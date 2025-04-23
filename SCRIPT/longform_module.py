@@ -3,6 +3,8 @@ import sys
 import io
 import logging
 import time
+import pyperclip
+import keyboard
 from typing import Callable, Optional, Union, List, Iterable
 
 # Windows-specific setup for PyTorch audio
@@ -261,6 +263,11 @@ class LongFormTranscriber:
                 print("Transcription:")
                 print(self.last_transcription)
                 print("-" * 60 + "\n")
+            
+            # Copy and Paste the transcription to the active window
+            pyperclip.copy(self.last_transcription)
+            time.sleep(0.1)  # Give some time for the clipboard to update
+            keyboard.send("ctrl+v")  # Paste the transcription
     
     def quit(self):
         """
