@@ -123,6 +123,13 @@ class STTOrchestrator:
                 "compute_type": "default",
                 "device": "cuda",
                 "input_device_index": None,
+                "use_default_input": True,
+                    # This flag controls whether the application will dynamically detect and use 
+                    # the system's current default input device (when set to True) or use a fixed
+                    # device specified by input_device_index (when set to False). When True, the 
+                    # application will automatically use whichever audio input device is currently 
+                    # selected as the default in Windows Sound settings, enabling on-the-fly
+                    # device switching without restarting the application.
                 "gpu_device_index": 0,
                 "silero_sensitivity": 0.4,
                 "silero_use_onnx": False,
@@ -151,6 +158,7 @@ class STTOrchestrator:
                 "compute_type": "default",
                 "device": "cuda",
                 "input_device_index": None,
+                "use_default_input": True,
                 "gpu_device_index": 0,
                 "silero_sensitivity": 0.4,
                 "silero_use_onnx": False,
@@ -360,7 +368,7 @@ class STTOrchestrator:
                     language=module_config.get("language", "en"),
                     compute_type=module_config.get("compute_type", "default"),
                     device=module_config.get("device", "cuda"),
-                    input_device_index=module_config.get("input_device_index"),
+                    input_device_index=self.get_default_input_device_index() if module_config.get("use_default_input", True) else module_config.get("input_device_index"),
                     gpu_device_index=module_config.get("gpu_device_index", 0),
                     silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
                     silero_use_onnx=module_config.get("silero_use_onnx", False),
@@ -393,7 +401,7 @@ class STTOrchestrator:
                     language=module_config.get("language", "en"),
                     compute_type=module_config.get("compute_type", "default"),
                     device=module_config.get("device", "cuda"),
-                    input_device_index=module_config.get("input_device_index"),
+                    input_device_index=self.get_default_input_device_index() if module_config.get("use_default_input", True) else module_config.get("input_device_index"),
                     gpu_device_index=module_config.get("gpu_device_index", 0),
                     silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
                     silero_use_onnx=module_config.get("silero_use_onnx", False),
@@ -524,6 +532,24 @@ class STTOrchestrator:
     def log_error(self, message):
         """Log an error message."""
         logging.error(message)
+
+    def get_default_input_device_index(self):
+        """Get the index of the default input device."""
+        try:
+            import pyaudio
+            p = pyaudio.PyAudio()
+            
+            # Get default input device index from PyAudio
+            default_index = p.get_default_input_device_info()['index']
+            
+            device_name = p.get_device_info_by_index(default_index)['name']
+            safe_print(f"Using default input device: {device_name} (index: {default_index})")
+            
+            p.terminate()
+            return default_index
+        except Exception as e:
+            self.log_error(f"Error getting default input device: {e}")
+            return None  # Return None to use system default
     
     def start_server(self):
         """Start the TCP server to listen for commands from AutoHotkey."""
