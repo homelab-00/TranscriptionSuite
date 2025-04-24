@@ -878,7 +878,43 @@ class STTOrchestrator:
                 psutil.Process(self.ahk_pid).kill()
             except Exception as e:
                 self.log_error(f"Failed to kill AHK process: {e}")
-    
+
+    def _display_info(self) -> None:
+        """Display startup information."""
+        if HAS_RICH:
+            console.print(Panel(
+                "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
+                "Control the system using these hotkeys:\n"
+                "  [cyan]F1[/cyan]:  Open configuration dialogue box\n"
+                "  [cyan]F2[/cyan]:  Toggle real-time transcription\n"
+                "  [cyan]F3[/cyan]:  Start long-form recording\n"
+                "  [cyan]F4[/cyan]:  Stop long-form recording and transcribe\n"
+                "  [cyan]F10[/cyan]: Run static file transcription\n"
+                "  [cyan]F7[/cyan]:  Quit application\n\n"
+                f"[bold yellow]Selected Languages:[/bold yellow]\n"
+                f"  Long Form: {self.config['longform']['language']}\n"
+                f"  Real-time: {self.config['realtime']['language']}\n"
+                f"  Static: {self.config['static']['language']}",
+                title="Speech-to-Text System",
+                border_style="green"
+            ))
+        else:
+            safe_print("="*50)
+            safe_print("Speech-to-Text Orchestrator Running")
+            safe_print("="*50)
+            safe_print("Hotkeys:")
+            safe_print("  F2: Toggle real-time transcription")
+            safe_print("  F3: Start long-form recording")
+            safe_print("  F4: Stop long-form recording and transcribe")
+            safe_print("  F10: Run static file transcription")
+            safe_print("  F7: Quit application")
+            safe_print("="*50)
+            safe_print("Selected Languages:")
+            safe_print(f"  Long Form: {self.config['longform']['language']}")
+            safe_print(f"  Real-time: {self.config['realtime']['language']}")
+            safe_print(f"  Static: {self.config['static']['language']}")
+            safe_print("="*50)
+
     def run(self):
         """Run the orchestrator."""
         # Start the TCP server
@@ -904,30 +940,7 @@ class STTOrchestrator:
                     safe_print("Long-form transcription model fully loaded and ready to use.")
         
         # Display startup banner
-        if HAS_RICH:
-            console.print(Panel(
-                "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
-                "Control the system using these hotkeys:\n"
-                "  [cyan]F1[/cyan]:  Open configuration dialogue box\n"
-                "  [cyan]F2[/cyan]:  Toggle real-time transcription\n"
-                "  [cyan]F3[/cyan]:  Start long-form recording\n"
-                "  [cyan]F4[/cyan]:  Stop long-form recording and transcribe\n"
-                "  [cyan]F10[/cyan]: Run static file transcription\n"
-                "  [cyan]F7[/cyan]:  Quit application",
-                title="Speech-to-Text System",
-                border_style="green"
-            ))
-        else:
-            safe_print("="*50)
-            safe_print("Speech-to-Text Orchestrator Running")
-            safe_print("="*50)
-            safe_print("Hotkeys:")
-            safe_print("  F2: Toggle real-time transcription")
-            safe_print("  F3: Start long-form recording")
-            safe_print("  F4: Stop long-form recording and transcribe")
-            safe_print("  F10: Run static file transcription")
-            safe_print("  F7: Quit application")
-            safe_print("="*50)
+        self._display_info()
         
         # Keep the main thread running
         try:
