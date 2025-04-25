@@ -252,7 +252,15 @@ class SystemUtils:
         """Start the AutoHotkey script."""
         # First kill any leftover AHK processes
         self.kill_leftover_ahk()
-        
+
+        # Create a sentinel file with our PID for the AHK script to monitor
+        sentinel_file = os.path.join(os.path.dirname(ahk_path), "stt_running.tmp")
+        try:
+            with open(sentinel_file, 'w') as f:
+                f.write(str(os.getpid()))  # Write our PID to the file
+        except Exception as e:
+            logging.error(f"Failed to create sentinel file: {e}")
+
         # Record existing AHK PIDs before launching
         pre_pids = set()
         for proc in psutil.process_iter(['pid', 'name']):
@@ -295,6 +303,15 @@ class SystemUtils:
     
     def stop_ahk_script(self):
         """Kill AHK script if we know its PID."""
+        # Remove the sentinel file
+        sentinel_file = os.path.join(self.script_dir, "stt_running.tmp")
+        if os.path.exists(sentinel_file):
+            try:
+                os.remove(sentinel_file)
+            except Exception as e:
+                logging.error(f"Failed to remove sentinel file: {e}")
+        
+        # Try to kill the AHK process directly
         if self.ahk_pid is not None:
             logging.info(f"Killing AHK script with PID={self.ahk_pid}")
             try:
