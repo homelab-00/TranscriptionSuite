@@ -16,6 +16,7 @@ import subprocess
 import time
 import psutil
 from typing import Dict, Any, Optional, List, Tuple
+import logging 
 
 # Import from utility module
 from utils import (
@@ -351,6 +352,8 @@ class SystemUtils:
         
         # Display startup banner
         if HAS_RICH:
+            from rich.panel import Panel
+            from rich.live import Live
             panel_content = (
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
                 "Control the system using these hotkeys:\n"
