@@ -28,6 +28,7 @@ import threading
 import time
 import signal
 import atexit
+import logging
 
 # Import the utility module for shared functions
 from utils import (
