@@ -17,6 +17,7 @@ import subprocess
 import time
 import psutil
 from typing import Dict, Any, Optional, List, Tuple
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -322,36 +323,147 @@ class SystemUtils:
                 return False
         return False
 
-    def get_version_info(self) -> Dict[str, str]:
-        """Get version information for key dependencies."""
+    def get_version_info(self) -> Dict[str, Dict[str, Any]]:
+        """Get version information for key dependencies and check for updates."""
         version_info = {}
 
+        # Create a data structure to hold both current version and update info
+        # Format: {"package_name": {"current": "version", "update": "newer_version or None"}}
+        
         # Get PyTorch version
         try:
             import torch
-            version_info["torch"] = torch.__version__
+            version_info["torch"] = {"current": torch.__version__, "update": None}
         except ImportError:
-            version_info["torch"] = "Not installed"
+            version_info["torch"] = {"current": "Not installed", "update": None}
         
         # Get RealtimeSTT version
         try:
             import RealtimeSTT
             try:
                 from importlib.metadata import version
-                version_info["RealtimeSTT"] = version("realtimestt")
+                version_info["RealtimeSTT"] = {"current": version("realtimestt"), "update": None}
             except Exception:
-                version_info["RealtimeSTT"] = "Unknown"
+                version_info["RealtimeSTT"] = {"current": "Unknown", "update": None}
         except ImportError:
-            version_info["RealtimeSTT"] = "Not installed"
+            version_info["RealtimeSTT"] = {"current": "Not installed", "update": None}
         
         # Get Faster Whisper version
         try:
             import faster_whisper
-            version_info["faster_whisper"] = getattr(faster_whisper, "__version__", "Unknown")
+            version_info["faster_whisper"] = {"current": getattr(faster_whisper, "__version__", "Unknown"), "update": None}
         except ImportError:
-            version_info["faster_whisper"] = "Not installed"
+            version_info["faster_whisper"] = {"current": "Not installed", "update": None}
+        
+        # Check for updates using pip list --outdated
+        try:
+            import subprocess
+            import json
+            
+            # Run pip list --outdated to get update info in JSON format
+            result = subprocess.run(
+                ["pip", "list", "--outdated", "--format=json"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                try:
+                    outdated_packages = json.loads(result.stdout)
+                    for package_info in outdated_packages:
+                        package_name = package_info.get("name", "").lower()
+                        latest_version = package_info.get("latest_version", "")
+                        
+                        logging.info(f"Found update for {package_name}: {latest_version}")
+                        
+                        # Update the version info dict with update info
+                        if package_name == "torch" and "torch" in version_info:
+                            version_info["torch"]["update"] = latest_version
+                        elif package_name == "realtimestt" and "RealtimeSTT" in version_info:
+                            version_info["RealtimeSTT"]["update"] = latest_version
+                        elif package_name == "faster-whisper" and "faster_whisper" in version_info:
+                            version_info["faster_whisper"]["update"] = latest_version
+                except json.JSONDecodeError:
+                    logging.error(f"Error parsing JSON from pip list --outdated: {result.stdout}")
+        except Exception as e:
+            logging.error(f"Error checking for updates: {e}")
         
         return version_info
+
+    def get_cuda_info(self) -> Dict[str, str]:
+        """Get CUDA and CUDNN version information from system PATH."""
+        cuda_info = {
+            "cuda": "Not found",
+            "cudnn": "Not found"
+        }
+        
+        try:
+            # Get the system PATH
+            system_path = os.environ.get("PATH", "")
+            path_entries = system_path.split(os.pathsep)
+            
+            # Multiple patterns to match CUDA in PATH
+            cuda_patterns = [
+                r'CUDA\\v(\d+\.\d+)',
+                r'CUDA\\(\d+\.\d+)',
+                r'cuda(\d+\.\d+)',
+                r'cuda-(\d+\.\d+)'
+            ]
+            
+            # Look for CUDA in the PATH
+            for path_entry in path_entries:
+                for pattern in cuda_patterns:
+                    cuda_match = re.search(pattern, path_entry, re.IGNORECASE)
+                    if cuda_match:
+                        cuda_info["cuda"] = cuda_match.group(1)
+                        logging.info(f"Found CUDA version {cuda_info['cuda']} in PATH: {path_entry}")
+                        break
+                if cuda_info["cuda"] != "Not found":
+                    break
+            
+            # If we still don't have CUDA version, try using nvcc
+            if cuda_info["cuda"] == "Not found":
+                try:
+                    # Try using nvcc to get CUDA version
+                    result = subprocess.run(
+                        ["nvcc", "--version"],
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    if result.returncode == 0:
+                        # Parse the version from output like "Cuda compilation tools, release 11.4, V11.4.120"
+                        match = re.search(r'release (\d+\.\d+)', result.stdout)
+                        if match:
+                            cuda_info["cuda"] = match.group(1)
+                            logging.info(f"Found CUDA version {cuda_info['cuda']} using nvcc")
+                except Exception as e:
+                    logging.error(f"Error getting CUDA version from nvcc: {e}")
+            
+            # Multiple patterns to match CUDNN in PATH
+            cudnn_patterns = [
+                r'CUDNN\\v(\d+\.\d+)',
+                r'cudnn(\d+\.\d+)',
+                r'cudnn-(\d+\.\d+)',
+                r'cudnn_(\d+\.\d+)'
+            ]
+            
+            # Look for CUDNN in the PATH
+            for path_entry in path_entries:
+                for pattern in cudnn_patterns:
+                    cudnn_match = re.search(pattern, path_entry, re.IGNORECASE)
+                    if cudnn_match:
+                        cuda_info["cudnn"] = cudnn_match.group(1)
+                        logging.info(f"Found CUDNN version {cuda_info['cudnn']} in PATH: {path_entry}")
+                        break
+                if cuda_info["cudnn"] != "Not found":
+                    break
+                    
+        except Exception as e:
+            logging.error(f"Error getting CUDA/CUDNN info: {e}")
+        
+        return cuda_info
 
     def get_hardware_info(self) -> Dict[str, str]:
         """Get basic CPU and GPU information."""
@@ -402,6 +514,23 @@ class SystemUtils:
         # Get hardware information
         hardware_info = self.get_hardware_info()
         
+        # Get CUDA and CUDNN information
+        cuda_info = self.get_cuda_info()
+        
+        # Helper function to format version with update marker
+        def format_version(package):
+            version = version_info[package]
+            current = version["current"]
+            update = version["update"]
+            
+            if update:
+                if HAS_RICH:
+                    return f"{current} [bold red][UPDATE AVAILABLE: {update}][/bold red]"
+                else:
+                    return f"{current} [!] (update: {update})"
+            else:
+                return current
+        
         # Display startup banner
         if HAS_RICH:
             panel_content = (
@@ -413,14 +542,22 @@ class SystemUtils:
                 "  [cyan]F4[/cyan]:  Stop long-form recording and transcribe\n"
                 "  [cyan]F10[/cyan]: Run static file transcription\n"
                 "  [cyan]F7[/cyan]:  Quit application\n\n"
+
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
                 f"  Long Form: {self.config['longform']['language']}\n"
                 f"  Real-time: {self.config['realtime']['language']}\n"
                 f"  Static: {self.config['static']['language']}\n\n"
-                f"[bold yellow]Versions:[/bold yellow]\n"
-                f"  PyTorch: {version_info['torch']}\n"
-                f"  RealtimeSTT: {version_info['RealtimeSTT']}\n"
-                f"  Faster Whisper: {version_info['faster_whisper']}\n\n"
+
+                f"[bold yellow]Python Versions:[/bold yellow]\n"
+                f"  Python: {sys.version.split()[0]}\n"
+                f"  PyTorch: {format_version('torch')}\n"
+                f"  RealtimeSTT: {format_version('RealtimeSTT')}\n"
+                f"  Faster Whisper: {format_version('faster_whisper')}\n"
+
+                f"[bold yellow]CUDA Versions:[/bold yellow]\n"
+                f"  CUDA Toolkit: {cuda_info['cuda']}\n"
+                f"  CUDNN: {cuda_info['cudnn']}\n"
+
                 f"[bold yellow]Hardware:[/bold yellow]\n"
                 f"  CPU: {hardware_info['cpu']}\n"
                 f"  GPU: {hardware_info['gpu']}"
@@ -449,9 +586,11 @@ class SystemUtils:
             safe_print(f"  Static: {self.config['static']['language']}")
             safe_print("="*50)
             safe_print("Versions:")
-            safe_print(f"  PyTorch: {version_info['torch']}")
-            safe_print(f"  RealtimeSTT: {version_info['RealtimeSTT']}")
-            safe_print(f"  Faster Whisper: {version_info['faster_whisper']}")
+            safe_print(f"  PyTorch: {format_version('torch')}")
+            safe_print(f"  RealtimeSTT: {format_version('RealtimeSTT')}")
+            safe_print(f"  Faster Whisper: {format_version('faster_whisper')}")
+            safe_print(f"  CUDA Toolkit: {cuda_info['cuda']}")
+            safe_print(f"  CUDNN: {cuda_info['cudnn']}")
             safe_print("="*50)
             safe_print("Hardware:")
             safe_print(f"  CPU: {hardware_info['cpu']}")
