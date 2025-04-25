@@ -1,55 +1,40 @@
-import os
-import sys
-import io
-import logging
-from typing import Callable, Optional, Union, List, Iterable
+#!/usr/bin/env python3
+# realtime_module.py
+#
+# Provides continuous speech-to-text transcription
+#
+# This module:
+# - Performs continuous transcription from microphone input
+# - Uses Voice Activity Detection to detect speech
+# - Transcribes speech as it's detected
+# - Provides a flowing document of transcribed text
+
+# Import utility functions
+from utils import (
+    safe_print, setup_logging, fix_windows_console_encoding,
+    setup_windows_audio, HAS_RICH, console
+)
+
+# Import base transcriber
+from base_transcriber import BaseTranscriber
+
 import time
 import threading
 
-# Windows-specific setup for PyTorch audio
-if os.name == "nt" and (3, 8) <= sys.version_info < (3, 99):
-    from torchaudio._extension.utils import _init_dll_path
-    _init_dll_path()
+# Setup platform-specific configurations
+fix_windows_console_encoding()
+setup_windows_audio()
 
-# Fix console encoding for Windows to properly display Greek characters
-if os.name == "nt":
-    # Force UTF-8 encoding for stdout
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# Setup logging
+logger = setup_logging()
 
-# Import Rich for better terminal display with Unicode support
-try:
-    from rich.console import Console
-    from rich.text import Text
-    console = Console()
-    has_rich = True
-except ImportError:
-    has_rich = False
-
-class LongFormTranscriber:
+class RealtimeTranscriber(BaseTranscriber):
     """
     A class that provides continuous speech-to-text transcription,
     appending new transcriptions to create a flowing document.
     """
     
-    def __init__(self, 
-                 # General Parameters
-                 model: str = "Systran/faster-whisper-large-v3",
-                 download_root: str = None,
-                 language: str = "en",
-                 compute_type: str = "default",
-                 input_device_index: int = None,
-                 gpu_device_index: Union[int, List[int]] = 0,
-                 device: str = "cuda",
-                 on_recording_start: Callable = None,
-                 on_recording_stop: Callable = None,
-                 on_transcription_start: Callable = None,
-                 ensure_sentence_starting_uppercase: bool = True,
-                 ensure_sentence_ends_with_period: bool = True,
-                 use_microphone: bool = True,
-                 spinner: bool = False,
-                 level: int = logging.WARNING,
-                 batch_size: int = 16,
-                 
+    def __init__(self,
                  # Voice Activation Parameters
                  silero_sensitivity: float = 0.4,
                  silero_use_onnx: bool = False,
@@ -59,137 +44,112 @@ class LongFormTranscriber:
                  min_length_of_recording: float = 0.5,
                  min_gap_between_recordings: float = 0,
                  pre_recording_buffer_duration: float = 1.0,
-                 on_vad_detect_start: Callable = None,
-                 on_vad_detect_stop: Callable = None,
+                 on_vad_detect_start: callable = None,
+                 on_vad_detect_stop: callable = None,
                  
                  # Advanced Parameters
                  debug_mode: bool = False,
                  handle_buffer_overflow: bool = True,
-                 beam_size: int = 5,
-                 buffer_size: int = 512,
-                 sample_rate: int = 16000,
-                 initial_prompt: Optional[Union[str, Iterable[int]]] = None,
-                 suppress_tokens: Optional[List[int]] = [-1],
-                 print_transcription_time: bool = False,
                  early_transcription_on_silence: int = 0,
                  allowed_latency_limit: int = 100,
-                 no_log_file: bool = True,
-                 use_extended_logging: bool = False,
-                 beam_size_realtime: int = 3,
-                 enable_realtime_transcription: bool = False,
-                 realtime_processing_pause: float = 0.05,
-                 realtime_model_type: str = "tiny.en",
-                 realtime_batch_size: int = 16,
-
-                 # Additional parameters
-                 preinitialized_model=None,
-                 preload_model=False):
+                 
+                 # Additional RealtimeSTT parameters
+                 spinner: bool = False,
+                 use_microphone: bool = True,
+                 
+                 **kwargs):
         """
         Initialize the transcriber with all available parameters.
         """
-        self.text_buffer = ""
-        self.running = False
+        # Initialize base class
+        super().__init__(**kwargs)
         
-        # Store preinitialized model if provided
-        self.preinitialized_model = preinitialized_model
-
-        # Store constructor parameters
-        self.config = {
-            # General Parameters
-            'model': model,
-            'download_root': download_root,
-            'language': language,
-            'compute_type': compute_type,
-            'input_device_index': input_device_index,
-            'gpu_device_index': gpu_device_index,
-            'device': device,
-            'on_recording_start': on_recording_start,
-            'on_recording_stop': on_recording_stop,
-            'on_transcription_start': on_transcription_start,
-            'ensure_sentence_starting_uppercase': ensure_sentence_starting_uppercase,
-            'ensure_sentence_ends_with_period': ensure_sentence_ends_with_period,
-            'use_microphone': use_microphone,
-            'spinner': spinner,
-            'level': level,
-            'batch_size': batch_size,
-            
-            # Voice Activation Parameters
-            'silero_sensitivity': silero_sensitivity,
-            'silero_use_onnx': silero_use_onnx,
-            'silero_deactivity_detection': silero_deactivity_detection,
-            'webrtc_sensitivity': webrtc_sensitivity,
-            'post_speech_silence_duration': post_speech_silence_duration,
-            'min_length_of_recording': min_length_of_recording,
-            'min_gap_between_recordings': min_gap_between_recordings,
-            'pre_recording_buffer_duration': pre_recording_buffer_duration,
-            'on_vad_detect_start': on_vad_detect_start,
-            'on_vad_detect_stop': on_vad_detect_stop,
-            
-            # Advanced Parameters
-            'debug_mode': debug_mode,
-            'handle_buffer_overflow': handle_buffer_overflow,
-            'beam_size': beam_size,
-            'buffer_size': buffer_size,
-            'sample_rate': sample_rate,
-            'initial_prompt': initial_prompt,
-            'suppress_tokens': suppress_tokens,
-            'print_transcription_time': print_transcription_time,
-            'early_transcription_on_silence': early_transcription_on_silence,
-            'allowed_latency_limit': allowed_latency_limit,
-            'no_log_file': no_log_file,
-            'use_extended_logging': use_extended_logging,
-            
-            # Realtime specific parameters
-            'enable_realtime_transcription': True,
-            'realtime_processing_pause': 0.05,
-            'on_realtime_transcription_update': self._handle_realtime_update,
-        }
+        # Store real-time specific parameters
+        self.text_buffer = ""
+        self.silero_sensitivity = silero_sensitivity
+        self.silero_use_onnx = silero_use_onnx
+        self.silero_deactivity_detection = silero_deactivity_detection
+        self.webrtc_sensitivity = webrtc_sensitivity
+        self.post_speech_silence_duration = post_speech_silence_duration
+        self.min_length_of_recording = min_length_of_recording
+        self.min_gap_between_recordings = min_gap_between_recordings
+        self.pre_recording_buffer_duration = pre_recording_buffer_duration
+        self.on_vad_detect_start = on_vad_detect_start
+        self.on_vad_detect_stop = on_vad_detect_stop
+        self.debug_mode = debug_mode
+        self.handle_buffer_overflow = handle_buffer_overflow
+        self.early_transcription_on_silence = early_transcription_on_silence
+        self.allowed_latency_limit = allowed_latency_limit
+        self.spinner = spinner
+        self.use_microphone = use_microphone
         
         # Lazy-loaded recorder
         self.recorder = None
-        
-        # Flag to track if the transcription model is initialized
-        self.model_initialized = False
     
     def _initialize_recorder(self):
         """Lazy initialization of the recorder."""
         if self.recorder is not None:
             return self.recorder  # Return the recorder if already initialized
         
-        # Force disable real-time preview functionality
-        self.config['enable_realtime_transcription'] = False
-        
-        # No callbacks needed since we don't want to print anything
-        # Remove the previous callbacks completely
-        self.config['on_recording_start'] = None
-        self.config['on_recording_stop'] = None
-        
         try:
             # Now import the module
-            from RealtimeSTT import AudioToTextRecorder
+            try:
+                from RealtimeSTT import AudioToTextRecorder
+            except ImportError:
+                safe_print("RealtimeSTT library not installed. Cannot initialize recorder.", "error")
+                return None
             
             # If we have a preinitialized model, we would use it here
-            # Log that we're reusing a model
             if self.preinitialized_model:
-                if has_rich:
-                    console.print("[bold green]Using pre-initialized model[/bold green]")
-                else:
-                    print("Using pre-initialized model")
+                safe_print("Using pre-initialized model", "success")
             
             # Initialize the recorder with all parameters
-            self.recorder = AudioToTextRecorder(**self.config)
+            self.recorder = AudioToTextRecorder(
+                model=self.model_name,
+                download_root=self.download_root,
+                language=self.language,
+                compute_type=self.compute_type,
+                device=self.device,
+                input_device_index=None,  # Will use system default
+                gpu_device_index=self.gpu_device_index,
+                on_recording_start=None,  # No callbacks needed
+                on_recording_stop=None,
+                on_transcription_start=self.on_transcription_start,
+                ensure_sentence_starting_uppercase=self.ensure_sentence_starting_uppercase,
+                ensure_sentence_ends_with_period=self.ensure_sentence_ends_with_period,
+                use_microphone=self.use_microphone,
+                spinner=self.spinner,
+                level=logger.level,
+                batch_size=self.batch_size,
+                silero_sensitivity=self.silero_sensitivity,
+                silero_use_onnx=self.silero_use_onnx,
+                silero_deactivity_detection=self.silero_deactivity_detection,
+                webrtc_sensitivity=self.webrtc_sensitivity,
+                post_speech_silence_duration=self.post_speech_silence_duration,
+                min_length_of_recording=self.min_length_of_recording,
+                min_gap_between_recordings=self.min_gap_between_recordings,
+                pre_recording_buffer_duration=self.pre_recording_buffer_duration,
+                on_vad_detect_start=self.on_vad_detect_start,
+                on_vad_detect_stop=self.on_vad_detect_stop,
+                debug_mode=self.debug_mode,
+                handle_buffer_overflow=self.handle_buffer_overflow,
+                beam_size=self.beam_size,
+                initial_prompt=None,
+                suppress_tokens=[-1],
+                print_transcription_time=False,
+                early_transcription_on_silence=self.early_transcription_on_silence,
+                allowed_latency_limit=self.allowed_latency_limit,
+                no_log_file=True,
+                use_extended_logging=False,
+                # Force disable real-time preview
+                enable_realtime_transcription=False,
+                on_realtime_transcription_update=self._handle_realtime_update,
+            )
             
-            if has_rich:
-                console.print("[bold green]Real-time transcription system initialized.[/bold green]")
-            else:
-                print("Real-time transcription system initialized.")
-                
+            safe_print("Real-time transcription system initialized.", "success")
             return self.recorder  # Return the recorder if initialization succeeded
         except Exception as e:
-            if has_rich:
-                console.print(f"[bold red]Error initializing recorder: {str(e)}[/bold red]")
-            else:
-                print(f"Error initializing recorder: {str(e)}")
+            safe_print(f"Error initializing recorder: {str(e)}", "error")
             return None
     
     def _handle_realtime_update(self, text):
@@ -206,7 +166,8 @@ class LongFormTranscriber:
             return
 
         # Display the complete transcription
-        if has_rich:
+        if HAS_RICH:
+            from rich.text import Text
             console.print(Text(text, style="bold cyan"))
         else:
             print(text)
@@ -214,20 +175,15 @@ class LongFormTranscriber:
     def start(self):
         """
         Start the continuous transcription process.
+        Implements abstract method from base class.
         """
         if not self._initialize_recorder():
-            if has_rich:
-                console.print("[bold red]Failed to initialize the recorder. Cannot start transcription.[/bold red]")
-            else:
-                print("Failed to initialize the recorder. Cannot start transcription.")
+            safe_print("Failed to initialize the recorder. Cannot start transcription.", "error")
             return
 
         self.running = True
 
-        if has_rich:
-            console.print("[bold green]Real-time transcription active[/bold green]")
-        else:
-            print("Real-time transcription active")
+        safe_print("Real-time transcription active", "success")
 
         try:
             while self.running:
@@ -237,24 +193,19 @@ class LongFormTranscriber:
                     if text_result:
                         self.process_speech(text_result)
                 except Exception as e:
-                    if has_rich:
-                        console.print(f"[bold red]Error during transcription: {str(e)}[/bold red]")
-                    else:
-                        print(f"Error during transcription: {str(e)}")
+                    safe_print(f"Error during transcription: {str(e)}", "error")
                     time.sleep(0.1)  # Brief pause before retrying
 
         except KeyboardInterrupt:
             # Handle graceful exit on Ctrl+C
-            if has_rich:
-                console.print("\n[bold red]Stopping speech recognition...[/bold red]")
-            else:
-                print("\nStopping speech recognition...")
+            safe_print("\nStopping speech recognition...", "warning")
         finally:
             self.stop()
     
     def stop(self):
         """
         Stop the transcription process and clean up resources.
+        Implements abstract method from base class.
         """
         self.running = False
 
@@ -263,14 +214,11 @@ class LongFormTranscriber:
                 self.recorder.abort()  # Abort any ongoing recording/transcription
                 self.recorder.shutdown()
             except Exception as e:
-                if has_rich:
-                    console.print(f"[bold red]Error during shutdown: {str(e)}[/bold red]")
-                else:
-                    print(f"Error during shutdown: {str(e)}")
+                safe_print(f"Error during shutdown: {str(e)}", "error")
             self.recorder = None
 
         # Print a clear footer for the transcription block
-        if has_rich:
+        if HAS_RICH:
             from rich.panel import Panel
             console.print(Panel(
                 "Transcription has been stopped",
@@ -279,6 +227,11 @@ class LongFormTranscriber:
             ))
         else:
             print("\n===== REAL-TIME TRANSCRIPTION ENDED =====\n")
+    
+    def transcribe(self, audio_data, **kwargs):
+        """Implementation of abstract method from base class."""
+        # This transcriber does not directly implement transcribe, it uses the recorder
+        raise NotImplementedError("RealtimeTranscriber doesn't use the transcribe method directly")
     
     def get_transcribed_text(self):
         """
@@ -291,7 +244,7 @@ def main():
     """
     Main function to run the transcriber as a standalone script.
     """
-    transcriber = LongFormTranscriber()
+    transcriber = RealtimeTranscriber()
     transcriber.start()
     return transcriber.get_transcribed_text()
 

@@ -26,36 +26,26 @@ import os
 import sys
 import threading
 import time
-import logging
 import signal
 import atexit
 
-# Configure logging to file only (not to console)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ]
+# Import the utility module for shared functions
+from utils import (
+    safe_print, setup_logging, run_in_thread, force_gc_collect,
+    HAS_RICH, console, STTConstants
 )
 
+# Setup logging
+logger = setup_logging(log_file="stt_orchestrator.log")
+
 # Import the sub-modules we've created
-from model_manager import ModelManager, safe_print
+from model_manager import ModelManager
 from command_server import CommandServer
 from system_utils import SystemUtils
 
-# Try to import Rich for prettier console output
-try:
-    from rich.console import Console
-    console = Console()
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
-    console = None
-
-# TCP server settings
-SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 35000
+# TCP server settings from constants
+SERVER_HOST = STTConstants.SERVER_HOST
+SERVER_PORT = STTConstants.SERVER_PORT
 
 class STTOrchestrator:
     """

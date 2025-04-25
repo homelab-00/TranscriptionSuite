@@ -10,57 +10,23 @@
 
 import socket
 import threading
-import logging
 import time
 from typing import Dict, Callable, Optional
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ]
+# Import from utility module
+from utils import (
+    safe_print, setup_logging, HAS_RICH, console, STTConstants
 )
 
-# Try to import Rich for console output with color support
-try:
-    from rich.console import Console
-    console = Console()
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
-    console = None
-
-def safe_print(message, style="default"):
-    """Print function that handles I/O errors gracefully with optional styling."""
-    try:
-        if HAS_RICH:
-            if style == "error":
-                console.print(f"[bold red]{message}[/bold red]")
-            elif style == "warning":
-                console.print(f"[bold yellow]{message}[/bold yellow]")
-            elif style == "success":
-                console.print(f"[bold green]{message}[/bold green]")
-            elif style == "info":
-                console.print(f"[bold blue]{message}[/bold blue]")
-            else:
-                console.print(message)
-        else:
-            print(message)
-    except ValueError as e:
-        if "I/O operation on closed file" in str(e):
-            pass  # Silently ignore closed file errors
-        else:
-            # For other ValueErrors, log them
-            logging.error(f"Error in safe_print: {e}")
+# Setup logging
+logger = setup_logging(log_file="stt_orchestrator.log")
 
 class CommandServer:
     """
     TCP server for receiving and processing commands from the AutoHotkey script.
     """
     
-    def __init__(self, host='127.0.0.1', port=35000):
+    def __init__(self, host=STTConstants.SERVER_HOST, port=STTConstants.SERVER_PORT):
         """Initialize the command server with host and port."""
         self.host = host
         self.port = port
