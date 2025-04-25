@@ -450,7 +450,21 @@ class STTOrchestrator:
         except Exception as e:
             self.log_error(f"Error initializing {module_type} transcriber: {e}")
             return None
-    
+
+    def _can_reuse_model(self, target_mode):
+        """Check if we can reuse the currently loaded model for the target mode."""
+        if not self.current_loaded_model_type:
+            return False
+        
+        current_model = self.config[self.current_loaded_model_type].get("model")
+        target_model = self.config[target_mode].get("model")
+        
+        if current_model == target_model:
+            self.log_info(f"Can reuse {self.current_loaded_model_type} model for {target_mode} (both using {current_model})")
+            return True
+        
+        return False
+
     def _unload_current_model(self):
         """Unload the currently loaded model to free up memory more aggressively."""
         if not self.current_loaded_model_type:
@@ -642,9 +656,13 @@ class STTOrchestrator:
         else:
             # Start real-time transcription
             try:
-                # Make sure we're using the real-time model
-                if self.current_loaded_model_type != "realtime":
-                    self._unload_current_model()
+                # Check if we can reuse the current model
+                if not self._can_reuse_model("realtime"):
+                    # Make sure we're using the real-time model
+                    if self.current_loaded_model_type != "realtime":
+                        self._unload_current_model()
+                else:
+                    safe_print(f"Reusing {self.current_loaded_model_type} model for realtime")
                     
                 # Initialize the real-time transcriber if not already done
                 transcriber = self.initialize_transcriber("realtime")
@@ -697,22 +715,26 @@ class STTOrchestrator:
         if self.current_mode:
             safe_print(f"Cannot start long-form mode while in {self.current_mode} mode. Please finish the current operation first.")
             return
-            
-        try:
-            # Make sure we're using the long-form model
-            if self.current_loaded_model_type != "longform":
-                self._unload_current_model()
                 
+        try:
+            # Check if we can reuse the current model
+            if not self._can_reuse_model("longform"):
+                # Make sure we're using the long-form model
+                if self.current_loaded_model_type != "longform":
+                    self._unload_current_model()
+            else:
+                safe_print(f"Reusing {self.current_loaded_model_type} model for longform")
+                    
             # Initialize the long-form transcriber if not already done
             transcriber = self.initialize_transcriber("longform")
             if not transcriber:
                 safe_print("Failed to initialize long-form transcriber.")
                 return
-                
+                    
             safe_print("Starting long-form recording...")
             self.current_mode = "longform"
             transcriber.start_recording()
-            
+                
         except Exception as e:
             self.log_error(f"Error starting long-form recording: {e}")
             self.current_mode = None
@@ -744,24 +766,28 @@ class STTOrchestrator:
         if self.current_mode:
             safe_print(f"Cannot start static mode while in {self.current_mode} mode. Please finish the current operation first.")
             return
-            
-        try:
-            # Make sure we're using the static model
-            if self.current_loaded_model_type != "static":
-                self._unload_current_model()
                 
+        try:
+            # Check if we can reuse the current model
+            if not self._can_reuse_model("static"):
+                # Make sure we're using the static model
+                if self.current_loaded_model_type != "static":
+                    self._unload_current_model()
+            else:
+                safe_print(f"Reusing {self.current_loaded_model_type} model for static")
+                    
             # Initialize the static transcriber if not already done
             transcriber = self.initialize_transcriber("static")
             if not transcriber:
                 safe_print("Failed to initialize static transcriber.")
                 return
-                
+                    
             safe_print("Opening file selection dialog...")
             self.current_mode = "static"
-            
+                
             # Run in a separate thread to avoid blocking
             threading.Thread(target=self._run_static_thread, daemon=True).start()
-            
+                
         except Exception as e:
             self.log_error(f"Error starting static transcription: {e}")
             self.current_mode = None
@@ -879,10 +905,89 @@ class STTOrchestrator:
             except Exception as e:
                 self.log_error(f"Failed to kill AHK process: {e}")
 
+    def _get_version_info(self):
+        """Get version information for key dependencies."""
+        version_info = {}
+
+        # Get PyTorch version
+        try:
+            import torch
+            version_info["torch"] = torch.__version__
+        except ImportError:
+            version_info["torch"] = "Not installed"
+        
+        # Get RealtimeSTT version
+        try:
+            import RealtimeSTT
+            try:
+                from importlib.metadata import version
+                version_info["RealtimeSTT"] = version("realtimestt")
+            except Exception:
+                version_info["RealtimeSTT"] = "Unknown"
+        except ImportError:
+            version_info["RealtimeSTT"] = "Not installed"
+        
+        # Get Faster Whisper version
+        try:
+            import faster_whisper
+            version_info["faster_whisper"] = getattr(faster_whisper, "__version__", "Unknown")
+        except ImportError:
+            version_info["faster_whisper"] = "Not installed"
+        
+        return version_info
+
+    def _get_hardware_info(self):
+        """Get basic CPU and GPU information."""
+        hardware_info = {}
+        
+        # Get CPU info
+        try:
+            import platform
+            hardware_info["cpu"] = platform.processor()
+            if not hardware_info["cpu"]:  # On some systems, platform.processor() returns an empty string
+                import os
+                if os.name == 'nt':  # Windows
+                    import subprocess
+                    result = subprocess.check_output("wmic cpu get name", shell=True).decode().strip().split('\n')
+                    if len(result) > 1:
+                        hardware_info["cpu"] = result[1].strip()
+                else:  # Linux/Mac
+                    try:
+                        with open('/proc/cpuinfo', 'r') as f:
+                            for line in f:
+                                if line.startswith('model name'):
+                                    hardware_info["cpu"] = line.split(':')[1].strip()
+                                    break
+                    except:
+                        pass
+        except Exception as e:
+            hardware_info["cpu"] = "Unknown"
+            self.log_error(f"Error getting CPU info: {e}")
+        
+        # Get GPU info
+        try:
+            import torch
+            if torch.cuda.is_available():
+                hardware_info["gpu"] = torch.cuda.get_device_name(0)
+            else:
+                hardware_info["gpu"] = "No CUDA GPU available"
+        except Exception as e:
+            hardware_info["gpu"] = "Unknown"
+            self.log_error(f"Error getting GPU info: {e}")
+        
+        return hardware_info
+
     def _display_info(self) -> None:
         """Display startup information."""
+        # Get version information
+        version_info = self._get_version_info()
+        
+        # Get hardware information
+        hardware_info = self._get_hardware_info()
+        
+        # Display startup banner
         if HAS_RICH:
-            console.print(Panel(
+            panel_content = (
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
                 "Control the system using these hotkeys:\n"
                 "  [cyan]F1[/cyan]:  Open configuration dialogue box\n"
@@ -894,10 +999,17 @@ class STTOrchestrator:
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
                 f"  Long Form: {self.config['longform']['language']}\n"
                 f"  Real-time: {self.config['realtime']['language']}\n"
-                f"  Static: {self.config['static']['language']}",
-                title="Speech-to-Text System",
-                border_style="green"
-            ))
+                f"  Static: {self.config['static']['language']}\n\n"
+                f"[bold yellow]Versions:[/bold yellow]\n"
+                f"  PyTorch: {version_info['torch']}\n"
+                f"  RealtimeSTT: {version_info['RealtimeSTT']}\n"
+                f"  Faster Whisper: {version_info['faster_whisper']}\n\n"
+                f"[bold yellow]Hardware:[/bold yellow]\n"
+                f"  CPU: {hardware_info['cpu']}\n"
+                f"  GPU: {hardware_info['gpu']}"
+            )
+            
+            console.print(Panel(panel_content, title="Speech-to-Text System", border_style="green"))
         else:
             safe_print("="*50)
             safe_print("Speech-to-Text Orchestrator Running")
@@ -914,6 +1026,15 @@ class STTOrchestrator:
             safe_print(f"  Real-time: {self.config['realtime']['language']}")
             safe_print(f"  Static: {self.config['static']['language']}")
             safe_print("="*50)
+            safe_print("Versions:")
+            safe_print(f"  PyTorch: {version_info['torch']}")
+            safe_print(f"  RealtimeSTT: {version_info['RealtimeSTT']}")
+            safe_print(f"  Faster Whisper: {version_info['faster_whisper']}")
+            safe_print("="*50)
+            safe_print("Hardware:")
+            safe_print(f"  CPU: {hardware_info['cpu']}")
+            safe_print(f"  GPU: {hardware_info['gpu']}")
+            safe_print("="*50)
 
     def run(self):
         """Run the orchestrator."""
@@ -923,21 +1044,21 @@ class STTOrchestrator:
         # Start the AutoHotkey script
         self.start_ahk_script()
         
-        # Pre-load the longform transcription model at startup as requested
-        safe_print("Pre-loading the long-form transcription model...")
-        longform_transcriber = self.initialize_transcriber("longform")
-        if longform_transcriber:
-            # Force complete initialization including the AudioToTextRecorder
-            if hasattr(longform_transcriber, 'force_initialize'):
-                if longform_transcriber.force_initialize():
-                    # Set the current loaded model type
-                    self.current_loaded_model_type = "longform"
-                    # Add to loaded_models dictionary
-                    self.loaded_models['longform'] = {
-                        'name': self.config['longform']['model'],
-                        'transcriber': longform_transcriber
-                    }
-                    safe_print("Long-form transcription model fully loaded and ready to use.")
+      # # Pre-load the longform transcription model at startup as requested
+      # safe_print("Pre-loading the long-form transcription model...")
+      # longform_transcriber = self.initialize_transcriber("longform")
+      # if longform_transcriber:
+      #     # Force complete initialization including the AudioToTextRecorder
+      #     if hasattr(longform_transcriber, 'force_initialize'):
+      #         if longform_transcriber.force_initialize():
+      #             # Set the current loaded model type
+      #             self.current_loaded_model_type = "longform"
+      #             # Add to loaded_models dictionary
+      #             self.loaded_models['longform'] = {
+      #                 'name': self.config['longform']['model'],
+      #                 'transcriber': longform_transcriber
+      #             }
+      #             safe_print("Long-form transcription model fully loaded and ready to use.")
         
         # Display startup banner
         self._display_info()
