@@ -1,1 +1,3 @@
+*.tmp
+*.log
 /SCRIPT/__pycache__/
