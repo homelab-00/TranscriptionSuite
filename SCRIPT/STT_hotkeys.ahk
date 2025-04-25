@@ -7,6 +7,26 @@
 SendMode Input
 SetWorkingDir %A_ScriptDir%
 
+; Get parent Python process PID from a file
+SentinelFile = %A_ScriptDir%\stt_running.tmp
+ParentPID := 0
+if (FileExist(SentinelFile)) {
+    FileRead, ParentPID, %SentinelFile%
+}
+
+; Monitor the parent process and exit when it does
+SetTimer, CheckParent, 1000
+return
+
+CheckParent:
+if (ParentPID != 0) {
+    Process, Exist, %ParentPID%
+    If (ErrorLevel = 0) {
+        ExitApp
+    }
+}
+return
+
 ; Check if ncat is available and use a suitable command
 CheckNetCatCmd() {
     ; Check if ncat is available
@@ -70,4 +90,5 @@ return
 ; F7 - Quit Application
 *F7::
     SendCommand("QUIT")
+    ExitApp  ; Add this line to exit the AHK script itself
 return
