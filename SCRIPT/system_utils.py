@@ -12,55 +12,19 @@
 import os
 import sys
 import json
-import logging
 import subprocess
 import time
 import psutil
 from typing import Dict, Any, Optional, List, Tuple
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ]
+# Import from utility module
+from utils import (
+    safe_print, setup_logging, HAS_RICH, console, force_gc_collect,
+    STTConstants
 )
 
-# Try to import Rich for prettier console output
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.text import Text
-    from rich.live import Live
-    console = Console()
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
-    console = None
-
-def safe_print(message, style="default"):
-    """Print function that handles I/O errors gracefully with optional styling."""
-    try:
-        if HAS_RICH:
-            if style == "error":
-                console.print(f"[bold red]{message}[/bold red]")
-            elif style == "warning":
-                console.print(f"[bold yellow]{message}[/bold yellow]")
-            elif style == "success":
-                console.print(f"[bold green]{message}[/bold green]")
-            elif style == "info":
-                console.print(f"[bold blue]{message}[/bold blue]")
-            else:
-                console.print(message)
-        else:
-            print(message)
-    except ValueError as e:
-        if "I/O operation on closed file" in str(e):
-            pass  # Silently ignore closed file errors
-        else:
-            # For other ValueErrors, log them
-            logging.error(f"Error in safe_print: {e}")
+# Setup logging
+logger = setup_logging(log_file="stt_orchestrator.log")
 
 class SystemUtils:
     """Utilities for system interaction and configuration management."""

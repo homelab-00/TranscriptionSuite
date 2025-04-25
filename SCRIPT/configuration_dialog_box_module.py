@@ -17,15 +17,14 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 import json
-import logging
 
-# Try to import Rich for pretty printing
-try:
-    from rich.console import Console
-    console = Console()
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
+# Import from utility module
+from utils import (
+    safe_print, setup_logging, HAS_RICH, console, STTConstants
+)
+
+# Setup logging
+logger = setup_logging()
 
 class ConfigurationDialog:
     def __init__(self, config_path, callback=None):
@@ -51,34 +50,10 @@ class ConfigurationDialog:
             "fr": "🇫🇷 French (fr)"
         }
         
-        # All supported languages from Whisper
-        self.languages = {
-            "en": "english", "zh": "chinese", "de": "german", "es": "spanish",
-            "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese",
-            "pt": "portuguese", "tr": "turkish", "pl": "polish", "ca": "catalan",
-            "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian",
-            "id": "indonesian", "hi": "hindi", "fi": "finnish", "vi": "vietnamese",
-            "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay",
-            "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian",
-            "ta": "tamil", "no": "norwegian", "th": "thai", "ur": "urdu",
-            "hr": "croatian", "bg": "bulgarian", "lt": "lithuanian", "la": "latin",
-            "mi": "maori", "ml": "malayalam", "cy": "welsh", "sk": "slovak",
-            "te": "telugu", "fa": "persian", "lv": "latvian", "bn": "bengali",
-            "sr": "serbian", "az": "azerbaijani", "sl": "slovenian", "kn": "kannada",
-            "et": "estonian", "mk": "macedonian", "br": "breton", "eu": "basque",
-            "is": "icelandic", "hy": "armenian", "ne": "nepali", "mn": "mongolian",
-            "bs": "bosnian", "kk": "kazakh", "sq": "albanian", "sw": "swahili",
-            "gl": "galician", "mr": "marathi", "pa": "punjabi", "si": "sinhala",
-            "km": "khmer", "sn": "shona", "yo": "yoruba", "so": "somali",
-            "af": "afrikaans", "oc": "occitan", "ka": "georgian", "be": "belarusian",
-            "tg": "tajik", "sd": "sindhi", "gu": "gujarati", "am": "amharic",
-            "yi": "yiddish", "lo": "lao", "uz": "uzbek", "fo": "faroese",
-            "ht": "haitian creole", "ps": "pashto", "tk": "turkmen", "nn": "nynorsk",
-            "mt": "maltese", "sa": "sanskrit", "lb": "luxembourgish", "my": "myanmar",
-            "bo": "tibetan", "tl": "tagalog", "mg": "malagasy", "as": "assamese",
-            "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa",
-            "ba": "bashkir", "jw": "javanese", "su": "sundanese", "yue": "cantonese"
-        }
+        # Get all supported languages from BaseTranscriber
+        from base_transcriber import BaseTranscriber
+        base = BaseTranscriber()
+        self.languages = base.get_available_languages()
         
         # Build display names for non-priority languages
         self.language_display = {}
@@ -94,17 +69,11 @@ class ConfigurationDialog:
     
     def _print(self, message):
         """Print with Rich if available, otherwise use regular print."""
-        if HAS_RICH:
-            console.print(message)
-        else:
-            print(message)
+        safe_print(message)
     
     def _print_error(self, message):
         """Print error message."""
-        if HAS_RICH:
-            console.print(f"[bold red]{message}[/bold red]")
-        else:
-            print(f"ERROR: {message}")
+        safe_print(message, "error")
     
     def _get_available_models(self):
         """Get a list of available Whisper models from the HuggingFace cache."""

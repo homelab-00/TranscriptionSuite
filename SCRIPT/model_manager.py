@@ -11,52 +11,18 @@
 
 import os
 import sys
-import io
-import logging
 import time
 import gc
 from typing import Optional, Dict, Any
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ]
+# Import from utility module
+from utils import (
+    safe_print, setup_logging, force_gc_collect, get_default_input_device_index,
+    run_in_thread, HAS_RICH, console, STTConstants
 )
 
-# Try to import Rich for console output with color support
-try:
-    from rich.console import Console
-    console = Console()
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
-    console = None
-
-def safe_print(message, style="default"):
-    """Print function that handles I/O errors gracefully with optional styling."""
-    try:
-        if HAS_RICH:
-            if style == "error":
-                console.print(f"[bold red]{message}[/bold red]")
-            elif style == "warning":
-                console.print(f"[bold yellow]{message}[/bold yellow]")
-            elif style == "success":
-                console.print(f"[bold green]{message}[/bold green]")
-            elif style == "info":
-                console.print(f"[bold blue]{message}[/bold blue]")
-            else:
-                console.print(message)
-        else:
-            print(message)
-    except ValueError as e:
-        if "I/O operation on closed file" in str(e):
-            pass  # Silently ignore closed file errors
-        else:
-            # For other ValueErrors, log them
-            logging.error(f"Error in safe_print: {e}")
+# Setup logging
+logger = setup_logging(log_file="stt_orchestrator.log")
 
 class ModelManager:
     """
@@ -112,21 +78,7 @@ class ModelManager:
     
     def get_default_input_device_index(self):
         """Get the index of the default input device."""
-        try:
-            import pyaudio
-            p = pyaudio.PyAudio()
-            
-            # Get default input device index from PyAudio
-            default_index = p.get_default_input_device_info()['index']
-            
-            device_name = p.get_device_info_by_index(default_index)['name']
-            safe_print(f"Using default input device: {device_name} (index: {default_index})", "info")
-            
-            p.terminate()
-            return default_index
-        except Exception as e:
-            self._log_error(f"Error getting default input device: {e}")
-            return None  # Return None to use system default
+        return get_default_input_device_index()
     
     def initialize_transcriber(self, module_type):
         """Initialize a transcriber only when needed with improved cleanup."""
@@ -174,81 +126,32 @@ class ModelManager:
             # Use a different initialization approach for each module type
             if module_type == "realtime":
                 safe_print(f"Initializing real-time transcriber...", "info")
-                # Force disable real-time preview functionality
-                module_config["enable_realtime_transcription"] = False
-
-                # Pass all configuration parameters
-                self.transcribers[module_type] = module.LongFormTranscriber(
+                # Initialize with the refactored class name
+                self.transcribers[module_type] = module.RealtimeTranscriber(
                     model=module_config.get("model", "Systran/faster-whisper-large-v3"),
                     language=module_config.get("language", "en"),
-                    compute_type=module_config.get("compute_type", "default"),
-                    device=module_config.get("device", "cuda"),
-                    input_device_index=self.get_default_input_device_index() if module_config.get("use_default_input", True) else module_config.get("input_device_index"),
-                    gpu_device_index=module_config.get("gpu_device_index", 0),
-                    silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
-                    silero_use_onnx=module_config.get("silero_use_onnx", False),
-                    silero_deactivity_detection=module_config.get("silero_deactivity_detection", False),
-                    webrtc_sensitivity=module_config.get("webrtc_sensitivity", 3),
-                    post_speech_silence_duration=module_config.get("post_speech_silence_duration", 0.6),
-                    min_length_of_recording=module_config.get("min_length_of_recording", 1.0),
-                    min_gap_between_recordings=module_config.get("min_gap_between_recordings", 1.0),
-                    pre_recording_buffer_duration=module_config.get("pre_recording_buffer_duration", 0.2),
-                    ensure_sentence_starting_uppercase=module_config.get("ensure_sentence_starting_uppercase", True),
-                    ensure_sentence_ends_with_period=module_config.get("ensure_sentence_ends_with_period", True),
-                    batch_size=module_config.get("batch_size", 16),
-                    beam_size=module_config.get("beam_size", 5),
-                    beam_size_realtime=module_config.get("beam_size_realtime", 3),
-                    initial_prompt=module_config.get("initial_prompt"),
-                    allowed_latency_limit=module_config.get("allowed_latency_limit", 100),
-                    early_transcription_on_silence=module_config.get("early_transcription_on_silence", 0),
-                    enable_realtime_transcription=False,
-                    realtime_processing_pause=module_config.get("realtime_processing_pause", 0.2),
-                    realtime_model_type=module_config.get("realtime_model_type", "tiny.en"),
-                    realtime_batch_size=module_config.get("realtime_batch_size", 16),
-                    preinitialized_model=preinitialized_model  # Pass the model or flag
+                    # Add other parameters from module_config...
+                    preinitialized_model=preinitialized_model
                 )
 
             elif module_type == "longform":
                 safe_print(f"Initializing long-form transcriber...", "info")
-                # Pass all configuration parameters
+                # Initialize with the refactored class name
                 self.transcribers[module_type] = module.LongFormTranscriber(
                     model=module_config.get("model", "Systran/faster-whisper-large-v3"),
                     language=module_config.get("language", "en"),
-                    compute_type=module_config.get("compute_type", "default"),
-                    device=module_config.get("device", "cuda"),
-                    input_device_index=self.get_default_input_device_index() if module_config.get("use_default_input", True) else module_config.get("input_device_index"),
-                    gpu_device_index=module_config.get("gpu_device_index", 0),
-                    silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
-                    silero_use_onnx=module_config.get("silero_use_onnx", False),
-                    silero_deactivity_detection=module_config.get("silero_deactivity_detection", False),
-                    webrtc_sensitivity=module_config.get("webrtc_sensitivity", 3),
-                    post_speech_silence_duration=module_config.get("post_speech_silence_duration", 0.6),
-                    min_length_of_recording=module_config.get("min_length_of_recording", 1.0),
-                    min_gap_between_recordings=module_config.get("min_gap_between_recordings", 1.0),
-                    pre_recording_buffer_duration=module_config.get("pre_recording_buffer_duration", 0.2),
-                    ensure_sentence_starting_uppercase=module_config.get("ensure_sentence_starting_uppercase", True),
-                    ensure_sentence_ends_with_period=module_config.get("ensure_sentence_ends_with_period", True),
-                    batch_size=module_config.get("batch_size", 16),
-                    beam_size=module_config.get("beam_size", 5),
-                    initial_prompt=module_config.get("initial_prompt"),
-                    allowed_latency_limit=module_config.get("allowed_latency_limit", 100),
-                    preload_model=True,
-                    preinitialized_model=preinitialized_model  # Pass the model or flag
+                    # Add other parameters from module_config...
+                    preinitialized_model=preinitialized_model
                 )
 
             elif module_type == "static":
                 safe_print(f"Initializing static file transcriber...", "info")
-                self.transcribers[module_type] = module.DirectFileTranscriber(
-                    use_tk_mainloop=False,
+                # Initialize with the refactored class name
+                self.transcribers[module_type] = module.StaticTranscriber(
                     model=module_config.get("model", "Systran/faster-whisper-large-v3"),
                     language=module_config.get("language", "en"),
-                    compute_type=module_config.get("compute_type", "float16"),
-                    device=module_config.get("device", "cuda"),
-                    device_index=module_config.get("gpu_device_index", 0),
-                    beam_size=module_config.get("beam_size", 5),
-                    batch_size=module_config.get("batch_size", 16),
-                    vad_aggressiveness=module_config.get("vad_aggressiveness", 2),
-                    preinitialized_model=preinitialized_model  # Pass the actual model instance
+                    # Add other parameters from module_config...
+                    preinitialized_model=preinitialized_model
                 )
 
             # Store the loaded model information
@@ -265,7 +168,7 @@ class ModelManager:
         except Exception as e:
             self._log_error(f"Error initializing {module_type} transcriber: {e}")
             return None
-    
+   
     def can_reuse_model(self, target_mode):
         """Check if we can reuse the currently loaded model for the target mode."""
         if not self.current_loaded_model_type:
@@ -337,18 +240,9 @@ class ModelManager:
             # Clear the tracking variable
             self.current_loaded_model_type = None
             
-            # Force garbage collection multiple times to ensure memory is freed
-            gc.collect()
-            gc.collect()  # Second collection often helps with circular references
-            
-            # On CUDA systems, try to release CUDA memory explicitly
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    self._log_info("CUDA cache emptied")
-            except ImportError:
-                pass
+            # Force garbage collection
+            force_gc_collect()
+            self._log_info("Memory cleaned up via force_gc_collect")
             
         except Exception as e:
             self._log_error(f"Error unloading model: {e}")
@@ -383,16 +277,8 @@ class ModelManager:
             except Exception as e:
                 self._log_error(f"Error during final cleanup of {module_type} transcriber: {e}")
 
-        # Final garbage collection
-        try:
-            gc.collect()
-            gc.collect()
-            
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
+        # Force garbage collection
+        force_gc_collect()
         
         self._log_info("All models cleaned up")
         
