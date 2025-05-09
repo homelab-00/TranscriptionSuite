@@ -1,3 +1,6 @@
 *.tmp
 *.log
 /SCRIPT/__pycache__/
+
+# PyCharm
+.idea/
