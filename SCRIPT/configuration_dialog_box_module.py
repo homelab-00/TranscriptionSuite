@@ -13,11 +13,9 @@
 # - Static tab: Configuration for static file transcription
 
 import os
-import sys
 import tkinter as tk
 from tkinter import ttk
 import json
-import logging
 
 # Try to import Rich for pretty printing
 try:
