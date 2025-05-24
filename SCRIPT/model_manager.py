@@ -15,7 +15,6 @@ import io
 import logging
 import time
 import gc
-from typing import Optional, Dict, Any
 
 # Configure logging
 logging.basicConfig(

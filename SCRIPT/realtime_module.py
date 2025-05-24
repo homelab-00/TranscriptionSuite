@@ -4,7 +4,6 @@ import io
 import logging
 from typing import Callable, Optional, Union, List, Iterable
 import time
-import threading
 
 # Windows-specific setup for PyTorch audio
 if os.name == "nt" and (3, 8) <= sys.version_info < (3, 99):

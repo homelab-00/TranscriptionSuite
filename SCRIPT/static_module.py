@@ -22,7 +22,7 @@ import wave
 import time
 import tempfile
 import ctypes
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, Callable
 import tkinter as tk
 from tkinter import filedialog
 

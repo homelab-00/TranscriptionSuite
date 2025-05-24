@@ -23,11 +23,9 @@
 # - F7: Quit application
 
 import os
-import sys
 import threading
 import time
 import logging
-import signal
 import atexit
 
 # Configure logging to file only (not to console)
