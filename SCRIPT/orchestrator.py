@@ -1,32 +1,36 @@
 #!/usr/bin/env python3
-# orchestrator.py
-#
-# Main controller for the Speech-to-Text system
-#
-# This script:
-# - Imports and integrates the three transcription modules:
-#   * Real-time transcription for immediate feedback
-#   * Long-form transcription for extended dictation
-#   * Static file transcription for pre-recorded audio/video
-# - Sets up a TCP server to listen for commands from the AutoHotkey script
-# - Manages the state of different transcription modes
-# - Provides a clean interface for hotkey-based control
-# - Handles command processing and module coordination
-# - Implements lazy loading of transcription models
-#
-# The system is designed to be controlled via the following hotkeys:
-# - F1: Open configuration dialog box
-# - F2: Toggle real-time transcription on/off
-# - F3: Start long-form recording
-# - F4: Stop long-form recording and transcribe
-# - F10: Run static file transcription
-# - F7: Quit application
+"""
+orchestrator.py - Main controller for the Speech-to-Text system
+
+This script:
+- Imports and integrates the three transcription modules:
+  * Real-time transcription for immediate feedback
+  * Long-form transcription for extended dictation
+  * Static file transcription for pre-recorded audio/video
+- Sets up a TCP server to listen for commands from the AutoHotkey script
+- Manages the state of different transcription modes
+- Provides a clean interface for hotkey-based control
+- Handles command processing and module coordination
+- Implements lazy loading of transcription models
+
+The system is designed to be controlled via the following hotkeys:
+- F1: Open configuration dialog box
+- F2: Toggle real-time transcription on/off
+- F3: Start long-form recording
+- F4: Stop long-form recording and transcribe
+- F10: Run static file transcription
+- F7: Quit application
+"""
 
 import os
 import threading
 import time
 import logging
 import atexit
+
+from model_manager import ModelManager, safe_print
+from command_server import CommandServer
+from system_utils import SystemUtils
 
 # Configure logging to file only (not to console)
 logging.basicConfig(
@@ -37,20 +41,15 @@ logging.basicConfig(
     ],
 )
 
-# Import the sub-modules we've created
-from model_manager import ModelManager, safe_print
-from command_server import CommandServer
-from system_utils import SystemUtils
-
 # Try to import Rich for prettier console output
 try:
     from rich.console import Console
 
-    console = Console()
+    CONSOLE = Console()
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
-    console = None
+    CONSOLE = None
 
 # TCP server settings
 SERVER_HOST = "127.0.0.1"
@@ -66,14 +65,16 @@ class STTOrchestrator:
     def __init__(self):
         """Initialize the orchestrator."""
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.config_path = os.path.join(self.script_dir, "config.json")
 
-        # Application state
-        self.running = False
-        self.current_mode = None  # Can be "realtime", "longform", or "static"
+        # Application state (combining related attributes)
+        self.app_state = {
+            "running": False,
+            "current_mode": None,  # Can be "realtime", "longform", or "static"
+            "config_path": os.path.join(self.script_dir, "config.json"),
+        }
 
         # Initialize system utilities
-        self.system_utils = SystemUtils(self.config_path)
+        self.system_utils = SystemUtils(self.app_state["config_path"])
 
         # Initialize configuration
         self.config = self.system_utils.load_or_create_config()
@@ -109,9 +110,10 @@ class STTOrchestrator:
         self.model_manager.config = new_config
 
         # If any transcribers are active, inform the user about restart
-        if self.current_mode:
+        if self.app_state["current_mode"]:
             safe_print(
-                "Configuration updated. Changes will take effect after restarting transcribers."
+                "Configuration updated. Changes will take effect after "
+                "restarting transcribers."
             )
         else:
             safe_print("Configuration updated successfully.")
@@ -119,9 +121,9 @@ class STTOrchestrator:
     def _open_config_dialog(self):
         """Open the configuration dialog."""
         # Check if any transcription is active
-        if self.current_mode:
+        if self.app_state["current_mode"]:
             safe_print(
-                f"Warning: Transcription in {self.current_mode} mode is active."
+                f"Warning: Transcription in {self.app_state['current_mode']} mode is active."
             )
             # We'll still allow opening the dialog, but warn the user
 
@@ -131,13 +133,17 @@ class STTOrchestrator:
     def _toggle_realtime(self):
         """Toggle real-time transcription on/off."""
         # Check if another mode is running
-        if self.current_mode and self.current_mode != "realtime":
+        if (
+            self.app_state["current_mode"]
+            and self.app_state["current_mode"] != "realtime"
+        ):
             safe_print(
-                f"Cannot start real-time mode while in {self.current_mode} mode. Please finish the current operation first."
+                f"Cannot start real-time mode while in {self.app_state['current_mode']} "
+                "mode. Please finish the current operation first."
             )
             return
 
-        if self.current_mode == "realtime":
+        if self.app_state["current_mode"] == "realtime":
             # Real-time transcription is already running, so stop it
             safe_print("Stopping real-time transcription...")
 
@@ -145,13 +151,15 @@ class STTOrchestrator:
                 transcriber = self.model_manager.transcribers.get("realtime")
                 if transcriber:
                     transcriber.running = False
-                self.current_mode = None
+                self.app_state["current_mode"] = None
 
                 # Unload the model when turning off real-time mode
                 self.model_manager.unload_current_model()
 
-            except Exception as e:
-                logging.error(f"Error stopping real-time transcription: {e}")
+            except (AttributeError, KeyError, RuntimeError) as error:
+                logging.error(
+                    "Error stopping real-time transcription: %s", error
+                )
         else:
             # Start real-time transcription
             try:
@@ -165,7 +173,8 @@ class STTOrchestrator:
                         self.model_manager.unload_current_model()
                 else:
                     safe_print(
-                        f"Reusing {self.model_manager.current_loaded_model_type} model for realtime",
+                        f"Reusing {self.model_manager.current_loaded_model_type} "
+                        "model for realtime",
                         "success",
                     )
 
@@ -180,13 +189,15 @@ class STTOrchestrator:
                     return
 
                 safe_print("Starting real-time transcription...", "success")
-                self.current_mode = "realtime"
+                self.app_state["current_mode"] = "realtime"
 
                 # Start real-time transcription in a separate thread
                 threading.Thread(target=self._run_realtime, daemon=True).start()
-            except Exception as e:
-                logging.error(f"Error starting real-time transcription: {e}")
-                self.current_mode = None
+            except (RuntimeError, OSError, ImportError) as error:
+                logging.error(
+                    "Error starting real-time transcription: %s", error
+                )
+                self.app_state["current_mode"] = None
 
     def _run_realtime(self):
         """Run real-time transcription in a separate thread."""
@@ -194,7 +205,7 @@ class STTOrchestrator:
             transcriber = self.model_manager.transcribers.get("realtime")
             if not transcriber:
                 safe_print("Realtime transcriber not available.", "error")
-                self.current_mode = None
+                self.app_state["current_mode"] = None
                 return
 
             # Clear any previous text
@@ -204,10 +215,10 @@ class STTOrchestrator:
             transcriber.start()
 
             logging.info("Real-time transcription stopped")
-            self.current_mode = None
+            self.app_state["current_mode"] = None
 
-        except Exception as e:
-            logging.error(f"Error in _run_realtime: {e}")
+        except (RuntimeError, OSError, AttributeError) as error:
+            logging.error("Error in _run_realtime: %s", error)
 
             # Make sure to clean up properly
             try:
@@ -216,17 +227,18 @@ class STTOrchestrator:
                     and self.model_manager.transcribers["realtime"]
                 ):
                     self.model_manager.transcribers["realtime"].stop()
-            except Exception as cleanup_e:
-                logging.error(f"Error during cleanup: {cleanup_e}")
+            except (AttributeError, RuntimeError) as cleanup_error:
+                logging.error("Error during cleanup: %s", cleanup_error)
 
-            self.current_mode = None
+            self.app_state["current_mode"] = None
 
     def _start_longform(self):
         """Start long-form recording."""
         # Check if another mode is running
-        if self.current_mode:
+        if self.app_state["current_mode"]:
             safe_print(
-                f"Cannot start long-form mode while in {self.current_mode} mode. Please finish the current operation first."
+                f"Cannot start long-form mode while in {self.app_state['current_mode']} "
+                "mode. Please finish the current operation first."
             )
             return
 
@@ -238,7 +250,8 @@ class STTOrchestrator:
                     self.model_manager.unload_current_model()
             else:
                 safe_print(
-                    f"Reusing {self.model_manager.current_loaded_model_type} model for longform",
+                    f"Reusing {self.model_manager.current_loaded_model_type} "
+                    "model for longform",
                     "success",
                 )
 
@@ -251,16 +264,16 @@ class STTOrchestrator:
                 return
 
             safe_print("Starting long-form recording...", "success")
-            self.current_mode = "longform"
+            self.app_state["current_mode"] = "longform"
             transcriber.start_recording()
 
-        except Exception as e:
-            logging.error(f"Error starting long-form recording: {e}")
-            self.current_mode = None
+        except (RuntimeError, OSError, ImportError) as error:
+            logging.error("Error starting long-form recording: %s", error)
+            self.app_state["current_mode"] = None
 
     def _stop_longform(self):
         """Stop long-form recording and transcribe."""
-        if self.current_mode != "longform":
+        if self.app_state["current_mode"] != "longform":
             safe_print("No active long-form recording to stop.")
             return
 
@@ -268,23 +281,24 @@ class STTOrchestrator:
             transcriber = self.model_manager.transcribers.get("longform")
             if not transcriber:
                 safe_print("Long-form transcriber not available.")
-                self.current_mode = None
+                self.app_state["current_mode"] = None
                 return
 
             safe_print("Stopping long-form recording and transcribing...")
             transcriber.stop_recording()
-            self.current_mode = None
+            self.app_state["current_mode"] = None
 
-        except Exception as e:
-            logging.error(f"Error stopping long-form recording: {e}")
-            self.current_mode = None
+        except (AttributeError, RuntimeError) as error:
+            logging.error("Error stopping long-form recording: %s", error)
+            self.app_state["current_mode"] = None
 
     def _run_static(self):
         """Run static file transcription."""
         # Check if another mode is running
-        if self.current_mode:
+        if self.app_state["current_mode"]:
             safe_print(
-                f"Cannot start static mode while in {self.current_mode} mode. Please finish the current operation first."
+                f"Cannot start static mode while in {self.app_state['current_mode']} mode. "
+                "Please finish the current operation first."
             )
             return
 
@@ -296,7 +310,8 @@ class STTOrchestrator:
                     self.model_manager.unload_current_model()
             else:
                 safe_print(
-                    f"Reusing {self.model_manager.current_loaded_model_type} model for static",
+                    f"Reusing {self.model_manager.current_loaded_model_type} "
+                    "model for static",
                     "success",
                 )
 
@@ -307,16 +322,16 @@ class STTOrchestrator:
                 return
 
             safe_print("Opening file selection dialog...")
-            self.current_mode = "static"
+            self.app_state["current_mode"] = "static"
 
             # Run in a separate thread to avoid blocking
             threading.Thread(
                 target=self._run_static_thread, daemon=True
             ).start()
 
-        except Exception as e:
-            logging.error(f"Error starting static transcription: {e}")
-            self.current_mode = None
+        except (RuntimeError, OSError, ImportError) as error:
+            logging.error("Error starting static transcription: %s", error)
+            self.app_state["current_mode"] = None
 
     def _run_static_thread(self):
         """Run static transcription in a separate thread."""
@@ -324,7 +339,7 @@ class STTOrchestrator:
             transcriber = self.model_manager.transcribers.get("static")
             if not transcriber:
                 safe_print("Static transcriber not available.")
-                self.current_mode = None
+                self.app_state["current_mode"] = None
                 return
 
             # Select and process the file
@@ -335,23 +350,23 @@ class STTOrchestrator:
                 time.sleep(0.5)
 
             logging.info("Static file transcription completed")
-            self.current_mode = None
+            self.app_state["current_mode"] = None
 
-        except Exception as e:
-            logging.error(f"Error in static transcription: {e}")
-            self.current_mode = None
+        except (RuntimeError, AttributeError, OSError) as error:
+            logging.error("Error in static transcription: %s", error)
+            self.app_state["current_mode"] = None
 
     def _quit(self):
         """Stop all processes and exit with improved cleanup."""
         safe_print("Quitting application...")
 
         # Make sure any active mode is stopped first
-        if self.current_mode:
-            if self.current_mode == "realtime":
+        if self.app_state["current_mode"]:
+            if self.app_state["current_mode"] == "realtime":
                 self._toggle_realtime()  # This will stop it if running
-            elif self.current_mode == "longform":
+            elif self.app_state["current_mode"] == "longform":
                 self._stop_longform()
-            elif self.current_mode == "static" and hasattr(
+            elif self.app_state["current_mode"] == "static" and hasattr(
                 self.model_manager.transcribers.get("static", None),
                 "request_abort",
             ):
@@ -380,27 +395,27 @@ class STTOrchestrator:
         self.system_utils.display_system_info()
 
         # Set the running flag
-        self.running = True
+        self.app_state["running"] = True
 
         # Keep the main thread running
         try:
-            while self.running:
+            while self.app_state["running"]:
                 time.sleep(0.1)
         except KeyboardInterrupt:
             safe_print("\nKeyboard interrupt received, shutting down...")
-        except Exception as e:
-            logging.error(f"Error in main loop: {e}")
+        except (RuntimeError, OSError) as error:
+            logging.error("Error in main loop: %s", error)
         finally:
             self.stop()
 
     def stop(self):
         """Stop all processes and clean up with improved resource handling."""
         try:
-            if not self.running:
+            if not self.app_state["running"]:
                 return
 
             logging.info("Beginning graceful shutdown sequence...")
-            self.running = False
+            self.app_state["running"] = False
 
             # Stop the command server
             self.command_server.stop()
@@ -413,8 +428,8 @@ class STTOrchestrator:
 
             logging.info("Orchestrator stopped successfully")
 
-        except Exception as e:
-            logging.error(f"Error during shutdown: {e}")
+        except (RuntimeError, OSError, AttributeError) as error:
+            logging.error("Error during shutdown: %s", error)
 
 
 if __name__ == "__main__":
