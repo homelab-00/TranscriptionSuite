@@ -1,11 +1,28 @@
-import os
-import sys
+"""
+Long-form speech transcription module using RealtimeSTT.
+
+This module provides a LongFormTranscriber class for manual control over
+speech recording and transcription with keyboard shortcuts and clipboard integration.
+"""
+
 import io
 import logging
+import os
+import sys
 import time
-import pyperclip
+from typing import Callable, Iterable, List, Optional, Union
+
 import keyboard
-from typing import Callable, Optional, Union, List, Iterable
+import pyperclip
+
+# Import RealtimeSTT at module level to avoid import-outside-toplevel warning
+try:
+    from RealtimeSTT import AudioToTextRecorder
+
+    HAS_REALTIME_STT = True
+except ImportError:
+    AudioToTextRecorder = None
+    HAS_REALTIME_STT = False
 
 # Windows-specific setup for PyTorch audio
 if os.name == "nt" and (3, 8) <= sys.version_info < (3, 99):
@@ -21,15 +38,16 @@ if os.name == "nt":
 # Import Rich for better terminal display with Unicode support
 try:
     from rich.console import Console
-    from rich.text import Text
     from rich.panel import Panel
-    from rich.live import Live
-    from rich.spinner import Spinner
+    from rich.text import Text
 
-    console = Console()
-    has_rich = True
+    CONSOLE = Console()
+    HAS_RICH = True
 except ImportError:
-    has_rich = False
+    CONSOLE = None
+    Panel = None
+    Text = None
+    HAS_RICH = False
 
 
 class LongFormTranscriber:
@@ -41,15 +59,15 @@ class LongFormTranscriber:
         self,
         # General Parameters
         model: str = "Systran/faster-whisper-large-v3",
-        download_root: str = None,
+        download_root: Optional[str] = None,
         language: str = "en",
         compute_type: str = "default",
-        input_device_index: int = None,
+        input_device_index: Optional[int] = None,
         gpu_device_index: Union[int, List[int]] = 0,
         device: str = "cuda",
-        on_recording_start: Callable = None,
-        on_recording_stop: Callable = None,
-        on_transcription_start: Callable = None,
+        on_recording_start: Optional[Callable] = None,
+        on_recording_stop: Optional[Callable] = None,
+        on_transcription_start: Optional[Callable] = None,
         ensure_sentence_starting_uppercase: bool = True,
         ensure_sentence_ends_with_period: bool = True,
         use_microphone: bool = True,
@@ -65,8 +83,8 @@ class LongFormTranscriber:
         min_length_of_recording: float = 0.5,
         min_gap_between_recordings: float = 0,
         pre_recording_buffer_duration: float = 1.0,
-        on_vad_detect_start: Callable = None,
-        on_vad_detect_stop: Callable = None,
+        on_vad_detect_start: Optional[Callable] = None,
+        on_vad_detect_stop: Optional[Callable] = None,
         # Advanced Parameters
         debug_mode: bool = False,
         handle_buffer_overflow: bool = True,
@@ -74,7 +92,7 @@ class LongFormTranscriber:
         buffer_size: int = 512,
         sample_rate: int = 16000,
         initial_prompt: Optional[Union[str, Iterable[int]]] = None,
-        suppress_tokens: Optional[List[int]] = [-1],
+        suppress_tokens: Optional[List[int]] = None,
         print_transcription_time: bool = False,
         early_transcription_on_silence: int = 0,
         allowed_latency_limit: int = 100,
@@ -87,9 +105,17 @@ class LongFormTranscriber:
         """
         Initialize the transcriber with all available parameters.
         """
+        if suppress_tokens is None:
+            suppress_tokens = [-1]
+
         self.recording = False
         self.running = False
         self.last_transcription = ""
+
+        # Add missing hotkey attributes
+        self.start_hotkey = None
+        self.stop_hotkey = None
+        self.quit_hotkey = None
 
         # Store preinitialized model if provided
         self.preinitialized_model = preinitialized_model
@@ -154,9 +180,9 @@ class LongFormTranscriber:
         """Force initialization of the recorder to preload the model."""
         try:
             return self._initialize_recorder() is not None
-        except Exception as e:
-            if has_rich:
-                console.print(
+        except (ImportError, RuntimeError) as e:
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(
                     f"[bold red]Error in force initialization: {str(e)}[/bold red]"
                 )
             else:
@@ -184,15 +210,15 @@ class LongFormTranscriber:
         self.config["on_recording_stop"] = on_rec_stop
 
         try:
-            # Now import the module
-            from RealtimeSTT import AudioToTextRecorder
+            if not HAS_REALTIME_STT or AudioToTextRecorder is None:
+                raise ImportError("RealtimeSTT not available")
 
             # If we have a preinitialized model, we would use it here
             # However, RealtimeSTT doesn't directly support passing a model object
             # so we'll still use the model name but log that we're reusing
             if self.preinitialized_model:
-                if has_rich:
-                    console.print(
+                if HAS_RICH and CONSOLE:
+                    CONSOLE.print(
                         "[bold green]Using pre-initialized model[/bold green]"
                     )
                 else:
@@ -201,8 +227,8 @@ class LongFormTranscriber:
             # Initialize the recorder with all parameters
             self.recorder = AudioToTextRecorder(**self.config)
 
-            if has_rich:
-                console.print(
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(
                     "[bold green]Long-form transcription system initialized.[/bold green]"
                 )
             else:
@@ -211,9 +237,9 @@ class LongFormTranscriber:
             return (
                 self.recorder
             )  # Return the recorder if initialization succeeded
-        except Exception as e:
-            if has_rich:
-                console.print(
+        except (ImportError, RuntimeError) as e:
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(
                     f"[bold red]Error initializing recorder: {str(e)}[/bold red]"
                 )
             else:
@@ -227,9 +253,9 @@ class LongFormTranscriber:
         # Initialize recorder if needed
         self._initialize_recorder()
 
-        if not self.recording:
-            if has_rich:
-                console.print("[bold green]Starting recording...[/bold green]")
+        if not self.recording and self.recorder:
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print("[bold green]Starting recording...[/bold green]")
             else:
                 print("\nStarting recording...")
             self.recorder.start()
@@ -239,15 +265,15 @@ class LongFormTranscriber:
         Stop recording audio and process the transcription.
         """
         if not self.recorder:
-            if has_rich:
-                console.print("[yellow]No active recorder to stop.[/yellow]")
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print("[yellow]No active recorder to stop.[/yellow]")
             else:
                 print("\nNo active recorder to stop.")
             return
 
         if self.recording:
-            if has_rich:
-                console.print(
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(
                     "[bold yellow]Stopping recording...[/bold yellow]"
                 )
             else:
@@ -256,16 +282,21 @@ class LongFormTranscriber:
             self.recorder.stop()
 
             # Display a spinner while transcribing
-            if has_rich:
-                with console.status("[bold blue]Transcribing...[/bold blue]"):
-                    self.last_transcription = self.recorder.text()
+            if HAS_RICH and CONSOLE:
+                with CONSOLE.status("[bold blue]Transcribing...[/bold blue]"):
+                    transcription = self.recorder.text()
             else:
                 print("Transcribing...")
-                self.last_transcription = self.recorder.text()
+                transcription = self.recorder.text()
+
+            # Ensure transcription is a string
+            self.last_transcription = (
+                str(transcription) if transcription else ""
+            )
 
             # Display the transcription
-            if has_rich:
-                console.print(
+            if HAS_RICH and CONSOLE and Panel and Text:
+                CONSOLE.print(
                     Panel(
                         Text(self.last_transcription, style="bold green"),
                         title="Transcription",
@@ -279,9 +310,10 @@ class LongFormTranscriber:
                 print("-" * 60 + "\n")
 
             # Copy and Paste the transcription to the active window
-            pyperclip.copy(self.last_transcription)
-            time.sleep(0.1)  # Give some time for the clipboard to update
-            keyboard.send("ctrl+v")  # Paste the transcription
+            if self.last_transcription:
+                pyperclip.copy(self.last_transcription)
+                time.sleep(0.1)  # Give some time for the clipboard to update
+                keyboard.send("ctrl+v")  # Paste the transcription
 
     def quit(self):
         """
@@ -291,8 +323,8 @@ class LongFormTranscriber:
         if self.recording and self.recorder:
             self.stop_recording()
 
-        if has_rich:
-            console.print("[bold red]Exiting...[/bold red]")
+        if HAS_RICH and CONSOLE:
+            CONSOLE.print("[bold red]Exiting...[/bold red]")
         else:
             print("\nExiting...")
 
@@ -311,9 +343,9 @@ class LongFormTranscriber:
         self.running = True
 
         # Show instructions (without hotkey references)
-        if has_rich:
-            console.print("[bold]Long-Form Speech Transcription[/bold]")
-            console.print("Ready for transcription")
+        if HAS_RICH and CONSOLE:
+            CONSOLE.print("[bold]Long-Form Speech Transcription[/bold]")
+            CONSOLE.print("Ready for transcription")
         else:
             print("Long-Form Speech Transcription")
             print("Ready for transcription")
@@ -326,18 +358,20 @@ class LongFormTranscriber:
             self.quit()
 
         # Show instructions
-        if has_rich:
-            console.print("[bold]Long-Form Speech Transcription[/bold]")
+        if HAS_RICH and CONSOLE:
+            CONSOLE.print("[bold]Long-Form Speech Transcription[/bold]")
             if self.start_hotkey:
-                console.print(
-                    f"Press [bold green]{self.start_hotkey}[/bold green] to start recording"
+                CONSOLE.print(
+                    f"Press [bold green]{self.start_hotkey}[/bold green] "
+                    "to start recording"
                 )
             if self.stop_hotkey:
-                console.print(
-                    f"Press [bold yellow]{self.stop_hotkey}[/bold yellow] to stop recording and transcribe"
+                CONSOLE.print(
+                    f"Press [bold yellow]{self.stop_hotkey}[/bold yellow] "
+                    "to stop recording and transcribe"
                 )
             if self.quit_hotkey:
-                console.print(
+                CONSOLE.print(
                     f"Press [bold red]{self.quit_hotkey}[/bold red] to quit"
                 )
         else:
