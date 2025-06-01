@@ -24,16 +24,11 @@ except ImportError:
     AudioToTextRecorder = None
     HAS_REALTIME_STT = False
 
-# Windows-specific setup for PyTorch audio
-if os.name == "nt" and (3, 8) <= sys.version_info < (3, 99):
-    from torchaudio._extension.utils import _init_dll_path
+# Import platform utilities for cross-platform compatibility
+from platform_utils import ensure_platform_init
 
-    _init_dll_path()
-
-# Fix console encoding for Windows to properly display Greek characters
-if os.name == "nt":
-    # Force UTF-8 encoding for stdout
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# Initialize platform-specific settings (console encoding, PyTorch audio, etc.)
+ensure_platform_init()
 
 # Import Rich for better terminal display with Unicode support
 try:
@@ -176,6 +171,47 @@ class LongFormTranscriber:
         if preload_model:
             self._initialize_recorder()
 
+    def _safe_clipboard_copy(self, text: str) -> bool:
+        """Safely copy text to clipboard with error handling."""
+        try:
+            pyperclip.copy(text)
+            # Verify the copy worked
+            if pyperclip.paste() == text:
+                return True
+            else:
+                if HAS_RICH and CONSOLE:
+                    CONSOLE.print("[yellow]Clipboard copy verification failed[/yellow]")
+                return False
+        except Exception as e:
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(f"[yellow]Clipboard error: {e}[/yellow]")
+            else:
+                print(f"Clipboard error: {e}")
+            return False
+
+    def _safe_paste(self):
+        """Safely paste using keyboard simulation with platform detection."""
+        try:
+            from platform_utils import get_platform_manager
+            platform_manager = get_platform_manager()
+
+            if platform_manager.is_linux:
+                # On Linux, try Ctrl+Shift+V first (works in many terminals)
+                # then fall back to Ctrl+V
+                try:
+                    keyboard.send("ctrl+shift+v")
+                except:
+                    keyboard.send("ctrl+v")
+            else:
+                # Windows and macOS
+                keyboard.send("ctrl+v")
+
+        except Exception as e:
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(f"[yellow]Paste error: {e}[/yellow]")
+            else:
+                print(f"Paste error: {e}")
+
     def force_initialize(self):
         """Force initialization of the recorder to preload the model."""
         try:
@@ -311,9 +347,17 @@ class LongFormTranscriber:
 
             # Copy and Paste the transcription to the active window
             if self.last_transcription:
-                pyperclip.copy(self.last_transcription)
-                time.sleep(0.1)  # Give some time for the clipboard to update
-                keyboard.send("ctrl+v")  # Paste the transcription
+                if self._safe_clipboard_copy(self.last_transcription):
+                    time.sleep(0.1)  # Give some time for the clipboard to update
+                    self._safe_paste()
+                else:
+                    # Fallback: just display the text for manual copying
+                    if HAS_RICH and CONSOLE:
+                        CONSOLE.print("\n[yellow]Clipboard not available. Please copy manually:[/yellow]")
+                        CONSOLE.print(f"[bold]{self.last_transcription}[/bold]")
+                    else:
+                        print("\nClipboard not available. Please copy manually:")
+                        print(f"TEXT: {self.last_transcription}")
 
     def quit(self):
         """

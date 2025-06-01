@@ -5,7 +5,6 @@ System utility functions for the Speech-to-Text system.
 This module:
 - Provides hardware and version information detection
 - Manages configuration loading and saving
-- Handles AutoHotkey script management
 - Contains utility functions for system interactions
 """
 
@@ -19,13 +18,19 @@ import sys
 import time
 from importlib.metadata import version as metadata_version, PackageNotFoundError
 from typing import Dict, Any
+from platform_utils import get_platform_manager
 
-import psutil
+# Optional import for process management
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    psutil = None
 
 # Import optional dependencies at module level
 try:
     import torch
-
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -33,7 +38,6 @@ except ImportError:
 
 try:
     import faster_whisper
-
     FASTER_WHISPER_AVAILABLE = True
 except ImportError:
     FASTER_WHISPER_AVAILABLE = False
@@ -98,9 +102,9 @@ class SystemUtils:
     def __init__(self, config_path: str):
         """Initialize with configuration file path."""
         self.config_path = config_path
-        self.ahk_pid = None
         self.config = {}
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.platform_manager = get_platform_manager()
 
     def load_or_create_config(self) -> Dict[str, Any]:
         """Load configuration from file or create it if it doesn't exist."""
@@ -110,7 +114,7 @@ class SystemUtils:
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
                 "compute_type": "default",
-                "device": "cuda",
+                "device": self.platform_manager.get_optimal_device_config()["device"],
                 "input_device_index": None,
                 "use_default_input": True,
                 # This flag controls whether the application will dynamically detect and use
@@ -145,7 +149,7 @@ class SystemUtils:
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
                 "compute_type": "default",
-                "device": "cuda",
+                "device": self.platform_manager.get_optimal_device_config()["device"],
                 "input_device_index": None,
                 "use_default_input": True,
                 "gpu_device_index": 0,
@@ -168,13 +172,19 @@ class SystemUtils:
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
                 "compute_type": "float16",
-                "device": "cuda",
+                "device": self.platform_manager.get_optimal_device_config()["device"],
+                # Keep static compute_type as float16 if CUDA is available, otherwise float32
                 "gpu_device_index": 0,
                 "beam_size": 5,
                 "batch_size": 16,
                 "vad_aggressiveness": 2,
             },
         }
+
+        # Ensure config directory exists
+        config_dir = self.platform_manager.get_config_dir()
+        if not os.path.isabs(self.config_path):
+            self.config_path = config_dir / "config.json"
 
         # Try to load existing config
         if os.path.exists(self.config_path):
@@ -270,119 +280,6 @@ class SystemUtils:
             )
             return False
 
-    def kill_leftover_ahk(self):
-        """Kill any existing AHK processes using our script."""
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            try:
-                if (
-                    proc.info["name"] == "AutoHotkeyU64.exe"
-                    and proc.info["cmdline"] is not None
-                    and "STT_hotkeys.ahk" in " ".join(proc.info["cmdline"])
-                ):
-                    logging.info(
-                        "Killing leftover AHK process with PID=%s", proc.pid
-                    )
-                    psutil.Process(proc.pid).kill()
-            except (
-                psutil.NoSuchProcess,
-                psutil.AccessDenied,
-                psutil.ZombieProcess,
-            ):
-                pass
-
-    def start_ahk_script(self, ahk_path: str) -> bool:
-        """Start the AutoHotkey script."""
-        # First kill any leftover AHK processes
-        self.kill_leftover_ahk()
-
-        # Create a sentinel file with our PID for the AHK script to monitor
-        sentinel_file = os.path.join(
-            os.path.dirname(ahk_path), "stt_running.tmp"
-        )
-        try:
-            with open(sentinel_file, "w", encoding="utf-8") as pid_file:
-                pid_file.write(str(os.getpid()))  # Write our PID to the file
-        except OSError as exception:
-            logging.error("Failed to create sentinel file: %s", exception)
-
-        # Record existing AHK PIDs before launching
-        pre_pids = set()
-        for proc in psutil.process_iter(["pid", "name"]):
-            try:
-                if proc.info["name"] == "AutoHotkeyU64.exe":
-                    pre_pids.add(proc.info["pid"])
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        # Launch the AHK script
-        logging.info("Launching AHK script...")
-
-        # Use platform-specific flags
-        if os.name == "nt":  # Windows
-            try:
-                with subprocess.Popen(
-                    [ahk_path],
-                    creationflags=(
-                        subprocess.DETACHED_PROCESS
-                        | subprocess.CREATE_NEW_PROCESS_GROUP
-                    ),
-                    shell=True,
-                ) as proc:
-                    pass
-            except AttributeError:
-                # Fallback for systems where these flags might not be available
-                with subprocess.Popen([ahk_path], shell=True) as proc:
-                    pass
-        else:
-            with subprocess.Popen([ahk_path], shell=True) as proc:
-                pass
-
-        # Give it a moment to start
-        time.sleep(1.0)
-
-        # Find the new AHK process
-        post_pids = set()
-        for proc in psutil.process_iter(["pid", "name"]):
-            try:
-                if proc.info["name"] == "AutoHotkeyU64.exe":
-                    post_pids.add(proc.info["pid"])
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        # Store the PID of the new process
-        new_pids = post_pids - pre_pids
-        if len(new_pids) == 1:
-            self.ahk_pid = new_pids.pop()
-            logging.info("Detected new AHK script PID: %s", self.ahk_pid)
-            return True
-
-        logging.info(
-            "Could not detect a single new AHK script PID. No PID stored."
-        )
-        self.ahk_pid = None
-        return False
-
-    def stop_ahk_script(self):
-        """Kill AHK script if we know its PID."""
-        # Remove the sentinel file
-        sentinel_file = os.path.join(self.script_dir, "stt_running.tmp")
-        if os.path.exists(sentinel_file):
-            try:
-                os.remove(sentinel_file)
-            except OSError as exception:
-                logging.error("Failed to remove sentinel file: %s", exception)
-
-        # Try to kill the AHK process directly
-        if self.ahk_pid is not None:
-            logging.info("Killing AHK script with PID=%s", self.ahk_pid)
-            try:
-                psutil.Process(self.ahk_pid).kill()
-                return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as exception:
-                logging.error("Failed to kill AHK process: %s", exception)
-                return False
-        return False
-
     def get_version_info(self) -> Dict[str, Dict[str, Any]]:
         """Get version information for key dependencies and check for updates."""
         version_info = {}
@@ -427,7 +324,7 @@ class SystemUtils:
                 "update": None,
             }
 
-        # Check for updates using pip list --outdated
+        # Check for updates using pip list --outdated (only if we can run subprocess)
         try:
             # Run pip list --outdated to get update info in JSON format
             result = subprocess.run(
@@ -435,6 +332,7 @@ class SystemUtils:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=10,  # Add timeout to prevent hanging
             )
             if result.returncode == 0:
                 try:
@@ -458,7 +356,7 @@ class SystemUtils:
                         "Error parsing JSON from pip list --outdated: %s",
                         result.stdout,
                     )
-        except (OSError, subprocess.SubprocessError) as exception:
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exception:
             logging.error("Error checking for updates: %s", exception)
 
         return version_info
@@ -531,6 +429,7 @@ class SystemUtils:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=5,
             )
             if result.returncode == 0:
                 match = re.search(r"release (\d+\.\d+)", result.stdout)
@@ -540,7 +439,7 @@ class SystemUtils:
                         "Found CUDA version %s using nvcc", version_str
                     )
                     return version_str
-        except (OSError, subprocess.SubprocessError) as exception:
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exception:
             logging.error("Error getting CUDA version from nvcc: %s", exception)
 
         return "Not found"
@@ -601,15 +500,18 @@ class SystemUtils:
 
     def _get_detailed_cpu_info(self) -> str:
         """Get detailed CPU information when platform.processor() fails."""
-        if os.name == "nt":  # Windows
-            result = (
-                subprocess.check_output("wmic cpu get name", shell=True)
-                .decode()
-                .strip()
-                .split("\n")
-            )
-            if len(result) > 1:
-                return result[1].strip()
+        if self.platform_manager.is_windows:  # Windows
+            try:
+                result = (
+                    subprocess.check_output("wmic cpu get name", shell=True, timeout=5)
+                    .decode()
+                    .strip()
+                    .split("\n")
+                )
+                if len(result) > 1:
+                    return result[1].strip()
+            except (subprocess.SubprocessError, subprocess.TimeoutExpired, UnicodeDecodeError):
+                pass
         else:  # Linux/Mac
             try:
                 with open("/proc/cpuinfo", "r", encoding="utf-8") as cpu_file:
@@ -628,8 +530,10 @@ class SystemUtils:
         # Get hardware information
         hardware_info = self.get_hardware_info()
 
-        # Get CUDA and CUDNN information
-        cuda_info = self.get_cuda_info()
+        # Get enhanced CUDA information and platform info
+        cuda_info_old = self.get_cuda_info()  # Keep the old method for CUDA toolkit detection
+        cuda_info = self.platform_manager.check_cuda_availability()
+        platform_info = f"Platform: {self.platform_manager.platform.title()}"
 
         # Helper function to format version with update marker
         def format_version(package):
@@ -663,9 +567,12 @@ class SystemUtils:
                 f"  PyTorch: {format_version('torch')}\n"
                 f"  RealtimeSTT: {format_version('RealtimeSTT')}\n"
                 f"  Faster Whisper: {format_version('faster_whisper')}\n"
-                f"[bold yellow]CUDA Versions:[/bold yellow]\n"
-                f"  CUDA Toolkit: {cuda_info['cuda']}\n"
-                f"  CUDNN: {cuda_info['cudnn']}\n"
+                f"[bold yellow]Platform & CUDA Info:[/bold yellow]\n"
+                f"  {platform_info}\n"
+                f"  CUDA Available: {'Yes' if cuda_info['available'] else 'No'}\n"
+                f"  CUDA Version: {cuda_info.get('version', 'N/A')}\n"
+                f"  GPU Device: {cuda_info.get('device_name', 'N/A')}\n"
+                f"  Compute Capability: {cuda_info.get('compute_capability', 'N/A')}\n"
                 f"[bold yellow]Hardware:[/bold yellow]\n"
                 f"  CPU: {hardware_info['cpu']}\n"
                 f"  GPU: {hardware_info['gpu']}"
@@ -701,8 +608,8 @@ class SystemUtils:
             safe_print(f"  PyTorch: {format_version('torch')}")
             safe_print(f"  RealtimeSTT: {format_version('RealtimeSTT')}")
             safe_print(f"  Faster Whisper: {format_version('faster_whisper')}")
-            safe_print(f"  CUDA Toolkit: {cuda_info['cuda']}")
-            safe_print(f"  CUDNN: {cuda_info['cudnn']}")
+            safe_print(f"  CUDA Toolkit: {cuda_info_old['cuda']}")
+            safe_print(f"  CUDNN: {cuda_info_old['cudnn']}")
             safe_print("=" * 50)
             safe_print("Hardware:")
             safe_print(f"  CPU: {hardware_info['cpu']}")
