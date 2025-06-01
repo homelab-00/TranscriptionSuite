@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-# static_module.py
-#
-# Handles transcription of pre-recorded audio/video files
-#
-# This module:
-# - Provides a file selection dialog for choosing audio/video files
-# - Converts various media formats to 16kHz mono WAV using FFmpeg
-# - Applies Voice Activity Detection to remove silence
-# - Transcribes using Faster Whisper models (without using RealtimeSTT)
-# - Saves transcription results alongside the original file
-# - Manages temporary files and resource cleanup
-# - Supports abortion of in-progress transcription
-# - Provides feedback on transcription status
+"""
+Static module for transcribing pre-recorded audio/video files.
+
+This module provides functionality to:
+- Select audio/video files through a GUI dialog
+- Convert various media formats to 16kHz mono WAV using FFmpeg
+- Apply Voice Activity Detection to remove silence
+- Transcribe using Faster Whisper models
+- Save transcription results alongside the original file
+- Manage temporary files and resource cleanup
+- Support abortion of in-progress transcription
+"""
 
 import os
 import sys
@@ -22,7 +21,8 @@ import wave
 import time
 import tempfile
 import ctypes
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
+from dataclasses import dataclass
 import tkinter as tk
 from tkinter import filedialog
 
@@ -42,11 +42,15 @@ try:
     from rich.panel import Panel
     from rich.text import Text
 
-    console = Console()
+    CONSOLE = Console()
     HAS_RICH = True
+    RICH_PANEL = Panel
+    RICH_TEXT = Text
 except ImportError:
     HAS_RICH = False
-    console = None
+    CONSOLE = None
+    RICH_PANEL = None
+    RICH_TEXT = None
 
 # Try to import required libraries, with graceful fallbacks
 try:
@@ -56,8 +60,11 @@ try:
     HAS_WHISPER = True
 except ImportError:
     HAS_WHISPER = False
+    torch = None
+    WhisperModel = None
     print(
-        "Warning: faster-whisper not installed. Install with: pip install faster-whisper"
+        "Warning: faster-whisper not installed. "
+        "Install with: pip install faster-whisper"
     )
 
 try:
@@ -66,9 +73,49 @@ try:
     HAS_WEBRTC_VAD = True
 except ImportError:
     HAS_WEBRTC_VAD = False
+    webrtcvad = None
     print(
         "Warning: webrtcvad not installed. Install with: pip install webrtcvad"
     )
+
+
+@dataclass
+class ModelConfig:
+    """Configuration for the Whisper model."""
+
+    name: str = "Systran/faster-whisper-large-v3"
+    language: str = "en"
+    compute_type: str = "float16"
+    device: str = "cuda"
+    device_index: int = 0
+    download_root: Optional[str] = None
+    task: str = "transcribe"
+
+
+@dataclass
+class TranscriptionState:
+    """State variables for transcription process."""
+
+    transcribing: bool = False
+    abort_requested: bool = False
+    transcription_thread: Optional[threading.Thread] = None
+
+
+@dataclass
+class UIConfig:
+    """Configuration for UI components."""
+
+    use_tk_mainloop: bool = False
+    callback_on_progress: Optional[Callable[[str], None]] = None
+
+
+@dataclass
+class Resources:
+    """Resource management for the transcriber."""
+
+    whisper_model: Optional[Any] = None
+    root: Optional[tk.Tk] = None
+    temp_dir: Optional[str] = None
 
 
 class DirectFileTranscriber:
@@ -80,82 +127,77 @@ class DirectFileTranscriber:
     def __init__(
         self,
         use_tk_mainloop: bool = False,
-        model: str = "Systran/faster-whisper-large-v3",
-        download_root: Optional[str] = None,
-        language: str = "en",
-        compute_type: str = "float16",
-        device: str = "cuda",
-        device_index: int = 0,
-        task: str = "transcribe",
         callback_on_progress: Optional[Callable[[str], None]] = None,
-        preinitialized_model=None,
-        **kwargs,
+        preinitialized_model: Optional[Any] = None,
+        **kwargs: Any,
     ):
         """Initialize the transcriber with basic parameters."""
-        # Transcription settings
-        self.model_name = model
-        self.language = language
-        self.compute_type = compute_type
-        self.device = device
-        self.device_index = device_index
-        self.download_root = download_root
-        self.use_tk_mainloop = use_tk_mainloop
-        self.task = task
-        self.callback_on_progress = callback_on_progress
+        # Configuration objects
+        self.model_config = ModelConfig(
+            name=kwargs.get("model", "Systran/faster-whisper-large-v3"),
+            language=kwargs.get("language", "en"),
+            compute_type=kwargs.get("compute_type", "float16"),
+            device=kwargs.get("device", "cuda"),
+            device_index=kwargs.get("device_index", 0),
+            download_root=kwargs.get("download_root", None),
+            task=kwargs.get("task", "transcribe"),
+        )
 
-        # Store preinitialized model if provided
-        self.preinitialized_model = preinitialized_model
+        self.ui_config = UIConfig(
+            use_tk_mainloop=use_tk_mainloop,
+            callback_on_progress=callback_on_progress,
+        )
 
-        # State variables
-        self.transcribing = False
-        self.abort_requested = False
-        self.transcription_thread = None
-        self.root = None
-        self.whisper_model = None
-        self.temp_dir = None
+        self.resources = Resources()
+        self.resources.whisper_model = preinitialized_model
 
-        # Create temporary directory
+        # State management
+        self.state = TranscriptionState()
+
+        # Initialize resources
         self._setup_temp_dir()
-
-        # Preload model if possible
         if HAS_WHISPER:
             self._initialize_model()
 
     def _safe_print(self, message: str, style: str = "default") -> None:
         """Print with Rich if available, otherwise use regular print."""
-        if HAS_RICH:
+        if HAS_RICH and CONSOLE is not None:
             if style == "error":
-                console.print(f"[bold red]{message}[/bold red]")
+                CONSOLE.print(f"[bold red]{message}[/bold red]")
             elif style == "warning":
-                console.print(f"[bold yellow]{message}[/bold yellow]")
+                CONSOLE.print(f"[bold yellow]{message}[/bold yellow]")
             elif style == "success":
-                console.print(f"[bold green]{message}[/bold green]")
+                CONSOLE.print(f"[bold green]{message}[/bold green]")
             elif style == "info":
-                console.print(f"[bold blue]{message}[/bold blue]")
+                CONSOLE.print(f"[bold blue]{message}[/bold blue]")
             else:
-                console.print(message)
+                CONSOLE.print(message)
         else:
             print(message)
 
     def _setup_temp_dir(self) -> None:
         """Set up the temporary directory for intermediate files."""
         try:
-            self.temp_dir = tempfile.mkdtemp(prefix="static_transcription_")
-            logging.info(f"Created temporary directory: {self.temp_dir}")
-        except Exception as e:
-            logging.error(f"Failed to create temporary directory: {e}")
+            self.resources.temp_dir = tempfile.mkdtemp(
+                prefix="static_transcription_"
+            )
+            logging.info(
+                "Created temporary directory: %s", self.resources.temp_dir
+            )
+        except (OSError, IOError) as e:
+            logging.error("Failed to create temporary directory: %s", e)
             self._safe_print(
                 f"Failed to create temporary directory: {e}", "error"
             )
             # Fall back to current directory
-            self.temp_dir = os.getcwd()
+            self.resources.temp_dir = os.getcwd()
 
     def _initialize_model(self) -> bool:
         """Initialize the Whisper model."""
-        if self.whisper_model is not None:
+        if self.resources.whisper_model is not None:
             return True
 
-        if not HAS_WHISPER:
+        if not HAS_WHISPER or WhisperModel is None:
             self._safe_print(
                 "Faster Whisper not installed. Cannot initialize model.",
                 "error",
@@ -164,65 +206,129 @@ class DirectFileTranscriber:
 
         try:
             # If we have a preinitialized model, use it directly
-            if self.preinitialized_model:
-                self._safe_print(f"Using pre-initialized Whisper model", "info")
-                self.whisper_model = self.preinitialized_model
+            if self.resources.whisper_model:
+                self._safe_print("Using pre-initialized Whisper model", "info")
                 return True
 
             # Otherwise, initialize a new model
-            self._safe_print(
-                f"Loading Whisper model: {self.model_name}...", "info"
-            )
-            logging.info(f"Initializing Whisper model: {self.model_name}")
+            config = self.model_config
+            self._safe_print(f"Loading Whisper model: {config.name}...", "info")
+            logging.info("Initializing Whisper model: %s", config.name)
 
-            # Determine device
-            device = self.device
-            if device == "cuda" and not torch.cuda.is_available():
-                self._safe_print(
-                    "CUDA not available, falling back to CPU", "warning"
-                )
-                device = "cpu"
-
-            # For CPU, use float32 instead of float16
-            compute_type = self.compute_type
-            if device == "cpu" and compute_type == "float16":
-                compute_type = "float32"
+            # Determine device and compute type
+            device, compute_type = self._get_device_config()
 
             # Initialize the model
-            self.whisper_model = WhisperModel(
-                self.model_name,
+            self.resources.whisper_model = WhisperModel(
+                config.name,
                 device=device,
-                device_index=self.device_index,
+                device_index=config.device_index,
                 compute_type=compute_type,
-                download_root=self.download_root,
+                download_root=config.download_root,
             )
 
             self._safe_print(
-                f"Whisper model {self.model_name} loaded successfully",
+                f"Whisper model {config.name} loaded successfully",
                 "success",
             )
-            logging.info(f"Model {self.model_name} initialized successfully")
+            logging.info("Model %s initialized successfully", config.name)
             return True
 
-        except Exception as e:
+        except (ImportError, RuntimeError, OSError) as e:
             self._safe_print(
                 f"Failed to initialize Whisper model: {e}", "error"
             )
-            logging.error(f"Model initialization error: {e}")
+            logging.error("Model initialization error: %s", e)
             return False
+
+    def _get_device_config(self) -> tuple[str, str]:
+        """Get device and compute type configuration."""
+        device = self.model_config.device
+        if (
+            device == "cuda"
+            and torch is not None
+            and not torch.cuda.is_available()
+        ):
+            self._safe_print(
+                "CUDA not available, falling back to CPU", "warning"
+            )
+            device = "cpu"
+
+        compute_type = self.model_config.compute_type
+        if device == "cpu" and compute_type == "float16":
+            compute_type = "float32"
+
+        return device, compute_type
 
     def _cleanup_temp_files(self) -> None:
         """Clean up temporary files."""
-        if self.temp_dir and os.path.exists(self.temp_dir):
+        if self.resources.temp_dir and os.path.exists(self.resources.temp_dir):
             try:
-                shutil.rmtree(self.temp_dir)
-                logging.info(f"Removed temporary directory: {self.temp_dir}")
-            except Exception as e:
-                logging.error(f"Failed to remove temp directory: {e}")
+                shutil.rmtree(self.resources.temp_dir)
+                logging.info(
+                    "Removed temporary directory: %s", self.resources.temp_dir
+                )
+            except (OSError, IOError) as e:
+                logging.error("Failed to remove temp directory: %s", e)
                 self._safe_print(
                     f"Warning: Failed to clean up temporary files: {e}",
                     "warning",
                 )
+
+    @property
+    def transcribing(self) -> bool:
+        """Get transcription status."""
+        return self.state.transcribing
+
+    @transcribing.setter
+    def transcribing(self, value: bool) -> None:
+        """Set transcription status."""
+        self.state.transcribing = value
+
+    @property
+    def abort_requested(self) -> bool:
+        """Get abort request status."""
+        return self.state.abort_requested
+
+    @abort_requested.setter
+    def abort_requested(self, value: bool) -> None:
+        """Set abort request status."""
+        self.state.abort_requested = value
+
+    @property
+    def callback_on_progress(self) -> Optional[Callable[[str], None]]:
+        """Get progress callback."""
+        return self.ui_config.callback_on_progress
+
+    @property
+    def whisper_model(self) -> Optional[Any]:
+        """Get Whisper model."""
+        return self.resources.whisper_model
+
+    @whisper_model.setter
+    def whisper_model(self, value: Optional[Any]) -> None:
+        """Set Whisper model."""
+        self.resources.whisper_model = value
+
+    @property
+    def root(self) -> Optional[tk.Tk]:
+        """Get Tkinter root."""
+        return self.resources.root
+
+    @root.setter
+    def root(self, value: Optional[tk.Tk]) -> None:
+        """Set Tkinter root."""
+        self.resources.root = value
+
+    @property
+    def temp_dir(self) -> Optional[str]:
+        """Get temporary directory."""
+        return self.resources.temp_dir
+
+    @temp_dir.setter
+    def temp_dir(self, value: Optional[str]) -> None:
+        """Set temporary directory."""
+        self.resources.temp_dir = value
 
     def select_file(self) -> None:
         """Open a file dialog to select a file for transcription."""
@@ -241,7 +347,24 @@ class DirectFileTranscriber:
         self.root.update()
 
         # Show the file dialog
-        file_path = filedialog.askopenfilename(
+        file_path = self._show_file_dialog()
+
+        if file_path:
+            # Reset abort flag
+            self.abort_requested = False
+
+            # Start transcription in a separate thread
+            self.state.transcription_thread = threading.Thread(
+                target=self._process_file, args=(file_path,), daemon=True
+            )
+            self.state.transcription_thread.start()
+        else:
+            self._safe_print("No file selected", "warning")
+            self.transcribing = False
+
+    def _show_file_dialog(self) -> str:
+        """Show file selection dialog."""
+        return filedialog.askopenfilename(
             title="Select an Audio or Video File",
             filetypes=[
                 (
@@ -255,28 +378,26 @@ class DirectFileTranscriber:
             parent=self.root,
         )
 
-        if file_path:
-            # Reset abort flag
-            self.abort_requested = False
-
-            # Start transcription in a separate thread
-            self.transcription_thread = threading.Thread(
-                target=self._process_file, args=(file_path,), daemon=True
-            )
-            self.transcription_thread.start()
-        else:
-            self._safe_print("No file selected", "warning")
-            self.transcribing = False
-
     def _ensure_wav_format(self, input_path: str) -> Optional[str]:
         """Convert input file (audio or video) to 16kHz mono WAV."""
         if not os.path.exists(input_path):
             self._safe_print(f"File not found: {input_path}", "error")
             return None
 
-        temp_wav = os.path.join(self.temp_dir, "temp_static_file.wav")
+        if self.resources.temp_dir is None:
+            self._safe_print("Temporary directory not available", "error")
+            return None
+
+        temp_wav = os.path.join(self.resources.temp_dir, "temp_static_file.wav")
 
         # Check if the file is already a WAV in the correct format
+        if self._is_correct_wav_format(input_path, temp_wav):
+            return temp_wav
+
+        return self._convert_with_ffmpeg(input_path, temp_wav)
+
+    def _is_correct_wav_format(self, input_path: str, temp_wav: str) -> bool:
+        """Check if input is already correct WAV format."""
         try:
             with wave.open(input_path, "rb") as wf:
                 channels = wf.getnchannels()
@@ -286,13 +407,19 @@ class DirectFileTranscriber:
                         "No conversion needed, copying to temp file", "info"
                     )
                     shutil.copy(input_path, temp_wav)
-                    return temp_wav
+                    return True
         except wave.Error:
             # Not a valid WAV file, needs conversion
             pass
-        except Exception as e:
-            logging.warning(f"File check error: {e}. Will try conversion.")
+        except (OSError, IOError) as e:
+            logging.warning("File check error: %s. Will try conversion.", e)
 
+        return False
+
+    def _convert_with_ffmpeg(
+        self, input_path: str, output_path: str
+    ) -> Optional[str]:
+        """Convert file using FFmpeg."""
         # Get file extension to determine if it's video or audio
         _, ext = os.path.splitext(input_path)
         ext = ext.lower()
@@ -304,12 +431,14 @@ class DirectFileTranscriber:
         # Convert using FFmpeg
         if is_video:
             self._safe_print(
-                f"Converting video file '{os.path.basename(input_path)}' to 16kHz mono WAV",
+                f"Converting video file '{os.path.basename(input_path)}' "
+                "to 16kHz mono WAV",
                 "info",
             )
         else:
             self._safe_print(
-                f"Converting audio file '{os.path.basename(input_path)}' to 16kHz mono WAV",
+                f"Converting audio file '{os.path.basename(input_path)}' "
+                "to 16kHz mono WAV",
                 "info",
             )
 
@@ -325,7 +454,7 @@ class DirectFileTranscriber:
                     "1",  # Mono
                     "-ar",
                     "16000",  # 16kHz
-                    temp_wav,
+                    output_path,
                 ],
                 check=True,
                 stdout=subprocess.PIPE,
@@ -333,134 +462,158 @@ class DirectFileTranscriber:
             )
 
             self._safe_print("Conversion successful", "success")
-            return temp_wav
-        except Exception as e:
+            return output_path
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
             self._safe_print(f"FFmpeg conversion error: {e}", "error")
-            logging.error(f"FFmpeg conversion error: {e}")
+            logging.error("FFmpeg conversion error: %s", e)
             return None
 
     def _apply_vad(self, in_wav_path: str, aggressiveness: int = 2) -> str:
         """Apply Voice Activity Detection to keep only speech frames."""
-        if not HAS_WEBRTC_VAD:
+        if not HAS_WEBRTC_VAD or webrtcvad is None:
             self._safe_print(
                 "webrtcvad not installed. Skipping VAD.", "warning"
             )
             return in_wav_path
 
-        out_wav = os.path.join(self.temp_dir, "temp_static_silence_removed.wav")
+        if self.resources.temp_dir is None:
+            self._safe_print("Temporary directory not available", "error")
+            return in_wav_path
+
+        out_wav = os.path.join(
+            self.resources.temp_dir, "temp_static_silence_removed.wav"
+        )
 
         try:
-            # Open and read input file
-            wf_in = wave.open(in_wav_path, "rb")
-            channels = wf_in.getnchannels()
-            rate = wf_in.getframerate()
+            return self._process_vad(in_wav_path, out_wav, aggressiveness)
+        except (OSError, IOError, ValueError) as e:
+            self._safe_print(f"VAD processing error: {e}", "error")
+            logging.error("VAD processing error: %s", e)
+            return in_wav_path
 
-            # Check if file format is compatible with VAD
-            if channels != 1:
-                self._safe_print(
-                    "VAD requires mono audio. Skipping VAD.", "warning"
-                )
-                wf_in.close()
-                return in_wav_path
+    def _process_vad(
+        self, in_wav_path: str, out_wav: str, aggressiveness: int
+    ) -> str:
+        """Process VAD on the audio file."""
+        # Read audio parameters
+        audio_params = self._read_audio_params(in_wav_path)
+        if not audio_params:
+            return in_wav_path
 
-            if rate not in [8000, 16000, 32000, 48000]:
-                self._safe_print(
-                    "VAD requires specific sample rates. Skipping VAD.",
-                    "warning",
-                )
-                wf_in.close()
-                return in_wav_path
+        channels, rate, audio_data = audio_params
 
-            # Read all audio data
-            audio_data = wf_in.readframes(wf_in.getnframes())
-            wf_in.close()
+        # Check if file format is compatible with VAD
+        if not self._is_vad_compatible(channels, rate):
+            return in_wav_path
 
-            # Initialize VAD
-            vad = webrtcvad.Vad(aggressiveness)
+        # Initialize VAD and process audio - check webrtcvad availability
+        if webrtcvad is None:
+            self._safe_print("webrtcvad not available", "error")
+            return in_wav_path
 
-            # Process audio in 30ms frames
-            frame_ms = 30
-            frame_bytes = int(
-                rate * 2 * (frame_ms / 1000.0)
-            )  # 16-bit samples = 2 bytes each
+        vad = webrtcvad.Vad(aggressiveness)
+        voiced_bytes = self._extract_speech_frames(vad, audio_data, rate)
 
-            voiced_bytes = bytearray()
-            idx = 0
-
-            # Process each frame
-            frames_total = len(audio_data) // frame_bytes
-            frames_processed = 0
-            frames_speech = 0
-
+        if not voiced_bytes:
             self._safe_print(
-                "Processing audio with Voice Activity Detection...", "info"
+                "VAD found no voice frames. Using original audio.", "warning"
             )
+            return in_wav_path
 
-            # Process each frame
-            while idx + frame_bytes <= len(audio_data):
-                # Check if abort was requested
-                if self.abort_requested:
-                    self._safe_print(
-                        "VAD processing aborted by user", "warning"
-                    )
-                    return in_wav_path
+        # Write output file
+        self._write_vad_output(out_wav, voiced_bytes, rate)
+        return out_wav
 
-                frame = audio_data[idx : idx + frame_bytes]
-                is_speech = vad.is_speech(frame, rate)
-                if is_speech:
-                    voiced_bytes.extend(frame)
-                    frames_speech += 1
+    def _read_audio_params(
+        self, in_wav_path: str
+    ) -> Optional[tuple[int, int, bytes]]:
+        """Read audio parameters from WAV file."""
+        try:
+            with wave.open(in_wav_path, "rb") as wf_in:
+                channels = wf_in.getnchannels()
+                rate = wf_in.getframerate()
+                audio_data = wf_in.readframes(wf_in.getnframes())
+                return channels, rate, audio_data
+        except (wave.Error, OSError) as e:
+            self._safe_print(f"Error reading audio file: {e}", "error")
+            return None
 
-                frames_processed += 1
+    def _is_vad_compatible(self, channels: int, rate: int) -> bool:
+        """Check if audio format is compatible with VAD."""
+        if channels != 1:
+            self._safe_print(
+                "VAD requires mono audio. Skipping VAD.", "warning"
+            )
+            return False
 
-                # Provide progress update every 5%
-                if frames_processed % max(1, frames_total // 20) == 0:
-                    progress = int(100 * frames_processed / frames_total)
-                    self._update_progress(
-                        f"VAD processing: {progress}% complete"
-                    )
+        if rate not in [8000, 16000, 32000, 48000]:
+            self._safe_print(
+                "VAD requires specific sample rates. Skipping VAD.", "warning"
+            )
+            return False
 
-                idx += frame_bytes
+        return True
 
-            # Check if we found any speech
-            if len(voiced_bytes) == 0:
-                self._safe_print(
-                    "VAD found no voice frames. Using original audio.",
-                    "warning",
-                )
-                return in_wav_path
+    def _extract_speech_frames(
+        self, vad: Any, audio_data: bytes, rate: int
+    ) -> bytearray:
+        """Extract speech frames using VAD."""
+        frame_ms = 30
+        frame_bytes = int(rate * 2 * (frame_ms / 1000.0))
+        voiced_bytes = bytearray()
+        frames_total = len(audio_data) // frame_bytes
+        frames_speech = 0
 
-            # Write out the speech-only audio
-            wf_out = wave.open(out_wav, "wb")
+        self._safe_print(
+            "Processing audio with Voice Activity Detection...", "info"
+        )
+
+        for i in range(0, len(audio_data) - frame_bytes + 1, frame_bytes):
+            if self.state.abort_requested:
+                self._safe_print("VAD processing aborted by user", "warning")
+                return bytearray()
+
+            frame = audio_data[i : i + frame_bytes]
+            is_speech = vad.is_speech(frame, rate)
+            if is_speech:
+                voiced_bytes.extend(frame)
+                frames_speech += 1
+
+            # Progress update
+            frame_num = i // frame_bytes + 1
+            if frame_num % max(1, frames_total // 20) == 0:
+                progress = int(100 * frame_num / frames_total)
+                self._update_progress(f"VAD processing: {progress}% complete")
+
+        self._safe_print(
+            f"VAD processing complete: Retained {frames_speech} voice frames "
+            f"out of {frames_total} total frames",
+            "success",
+        )
+        return voiced_bytes
+
+    def _write_vad_output(
+        self, out_wav: str, voiced_bytes: bytearray, rate: int
+    ) -> None:
+        """Write VAD output to file."""
+        with wave.open(out_wav, "wb") as wf_out:
             wf_out.setnchannels(1)
             wf_out.setsampwidth(2)  # 16-bit
             wf_out.setframerate(rate)
             wf_out.writeframes(voiced_bytes)
-            wf_out.close()
-
-            self._safe_print(
-                f"VAD processing complete: Retained {frames_speech} voice frames out of {frames_processed} total frames",
-                "success",
-            )
-            return out_wav
-
-        except Exception as e:
-            self._safe_print(f"VAD processing error: {e}", "error")
-            logging.error(f"VAD processing error: {e}")
-            return in_wav_path
 
     def _update_progress(self, message: str) -> None:
         """Update progress message."""
-        logging.info(message)
+        logging.info("%s", message)
         self._safe_print(message, "info")
-        if self.callback_on_progress:
-            self.callback_on_progress(message)
+        if self.ui_config.callback_on_progress is not None:
+            self.ui_config.callback_on_progress(message)
 
     def _process_file(self, file_path: str) -> None:
         """Process and transcribe the selected file."""
         try:
             self.transcribing = True
-            logging.info(f"Processing file: {file_path}")
+            logging.info("Processing file: %s", file_path)
             self._safe_print(
                 f"Processing file: {os.path.basename(file_path)}", "info"
             )
@@ -471,191 +624,230 @@ class DirectFileTranscriber:
                     "Failed to initialize transcription model, aborting",
                     "error",
                 )
-                self.transcribing = False
                 return
 
-            # Step 1: Convert to WAV format if needed
-            self._update_progress("Converting file to WAV format...")
-            wav_path = self._ensure_wav_format(file_path)
-            if not wav_path or not os.path.exists(wav_path):
-                self._safe_print(
-                    "Failed to convert audio file. Aborting.", "error"
-                )
-                self.transcribing = False
+            # Process the file through conversion and VAD
+            processed_wav = self._prepare_audio(file_path)
+            if not processed_wav:
                 return
 
-            # Check abort flag after conversion
-            if self.abort_requested:
-                self._safe_print(
-                    "Transcription aborted after conversion", "warning"
-                )
-                self.transcribing = False
-                return
-
-            # Step 2: Apply VAD to remove non-speech sections
-            self._update_progress("Applying Voice Activity Detection...")
-            voice_wav = self._apply_vad(wav_path, aggressiveness=2)
-
-            # Check abort flag after VAD
-            if self.abort_requested:
-                self._safe_print("Transcription aborted after VAD", "warning")
-                self.transcribing = False
-                return
-
-            # Step 3: Transcribe the processed audio
-            self._update_progress("Beginning transcription...")
-
-            # Determine if we should translate or transcribe
-            task = self.task
-            if task != "translate" and self.language not in ["en", "el"]:
-                # If not English or Greek, we likely want to translate to English
-                task = "translate"
-                self._safe_print(
-                    f"Language '{self.language}' - using translation mode",
-                    "info",
-                )
-            else:
-                self._safe_print(
-                    f"Language '{self.language}' - using transcription mode",
-                    "info",
-                )
-
-            try:
-                segments, info = self.whisper_model.transcribe(
-                    voice_wav, language=self.language, task=task, beam_size=5
-                )
-
-                # Combine all segments into final text
-                final_text = ""
-                segment_count = 0
-
-                for segment in segments:
-                    # Check for abort
-                    if self.abort_requested:
-                        self._safe_print(
-                            "Transcription aborted during processing", "warning"
-                        )
-                        self.transcribing = False
-                        return
-
-                    final_text += segment.text
-                    segment_count += 1
-
-                    # Update progress every few segments
-                    if segment_count % 5 == 0:
-                        self._update_progress(
-                            f"Processed {segment_count} segments..."
-                        )
-
-                # Check abort flag after transcription
-                if self.abort_requested:
-                    self._safe_print(
-                        "Transcription completed but results discarded due to abort request",
-                        "warning",
-                    )
-                    self.transcribing = False
-                    return
-
-                # Clean up the text (remove extra spaces, etc.)
-                final_text = final_text.strip()
-
-                # Display results
-                if HAS_RICH:
-                    panel = Panel(
-                        Text(final_text, style="bold magenta"),
-                        title="Static File Transcription",
-                        border_style="yellow",
-                    )
-                    console.print(panel)
-                else:
-                    self._safe_print(
-                        "---- Transcription Result ----", "success"
-                    )
-                    self._safe_print(final_text)
-                    self._safe_print("-----------------------------", "success")
-
-                # Save .txt alongside the original file
-                base_name = os.path.splitext(os.path.basename(file_path))[0]
-                dir_name = os.path.dirname(file_path)
-                out_txt_path = os.path.join(dir_name, base_name + ".txt")
-
-                with open(out_txt_path, "w", encoding="utf-8") as f:
-                    f.write(final_text)
-
-                self._safe_print(
-                    f"Saved transcription to: {out_txt_path}", "success"
-                )
-
-            except Exception as e:
-                self._safe_print(f"Transcription failed: {e}", "error")
-                logging.error(f"Transcription error: {e}")
+            # Transcribe the processed audio
+            self._transcribe_audio(processed_wav, file_path)
 
         except SystemExit:
             self._safe_print(
                 "Transcription thread was terminated by user request", "warning"
             )
-        except Exception as e:
+        except (OSError, IOError, RuntimeError) as e:
             self._safe_print(f"Static transcription failed: {e}", "error")
-            logging.error(f"Static transcription failed: {e}")
+            logging.error("Static transcription failed: %s", e)
 
         finally:
             self._cleanup_temp_files()
             self.transcribing = False
             self._safe_print("Transcription process complete", "success")
 
+    def _prepare_audio(self, file_path: str) -> Optional[str]:
+        """Prepare audio file for transcription."""
+        # Step 1: Convert to WAV format if needed
+        self._update_progress("Converting file to WAV format...")
+        wav_path = self._ensure_wav_format(file_path)
+        if not wav_path or not os.path.exists(wav_path):
+            self._safe_print("Failed to convert audio file. Aborting.", "error")
+            return None
+
+        # Check abort flag after conversion
+        if self.abort_requested:
+            self._safe_print(
+                "Transcription aborted after conversion", "warning"
+            )
+            return None
+
+        # Step 2: Apply VAD to remove non-speech sections
+        self._update_progress("Applying Voice Activity Detection...")
+        voice_wav = self._apply_vad(wav_path, aggressiveness=2)
+
+        # Check abort flag after VAD
+        if self.abort_requested:
+            self._safe_print("Transcription aborted after VAD", "warning")
+            return None
+
+        return voice_wav
+
+    def _transcribe_audio(
+        self, voice_wav: str, original_file_path: str
+    ) -> None:
+        """Transcribe the prepared audio file."""
+        if self.resources.whisper_model is None:
+            self._safe_print("Whisper model not available", "error")
+            return
+
+        # Step 3: Transcribe the processed audio
+        self._update_progress("Beginning transcription...")
+
+        # Determine if we should translate or transcribe
+        task = self.model_config.task
+        if task != "translate" and self.model_config.language not in [
+            "en",
+            "el",
+        ]:
+            # If not English or Greek, we likely want to translate to English
+            task = "translate"
+            self._safe_print(
+                f"Language '{self.model_config.language}' - using translation mode",
+                "info",
+            )
+        else:
+            self._safe_print(
+                f"Language '{self.model_config.language}' - using transcription mode",
+                "info",
+            )
+
+        try:
+            segments, _ = self.resources.whisper_model.transcribe(
+                voice_wav,
+                language=self.model_config.language,
+                task=task,
+                beam_size=5,
+            )
+
+            # Combine all segments into final text
+            final_text = self._process_segments(segments)
+
+            # Check abort flag after transcription
+            if self.state.abort_requested:
+                self._safe_print(
+                    "Transcription completed but results discarded due to abort request",
+                    "warning",
+                )
+                return
+
+            # Display and save results
+            self._display_and_save_results(final_text, original_file_path)
+
+        except (RuntimeError, OSError, ValueError) as e:
+            self._safe_print(f"Transcription failed: {e}", "error")
+            logging.error("Transcription error: %s", e)
+
+    def _process_segments(self, segments: Any) -> str:
+        """Process transcription segments into final text."""
+        final_text = ""
+        segment_count = 0
+
+        for segment in segments:
+            # Check for abort
+            if self.state.abort_requested:
+                self._safe_print(
+                    "Transcription aborted during processing", "warning"
+                )
+                return ""
+
+            final_text += segment.text
+            segment_count += 1
+
+            # Update progress every few segments
+            if segment_count % 5 == 0:
+                self._update_progress(f"Processed {segment_count} segments...")
+
+        return final_text.strip()
+
+    def _display_and_save_results(
+        self, final_text: str, file_path: str
+    ) -> None:
+        """Display and save transcription results."""
+        # Display results
+        if (
+            HAS_RICH
+            and CONSOLE is not None
+            and RICH_PANEL is not None
+            and RICH_TEXT is not None
+        ):
+            panel = RICH_PANEL(
+                RICH_TEXT(final_text, style="bold magenta"),
+                title="Static File Transcription",
+                border_style="yellow",
+            )
+            CONSOLE.print(panel)
+        else:
+            self._safe_print("---- Transcription Result ----", "success")
+            self._safe_print(final_text)
+            self._safe_print("-----------------------------", "success")
+
+        # Save .txt alongside the original file
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        dir_name = os.path.dirname(file_path)
+        out_txt_path = os.path.join(dir_name, base_name + ".txt")
+
+        try:
+            with open(out_txt_path, "w", encoding="utf-8") as f:
+                f.write(final_text)
+
+            self._safe_print(
+                f"Saved transcription to: {out_txt_path}", "success"
+            )
+        except (OSError, IOError) as e:
+            self._safe_print(f"Failed to save transcription: {e}", "error")
+            logging.error("Failed to save transcription: %s", e)
+
     def request_abort(self) -> None:
         """Request abortion of any in-progress transcription."""
-        if not self.transcribing:
+        if not self.state.transcribing:
             self._safe_print("No transcription in progress to abort", "warning")
             return
 
         self._safe_print("Aborting transcription...", "warning")
-        self.abort_requested = True
+        self.state.abort_requested = True
 
         # Try to terminate the thread if it's stuck
-        if self.transcription_thread and self.transcription_thread.is_alive():
-            try:
-                # Give it a moment to abort gracefully
-                time.sleep(0.5)
+        if (
+            self.state.transcription_thread
+            and self.state.transcription_thread.is_alive()
+        ):
+            self._terminate_thread()
 
-                # If still running, try to terminate it (Windows-specific)
-                if (
-                    self.transcription_thread.is_alive()
-                    and sys.platform == "win32"
-                ):
-                    thread_id = self.transcription_thread.ident
-                    if thread_id:
-                        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                            ctypes.c_long(thread_id),
-                            ctypes.py_object(SystemExit),
+    def _terminate_thread(self) -> None:
+        """Terminate the transcription thread."""
+        try:
+            # Give it a moment to abort gracefully
+            time.sleep(0.5)
+
+            # If still running, try to terminate it (Windows-specific)
+            if (
+                self.state.transcription_thread is not None
+                and self.state.transcription_thread.is_alive()
+                and sys.platform == "win32"
+            ):
+                thread_id = self.state.transcription_thread.ident
+                if thread_id:
+                    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                        ctypes.c_long(thread_id),
+                        ctypes.py_object(SystemExit),
+                    )
+                    if res > 1:
+                        # If more than one thread was affected, undo the damage
+                        ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                            ctypes.c_long(thread_id), None
                         )
-                        if res > 1:
-                            # If more than one thread was affected, undo the damage
-                            ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                                ctypes.c_long(thread_id), None
-                            )
-                            logging.error(
-                                "Failed to terminate thread correctly"
-                            )
-            except Exception as e:
-                logging.error(f"Error while terminating thread: {e}")
+                        logging.error("Failed to terminate thread correctly")
+        except (OSError, ValueError) as e:
+            logging.error("Error while terminating thread: %s", e)
 
     def cleanup(self) -> None:
         """Clean up resources before exiting."""
         # Request abort if transcription is in progress
-        if self.transcribing:
+        if self.state.transcribing:
             self.request_abort()
 
         # Clean up temp files
         self._cleanup_temp_files()
 
         # Clean up Tkinter resources
-        if self.root:
+        if self.resources.root:
             try:
-                self.root.destroy()
-                self.root = None
-            except Exception as e:
-                logging.error(f"Error destroying Tkinter root: {e}")
+                self.resources.root.destroy()
+                self.resources.root = None
+            except tk.TclError as e:
+                logging.error("Error destroying Tkinter root: %s", e)
 
 
 # For standalone testing
