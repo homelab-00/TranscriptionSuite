@@ -1,3 +1,0 @@
-[submodule "pip-updater"]
-	path = pip-updater
-	url = https://github.com/homelab-00/Smart_pip_package_updater.git
