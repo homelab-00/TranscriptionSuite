@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+TCP server for handling hotkey commands from AutoHotkey.
+
+This module:
+- Sets up a TCP server to listen for commands from the AutoHotkey script
+- Receives and processes hotkey commands
+- Dispatches commands to appropriate handlers in the orchestrator
+"""
 # command_server.py
 #
 # TCP server for handling hotkey commands from AutoHotkey
@@ -26,27 +34,27 @@ logging.basicConfig(
 try:
     from rich.console import Console
 
-    console = Console()
+    CONSOLE = Console()
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
-    console = None
+    CONSOLE = None
 
 
 def safe_print(message, style="default"):
     """Print function that handles I/O errors gracefully with optional styling."""
     try:
-        if HAS_RICH:
+        if HAS_RICH and CONSOLE is not None:
             if style == "error":
-                console.print(f"[bold red]{message}[/bold red]")
+                CONSOLE.print(f"[bold red]{message}[/bold red]")
             elif style == "warning":
-                console.print(f"[bold yellow]{message}[/bold yellow]")
+                CONSOLE.print(f"[bold yellow]{message}[/bold yellow]")
             elif style == "success":
-                console.print(f"[bold green]{message}[/bold green]")
+                CONSOLE.print(f"[bold green]{message}[/bold green]")
             elif style == "info":
-                console.print(f"[bold blue]{message}[/bold blue]")
+                CONSOLE.print(f"[bold blue]{message}[/bold blue]")
             else:
-                console.print(message)
+                CONSOLE.print(message)
         else:
             print(message)
     except ValueError as e:
@@ -54,7 +62,7 @@ def safe_print(message, style="default"):
             pass  # Silently ignore closed file errors
         else:
             # For other ValueErrors, log them
-            logging.error(f"Error in safe_print: {e}")
+            logging.error("Error in safe_print: %s", e)
 
 
 class CommandServer:
@@ -90,7 +98,7 @@ class CommandServer:
             target=self._run_server, daemon=True
         )
         self.server_thread.start()
-        logging.info(f"TCP server started on {self.host}:{self.port}")
+        logging.info("TCP server started on %s:%s", self.host, self.port)
 
     def stop(self, timeout: Optional[float] = 2.0):
         """Stop the TCP server."""
@@ -112,8 +120,8 @@ class CommandServer:
                 and current_thread_id != server_thread_id
             ):
                 self.server_thread.join(timeout=timeout)
-        except Exception as e:
-            logging.error(f"Error joining server thread: {e}")
+        except (OSError, RuntimeError) as e:
+            logging.error("Error joining server thread: %s", e)
 
         logging.info("TCP server stopped")
 
@@ -131,9 +139,9 @@ class CommandServer:
 
             while self.running:
                 try:
-                    client_socket, addr = server_socket.accept()
+                    client_socket, _ = server_socket.accept()
                     data = client_socket.recv(1024).decode("utf-8").strip()
-                    logging.info(f"Received command: {data}")
+                    logging.info("Received command: %s", data)
 
                     # Process command
                     self._handle_command(data)
@@ -141,10 +149,10 @@ class CommandServer:
                     client_socket.close()
                 except socket.timeout:
                     continue  # Just a timeout, check self.running and continue
-                except Exception as e:
-                    logging.error(f"Error handling client connection: {e}")
-        except Exception as e:
-            logging.error(f"Server error: {e}")
+                except (socket.error, UnicodeDecodeError) as e:
+                    logging.error("Error handling client connection: %s", e)
+        except (socket.error, OSError) as e:
+            logging.error("Server error: %s", e)
         finally:
             server_socket.close()
 
@@ -154,8 +162,8 @@ class CommandServer:
             if command in self.command_handlers:
                 self.command_handlers[command]()
             else:
-                logging.error(f"Unknown command: {command}")
+                logging.error("Unknown command: %s", command)
                 safe_print(f"Unknown command: {command}", "error")
-        except Exception as e:
-            logging.error(f"Error handling command {command}: {e}")
+        except (KeyError, TypeError, AttributeError) as e:
+            logging.error("Error handling command %s: %s", command, e)
             safe_print(f"Error handling command {command}: {e}", "error")
