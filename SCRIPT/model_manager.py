@@ -17,6 +17,7 @@ import logging
 import time
 import gc
 import importlib.util
+from platform_utils import get_platform_manager
 
 # Try to import optional dependencies at module level
 try:
@@ -93,6 +94,80 @@ class ModelManager:
         self.loaded_models = {}
         self.transcribers = {}
         self.modules = {}
+        self.platform_manager = get_platform_manager()
+
+    def get_audio_devices(self):
+        """Get available audio input devices with cross-platform compatibility."""
+        devices = []
+
+        if not HAS_PYAUDIO or pyaudio is None:
+            self._log_warning("PyAudio not available for device enumeration")
+            return devices
+
+        try:
+            p = pyaudio.PyAudio()
+
+            # Get device count
+            device_count = p.get_device_count()
+
+            for i in range(device_count):
+                try:
+                    device_info = p.get_device_info_by_index(i)
+
+                    # Robust type checking for maxInputChannels
+                    max_input_channels = device_info.get('maxInputChannels', 0)
+                    if not isinstance(max_input_channels, (int, float)):
+                        continue
+
+                    # Only include input devices
+                    if max_input_channels > 0:
+                        device_entry = {
+                            'index': i,
+                            'name': str(device_info.get('name', f'Device {i}')),
+                            'channels': int(max_input_channels),
+                            'sample_rate': float(device_info.get('defaultSampleRate', 44100)),
+                            'is_default': i == p.get_default_input_device_info()['index']
+                        }
+                        devices.append(device_entry)
+
+                except (OSError, ValueError, TypeError) as e:
+                    self._log_warning(f"Could not get info for audio device {i}: {e}")
+                    continue
+
+            p.terminate()
+
+            # Sort devices - default device first, then by name
+            devices.sort(key=lambda x: (not x['is_default'], x['name']))
+
+            self._log_info(f"Found {len(devices)} audio input devices")
+            return devices
+
+        except Exception as e:
+            self._log_error(f"Error enumerating audio devices: {e}")
+            return devices
+
+    def _get_optimal_device(self, module_config):
+        """Get optimal device configuration with fallback."""
+        requested_device = module_config.get("device", "cuda")
+        cuda_info = self.platform_manager.check_cuda_availability()
+
+        if requested_device == "cuda" and not cuda_info["available"]:
+            self._log_info("CUDA requested but not available, falling back to CPU")
+            safe_print("CUDA not available, using CPU", "warning")
+            return "cpu"
+
+        return requested_device
+
+    def _get_optimal_compute_type(self, module_config, device):
+        """Get optimal compute type based on device and platform."""
+        if device == "cpu":
+            return "float32"  # CPU doesn't support float16 efficiently
+
+        requested_type = module_config.get("compute_type", "default")
+        if requested_type == "default":
+            return self.platform_manager.get_optimal_device_config()["compute_type"]
+
+        return requested_type
 
     def import_module_lazily(self, module_name):
         """Import a module only when needed."""
@@ -139,7 +214,7 @@ class ModelManager:
             return None
 
     def get_default_input_device_index(self):
-        """Get the index of the default input device."""
+        """Get the index of the default input device with better error handling."""
         if not HAS_PYAUDIO or pyaudio is None:
             self._log_error("PyAudio not available")
             return None
@@ -147,20 +222,69 @@ class ModelManager:
         try:
             p = pyaudio.PyAudio()
 
-            # Get default input device index from PyAudio
-            default_index = p.get_default_input_device_info()["index"]
+            # Get default input device info
+            default_device_info = p.get_default_input_device_info()
+            default_index = default_device_info["index"]
+            device_name = default_device_info["name"]
 
-            device_name = p.get_device_info_by_index(int(default_index))["name"]
-            safe_print(
-                f"Using default input device: {device_name} (index: {default_index})",
-                "info",
-            )
+            # Ensure we have a valid integer index
+            if not isinstance(default_index, (int, float)):
+                self._log_warning(f"Invalid device index type: {type(default_index)}")
+                p.terminate()
+                return None
+                
+            default_index = int(default_index)
+
+            # Verify the device actually works by testing it
+            try:
+                # Try to open the device briefly to ensure it's accessible
+                stream = p.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=16000,
+                    input=True,
+                    input_device_index=default_index,
+                    frames_per_buffer=1024
+                )
+                stream.close()
+
+                safe_print(
+                    f"Using default input device: {device_name} (index: {default_index})",
+                    "info",
+                )
+
+            except (OSError, ValueError) as e:
+                self._log_warning(f"Default device {device_name} not accessible: {e}")
+                # Try to find an alternative working device
+                devices = self.get_audio_devices()
+                for device in devices:
+                    try:
+                        stream = p.open(
+                            format=pyaudio.paInt16,
+                            channels=1,
+                            rate=16000,
+                            input=True,
+                            input_device_index=device['index'],
+                            frames_per_buffer=1024
+                        )
+                        stream.close()
+                        safe_print(f"Using alternative device: {device['name']}", "info")
+                        p.terminate()
+                        return device['index']
+                    except:
+                        continue
+
+                # If no devices work, return None
+                self._log_error("No working audio input devices found")
+                p.terminate()
+                return None
 
             p.terminate()
             return default_index
-        except (OSError, IOError) as e:
-            self._log_error("Error getting default input device: %s", e)
-            return None  # Return None to use system default
+
+        except Exception as e:
+            self._log_error(f"Error getting default input device: {e}")
+            return None
 
     def _get_reusable_model(self, current_model_name):
         """Get a reusable model if available."""
@@ -192,14 +316,19 @@ class ModelManager:
     ):
         """Initialize realtime transcriber with configuration."""
         safe_print("Initializing real-time transcriber...", "info")
+        
+        # Get device and compute type
+        device = self._get_optimal_device(module_config)
+        compute_type = self._get_optimal_compute_type(module_config, device)
+        
         # Force disable real-time preview functionality
         module_config["enable_realtime_transcription"] = False
 
         return module.LongFormTranscriber(
             model=module_config.get("model", "Systran/faster-whisper-large-v3"),
             language=module_config.get("language", "en"),
-            compute_type=module_config.get("compute_type", "default"),
-            device=module_config.get("device", "cuda"),
+            compute_type=compute_type,
+            device=device,
             input_device_index=(
                 self.get_default_input_device_index()
                 if module_config.get("use_default_input", True)
@@ -257,11 +386,15 @@ class ModelManager:
         """Initialize longform transcriber with configuration."""
         safe_print("Initializing long-form transcriber...", "info")
 
+        # Get device and compute type
+        device = self._get_optimal_device(module_config)
+        compute_type = self._get_optimal_compute_type(module_config, device)
+
         return module.LongFormTranscriber(
             model=module_config.get("model", "Systran/faster-whisper-large-v3"),
             language=module_config.get("language", "en"),
-            compute_type=module_config.get("compute_type", "default"),
-            device=module_config.get("device", "cuda"),
+            compute_type=compute_type,
+            device=device,
             input_device_index=(
                 self.get_default_input_device_index()
                 if module_config.get("use_default_input", True)
@@ -313,7 +446,7 @@ class ModelManager:
             model=module_config.get("model", "Systran/faster-whisper-large-v3"),
             language=module_config.get("language", "en"),
             compute_type=module_config.get("compute_type", "float16"),
-            device=module_config.get("device", "cuda"),
+            device=self._get_optimal_device(module_config),
             device_index=module_config.get("gpu_device_index", 0),
             beam_size=module_config.get("beam_size", 5),
             batch_size=module_config.get("batch_size", 16),
@@ -463,10 +596,12 @@ class ModelManager:
             gc.collect()
             gc.collect()  # Second collection often helps with circular references
 
-            # On CUDA systems, try to release CUDA memory explicitly
-            if HAS_TORCH and torch is not None and torch.cuda.is_available():
+            # Release CUDA memory if available
+            cuda_info = self.platform_manager.check_cuda_availability()
+            if cuda_info["available"] and HAS_TORCH and torch is not None:
                 torch.cuda.empty_cache()
-                self._log_info("CUDA cache emptied")
+                torch.cuda.synchronize()  # Ensure all operations complete
+                self._log_info("CUDA cache emptied and synchronized")
 
         except (AttributeError, OSError) as e:
             self._log_error("Error unloading model: %s", e)
@@ -522,6 +657,10 @@ class ModelManager:
     def _log_info(self, message, *args):
         """Log an info message."""
         logging.info(message, *args)
+
+    def _log_warning(self, message, *args):
+        """Log a warning message."""
+        logging.warning(message, *args)
 
     def _log_error(self, message, *args):
         """Log an error message."""

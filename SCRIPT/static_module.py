@@ -806,31 +806,30 @@ class DirectFileTranscriber:
             self._terminate_thread()
 
     def _terminate_thread(self) -> None:
-        """Terminate the transcription thread."""
+        """Terminate the transcription thread using cross-platform approach."""
         try:
             # Give it a moment to abort gracefully
             time.sleep(0.5)
 
-            # If still running, try to terminate it (Windows-specific)
+            # Use threading.Event for graceful shutdown instead of forced termination
             if (
-                self.state.transcription_thread is not None
-                and self.state.transcription_thread.is_alive()
-                and sys.platform == "win32"
+                    self.state.transcription_thread is not None
+                    and self.state.transcription_thread.is_alive()
             ):
-                thread_id = self.state.transcription_thread.ident
-                if thread_id:
-                    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                        ctypes.c_long(thread_id),
-                        ctypes.py_object(SystemExit),
-                    )
-                    if res > 1:
-                        # If more than one thread was affected, undo the damage
-                        ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                            ctypes.c_long(thread_id), None
-                        )
-                        logging.error("Failed to terminate thread correctly")
-        except (OSError, ValueError) as e:
-            logging.error("Error while terminating thread: %s", e)
+                # The thread should check self.state.abort_requested regularly
+                # and exit on its own. We've already set abort_requested = True
+                # So we just wait a bit longer for graceful shutdown
+                self.state.transcription_thread.join(timeout=2.0)
+
+                if self.state.transcription_thread.is_alive():
+                    logging.warning("Transcription thread did not shutdown gracefully")
+                    # Instead of forced termination, we'll let it run
+                    # The thread will eventually finish on its own
+                else:
+                    logging.info("Transcription thread shutdown gracefully")
+
+        except Exception as e:
+            logging.error(f"Error during thread shutdown: {e}")
 
     def cleanup(self) -> None:
         """Clean up resources before exiting."""
