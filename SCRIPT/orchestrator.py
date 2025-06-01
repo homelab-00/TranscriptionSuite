@@ -27,10 +27,13 @@ import threading
 import time
 import logging
 import atexit
+import sys
 
 from model_manager import ModelManager, safe_print
 from command_server import CommandServer
 from system_utils import SystemUtils
+from hotkey_manager import HotkeyManager
+from depenency_checker import DependencyChecker
 
 # Configure logging to file only (not to console)
 logging.basicConfig(
@@ -85,11 +88,65 @@ class STTOrchestrator:
         # Initialize command server
         self.command_server = CommandServer(SERVER_HOST, SERVER_PORT)
 
+        # Initialize hotkey manager
+        self.hotkey_manager = HotkeyManager(self._handle_hotkey_command)
+
         # Register command handlers
         self._register_command_handlers()
 
         # Register cleanup handler
         atexit.register(self.stop)
+
+    def _handle_hotkey_command(self, command: str):
+        """Handle commands from the hotkey system."""
+        try:
+            if command in self.command_server.command_handlers:
+                self.command_server.command_handlers[command]()
+            else:
+                logging.error(f"Unknown hotkey command: {command}")
+                safe_print(f"Unknown hotkey command: {command}", "error")
+        except Exception as e:
+            logging.error(f"Error handling hotkey command {command}: {e}")
+            safe_print(f"Error handling hotkey command {command}: {e}", "error")
+
+    def _check_startup_dependencies(self):
+        """Check dependencies during startup and warn about issues."""
+        try:
+            safe_print("Checking system dependencies...", "info")
+
+            checker = DependencyChecker()
+            results = checker.check_all_dependencies()
+
+            summary = results.get('summary', {})
+            status = summary.get('overall_status', 'unknown')
+
+            if status == 'critical_issues':
+                safe_print("Critical dependencies are missing!", "error")
+                for item in summary.get('critical_missing', []):
+                    safe_print(f"  Missing: {item}", "error")
+
+                # Ask user if they want to continue anyway
+                response = input("\nContinue anyway? (y/N): ").strip().lower()
+                if response != 'y':
+                    safe_print("Exiting due to missing dependencies.", "error")
+                    sys.exit(1)
+
+            elif status == 'warnings_present':
+                safe_print("Some non-critical issues detected:", "warning")
+                for item in summary.get('warnings', []):
+                    safe_print(f"  Warning: {item}", "warning")
+
+                if summary.get('recommendations'):
+                    safe_print("Recommendations:", "info")
+                    for item in summary['recommendations']:
+                        safe_print(f"  • {item}", "info")
+
+            else:
+                safe_print("All dependencies satisfied ✓", "success")
+
+        except Exception as e:
+            logging.error(f"Error during dependency check: {e}")
+            safe_print(f"Warning: Could not complete dependency check: {e}", "warning")
 
     def _register_command_handlers(self):
         """Register handlers for different commands."""
@@ -387,12 +444,21 @@ class STTOrchestrator:
         # Start the TCP server
         self.command_server.start()
 
-        # Start the AutoHotkey script
-        ahk_path = os.path.join(self.script_dir, "STT_hotkeys.ahk")
-        self.system_utils.start_ahk_script(ahk_path)
+        # Initialize and start the hotkey system
+        if not self.hotkey_manager.initialize():
+            safe_print("Warning: Hotkey system could not be initialized. Manual control only.", "warning")
+        else:
+            if not self.hotkey_manager.start():
+                safe_print("Warning: Hotkey system failed to start. Manual control only.", "warning")
+            else:
+                hotkey_info = self.hotkey_manager.get_backend_info()
+                safe_print(f"Hotkey system started using {hotkey_info['backend']}", "success")
 
         # Display startup banner with system information
         self.system_utils.display_system_info()
+
+        # Perform dependency check
+        self._check_startup_dependencies()
 
         # Set the running flag
         self.app_state["running"] = True
@@ -423,8 +489,8 @@ class STTOrchestrator:
             # Clean up all models
             self.model_manager.cleanup_all_models()
 
-            # Stop the AutoHotkey script
-            self.system_utils.stop_ahk_script()
+            # Stop the hotkey system
+            self.hotkey_manager.stop()
 
             logging.info("Orchestrator stopped successfully")
 

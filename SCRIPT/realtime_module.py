@@ -81,16 +81,11 @@ except ImportError:
             return f"{'-' * 30}\n{self.content}\n{'-' * 30}"
 
 
-# Windows-specific setup for PyTorch audio
-if os.name == "nt" and (3, 8) <= sys.version_info < (3, 99):
-    from torchaudio._extension.utils import _init_dll_path
+# Import platform utilities for cross-platform compatibility
+from platform_utils import ensure_platform_init
 
-    _init_dll_path()
-
-# Fix console encoding for Windows to properly display Greek characters
-if os.name == "nt":
-    # Force UTF-8 encoding for stdout
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# Initialize platform-specific settings (console encoding, PyTorch audio, etc.)
+ensure_platform_init()
 
 
 class LongFormTranscriber:
