@@ -1,23 +1,43 @@
 #!/usr/bin/env python3
-# system_utils.py
-#
-# System utility functions for the Speech-to-Text system
-#
-# This module:
-# - Provides hardware and version information detection
-# - Manages configuration loading and saving
-# - Handles AutoHotkey script management
-# - Contains utility functions for system interactions
+"""
+System utility functions for the Speech-to-Text system.
 
-import os
-import sys
+This module:
+- Provides hardware and version information detection
+- Manages configuration loading and saving
+- Handles AutoHotkey script management
+- Contains utility functions for system interactions
+"""
+
 import json
 import logging
-import subprocess
-import time
-import psutil
-from typing import Dict, Any, Optional, List, Tuple
+import os
+import platform
 import re
+import subprocess
+import sys
+import time
+from importlib.metadata import version as metadata_version, PackageNotFoundError
+from typing import Dict, Any
+
+import psutil
+
+# Import optional dependencies at module level
+try:
+    import torch
+
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+    torch = None
+
+try:
+    import faster_whisper
+
+    FASTER_WHISPER_AVAILABLE = True
+except ImportError:
+    FASTER_WHISPER_AVAILABLE = False
+    faster_whisper = None
 
 # Configure logging
 logging.basicConfig(
@@ -32,38 +52,44 @@ logging.basicConfig(
 try:
     from rich.console import Console
     from rich.panel import Panel
-    from rich.text import Text
     from rich.live import Live
 
-    console = Console()
+    CONSOLE = Console()
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
-    console = None
+    CONSOLE = None
+    Panel = None
+    Live = None
+
+try:
+    from configuration_dialog_box_module import ConfigurationDialog
+except ImportError:
+    ConfigurationDialog = None
 
 
 def safe_print(message, style="default"):
     """Print function that handles I/O errors gracefully with optional styling."""
     try:
-        if HAS_RICH:
+        if HAS_RICH and CONSOLE is not None:
             if style == "error":
-                console.print(f"[bold red]{message}[/bold red]")
+                CONSOLE.print(f"[bold red]{message}[/bold red]")
             elif style == "warning":
-                console.print(f"[bold yellow]{message}[/bold yellow]")
+                CONSOLE.print(f"[bold yellow]{message}[/bold yellow]")
             elif style == "success":
-                console.print(f"[bold green]{message}[/bold green]")
+                CONSOLE.print(f"[bold green]{message}[/bold green]")
             elif style == "info":
-                console.print(f"[bold blue]{message}[/bold blue]")
+                CONSOLE.print(f"[bold blue]{message}[/bold blue]")
             else:
-                console.print(message)
+                CONSOLE.print(message)
         else:
             print(message)
-    except ValueError as e:
-        if "I/O operation on closed file" in str(e):
+    except ValueError as exception:
+        if "I/O operation on closed file" in str(exception):
             pass  # Silently ignore closed file errors
         else:
             # For other ValueErrors, log them
-            logging.error(f"Error in safe_print: {e}")
+            logging.error("Error in safe_print: %s", exception)
 
 
 class SystemUtils:
@@ -74,6 +100,7 @@ class SystemUtils:
         self.config_path = config_path
         self.ahk_pid = None
         self.config = {}
+        self.script_dir = os.path.dirname(os.path.abspath(__file__))
 
     def load_or_create_config(self) -> Dict[str, Any]:
         """Load configuration from file or create it if it doesn't exist."""
@@ -152,22 +179,24 @@ class SystemUtils:
         # Try to load existing config
         if os.path.exists(self.config_path):
             try:
-                with open(self.config_path, "r") as f:
-                    loaded_config = json.load(f)
+                with open(
+                    self.config_path, "r", encoding="utf-8"
+                ) as config_file:
+                    loaded_config = json.load(config_file)
 
                     # Update default config with loaded values
-                    for module_type in default_config:
+                    for module_type, module_defaults in default_config.items():
                         if module_type in loaded_config:
                             for param, value in loaded_config[
                                 module_type
                             ].items():
-                                if param in default_config[module_type]:
-                                    default_config[module_type][param] = value
+                                if param in module_defaults:
+                                    module_defaults[param] = value
 
                     self.config = default_config
                     logging.info("Configuration loaded from file")
-            except Exception as e:
-                logging.error(f"Error loading configuration: {e}")
+            except (json.JSONDecodeError, OSError) as exception:
+                logging.error("Error loading configuration: %s", exception)
                 self.config = default_config
         else:
             # Use defaults and save to file
@@ -184,41 +213,38 @@ class SystemUtils:
         def fix_none_values(obj):
             if isinstance(obj, dict):
                 return {k: fix_none_values(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
+            if isinstance(obj, list):
                 return [fix_none_values(i) for i in obj]
-            elif obj == "":
+            if obj == "":
                 return None  # Convert empty strings back to None
-            else:
-                return obj
+            return obj
 
         try:
             # Apply the fix to the config object
             fixed_config = fix_none_values(self.config)
 
-            with open(self.config_path, "w") as f:
-                json.dump(fixed_config, f, indent=4)
+            with open(self.config_path, "w", encoding="utf-8") as config_file:
+                json.dump(fixed_config, config_file, indent=4)
 
             logging.info("Configuration saved to file")
             return True
-        except Exception as e:
-            logging.error(f"Error saving configuration: {e}")
+        except (OSError, TypeError) as exception:
+            logging.error("Error saving configuration: %s", exception)
             return False
 
     def open_config_dialog(self, config_updated_callback=None):
         """Open the configuration dialog."""
         safe_print("Opening configuration dialog...", "info")
 
+        if not ConfigurationDialog:
+            logging.error("Configuration dialog module not found.")
+            return False
+
         try:
-            # Add the script directory to sys.path if it's not already there
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            if script_dir not in sys.path:
-                sys.path.append(script_dir)
-
-            from configuration_dialog_box_module import ConfigurationDialog
-
             # Create and show the dialog
             dialog = ConfigurationDialog(
-                config_path=self.config_path, callback=config_updated_callback
+                config_file_path=self.config_path,
+                callback=config_updated_callback,
             )
 
             result = dialog.show_dialog()
@@ -228,16 +254,20 @@ class SystemUtils:
                 logging.info("Configuration dialog closed with Apply")
                 # Reload the configuration
                 if os.path.exists(self.config_path):
-                    with open(self.config_path, "r") as f:
-                        self.config = json.load(f)
+                    with open(
+                        self.config_path, "r", encoding="utf-8"
+                    ) as config_file:
+                        self.config = json.load(config_file)
             else:
                 logging.info("Configuration dialog closed without saving")
 
             return result
 
-        except Exception as e:
-            logging.error(f"Error opening configuration dialog: {e}")
-            safe_print(f"Error opening configuration dialog: {e}", "error")
+        except (ImportError, OSError) as exception:
+            logging.error("Error opening configuration dialog: %s", exception)
+            safe_print(
+                f"Error opening configuration dialog: {exception}", "error"
+            )
             return False
 
     def kill_leftover_ahk(self):
@@ -250,7 +280,7 @@ class SystemUtils:
                     and "STT_hotkeys.ahk" in " ".join(proc.info["cmdline"])
                 ):
                     logging.info(
-                        f"Killing leftover AHK process with PID={proc.pid}"
+                        "Killing leftover AHK process with PID=%s", proc.pid
                     )
                     psutil.Process(proc.pid).kill()
             except (
@@ -270,10 +300,10 @@ class SystemUtils:
             os.path.dirname(ahk_path), "stt_running.tmp"
         )
         try:
-            with open(sentinel_file, "w") as f:
-                f.write(str(os.getpid()))  # Write our PID to the file
-        except Exception as e:
-            logging.error(f"Failed to create sentinel file: {e}")
+            with open(sentinel_file, "w", encoding="utf-8") as pid_file:
+                pid_file.write(str(os.getpid()))  # Write our PID to the file
+        except OSError as exception:
+            logging.error("Failed to create sentinel file: %s", exception)
 
         # Record existing AHK PIDs before launching
         pre_pids = set()
@@ -286,12 +316,26 @@ class SystemUtils:
 
         # Launch the AHK script
         logging.info("Launching AHK script...")
-        subprocess.Popen(
-            [ahk_path],
-            creationflags=subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NEW_PROCESS_GROUP,
-            shell=True,
-        )
+
+        # Use platform-specific flags
+        if os.name == "nt":  # Windows
+            try:
+                with subprocess.Popen(
+                    [ahk_path],
+                    creationflags=(
+                        subprocess.DETACHED_PROCESS
+                        | subprocess.CREATE_NEW_PROCESS_GROUP
+                    ),
+                    shell=True,
+                ) as proc:
+                    pass
+            except AttributeError:
+                # Fallback for systems where these flags might not be available
+                with subprocess.Popen([ahk_path], shell=True) as proc:
+                    pass
+        else:
+            with subprocess.Popen([ahk_path], shell=True) as proc:
+                pass
 
         # Give it a moment to start
         time.sleep(1.0)
@@ -309,14 +353,14 @@ class SystemUtils:
         new_pids = post_pids - pre_pids
         if len(new_pids) == 1:
             self.ahk_pid = new_pids.pop()
-            logging.info(f"Detected new AHK script PID: {self.ahk_pid}")
+            logging.info("Detected new AHK script PID: %s", self.ahk_pid)
             return True
-        else:
-            logging.info(
-                "Could not detect a single new AHK script PID. No PID stored."
-            )
-            self.ahk_pid = None
-            return False
+
+        logging.info(
+            "Could not detect a single new AHK script PID. No PID stored."
+        )
+        self.ahk_pid = None
+        return False
 
     def stop_ahk_script(self):
         """Kill AHK script if we know its PID."""
@@ -325,17 +369,17 @@ class SystemUtils:
         if os.path.exists(sentinel_file):
             try:
                 os.remove(sentinel_file)
-            except Exception as e:
-                logging.error(f"Failed to remove sentinel file: {e}")
+            except OSError as exception:
+                logging.error("Failed to remove sentinel file: %s", exception)
 
         # Try to kill the AHK process directly
         if self.ahk_pid is not None:
-            logging.info(f"Killing AHK script with PID={self.ahk_pid}")
+            logging.info("Killing AHK script with PID=%s", self.ahk_pid)
             try:
                 psutil.Process(self.ahk_pid).kill()
                 return True
-            except Exception as e:
-                logging.error(f"Failed to kill AHK process: {e}")
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as exception:
+                logging.error("Failed to kill AHK process: %s", exception)
                 return False
         return False
 
@@ -347,47 +391,37 @@ class SystemUtils:
         # Format: {"package_name": {"current": "version", "update": "newer_version or None"}}
 
         # Get PyTorch version
-        try:
-            import torch
-
+        if TORCH_AVAILABLE and torch is not None:
             version_info["torch"] = {
                 "current": torch.__version__,
                 "update": None,
             }
-        except ImportError:
+        else:
             version_info["torch"] = {"current": "Not installed", "update": None}
 
         # Get RealtimeSTT version
         try:
-            import RealtimeSTT
-
-            try:
-                from importlib.metadata import version
-
-                version_info["RealtimeSTT"] = {
-                    "current": version("realtimestt"),
-                    "update": None,
-                }
-            except Exception:
-                version_info["RealtimeSTT"] = {
-                    "current": "Unknown",
-                    "update": None,
-                }
-        except ImportError:
+            realtime_version = metadata_version("realtimestt")
+            version_info["RealtimeSTT"] = {
+                "current": realtime_version,
+                "update": None,
+            }
+        except PackageNotFoundError:
             version_info["RealtimeSTT"] = {
                 "current": "Not installed",
                 "update": None,
             }
 
         # Get Faster Whisper version
-        try:
-            import faster_whisper
-
+        if FASTER_WHISPER_AVAILABLE and faster_whisper is not None:
+            faster_whisper_ver = getattr(
+                faster_whisper, "__version__", "Unknown"
+            )
             version_info["faster_whisper"] = {
-                "current": getattr(faster_whisper, "__version__", "Unknown"),
+                "current": faster_whisper_ver,
                 "update": None,
             }
-        except ImportError:
+        else:
             version_info["faster_whisper"] = {
                 "current": "Not installed",
                 "update": None,
@@ -395,9 +429,6 @@ class SystemUtils:
 
         # Check for updates using pip list --outdated
         try:
-            import subprocess
-            import json
-
             # Run pip list --outdated to get update info in JSON format
             result = subprocess.run(
                 ["pip", "list", "--outdated", "--format=json"],
@@ -405,7 +436,6 @@ class SystemUtils:
                 text=True,
                 check=False,
             )
-
             if result.returncode == 0:
                 try:
                     outdated_packages = json.loads(result.stdout)
@@ -414,111 +444,132 @@ class SystemUtils:
                         latest_version = package_info.get("latest_version", "")
 
                         logging.info(
-                            f"Found update for {package_name}: {latest_version}"
+                            "Found update for %s: %s",
+                            package_name,
+                            latest_version,
                         )
 
                         # Update the version info dict with update info
-                        if package_name == "torch" and "torch" in version_info:
-                            version_info["torch"]["update"] = latest_version
-                        elif (
-                            package_name == "realtimestt"
-                            and "RealtimeSTT" in version_info
-                        ):
-                            version_info["RealtimeSTT"][
-                                "update"
-                            ] = latest_version
-                        elif (
-                            package_name == "faster-whisper"
-                            and "faster_whisper" in version_info
-                        ):
-                            version_info["faster_whisper"][
-                                "update"
-                            ] = latest_version
+                        self._update_package_version_info(
+                            version_info, package_name, latest_version
+                        )
                 except json.JSONDecodeError:
                     logging.error(
-                        f"Error parsing JSON from pip list --outdated: {result.stdout}"
+                        "Error parsing JSON from pip list --outdated: %s",
+                        result.stdout,
                     )
-        except Exception as e:
-            logging.error(f"Error checking for updates: {e}")
+        except (OSError, subprocess.SubprocessError) as exception:
+            logging.error("Error checking for updates: %s", exception)
 
         return version_info
+
+    def _update_package_version_info(
+        self, version_info, package_name, latest_version
+    ):
+        """Helper method to update package version info."""
+        if package_name == "torch" and "torch" in version_info:
+            version_info["torch"]["update"] = latest_version
+        elif package_name == "realtimestt" and "RealtimeSTT" in version_info:
+            version_info["RealtimeSTT"]["update"] = latest_version
+        elif (
+            package_name == "faster-whisper"
+            and "faster_whisper" in version_info
+        ):
+            version_info["faster_whisper"]["update"] = latest_version
 
     def get_cuda_info(self) -> Dict[str, str]:
         """Get CUDA and CUDNN version information from system PATH."""
         cuda_info = {"cuda": "Not found", "cudnn": "Not found"}
 
         try:
-            # Get the system PATH
-            system_path = os.environ.get("PATH", "")
-            path_entries = system_path.split(os.pathsep)
+            # Get CUDA version from PATH
+            cuda_info["cuda"] = self._find_cuda_version_in_path()
 
-            # Multiple patterns to match CUDA in PATH
-            cuda_patterns = [
-                r"CUDA\\v(\d+\.\d+)",
-                r"CUDA\\(\d+\.\d+)",
-                r"cuda(\d+\.\d+)",
-                r"cuda-(\d+\.\d+)",
-            ]
-
-            # Look for CUDA in the PATH
-            for path_entry in path_entries:
-                for pattern in cuda_patterns:
-                    cuda_match = re.search(pattern, path_entry, re.IGNORECASE)
-                    if cuda_match:
-                        cuda_info["cuda"] = cuda_match.group(1)
-                        logging.info(
-                            f"Found CUDA version {cuda_info['cuda']} in PATH: {path_entry}"
-                        )
-                        break
-                if cuda_info["cuda"] != "Not found":
-                    break
-
-            # If we still don't have CUDA version, try using nvcc
+            # If not found in PATH, try nvcc
             if cuda_info["cuda"] == "Not found":
-                try:
-                    # Try using nvcc to get CUDA version
-                    result = subprocess.run(
-                        ["nvcc", "--version"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    if result.returncode == 0:
-                        # Parse the version from output like "Cuda compilation tools, release 11.4, V11.4.120"
-                        match = re.search(r"release (\d+\.\d+)", result.stdout)
-                        if match:
-                            cuda_info["cuda"] = match.group(1)
-                            logging.info(
-                                f"Found CUDA version {cuda_info['cuda']} using nvcc"
-                            )
-                except Exception as e:
-                    logging.error(f"Error getting CUDA version from nvcc: {e}")
+                cuda_info["cuda"] = self._find_cuda_version_with_nvcc()
 
-            # Multiple patterns to match CUDNN in PATH
-            cudnn_patterns = [
-                r"CUDNN\\v(\d+\.\d+)",
-                r"cudnn(\d+\.\d+)",
-                r"cudnn-(\d+\.\d+)",
-                r"cudnn_(\d+\.\d+)",
-            ]
+            # Get CUDNN version from PATH
+            cuda_info["cudnn"] = self._find_cudnn_version_in_path()
 
-            # Look for CUDNN in the PATH
-            for path_entry in path_entries:
-                for pattern in cudnn_patterns:
-                    cudnn_match = re.search(pattern, path_entry, re.IGNORECASE)
-                    if cudnn_match:
-                        cuda_info["cudnn"] = cudnn_match.group(1)
-                        logging.info(
-                            f"Found CUDNN version {cuda_info['cudnn']} in PATH: {path_entry}"
-                        )
-                        break
-                if cuda_info["cudnn"] != "Not found":
-                    break
-
-        except Exception as e:
-            logging.error(f"Error getting CUDA/CUDNN info: {e}")
+        except (OSError, AttributeError) as exception:
+            logging.error("Error getting CUDA/CUDNN info: %s", exception)
 
         return cuda_info
+
+    def _find_cuda_version_in_path(self) -> str:
+        """Find CUDA version in system PATH."""
+        system_path = os.environ.get("PATH", "")
+        path_entries = system_path.split(os.pathsep)
+
+        cuda_patterns = [
+            r"CUDA\\v(\d+\.\d+)",
+            r"CUDA\\(\d+\.\d+)",
+            r"cuda(\d+\.\d+)",
+            r"cuda-(\d+\.\d+)",
+        ]
+
+        for path_entry in path_entries:
+            for pattern in cuda_patterns:
+                cuda_match = re.search(pattern, path_entry, re.IGNORECASE)
+                if cuda_match:
+                    version_str = cuda_match.group(1)
+                    logging.info(
+                        "Found CUDA version %s in PATH: %s",
+                        version_str,
+                        path_entry,
+                    )
+                    return version_str
+
+        return "Not found"
+
+    def _find_cuda_version_with_nvcc(self) -> str:
+        """Find CUDA version using nvcc command."""
+        try:
+            result = subprocess.run(
+                ["nvcc", "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                match = re.search(r"release (\d+\.\d+)", result.stdout)
+                if match:
+                    version_str = match.group(1)
+                    logging.info(
+                        "Found CUDA version %s using nvcc", version_str
+                    )
+                    return version_str
+        except (OSError, subprocess.SubprocessError) as exception:
+            logging.error("Error getting CUDA version from nvcc: %s", exception)
+
+        return "Not found"
+
+    def _find_cudnn_version_in_path(self) -> str:
+        """Find CUDNN version in system PATH."""
+        system_path = os.environ.get("PATH", "")
+        path_entries = system_path.split(os.pathsep)
+
+        cudnn_patterns = [
+            r"CUDNN\\v(\d+\.\d+)",
+            r"cudnn(\d+\.\d+)",
+            r"cudnn-(\d+\.\d+)",
+            r"cudnn_(\d+\.\d+)",
+        ]
+
+        for path_entry in path_entries:
+            for pattern in cudnn_patterns:
+                cudnn_match = re.search(pattern, path_entry, re.IGNORECASE)
+                if cudnn_match:
+                    version_str = cudnn_match.group(1)
+                    logging.info(
+                        "Found CUDNN version %s in PATH: %s",
+                        version_str,
+                        path_entry,
+                    )
+                    return version_str
+
+        return "Not found"
 
     def get_hardware_info(self) -> Dict[str, str]:
         """Get basic CPU and GPU information."""
@@ -526,53 +577,48 @@ class SystemUtils:
 
         # Get CPU info
         try:
-            import platform
-
             hardware_info["cpu"] = platform.processor()
-            if not hardware_info[
-                "cpu"
-            ]:  # On some systems, platform.processor() returns an empty string
-                import os
-
-                if os.name == "nt":  # Windows
-                    import subprocess
-
-                    result = (
-                        subprocess.check_output("wmic cpu get name", shell=True)
-                        .decode()
-                        .strip()
-                        .split("\n")
-                    )
-                    if len(result) > 1:
-                        hardware_info["cpu"] = result[1].strip()
-                else:  # Linux/Mac
-                    try:
-                        with open("/proc/cpuinfo", "r") as f:
-                            for line in f:
-                                if line.startswith("model name"):
-                                    hardware_info["cpu"] = line.split(":")[
-                                        1
-                                    ].strip()
-                                    break
-                    except:
-                        pass
-        except Exception as e:
+            if not hardware_info["cpu"]:
+                hardware_info["cpu"] = self._get_detailed_cpu_info()
+        except (OSError, subprocess.SubprocessError) as exception:
             hardware_info["cpu"] = "Unknown"
-            logging.error(f"Error getting CPU info: {e}")
+            logging.error("Error getting CPU info: %s", exception)
 
         # Get GPU info
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                hardware_info["gpu"] = torch.cuda.get_device_name(0)
-            else:
-                hardware_info["gpu"] = "No CUDA GPU available"
-        except Exception as e:
-            hardware_info["gpu"] = "Unknown"
-            logging.error(f"Error getting GPU info: {e}")
+        if TORCH_AVAILABLE and torch is not None:
+            try:
+                if torch.cuda.is_available():
+                    hardware_info["gpu"] = torch.cuda.get_device_name(0)
+                else:
+                    hardware_info["gpu"] = "No CUDA GPU available"
+            except (ImportError, RuntimeError) as exception:
+                hardware_info["gpu"] = "Unknown"
+                logging.error("Error getting GPU info: %s", exception)
+        else:
+            hardware_info["gpu"] = "PyTorch not available"
 
         return hardware_info
+
+    def _get_detailed_cpu_info(self) -> str:
+        """Get detailed CPU information when platform.processor() fails."""
+        if os.name == "nt":  # Windows
+            result = (
+                subprocess.check_output("wmic cpu get name", shell=True)
+                .decode()
+                .strip()
+                .split("\n")
+            )
+            if len(result) > 1:
+                return result[1].strip()
+        else:  # Linux/Mac
+            try:
+                with open("/proc/cpuinfo", "r", encoding="utf-8") as cpu_file:
+                    for line in cpu_file:
+                        if line.startswith("model name"):
+                            return line.split(":")[1].strip()
+            except (OSError, IndexError):
+                pass
+        return "Unknown"
 
     def display_system_info(self) -> None:
         """Display system information including versions and hardware."""
@@ -594,13 +640,11 @@ class SystemUtils:
             if update:
                 if HAS_RICH:
                     return f"{current} [bold red][UPDATE AVAILABLE: {update}][/bold red]"
-                else:
-                    return f"{current} [!] (update: {update})"
-            else:
-                return current
+                return f"{current} [!] (update: {update})"
+            return current
 
         # Display startup banner
-        if HAS_RICH:
+        if HAS_RICH and Panel is not None and Live is not None:
             panel_content = (
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
                 "Control the system using these hotkeys:\n"
@@ -632,7 +676,7 @@ class SystemUtils:
                 title="Speech-to-Text System",
                 border_style="green",
             )
-            with Live(info_panel, console=console, auto_refresh=False) as live:
+            with Live(info_panel, console=CONSOLE, auto_refresh=False) as live:
                 live.update(info_panel)
                 # Brief pause to ensure proper display
                 time.sleep(0.1)
