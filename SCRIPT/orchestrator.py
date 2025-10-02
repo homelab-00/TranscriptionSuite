@@ -32,7 +32,6 @@ import sys
 from model_manager import ModelManager, safe_print
 from command_server import CommandServer
 from system_utils import SystemUtils
-from hotkey_manager import HotkeyManager
 from depenency_checker import DependencyChecker
 
 # Configure logging to file only (not to console)
@@ -88,26 +87,11 @@ class STTOrchestrator:
         # Initialize command server
         self.command_server = CommandServer(SERVER_HOST, SERVER_PORT)
 
-        # Initialize hotkey manager
-        self.hotkey_manager = HotkeyManager(self._handle_hotkey_command)
-
         # Register command handlers
         self._register_command_handlers()
 
         # Register cleanup handler
         atexit.register(self.stop)
-
-    def _handle_hotkey_command(self, command: str):
-        """Handle commands from the hotkey system."""
-        try:
-            if command in self.command_server.command_handlers:
-                self.command_server.command_handlers[command]()
-            else:
-                logging.error(f"Unknown hotkey command: {command}")
-                safe_print(f"Unknown hotkey command: {command}", "error")
-        except Exception as e:
-            logging.error(f"Error handling hotkey command {command}: {e}")
-            safe_print(f"Error handling hotkey command {command}: {e}", "error")
 
     def _check_startup_dependencies(self):
         """Check dependencies during startup and warn about issues."""
@@ -443,16 +427,10 @@ class STTOrchestrator:
         """Run the orchestrator."""
         # Start the TCP server
         self.command_server.start()
-
-        # Initialize and start the hotkey system
-        if not self.hotkey_manager.initialize():
-            safe_print("Warning: Hotkey system could not be initialized. Manual control only.", "warning")
-        else:
-            if not self.hotkey_manager.start():
-                safe_print("Warning: Hotkey system failed to start. Manual control only.", "warning")
-            else:
-                hotkey_info = self.hotkey_manager.get_backend_info()
-                safe_print(f"Hotkey system started using {hotkey_info['backend']}", "success")
+        safe_print("Command server started. Ready to receive commands from system hotkeys.", "success")
+        
+        # Enable the KDE hotkeys
+        self._manage_hotkeys(enable=True)
 
         # Display startup banner with system information
         self.system_utils.display_system_info()
@@ -483,20 +461,75 @@ class STTOrchestrator:
             logging.info("Beginning graceful shutdown sequence...")
             self.app_state["running"] = False
 
+            # Disable the KDE hotkeys
+            self._manage_hotkeys(enable=False)
+
             # Stop the command server
             self.command_server.stop()
 
             # Clean up all models
             self.model_manager.cleanup_all_models()
 
-            # Stop the hotkey system
-            self.hotkey_manager.stop()
-
             logging.info("Orchestrator stopped successfully")
 
         except (RuntimeError, OSError, AttributeError) as error:
             logging.error("Error during shutdown: %s", error)
 
+    def _manage_hotkeys(self, enable: bool) -> None:
+            """Enable or disable KDE hotkeys by setting their key assignments via D-Bus."""
+            try:
+                import dbus
+            except ImportError:
+                safe_print("Could not manage KDE hotkeys. Please install the 'python-dbus' package.", "error")
+                return
+
+            # Map of shortcut identifiers to their Qt KeyCode.
+            # Format: { "desktop-file": (["details"], key_code) }
+            shortcut_map = {
+                "net.local.sh.desktop": (["_launch", "STT: Open Config", "STT: Open Config"], 0x01000030), # F1
+                "net.local.sh-2.desktop": (["_launch", "STT: Toggle Realtime", "STT: Toggle Realtime"], 0x01000031), # F2
+                "net.local.sh-3.desktop": (["_launch", "STT: Start Longform", "STT: Start Longform"], 0x01000032), # F3
+                "net.local.sh-4.desktop": (["_launch", "STT: Stop Longform", "STT: Stop Longform"], 0x01000033), # F4
+                "net.local.sh-5.desktop": (["_launch", "STT: Run Static", "STT: Run Static"], 0x01000039), # F10
+                "net.local.sh-6.desktop": (["_launch", "STT: Quit", "STT: Quit"], 0x01000036) # F7
+            }
+
+            try:
+                bus = dbus.SessionBus()
+                proxy = bus.get_object('org.kde.kglobalaccel', '/kglobalaccel')
+                interface = dbus.Interface(proxy, 'org.kde.KGlobalAccel')
+
+                for desktop_file, (details, keycode) in shortcut_map.items():
+                    # The identifier is an array of strings.
+                    identifier = dbus.Array([desktop_file] + details, signature='s')
+
+                    if enable:
+                        # This is the correct structure for a key sequence: an array of 4 integers.
+                        # For simple keys, the modifiers are 0.
+                        key_sequence = dbus.Array([
+                            dbus.Int32(keycode), dbus.Int32(0), dbus.Int32(0), dbus.Int32(0)
+                        ], signature='i')
+
+                        # This builds the full 'a(ai)' type: Array of [Struct of (Array of Ints)]
+                        key_struct = dbus.Struct([key_sequence], signature='(ai)')
+                        keys_to_set = dbus.Array([key_struct], signature='a(ai)')
+                    else:
+                        # To disable, we pass a correctly typed but empty array.
+                        keys_to_set = dbus.Array([], signature='a(ai)')
+                    
+                    interface.setForeignShortcutKeys(identifier, keys_to_set)
+            
+            except dbus.exceptions.DBusException as e:
+                safe_print(f"A D-Bus error occurred while managing KDE hotkeys: {e.get_dbus_message()}", "error")
+                logging.error(f"D-Bus error managing KDE hotkeys: {e.get_dbus_message()}")
+                return
+            except Exception as e:
+                safe_print(f"An unexpected error occurred while managing KDE hotkeys: {e}", "error")
+                logging.error(f"Unexpected error managing KDE hotkeys: {e}")
+                return
+
+            status_text = "Enabled" if enable else "Disabled"
+            safe_print(f"KDE custom hotkeys have been {status_text}.", "success")
 
 if __name__ == "__main__":
     orchestrator = STTOrchestrator()

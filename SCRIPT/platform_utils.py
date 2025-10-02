@@ -201,40 +201,6 @@ class PlatformManager:
 
         return backends
 
-    def get_hotkey_backend(self) -> str:
-        """Determine the best hotkey backend for the platform."""
-        if self.is_windows:
-            # Check if AutoHotkey is available
-            if self.get_executable_path("AutoHotkey"):
-                return "autohotkey"
-            else:
-                return "pynput"  # Fallback to Python-based solution
-        elif self.is_linux:
-            # Check if we're in X11 or Wayland
-            if os.environ.get("WAYLAND_DISPLAY"):
-                return "wayland"  # Will need special handling
-            elif os.environ.get("DISPLAY"):
-                return "x11"
-            else:
-                return "none"  # No display server detected
-        else:  # macOS
-            return "macos"
-
-    def supports_global_hotkeys(self) -> bool:
-        """Check if global hotkeys are supported in the current environment."""
-        backend = self.get_hotkey_backend()
-
-        if backend in ["autohotkey", "x11", "macos"]:
-            return True
-        elif backend == "pynput":
-            # pynput should work on most platforms
-            return True
-        elif backend == "wayland":
-            # Wayland has restrictions on global hotkeys for security
-            return False
-        else:
-            return False
-
 
 # Global instance
 platform_manager = PlatformManager()

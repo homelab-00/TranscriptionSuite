@@ -93,11 +93,6 @@ class DependencyChecker:
                 'min_version': None,
                 'description': 'Clipboard operations'
             },
-            'pynput': {
-                'required': False,
-                'min_version': None,
-                'description': 'Cross-platform input handling'
-            },
             'webrtcvad': {
                 'required': False,
                 'min_version': None,
@@ -158,13 +153,6 @@ class DependencyChecker:
                 'install_hint': self._get_ffmpeg_install_hint()
             }
         }
-
-        if self.platform_manager.is_windows:
-            executables['AutoHotkey'] = {
-                'required': False,
-                'description': 'Global hotkey support (alternative: pynput)',
-                'install_hint': 'Download from https://www.autohotkey.com/'
-            }
 
         results = {}
 
