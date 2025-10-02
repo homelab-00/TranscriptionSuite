@@ -102,15 +102,29 @@ class DependencyChecker:
                 'required': False,
                 'min_version': None,
                 'description': 'Enhanced console output'
+            },
+            'PyQt6': {
+                'required': True,
+                'min_version': None,
+                'description': 'GUI toolkit for system tray icon',
+            },
+            'Pillow': {
+                'required': True,
+                'min_version': None,
+                'import_name': 'PIL',  # The actual name used for importing
+                'description': 'Image manipulation for dynamic tray icon',
             }
         }
 
         results = {}
 
         for package_name, package_info in required_packages.items():
+            # Use the specified import_name if it exists, otherwise default to the package name
+            import_name = package_info.get('import_name', package_name)
+
             try:
                 # Try to import the package
-                spec = importlib.util.find_spec(package_name)
+                spec = importlib.util.find_spec(import_name)
                 if spec is None:
                     results[package_name] = {
                         'available': False,
@@ -122,7 +136,7 @@ class DependencyChecker:
                     continue
 
                 # Import and get version
-                module = importlib.import_module(package_name)
+                module = importlib.import_module(import_name)
                 version = getattr(module, '__version__', 'unknown')
 
                 results[package_name] = {

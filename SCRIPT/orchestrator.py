@@ -34,6 +34,13 @@ from command_server import CommandServer
 from system_utils import SystemUtils
 from depenency_checker import DependencyChecker
 
+# Try to import the tray manager
+try:
+    from tray_manager import TrayIconManager
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+
 # Configure logging to file only (not to console)
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +84,15 @@ class STTOrchestrator:
 
         # Initialize system utilities
         self.system_utils = SystemUtils(self.app_state["config_path"])
+
+        # Initialize Tray Icon Manager
+        if HAS_TRAY:
+            self.tray_manager = TrayIconManager(
+                name="STT Orchestrator", quit_callback=self._quit
+            )
+        else:
+            self.tray_manager = None
+            safe_print("Could not initialize system tray icon. Please install PyQt6.", "warning")
 
         # Initialize configuration
         self.config = self.system_utils.load_or_create_config()
@@ -283,6 +299,9 @@ class STTOrchestrator:
             )
             return
 
+        if self.tray_manager:
+            self.tray_manager.set_state("recording")
+
         try:
             # Check if we can reuse the current model
             if not self.model_manager.can_reuse_model("longform"):
@@ -318,6 +337,9 @@ class STTOrchestrator:
             safe_print("No active long-form recording to stop.")
             return
 
+        if self.tray_manager:
+            self.tray_manager.set_state("transcribing")
+
         try:
             transcriber = self.model_manager.transcribers.get("longform")
             if not transcriber:
@@ -328,6 +350,9 @@ class STTOrchestrator:
             safe_print("Stopping long-form recording and transcribing...")
             transcriber.stop_recording()
             self.app_state["current_mode"] = None
+
+            if self.tray_manager:
+                self.tray_manager.set_state("standby")
 
         except (AttributeError, RuntimeError) as error:
             logging.error("Error stopping long-form recording: %s", error)
@@ -419,10 +444,6 @@ class STTOrchestrator:
         # Now do the full shutdown
         self.stop()
 
-        # Force exit after a short delay to ensure clean shutdown
-        time.sleep(0.5)
-        os._exit(0)
-
     def run(self):
         """Run the orchestrator."""
         # Start the TCP server
@@ -441,16 +462,19 @@ class STTOrchestrator:
         # Set the running flag
         self.app_state["running"] = True
 
-        # Keep the main thread running
-        try:
-            while self.app_state["running"]:
-                time.sleep(0.1)
-        except KeyboardInterrupt:
-            safe_print("\nKeyboard interrupt received, shutting down...")
-        except (RuntimeError, OSError) as error:
-            logging.error("Error in main loop: %s", error)
-        finally:
-            self.stop()
+        if self.tray_manager:
+            # The tray manager will run the main application loop and block until quit
+            self.tray_manager.run()
+        else:
+            # Fallback to the old loop if tray is not available
+            safe_print("Running in headless mode without a tray icon.", "info")
+            try:
+                while self.app_state["running"]:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                safe_print("\nKeyboard interrupt received, shutting down...")
+            finally:
+                self.stop()
 
     def stop(self):
         """Stop all processes and clean up with improved resource handling."""
@@ -463,6 +487,10 @@ class STTOrchestrator:
 
             # Disable the KDE hotkeys
             self._manage_hotkeys(enable=False)
+
+            # Stop the tray manager and its event loop
+            if self.tray_manager:
+                self.tray_manager.stop()
 
             # Stop the command server
             self.command_server.stop()
@@ -486,12 +514,12 @@ class STTOrchestrator:
             # Map of shortcut identifiers to their Qt KeyCode.
             # Format: { "desktop-file": (["details"], key_code) }
             shortcut_map = {
-                "net.local.sh.desktop": (["_launch", "STT: Open Config", "STT: Open Config"], 0x01000030), # F1
-                "net.local.sh-2.desktop": (["_launch", "STT: Toggle Realtime", "STT: Toggle Realtime"], 0x01000031), # F2
-                "net.local.sh-3.desktop": (["_launch", "STT: Start Longform", "STT: Start Longform"], 0x01000032), # F3
-                "net.local.sh-4.desktop": (["_launch", "STT: Stop Longform", "STT: Stop Longform"], 0x01000033), # F4
-                "net.local.sh-5.desktop": (["_launch", "STT: Run Static", "STT: Run Static"], 0x01000039), # F10
-                "net.local.sh-6.desktop": (["_launch", "STT: Quit", "STT: Quit"], 0x01000036) # F7
+                "net.local.sh-7.desktop": (["_launch", "STT: Open Config", "STT: Open Config"], 0x01000030), # F1
+                "net.local.sh-8.desktop": (["_launch", "STT: Toggle Realtime", "STT: Toggle Realtime"], 0x01000031), # F2
+                "net.local.sh-9.desktop": (["_launch", "STT: Start Longform", "STT: Start Longform"], 0x01000032), # F3
+                "net.local.sh-10.desktop": (["_launch", "STT: Stop Longform", "STT: Stop Longform"], 0x01000033), # F4
+                "net.local.sh-11.desktop": (["_launch", "STT: Run Static", "STT: Run Static"], 0x01000039), # F10
+                "net.local.sh-12.desktop": (["_launch", "STT: Quit", "STT: Quit"], 0x01000036) # F7
             }
 
             try:
