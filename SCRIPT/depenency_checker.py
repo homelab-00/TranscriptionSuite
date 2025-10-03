@@ -6,6 +6,7 @@ This module provides comprehensive checking of external dependencies
 and system requirements across different platforms.
 """
 
+import contextlib
 import logging
 import subprocess
 import sys
@@ -244,33 +245,34 @@ class DependencyChecker:
             import pyaudio
             result['pyaudio_available'] = True
 
-            # Test device enumeration
-            p = pyaudio.PyAudio()
-            result['device_count'] = p.get_device_count()
+            suppress_ctx = getattr(self.platform_manager, "suppress_audio_warnings", None)
+            with suppress_ctx() if suppress_ctx else contextlib.nullcontext():
+                p = pyaudio.PyAudio()
+                result['device_count'] = p.get_device_count()
 
-            # Test default device access
-            try:
-                default_info = p.get_default_input_device_info()
+                # Test default device access
+                try:
+                    default_info = p.get_default_input_device_info()
 
-                # Ensure device index is an integer
-                device_index = int(default_info['index'])
+                    # Ensure device index is an integer
+                    device_index = int(default_info['index'])
 
-                # Try to briefly open the default device
-                stream = p.open(
-                    format=pyaudio.paInt16,
-                    channels=1,
-                    rate=16000,
-                    input=True,
-                    input_device_index=device_index,
-                    frames_per_buffer=1024
-                )
-                stream.close()
-                result['default_device_accessible'] = True
+                    # Try to briefly open the default device
+                    stream = p.open(
+                        format=pyaudio.paInt16,
+                        channels=1,
+                        rate=16000,
+                        input=True,
+                        input_device_index=device_index,
+                        frames_per_buffer=1024
+                    )
+                    stream.close()
+                    result['default_device_accessible'] = True
 
-            except Exception as e:
-                result['errors'].append(f"Default audio device not accessible: {e}")
+                except Exception as e:
+                    result['errors'].append(f"Default audio device not accessible: {e}")
 
-            p.terminate()
+                p.terminate()
 
         except ImportError:
             result['errors'].append("PyAudio not installed")

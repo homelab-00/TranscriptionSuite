@@ -10,6 +10,7 @@ This module:
 - Provides a clean interface for model interaction
 """
 
+import contextlib
 import os
 import sys
 import io
@@ -104,37 +105,40 @@ class ModelManager:
             self._log_warning("PyAudio not available for device enumeration")
             return devices
 
+        suppress_ctx = getattr(self.platform_manager, "suppress_audio_warnings", None)
+
         try:
-            p = pyaudio.PyAudio()
+            with suppress_ctx() if suppress_ctx else contextlib.nullcontext():
+                p = pyaudio.PyAudio()
 
-            # Get device count
-            device_count = p.get_device_count()
+                # Get device count
+                device_count = p.get_device_count()
 
-            for i in range(device_count):
-                try:
-                    device_info = p.get_device_info_by_index(i)
+                for i in range(device_count):
+                    try:
+                        device_info = p.get_device_info_by_index(i)
 
-                    # Robust type checking for maxInputChannels
-                    max_input_channels = device_info.get('maxInputChannels', 0)
-                    if not isinstance(max_input_channels, (int, float)):
+                        # Robust type checking for maxInputChannels
+                        max_input_channels = device_info.get('maxInputChannels', 0)
+                        if not isinstance(max_input_channels, (int, float)):
+                            continue
+
+                        # Only include input devices
+                        if max_input_channels > 0:
+                            device_entry = {
+                                'index': i,
+                                'name': str(device_info.get('name', f'Device {i}')),
+                                'channels': int(max_input_channels),
+                                'sample_rate': float(device_info.get('defaultSampleRate', 44100)),
+                                'is_default': i == p.get_default_input_device_info()['index']
+                            }
+                            devices.append(device_entry)
+
+                    except (OSError, ValueError, TypeError) as e:
+                        self._log_warning(f"Could not get info for audio device {i}: {e}")
                         continue
 
-                    # Only include input devices
-                    if max_input_channels > 0:
-                        device_entry = {
-                            'index': i,
-                            'name': str(device_info.get('name', f'Device {i}')),
-                            'channels': int(max_input_channels),
-                            'sample_rate': float(device_info.get('defaultSampleRate', 44100)),
-                            'is_default': i == p.get_default_input_device_info()['index']
-                        }
-                        devices.append(device_entry)
-
-                except (OSError, ValueError, TypeError) as e:
-                    self._log_warning(f"Could not get info for audio device {i}: {e}")
-                    continue
-
-            p.terminate()
+                p.terminate()
 
             # Sort devices - default device first, then by name
             devices.sort(key=lambda x: (not x['is_default'], x['name']))
@@ -219,68 +223,70 @@ class ModelManager:
             self._log_error("PyAudio not available")
             return None
 
+        suppress_ctx = getattr(self.platform_manager, "suppress_audio_warnings", None)
+
         try:
-            p = pyaudio.PyAudio()
+            with suppress_ctx() if suppress_ctx else contextlib.nullcontext():
+                p = pyaudio.PyAudio()
 
-            # Get default input device info
-            default_device_info = p.get_default_input_device_info()
-            default_index = default_device_info["index"]
-            device_name = default_device_info["name"]
+                # Get default input device info
+                default_device_info = p.get_default_input_device_info()
+                default_index = default_device_info["index"]
+                device_name = default_device_info["name"]
 
-            # Ensure we have a valid integer index
-            if not isinstance(default_index, (int, float)):
-                self._log_warning(f"Invalid device index type: {type(default_index)}")
+                # Ensure we have a valid integer index
+                if not isinstance(default_index, (int, float)):
+                    self._log_warning(f"Invalid device index type: {type(default_index)}")
+                    p.terminate()
+                    return None
+
+                default_index = int(default_index)
+
+                # Verify the device actually works by testing it
+                try:
+                    stream = p.open(
+                        format=pyaudio.paInt16,
+                        channels=1,
+                        rate=16000,
+                        input=True,
+                        input_device_index=default_index,
+                        frames_per_buffer=1024
+                    )
+                    stream.close()
+
+                    safe_print(
+                        f"Using default input device: {device_name} (index: {default_index})",
+                        "info",
+                    )
+
+                except (OSError, ValueError) as e:
+                    self._log_warning(f"Default device {device_name} not accessible: {e}")
+                    # Try to find an alternative working device
+                    devices = self.get_audio_devices()
+                    for device in devices:
+                        try:
+                            stream = p.open(
+                                format=pyaudio.paInt16,
+                                channels=1,
+                                rate=16000,
+                                input=True,
+                                input_device_index=device['index'],
+                                frames_per_buffer=1024
+                            )
+                            stream.close()
+                            safe_print(f"Using alternative device: {device['name']}", "info")
+                            p.terminate()
+                            return device['index']
+                        except:
+                            continue
+
+                    # If no devices work, return None
+                    self._log_error("No working audio input devices found")
+                    p.terminate()
+                    return None
+
                 p.terminate()
-                return None
-                
-            default_index = int(default_index)
-
-            # Verify the device actually works by testing it
-            try:
-                # Try to open the device briefly to ensure it's accessible
-                stream = p.open(
-                    format=pyaudio.paInt16,
-                    channels=1,
-                    rate=16000,
-                    input=True,
-                    input_device_index=default_index,
-                    frames_per_buffer=1024
-                )
-                stream.close()
-
-                safe_print(
-                    f"Using default input device: {device_name} (index: {default_index})",
-                    "info",
-                )
-
-            except (OSError, ValueError) as e:
-                self._log_warning(f"Default device {device_name} not accessible: {e}")
-                # Try to find an alternative working device
-                devices = self.get_audio_devices()
-                for device in devices:
-                    try:
-                        stream = p.open(
-                            format=pyaudio.paInt16,
-                            channels=1,
-                            rate=16000,
-                            input=True,
-                            input_device_index=device['index'],
-                            frames_per_buffer=1024
-                        )
-                        stream.close()
-                        safe_print(f"Using alternative device: {device['name']}", "info")
-                        p.terminate()
-                        return device['index']
-                    except:
-                        continue
-
-                # If no devices work, return None
-                self._log_error("No working audio input devices found")
-                p.terminate()
-                return None
-
-            p.terminate()
-            return default_index
+                return default_index
 
         except Exception as e:
             self._log_error(f"Error getting default input device: {e}")
@@ -532,18 +538,43 @@ class ModelManager:
     def _cleanup_recorder(self, transcriber):
         """Clean up recorder resources."""
         if hasattr(transcriber, "recorder") and transcriber.recorder:
+            original_stdout = sys.stdout
             try:
                 # Redirect stdout temporarily to suppress messages
-                original_stdout = sys.stdout
                 sys.stdout = io.StringIO()
 
-                transcriber.recorder.abort()
-                transcriber.recorder.shutdown()
-
-                # Restore stdout
-                sys.stdout = original_stdout
+                # Prefer the transcriber-level abort which has timeout handling
+                if hasattr(transcriber, "abort"):
+                    ok = False
+                    try:
+                        ok = bool(transcriber.abort())
+                    except Exception as e:
+                        self._log_warning("transcriber.abort() raised: %s", e)
+                    if not ok:
+                        # Fallback to direct recorder shutdown
+                        try:
+                            transcriber.recorder.abort()
+                        except Exception:
+                            pass
+                        try:
+                            transcriber.recorder.shutdown()
+                        except Exception:
+                            pass
+                else:
+                    # Legacy path: call recorder abort/shutdown directly
+                    try:
+                        transcriber.recorder.abort()
+                    except Exception:
+                        pass
+                    try:
+                        transcriber.recorder.shutdown()
+                    except Exception:
+                        pass
             except (AttributeError, OSError) as e:
                 self._log_error("Error during recorder shutdown: %s", e)
+            finally:
+                # Restore stdout
+                sys.stdout = original_stdout
 
     def unload_current_model(self):
         """Unload the currently loaded model to free up memory more aggressively."""
