@@ -5,10 +5,12 @@ This module provides a LongFormTranscriber class for manual control over
 speech recording and transcription with keyboard shortcuts and clipboard integration.
 """
 
+import contextlib
 import io
 import logging
 import os
 import sys
+import threading
 import time
 from typing import Callable, Iterable, List, Optional, Union
 
@@ -28,7 +30,7 @@ except ImportError:
 from platform_utils import ensure_platform_init
 
 # Initialize platform-specific settings (console encoding, PyTorch audio, etc.)
-ensure_platform_init()
+PLATFORM_MANAGER = ensure_platform_init()
 
 # Import Rich for better terminal display with Unicode support
 try:
@@ -106,11 +108,9 @@ class LongFormTranscriber:
         self.recording = False
         self.running = False
         self.last_transcription = ""
+        self._abort_requested = False
 
-        # Add missing hotkey attributes
-        self.start_hotkey = None
-        self.stop_hotkey = None
-        self.quit_hotkey = None
+    # Hotkey attributes removed; control is via orchestrator's tray only
 
         # Store preinitialized model if provided
         self.preinitialized_model = preinitialized_model
@@ -261,7 +261,12 @@ class LongFormTranscriber:
                     print("Using pre-initialized model")
 
             # Initialize the recorder with all parameters
-            self.recorder = AudioToTextRecorder(**self.config)
+            suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
+            if suppress_ctx:
+                with suppress_ctx():
+                    self.recorder = AudioToTextRecorder(**self.config)
+            else:
+                self.recorder = AudioToTextRecorder(**self.config)
 
             if HAS_RICH and CONSOLE:
                 CONSOLE.print(
@@ -315,20 +320,24 @@ class LongFormTranscriber:
             else:
                 print("\nStopping recording...")
 
+            self._abort_requested = False  # reset flag for this cycle
             self.recorder.stop()
 
             # Display a spinner while transcribing
             if HAS_RICH and CONSOLE:
                 with CONSOLE.status("[bold blue]Transcribing...[/bold blue]"):
-                    transcription = self.recorder.text()
+                    transcription = None if self._abort_requested else self.recorder.text()
             else:
                 print("Transcribing...")
-                transcription = self.recorder.text()
+                transcription = None if self._abort_requested else self.recorder.text()
+
+            # If aborted, skip producing/pasting any text
+            if self._abort_requested:
+                self.last_transcription = ""
+                return
 
             # Ensure transcription is a string
-            self.last_transcription = (
-                str(transcription) if transcription else ""
-            )
+            self.last_transcription = (str(transcription) if transcription else "")
 
             # Display the transcription
             if HAS_RICH and CONSOLE and Panel and Text:
@@ -346,7 +355,7 @@ class LongFormTranscriber:
                 print("-" * 60 + "\n")
 
             # Copy and Paste the transcription to the active window
-            if self.last_transcription:
+            if self.last_transcription and not self._abort_requested:
                 if self._safe_clipboard_copy(self.last_transcription):
                     time.sleep(0.1)  # Give some time for the clipboard to update
                     self._safe_paste()
@@ -358,6 +367,125 @@ class LongFormTranscriber:
                     else:
                         print("\nClipboard not available. Please copy manually:")
                         print(f"TEXT: {self.last_transcription}")
+
+    def abort(self):
+        """Abort current recording or transcription safely without blocking.
+
+        Returns:
+            bool: True if abort completed cleanly, False if timed out and a
+                  more aggressive shutdown was requested instead.
+        """
+        self._abort_requested = True
+        self.last_transcription = ""
+
+        rec = self.recorder
+        if not rec:
+            self.recording = False
+            self._abort_requested = False
+            return True
+
+        # Run recorder.abort() in a worker thread and wait with a timeout
+        import threading
+
+        result = {"ok": False}
+        abort_complete = threading.Event()
+
+        def _do_abort():
+            try:
+                rec.abort()
+                result["ok"] = True
+            except Exception as e:
+                if HAS_RICH and CONSOLE:
+                    CONSOLE.print(f"[yellow]Abort error: {e}[/yellow]")
+                else:
+                    print(f"Abort error: {e}")
+            finally:
+                abort_complete.set()
+
+        t = threading.Thread(target=_do_abort, daemon=True)
+        t.start()
+
+        graceful_wait = 5.0
+        check_interval = 0.1
+        waited = 0.0
+
+        while waited < graceful_wait and not abort_complete.is_set():
+            if not self.recording:
+                result["ok"] = True
+                abort_complete.set()
+                break
+            time.sleep(check_interval)
+            waited += check_interval
+
+        # Attempt a gentle stop if abort is still running
+        if not abort_complete.is_set():
+            try:
+                if hasattr(rec, "stop"):
+                    rec.stop()
+            except Exception:
+                pass
+
+            extra_wait = 2.0
+            while extra_wait > 0 and not abort_complete.is_set():
+                time.sleep(check_interval)
+                extra_wait -= check_interval
+
+        forced_reset = False
+
+        if not abort_complete.is_set():
+            forced_reset = True
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print("[yellow]Abort still active after grace period; performing forced recorder reset...[/yellow]")
+            else:
+                print("Abort still active after grace period; performing forced recorder reset...")
+            self._force_reset_recorder(rec)
+            abort_complete.set()
+
+        # Allow the worker thread to wind down but don't block shutdown
+        t.join(timeout=0.2)
+
+        self.recording = False
+        self._abort_requested = False
+
+        if forced_reset:
+            return False
+
+        return result["ok"]
+
+    def _force_reset_recorder(self, recorder):
+        """Forcefully drop the recorder while suppressing noisy shutdown output."""
+        if not recorder:
+            return
+
+        # Detach immediately so orchestrator can spawn a fresh instance
+        self.recorder = None
+
+        cleanup_done = threading.Event()
+
+        def _cleanup():
+            buffer = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+                    for attr in ("stop", "abort", "shutdown"):
+                        method = getattr(recorder, attr, None)
+                        if callable(method):
+                            try:
+                                method()
+                            except Exception:
+                                pass
+            finally:
+                buffer.close()
+                cleanup_done.set()
+
+        worker = threading.Thread(target=_cleanup, daemon=True)
+        worker.start()
+
+        # Allow up to 5 seconds for cleanup; afterwards, abandon the worker
+        if not cleanup_done.wait(timeout=5.0):
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print("[yellow]Recorder cleanup thread still running; continuing anyway.[/yellow]")
+            else:
+                print("Recorder cleanup thread still running; continuing anyway.")
 
     def quit(self):
         """
@@ -401,33 +529,11 @@ class LongFormTranscriber:
         except KeyboardInterrupt:
             self.quit()
 
-        # Show instructions
+        # Show minimal instructions (no hotkey hints; tray controls are used)
         if HAS_RICH and CONSOLE:
             CONSOLE.print("[bold]Long-Form Speech Transcription[/bold]")
-            if self.start_hotkey:
-                CONSOLE.print(
-                    f"Press [bold green]{self.start_hotkey}[/bold green] "
-                    "to start recording"
-                )
-            if self.stop_hotkey:
-                CONSOLE.print(
-                    f"Press [bold yellow]{self.stop_hotkey}[/bold yellow] "
-                    "to stop recording and transcribe"
-                )
-            if self.quit_hotkey:
-                CONSOLE.print(
-                    f"Press [bold red]{self.quit_hotkey}[/bold red] to quit"
-                )
         else:
             print("Long-Form Speech Transcription")
-            if self.start_hotkey:
-                print(f"Press {self.start_hotkey} to start recording")
-            if self.stop_hotkey:
-                print(
-                    f"Press {self.stop_hotkey} to stop recording and transcribe"
-                )
-            if self.quit_hotkey:
-                print(f"Press {self.quit_hotkey} to quit")
 
         # Keep the program running until quit
         try:

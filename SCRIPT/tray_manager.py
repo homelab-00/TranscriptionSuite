@@ -22,13 +22,25 @@ except ImportError:
 class TrayIconManager:
     """Manages the system tray icon and the application event loop."""
 
-    def __init__(self, name: str, quit_callback: Optional[Callable] = None):
+    def __init__(self,
+                 name: str,
+                 start_callback: Optional[Callable] = None,
+                 stop_callback: Optional[Callable] = None,
+                 quit_callback: Optional[Callable] = None,
+                 open_config_callback: Optional[Callable] = None,
+                 run_static_callback: Optional[Callable] = None,
+                 reset_callback: Optional[Callable] = None):
         """
         Initialize the TrayIconManager.
 
         Args:
             name: The name of the application, shown as a tooltip.
-            quit_callback: A function to call when the quit menu item is clicked.
+            start_callback: Function to call on left-click.
+            stop_callback: Function to call on right-click.
+            quit_callback: A function to call to quit.
+            open_config_callback: Function to open the config dialog.
+            run_static_callback: Function to run static transcription.
+            reset_callback: Function to reset the current operation.
         """
         if not HAS_PYQT:
             raise ImportError("PyQt6 is required for the system tray icon. Please install it.")
@@ -47,27 +59,85 @@ class TrayIconManager:
 
         self.icon = QSystemTrayIcon()
         self.icon.setToolTip(name)
+        
+        # Store callbacks
+        self.start_callback = start_callback
+        self.stop_callback = stop_callback
         self.quit_callback = quit_callback
+        self.open_config_callback = open_config_callback
+        self.run_static_callback = run_static_callback
+        self.reset_callback = reset_callback
 
         self._setup_context_menu()
+        # Connect to the 'activated' signal to handle clicks
+        self.icon.activated.connect(self._handle_activation)
 
+        # New color scheme reflecting the new states
         self.colors = {
+            "loading": (128, 128, 128),  # Grey
             "standby": (0, 255, 0),      # Green
             "recording": (255, 255, 0),  # Yellow
-            "transcribing": (255, 0, 0)  # Red
+            "transcribing": (255, 128, 0), # Orange during transcription
+            "error": (255, 0, 0)         # Red
         }
 
     def _setup_context_menu(self):
-        """Create a context menu for the tray icon with a Quit button."""
+        """Create a context menu for the tray icon."""
         menu = QMenu()
+        
+        if self.start_callback:
+            start_action = menu.addAction("Start Recording")
+            if start_action:
+                start_action.triggered.connect(self.start_callback)
+
+        if self.stop_callback:
+            stop_action = menu.addAction("Stop Recording")
+            if stop_action:
+                stop_action.triggered.connect(self.stop_callback)
+
+        if getattr(self, "reset_callback", None):
+            reset_action = menu.addAction("Reset")
+            if reset_action:
+                reset_action.triggered.connect(self.reset_callback)
+
+        menu.addSeparator()
+
+        if self.open_config_callback:
+            config_action = menu.addAction("Configuration")
+            if config_action:
+                config_action.triggered.connect(self.open_config_callback)
+        
+        if self.run_static_callback:
+            static_action = menu.addAction("Transcribe File...")
+            if static_action:
+                static_action.triggered.connect(self.run_static_callback)
+
+        menu.addSeparator()
+
         if self.quit_callback:
             quit_action = menu.addAction("Quit")
-            # --- FIX 2: Address 'reportOptionalMemberAccess' ---
-            # Pylance warns that addAction could theoretically return None.
-            # We add a check to ensure quit_action is valid before using it.
             if quit_action:
                 quit_action.triggered.connect(self.quit_callback)
+        
         self.icon.setContextMenu(menu)
+
+    def _handle_activation(self, reason: QSystemTrayIcon.ActivationReason):
+        """Handle various click events on the tray icon."""
+        # Type guard to ensure we have a QApplication instance
+        if not isinstance(self.app, QApplication):
+            return
+        
+        # Now we can safely cast and use QApplication methods
+        app = cast(QApplication, self.app)
+        # Get keyboard modifiers to check if Shift is pressed
+        modifiers = app.keyboardModifiers()
+        
+        is_shift_pressed = modifiers & Qt.KeyboardModifier.ShiftModifier
+        
+        if reason == QSystemTrayIcon.ActivationReason.Trigger and self.start_callback: # Left-click
+            self.start_callback()
+        elif reason == QSystemTrayIcon.ActivationReason.MiddleClick and self.stop_callback: # Middle-click
+            self.stop_callback()
 
     def _create_icon(self, color_rgb: tuple) -> QIcon:
         """
@@ -110,7 +180,7 @@ class TrayIconManager:
         Set the icon's appearance based on the application state.
 
         Args:
-            state: The current state ('standby', 'recording', 'transcribing').
+            state: The current state ('loading', 'standby', 'recording', 'transcribing', 'error').
         """
         color = self.colors.get(state)
         if color:
@@ -119,7 +189,7 @@ class TrayIconManager:
 
     def run(self):
         """Show the icon and start the application event loop."""
-        self.set_state("standby")
+        self.set_state("loading") # Start with grey icon
         self.icon.show()
         if self.app:
             return self.app.exec()

@@ -6,11 +6,13 @@ This module provides unified interfaces for platform-specific operations,
 ensuring the TranscriptionSuite works seamlessly on both Windows and Linux.
 """
 
+import contextlib
 import io
 import os
 import sys
 import platform
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -28,10 +30,13 @@ class PlatformManager:
         self.is_windows = self.platform == "windows"
         self.is_linux = self.platform == "linux"
         self.is_macos = self.platform == "darwin"
+        self._alsa_error_handler = None
+        self._stderr_lock = threading.RLock()
 
         # Initialize platform-specific components
         self._initialize_console()
         self._initialize_pytorch_audio()
+        self._suppress_alsa_warnings()
 
     def _initialize_console(self):
         """Initialize console encoding for proper Unicode support."""
@@ -59,6 +64,70 @@ class PlatformManager:
             # On Linux, PyTorch audio should work out of the box
             # But we might want to check for specific audio backends
             logger.info("Linux detected, PyTorch audio should use system backends")
+
+    def _suppress_alsa_warnings(self):
+        """Prevent ALSA from spamming stderr while keeping critical errors."""
+        if not self.is_linux:
+            return
+
+        try:
+            from ctypes import CDLL, CFUNCTYPE, c_char_p, c_int
+
+            ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
+
+            def _alsa_error_handler(filename, line, function, err, fmt):
+                # Only log actual errors; ignore harmless configuration probes
+                if err == 0:
+                    return
+
+                try:
+                    message = fmt.decode("utf-8", "ignore") if fmt else ""
+                    location = filename.decode("utf-8", "ignore") if filename else "libasound"
+                except Exception:
+                    message = ""
+                    location = "libasound"
+
+                if message:
+                    logger.debug("ALSA (%s:%s): %s", location, err, message.strip())
+
+            handler = ERROR_HANDLER_FUNC(_alsa_error_handler)
+            asound = CDLL("libasound.so.2")
+            asound.snd_lib_error_set_handler(handler)
+            self._alsa_error_handler = handler  # keep reference to prevent GC
+            logger.debug("ALSA warnings suppressed via custom handler")
+        except OSError as e:
+            logger.debug("libasound not available for warning suppression: %s", e)
+        except Exception as e:
+            logger.debug("Could not suppress ALSA warnings: %s", e)
+
+    @contextlib.contextmanager
+    def suppress_audio_warnings(self):
+        """Temporarily silence low-level audio backend spew (PortAudio/ALSA)."""
+        if not self.is_linux:
+            yield
+            return
+
+        try:
+            stderr_fd = sys.stderr.fileno()
+        except (AttributeError, OSError):
+            yield
+            return
+
+        with self._stderr_lock:
+            saved_fd = os.dup(stderr_fd)
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            try:
+                sys.stderr.flush()
+                os.dup2(devnull, stderr_fd)
+                os.close(devnull)
+                yield
+            finally:
+                os.dup2(saved_fd, stderr_fd)
+                os.close(saved_fd)
+                try:
+                    sys.stderr.flush()
+                except Exception:
+                    pass
 
     def get_config_dir(self) -> Path:
         """Get the appropriate configuration directory for the platform."""

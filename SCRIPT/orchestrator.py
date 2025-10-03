@@ -7,19 +7,13 @@ This script:
   * Real-time transcription for immediate feedback
   * Long-form transcription for extended dictation
   * Static file transcription for pre-recorded audio/video
-- Sets up a TCP server to listen for commands from the AutoHotkey script
 - Manages the state of different transcription modes
-- Provides a clean interface for hotkey-based control
+- Provides a clean interface via the system tray icon
 - Handles command processing and module coordination
 - Implements lazy loading of transcription models
 
-The system is designed to be controlled via the following hotkeys:
-- F1: Open configuration dialog box
-- F2: Toggle real-time transcription on/off
-- F3: Start long-form recording
-- F4: Stop long-form recording and transcribe
-- F10: Run static file transcription
-- F7: Quit application
+Use the system tray menu to open configuration, start/stop long-form recording,
+run static transcription, and quit.
 """
 
 import os
@@ -29,8 +23,9 @@ import logging
 import atexit
 import sys
 
+# REMOVED: KDE DBus/global hotkeys support; only tray controls remain
+
 from model_manager import ModelManager, safe_print
-from command_server import CommandServer
 from system_utils import SystemUtils
 from depenency_checker import DependencyChecker
 
@@ -60,9 +55,7 @@ except ImportError:
     HAS_RICH = False
     CONSOLE = None
 
-# TCP server settings
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 35000
+# REMOVED: TCP command server settings; system tray provides all control
 
 
 class STTOrchestrator:
@@ -85,10 +78,16 @@ class STTOrchestrator:
         # Initialize system utilities
         self.system_utils = SystemUtils(self.app_state["config_path"])
 
-        # Initialize Tray Icon Manager
+        # CHANGED: Initialize Tray Icon Manager with all necessary callbacks
         if HAS_TRAY:
             self.tray_manager = TrayIconManager(
-                name="STT Orchestrator", quit_callback=self._quit
+                name="STT Orchestrator",
+                start_callback=self._start_longform,
+                stop_callback=self._stop_longform,
+                quit_callback=self._quit,
+                open_config_callback=self._open_config_dialog,
+                run_static_callback=self._run_static,
+                reset_callback=self._reset_longform,
             )
         else:
             self.tray_manager = None
@@ -100,11 +99,7 @@ class STTOrchestrator:
         # Initialize model manager
         self.model_manager = ModelManager(self.config, self.script_dir)
 
-        # Initialize command server
-        self.command_server = CommandServer(SERVER_HOST, SERVER_PORT)
-
-        # Register command handlers
-        self._register_command_handlers()
+    # NOTE: Non-tray triggers (DBus hotkeys, TCP server) have been removed.
 
         # Register cleanup handler
         atexit.register(self.stop)
@@ -148,17 +143,11 @@ class STTOrchestrator:
             logging.error(f"Error during dependency check: {e}")
             safe_print(f"Warning: Could not complete dependency check: {e}", "warning")
 
-    def _register_command_handlers(self):
-        """Register handlers for different commands."""
-        handlers = {
-            "OPEN_CONFIG": self._open_config_dialog,
-            "TOGGLE_REALTIME": self._toggle_realtime,
-            "START_LONGFORM": self._start_longform,
-            "STOP_LONGFORM": self._stop_longform,
-            "RUN_STATIC": self._run_static,
-            "QUIT": self._quit,
-        }
-        self.command_server.register_handlers(handlers)
+    # REMOVED: TCP command handler registration
+
+    # REMOVED: KDE DBus hotkey setup; only tray controls remain
+
+    # REMOVED: Hotkey signal handler
 
     def _config_updated(self, new_config):
         """Handle configuration updates."""
@@ -177,19 +166,15 @@ class STTOrchestrator:
 
     def _open_config_dialog(self):
         """Open the configuration dialog."""
-        # Check if any transcription is active
         if self.app_state["current_mode"]:
             safe_print(
                 f"Warning: Transcription in {self.app_state['current_mode']} mode is active."
             )
-            # We'll still allow opening the dialog, but warn the user
-
-        # Open the dialog using system utilities
         self.system_utils.open_config_dialog(self._config_updated)
 
     def _toggle_realtime(self):
         """Toggle real-time transcription on/off."""
-        # Check if another mode is running
+        # This function can remain for the context menu, but is no longer a primary control
         if (
             self.app_state["current_mode"]
             and self.app_state["current_mode"] != "realtime"
@@ -201,28 +186,20 @@ class STTOrchestrator:
             return
 
         if self.app_state["current_mode"] == "realtime":
-            # Real-time transcription is already running, so stop it
             safe_print("Stopping real-time transcription...")
-
             try:
                 transcriber = self.model_manager.transcribers.get("realtime")
                 if transcriber:
                     transcriber.running = False
                 self.app_state["current_mode"] = None
-
-                # Unload the model when turning off real-time mode
                 self.model_manager.unload_current_model()
-
             except (AttributeError, KeyError, RuntimeError) as error:
                 logging.error(
                     "Error stopping real-time transcription: %s", error
                 )
         else:
-            # Start real-time transcription
             try:
-                # Check if we can reuse the current model
                 if not self.model_manager.can_reuse_model("realtime"):
-                    # Make sure we're using the real-time model
                     if (
                         self.model_manager.current_loaded_model_type
                         != "realtime"
@@ -234,8 +211,6 @@ class STTOrchestrator:
                         "model for realtime",
                         "success",
                     )
-
-                # Initialize the real-time transcriber if not already done
                 transcriber = self.model_manager.initialize_transcriber(
                     "realtime"
                 )
@@ -244,11 +219,8 @@ class STTOrchestrator:
                         "Failed to initialize real-time transcriber.", "error"
                     )
                     return
-
                 safe_print("Starting real-time transcription...", "success")
                 self.app_state["current_mode"] = "realtime"
-
-                # Start real-time transcription in a separate thread
                 threading.Thread(target=self._run_realtime, daemon=True).start()
             except (RuntimeError, OSError, ImportError) as error:
                 logging.error(
@@ -264,20 +236,12 @@ class STTOrchestrator:
                 safe_print("Realtime transcriber not available.", "error")
                 self.app_state["current_mode"] = None
                 return
-
-            # Clear any previous text
             transcriber.text_buffer = ""
-
-            # Start transcription
             transcriber.start()
-
             logging.info("Real-time transcription stopped")
             self.app_state["current_mode"] = None
-
         except (RuntimeError, OSError, AttributeError) as error:
             logging.error("Error in _run_realtime: %s", error)
-
-            # Make sure to clean up properly
             try:
                 if (
                     "realtime" in self.model_manager.transcribers
@@ -286,12 +250,10 @@ class STTOrchestrator:
                     self.model_manager.transcribers["realtime"].stop()
             except (AttributeError, RuntimeError) as cleanup_error:
                 logging.error("Error during cleanup: %s", cleanup_error)
-
             self.app_state["current_mode"] = None
 
     def _start_longform(self):
         """Start long-form recording."""
-        # Check if another mode is running
         if self.app_state["current_mode"]:
             safe_print(
                 f"Cannot start long-form mode while in {self.app_state['current_mode']} "
@@ -299,79 +261,168 @@ class STTOrchestrator:
             )
             return
 
+        transcriber = self.model_manager.transcribers.get("longform")
+        if not transcriber:
+            safe_print("Long-form model is not ready. Please wait.", "warning")
+            return
+
         if self.tray_manager:
             self.tray_manager.set_state("recording")
 
         try:
-            # Check if we can reuse the current model
-            if not self.model_manager.can_reuse_model("longform"):
-                # Make sure we're using the long-form model
-                if self.model_manager.current_loaded_model_type != "longform":
-                    self.model_manager.unload_current_model()
-            else:
-                safe_print(
-                    f"Reusing {self.model_manager.current_loaded_model_type} "
-                    "model for longform",
-                    "success",
-                )
-
-            # Initialize the long-form transcriber if not already done
-            transcriber = self.model_manager.initialize_transcriber("longform")
-            if not transcriber:
-                safe_print(
-                    "Failed to initialize long-form transcriber.", "error"
-                )
-                return
-
             safe_print("Starting long-form recording...", "success")
             self.app_state["current_mode"] = "longform"
             transcriber.start_recording()
-
         except (RuntimeError, OSError, ImportError) as error:
             logging.error("Error starting long-form recording: %s", error)
             self.app_state["current_mode"] = None
+            if self.tray_manager:
+                self.tray_manager.set_state("standby")
 
     def _stop_longform(self):
         """Stop long-form recording and transcribe."""
         if self.app_state["current_mode"] != "longform":
-            safe_print("No active long-form recording to stop.")
+            safe_print("No active long-form recording to stop.", "info")
             return
+        # Dispatch to a worker thread so the Qt event loop can update the icon
+        def _worker():
+            if self.tray_manager:
+                self.tray_manager.set_state("transcribing")
+            try:
+                transcriber = self.model_manager.transcribers.get("longform")
+                if not transcriber:
+                    safe_print("Long-form transcriber not available.")
+                    self.app_state["current_mode"] = None
+                    if self.tray_manager:
+                        self.tray_manager.set_state("standby")
+                    return
 
-        if self.tray_manager:
-            self.tray_manager.set_state("transcribing")
-
-        try:
-            transcriber = self.model_manager.transcribers.get("longform")
-            if not transcriber:
-                safe_print("Long-form transcriber not available.")
+                safe_print("Stopping long-form recording and transcribing...")
+                transcriber.stop_recording()
                 self.app_state["current_mode"] = None
-                return
 
-            safe_print("Stopping long-form recording and transcribing...")
-            transcriber.stop_recording()
-            self.app_state["current_mode"] = None
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby")
 
+            except (AttributeError, RuntimeError) as error:
+                logging.error("Error stopping long-form recording: %s", error)
+                self.app_state["current_mode"] = None
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _reset_longform(self):
+        """Reset long-form: abort recording or transcription and return to standby."""
+        # Only meaningful for longform sessions
+        if self.app_state.get("current_mode") != "longform":
+            safe_print("No active long-form session to reset.", "info")
             if self.tray_manager:
                 self.tray_manager.set_state("standby")
+            return
 
-        except (AttributeError, RuntimeError) as error:
-            logging.error("Error stopping long-form recording: %s", error)
-            self.app_state["current_mode"] = None
+        def _worker():
+            # Indicate we're doing some work; avoid blocking the UI thread
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+            try:
+                transcriber = self.model_manager.transcribers.get("longform")
+                if transcriber and hasattr(transcriber, "abort"):
+                    safe_print(
+                        "Reset requested: aborting current long-form operation...",
+                        "warning",
+                    )
+                    # Abort with internal timeout handling; falls back to shutdown
+                    try:
+                        result = transcriber.abort()
+                    except Exception as e:
+                        logging.error("Error invoking transcriber.abort(): %s", e)
+                        result = False
+                    if result is False:
+                        safe_print(
+                            "Abort did not complete promptly. Reinitializing recorder...",
+                            "warning",
+                        )
+                        try:
+                            if hasattr(transcriber, "clean_up"):
+                                transcriber.clean_up()
+                        except Exception as cleanup_error:
+                            logging.error(
+                                "Error during long-form cleanup: %s", cleanup_error
+                            )
+                        try:
+                            if hasattr(transcriber, "force_initialize") and transcriber.force_initialize():
+                                safe_print(
+                                    "Recorder reset. Long-form mode is ready for a new recording.",
+                                    "success",
+                                )
+                            else:
+                                safe_print(
+                                    "Recorder reinitialization failed; long-form recording may be unavailable until restart.",
+                                    "error",
+                                )
+                        except Exception as init_error:
+                            logging.error(
+                                "Error reinitializing long-form recorder: %s", init_error
+                            )
+                            safe_print(
+                                "Failed to reset recorder cleanly. You may need to restart long-form mode.",
+                                "error",
+                            )
+                    else:
+                        safe_print(
+                            "Long-form session reset. Ready to record again.",
+                            "success",
+                        )
+                else:
+                    safe_print(
+                        "Reset requested but long-form transcriber is unavailable. Attempting to reinitialize...",
+                        "warning",
+                    )
+                    try:
+                        transcriber = self.model_manager.initialize_transcriber("longform")
+                        if transcriber:
+                            safe_print(
+                                "Long-form recorder reinitialized. Ready to record.",
+                                "success",
+                            )
+                        else:
+                            safe_print(
+                                "Could not reinitialize long-form recorder. Please restart the application.",
+                                "error",
+                            )
+                    except Exception as init_error:
+                        logging.error(
+                            "Error initializing long-form transcriber during reset: %s",
+                            init_error,
+                        )
+                        safe_print(
+                            "Critical error resetting long-form recorder. A restart may be required.",
+                            "error",
+                        )
+
+            except Exception as e:
+                logging.error(f"Error during reset: {e}")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+            finally:
+                # Clear mode and set UI back to standby
+                self.app_state["current_mode"] = None
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _run_static(self):
         """Run static file transcription."""
-        # Check if another mode is running
         if self.app_state["current_mode"]:
             safe_print(
                 f"Cannot start static mode while in {self.app_state['current_mode']} mode. "
                 "Please finish the current operation first."
             )
             return
-
         try:
-            # Check if we can reuse the current model
             if not self.model_manager.can_reuse_model("static"):
-                # Make sure we're using the static model
                 if self.model_manager.current_loaded_model_type != "static":
                     self.model_manager.unload_current_model()
             else:
@@ -380,21 +431,15 @@ class STTOrchestrator:
                     "model for static",
                     "success",
                 )
-
-            # Initialize the static transcriber if not already done
             transcriber = self.model_manager.initialize_transcriber("static")
             if not transcriber:
                 safe_print("Failed to initialize static transcriber.", "error")
                 return
-
             safe_print("Opening file selection dialog...")
             self.app_state["current_mode"] = "static"
-
-            # Run in a separate thread to avoid blocking
             threading.Thread(
                 target=self._run_static_thread, daemon=True
             ).start()
-
         except (RuntimeError, OSError, ImportError) as error:
             logging.error("Error starting static transcription: %s", error)
             self.app_state["current_mode"] = None
@@ -407,17 +452,11 @@ class STTOrchestrator:
                 safe_print("Static transcriber not available.")
                 self.app_state["current_mode"] = None
                 return
-
-            # Select and process the file
             transcriber.select_file()
-
-            # Wait until transcription is complete
             while transcriber.transcribing:
                 time.sleep(0.5)
-
             logging.info("Static file transcription completed")
             self.app_state["current_mode"] = None
-
         except (RuntimeError, AttributeError, OSError) as error:
             logging.error("Error in static transcription: %s", error)
             self.app_state["current_mode"] = None
@@ -425,48 +464,46 @@ class STTOrchestrator:
     def _quit(self):
         """Stop all processes and exit with improved cleanup."""
         safe_print("Quitting application...")
-
-        # Make sure any active mode is stopped first
-        if self.app_state["current_mode"]:
-            if self.app_state["current_mode"] == "realtime":
-                self._toggle_realtime()  # This will stop it if running
-            elif self.app_state["current_mode"] == "longform":
-                self._stop_longform()
-            elif self.app_state["current_mode"] == "static" and hasattr(
-                self.model_manager.transcribers.get("static", None),
-                "request_abort",
-            ):
-                self.model_manager.transcribers["static"].request_abort()
-
-        # Allow time for mode to stop
+        if self.app_state["current_mode"] == "longform":
+            self._stop_longform()
         time.sleep(0.5)
-
-        # Now do the full shutdown
         self.stop()
+        # Add a more forceful exit in case the tray event loop hangs
+        os._exit(0)
 
     def run(self):
         """Run the orchestrator."""
-        # Start the TCP server
-        self.command_server.start()
-        safe_print("Command server started. Ready to receive commands from system hotkeys.", "success")
-        
-        # Enable the KDE hotkeys
-        self._manage_hotkeys(enable=True)
+        # Only the tray icon will control the application now.
 
-        # Display startup banner with system information
         self.system_utils.display_system_info()
-
-        # Perform dependency check
         self._check_startup_dependencies()
 
-        # Set the running flag
+    # REMOVED: KDE-native hotkeys
+        
+        # NEW: Proactively load the longform model in a separate thread
+        def load_initial_model():
+            safe_print("Pre-loading the long-form transcription model...", "info")
+            if self.tray_manager:
+                self.tray_manager.set_state("loading") # Grey icon
+            
+            transcriber = self.model_manager.initialize_transcriber("longform")
+            # The force_initialize method will preload the model.
+            if transcriber and transcriber.force_initialize():
+                safe_print("Long-form model loaded. System is ready.", "success")
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby") # Green icon
+            else:
+                safe_print("Failed to load the long-form model on startup.", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error") # Red icon
+        
+        threading.Thread(target=load_initial_model, daemon=True).start()
+
         self.app_state["running"] = True
 
         if self.tray_manager:
-            # The tray manager will run the main application loop and block until quit
             self.tray_manager.run()
         else:
-            # Fallback to the old loop if tray is not available
             safe_print("Running in headless mode without a tray icon.", "info")
             try:
                 while self.app_state["running"]:
@@ -479,23 +516,17 @@ class STTOrchestrator:
     def stop(self):
         """Stop all processes and clean up with improved resource handling."""
         try:
-            if not self.app_state["running"]:
+            if not self.app_state.get("running"):
                 return
 
             logging.info("Beginning graceful shutdown sequence...")
             self.app_state["running"] = False
 
-            # Disable the KDE hotkeys
-            self._manage_hotkeys(enable=False)
+            # DBus loop removed
 
-            # Stop the tray manager and its event loop
             if self.tray_manager:
                 self.tray_manager.stop()
 
-            # Stop the command server
-            self.command_server.stop()
-
-            # Clean up all models
             self.model_manager.cleanup_all_models()
 
             logging.info("Orchestrator stopped successfully")
@@ -503,61 +534,9 @@ class STTOrchestrator:
         except (RuntimeError, OSError, AttributeError) as error:
             logging.error("Error during shutdown: %s", error)
 
-    def _manage_hotkeys(self, enable: bool) -> None:
-            """Enable or disable KDE hotkeys by setting their key assignments via D-Bus."""
-            try:
-                import dbus
-            except ImportError:
-                safe_print("Could not manage KDE hotkeys. Please install the 'python-dbus' package.", "error")
-                return
+    # REMOVED: The entire _manage_hotkeys function is deleted.
+    # def _manage_hotkeys(self, enable: bool) -> None: ...
 
-            # Map of shortcut identifiers to their Qt KeyCode.
-            # Format: { "desktop-file": (["details"], key_code) }
-            shortcut_map = {
-                "net.local.sh-7.desktop": (["_launch", "STT: Open Config", "STT: Open Config"], 0x01000030), # F1
-                "net.local.sh-8.desktop": (["_launch", "STT: Toggle Realtime", "STT: Toggle Realtime"], 0x01000031), # F2
-                "net.local.sh-9.desktop": (["_launch", "STT: Start Longform", "STT: Start Longform"], 0x01000032), # F3
-                "net.local.sh-10.desktop": (["_launch", "STT: Stop Longform", "STT: Stop Longform"], 0x01000033), # F4
-                "net.local.sh-11.desktop": (["_launch", "STT: Run Static", "STT: Run Static"], 0x01000039), # F10
-                "net.local.sh-12.desktop": (["_launch", "STT: Quit", "STT: Quit"], 0x01000036) # F7
-            }
-
-            try:
-                bus = dbus.SessionBus()
-                proxy = bus.get_object('org.kde.kglobalaccel', '/kglobalaccel')
-                interface = dbus.Interface(proxy, 'org.kde.KGlobalAccel')
-
-                for desktop_file, (details, keycode) in shortcut_map.items():
-                    # The identifier is an array of strings.
-                    identifier = dbus.Array([desktop_file] + details, signature='s')
-
-                    if enable:
-                        # This is the correct structure for a key sequence: an array of 4 integers.
-                        # For simple keys, the modifiers are 0.
-                        key_sequence = dbus.Array([
-                            dbus.Int32(keycode), dbus.Int32(0), dbus.Int32(0), dbus.Int32(0)
-                        ], signature='i')
-
-                        # This builds the full 'a(ai)' type: Array of [Struct of (Array of Ints)]
-                        key_struct = dbus.Struct([key_sequence], signature='(ai)')
-                        keys_to_set = dbus.Array([key_struct], signature='a(ai)')
-                    else:
-                        # To disable, we pass a correctly typed but empty array.
-                        keys_to_set = dbus.Array([], signature='a(ai)')
-                    
-                    interface.setForeignShortcutKeys(identifier, keys_to_set)
-            
-            except dbus.exceptions.DBusException as e:
-                safe_print(f"A D-Bus error occurred while managing KDE hotkeys: {e.get_dbus_message()}", "error")
-                logging.error(f"D-Bus error managing KDE hotkeys: {e.get_dbus_message()}")
-                return
-            except Exception as e:
-                safe_print(f"An unexpected error occurred while managing KDE hotkeys: {e}", "error")
-                logging.error(f"Unexpected error managing KDE hotkeys: {e}")
-                return
-
-            status_text = "Enabled" if enable else "Disabled"
-            safe_print(f"KDE custom hotkeys have been {status_text}.", "success")
 
 if __name__ == "__main__":
     orchestrator = STTOrchestrator()
