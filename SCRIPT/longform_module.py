@@ -5,17 +5,29 @@ This module provides a LongFormTranscriber class for manual control over
 speech recording and transcription with keyboard shortcuts and clipboard integration.
 """
 
+import array
 import contextlib
 import io
 import logging
+import math
 import os
+import queue
 import sys
 import threading
 import time
-from typing import Callable, Iterable, List, Optional, Union
+from collections import deque
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import keyboard
 import pyperclip
+
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
 
 # Import RealtimeSTT at module level to avoid import-outside-toplevel warning
 try:
@@ -118,6 +130,16 @@ class LongFormTranscriber:
         self._timer_stop_event = threading.Event()
         self._timer_lines_rendered = False
 
+        self._waveform_lock = threading.Lock()
+        self._waveform_window_seconds = 10.0
+        self._waveform_slot_count = 32
+        self._waveform_samples: deque[Tuple[float, float]] = deque(maxlen=512)
+        self._waveform_last_levels: List[float] = [0.0] * self._waveform_slot_count
+        self._waveform_last_update = 0.0
+        self._waveform_decay_seconds = 2.5
+        self._latest_waveform = self._default_waveform_display()
+        self._progress_block_interval = 10.0
+
         # Hotkey attributes removed; control is via orchestrator's tray only
 
         # Store preinitialized model if provided
@@ -178,6 +200,157 @@ class LongFormTranscriber:
         # If preload_model is True, initialize the recorder immediately
         if preload_model:
             self._initialize_recorder()
+
+    def _default_waveform_display(self) -> str:
+        """Return a friendly placeholder for waveform output."""
+        idle_message = "Waiting for audio input…"
+
+        if HAS_RICH and CONSOLE:
+            return f"[grey50]{idle_message}[/grey50]"
+
+        return idle_message
+
+    def _reset_waveform_state(self) -> None:
+        """Reset waveform buffers to a neutral state."""
+        with self._waveform_lock:
+            self._waveform_samples.clear()
+            self._waveform_last_levels = [0.0] * self._waveform_slot_count
+            self._waveform_last_update = 0.0
+            self._latest_waveform = self._default_waveform_display()
+
+    def _build_progress_bar(self, elapsed: float) -> str:
+        """Build a segmented progress bar for the recording timeline."""
+        block_interval = max(self._progress_block_interval, 1.0)
+        total_blocks = max(1, int(elapsed // block_interval) + 1)
+        # Cap total blocks to avoid overly long lines (roughly 10 minutes at 10s intervals)
+        total_blocks = min(total_blocks, 60)
+
+        segments: List[str] = []
+        for index in range(total_blocks):
+            mark_seconds = index * block_interval
+            is_minute_marker = index == 0 or math.isclose(mark_seconds % 60, 0.0, abs_tol=1e-6)
+
+            if HAS_RICH and CONSOLE:
+                if index == 0:
+                    segments.append("[grey58]▆[/grey58]")
+                elif is_minute_marker:
+                    segments.append("[dark_orange3]▆[/dark_orange3]")
+                else:
+                    segments.append("[grey65]─[/grey65]")
+            else:
+                if is_minute_marker:
+                    segments.append("|")
+                else:
+                    segments.append("-")
+
+        return "".join(segments)
+
+    def _render_waveform(self) -> str:
+        """Render a waveform bar based on recent audio levels."""
+        now = time.monotonic()
+        with self._waveform_lock:
+            samples = list(self._waveform_samples)
+            last_update = self._waveform_last_update
+            previous_levels = self._waveform_last_levels[:]
+            slot_count = self._waveform_slot_count
+            window = self._waveform_window_seconds
+
+        if not samples or (now - last_update > self._waveform_decay_seconds):
+            display = self._default_waveform_display()
+            with self._waveform_lock:
+                self._latest_waveform = display
+                self._waveform_last_levels = [0.0] * self._waveform_slot_count
+            return display
+
+        if slot_count <= 0 or window <= 0:
+            return self._default_waveform_display()
+
+        window_start = now - window
+        slot_duration = window / slot_count
+        slot_values = [0.0] * slot_count
+
+        if len(previous_levels) != slot_count:
+            previous_levels = [0.0] * slot_count
+
+        for timestamp, level in samples:
+            if timestamp < window_start:
+                continue
+            slot_index = int((timestamp - window_start) / slot_duration)
+            if slot_index >= slot_count:
+                slot_index = slot_count - 1
+            slot_values[slot_index] = max(slot_values[slot_index], level)
+
+        peak_level = max(slot_values) if slot_values else 0.0
+        if peak_level <= 1e-6:
+            normalised_levels = [0.0] * slot_count
+        else:
+            normalised_levels = [min(1.0, value / peak_level) for value in slot_values]
+
+        # Apply light smoothing so the bar doesn't jitter excessively
+        smoothed_levels = [
+            (prev * 0.4) + (current * 0.6)
+            for prev, current in zip(previous_levels, normalised_levels)
+        ]
+
+        glyphs = "▁▂▃▄▅▆▇█"
+        glyph_count = len(glyphs) - 1
+        bar_chars: List[str] = []
+
+        for level in smoothed_levels:
+            clamped = max(0.0, min(1.0, level))
+            glyph_index = min(glyph_count, int(round(clamped * glyph_count)))
+            bar_chars.append(glyphs[glyph_index])
+
+        bar = "".join(bar_chars)
+
+        if HAS_RICH and CONSOLE:
+            display = f"[#4caf50]{bar}[/#4caf50]"
+        else:
+            display = bar
+
+        with self._waveform_lock:
+            self._latest_waveform = display
+            self._waveform_last_levels = smoothed_levels
+
+        return display
+
+    def _handle_recorded_chunk(self, chunk: bytes) -> None:
+        """Tap audio chunks from the recorder to derive waveform levels."""
+        if not chunk:
+            return
+
+        level = 0.0
+
+        try:
+            if HAS_NUMPY and np is not None:
+                samples = np.frombuffer(chunk, dtype=np.int16)
+                if samples.size == 0:
+                    return
+                floats = samples.astype(np.float32)
+                rms = float(np.sqrt(np.mean(np.square(floats))))
+            else:
+                samples = array.array("h")
+                samples.frombytes(chunk)
+                if len(samples) == 0:
+                    return
+                sum_sq = 0.0
+                for sample in samples:
+                    sum_sq += float(sample * sample)
+                rms = math.sqrt(sum_sq / len(samples))
+
+            level = min(1.0, rms / 32768.0)
+        except Exception:
+            return
+
+        now = time.monotonic()
+        with self._waveform_lock:
+            if self._waveform_samples and now < self._waveform_samples[-1][0]:
+                self._waveform_samples.clear()
+            self._waveform_samples.append((now, level))
+            cutoff = now - self._waveform_window_seconds
+            while self._waveform_samples and self._waveform_samples[0][0] < cutoff:
+                self._waveform_samples.popleft()
+            self._waveform_last_update = now
 
     def _safe_clipboard_copy(self, text: str) -> bool:
         """Safely copy text to clipboard with error handling."""
@@ -251,6 +424,7 @@ class LongFormTranscriber:
             self._timer_thread.join(timeout=0.5)
         self._timer_thread = None
         self._timer_lines_rendered = False
+        self._reset_waveform_state()
 
     def _run_recording_timer(self) -> None:
         """Print elapsed recording time and progress indicators."""
@@ -263,42 +437,43 @@ class LongFormTranscriber:
             minutes = int(elapsed // 60)
             seconds = int(elapsed % 60)
             time_str = f"{minutes:02d},{seconds:02d}"
-            boxes = "■" * int(elapsed // 5)
+
+            progress_bar = self._build_progress_bar(elapsed)
+            waveform_display = self._render_waveform()
 
             if HAS_RICH and CONSOLE:
-                timer_line = f"[yellow]Recording time: {time_str}[/yellow]"
-                progress_line = f"[white]Progress:[/white] {boxes}"
+                timer_line = f"[#ff5722]Recording time: {time_str}[/#ff5722]"
+                progress_line = f"[white]Progress:[/white] {progress_bar}"
+                waveform_line = f"[white]Waveform:[/white] {waveform_display}"
 
                 if self._timer_lines_rendered:
-                    CONSOLE.file.write("\033[2F")  # move cursor up two lines
-                    CONSOLE.file.write("\033[K")   # clear line
-                    CONSOLE.file.flush()
-                    CONSOLE.print(timer_line)
-                    CONSOLE.file.write("\033[K")
-                    CONSOLE.file.flush()
-                    CONSOLE.print(progress_line)
+                    CONSOLE.file.write("\033[3F")
+                    for line in (timer_line, progress_line, waveform_line):
+                        CONSOLE.file.write("\033[K")
+                        CONSOLE.file.flush()
+                        CONSOLE.print(line)
                 else:
-                    CONSOLE.print(timer_line)
-                    CONSOLE.print(progress_line)
+                    for line in (timer_line, progress_line, waveform_line):
+                        CONSOLE.print(line)
                     self._timer_lines_rendered = True
                 CONSOLE.file.flush()
             else:
                 timer_line = f"Recording time: {time_str}"
-                progress_line = f"Progress: {boxes}"
+                progress_line = f"Progress: {progress_bar}"
+                waveform_line = f"Waveform: {waveform_display}"
 
                 if self._timer_lines_rendered:
-                    sys.stdout.write("\033[2F")  # move cursor up two lines
-                    sys.stdout.write("\033[K")   # clear line
-                    sys.stdout.write(timer_line + "\n")
-                    sys.stdout.write("\033[K")
-                    sys.stdout.write(progress_line + "\n")
+                    sys.stdout.write("\033[3F")
+                    for line in (timer_line, progress_line, waveform_line):
+                        sys.stdout.write("\033[K")
+                        sys.stdout.write(line + "\n")
                     sys.stdout.flush()
                 else:
-                    print(timer_line)
-                    print(progress_line)
+                    for line in (timer_line, progress_line, waveform_line):
+                        print(line)
                     self._timer_lines_rendered = True
 
-            time.sleep(1.0)
+            time.sleep(0.2)
 
     def _initialize_recorder(self):
         """Lazy initialization of the recorder."""
@@ -312,6 +487,7 @@ class LongFormTranscriber:
             self._last_recording_duration = 0.0
             self._last_transcription_duration = 0.0
             self._timer_lines_rendered = False
+            self._reset_waveform_state()
             self._start_timer_thread()
             if self.external_on_recording_start:
                 self.external_on_recording_start()
@@ -330,6 +506,7 @@ class LongFormTranscriber:
         # Set the custom callbacks
         self.config["on_recording_start"] = on_rec_start
         self.config["on_recording_stop"] = on_rec_stop
+        self.config["on_recorded_chunk"] = self._handle_recorded_chunk
 
         try:
             if not HAS_REALTIME_STT or AudioToTextRecorder is None:
