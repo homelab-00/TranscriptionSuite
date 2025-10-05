@@ -110,7 +110,15 @@ class LongFormTranscriber:
         self.last_transcription = ""
         self._abort_requested = False
 
-    # Hotkey attributes removed; control is via orchestrator's tray only
+        self._recording_started_at = None
+        self._last_recording_duration = 0.0
+        self._last_transcription_duration = 0.0
+
+        self._timer_thread: Optional[threading.Thread] = None
+        self._timer_stop_event = threading.Event()
+        self._timer_lines_rendered = False
+
+        # Hotkey attributes removed; control is via orchestrator's tray only
 
         # Store preinitialized model if provided
         self.preinitialized_model = preinitialized_model
@@ -225,6 +233,73 @@ class LongFormTranscriber:
                 print(f"Error in force initialization: {str(e)}")
             return False
 
+    def _start_timer_thread(self) -> None:
+        """Start background timer updates during recording."""
+        if self._timer_thread and self._timer_thread.is_alive():
+            return
+
+        self._timer_stop_event.clear()
+        self._timer_thread = threading.Thread(
+            target=self._run_recording_timer, daemon=True
+        )
+        self._timer_thread.start()
+
+    def _stop_timer_thread(self) -> None:
+        """Stop background timer updates."""
+        self._timer_stop_event.set()
+        if self._timer_thread and self._timer_thread.is_alive():
+            self._timer_thread.join(timeout=0.5)
+        self._timer_thread = None
+        self._timer_lines_rendered = False
+
+    def _run_recording_timer(self) -> None:
+        """Print elapsed recording time and progress indicators."""
+        while not self._timer_stop_event.is_set():
+            if not self.recording or self._recording_started_at is None:
+                time.sleep(0.1)
+                continue
+
+            elapsed = time.monotonic() - self._recording_started_at
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            time_str = f"{minutes:02d},{seconds:02d}"
+            boxes = "■" * int(elapsed // 5)
+
+            if HAS_RICH and CONSOLE:
+                timer_line = f"[yellow]Recording time: {time_str}[/yellow]"
+                progress_line = f"[white]Progress:[/white] {boxes}"
+
+                if self._timer_lines_rendered:
+                    CONSOLE.file.write("\033[2F")  # move cursor up two lines
+                    CONSOLE.file.write("\033[K")   # clear line
+                    CONSOLE.file.flush()
+                    CONSOLE.print(timer_line)
+                    CONSOLE.file.write("\033[K")
+                    CONSOLE.file.flush()
+                    CONSOLE.print(progress_line)
+                else:
+                    CONSOLE.print(timer_line)
+                    CONSOLE.print(progress_line)
+                    self._timer_lines_rendered = True
+                CONSOLE.file.flush()
+            else:
+                timer_line = f"Recording time: {time_str}"
+                progress_line = f"Progress: {boxes}"
+
+                if self._timer_lines_rendered:
+                    sys.stdout.write("\033[2F")  # move cursor up two lines
+                    sys.stdout.write("\033[K")   # clear line
+                    sys.stdout.write(timer_line + "\n")
+                    sys.stdout.write("\033[K")
+                    sys.stdout.write(progress_line + "\n")
+                    sys.stdout.flush()
+                else:
+                    print(timer_line)
+                    print(progress_line)
+                    self._timer_lines_rendered = True
+
+            time.sleep(1.0)
+
     def _initialize_recorder(self):
         """Lazy initialization of the recorder."""
         if self.recorder is not None:
@@ -233,11 +308,22 @@ class LongFormTranscriber:
         # Create custom recording callbacks that update our internal state
         def on_rec_start():
             self.recording = True
+            self._recording_started_at = time.monotonic()
+            self._last_recording_duration = 0.0
+            self._last_transcription_duration = 0.0
+            self._timer_lines_rendered = False
+            self._start_timer_thread()
             if self.external_on_recording_start:
                 self.external_on_recording_start()
 
         def on_rec_stop():
             self.recording = False
+            if self._recording_started_at is not None:
+                self._last_recording_duration = (
+                    time.monotonic() - self._recording_started_at
+                )
+                self._recording_started_at = None
+            self._stop_timer_thread()
             if self.external_on_recording_stop:
                 self.external_on_recording_stop()
 
@@ -296,7 +382,7 @@ class LongFormTranscriber:
 
         if not self.recording and self.recorder:
             if HAS_RICH and CONSOLE:
-                CONSOLE.print("[bold green]Starting recording...[/bold green]")
+                CONSOLE.print("[green]Starting recording...[/green]")
             else:
                 print("\nStarting recording...")
             self.recorder.start()
@@ -314,27 +400,49 @@ class LongFormTranscriber:
 
         if self.recording:
             if HAS_RICH and CONSOLE:
-                CONSOLE.print(
-                    "[bold yellow]Stopping recording...[/bold yellow]"
-                )
+                CONSOLE.print("[yellow]Stopping recording...[/yellow]")
             else:
                 print("\nStopping recording...")
 
             self._abort_requested = False  # reset flag for this cycle
             self.recorder.stop()
+            self._stop_timer_thread()
+
+            transcription = None
+            transcription_start = time.monotonic()
 
             # Display a spinner while transcribing
             if HAS_RICH and CONSOLE:
                 with CONSOLE.status("[bold blue]Transcribing...[/bold blue]"):
-                    transcription = None if self._abort_requested else self.recorder.text()
+                    transcription = (
+                        None
+                        if self._abort_requested
+                        else self.recorder.text()
+                    )
             else:
                 print("Transcribing...")
-                transcription = None if self._abort_requested else self.recorder.text()
+                transcription = (
+                    None
+                    if self._abort_requested
+                    else self.recorder.text()
+                )
+
+            self._last_transcription_duration = (
+                time.monotonic() - transcription_start
+            )
 
             # If aborted, skip producing/pasting any text
             if self._abort_requested:
                 self.last_transcription = ""
+                self._last_transcription_duration = 0.0
+                self._last_recording_duration = 0.0
                 return
+
+            if self._recording_started_at is not None:
+                self._last_recording_duration = (
+                    time.monotonic() - self._recording_started_at
+                )
+                self._recording_started_at = None
 
             # Ensure transcription is a string
             self.last_transcription = (str(transcription) if transcription else "")
@@ -368,6 +476,8 @@ class LongFormTranscriber:
                         print("\nClipboard not available. Please copy manually:")
                         print(f"TEXT: {self.last_transcription}")
 
+            self._print_transcription_metrics()
+
     def abort(self):
         """Abort current recording or transcription safely without blocking.
 
@@ -377,6 +487,8 @@ class LongFormTranscriber:
         """
         self._abort_requested = True
         self.last_transcription = ""
+        self._stop_timer_thread()
+        self._recording_started_at = None
 
         rec = self.recorder
         if not rec:
@@ -495,6 +607,8 @@ class LongFormTranscriber:
         if self.recording and self.recorder:
             self.stop_recording()
 
+        self._stop_timer_thread()
+
         if HAS_RICH and CONSOLE:
             CONSOLE.print("[bold red]Exiting...[/bold red]")
         else:
@@ -547,6 +661,62 @@ class LongFormTranscriber:
         Return the last transcribed text.
         """
         return self.last_transcription
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format seconds as a human-friendly string."""
+        if seconds <= 0:
+            return "0.00s"
+        minutes, secs = divmod(seconds, 60.0)
+        if minutes:
+            return f"{int(minutes)}m {secs:04.1f}s"
+        return f"{secs:.2f}s"
+
+    def _print_transcription_metrics(self) -> None:
+        """Display metrics about the last transcription cycle."""
+        if self._abort_requested:
+            return
+
+        audio_duration = self._last_recording_duration
+        processing_time = self._last_transcription_duration
+        speed_ratio = (
+            audio_duration / processing_time if processing_time > 0 else 0.0
+        )
+        realtime_factor = (
+            processing_time / audio_duration if audio_duration > 0 else 0.0
+        )
+
+        if HAS_RICH and CONSOLE:
+            CONSOLE.print("[bold white]Transcription metrics:[/bold white]")
+            CONSOLE.print(
+                f"[grey58]  Audio duration: {self._format_duration(audio_duration)}[/grey58]"
+            )
+            CONSOLE.print(
+                f"[grey58]  Processing time: {self._format_duration(processing_time)}[/grey58]"
+            )
+            CONSOLE.print(
+                f"[grey58]  Speed ratio: {speed_ratio:.2f}x[/grey58]"
+            )
+            CONSOLE.print(
+                f"[grey58]  Real-time factor: {realtime_factor:.2f}[/grey58]"
+            )
+        else:
+            print("Transcription metrics:")
+            print(
+                f"  Audio duration: {self._format_duration(audio_duration)}"
+            )
+            print(
+                f"  Processing time: {self._format_duration(processing_time)}"
+            )
+            print(f"  Speed ratio: {speed_ratio:.2f}x")
+            print(f"  Real-time factor: {realtime_factor:.2f}")
+
+        logging.info(
+            "Long-form transcription metrics | audio: %.2fs | processing: %.2fs | speed: %.2fx | RTF: %.2f",
+            audio_duration,
+            processing_time,
+            speed_ratio,
+            realtime_factor,
+        )
 
 
 def main():

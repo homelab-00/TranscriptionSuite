@@ -99,6 +99,8 @@ class TranscriptionState:
     transcribing: bool = False
     abort_requested: bool = False
     transcription_thread: Optional[threading.Thread] = None
+    audio_duration: float = 0.0
+    transcription_time: float = 0.0
 
 
 @dataclass
@@ -618,6 +620,10 @@ class DirectFileTranscriber:
                 f"Processing file: {os.path.basename(file_path)}", "info"
             )
 
+            # Reset metrics for this transcription run
+            self.state.audio_duration = 0.0
+            self.state.transcription_time = 0.0
+
             # Check if model is initialized
             if not self._initialize_model():
                 self._safe_print(
@@ -667,6 +673,11 @@ class DirectFileTranscriber:
         self._update_progress("Applying Voice Activity Detection...")
         voice_wav = self._apply_vad(wav_path, aggressiveness=2)
 
+        if voice_wav and os.path.exists(voice_wav):
+            self.state.audio_duration = self._calculate_wav_duration(voice_wav)
+        else:
+            self.state.audio_duration = 0.0
+
         # Check abort flag after VAD
         if self.abort_requested:
             self._safe_print("Transcription aborted after VAD", "warning")
@@ -704,12 +715,14 @@ class DirectFileTranscriber:
             )
 
         try:
+            start_time = time.monotonic()
             segments, _ = self.resources.whisper_model.transcribe(
                 voice_wav,
                 language=self.model_config.language,
                 task=task,
                 beam_size=5,
             )
+            self.state.transcription_time = time.monotonic() - start_time
 
             # Combine all segments into final text
             final_text = self._process_segments(segments)
@@ -724,10 +737,63 @@ class DirectFileTranscriber:
 
             # Display and save results
             self._display_and_save_results(final_text, original_file_path)
+            self._print_transcription_metrics()
 
         except (RuntimeError, OSError, ValueError) as e:
             self._safe_print(f"Transcription failed: {e}", "error")
             logging.error("Transcription error: %s", e)
+
+    def _calculate_wav_duration(self, wav_path: str) -> float:
+        """Calculate duration of a WAV file in seconds."""
+        try:
+            with wave.open(wav_path, "rb") as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate() or 1
+                return frames / float(rate)
+        except (wave.Error, OSError, ZeroDivisionError) as exc:
+            logging.warning(
+                "Failed to read WAV duration for %s: %s", wav_path, exc
+            )
+            return 0.0
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format seconds as a human-friendly string."""
+        if seconds <= 0:
+            return "0.00s"
+        minutes, secs = divmod(seconds, 60.0)
+        if minutes:
+            return f"{int(minutes)}m {secs:04.1f}s"
+        return f"{secs:.2f}s"
+
+    def _print_transcription_metrics(self) -> None:
+        """Print transcription metrics after processing completes."""
+        if self.state.abort_requested:
+            return
+
+        audio_duration = self.state.audio_duration
+        processing_time = self.state.transcription_time
+        speed_ratio = (
+            audio_duration / processing_time if processing_time > 0 else 0.0
+        )
+        realtime_factor = (
+            processing_time / audio_duration if audio_duration > 0 else 0.0
+        )
+
+        message = (
+            "Transcription metrics:\n"
+            f"  Audio duration: {self._format_duration(audio_duration)}\n"
+            f"  Processing time: {self._format_duration(processing_time)}\n"
+            f"  Speed ratio: {speed_ratio:.2f}x\n"
+            f"  Real-time factor: {realtime_factor:.2f}"
+        )
+        self._safe_print(message, "info")
+        logging.info(
+            "Transcription metrics | audio: %.2fs | processing: %.2fs | speed: %.2fx | RTF: %.2f",
+            audio_duration,
+            processing_time,
+            speed_ratio,
+            realtime_factor,
+        )
 
     def _process_segments(self, segments: Any) -> str:
         """Process transcription segments into final text."""
