@@ -131,14 +131,16 @@ class LongFormTranscriber:
         self._timer_lines_rendered = False
 
         self._waveform_lock = threading.Lock()
-        self._waveform_window_seconds = 10.0
+        self._waveform_window_seconds = 60.0
+        self._waveform_display_seconds = 10.0
         self._waveform_slot_count = 32
         self._waveform_samples: deque[Tuple[float, float]] = deque(maxlen=512)
         self._waveform_last_levels: List[float] = [0.0] * self._waveform_slot_count
         self._waveform_last_update = 0.0
         self._waveform_decay_seconds = 2.5
         self._latest_waveform = self._default_waveform_display()
-        self._progress_block_interval = 10.0
+        self._waveform_amplitude_threshold = 0.7
+        self._waveform_display_rows = 3
 
         # Hotkey attributes removed; control is via orchestrator's tray only
 
@@ -218,33 +220,6 @@ class LongFormTranscriber:
             self._waveform_last_update = 0.0
             self._latest_waveform = self._default_waveform_display()
 
-    def _build_progress_bar(self, elapsed: float) -> str:
-        """Build a segmented progress bar for the recording timeline."""
-        block_interval = max(self._progress_block_interval, 1.0)
-        total_blocks = max(1, int(elapsed // block_interval) + 1)
-        # Cap total blocks to avoid overly long lines (roughly 10 minutes at 10s intervals)
-        total_blocks = min(total_blocks, 60)
-
-        segments: List[str] = []
-        for index in range(total_blocks):
-            mark_seconds = index * block_interval
-            is_minute_marker = index == 0 or math.isclose(mark_seconds % 60, 0.0, abs_tol=1e-6)
-
-            if HAS_RICH and CONSOLE:
-                if index == 0:
-                    segments.append("[grey58]▆[/grey58]")
-                elif is_minute_marker:
-                    segments.append("[dark_orange3]▆[/dark_orange3]")
-                else:
-                    segments.append("[grey65]─[/grey65]")
-            else:
-                if is_minute_marker:
-                    segments.append("|")
-                else:
-                    segments.append("-")
-
-        return "".join(segments)
-
     def _render_waveform(self) -> str:
         """Render a waveform bar based on recent audio levels."""
         now = time.monotonic()
@@ -253,7 +228,8 @@ class LongFormTranscriber:
             last_update = self._waveform_last_update
             previous_levels = self._waveform_last_levels[:]
             slot_count = self._waveform_slot_count
-            window = self._waveform_window_seconds
+            display_window = self._waveform_display_seconds
+            rows = self._waveform_display_rows
 
         if not samples or (now - last_update > self._waveform_decay_seconds):
             display = self._default_waveform_display()
@@ -262,51 +238,83 @@ class LongFormTranscriber:
                 self._waveform_last_levels = [0.0] * self._waveform_slot_count
             return display
 
-        if slot_count <= 0 or window <= 0:
+        if slot_count <= 0 or display_window <= 0:
             return self._default_waveform_display()
 
-        window_start = now - window
-        slot_duration = window / slot_count
+        filtered_samples = [
+            (timestamp, level)
+            for timestamp, level in samples
+            if level <= self._waveform_amplitude_threshold
+        ]
+
+        if not filtered_samples:
+            return self._default_waveform_display()
+
+        peak_level = max(level for _, level in filtered_samples)
+        if peak_level <= 1e-6:
+            peak_level = 1e-6
+
+        display_start = now - display_window
+        slot_duration = display_window / slot_count
         slot_values = [0.0] * slot_count
 
         if len(previous_levels) != slot_count:
             previous_levels = [0.0] * slot_count
 
-        for timestamp, level in samples:
-            if timestamp < window_start:
+        for timestamp, level in filtered_samples:
+            if timestamp < display_start:
                 continue
-            slot_index = int((timestamp - window_start) / slot_duration)
-            if slot_index >= slot_count:
-                slot_index = slot_count - 1
-            slot_values[slot_index] = max(slot_values[slot_index], level)
+            slot_index = int((timestamp - display_start) / slot_duration)
+            if 0 <= slot_index < slot_count:
+                slot_values[slot_index] = max(slot_values[slot_index], level)
 
-        peak_level = max(slot_values) if slot_values else 0.0
-        if peak_level <= 1e-6:
-            normalised_levels = [0.0] * slot_count
-        else:
-            normalised_levels = [min(1.0, value / peak_level) for value in slot_values]
+        normalised_levels = [min(1.0, value / peak_level) for value in slot_values]
 
-        # Apply light smoothing so the bar doesn't jitter excessively
         smoothed_levels = [
             (prev * 0.4) + (current * 0.6)
             for prev, current in zip(previous_levels, normalised_levels)
         ]
 
-        glyphs = "▁▂▃▄▅▆▇█"
-        glyph_count = len(glyphs) - 1
-        bar_chars: List[str] = []
+        if rows <= 1:
+            glyphs = "▁▂▃▄▅▆▇█"
+            glyph_count = len(glyphs) - 1
+            bar_chars: List[str] = []
 
-        for level in smoothed_levels:
-            clamped = max(0.0, min(1.0, level))
-            glyph_index = min(glyph_count, int(round(clamped * glyph_count)))
-            bar_chars.append(glyphs[glyph_index])
+            for level in smoothed_levels:
+                clamped = max(0.0, min(1.0, level))
+                glyph_index = min(glyph_count, int(round(clamped * glyph_count)))
+                bar_chars.append(glyphs[glyph_index])
 
-        bar = "".join(bar_chars)
-
-        if HAS_RICH and CONSOLE:
-            display = f"[#4caf50]{bar}[/#4caf50]"
+            bar = "".join(bar_chars)
+            display = f"[#4caf50]{bar}[/#4caf50]" if HAS_RICH and CONSOLE else bar
         else:
-            display = bar
+            rows_output: List[str] = []
+
+            for row_idx in range(rows):
+                row_chars: List[str] = []
+                min_threshold = row_idx / rows
+                max_threshold = (row_idx + 1) / rows
+                glyphs = "▁▂▃▄▅▆▇█"
+                glyph_count = len(glyphs) - 1
+
+                for level in smoothed_levels:
+                    if level <= min_threshold:
+                        row_chars.append(" ")
+                    elif level >= max_threshold:
+                        row_chars.append(glyphs[-1])
+                    else:
+                        row_level = (level - min_threshold) / (max_threshold - min_threshold)
+                        glyph_index = min(glyph_count, int(round(row_level * glyph_count)))
+                        row_chars.append(glyphs[glyph_index])
+
+                rows_output.append("".join(row_chars))
+
+            rows_output.reverse()
+
+            if HAS_RICH and CONSOLE:
+                display = "\n".join(f"[#4caf50]{row}[/#4caf50]" for row in rows_output)
+            else:
+                display = "\n".join(rows_output)
 
         with self._waveform_lock:
             self._latest_waveform = display
@@ -339,6 +347,9 @@ class LongFormTranscriber:
                 rms = math.sqrt(sum_sq / len(samples))
 
             level = min(1.0, rms / 32768.0)
+
+            if level > self._waveform_amplitude_threshold:
+                return
         except Exception:
             return
 
@@ -427,7 +438,7 @@ class LongFormTranscriber:
         self._reset_waveform_state()
 
     def _run_recording_timer(self) -> None:
-        """Print elapsed recording time and progress indicators."""
+        """Print elapsed recording time alongside waveform updates."""
         while not self._timer_stop_event.is_set():
             if not self.recording or self._recording_started_at is None:
                 time.sleep(0.1)
@@ -438,38 +449,51 @@ class LongFormTranscriber:
             seconds = int(elapsed % 60)
             time_str = f"{minutes:02d},{seconds:02d}"
 
-            progress_bar = self._build_progress_bar(elapsed)
             waveform_display = self._render_waveform()
+            waveform_lines = waveform_display.split("\n")
+            waveform_line_count = len(waveform_lines)
 
             if HAS_RICH and CONSOLE:
                 timer_line = f"[#ff5722]Recording time: {time_str}[/#ff5722]"
-                progress_line = f"[white]Progress:[/white] {progress_bar}"
-                waveform_line = f"[white]Waveform:[/white] {waveform_display}"
+                waveform_header = f"[white]Waveform:[/white]"
 
                 if self._timer_lines_rendered:
-                    CONSOLE.file.write("\033[3F")
-                    for line in (timer_line, progress_line, waveform_line):
+                    CONSOLE.file.write(f"\033[{waveform_line_count + 2}F")
+                    CONSOLE.file.write("\033[K")
+                    CONSOLE.file.flush()
+                    CONSOLE.print(timer_line)
+                    CONSOLE.file.write("\033[K")
+                    CONSOLE.file.flush()
+                    CONSOLE.print(waveform_header)
+                    for line in waveform_lines:
                         CONSOLE.file.write("\033[K")
                         CONSOLE.file.flush()
                         CONSOLE.print(line)
                 else:
-                    for line in (timer_line, progress_line, waveform_line):
+                    CONSOLE.print(timer_line)
+                    CONSOLE.print(waveform_header)
+                    for line in waveform_lines:
                         CONSOLE.print(line)
                     self._timer_lines_rendered = True
                 CONSOLE.file.flush()
             else:
                 timer_line = f"Recording time: {time_str}"
-                progress_line = f"Progress: {progress_bar}"
-                waveform_line = f"Waveform: {waveform_display}"
+                waveform_header = "Waveform:"
 
                 if self._timer_lines_rendered:
-                    sys.stdout.write("\033[3F")
-                    for line in (timer_line, progress_line, waveform_line):
+                    sys.stdout.write(f"\033[{waveform_line_count + 2}F")
+                    sys.stdout.write("\033[K")
+                    sys.stdout.write(timer_line + "\n")
+                    sys.stdout.write("\033[K")
+                    sys.stdout.write(waveform_header + "\n")
+                    for line in waveform_lines:
                         sys.stdout.write("\033[K")
                         sys.stdout.write(line + "\n")
                     sys.stdout.flush()
                 else:
-                    for line in (timer_line, progress_line, waveform_line):
+                    print(timer_line)
+                    print(waveform_header)
+                    for line in waveform_lines:
                         print(line)
                     self._timer_lines_rendered = True
 
