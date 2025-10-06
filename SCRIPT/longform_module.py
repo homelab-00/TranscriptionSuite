@@ -58,6 +58,8 @@ except ImportError:
     Text = None
     HAS_RICH = False
 
+# Waveform graph: Max Y-axis value
+DEFAULT_WAVEFORM_CLIPPING_THRESHOLD_DB = -25.0
 
 class LongFormTranscriber:
     """
@@ -140,7 +142,16 @@ class LongFormTranscriber:
         self._waveform_decay_seconds = 2.5
         self._latest_waveform = self._default_waveform_display()
         self._waveform_amplitude_threshold = 0.7
-        self._waveform_display_rows = 3
+        self._waveform_display_rows = 4
+        self._waveform_clipping_threshold_db = DEFAULT_WAVEFORM_CLIPPING_THRESHOLD_DB
+        self._waveform_clipping_threshold = 10 ** (
+            self._waveform_clipping_threshold_db / 20.0
+        )
+        self._waveform_scale_target = max(
+            self._waveform_clipping_threshold,
+            1e-3,
+        )
+        self._waveform_scale_last_update = time.monotonic()
 
         # Hotkey attributes removed; control is via orchestrator's tray only
 
@@ -219,6 +230,7 @@ class LongFormTranscriber:
             self._waveform_last_levels = [0.0] * self._waveform_slot_count
             self._waveform_last_update = 0.0
             self._latest_waveform = self._default_waveform_display()
+            self._waveform_scale_last_update = time.monotonic()
 
     def _render_waveform(self) -> str:
         """Render a waveform bar based on recent audio levels."""
@@ -230,29 +242,28 @@ class LongFormTranscriber:
             slot_count = self._waveform_slot_count
             display_window = self._waveform_display_seconds
             rows = self._waveform_display_rows
+            amp_threshold = self._waveform_amplitude_threshold
+            scale_target = self._waveform_scale_target
 
         if not samples or (now - last_update > self._waveform_decay_seconds):
             display = self._default_waveform_display()
             with self._waveform_lock:
                 self._latest_waveform = display
                 self._waveform_last_levels = [0.0] * self._waveform_slot_count
+                self._waveform_scale_last_update = now
             return display
 
         if slot_count <= 0 or display_window <= 0:
             return self._default_waveform_display()
 
         filtered_samples = [
-            (timestamp, level)
+            (timestamp, min(level, amp_threshold))
             for timestamp, level in samples
-            if level <= self._waveform_amplitude_threshold
+            if level > 0.0
         ]
 
         if not filtered_samples:
             return self._default_waveform_display()
-
-        peak_level = max(level for _, level in filtered_samples)
-        if peak_level <= 1e-6:
-            peak_level = 1e-6
 
         display_start = now - display_window
         slot_duration = display_window / slot_count
@@ -268,11 +279,18 @@ class LongFormTranscriber:
             if 0 <= slot_index < slot_count:
                 slot_values[slot_index] = max(slot_values[slot_index], level)
 
-        normalised_levels = [min(1.0, value / peak_level) for value in slot_values]
+        scale_denominator = max(scale_target, 1e-6)
+        raw_normalised_levels = [value / scale_denominator for value in slot_values]
+        clipped_flags = [value > 1.0 for value in raw_normalised_levels]
+        normalised_levels = [min(1.0, value) for value in raw_normalised_levels]
 
         smoothed_levels = [
             (prev * 0.4) + (current * 0.6)
             for prev, current in zip(previous_levels, normalised_levels)
+        ]
+        smoothed_clipped_flags = [
+            clipped or level >= 0.99
+            for clipped, level in zip(clipped_flags, smoothed_levels)
         ]
 
         if rows <= 1:
@@ -280,20 +298,30 @@ class LongFormTranscriber:
             glyph_count = len(glyphs) - 1
             bar_chars: List[str] = []
 
-            for level in smoothed_levels:
+            for idx, level in enumerate(smoothed_levels):
                 clamped = max(0.0, min(1.0, level))
                 glyph_index = min(glyph_count, int(round(clamped * glyph_count)))
                 bar_chars.append(glyphs[glyph_index])
 
             bar = "".join(bar_chars)
-            display = f"[#4caf50]{bar}[/#4caf50]" if HAS_RICH and CONSOLE else bar
+            if HAS_RICH and CONSOLE:
+                coloured = []
+                for idx, char in enumerate(bar_chars):
+                    if smoothed_clipped_flags[idx]:
+                        coloured.append(f"[yellow]{char}[/yellow]")
+                    else:
+                        coloured.append(f"[#4caf50]{char}[/#4caf50]")
+                display = "".join(coloured)
+            else:
+                display = bar
         else:
-            rows_output: List[str] = []
+            amplitude_row_count = max(1, rows - 1)
+            amplitude_rows: List[List[str]] = []
 
-            for row_idx in range(rows):
+            for row_idx in range(amplitude_row_count):
                 row_chars: List[str] = []
-                min_threshold = row_idx / rows
-                max_threshold = (row_idx + 1) / rows
+                min_threshold = row_idx / amplitude_row_count
+                max_threshold = (row_idx + 1) / amplitude_row_count
                 glyphs = "▁▂▃▄▅▆▇█"
                 glyph_count = len(glyphs) - 1
 
@@ -307,14 +335,39 @@ class LongFormTranscriber:
                         glyph_index = min(glyph_count, int(round(row_level * glyph_count)))
                         row_chars.append(glyphs[glyph_index])
 
-                rows_output.append("".join(row_chars))
+                amplitude_rows.append(row_chars)
 
-            rows_output.reverse()
+            amplitude_rows.reverse()
+
+            indicator_row = [
+                "▁" if smoothed_clipped_flags[col_idx] else " "
+                for col_idx in range(len(smoothed_levels))
+            ]
 
             if HAS_RICH and CONSOLE:
-                display = "\n".join(f"[#4caf50]{row}[/#4caf50]" for row in rows_output)
+                coloured_rows: List[str] = []
+                if any(char != " " for char in indicator_row):
+                    coloured_indicator = "".join(
+                        "[yellow]▁[/yellow]" if char == "▁" else " "
+                        for char in indicator_row
+                    )
+                    coloured_rows.append(coloured_indicator)
+
+                for row_chars in amplitude_rows:
+                    coloured_rows.append(
+                        "".join(
+                            f"[#4caf50]{char}[/#4caf50]" if char != " " else " "
+                            for char in row_chars
+                        )
+                    )
+
+                display = "\n".join(coloured_rows) if coloured_rows else ""
             else:
-                display = "\n".join(rows_output)
+                lines: List[str] = []
+                if any(char != " " for char in indicator_row):
+                    lines.append("".join(indicator_row))
+                lines.extend("".join(row) for row in amplitude_rows)
+                display = "\n".join(lines)
 
         with self._waveform_lock:
             self._latest_waveform = display
@@ -347,21 +400,21 @@ class LongFormTranscriber:
                 rms = math.sqrt(sum_sq / len(samples))
 
             level = min(1.0, rms / 32768.0)
-
-            if level > self._waveform_amplitude_threshold:
-                return
         except Exception:
             return
 
         now = time.monotonic()
+        adjusted_level = min(level, self._waveform_amplitude_threshold)
+
         with self._waveform_lock:
             if self._waveform_samples and now < self._waveform_samples[-1][0]:
                 self._waveform_samples.clear()
-            self._waveform_samples.append((now, level))
+            self._waveform_samples.append((now, adjusted_level))
             cutoff = now - self._waveform_window_seconds
             while self._waveform_samples and self._waveform_samples[0][0] < cutoff:
                 self._waveform_samples.popleft()
             self._waveform_last_update = now
+            self._waveform_scale_last_update = now
 
     def _safe_clipboard_copy(self, text: str) -> bool:
         """Safely copy text to clipboard with error handling."""
