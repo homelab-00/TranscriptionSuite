@@ -551,13 +551,8 @@ class SystemUtils:
         if HAS_RICH and Panel is not None and Live is not None:
             panel_content = (
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
-                "Control the system using these hotkeys:\n"
-                "  [cyan]F1[/cyan]:  Open configuration dialogue box\n"
-                "  [cyan]F2[/cyan]:  Toggle real-time transcription\n"
-                "  [cyan]F3[/cyan]:  Start long-form recording\n"
-                "  [cyan]F4[/cyan]:  Stop long-form recording and transcribe\n"
-                "  [cyan]F10[/cyan]: Run static file transcription\n"
-                "  [cyan]F7[/cyan]:  Quit application\n\n"
+                f"[bold yellow]Control[/bold yellow] the system by clicking "
+                f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
                 f"  Long Form: {self.config['longform']['language']}\n"
                 f"  Real-time: {self.config['realtime']['language']}\n"
