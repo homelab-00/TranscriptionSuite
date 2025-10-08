@@ -1,33 +1,33 @@
-# TranscriptionSuite - Speech-to-Text System
+# Speech-to-Text Orchestrator
 
-A sophisticated speech-to-text transcription system that provides long-form 
-dictation capabilities with system tray integration. This project leverages 
-Faster Whisper models for high-quality transcription and provides a seamless 
-workflow for converting speech to text with automatic clipboard integration. 
-The primary focus is on long-form transcription, allowing you to record extended 
-audio sessions and receive accurate transcriptions that are automatically pasted 
-into your clipboard.
+A focused, high-performance speech-to-text application for long-form dictation,
+controlled entirely from the system tray. It uses Faster Whisper models to
+provide high-quality transcriptions that are automatically copied to the clipboard,
+ready to be pasted anywhere.
 
 ### Key Features
 
-- **Long-form Transcription**: Record extended speech sessions with manual start/stop control
-- **System Tray Integration**: Control all functionality through a clean system tray icon interface
-- **Automatic Clipboard Integration**: Transcribed text is automatically copied and pasted to your active window # Not working in Linux yet
-- **GPU Acceleration**: Utilizes CUDA for fast transcription processing
-- **Multi-language Support**: Supports all Whisper language codes for transcription
-- **Visual Feedback**: Color-coded tray icon shows current system state (loading, standby, recording, transcribing, error)
+- **Long-form Transcription**: Record extended speech sessions with manual start/stop control.
+- **Mini Real-time Preview**: See a live preview of your transcription as you speak.
+- **System Tray Integration**: Control all functionality through a simple system tray icon.
+- **Instant Responsiveness**: The transcription model is loaded at startup and remains in memory, eliminating delays when starting a recording.
+- **Clipboard Integration**: Transcribed text is automatically copied to your clipboard.
+- **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
+- **Multi-language Support**: Supports all Whisper-compatible language codes.
 
 ### Architecture
 
-The system consists of several interconnected modules:
+The system is built around a central orchestrator that manages a single,
+persistent `LongFormTranscriber` instance. At startup, the main transcription
+model and the mini real-time preview model are loaded once and remain in GPU
+memory for the entire application lifecycle. This ensures immediate
+responsiveness and efficient resource use.
 
-- **Orchestrator** (`orchestrator.py`): The main controller that coordinates all modules
-- **Long-form Module** (`longform_module.py`): Handles extended recording and transcription using RealtimeSTT
-- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface
-- **Model Manager** (`model_manager.py`): Manages Whisper model loading and resource optimization
-- **Configuration Dialog** (`configuration_dialog_box_module.py`): Tkinter-based settings interface
-- **Static Module** (`static_module.py`): File transcription capabilities (not in active development)
-- **Realtime Module** (`realtime_module.py`): Real-time transcription (not in active development)
+- **Orchestrator** (`orchestrator.py`): The main controller that wires the UI to the transcriber.
+- **Long-form Module** (`longform_module.py`): Handles extended recording and transcription using RealtimeSTT.
+- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
+- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instance.
+- **System Utilities** (`system_utils.py`): Provides a terminal-based configuration editor and system info display.
 
 ## System Requirements
 
@@ -170,7 +170,6 @@ pip install RealtimeSTT --no-deps
 pip install pyaudio
 pip install PyQt6
 pip install pillow
-pip install keyboard
 pip install pyperclip
 pip install webrtcvad
 pip install rich
@@ -203,19 +202,28 @@ Note the index number of your preferred microphone.
 ### Step 2: Configure config.json
 
 Edit the `SCRIPT/config.json` file and update the `input_device_index` 
-for both longform and realtime sections:
+for the `longform` and `mini_realtime` sections. Set `use_default_input` to
+`false` if you are specifying a device index.
 
 ```json
 {
+    "mini_realtime": {
+        "enabled": true,
+        "language": "el",
+        "input_device_index": 21,
+        "use_default_input": false
+    },
     "longform": {
         "model": "Systran/faster-whisper-large-v3",
-        "language": "en",
-        "input_device_index": 21,  // Your microphone index here
+        "language": "el",
+        "input_device_index": 21,
         "use_default_input": false,
         // ... other settings
     }
 }
 ```
+For a full list of available settings, refer to the `load_or_create_config`
+function in `SCRIPT/system_utils.py`.
 
 ### Language Configuration
 
@@ -268,9 +276,8 @@ All controls are accessed through the system tray icon:
 **Right-click** on the tray icon: Open context menu with options:
 - Start Recording
 - Stop Recording
-- Reset (abort current operation)     # Currently not working feature
-- Configuration (opens settings dialog)
-- Transcribe File... (for static file transcription)
+- Reset (abort current operation)
+- Configuration (opens the terminal-based settings editor)
 - Quit
 
 ### Workflow Example
@@ -279,7 +286,7 @@ All controls are accessed through the system tray icon:
 2. Left-click the tray icon to start recording (icon turns yellow)
 3. Speak your content
 4. Middle-click to stop and transcribe (icon turns orange during processing)
-5. The transcribed text is automatically pasted at your cursor position
+5. The transcribed text is copied to your clipboard so you can paste it wherever you need it
 
 ## Architecture Details
 
@@ -302,6 +309,9 @@ If the application can't access your microphone:
 1. Re-run `list_audio_devices.py` to confirm the device index
 2. Check system audio permissions
 3. Verify no other application is exclusively using the microphone
+4. The app now suppresses noisy ALSA/PortAudio warnings by default; if you need
+     to debug low-level audio problems, launch with `TSUITE_DEBUG_AUDIO=1` to
+     restore the verbose backend logs.
 
 ### Model Loading Issues
 

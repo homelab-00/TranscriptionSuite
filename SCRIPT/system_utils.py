@@ -8,6 +8,7 @@ This module:
 - Contains utility functions for system interactions
 """
 
+import copy
 import json
 import logging
 import os
@@ -66,12 +67,6 @@ except ImportError:
     Panel = None
     Live = None
 
-try:
-    from configuration_dialog_box_module import ConfigurationDialog
-except ImportError:
-    ConfigurationDialog = None
-
-
 def safe_print(message, style="default"):
     """Print function that handles I/O errors gracefully with optional styling."""
     try:
@@ -110,19 +105,14 @@ class SystemUtils:
         """Load configuration from file or create it if it doesn't exist."""
         # Define default configuration with full model names and English language
         default_config = {
-            "realtime": {
+            "mini_realtime": {
+                "enabled": True,
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
                 "compute_type": "default",
                 "device": self.platform_manager.get_optimal_device_config()["device"],
                 "input_device_index": None,
                 "use_default_input": True,
-                # This flag controls whether the application will dynamically detect and use
-                # the system's current default input device (when set to True) or use a fixed
-                # device specified by input_device_index (when set to False). When True, the
-                # application will automatically use whichever audio input device is currently
-                # selected as the default in Windows Sound settings, enabling on-the-fly
-                # device switching without restarting the application.
                 "gpu_device_index": 0,
                 "silero_sensitivity": 0.4,
                 "silero_use_onnx": False,
@@ -167,17 +157,6 @@ class SystemUtils:
                 "beam_size": 5,
                 "initial_prompt": None,
                 "allowed_latency_limit": 100,
-            },
-            "static": {
-                "model": "Systran/faster-whisper-large-v3",
-                "language": "en",
-                "compute_type": "float16",
-                "device": self.platform_manager.get_optimal_device_config()["device"],
-                # Keep static compute_type as float16 if CUDA is available, otherwise float32
-                "gpu_device_index": 0,
-                "beam_size": 5,
-                "batch_size": 16,
-                "vad_aggressiveness": 2,
             },
         }
 
@@ -242,43 +221,137 @@ class SystemUtils:
             logging.error("Error saving configuration: %s", exception)
             return False
 
-    def open_config_dialog(self, config_updated_callback=None):
-        """Open the configuration dialog."""
-        safe_print("Opening configuration dialog...", "info")
+    def _convert_input_value(self, original_value: Any, raw_value: str) -> Any:
+        """Convert a user-entered string to the type of the original value."""
+        if raw_value.lower() == "none":
+            return None
 
-        if not ConfigurationDialog:
-            logging.error("Configuration dialog module not found.")
-            return False
+        if isinstance(original_value, bool):
+            return raw_value.strip().lower() in {"1", "true", "yes", "y"}
+
+        if isinstance(original_value, int) and not isinstance(original_value, bool):
+            try:
+                return int(raw_value)
+            except ValueError:
+                safe_print("Invalid integer. Keeping previous value.", "warning")
+                return original_value
+
+        if isinstance(original_value, float):
+            try:
+                return float(raw_value)
+            except ValueError:
+                safe_print("Invalid float. Keeping previous value.", "warning")
+                return original_value
+
+        if isinstance(original_value, (list, dict)):
+            try:
+                return json.loads(raw_value)
+            except json.JSONDecodeError:
+                safe_print("Invalid JSON. Keeping previous value.", "warning")
+                return original_value
+
+        return raw_value
+
+    def open_config_dialog(self, config_updated_callback=None):
+        """Open an interactive terminal-based configuration editor."""
+        safe_print("Opening configuration editor...", "info")
 
         try:
-            # Create and show the dialog
-            dialog = ConfigurationDialog(
-                config_file_path=self.config_path,
-                callback=config_updated_callback,
-            )
-
-            result = dialog.show_dialog()
-
-            # If the user clicked Apply
-            if result:
-                logging.info("Configuration dialog closed with Apply")
-                # Reload the configuration
-                if os.path.exists(self.config_path):
-                    with open(
-                        self.config_path, "r", encoding="utf-8"
-                    ) as config_file:
-                        self.config = json.load(config_file)
-            else:
-                logging.info("Configuration dialog closed without saving")
-
-            return result
-
-        except (ImportError, OSError) as exception:
-            logging.error("Error opening configuration dialog: %s", exception)
-            safe_print(
-                f"Error opening configuration dialog: {exception}", "error"
-            )
+            current_config = self.load_or_create_config()
+        except Exception as exception:
+            logging.error("Failed to load configuration: %s", exception)
+            safe_print("Failed to load configuration.", "error")
             return False
+
+        if not isinstance(current_config, dict) or not current_config:
+            safe_print("Configuration is empty or invalid.", "error")
+            return False
+
+        editable_config = copy.deepcopy(current_config)
+        changes_made = False
+
+        try:
+            while True:
+                sections = ", ".join(editable_config.keys())
+                safe_print(f"Available sections: {sections}")
+                safe_print("Press Enter to finish editing or type 'cancel' to abort.", "info")
+                section = input("Section to edit: ").strip()
+
+                if section == "":
+                    break
+
+                if section.lower() == "cancel":
+                    safe_print("Configuration editing cancelled.", "warning")
+                    return False
+
+                if section not in editable_config:
+                    safe_print(f"Unknown section '{section}'.", "warning")
+                    continue
+
+                section_config = editable_config[section]
+                if not isinstance(section_config, dict):
+                    safe_print(f"Section '{section}' is not editable.", "warning")
+                    continue
+
+                while True:
+                    safe_print(
+                        "Press Enter to return to section selection or type 'cancel' to abort.",
+                        "info",
+                    )
+                    for key, value in section_config.items():
+                        safe_print(f"  {key}: {value!r}")
+
+                    parameter = input("Parameter to edit: ").strip()
+
+                    if parameter == "":
+                        break
+
+                    if parameter.lower() == "cancel":
+                        safe_print("Configuration editing cancelled.", "warning")
+                        return False
+
+                    if parameter not in section_config:
+                        safe_print(f"Unknown parameter '{parameter}'.", "warning")
+                        continue
+
+                    current_value = section_config[parameter]
+                    prompt = (
+                        f"New value for '{parameter}' (current {current_value!r}). "
+                        "Leave blank to keep current value: "
+                    )
+                    raw_value = input(prompt).strip()
+
+                    if raw_value == "":
+                        safe_print("No changes made.", "info")
+                        continue
+
+                    new_value = self._convert_input_value(current_value, raw_value)
+                    section_config[parameter] = new_value
+                    safe_print(
+                        f"Updated {section}.{parameter} -> {new_value!r}", "success"
+                    )
+                    changes_made = True
+
+        except (EOFError, KeyboardInterrupt):
+            safe_print("Configuration editing interrupted.", "warning")
+            return False
+
+        if not changes_made:
+            safe_print("No configuration changes to save.", "info")
+            return False
+
+        self.config = editable_config
+
+        if not self.save_config():
+            safe_print("Failed to save configuration.", "error")
+            return False
+
+        safe_print("Configuration saved.", "success")
+
+        if config_updated_callback:
+            config_updated_callback(copy.deepcopy(self.config))
+
+        return True
 
     def get_version_info(self) -> Dict[str, Dict[str, Any]]:
         """Get version information for key dependencies and check for updates."""
@@ -554,9 +627,8 @@ class SystemUtils:
                 f"[bold yellow]Control[/bold yellow] the system by clicking "
                 f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
-                f"  Long Form: {self.config['longform']['language']}\n"
-                f"  Real-time: {self.config['realtime']['language']}\n"
-                f"  Static: {self.config['static']['language']}\n\n"
+                f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}\n"
+                f"  Mini Real-time: {self.config.get('mini_realtime', {}).get('language', 'N/A')}\n\n"
                 f"[bold yellow]Python Versions:[/bold yellow]\n"
                 f"  Python: {sys.version.split()[0]}\n"
                 f"  PyTorch: {format_version('torch')}\n"
@@ -594,10 +666,8 @@ class SystemUtils:
             safe_print("  F10: Run static file transcription")
             safe_print("  F7: Quit application")
             safe_print("=" * 50)
-            safe_print("Selected Languages:")
-            safe_print(f"  Long Form: {self.config['longform']['language']}")
-            safe_print(f"  Real-time: {self.config['realtime']['language']}")
-            safe_print(f"  Static: {self.config['static']['language']}")
+            safe_print("Selected Language:")
+            safe_print(f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}")
             safe_print("=" * 50)
             safe_print("Versions:")
             safe_print(f"  PyTorch: {format_version('torch')}")

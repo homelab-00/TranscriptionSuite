@@ -179,9 +179,8 @@ class ModelManager:
             return self.modules[module_name]
 
         module_paths = {
-            "realtime": "realtime_module.py",
+            "mini_realtime": "realtime_module.py",
             "longform": "longform_module.py",
-            "static": "static_module.py",
         }
 
         filepath = os.path.join(
@@ -189,7 +188,6 @@ class ModelManager:
         )
 
         try:
-            # First check if the file exists
             if not os.path.exists(filepath):
                 self._log_error("Module file not found: %s", filepath)
                 return None
@@ -202,12 +200,9 @@ class ModelManager:
                 return None
 
             module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = (
-                module  # Add to sys.modules to avoid import errors
-            )
+            sys.modules[module_name] = module
             spec.loader.exec_module(module)
 
-            # Store the imported module
             self.modules[module_name] = module
             self._log_info("Successfully imported module: %s", module_name)
             return module
@@ -216,6 +211,105 @@ class ModelManager:
                 "Error importing %s from %s: %s", module_name, filepath, e
             )
             return None
+
+    def _resolve_input_device_index(self, module_config, fallback=None):
+        """Resolve the audio input device index honoring default-device flags."""
+        use_default = module_config.get("use_default_input", True)
+ 
+        if use_default:
+            default_index = self.get_default_input_device_index()
+            if default_index is not None:
+                return default_index
+            return fallback # Fallback if default cannot be found
+
+        explicit_index = module_config.get("input_device_index")
+        if explicit_index is not None:
+            return explicit_index
+
+        return fallback
+
+    def _prepare_mini_realtime_config(
+        self,
+        mini_config,
+        fallback_input_index,
+        fallback_device,
+        longform_config,
+    ):
+        """Build a recorder-ready configuration for the mini real-time preview."""
+
+        if not isinstance(mini_config, dict):
+            return None
+
+        prepared_config = {}
+
+        realtime_defaults = self.config.get("mini_realtime") # Base on its own defaults
+        if isinstance(realtime_defaults, dict):
+            prepared_config.update(realtime_defaults)
+
+        if isinstance(longform_config, dict):
+            for key, value in longform_config.items():
+                prepared_config.setdefault(key, value)
+
+        prepared_config.update(mini_config)
+
+        resolved_device = self._get_optimal_device(prepared_config)
+        prepared_config["device"] = (
+            resolved_device if resolved_device is not None else fallback_device
+        )
+
+        prepared_config["compute_type"] = self._get_optimal_compute_type(
+            prepared_config,
+            prepared_config["device"],
+        )
+
+        resolved_input_index = self._resolve_input_device_index(
+            prepared_config,
+            fallback_input_index,
+        )
+
+        if resolved_input_index is not None:
+            prepared_config["input_device_index"] = resolved_input_index
+        else:
+            prepared_config.pop("input_device_index", None)
+
+        prepared_config.pop("use_default_input", None)
+
+        if "gpu_device_index" not in prepared_config:
+            prepared_config["gpu_device_index"] = (
+                (longform_config or {}).get("gpu_device_index", 0)
+            )
+
+        prepared_config["enabled"] = prepared_config.get("enabled", True)
+
+        return prepared_config
+
+    def _initialize_mini_realtime_transcriber(
+        self, module, module_config, preinitialized_model
+    ):
+        """Initialise the mini real-time transcriber."""
+        safe_print("Initializing mini real-time transcriber...", "info")
+
+        longform_defaults = self.config.get("longform", {})
+        minirt_config = self._prepare_mini_realtime_config(
+            module_config,
+            fallback_input_index=None,
+            fallback_device=None,
+            longform_config=longform_defaults,
+        )
+
+        if not minirt_config:
+            safe_print(
+                "Mini real-time configuration missing or invalid. Skipping warmup.",
+                "warning",
+            )
+            return None
+
+        # This function is now a placeholder. The actual initialization happens
+        # inside the LongFormTranscriber. We just need to ensure the model
+        # can be loaded, which is done by LongFormTranscriber's own initialization.
+        # We return a placeholder or True to signal success to the orchestrator.
+        # The real object is stored inside the longform transcriber.
+        return True
 
     def get_default_input_device_index(self):
         """Get the index of the default input device with better error handling."""
@@ -292,100 +386,6 @@ class ModelManager:
             self._log_error(f"Error getting default input device: {e}")
             return None
 
-    def _get_reusable_model(self, current_model_name):
-        """Get a reusable model if available."""
-        for model_type, model_info in self.loaded_models.items():
-            if model_info["name"] == current_model_name:
-                safe_print(
-                    f"Reusing already loaded {model_type} model",
-                    "success",
-                )
-                return self._extract_model_from_transcriber(
-                    model_info, model_type
-                )
-        return None
-
-    def _extract_model_from_transcriber(self, model_info, model_type):
-        """Extract model from existing transcriber based on type."""
-        transcriber = model_info["transcriber"]
-
-        if model_type in ("longform", "realtime"):
-            if hasattr(transcriber, "recorder") and transcriber.recorder:
-                return True  # Flag that we're reusing
-        elif model_type == "static":
-            if hasattr(transcriber, "whisper_model"):
-                return transcriber.whisper_model
-        return None
-
-    def _initialize_realtime_transcriber(
-        self, module, module_config, preinitialized_model
-    ):
-        """Initialize realtime transcriber with configuration."""
-        safe_print("Initializing real-time transcriber...", "info")
-        
-        # Get device and compute type
-        device = self._get_optimal_device(module_config)
-        compute_type = self._get_optimal_compute_type(module_config, device)
-        
-        # Force disable real-time preview functionality
-        module_config["enable_realtime_transcription"] = False
-
-        return module.LongFormTranscriber(
-            model=module_config.get("model", "Systran/faster-whisper-large-v3"),
-            language=module_config.get("language", "en"),
-            compute_type=compute_type,
-            device=device,
-            input_device_index=(
-                self.get_default_input_device_index()
-                if module_config.get("use_default_input", True)
-                else module_config.get("input_device_index")
-            ),
-            gpu_device_index=module_config.get("gpu_device_index", 0),
-            silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
-            silero_use_onnx=module_config.get("silero_use_onnx", False),
-            silero_deactivity_detection=module_config.get(
-                "silero_deactivity_detection", False
-            ),
-            webrtc_sensitivity=module_config.get("webrtc_sensitivity", 3),
-            post_speech_silence_duration=module_config.get(
-                "post_speech_silence_duration", 0.6
-            ),
-            min_length_of_recording=module_config.get(
-                "min_length_of_recording", 1.0
-            ),
-            min_gap_between_recordings=module_config.get(
-                "min_gap_between_recordings", 1.0
-            ),
-            pre_recording_buffer_duration=module_config.get(
-                "pre_recording_buffer_duration", 0.2
-            ),
-            ensure_sentence_starting_uppercase=module_config.get(
-                "ensure_sentence_starting_uppercase", True
-            ),
-            ensure_sentence_ends_with_period=module_config.get(
-                "ensure_sentence_ends_with_period", True
-            ),
-            batch_size=module_config.get("batch_size", 16),
-            beam_size=module_config.get("beam_size", 5),
-            beam_size_realtime=module_config.get("beam_size_realtime", 3),
-            initial_prompt=module_config.get("initial_prompt"),
-            allowed_latency_limit=module_config.get(
-                "allowed_latency_limit", 100
-            ),
-            early_transcription_on_silence=module_config.get(
-                "early_transcription_on_silence", 0
-            ),
-            enable_realtime_transcription=False,
-            realtime_processing_pause=module_config.get(
-                "realtime_processing_pause", 0.2
-            ),
-            realtime_model_type=module_config.get(
-                "realtime_model_type", "tiny.en"
-            ),
-            realtime_batch_size=module_config.get("realtime_batch_size", 16),
-            preinitialized_model=preinitialized_model,
-        )
-
     def _initialize_longform_transcriber(
         self, module, module_config, preinitialized_model
     ):
@@ -396,16 +396,25 @@ class ModelManager:
         device = self._get_optimal_device(module_config)
         compute_type = self._get_optimal_compute_type(module_config, device)
 
+        resolved_input_index = self._resolve_input_device_index(module_config)
+
+        # Derive mini real-time preview configuration from dedicated settings
+        mini_realtime_settings = None
+        config_mini = self.config.get("mini_realtime")
+        if isinstance(config_mini, dict):
+            mini_realtime_settings = self._prepare_mini_realtime_config(
+                config_mini,
+                resolved_input_index,
+                device,
+                module_config,
+            )
+
         return module.LongFormTranscriber(
             model=module_config.get("model", "Systran/faster-whisper-large-v3"),
             language=module_config.get("language", "en"),
             compute_type=compute_type,
             device=device,
-            input_device_index=(
-                self.get_default_input_device_index()
-                if module_config.get("use_default_input", True)
-                else module_config.get("input_device_index")
-            ),
+            input_device_index=resolved_input_index,
             gpu_device_index=module_config.get("gpu_device_index", 0),
             silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
             silero_use_onnx=module_config.get("silero_use_onnx", False),
@@ -437,27 +446,8 @@ class ModelManager:
             allowed_latency_limit=module_config.get(
                 "allowed_latency_limit", 100
             ),
-            preload_model=True,
             preinitialized_model=preinitialized_model,
-        )
-
-    def _initialize_static_transcriber(
-        self, module, module_config, preinitialized_model
-    ):
-        """Initialize static transcriber with configuration."""
-        safe_print("Initializing static file transcriber...", "info")
-
-        return module.DirectFileTranscriber(
-            use_tk_mainloop=False,
-            model=module_config.get("model", "Systran/faster-whisper-large-v3"),
-            language=module_config.get("language", "en"),
-            compute_type=module_config.get("compute_type", "float16"),
-            device=self._get_optimal_device(module_config),
-            device_index=module_config.get("gpu_device_index", 0),
-            beam_size=module_config.get("beam_size", 5),
-            batch_size=module_config.get("batch_size", 16),
-            vad_aggressiveness=module_config.get("vad_aggressiveness", 2),
-            preinitialized_model=preinitialized_model,
+            mini_realtime_config=mini_realtime_settings,
         )
 
     def initialize_transcriber(self, module_type):
@@ -480,13 +470,12 @@ class ModelManager:
             current_model_name = module_config.get(
                 "model", "Systran/faster-whisper-large-v3"
             )
-            preinitialized_model = self._get_reusable_model(current_model_name)
+            preinitialized_model = None # No reuse logic anymore
 
             # Initialize based on module type
             transcriber_initializers = {
-                "realtime": self._initialize_realtime_transcriber,
+                "mini_realtime": self._initialize_mini_realtime_transcriber,
                 "longform": self._initialize_longform_transcriber,
-                "static": self._initialize_static_transcriber,
             }
 
             if module_type in transcriber_initializers:
@@ -507,7 +496,8 @@ class ModelManager:
                 "%s transcriber initialized successfully",
                 module_type.capitalize(),
             )
-            self.current_loaded_model_type = module_type
+            if module_type != "mini_realtime":
+                self.current_loaded_model_type = module_type
             return self.transcribers[module_type]
 
         except (ImportError, AttributeError, ValueError, OSError) as e:
@@ -515,25 +505,6 @@ class ModelManager:
                 "Error initializing %s transcriber: %s", module_type, e
             )
             return None
-
-    def can_reuse_model(self, target_mode):
-        """Check if we can reuse the currently loaded model for the target mode."""
-        if not self.current_loaded_model_type:
-            return False
-
-        current_model = self.config[self.current_loaded_model_type].get("model")
-        target_model = self.config[target_mode].get("model")
-
-        if current_model == target_model:
-            self._log_info(
-                "Can reuse %s model for %s (both using %s)",
-                self.current_loaded_model_type,
-                target_mode,
-                current_model,
-            )
-            return True
-
-        return False
 
     def _cleanup_recorder(self, transcriber):
         """Clean up recorder resources."""
@@ -576,75 +547,17 @@ class ModelManager:
                 # Restore stdout
                 sys.stdout = original_stdout
 
-    def unload_current_model(self):
-        """Unload the currently loaded model to free up memory more aggressively."""
-        if not self.current_loaded_model_type:
-            return
-
-        try:
-            self._log_info(
-                "Aggressively unloading %s model...",
-                self.current_loaded_model_type,
-            )
-            safe_print(
-                f"Unloading {self.current_loaded_model_type} model...", "info"
-            )
-
-            if self.current_loaded_model_type in self.transcribers:
-                transcriber = self.transcribers[self.current_loaded_model_type]
-
-                # Handle different transcribers differently with more aggressive cleanup
-                if self.current_loaded_model_type == "realtime":
-                    self._cleanup_recorder(transcriber)
-
-                elif self.current_loaded_model_type == "longform":
-                    self._cleanup_recorder(transcriber)
-                    if hasattr(transcriber, "recorder"):
-                        transcriber.recorder = None
-
-                elif self.current_loaded_model_type == "static":
-                    if hasattr(transcriber, "whisper_model"):
-                        # Explicitly delete the model
-                        del transcriber.whisper_model
-                        transcriber.whisper_model = None
-
-                # Remove from transcribers dictionary to ensure complete cleanup
-                self.transcribers[self.current_loaded_model_type] = None
-
-                # Remove from loaded_models dictionary
-                if self.current_loaded_model_type in self.loaded_models:
-                    del self.loaded_models[self.current_loaded_model_type]
-
-                self._log_info(
-                    "Successfully unloaded %s model",
-                    self.current_loaded_model_type,
-                )
-
-            # Clear the tracking variable
-            self.current_loaded_model_type = None
-
-            # Force garbage collection multiple times to ensure memory is freed
-            gc.collect()
-            gc.collect()  # Second collection often helps with circular references
-
-            # Release CUDA memory if available
-            cuda_info = self.platform_manager.check_cuda_availability()
-            if cuda_info["available"] and HAS_TORCH and torch is not None:
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()  # Ensure all operations complete
-                self._log_info("CUDA cache emptied and synchronized")
-
-        except (AttributeError, OSError) as e:
-            self._log_error("Error unloading model: %s", e)
-
     def cleanup_all_models(self):
         """Properly clean up all loaded models and transcribers."""
-        # First, try to unload the current model
-        if self.current_loaded_model_type:
-            self.unload_current_model()
-            time.sleep(0.5)  # Give it time to release resources
+        # Now we only ever have one primary transcriber: longform
+        longform_transcriber = self.transcribers.get("longform")
+        if longform_transcriber:
+            safe_print("Cleaning up long-form transcriber...", "info")
+            if hasattr(longform_transcriber, "clean_up"):
+                longform_transcriber.clean_up()
+            self.transcribers["longform"] = None
 
-        # Clean up any remaining resources
+        # Clean up any other remaining resources just in case
         for module_type, transcriber in list(self.transcribers.items()):
             try:
                 if transcriber is not None:
@@ -652,17 +565,9 @@ class ModelManager:
                         f"Final cleanup of {module_type} transcriber...", "info"
                     )
 
-                    if module_type == "realtime":
-                        if hasattr(transcriber, "stop"):
-                            transcriber.stop()
-
-                    elif module_type == "longform":
+                    if module_type == "longform":
                         if hasattr(transcriber, "clean_up"):
                             transcriber.clean_up()
-
-                    elif module_type == "static":
-                        if hasattr(transcriber, "cleanup"):
-                            transcriber.cleanup()
 
                     # Remove the reference
                     self.transcribers[module_type] = None
