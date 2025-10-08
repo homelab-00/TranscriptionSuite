@@ -28,7 +28,6 @@ class TrayIconManager:
                  stop_callback: Optional[Callable] = None,
                  quit_callback: Optional[Callable] = None,
                  open_config_callback: Optional[Callable] = None,
-                 run_static_callback: Optional[Callable] = None,
                  reset_callback: Optional[Callable] = None):
         """
         Initialize the TrayIconManager.
@@ -39,7 +38,6 @@ class TrayIconManager:
             stop_callback: Function to call on right-click.
             quit_callback: A function to call to quit.
             open_config_callback: Function to open the config dialog.
-            run_static_callback: Function to run static transcription.
             reset_callback: Function to reset the current operation.
         """
         if not HAS_PYQT:
@@ -65,7 +63,6 @@ class TrayIconManager:
         self.stop_callback = stop_callback
         self.quit_callback = quit_callback
         self.open_config_callback = open_config_callback
-        self.run_static_callback = run_static_callback
         self.reset_callback = reset_callback
 
         self._setup_context_menu()
@@ -106,11 +103,6 @@ class TrayIconManager:
             config_action = menu.addAction("Configuration")
             if config_action:
                 config_action.triggered.connect(self.open_config_callback)
-        
-        if self.run_static_callback:
-            static_action = menu.addAction("Transcribe File...")
-            if static_action:
-                static_action.triggered.connect(self.run_static_callback)
 
         menu.addSeparator()
 
