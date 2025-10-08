@@ -162,9 +162,9 @@ class DependencyChecker:
     def _check_external_executables(self) -> Dict[str, Dict]:
         """Check availability of external executables."""
         executables = {
-            'ffmpeg': {
-                'required': True,
-                'description': 'Audio/video processing for static transcription',
+            'ffmpeg': { # Kept for potential future use or user convenience, but not critical
+                'required': False,
+                'description': 'Optional: Audio/video processing utilities',
                 'install_hint': self._get_ffmpeg_install_hint()
             }
         }

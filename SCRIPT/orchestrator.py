@@ -86,7 +86,6 @@ class STTOrchestrator:
                 stop_callback=self._stop_longform,
                 quit_callback=self._quit,
                 open_config_callback=self._open_config_dialog,
-                run_static_callback=self._run_static,
                 reset_callback=self._reset_longform,
             )
         else:
@@ -154,103 +153,53 @@ class STTOrchestrator:
         logging.info("Configuration updated")
         self.config = new_config
         self.model_manager.config = new_config
+        reload_successful = False
 
-        # If any transcribers are active, inform the user about restart
-        if self.app_state["current_mode"]:
-            safe_print(
-                "Configuration updated. Changes will take effect after "
-                "restarting transcribers."
+        if self.tray_manager:
+            self.tray_manager.set_state("loading")
+
+        try:
+            if "longform" in self.model_manager.transcribers:
+                self.model_manager.transcribers["longform"] = None
+
+            longform_transcriber = self.model_manager.initialize_transcriber("longform")
+            if longform_transcriber:
+                reload_successful = True
+            else:
+                reload_successful = False
+
+        except Exception as error:
+            logging.error(
+                "Error reloading long-form model after configuration update: %s",
+                error,
             )
+            safe_print(
+                "Configuration saved but reloading the long-form model failed."
+                " Check the logs for details.",
+                "error",
+            )
+            reload_successful = False
+
+        if self.tray_manager:
+            self.tray_manager.set_state("standby" if reload_successful else "error")
+
+        if reload_successful:
+            safe_print("Configuration updated. Long-form model reloaded.", "success")
         else:
-            safe_print("Configuration updated successfully.")
+            safe_print(
+                "Long-form model reload was unsuccessful. Please review the configuration.",
+                "warning",
+            )
 
     def _open_config_dialog(self):
         """Open the configuration dialog."""
-        if self.app_state["current_mode"]:
+        if self.app_state["current_mode"] is not None:
             safe_print(
-                f"Warning: Transcription in {self.app_state['current_mode']} mode is active."
-            )
-        self.system_utils.open_config_dialog(self._config_updated)
-
-    def _toggle_realtime(self):
-        """Toggle real-time transcription on/off."""
-        # This function can remain for the context menu, but is no longer a primary control
-        if (
-            self.app_state["current_mode"]
-            and self.app_state["current_mode"] != "realtime"
-        ):
-            safe_print(
-                f"Cannot start real-time mode while in {self.app_state['current_mode']} "
-                "mode. Please finish the current operation first."
+                "Configuration can only be edited while the system is in standby.",
+                "warning",
             )
             return
-
-        if self.app_state["current_mode"] == "realtime":
-            safe_print("Stopping real-time transcription...")
-            try:
-                transcriber = self.model_manager.transcribers.get("realtime")
-                if transcriber:
-                    transcriber.running = False
-                self.app_state["current_mode"] = None
-                self.model_manager.unload_current_model()
-            except (AttributeError, KeyError, RuntimeError) as error:
-                logging.error(
-                    "Error stopping real-time transcription: %s", error
-                )
-        else:
-            try:
-                if not self.model_manager.can_reuse_model("realtime"):
-                    if (
-                        self.model_manager.current_loaded_model_type
-                        != "realtime"
-                    ):
-                        self.model_manager.unload_current_model()
-                else:
-                    safe_print(
-                        f"Reusing {self.model_manager.current_loaded_model_type} "
-                        "model for realtime",
-                        "success",
-                    )
-                transcriber = self.model_manager.initialize_transcriber(
-                    "realtime"
-                )
-                if not transcriber:
-                    safe_print(
-                        "Failed to initialize real-time transcriber.", "error"
-                    )
-                    return
-                safe_print("Starting real-time transcription...", "success")
-                self.app_state["current_mode"] = "realtime"
-                threading.Thread(target=self._run_realtime, daemon=True).start()
-            except (RuntimeError, OSError, ImportError) as error:
-                logging.error(
-                    "Error starting real-time transcription: %s", error
-                )
-                self.app_state["current_mode"] = None
-
-    def _run_realtime(self):
-        """Run real-time transcription in a separate thread."""
-        try:
-            transcriber = self.model_manager.transcribers.get("realtime")
-            if not transcriber:
-                safe_print("Realtime transcriber not available.", "error")
-                self.app_state["current_mode"] = None
-                return
-            transcriber.text_buffer = ""
-            transcriber.start()
-            logging.info("Real-time transcription stopped")
-            self.app_state["current_mode"] = None
-        except (RuntimeError, OSError, AttributeError) as error:
-            logging.error("Error in _run_realtime: %s", error)
-            try:
-                if (
-                    "realtime" in self.model_manager.transcribers
-                    and self.model_manager.transcribers["realtime"]
-                ):
-                    self.model_manager.transcribers["realtime"].stop()
-            except (AttributeError, RuntimeError) as cleanup_error:
-                logging.error("Error during cleanup: %s", cleanup_error)
-            self.app_state["current_mode"] = None
+        self.system_utils.open_config_dialog(self._config_updated)
 
     def _start_longform(self):
         """Start long-form recording."""
@@ -413,54 +362,6 @@ class STTOrchestrator:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _run_static(self):
-        """Run static file transcription."""
-        if self.app_state["current_mode"]:
-            safe_print(
-                f"Cannot start static mode while in {self.app_state['current_mode']} mode. "
-                "Please finish the current operation first."
-            )
-            return
-        try:
-            if not self.model_manager.can_reuse_model("static"):
-                if self.model_manager.current_loaded_model_type != "static":
-                    self.model_manager.unload_current_model()
-            else:
-                safe_print(
-                    f"Reusing {self.model_manager.current_loaded_model_type} "
-                    "model for static",
-                    "success",
-                )
-            transcriber = self.model_manager.initialize_transcriber("static")
-            if not transcriber:
-                safe_print("Failed to initialize static transcriber.", "error")
-                return
-            safe_print("Opening file selection dialog...")
-            self.app_state["current_mode"] = "static"
-            threading.Thread(
-                target=self._run_static_thread, daemon=True
-            ).start()
-        except (RuntimeError, OSError, ImportError) as error:
-            logging.error("Error starting static transcription: %s", error)
-            self.app_state["current_mode"] = None
-
-    def _run_static_thread(self):
-        """Run static transcription in a separate thread."""
-        try:
-            transcriber = self.model_manager.transcribers.get("static")
-            if not transcriber:
-                safe_print("Static transcriber not available.")
-                self.app_state["current_mode"] = None
-                return
-            transcriber.select_file()
-            while transcriber.transcribing:
-                time.sleep(0.5)
-            logging.info("Static file transcription completed")
-            self.app_state["current_mode"] = None
-        except (RuntimeError, AttributeError, OSError) as error:
-            logging.error("Error in static transcription: %s", error)
-            self.app_state["current_mode"] = None
-
     def _quit(self):
         """Stop all processes and exit with improved cleanup."""
         safe_print("Quitting application...")
@@ -481,23 +382,32 @@ class STTOrchestrator:
     # REMOVED: KDE-native hotkeys
         
         # NEW: Proactively load the longform model in a separate thread
-        def load_initial_model():
-            safe_print("Pre-loading the long-form transcription model...", "info")
+        def preload_startup_models():
             if self.tray_manager:
-                self.tray_manager.set_state("loading") # Grey icon
-            
+                self.tray_manager.set_state("loading")  # Grey icon
+
+            overall_success = True
+            safe_print("Pre-loading the long-form transcription model...", "info")
+
+            # Initialize the single long-form transcriber.
+            # This will also handle the mini real-time model internally.
             transcriber = self.model_manager.initialize_transcriber("longform")
-            # The force_initialize method will preload the model.
-            if transcriber and transcriber.force_initialize():
-                safe_print("Long-form model loaded. System is ready.", "success")
-                if self.tray_manager:
-                    self.tray_manager.set_state("standby") # Green icon
+            if not transcriber:
+                safe_print("Failed to initialise the long-form model.", "error")
+                success = False
             else:
-                safe_print("Failed to load the long-form model on startup.", "error")
-                if self.tray_manager:
-                    self.tray_manager.set_state("error") # Red icon
-        
-        threading.Thread(target=load_initial_model, daemon=True).start()
+                # The model is now loaded during the transcriber's __init__
+                # so if we get an object back, it's ready.
+                success = True
+            
+            overall_success = success
+
+            if self.tray_manager:
+                self.tray_manager.set_state(
+                    "standby" if overall_success else "error"
+                )
+
+        threading.Thread(target=preload_startup_models, daemon=True).start()
 
         self.app_state["running"] = True
 
