@@ -1,7 +1,8 @@
 {
-    "realtime": {
-        "model": "Systran/faster-whisper-large-v3",
-        "language": "en",
+    "mini_realtime": {
+        "enabled": true,
+        "model": "deepdml/faster-whisper-large-v3-turbo-ct2",
+        "language": "el",
         "compute_type": "default",
         "device": "cuda",
         "input_device_index": 21,
@@ -25,7 +26,7 @@
         "early_transcription_on_silence": 0,
         "enable_realtime_transcription": true,
         "realtime_processing_pause": 0.2,
-        "realtime_model_type": "tiny.en",
+        "realtime_model_type": "deepdml/faster-whisper-large-v3-turbo-ct2",
         "realtime_batch_size": 16
     },
     "longform": {
@@ -50,15 +51,5 @@
         "beam_size": 5,
         "initial_prompt": null,
         "allowed_latency_limit": 100
-    },
-    "static": {
-        "model": "Systran/faster-whisper-large-v3",
-        "language": "en",
-        "compute_type": "float16",
-        "device": "cuda",
-        "gpu_device_index": 0,
-        "beam_size": 5,
-        "batch_size": 16,
-        "vad_aggressiveness": 2
     }
 }
