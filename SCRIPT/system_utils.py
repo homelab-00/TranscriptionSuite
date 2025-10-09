@@ -105,36 +105,6 @@ class SystemUtils:
         """Load configuration from file or create it if it doesn't exist."""
         # Define default configuration with full model names and English language
         default_config = {
-            "mini_realtime": {
-                "enabled": True,
-                "model": "Systran/faster-whisper-large-v3",
-                "language": "en",
-                "compute_type": "default",
-                "device": self.platform_manager.get_optimal_device_config()["device"],
-                "input_device_index": None,
-                "use_default_input": True,
-                "gpu_device_index": 0,
-                "silero_sensitivity": 0.4,
-                "silero_use_onnx": False,
-                "silero_deactivity_detection": False,
-                "webrtc_sensitivity": 3,
-                "post_speech_silence_duration": 0.6,
-                "min_length_of_recording": 1.0,
-                "min_gap_between_recordings": 1.0,
-                "pre_recording_buffer_duration": 0.2,
-                "ensure_sentence_starting_uppercase": True,
-                "ensure_sentence_ends_with_period": True,
-                "batch_size": 16,
-                "beam_size": 5,
-                "beam_size_realtime": 3,
-                "initial_prompt": None,
-                "allowed_latency_limit": 100,
-                "early_transcription_on_silence": 0,
-                "enable_realtime_transcription": True,
-                "realtime_processing_pause": 0.2,
-                "realtime_model_type": "tiny.en",
-                "realtime_batch_size": 16,
-            },
             "longform": {
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
@@ -146,7 +116,7 @@ class SystemUtils:
                 "silero_sensitivity": 0.4,
                 "silero_use_onnx": False,
                 "silero_deactivity_detection": False,
-                "webrtc_sensitivity": 3,
+                "webtrtc_sensitivity": 3,
                 "post_speech_silence_duration": 0.6,
                 "min_length_of_recording": 1.0,
                 "min_gap_between_recordings": 1.0,
@@ -157,6 +127,33 @@ class SystemUtils:
                 "beam_size": 5,
                 "initial_prompt": None,
                 "allowed_latency_limit": 100,
+                "faster_whisper_vad_filter": True,
+            },
+            "realtime_preview": {
+                "model": "deepdml/faster-whisper-large-v3-turbo-ct2",
+                "realtime_model_type": "Systran/faster-whisper-base",
+                "language": "en",
+                "compute_type": "default",
+                "device": self.platform_manager.get_optimal_device_config()["device"],
+                "input_device_index": None,
+                "use_default_input": True,
+                "gpu_device_index": 0,
+                "silero_sensitivity": 0.4,
+                "silero_use_onnx": True,
+                "silero_deactivity_detection": True,
+                "webrtc_sensitivity": 3,
+                "post_speech_silence_duration": 0.6,
+                "min_length_of_recording": 1.0,
+                "min_gap_between_recordings": 1.0,
+                "pre_recording_buffer_duration": 0.2,
+                "batch_size": 16,
+                "realtime_batch_size": 16,
+                "beam_size": 5,
+                "beam_size_realtime": 3,
+                "enable_realtime_transcription": True,
+                "use_main_model_for_realtime": False,
+                "realtime_processing_pause": 0.2,
+                "faster_whisper_vad_filter": False,
             },
         }
 
@@ -196,7 +193,7 @@ class SystemUtils:
         return self.config
 
     def save_config(self) -> bool:
-        """Save current configuration to file."""
+        """Save the current configuration to a file."""
 
         # Define a function to fix None values
         def fix_none_values(obj):
@@ -628,7 +625,8 @@ class SystemUtils:
                 f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
                 f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}\n"
-                f"  Mini Real-time: {self.config.get('mini_realtime', {}).get('language', 'N/A')}\n\n"
+                f"  RT Preview: {self.config.get('realtime_preview', {}).get('language', 'N/A')}\n"
+                f"  RT Preview (Mini): {self.config.get('realtime_preview', {}).get('language', 'N/A')}\n\n"
                 f"[bold yellow]Python Versions:[/bold yellow]\n"
                 f"  Python: {sys.version.split()[0]}\n"
                 f"  PyTorch: {format_version('torch')}\n"
