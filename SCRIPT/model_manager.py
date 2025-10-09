@@ -228,58 +228,40 @@ class ModelManager:
 
         return fallback
 
-    def _prepare_mini_realtime_config(
+    def _prepare_realtime_preview_config(
         self,
-        mini_config,
+        preview_config,
         fallback_input_index,
-        fallback_device,
-        longform_config,
     ):
-        """Build a recorder-ready configuration for the mini real-time preview."""
+        """Build a recorder-ready configuration for the real-time preview."""
 
-        if not isinstance(mini_config, dict):
+        if not isinstance(preview_config, dict):
             return None
 
-        prepared_config = {}
+        # Start with a copy of the dedicated preview config
+        prepared_config = preview_config.copy()
 
-        realtime_defaults = self.config.get("mini_realtime") # Base on its own defaults
-        if isinstance(realtime_defaults, dict):
-            prepared_config.update(realtime_defaults)
-
-        if isinstance(longform_config, dict):
-            for key, value in longform_config.items():
-                prepared_config.setdefault(key, value)
-
-        prepared_config.update(mini_config)
-
+        # Resolve device and compute type based on the preview config itself
         resolved_device = self._get_optimal_device(prepared_config)
-        prepared_config["device"] = (
-            resolved_device if resolved_device is not None else fallback_device
-        )
-
+        prepared_config["device"] = resolved_device
         prepared_config["compute_type"] = self._get_optimal_compute_type(
             prepared_config,
-            prepared_config["device"],
+            resolved_device,
         )
 
+        # Resolve input device
         resolved_input_index = self._resolve_input_device_index(
             prepared_config,
             fallback_input_index,
         )
-
         if resolved_input_index is not None:
             prepared_config["input_device_index"] = resolved_input_index
         else:
+            # If no device can be resolved, let the recorder handle it
             prepared_config.pop("input_device_index", None)
 
+        # Clean up flags that the recorder doesn't need
         prepared_config.pop("use_default_input", None)
-
-        if "gpu_device_index" not in prepared_config:
-            prepared_config["gpu_device_index"] = (
-                (longform_config or {}).get("gpu_device_index", 0)
-            )
-
-        prepared_config["enabled"] = prepared_config.get("enabled", True)
 
         return prepared_config
 
@@ -289,12 +271,9 @@ class ModelManager:
         """Initialise the mini real-time transcriber."""
         safe_print("Initializing mini real-time transcriber...", "info")
 
-        longform_defaults = self.config.get("longform", {})
-        minirt_config = self._prepare_mini_realtime_config(
+        minirt_config = self._prepare_realtime_preview_config(
             module_config,
             fallback_input_index=None,
-            fallback_device=None,
-            longform_config=longform_defaults,
         )
 
         if not minirt_config:
@@ -398,15 +377,13 @@ class ModelManager:
 
         resolved_input_index = self._resolve_input_device_index(module_config)
 
-        # Derive mini real-time preview configuration from dedicated settings
-        mini_realtime_settings = None
-        config_mini = self.config.get("mini_realtime")
-        if isinstance(config_mini, dict):
-            mini_realtime_settings = self._prepare_mini_realtime_config(
-                config_mini,
+        # Derive real-time preview configuration from dedicated settings
+        realtime_preview_settings = None
+        config_preview = self.config.get("realtime_preview")
+        if isinstance(config_preview, dict):
+            realtime_preview_settings = self._prepare_realtime_preview_config(
+                config_preview,
                 resolved_input_index,
-                device,
-                module_config,
             )
 
         return module.LongFormTranscriber(
@@ -446,8 +423,11 @@ class ModelManager:
             allowed_latency_limit=module_config.get(
                 "allowed_latency_limit", 100
             ),
+            faster_whisper_vad_filter=module_config.get(
+                "faster_whisper_vad_filter", True
+            ),
             preinitialized_model=preinitialized_model,
-            mini_realtime_config=mini_realtime_settings,
+            realtime_preview_config=realtime_preview_settings,
         )
 
     def initialize_transcriber(self, module_type):
