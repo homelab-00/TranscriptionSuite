@@ -6,22 +6,26 @@ provide high-quality transcriptions that are automatically copied to the clipboa
 ready to be pasted anywhere.
 
 ### Key Features
-
 - **Long-form Transcription**: Record extended speech sessions with manual start/stop control.
-- **Mini Real-time Preview**: See a live preview of your transcription as you speak.
+- **Advanced Real-time Preview**: See a live, two-stage preview of your transcription as you speak, inspired by the `RealtimeSTT` project's own test scripts for a high-quality user experience.
 - **System Tray Integration**: Control all functionality through a simple system tray icon.
-- **Instant Responsiveness**: The transcription model is loaded at startup and remains in memory, eliminating delays when starting a recording.
+- **Instant Responsiveness**: The transcription models are loaded at startup and remain in memory, eliminating delays when starting a recording.
 - **Clipboard Integration**: Transcribed text is automatically copied to your clipboard.
 - **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
 - **Multi-language Support**: Supports all Whisper-compatible language codes.
 
-### Architecture
+### Architecture: A Two-Recorder, Three-Model System
 
-The system is built around a central orchestrator that manages a single,
-persistent `LongFormTranscriber` instance. At startup, the main transcription
-model and the mini real-time preview model are loaded once and remain in GPU
-memory for the entire application lifecycle. This ensures immediate
-responsiveness and efficient resource use.
+The system is built around a central orchestrator that manages two separate, dedicated transcription recorders to provide both a high-quality live preview and a high-accuracy final output. This three-model architecture is inspired by the advanced usage patterns demonstrated in the `RealtimeSTT` project.
+
+1.  **Preview Recorder**: This instance is active during recording. It listens to the microphone and uses two models to generate the live preview on your screen.
+2.  **Long-form Recorder**: This instance has its microphone disabled. It waits until the recording is stopped, then receives the complete audio from the Preview Recorder to perform the final, high-accuracy transcription.
+
+This separation ensures stability and allows each component to be configured independently for its specific task. The three models are:
+
+- **Long-form Model**: The primary, high-quality model for the final transcription. Configured in the `longform` section of `config.json`.
+- **Real-time Preview Model**: A fast and accurate model that generates the main live text. Configured via the `model` key in the `realtime_preview` section.
+- **Real-time Preview Mini Model**: An ultra-fast, smaller model used internally by `RealtimeSTT` for initial phrase detection, which is then refined by the main preview model. Configured via the `realtime_model_type` key in the `realtime_preview` section.
 
 - **Orchestrator** (`orchestrator.py`): The main controller that wires the UI to the transcriber.
 - **Long-form Module** (`longform_module.py`): Handles extended recording and transcription using RealtimeSTT.
@@ -201,29 +205,32 @@ Note the index number of your preferred microphone.
 
 ### Step 2: Configure config.json
 
-Edit the `SCRIPT/config.json` file and update the `input_device_index` 
-for the `longform` and `mini_realtime` sections. Set `use_default_input` to
-`false` if you are specifying a device index.
+Edit the `SCRIPT/config.json` file. It is split into two main sections: `longform` for the final transcription and `realtime_preview` for the live on-screen experience.
+
+Update the `input_device_index` for the `realtime_preview` section, as this is the recorder that listens to your microphone. Set `use_default_input` to `false` if you are specifying a device index.
 
 ```json
 {
-    "mini_realtime": {
-        "enabled": true,
-        "language": "el",
-        "input_device_index": 21,
-        "use_default_input": false
-    },
     "longform": {
         "model": "Systran/faster-whisper-large-v3",
         "language": "el",
+        "faster_whisper_vad_filter": true,
+        // ... other long-form settings
+    },
+    "realtime_preview": {
+        "model": "deepdml/faster-whisper-large-v3-turbo-ct2",
+        "realtime_model_type": "Systran/faster-whisper-base",
+        "language": "el",
         "input_device_index": 21,
         "use_default_input": false,
-        // ... other settings
+        "enable_realtime_transcription": true,
+        "use_main_model_for_realtime": false,
+        "faster_whisper_vad_filter": false,
+        // ... other real-time settings
     }
 }
 ```
-For a full list of available settings, refer to the `load_or_create_config`
-function in `SCRIPT/system_utils.py`.
+The `realtime_preview` section contains many parameters that control the live transcription behavior. For a detailed explanation of each flag (e.g., `silero_sensitivity`, `webrtc_sensitivity`, `realtime_processing_pause`, etc.), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
 
 ### Language Configuration
 
@@ -290,9 +297,8 @@ All controls are accessed through the system tray icon:
 
 ## Architecture Details
 
-The longform module utilizes the `RealtimeSTT` project for its core functionality but operates in a manual mode rather than automatic voice activity detection. This provides precise control over when recording starts and stops, making it ideal for dictation workflows where you want complete control over the transcription boundaries.
-
-The system implements intelligent model management, reusing loaded models when possible to minimize memory usage and loading times. The Faster Whisper model provides the transcription engine, offering an excellent balance between speed and accuracy.
+The application's core logic is built on top of the powerful `RealtimeSTT` library. We use two separate instances of its `AudioToTextRecorder` class to achieve our robust two-stage transcription process. The real-time preview implementation is heavily inspired by the `realtimestt_test.py` example script provided by the `RealtimeSTT` author, which demonstrates an effective pattern for a high-quality live user experience.
+This manual, dual-recorder approach provides precise control over transcription boundaries, making it ideal for dictation workflows.
 
 ## Troubleshooting
 
@@ -338,7 +344,6 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ## Acknowledgments
 
 This project builds upon several excellent open-source projects:
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for developing a robust realtime/longform implementation of whisper and also inspiring this project
-
+- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for its powerful and flexible transcription engine. The user experience for the live preview was inspired by the project's own example scripts.
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) for the excellent model optimization
 - [OpenAI Whisper](https://github.com/openai/whisper) for the underlying speech recognition models
