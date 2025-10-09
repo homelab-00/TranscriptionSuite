@@ -15,8 +15,9 @@ import queue
 import sys
 import threading
 import time
+import textwrap
 from collections import deque
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, cast
 
 import pyperclip
 
@@ -40,12 +41,24 @@ except ImportError:
 # Import platform utilities for cross-platform compatibility
 from platform_utils import ensure_platform_init
 
+# Ensure compatibility with faster-whisper's disabled_tqdm helper on newer
+# tqdm releases that no longer expose a global `_lock` attribute.
+try:  # pragma: no cover - defensive compatibility shim
+    from tqdm import tqdm as _tqdm_class  # type: ignore
+except ImportError:  # pragma: no cover
+    _tqdm_class = None  # type: ignore[assignment]
+else:  # pragma: no cover
+    if _tqdm_class is not None and not hasattr(_tqdm_class, "_lock"):
+        setattr(_tqdm_class, "_lock", threading.RLock())
+
 # Initialize platform-specific settings (console encoding, PyTorch audio, etc.)
 PLATFORM_MANAGER = ensure_platform_init()
 
 # Import Rich for better terminal display with Unicode support
 try:
-    from rich.console import Console
+    from rich.align import Align
+    from rich.console import Console, Group
+    from rich.live import Live
     from rich.panel import Panel
     from rich.text import Text
 
@@ -53,8 +66,11 @@ try:
     HAS_RICH = True
 except ImportError:
     CONSOLE = None
+    Live = None
+    Group = None
     Panel = None
     Text = None
+    Align = None
     HAS_RICH = False
 
 # Waveform graph: Max Y-axis value
@@ -128,11 +144,6 @@ class LongFormTranscriber:
         self._last_recording_duration = 0.0
         self._last_transcription_duration = 0.0
 
-        self._timer_thread: Optional[threading.Thread] = None
-        self._timer_stop_event = threading.Event()
-        self._timer_lines_rendered = False
-        self._timer_render_line_count = 0
-
         self._waveform_lock = threading.Lock()
         self._waveform_window_seconds = 60.0
         self._waveform_display_seconds = 10.0
@@ -154,6 +165,9 @@ class LongFormTranscriber:
         )
         self._waveform_scale_last_update = time.monotonic()
 
+        self._timer_thread: Optional[threading.Thread] = None
+        self._timer_stop_event = threading.Event()
+
         # Hotkey attributes removed; control is via orchestrator's tray only
 
         # Store preinitialized model if provided
@@ -166,7 +180,10 @@ class LongFormTranscriber:
         )
         self._mini_realtime_override_cache: Dict[str, Any] = {}
         self._mini_realtime_last_text = ""
-        self._mini_realtime_lines: List[str] = [""] * 4
+        self._mini_realtime_history: deque[str] = deque(maxlen=200)
+        self._mini_realtime_display_rows = 10
+        self._mini_realtime_max_events = 3
+        self._mini_realtime_event_spacing = 4
         self._mini_realtime_dirty = False
 
         # Store all configuration for lazy loading
@@ -237,7 +254,7 @@ class LongFormTranscriber:
     def _configure_mini_realtime(self, language: str) -> None:
         """Configure optional mini real-time transcription preview settings."""
         self._mini_realtime_model_label = None
-        self._mini_realtime_lines = [""] * 4
+        self._mini_realtime_history.clear()
 
         # Always reset previous overrides before applying new configuration
         self._restore_mini_realtime_overrides()
@@ -250,6 +267,9 @@ class LongFormTranscriber:
             self._apply_mini_override("realtime_processing_pause", None)
             self._apply_mini_override("realtime_batch_size", None)
             self._apply_mini_override("beam_size_realtime", None)
+            self._mini_realtime_last_text = ""
+            self._mini_realtime_history.clear()
+            self._mini_realtime_dirty = True
             return
 
         overrides = dict(self.mini_realtime_config)
@@ -322,15 +342,50 @@ class LongFormTranscriber:
 
         self._mini_realtime_last_text = stripped_text
 
-        message = f"[Mini-RT] {delta}".strip()
-
-        if len(self._mini_realtime_lines) >= 4:
-            self._mini_realtime_lines.pop(0)
-        self._mini_realtime_lines.append(message)
-        while len(self._mini_realtime_lines) < 4:
-            self._mini_realtime_lines.insert(0, "")
+        message = f"Mini-RT: {delta}".strip()
+        self._mini_realtime_history.appendleft(message)
 
         self._mini_realtime_dirty = True
+
+    def _mini_realtime_wrap_width(self) -> int:
+        """Estimate an appropriate wrapping width for mini real-time text."""
+        if HAS_RICH and CONSOLE:
+            console_width = max(CONSOLE.width - 12, 40)
+        else:
+            console_width = 80
+        return max(20, min(console_width, 140))
+
+    def _get_mini_realtime_lines(self, max_width: int) -> List[str]:
+        """Build a fixed-size list of lines for the mini real-time preview."""
+        rows = self._mini_realtime_display_rows
+        if not self._mini_realtime_enabled or not self.config.get(
+            "enable_realtime_transcription", False
+        ):
+            return [""] * rows
+
+        width = max(20, max_width)
+        lines: List[str] = []
+        history = list(self._mini_realtime_history)
+        spacing = max(1, self._mini_realtime_event_spacing)
+        max_events = max(1, self._mini_realtime_max_events)
+
+        for event_idx in range(max_events):
+            history_index = event_idx * spacing
+            if history_index >= len(history):
+                break
+
+            message = history[history_index].strip()
+            wrapped = textwrap.wrap(message, width=width) or [""]
+
+            for segment in wrapped:
+                lines.append(segment)
+                if len(lines) >= rows:
+                    return lines[:rows]
+
+        if len(lines) < rows:
+            lines.extend([""] * (rows - len(lines)))
+
+        return lines[:rows]
 
     def _apply_mini_override(self, key: str, value: Any) -> None:
         """Apply a configuration override while tracking original values."""
@@ -584,116 +639,79 @@ class LongFormTranscriber:
         if self._timer_thread and self._timer_thread.is_alive():
             self._timer_thread.join(timeout=0.5)
         self._timer_thread = None
-        self._timer_lines_rendered = False
-        self._timer_render_line_count = 0
         self._reset_waveform_state()
 
     def _run_recording_timer(self) -> None:
-        """Print elapsed recording time alongside waveform updates."""
-        while not self._timer_stop_event.is_set():
+        """Render a live display during recording using Rich."""
+        if not HAS_RICH or not CONSOLE or not Live or not Group or not Panel or not Align or not Text:
+            # Fallback for when Rich is not available
+            while not self._timer_stop_event.is_set():
+                time.sleep(0.2)
+            return
+
+        assert Live is not None and Group is not None and Panel is not None and Align is not None and Text is not None
+
+        rich_group = cast(Any, Group)
+        rich_panel = cast(Any, Panel)
+        rich_align = cast(Any, Align)
+        rich_text = cast(Any, Text)
+
+        def generate_display():
+            """Generate the renderable content for the live display."""
             if not self.recording or self._recording_started_at is None:
-                time.sleep(0.1)
-                continue
+                return rich_group(rich_panel("Waiting to start...", border_style="yellow"))
 
             elapsed = time.monotonic() - self._recording_started_at
-            minutes = int(elapsed // 60)
-            seconds = int(elapsed % 60)
-            time_str = f"{minutes:02d},{seconds:02d}"
+            minutes, seconds = divmod(elapsed, 60)
+            time_str = f"{int(minutes):02d}:{int(seconds):02d}"
 
-            waveform_display = self._render_waveform()
-            waveform_lines = waveform_display.split("\n")
-
-            mini_active = self._mini_realtime_enabled and self.config.get(
-                "enable_realtime_transcription", False
+            # Header Panel
+            header_panel = rich_panel(
+                rich_align.center(f"[bold #ff5722]Recording Time: {time_str}[/bold #ff5722]"),
+                title="[bold white]Status[/bold white]",
+                border_style="green",
+                height=3,
             )
-            mini_header = None
-            mini_lines: List[str] = []
 
-            if mini_active:
-                mini_header = (
-                    "[white]Mini-RT preview:[/white]"
-                    if HAS_RICH and CONSOLE
-                    else "Mini-RT preview:"
-                )
-                mini_lines = list(self._mini_realtime_lines)
-                if len(mini_lines) < 4:
-                    mini_lines.extend(["" for _ in range(4 - len(mini_lines))])
+            # Waveform Panel
+            waveform_display = self._render_waveform()
+            waveform_panel = rich_panel(
+                waveform_display,
+                title="[white]Waveform[/white]",
+                border_style="blue",
+                height=self._waveform_display_rows + 2,
+            )
 
-            waveform_line_count = len(waveform_lines)
-            total_lines = 2 + waveform_line_count
-            if mini_header:
-                total_lines += 1 + len(mini_lines)
+            # Mini Real-time Panel
+            wrap_width = self._mini_realtime_wrap_width()
+            mini_lines = self._get_mini_realtime_lines(wrap_width)
+            mini_rt_content = rich_text(
+                "\n".join(mini_lines),
+                style="white",
+                justify="left",
+            )
 
-            if HAS_RICH and CONSOLE:
-                timer_line = f"[#ff5722]Recording time: {time_str}[/#ff5722]"
-                waveform_header = "[white]Waveform:[/white]"
+            mini_rt_panel = rich_panel(
+                mini_rt_content,
+                title="[white]Mini-RT Preview[/white]",
+                border_style="magenta",
+                height=self._mini_realtime_display_rows + 2,
+            )
 
-                if self._timer_lines_rendered and self._timer_render_line_count:
-                    CONSOLE.file.write(f"\033[{self._timer_render_line_count}F")
+            return rich_group(header_panel, waveform_panel, mini_rt_panel)
 
-                # Timer line
-                CONSOLE.file.write("\033[K")
-                CONSOLE.file.flush()
-                CONSOLE.print(timer_line)
-
-                # Waveform header
-                CONSOLE.file.write("\033[K")
-                CONSOLE.file.flush()
-                CONSOLE.print(waveform_header)
-
-                # Waveform content
-                for line in waveform_lines:
-                    CONSOLE.file.write("\033[K")
-                    CONSOLE.file.flush()
-                    CONSOLE.print(line)
-
-                # Mini realtime block
-                if mini_header:
-                    CONSOLE.file.write("\033[K")
-                    CONSOLE.file.flush()
-                    CONSOLE.print(mini_header)
-                    for entry in mini_lines:
-                        display_text = entry if entry else ""
-                        coloured = (
-                            f"[dim cyan]{display_text}[/dim cyan]"
-                            if display_text
-                            else "[dim cyan] [/dim cyan]"
-                        )
-                        CONSOLE.file.write("\033[K")
-                        CONSOLE.file.flush()
-                        CONSOLE.print(coloured)
-
-                CONSOLE.file.flush()
-                self._timer_lines_rendered = True
-            else:
-                timer_line = f"Recording time: {time_str}"
-                waveform_header = "Waveform:"
-
-                if self._timer_lines_rendered and self._timer_render_line_count:
-                    sys.stdout.write(f"\033[{self._timer_render_line_count}F")
-
-                sys.stdout.write("\033[K")
-                sys.stdout.write(timer_line + "\n")
-                sys.stdout.write("\033[K")
-                sys.stdout.write(waveform_header + "\n")
-                for line in waveform_lines:
-                    sys.stdout.write("\033[K")
-                    sys.stdout.write(line + "\n")
-
-                if mini_header:
-                    sys.stdout.write("\033[K")
-                    sys.stdout.write(mini_header + "\n")
-                    for entry in mini_lines:
-                        display_text = entry if entry else ""
-                        sys.stdout.write("\033[K")
-                        sys.stdout.write(display_text + "\n")
-
-                sys.stdout.flush()
-                self._timer_lines_rendered = True
-
-            self._timer_render_line_count = total_lines
-            self._mini_realtime_dirty = False
-            time.sleep(0.2)
+        # Use Live with screen=True to take over the terminal display
+        with Live(
+            generate_display(),
+            screen=True,
+            transient=True,
+            redirect_stderr=False,
+            refresh_per_second=10,
+        ) as live:
+            while not self._timer_stop_event.is_set():
+                live.update(generate_display())
+                self._mini_realtime_dirty = False
+                time.sleep(0.1)  # Prevent tight loop while waiting for stop event
 
     def _initialize_recorder(self):
         """Lazy initialization of the recorder."""
@@ -706,13 +724,12 @@ class LongFormTranscriber:
             self._recording_started_at = time.monotonic()
             self._last_recording_duration = 0.0
             self._last_transcription_duration = 0.0
-            self._timer_lines_rendered = False
             self._reset_waveform_state()
             if self._mini_realtime_enabled and self.config.get(
                 "enable_realtime_transcription", False
             ):
                 self._mini_realtime_last_text = ""
-                self._mini_realtime_lines = [""] * 4
+                self._mini_realtime_history.clear()
                 self._mini_realtime_dirty = True
                 model_hint = (
                     f" · {self._mini_realtime_model_label}"
@@ -741,7 +758,7 @@ class LongFormTranscriber:
             if self._mini_realtime_enabled and self.config.get(
                 "enable_realtime_transcription", False
             ):
-                self._mini_realtime_lines = [""] * 4
+                self._mini_realtime_history.clear()
                 self._mini_realtime_dirty = True
                 if HAS_RICH and CONSOLE:
                     CONSOLE.print("[dim cyan][Mini-RT] Preview paused[/dim cyan]")
@@ -801,6 +818,25 @@ class LongFormTranscriber:
         """
         Start recording audio for transcription.
         """
+        if HAS_RICH and CONSOLE and Panel and Align:
+            min_width = 80
+            min_height = 16  # Increased to fit layout
+            if CONSOLE.width < min_width or CONSOLE.height < min_height:
+                CONSOLE.print(
+                    Panel(
+                        Align.center(
+                            f"[bold]Terminal too small![/bold]\n\n"
+                            f"Please resize to at least [cyan]{min_width}x{min_height}[/cyan] characters to start recording.\n"
+                            f"Current size is [yellow]{CONSOLE.width}x{CONSOLE.height}[/yellow].",
+                            vertical="middle",
+                        ),
+                        title="[bold red]Error[/bold red]",
+                        border_style="red",
+                        height=7,
+                    )
+                )
+                return
+
         if not self.recording and self.recorder is not None:
             if HAS_RICH and CONSOLE:
                 CONSOLE.print("[green]Starting recording...[/green]")
@@ -908,7 +944,7 @@ class LongFormTranscriber:
             # Reset mini realtime buffer for the next session
             if self._mini_realtime_enabled:
                 self._mini_realtime_last_text = ""
-                self._mini_realtime_lines = [""] * 4
+                self._mini_realtime_history.clear()
                 self._mini_realtime_dirty = True
 
             self._print_transcription_metrics()
@@ -926,7 +962,7 @@ class LongFormTranscriber:
         self._recording_started_at = None
         if self._mini_realtime_enabled:
             self._mini_realtime_last_text = ""
-            self._mini_realtime_lines = [""] * 4
+            self._mini_realtime_history.clear()
             self._mini_realtime_dirty = True
 
         rec = self.recorder
