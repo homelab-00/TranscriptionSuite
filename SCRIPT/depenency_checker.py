@@ -306,14 +306,37 @@ class DependencyChecker:
         except Exception:
             pass
 
-        # Test clipboard access
+        # Test clipboard access with a short timeout to avoid hanging on Wayland
         try:
             import pyperclip
-            original = pyperclip.paste()
-            pyperclip.copy('test')
-            if pyperclip.paste() == 'test':
+            import threading
+
+            clipboard_result: Dict[str, Any] = {"ok": False, "original": None}
+            clipboard_event = threading.Event()
+
+            def _probe_clipboard():
+                try:
+                    original = pyperclip.paste()
+                    pyperclip.copy("test")
+                    if pyperclip.paste() == "test":
+                        clipboard_result["ok"] = True
+                        clipboard_result["original"] = original
+                except Exception:
+                    clipboard_result["ok"] = False
+                finally:
+                    clipboard_event.set()
+
+            worker = threading.Thread(target=_probe_clipboard, daemon=True)
+            worker.start()
+            clipboard_event.wait(timeout=1.5)
+
+            if clipboard_result["ok"]:
                 permissions['can_access_clipboard'] = True
-                pyperclip.copy(original)  # Restore
+                if clipboard_result.get("original") is not None:
+                    try:
+                        pyperclip.copy(clipboard_result["original"])
+                    except Exception:
+                        pass
         except Exception:
             pass
 
