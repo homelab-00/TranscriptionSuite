@@ -56,6 +56,7 @@ class PlatformManager:
         if self.is_windows and (3, 8) <= sys.version_info < (3, 99):
             try:
                 from torchaudio._extension.utils import _init_dll_path
+
                 _init_dll_path()
                 logger.info("PyTorch audio DLL path initialized for Windows")
             except ImportError as e:
@@ -73,7 +74,9 @@ class PlatformManager:
         try:
             from ctypes import CDLL, CFUNCTYPE, c_char_p, c_int
 
-            ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
+            ERROR_HANDLER_FUNC = CFUNCTYPE(
+                None, c_char_p, c_int, c_char_p, c_int, c_char_p
+            )
 
             def _alsa_error_handler(filename, line, function, err, fmt):
                 # Only log actual errors; ignore harmless configuration probes
@@ -82,7 +85,9 @@ class PlatformManager:
 
                 try:
                     message = fmt.decode("utf-8", "ignore") if fmt else ""
-                    location = filename.decode("utf-8", "ignore") if filename else "libasound"
+                    location = (
+                        filename.decode("utf-8", "ignore") if filename else "libasound"
+                    )
                 except Exception:
                     message = ""
                     location = "libasound"
@@ -142,7 +147,9 @@ class PlatformManager:
             else:
                 config_dir = Path.home() / ".config" / "transcriptionsuite"
         else:  # macOS
-            config_dir = Path.home() / "Library" / "Application Support" / "TranscriptionSuite"
+            config_dir = (
+                Path.home() / "Library" / "Application Support" / "TranscriptionSuite"
+            )
 
         # Create directory if it doesn't exist
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +175,7 @@ class PlatformManager:
     def get_temp_dir(self) -> Path:
         """Get a temporary directory for the platform."""
         import tempfile
+
         temp_dir = Path(tempfile.gettempdir()) / "transcriptionsuite"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return temp_dir
@@ -177,8 +185,8 @@ class PlatformManager:
         import shutil
 
         # Add platform-specific extensions if needed
-        if self.is_windows and not executable_name.endswith('.exe'):
-            executable_name += '.exe'
+        if self.is_windows and not executable_name.endswith(".exe"):
+            executable_name += ".exe"
 
         executable_path = shutil.which(executable_name)
         return Path(executable_path) if executable_path else None
@@ -191,7 +199,7 @@ class PlatformManager:
             "device_count": 0,
             "device_name": None,
             "compute_capability": None,
-            "error": None
+            "error": None,
         }
 
         try:
@@ -200,7 +208,7 @@ class PlatformManager:
             if torch.cuda.is_available():
                 cuda_info["available"] = True
                 # Use getattr to avoid Pylance warnings about torch.version
-                cuda_info["version"] = getattr(torch, 'version', {}).cuda  # type: ignore
+                cuda_info["version"] = getattr(torch, "version", {}).cuda  # type: ignore
                 cuda_info["device_count"] = torch.cuda.device_count()
 
                 if cuda_info["device_count"] > 0:
@@ -230,24 +238,23 @@ class PlatformManager:
         if cuda_info["available"]:
             return {
                 "device": "cuda",
-                "compute_type": "float16" if self._supports_float16() else "float32"
+                "compute_type": "float16" if self._supports_float16() else "float32",
             }
         else:
-            return {
-                "device": "cpu",
-                "compute_type": "float32"
-            }
+            return {"device": "cpu", "compute_type": "float32"}
 
     def _supports_float16(self) -> bool:
         """Check if the current GPU supports float16 operations efficiently."""
         try:
             import torch
+
             if torch.cuda.is_available():
-                # Check compute capability - float16 is efficient on compute capability >= 6.0
+                # Check compute capability - F16 is efficient on compute capability >= 6.0
                 capability = torch.cuda.get_device_capability(0)
                 major, minor = capability
                 return major >= 6
-        except:
+        except Exception as e:
+            logger.debug(f"Error checking float16 support: {e}")
             pass
         return False
 
