@@ -129,32 +129,6 @@ class SystemUtils:
                 "allowed_latency_limit": 100,
                 "faster_whisper_vad_filter": True,
             },
-            "realtime_preview": {
-                "model": "deepdml/faster-whisper-large-v3-turbo-ct2",
-                "realtime_model_type": "Systran/faster-whisper-base",
-                "language": "en",
-                "compute_type": "default",
-                "device": self.platform_manager.get_optimal_device_config()["device"],
-                "input_device_index": None,
-                "use_default_input": True,
-                "gpu_device_index": 0,
-                "silero_sensitivity": 0.4,
-                "silero_use_onnx": True,
-                "silero_deactivity_detection": True,
-                "webrtc_sensitivity": 3,
-                "post_speech_silence_duration": 0.6,
-                "min_length_of_recording": 1.0,
-                "min_gap_between_recordings": 1.0,
-                "pre_recording_buffer_duration": 0.2,
-                "batch_size": 16,
-                "realtime_batch_size": 16,
-                "beam_size": 5,
-                "beam_size_realtime": 3,
-                "enable_realtime_transcription": True,
-                "use_main_model_for_realtime": False,
-                "realtime_processing_pause": 0.2,
-                "faster_whisper_vad_filter": False,
-            },
         }
 
         # Ensure config directory exists
@@ -624,9 +598,7 @@ class SystemUtils:
                 f"[bold yellow]Control[/bold yellow] the system by clicking "
                 f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
-                f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}\n"
-                f"  RT Preview: {self.config.get('realtime_preview', {}).get('language', 'N/A')}\n"
-                f"  RT Preview (Mini): {self.config.get('realtime_preview', {}).get('language', 'N/A')}\n\n"
+                f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}\n\n"
                 f"[bold yellow]Python Versions:[/bold yellow]\n"
                 f"  Python: {sys.version.split()[0]}\n"
                 f"  PyTorch: {format_version('torch')}\n"
@@ -655,14 +627,6 @@ class SystemUtils:
         else:
             safe_print("=" * 50)
             safe_print("Speech-to-Text Orchestrator Running")
-            safe_print("=" * 50)
-            safe_print("Hotkeys:")
-            safe_print("  F1: Open configuration dialogue box")
-            safe_print("  F2: Toggle real-time transcription")
-            safe_print("  F3: Start long-form recording")
-            safe_print("  F4: Stop long-form recording and transcribe")
-            safe_print("  F10: Run static file transcription")
-            safe_print("  F7: Quit application")
             safe_print("=" * 50)
             safe_print("Selected Language:")
             safe_print(f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}")

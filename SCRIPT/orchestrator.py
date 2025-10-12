@@ -4,7 +4,6 @@ orchestrator.py - Main controller for the Speech-to-Text system
 
 This script:
 - Imports and integrates the three transcription modules:
-  * Real-time transcription for immediate feedback
   * Long-form transcription for extended dictation
   * Static file transcription for pre-recorded audio/video
 - Manages the state of different transcription modes
@@ -71,7 +70,7 @@ class STTOrchestrator:
         # Application state (combining related attributes)
         self.app_state = {
             "running": False,
-            "current_mode": None,  # Can be "realtime", "longform", or "static"
+            "current_mode": None,  # Tracks "longform" or "static"
             "config_path": os.path.join(self.script_dir, "config.json"),
         }
 
@@ -389,8 +388,6 @@ class STTOrchestrator:
             overall_success = True
             safe_print("Pre-loading the long-form transcription model...", "info")
 
-            # Initialize the single long-form transcriber.
-            # This will also handle the mini real-time model internally.
             transcriber = self.model_manager.initialize_transcriber("longform")
             if not transcriber:
                 safe_print("Failed to initialise the long-form model.", "error")
