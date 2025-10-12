@@ -25,7 +25,7 @@ import sys
 # REMOVED: KDE DBus/global hotkeys support; only tray controls remain
 
 from model_manager import ModelManager, safe_print
-from system_utils import SystemUtils
+from system_utils import SystemUtils, setup_logging
 from depenency_checker import DependencyChecker
 
 # Try to import the tray manager
@@ -36,14 +36,7 @@ try:
 except ImportError:
     HAS_TRAY = False
 
-# Configure logging to file only (not to console)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ],
-)
+setup_logging()
 
 # Try to import Rich for prettier console output
 try:
