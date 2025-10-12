@@ -179,7 +179,6 @@ class ModelManager:
             return self.modules[module_name]
 
         module_paths = {
-            "mini_realtime": "realtime_module.py",
             "longform": "longform_module.py",
         }
 
@@ -227,68 +226,6 @@ class ModelManager:
             return explicit_index
 
         return fallback
-
-    def _prepare_realtime_preview_config(
-        self,
-        preview_config,
-        fallback_input_index,
-    ):
-        """Build a recorder-ready configuration for the real-time preview."""
-
-        if not isinstance(preview_config, dict):
-            return None
-
-        # Start with a copy of the dedicated preview config
-        prepared_config = preview_config.copy()
-
-        # Resolve device and compute type based on the preview config itself
-        resolved_device = self._get_optimal_device(prepared_config)
-        prepared_config["device"] = resolved_device
-        prepared_config["compute_type"] = self._get_optimal_compute_type(
-            prepared_config,
-            resolved_device,
-        )
-
-        # Resolve input device
-        resolved_input_index = self._resolve_input_device_index(
-            prepared_config,
-            fallback_input_index,
-        )
-        if resolved_input_index is not None:
-            prepared_config["input_device_index"] = resolved_input_index
-        else:
-            # If no device can be resolved, let the recorder handle it
-            prepared_config.pop("input_device_index", None)
-
-        # Clean up flags that the recorder doesn't need
-        prepared_config.pop("use_default_input", None)
-
-        return prepared_config
-
-    def _initialize_mini_realtime_transcriber(
-        self, module, module_config, preinitialized_model
-    ):
-        """Initialise the mini real-time transcriber."""
-        safe_print("Initializing mini real-time transcriber...", "info")
-
-        minirt_config = self._prepare_realtime_preview_config(
-            module_config,
-            fallback_input_index=None,
-        )
-
-        if not minirt_config:
-            safe_print(
-                "Mini real-time configuration missing or invalid. Skipping warmup.",
-                "warning",
-            )
-            return None
-
-        # This function is now a placeholder. The actual initialization happens
-        # inside the LongFormTranscriber. We just need to ensure the model
-        # can be loaded, which is done by LongFormTranscriber's own initialization.
-        # We return a placeholder or True to signal success to the orchestrator.
-        # The real object is stored inside the longform transcriber.
-        return True
 
     def get_default_input_device_index(self):
         """Get the index of the default input device with better error handling."""
@@ -377,15 +314,6 @@ class ModelManager:
 
         resolved_input_index = self._resolve_input_device_index(module_config)
 
-        # Derive real-time preview configuration from dedicated settings
-        realtime_preview_settings = None
-        config_preview = self.config.get("realtime_preview")
-        if isinstance(config_preview, dict):
-            realtime_preview_settings = self._prepare_realtime_preview_config(
-                config_preview,
-                resolved_input_index,
-            )
-
         return module.LongFormTranscriber(
             model=module_config.get("model", "Systran/faster-whisper-large-v3"),
             language=module_config.get("language", "en"),
@@ -427,7 +355,6 @@ class ModelManager:
                 "faster_whisper_vad_filter", True
             ),
             preinitialized_model=preinitialized_model,
-            realtime_preview_config=realtime_preview_settings,
         )
 
     def initialize_transcriber(self, module_type):
@@ -454,7 +381,6 @@ class ModelManager:
 
             # Initialize based on module type
             transcriber_initializers = {
-                "mini_realtime": self._initialize_mini_realtime_transcriber,
                 "longform": self._initialize_longform_transcriber,
             }
 
@@ -476,8 +402,7 @@ class ModelManager:
                 "%s transcriber initialized successfully",
                 module_type.capitalize(),
             )
-            if module_type != "mini_realtime":
-                self.current_loaded_model_type = module_type
+            self.current_loaded_model_type = module_type
             return self.transcribers[module_type]
 
         except (ImportError, AttributeError, ValueError, OSError) as e:
