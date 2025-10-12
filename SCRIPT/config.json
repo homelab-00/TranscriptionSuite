@@ -10,7 +10,7 @@
         "silero_sensitivity": 0.4,
         "silero_use_onnx": false,
         "silero_deactivity_detection": false,
-        "webrtc_sensitivity": 3,
+        "webtrtc_sensitivity": 3,
         "post_speech_silence_duration": 0.6,
         "min_length_of_recording": 1.0,
         "min_gap_between_recordings": 1.0,
@@ -22,5 +22,13 @@
         "initial_prompt": null,
         "allowed_latency_limit": 100,
         "faster_whisper_vad_filter": true
+    },
+    "logging": {
+        "level": "INFO",
+        "max_size_mb": 10,
+        "backup_count": 3,
+        "console_output": false,
+        "file_name": "stt_orchestrator.log",
+        "directory": "/home/Bill/.config/transcriptionsuite"
     }
 }

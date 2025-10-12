@@ -36,15 +36,6 @@ except ImportError:
     HAS_TORCH = False
     torch = None
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ],
-)
-
 # Try to import Rich for console output with color support
 try:
     from rich.console import Console
