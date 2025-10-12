@@ -10,13 +10,10 @@ import contextlib
 import io
 import logging
 import math
-import os
-import queue
-import sys
 import threading
 import time
 from collections import deque
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, cast
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, cast
 
 import pyperclip
 
@@ -129,9 +126,8 @@ class LongFormTranscriber:
         allowed_latency_limit: int = 100,
         no_log_file: bool = True,
         use_extended_logging: bool = False,
-    faster_whisper_vad_filter: bool = True,
-    preinitialized_model=None,
-    realtime_preview_config: Optional[dict] = None,
+        faster_whisper_vad_filter: bool = True,
+        preinitialized_model=None,
     ):
         """
         Initialize the transcriber with all available parameters.
@@ -176,9 +172,6 @@ class LongFormTranscriber:
 
         # Store preinitialized model if provided
         self.preinitialized_model = preinitialized_model
-
-        # New attribute to hold the rich.Text object for the live preview
-        self._realtime_display_text: Optional[Text] = None  # type: ignore[valid-type]
 
         # Store all configuration for lazy loading
         self.config = {
@@ -226,17 +219,13 @@ class LongFormTranscriber:
             "faster_whisper_vad_filter": faster_whisper_vad_filter,
         }
 
-        # Store the separate preview config
-        self.realtime_preview_config = realtime_preview_config or {}
-
         # External callbacks
         self.external_on_recording_start = on_recording_start
         self.external_on_recording_stop = on_recording_stop
 
-        # Initialize BOTH recorder instances.
-        self.longform_recorder = None
-        self.preview_recorder = None
-        self._initialize_recorders()
+        # Initialize the recorder instance.
+        self.recorder = None
+        self._initialize_recorder()
 
     def _default_waveform_display(self) -> str:
         """Return a friendly placeholder for waveform output."""
@@ -247,29 +236,6 @@ class LongFormTranscriber:
 
         return idle_message
 
-    def _preprocess_realtime_text(self, text: str) -> str:
-        """Preprocesses text for real-time display based on logic from realtimestt_test.py."""
-        # Remove leading whitespaces
-        processed_text = text.lstrip()
-
-        #  Remove starting ellipses if present
-        if processed_text.startswith("..."):
-            processed_text = processed_text[3:]
-
-        # Remove any leading whitespaces again after ellipses removal
-        processed_text = processed_text.lstrip()
-
-        return processed_text
-
-    def _update_realtime_preview(self, text: str) -> None:
-        """Handle streaming updates and refresh the Rich.Text object for the UI."""
-        if not self.recording:
-            return
-        if Text is None:
-            return
-        processed_text = self._preprocess_realtime_text(text)
-        self._realtime_display_text = Text(processed_text, style="yellow", justify="left")
-
     def _reset_waveform_state(self) -> None:
         """Reset waveform buffers to a neutral state."""
         with self._waveform_lock:
@@ -277,8 +243,6 @@ class LongFormTranscriber:
             self._waveform_last_levels = [0.0] * self._waveform_slot_count
             self._waveform_last_update = 0.0
             self._latest_waveform = self._default_waveform_display()
-            self._waveform_scale_last_update = time.monotonic()
-
     def _render_waveform(self) -> str:
         """Render a waveform bar based on recent audio levels."""
         now = time.monotonic()
@@ -501,63 +465,49 @@ class LongFormTranscriber:
         self._reset_waveform_state()
 
     def _run_recording_timer(self) -> None:
-        """Render a live display during recording using Rich."""
-        if not HAS_RICH or not CONSOLE or not Live or not Group or not Panel or not Align or not Text:
-            # Fallback for when Rich is not available
+        """Render a live status display during recording using Rich."""
+        rich_components_available = all(
+            [HAS_RICH, CONSOLE, Live, Group, Panel, Align, Text]
+        )
+
+        if not rich_components_available:
             while not self._timer_stop_event.is_set():
                 time.sleep(0.2)
             return
 
-        assert Live is not None and Group is not None and Panel is not None and Align is not None and Text is not None
-
         rich_group = cast(Any, Group)
         rich_panel = cast(Any, Panel)
         rich_align = cast(Any, Align)
-        rich_text = cast(Any, Text)
 
-        def generate_display():
-            """Generate the renderable content for the live display."""
+        def generate_display() -> Any:
+            """Generate the Rich renderable for the live display."""
             if not self.recording or self._recording_started_at is None:
-                return rich_group(rich_panel("Waiting to start...", border_style="yellow"))
+                return rich_group(
+                    rich_panel("Waiting to start...", border_style="yellow")
+                )
 
             elapsed = time.monotonic() - self._recording_started_at
             minutes, seconds = divmod(elapsed, 60)
             time_str = f"{int(minutes):02d}:{int(seconds):02d}"
 
-            # Header Panel
             header_panel = rich_panel(
-                rich_align.center(f"[bold #ff5722]Recording Time: {time_str}[/bold #ff5722]"),
+                rich_align.center(
+                    f"[bold #ff5722]Recording Time: {time_str}[/bold #ff5722]"
+                ),
                 title="[bold white]Status[/bold white]",
                 border_style="green",
                 height=3,
             )
 
-            # Waveform Panel
-            waveform_display = self._render_waveform()
             waveform_panel = rich_panel(
-                waveform_display,
+                self._render_waveform(),
                 title="[white]Waveform[/white]",
                 border_style="blue",
                 height=self._waveform_display_rows + 2,
             )
 
-            # Mini Real-time Panel
-            # The content is now a single Rich.Text object, updated by the callback
-            if Text is not None:
-                panel_content = self._realtime_display_text or Text("")
-            else:
-                panel_content = self._realtime_display_text or ""
+            return rich_group(header_panel, waveform_panel)
 
-            mini_rt_panel = rich_panel(
-                panel_content,
-                title="[white]Mini-RT Preview[/white]",
-                border_style="magenta",
-                height=12,  # A fixed, generous height for the panel
-            )
-
-            return rich_group(header_panel, waveform_panel, mini_rt_panel)
-
-        # Use Live with screen=True to take over the terminal display
         with Live(
             generate_display(),
             screen=True,
@@ -567,35 +517,24 @@ class LongFormTranscriber:
         ) as live:
             while not self._timer_stop_event.is_set():
                 live.update(generate_display())
-                time.sleep(0.1)  # Prevent tight loop while waiting for stop event
+                time.sleep(0.1)
 
-    def _initialize_recorders(self):
-        """Initialize both the preview and long-form recorder instances."""
+    def _initialize_recorder(self) -> None:
+        """Initialize the single recorder instance used for long-form capture."""
         if not HAS_REALTIME_STT or AudioToTextRecorder is None:
             raise ImportError("RealtimeSTT not available")
 
-        # Create custom recording callbacks that update our internal state
-        def on_rec_start():
+        def on_rec_start() -> None:
             self.recording = True
             self._recording_started_at = time.monotonic()
             self._last_recording_duration = 0.0
             self._last_transcription_duration = 0.0
             self._reset_waveform_state()
-            if self.realtime_preview_config:
-                self._realtime_display_text = Text("Waiting for speech...", style="cyan")
-                preview_message = (
-                    f"[Mini-RT] Live preview active ({self.realtime_preview_config.get('language', 'en')} · "
-                    f"{self.realtime_preview_config.get('model', 'unknown')})"
-                )
-                if HAS_RICH and CONSOLE:
-                    CONSOLE.print(f"[dim cyan]{preview_message}[/dim cyan]")
-                else:
-                    print(preview_message)
             self._start_timer_thread()
             if self.external_on_recording_start:
                 self.external_on_recording_start()
 
-        def on_rec_stop():
+        def on_rec_stop() -> None:
             self.recording = False
             if self._recording_started_at is not None:
                 self._last_recording_duration = (
@@ -603,47 +542,58 @@ class LongFormTranscriber:
                 )
                 self._recording_started_at = None
             self._stop_timer_thread()
-            if self.realtime_preview_config:
-                self._realtime_display_text = None
-                if HAS_RICH and CONSOLE:
-                    CONSOLE.print("[dim cyan][Mini-RT] Preview paused[/dim cyan]")
-                else:
-                    print("[Mini-RT] Preview paused")
             if self.external_on_recording_stop:
                 self.external_on_recording_stop()
 
+        recorder_config = self.config.copy()
+        recorder_config["use_microphone"] = True
+        recorder_config["on_recording_start"] = on_rec_start
+        recorder_config["on_recording_stop"] = on_rec_stop
+        recorder_config["on_recorded_chunk"] = self._handle_recorded_chunk
+
+        suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
+
         try:
-            # 1. Initialize the Long-Form Recorder (mic disabled)
-            longform_config = self.config.copy()
-            longform_config["use_microphone"] = False
-            self.longform_recorder = AudioToTextRecorder(**longform_config)
-
-            # 2. Initialize the Preview Recorder (mic enabled)
-            if self.realtime_preview_config:
-                preview_config = self.realtime_preview_config.copy()
-                preview_config["use_microphone"] = True
-                preview_config["on_recording_start"] = on_rec_start
-                preview_config["on_recording_stop"] = on_rec_stop
-                preview_config["on_recorded_chunk"] = self._handle_recorded_chunk
-                preview_config["on_realtime_transcription_update"] = self._update_realtime_preview
-
-                suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
-                if suppress_ctx:
-                    with suppress_ctx():
-                        self.preview_recorder = AudioToTextRecorder(**preview_config)
-                else:
-                    self.preview_recorder = AudioToTextRecorder(**preview_config)
+            if suppress_ctx:
+                with suppress_ctx():
+                    self.recorder = AudioToTextRecorder(**recorder_config)
+            else:
+                self.recorder = AudioToTextRecorder(**recorder_config)
 
             if HAS_RICH and CONSOLE:
-                CONSOLE.print("[bold green]Long-form transcription system initialized.[/bold green]")
+                CONSOLE.print(
+                    "[bold green]Long-form transcription system initialized.[/bold green]"
+                )
             else:
                 print("Long-form transcription system initialized.")
 
-        except (ImportError, RuntimeError) as e:
+        except (ImportError, RuntimeError) as error:
             if HAS_RICH and CONSOLE:
-                CONSOLE.print(f"[bold red]Error initializing recorders: {str(e)}[/bold red]")
+                CONSOLE.print(
+                    f"[bold red]Error initializing recorder: {error}[/bold red]"
+                )
             else:
-                print(f"Error initializing recorders: {str(e)}")
+                print(f"Error initializing recorder: {error}")
+
+    def force_initialize(self) -> bool:
+        """Rebuild the recorder instance after a forced cleanup."""
+        try:
+            if self.recorder:
+                try:
+                    self.recorder.shutdown()
+                except Exception:
+                    pass
+            self.recorder = None
+            self._initialize_recorder()
+            return self.recorder is not None
+        except Exception as error:
+            if HAS_RICH and CONSOLE:
+                CONSOLE.print(
+                    f"[bold red]Failed to reinitialize recorder: {error}[/bold red]"
+                )
+            else:
+                print(f"Failed to reinitialize recorder: {error}")
+            return False
 
     def start_recording(self):
         """
@@ -667,27 +617,19 @@ class LongFormTranscriber:
                 )
                 return
 
-        if not self.recording and self.preview_recorder is not None:
+        if not self.recording and self.recorder is not None:
             suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
             if suppress_ctx:
                 with suppress_ctx():
-                    if HAS_RICH and CONSOLE:
-                        CONSOLE.print("[green]Starting recording...[/green]")
-                    else:
-                        print("\nStarting recording...")
-                    self.preview_recorder.start()
+                    self.recorder.start()
             else:
-                if HAS_RICH and CONSOLE:
-                    CONSOLE.print("[green]Starting recording...[/green]")
-                else:
-                    print("\nStarting recording...")
-                self.preview_recorder.start()
+                self.recorder.start()
 
     def stop_recording(self):
         """
         Stop recording audio and process the transcription.
         """
-        if not self.preview_recorder or not self.longform_recorder:
+        if not self.recorder:
             if HAS_RICH and CONSOLE:
                 CONSOLE.print("[yellow]Recorders not initialized.[/yellow]")
             else:
@@ -701,9 +643,9 @@ class LongFormTranscriber:
                 print("\nStopping recording...")
 
             self._abort_requested = False  # reset flag for this cycle
-            self.preview_recorder.stop()
-            self.preview_recorder.wait_audio()
-            audio_data = self.preview_recorder.audio
+            self.recorder.stop()
+            self.recorder.wait_audio()
+            audio_data = self.recorder.audio
             self._stop_timer_thread()
 
             transcription = None
@@ -712,18 +654,18 @@ class LongFormTranscriber:
             # Display a spinner while transcribing
             if HAS_RICH and CONSOLE:
                 with CONSOLE.status("[bold blue]Transcribing...[/bold blue]"):
-                    transcription = (
-                        ""
-                        if self._abort_requested
-                        else self.longform_recorder.perform_final_transcription(audio_data)
-                    )
+                    transcription = ""
+                    if not self._abort_requested:
+                        transcription = self.recorder.perform_final_transcription(
+                            audio_data
+                        )
             else:
                 print("Transcribing...")
-                transcription = (
-                    ""
-                    if self._abort_requested
-                    else self.longform_recorder.perform_final_transcription(audio_data)
-                )
+                transcription = ""
+                if not self._abort_requested:
+                    transcription = self.recorder.perform_final_transcription(
+                        audio_data
+                    )
 
             self._last_transcription_duration = (
                 time.monotonic() - transcription_start
@@ -782,10 +724,6 @@ class LongFormTranscriber:
                         print("\nClipboard not available. Please copy manually:")
                         print(f"TEXT: {self.last_transcription}")
 
-            # Reset mini realtime buffer for the next session
-            if self.realtime_preview_config:
-                self._realtime_display_text = None
-
             self._print_transcription_metrics()
 
     def abort(self):
@@ -799,10 +737,8 @@ class LongFormTranscriber:
         self.last_transcription = ""
         self._stop_timer_thread()
         self._recording_started_at = None
-        if self.realtime_preview_config:
-            self._realtime_display_text = None
 
-        rec = self.preview_recorder
+        rec = self.recorder
         if not rec:
             self.recording = False
             self._abort_requested = False
@@ -927,12 +863,9 @@ class LongFormTranscriber:
 
     def clean_up(self):
         """Clean up resources."""
-        if self.preview_recorder:
-            self.preview_recorder.shutdown()
-            self.preview_recorder = None
-        if self.longform_recorder:
-            self.longform_recorder.shutdown()
-            self.longform_recorder = None
+        if self.recorder:
+            self.recorder.shutdown()
+            self.recorder = None
 
     def run(self):
         """
