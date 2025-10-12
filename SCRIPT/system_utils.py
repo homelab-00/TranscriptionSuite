@@ -17,9 +17,89 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from importlib.metadata import version as metadata_version, PackageNotFoundError
 from typing import Dict, Any
 from platform_utils import get_platform_manager
+
+
+_LOGGING_CONFIGURED = False
+
+
+def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
+    """Initialize application logging once using absolute paths."""
+
+    global _LOGGING_CONFIGURED
+
+    root_logger = logging.getLogger()
+    if _LOGGING_CONFIGURED or root_logger.handlers:
+        return root_logger
+
+    platform_manager = get_platform_manager()
+    script_dir = Path(__file__).resolve().parent
+
+    logging_defaults: Dict[str, Any] = {
+        "level": "INFO",
+        "max_size_mb": 10,
+        "backup_count": 3,
+        "console_output": False,
+        "file_name": "stt_orchestrator.log",
+        "directory": str(platform_manager.get_config_dir()),
+    }
+
+    resolved_config: Dict[str, Any] = logging_defaults.copy()
+
+    if config is None:
+        config_path = platform_manager.get_config_dir() / "config.json"
+        if config_path.exists():
+            try:
+                with config_path.open("r", encoding="utf-8") as config_file:
+                    loaded_config = json.load(config_file)
+                resolved_config.update(loaded_config.get("logging", {}))
+            except (json.JSONDecodeError, OSError):
+                pass
+    else:
+        resolved_config.update(config.get("logging", {}))
+
+    log_dir = Path(resolved_config.get("directory", script_dir)).expanduser()
+    if not log_dir.is_absolute():
+        log_dir = (Path(script_dir) / log_dir).resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = log_dir / resolved_config.get("file_name", "stt_orchestrator.log")
+
+    level_name = str(resolved_config.get("level", "INFO")).upper()
+    log_level = getattr(logging, level_name, logging.INFO)
+
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=int(resolved_config.get("max_size_mb", 10) * 1024 * 1024),
+        backupCount=int(resolved_config.get("backup_count", 3)),
+    )
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    file_handler.setFormatter(formatter)
+
+    root_logger.setLevel(log_level)
+    root_logger.addHandler(file_handler)
+
+    if resolved_config.get("console_output", False):
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
+    logging.captureWarnings(True)
+    _LOGGING_CONFIGURED = True
+    root_logger.info("Logging initialized at %s", log_path)
+    root_logger.info(
+        "RealtimeSTT package logs remain separate in realtimesst.log "
+        "(managed by the library)"
+    )
+    return root_logger
+
 
 # Optional import for process management
 try:
@@ -46,15 +126,6 @@ try:
 except ImportError:
     FASTER_WHISPER_AVAILABLE = False
     faster_whisper = None
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("stt_orchestrator.log"),
-    ],
-)
 
 # Try to import Rich for prettier console output
 try:
@@ -133,6 +204,14 @@ class SystemUtils:
                 "allowed_latency_limit": 100,
                 "faster_whisper_vad_filter": True,
             },
+            "logging": {
+                "level": "INFO",
+                "max_size_mb": 10,
+                "backup_count": 3,
+                "console_output": False,
+                "file_name": "stt_orchestrator.log",
+                "directory": str(self.platform_manager.get_config_dir()),
+            },
         }
 
         # Ensure config directory exists
@@ -145,6 +224,7 @@ class SystemUtils:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as config_file:
                     loaded_config = json.load(config_file)
+                    needs_save = False
 
                     # Update default config with loaded values
                     for module_type, module_defaults in default_config.items():
@@ -153,7 +233,22 @@ class SystemUtils:
                                 if param in module_defaults:
                                     module_defaults[param] = value
 
+                    for module_type, values in loaded_config.items():
+                        if module_type not in default_config:
+                            default_config[module_type] = copy.deepcopy(values)
+
                     self.config = default_config
+                    logging_config_loaded = loaded_config.get("logging")
+                    if not logging_config_loaded:
+                        needs_save = True
+                    else:
+                        for key in default_config["logging"]:
+                            if key not in logging_config_loaded:
+                                needs_save = True
+                                break
+
+                    if needs_save:
+                        self.save_config()
                     logging.info("Configuration loaded from file")
             except (json.JSONDecodeError, OSError) as exception:
                 logging.error("Error loading configuration: %s", exception)
