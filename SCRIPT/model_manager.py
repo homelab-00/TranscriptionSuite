@@ -15,7 +15,6 @@ import os
 import sys
 import io
 import logging
-import time
 import gc
 import importlib.util
 from platform_utils import get_platform_manager
@@ -119,18 +118,21 @@ class ModelManager:
                         device_info = p.get_device_info_by_index(i)
 
                         # Robust type checking for maxInputChannels
-                        max_input_channels = device_info.get('maxInputChannels', 0)
+                        max_input_channels = device_info.get("maxInputChannels", 0)
                         if not isinstance(max_input_channels, (int, float)):
                             continue
 
                         # Only include input devices
                         if max_input_channels > 0:
                             device_entry = {
-                                'index': i,
-                                'name': str(device_info.get('name', f'Device {i}')),
-                                'channels': int(max_input_channels),
-                                'sample_rate': float(device_info.get('defaultSampleRate', 44100)),
-                                'is_default': i == p.get_default_input_device_info()['index']
+                                "index": i,
+                                "name": str(device_info.get("name", f"Device {i}")),
+                                "channels": int(max_input_channels),
+                                "sample_rate": float(
+                                    device_info.get("defaultSampleRate", 44100)
+                                ),
+                                "is_default": i
+                                == p.get_default_input_device_info()["index"],
                             }
                             devices.append(device_entry)
 
@@ -141,7 +143,7 @@ class ModelManager:
                 p.terminate()
 
             # Sort devices - default device first, then by name
-            devices.sort(key=lambda x: (not x['is_default'], x['name']))
+            devices.sort(key=lambda x: (not x["is_default"], x["name"]))
 
             self._log_info(f"Found {len(devices)} audio input devices")
             return devices
@@ -182,9 +184,7 @@ class ModelManager:
             "longform": "longform_module.py",
         }
 
-        filepath = os.path.join(
-            self.script_dir, module_paths.get(module_name, "")
-        )
+        filepath = os.path.join(self.script_dir, module_paths.get(module_name, ""))
 
         try:
             if not os.path.exists(filepath):
@@ -193,9 +193,7 @@ class ModelManager:
 
             spec = importlib.util.spec_from_file_location(module_name, filepath)
             if spec is None or spec.loader is None:
-                self._log_error(
-                    "Could not find module: %s at %s", module_name, filepath
-                )
+                self._log_error("Could not find module: %s at %s", module_name, filepath)
                 return None
 
             module = importlib.util.module_from_spec(spec)
@@ -206,20 +204,18 @@ class ModelManager:
             self._log_info("Successfully imported module: %s", module_name)
             return module
         except (ImportError, AttributeError, OSError) as e:
-            self._log_error(
-                "Error importing %s from %s: %s", module_name, filepath, e
-            )
+            self._log_error("Error importing %s from %s: %s", module_name, filepath, e)
             return None
 
     def _resolve_input_device_index(self, module_config, fallback=None):
         """Resolve the audio input device index honoring default-device flags."""
         use_default = module_config.get("use_default_input", True)
- 
+
         if use_default:
             default_index = self.get_default_input_device_index()
             if default_index is not None:
                 return default_index
-            return fallback # Fallback if default cannot be found
+            return fallback  # Fallback if default cannot be found
 
         explicit_index = module_config.get("input_device_index")
         if explicit_index is not None:
@@ -260,12 +256,13 @@ class ModelManager:
                         rate=16000,
                         input=True,
                         input_device_index=default_index,
-                        frames_per_buffer=1024
+                        frames_per_buffer=1024,
                     )
                     stream.close()
 
                     safe_print(
-                        f"Using default input device: {device_name} (index: {default_index})",
+                        f"Using default input device: {device_name} "
+                        f"(index: {default_index})",
                         "info",
                     )
 
@@ -280,14 +277,19 @@ class ModelManager:
                                 channels=1,
                                 rate=16000,
                                 input=True,
-                                input_device_index=device['index'],
-                                frames_per_buffer=1024
+                                input_device_index=device["index"],
+                                frames_per_buffer=1024,
                             )
                             stream.close()
-                            safe_print(f"Using alternative device: {device['name']}", "info")
+                            safe_print(
+                                f"Using alternative device: {device['name']}", "info"
+                            )
                             p.terminate()
-                            return device['index']
-                        except:
+                            return device["index"]
+                        except (OSError, ValueError) as e:
+                            self._log_warning(
+                                f"Default device {device_name} not accessible: {e}"
+                            )
                             continue
 
                     # If no devices work, return None
@@ -330,9 +332,7 @@ class ModelManager:
             post_speech_silence_duration=module_config.get(
                 "post_speech_silence_duration", 0.6
             ),
-            min_length_of_recording=module_config.get(
-                "min_length_of_recording", 1.0
-            ),
+            min_length_of_recording=module_config.get("min_length_of_recording", 1.0),
             min_gap_between_recordings=module_config.get(
                 "min_gap_between_recordings", 1.0
             ),
@@ -348,9 +348,7 @@ class ModelManager:
             batch_size=module_config.get("batch_size", 16),
             beam_size=module_config.get("beam_size", 5),
             initial_prompt=module_config.get("initial_prompt"),
-            allowed_latency_limit=module_config.get(
-                "allowed_latency_limit", 100
-            ),
+            allowed_latency_limit=module_config.get("allowed_latency_limit", 100),
             faster_whisper_vad_filter=module_config.get(
                 "faster_whisper_vad_filter", True
             ),
@@ -377,7 +375,7 @@ class ModelManager:
             current_model_name = module_config.get(
                 "model", "Systran/faster-whisper-large-v3"
             )
-            preinitialized_model = None # No reuse logic anymore
+            preinitialized_model = None  # No reuse logic anymore
 
             # Initialize based on module type
             transcriber_initializers = {
@@ -385,9 +383,9 @@ class ModelManager:
             }
 
             if module_type in transcriber_initializers:
-                self.transcribers[module_type] = transcriber_initializers[
-                    module_type
-                ](module, module_config, preinitialized_model)
+                self.transcribers[module_type] = transcriber_initializers[module_type](
+                    module, module_config, preinitialized_model
+                )
             else:
                 raise ValueError(f"Unknown module type: {module_type}")
 
@@ -406,9 +404,7 @@ class ModelManager:
             return self.transcribers[module_type]
 
         except (ImportError, AttributeError, ValueError, OSError) as e:
-            self._log_error(
-                "Error initializing %s transcriber: %s", module_type, e
-            )
+            self._log_error("Error initializing %s transcriber: %s", module_type, e)
             return None
 
     def _cleanup_recorder(self, transcriber):
@@ -466,9 +462,7 @@ class ModelManager:
         for module_type, transcriber in list(self.transcribers.items()):
             try:
                 if transcriber is not None:
-                    safe_print(
-                        f"Final cleanup of {module_type} transcriber...", "info"
-                    )
+                    safe_print(f"Final cleanup of {module_type} transcriber...", "info")
 
                     if module_type == "longform":
                         if hasattr(transcriber, "clean_up"):
