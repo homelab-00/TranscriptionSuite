@@ -1,5 +1,5 @@
 # tray_manager.py
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 """
 System Tray Icon Manager for the Speech-to-Text system.
 
@@ -14,21 +14,25 @@ from typing import Callable, Optional, cast
 try:
     from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
     from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen
-    from PyQt6.QtCore import Qt, QCoreApplication
+    from PyQt6.QtCore import Qt
+
     HAS_PYQT = True
 except ImportError:
     HAS_PYQT = False
 
+
 class TrayIconManager:
     """Manages the system tray icon and the application event loop."""
 
-    def __init__(self,
-                 name: str,
-                 start_callback: Optional[Callable] = None,
-                 stop_callback: Optional[Callable] = None,
-                 quit_callback: Optional[Callable] = None,
-                 open_config_callback: Optional[Callable] = None,
-                 reset_callback: Optional[Callable] = None):
+    def __init__(
+        self,
+        name: str,
+        start_callback: Optional[Callable] = None,
+        stop_callback: Optional[Callable] = None,
+        quit_callback: Optional[Callable] = None,
+        open_config_callback: Optional[Callable] = None,
+        reset_callback: Optional[Callable] = None,
+    ):
         """
         Initialize the TrayIconManager.
 
@@ -41,9 +45,12 @@ class TrayIconManager:
             reset_callback: Function to reset the current operation.
         """
         if not HAS_PYQT:
-            raise ImportError("PyQt6 is required for the system tray icon. Please install it.")
+            raise ImportError(
+                "PyQt6 is required for the system tray icon. Please install it."
+            )
 
-        # Get or create the application instance, using a local variable for type narrowing
+        # Get or create the application instance, using a local variable
+        # for type narrowing
         app = QApplication.instance()
         if not app:
             app = QApplication(sys.argv)
@@ -57,7 +64,7 @@ class TrayIconManager:
 
         self.icon = QSystemTrayIcon()
         self.icon.setToolTip(name)
-        
+
         # Store callbacks
         self.start_callback = start_callback
         self.stop_callback = stop_callback
@@ -72,16 +79,16 @@ class TrayIconManager:
         # New color scheme reflecting the new states
         self.colors = {
             "loading": (128, 128, 128),  # Grey
-            "standby": (0, 255, 0),      # Green
+            "standby": (0, 255, 0),  # Green
             "recording": (255, 255, 0),  # Yellow
-            "transcribing": (255, 128, 0), # Orange during transcription
-            "error": (255, 0, 0)         # Red
+            "transcribing": (255, 128, 0),  # Orange during transcription
+            "error": (255, 0, 0),  # Red
         }
 
     def _setup_context_menu(self):
         """Create a context menu for the tray icon."""
         menu = QMenu()
-        
+
         if self.start_callback:
             start_action = menu.addAction("Start Recording")
             if start_action:
@@ -110,7 +117,7 @@ class TrayIconManager:
             quit_action = menu.addAction("Quit")
             if quit_action:
                 quit_action.triggered.connect(self.quit_callback)
-        
+
         self.icon.setContextMenu(menu)
 
     def _handle_activation(self, reason: QSystemTrayIcon.ActivationReason):
@@ -118,17 +125,14 @@ class TrayIconManager:
         # Type guard to ensure we have a QApplication instance
         if not isinstance(self.app, QApplication):
             return
-        
-        # Now we can safely cast and use QApplication methods
-        app = cast(QApplication, self.app)
-        # Get keyboard modifiers to check if Shift is pressed
-        modifiers = app.keyboardModifiers()
-        
-        is_shift_pressed = modifiers & Qt.KeyboardModifier.ShiftModifier
-        
-        if reason == QSystemTrayIcon.ActivationReason.Trigger and self.start_callback: # Left-click
+
+        if (
+            reason == QSystemTrayIcon.ActivationReason.Trigger and self.start_callback
+        ):  # Left-click
             self.start_callback()
-        elif reason == QSystemTrayIcon.ActivationReason.MiddleClick and self.stop_callback: # Middle-click
+        elif (
+            reason == QSystemTrayIcon.ActivationReason.MiddleClick and self.stop_callback
+        ):  # Middle-click
             self.stop_callback()
 
     def _create_icon(self, color_rgb: tuple) -> QIcon:
@@ -137,7 +141,7 @@ class TrayIconManager:
 
         Args:
             color_rgb: A tuple (r, g, b) for the icon's fill color.
-        
+
         Returns:
             A QIcon object.
         """
@@ -172,7 +176,8 @@ class TrayIconManager:
         Set the icon's appearance based on the application state.
 
         Args:
-            state: The current state ('loading', 'standby', 'recording', 'transcribing', 'error').
+            state: The current state (
+                'loading', 'standby', 'recording', 'transcribing', 'error').
         """
         color = self.colors.get(state)
         if color:
@@ -181,7 +186,7 @@ class TrayIconManager:
 
     def run(self):
         """Show the icon and start the application event loop."""
-        self.set_state("loading") # Start with grey icon
+        self.set_state("loading")  # Start with grey icon
         self.icon.show()
         if self.app:
             return self.app.exec()
