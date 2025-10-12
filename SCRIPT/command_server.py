@@ -94,9 +94,7 @@ class CommandServer:
             return
 
         self.running = True
-        self.server_thread = threading.Thread(
-            target=self._run_server, daemon=True
-        )
+        self.server_thread = threading.Thread(target=self._run_server, daemon=True)
         self.server_thread.start()
         logging.info("TCP server started on %s:%s", self.host, self.port)
 
@@ -109,9 +107,7 @@ class CommandServer:
 
         # Only try to join the server thread if we're not currently in it
         current_thread_id = threading.get_ident()
-        server_thread_id = (
-            self.server_thread.ident if self.server_thread else None
-        )
+        server_thread_id = self.server_thread.ident if self.server_thread else None
 
         try:
             if (
@@ -133,9 +129,7 @@ class CommandServer:
         try:
             server_socket.bind((self.host, self.port))
             server_socket.listen(5)
-            server_socket.settimeout(
-                1
-            )  # Allow checking self.running every second
+            server_socket.settimeout(1)  # Allow checking self.running every second
 
             while self.running:
                 try:

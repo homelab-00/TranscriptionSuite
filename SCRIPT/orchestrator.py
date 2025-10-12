@@ -31,6 +31,7 @@ from depenency_checker import DependencyChecker
 # Try to import the tray manager
 try:
     from tray_manager import TrayIconManager
+
     HAS_TRAY = True
 except ImportError:
     HAS_TRAY = False
@@ -89,7 +90,9 @@ class STTOrchestrator:
             )
         else:
             self.tray_manager = None
-            safe_print("Could not initialize system tray icon. Please install PyQt6.", "warning")
+            safe_print(
+                "Could not initialize system tray icon. Please install PyQt6.", "warning"
+            )
 
         # Initialize configuration
         self.config = self.system_utils.load_or_create_config()
@@ -97,7 +100,7 @@ class STTOrchestrator:
         # Initialize model manager
         self.model_manager = ModelManager(self.config, self.script_dir)
 
-    # NOTE: Non-tray triggers (DBus hotkeys, TCP server) have been removed.
+        # NOTE: Non-tray triggers (DBus hotkeys, TCP server) have been removed.
 
         # Register cleanup handler
         atexit.register(self.stop)
@@ -110,28 +113,28 @@ class STTOrchestrator:
             checker = DependencyChecker()
             results = checker.check_all_dependencies()
 
-            summary = results.get('summary', {})
-            status = summary.get('overall_status', 'unknown')
+            summary = results.get("summary", {})
+            status = summary.get("overall_status", "unknown")
 
-            if status == 'critical_issues':
+            if status == "critical_issues":
                 safe_print("Critical dependencies are missing!", "error")
-                for item in summary.get('critical_missing', []):
+                for item in summary.get("critical_missing", []):
                     safe_print(f"  Missing: {item}", "error")
 
                 # Ask user if they want to continue anyway
                 response = input("\nContinue anyway? (y/N): ").strip().lower()
-                if response != 'y':
+                if response != "y":
                     safe_print("Exiting due to missing dependencies.", "error")
                     sys.exit(1)
 
-            elif status == 'warnings_present':
+            elif status == "warnings_present":
                 safe_print("Some non-critical issues detected:", "warning")
-                for item in summary.get('warnings', []):
+                for item in summary.get("warnings", []):
                     safe_print(f"  Warning: {item}", "warning")
 
-                if summary.get('recommendations'):
+                if summary.get("recommendations"):
                     safe_print("Recommendations:", "info")
-                    for item in summary['recommendations']:
+                    for item in summary["recommendations"]:
                         safe_print(f"  • {item}", "info")
 
             else:
@@ -186,7 +189,8 @@ class STTOrchestrator:
             safe_print("Configuration updated. Long-form model reloaded.", "success")
         else:
             safe_print(
-                "Long-form model reload was unsuccessful. Please review the configuration.",
+                "Long-form model reload was unsuccessful. "
+                "Please review the configuration.",
                 "warning",
             )
 
@@ -233,6 +237,7 @@ class STTOrchestrator:
             safe_print("No active long-form recording to stop.", "info")
             return
         # Dispatch to a worker thread so the Qt event loop can update the icon
+
         def _worker():
             if self.tray_manager:
                 self.tray_manager.set_state("transcribing")
@@ -288,7 +293,8 @@ class STTOrchestrator:
                         result = False
                     if result is False:
                         safe_print(
-                            "Abort did not complete promptly. Reinitializing recorder...",
+                            "Abort did not complete promptly. "
+                            "Reinitializing recorder...",
                             "warning",
                         )
                         try:
@@ -299,22 +305,29 @@ class STTOrchestrator:
                                 "Error during long-form cleanup: %s", cleanup_error
                             )
                         try:
-                            if hasattr(transcriber, "force_initialize") and transcriber.force_initialize():
+                            if (
+                                hasattr(transcriber, "force_initialize")
+                                and transcriber.force_initialize()
+                            ):
                                 safe_print(
-                                    "Recorder reset. Long-form mode is ready for a new recording.",
+                                    "Recorder reset. Long-form mode is ready for a "
+                                    "new recording.",
                                     "success",
                                 )
                             else:
                                 safe_print(
-                                    "Recorder reinitialization failed; long-form recording may be unavailable until restart.",
+                                    "Recorder reinitialization failed; long-form "
+                                    "recording may be unavailable until restart.",
                                     "error",
                                 )
                         except Exception as init_error:
                             logging.error(
-                                "Error reinitializing long-form recorder: %s", init_error
+                                "Error reinitializing long-form recorder: %s",
+                                init_error,
                             )
                             safe_print(
-                                "Failed to reset recorder cleanly. You may need to restart long-form mode.",
+                                "Failed to reset recorder cleanly. You may need to "
+                                "restart long-form mode.",
                                 "error",
                             )
                     else:
@@ -324,11 +337,14 @@ class STTOrchestrator:
                         )
                 else:
                     safe_print(
-                        "Reset requested but long-form transcriber is unavailable. Attempting to reinitialize...",
+                        "Reset requested but long-form transcriber is "
+                        "unavailable. Attempting to reinitialize...",
                         "warning",
                     )
                     try:
-                        transcriber = self.model_manager.initialize_transcriber("longform")
+                        transcriber = self.model_manager.initialize_transcriber(
+                            "longform"
+                        )
                         if transcriber:
                             safe_print(
                                 "Long-form recorder reinitialized. Ready to record.",
@@ -336,16 +352,19 @@ class STTOrchestrator:
                             )
                         else:
                             safe_print(
-                                "Could not reinitialize long-form recorder. Please restart the application.",
+                                "Could not reinitialize long-form recorder. "
+                                "Please restart the application.",
                                 "error",
                             )
                     except Exception as init_error:
                         logging.error(
-                            "Error initializing long-form transcriber during reset: %s",
+                            "Error initializing long-form transcriber during "
+                            "reset: %s",
                             init_error,
                         )
                         safe_print(
-                            "Critical error resetting long-form recorder. A restart may be required.",
+                            "Critical error resetting long-form recorder. "
+                            "A restart may be required.",
                             "error",
                         )
 
@@ -378,9 +397,7 @@ class STTOrchestrator:
         self.system_utils.display_system_info()
         self._check_startup_dependencies()
 
-    # REMOVED: KDE-native hotkeys
-        
-        # NEW: Proactively load the longform model in a separate thread
+        # Proactively load the longform model in a separate thread
         def preload_startup_models():
             if self.tray_manager:
                 self.tray_manager.set_state("loading")  # Grey icon
@@ -396,13 +413,11 @@ class STTOrchestrator:
                 # The model is now loaded during the transcriber's __init__
                 # so if we get an object back, it's ready.
                 success = True
-            
+
             overall_success = success
 
             if self.tray_manager:
-                self.tray_manager.set_state(
-                    "standby" if overall_success else "error"
-                )
+                self.tray_manager.set_state("standby" if overall_success else "error")
 
         threading.Thread(target=preload_startup_models, daemon=True).start()
 

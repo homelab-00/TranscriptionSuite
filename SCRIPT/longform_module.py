@@ -78,6 +78,7 @@ DEFAULT_WAVEFORM_CLIPPING_THRESHOLD_DB = -25.0
 
 _MISSING = object()
 
+
 class LongFormTranscriber:
     """
     A class that provides manual control over speech recording and transcription.
@@ -243,6 +244,7 @@ class LongFormTranscriber:
             self._waveform_last_levels = [0.0] * self._waveform_slot_count
             self._waveform_last_update = 0.0
             self._latest_waveform = self._default_waveform_display()
+
     def _render_waveform(self) -> str:
         """Render a waveform bar based on recent audio levels."""
         now = time.monotonic()
@@ -342,8 +344,12 @@ class LongFormTranscriber:
                     elif level >= max_threshold:
                         row_chars.append(glyphs[-1])
                     else:
-                        row_level = (level - min_threshold) / (max_threshold - min_threshold)
-                        glyph_index = min(glyph_count, int(round(row_level * glyph_count)))
+                        row_level = (level - min_threshold) / (
+                            max_threshold - min_threshold
+                        )
+                        glyph_index = min(
+                            glyph_count, int(round(row_level * glyph_count))
+                        )
                         row_chars.append(glyphs[glyph_index])
 
                 amplitude_rows.append(row_chars)
@@ -466,6 +472,7 @@ class LongFormTranscriber:
 
     def _run_recording_timer(self) -> None:
         """Render a live status display during recording using Rich."""
+        # First check if we have all Rich components available
         rich_components_available = all(
             [HAS_RICH, CONSOLE, Live, Group, Panel, Align, Text]
         )
@@ -475,9 +482,11 @@ class LongFormTranscriber:
                 time.sleep(0.2)
             return
 
+        # Explicitly create local variables that Pylance knows are not None
         rich_group = cast(Any, Group)
         rich_panel = cast(Any, Panel)
         rich_align = cast(Any, Align)
+        rich_live = cast(Any, Live)  # Add this line to create a non-None Live reference
 
         def generate_display() -> Any:
             """Generate the Rich renderable for the live display."""
@@ -508,7 +517,8 @@ class LongFormTranscriber:
 
             return rich_group(header_panel, waveform_panel)
 
-        with Live(
+        # Use rich_live instead of Live directly
+        with rich_live(
             generate_display(),
             screen=True,
             transient=True,
@@ -551,13 +561,17 @@ class LongFormTranscriber:
         recorder_config["on_recording_stop"] = on_rec_stop
         recorder_config["on_recorded_chunk"] = self._handle_recorded_chunk
 
-        suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
+        suppress_ctx: Optional[
+            Callable[[], contextlib.AbstractContextManager[Any]]
+        ] = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
 
         try:
-            if suppress_ctx:
-                with suppress_ctx():
-                    self.recorder = AudioToTextRecorder(**recorder_config)
+            context_manager: contextlib.AbstractContextManager[Any]
+            if suppress_ctx is not None and callable(suppress_ctx):
+                context_manager = suppress_ctx()
             else:
+                context_manager = contextlib.nullcontext()
+            with context_manager:
                 self.recorder = AudioToTextRecorder(**recorder_config)
 
             if HAS_RICH and CONSOLE:
@@ -607,8 +621,11 @@ class LongFormTranscriber:
                     Panel(
                         Align.center(
                             f"[bold]Terminal too small![/bold]\n\n"
-                            f"Please resize to at least [cyan]{min_width}x{min_height}[/cyan] characters to start recording.\n"
-                            f"Current size is [yellow]{CONSOLE.width}x{CONSOLE.height}[/yellow].",
+                            f"Please resize to at least "
+                            f"[cyan]{min_width}x{min_height}[/cyan] "
+                            f"characters to start recording.\n"
+                            f"Current size is "
+                            f"[yellow]{CONSOLE.width}x{CONSOLE.height}[/yellow].",
                             vertical="middle",
                         ),
                         title="[bold red]Error[/bold red]",
@@ -618,11 +635,15 @@ class LongFormTranscriber:
                 return
 
         if not self.recording and self.recorder is not None:
-            suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
-            if suppress_ctx:
-                with suppress_ctx():
-                    self.recorder.start()
+            suppress_ctx: Optional[
+                Callable[[], contextlib.AbstractContextManager[Any]]
+            ] = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
+            context_manager: contextlib.AbstractContextManager[Any]
+            if suppress_ctx is not None and callable(suppress_ctx):
+                context_manager = suppress_ctx()
             else:
+                context_manager = contextlib.nullcontext()
+            with context_manager:
                 self.recorder.start()
 
     def stop_recording(self):
@@ -663,13 +684,9 @@ class LongFormTranscriber:
                 print("Transcribing...")
                 transcription = ""
                 if not self._abort_requested:
-                    transcription = self.recorder.perform_final_transcription(
-                        audio_data
-                    )
+                    transcription = self.recorder.perform_final_transcription(audio_data)
 
-            self._last_transcription_duration = (
-                time.monotonic() - transcription_start
-            )
+            self._last_transcription_duration = time.monotonic() - transcription_start
 
             # If aborted, skip producing/pasting any text
             if self._abort_requested:
@@ -685,7 +702,7 @@ class LongFormTranscriber:
                 self._recording_started_at = None
 
             # Ensure transcription is a string
-            self.last_transcription = (str(transcription) if transcription else "")
+            self.last_transcription = str(transcription) if transcription else ""
 
             # Display the transcription
             if HAS_RICH and CONSOLE and Panel and Text:
@@ -707,17 +724,20 @@ class LongFormTranscriber:
                 if self._safe_clipboard_copy(self.last_transcription):
                     if HAS_RICH and CONSOLE:
                         CONSOLE.print(
-                            "[yellow]Transcription copied to the clipboard. Paste it manually when ready.[/yellow]"
+                            "[yellow]Transcription copied to the clipboard. "
+                            "Paste it manually when ready.[/yellow]"
                         )
                     else:
                         print(
-                            "Transcription copied to the clipboard. Paste it manually when ready."
+                            "Transcription copied to the clipboard. "
+                            "Paste it manually when ready."
                         )
                 else:
                     # Fallback: just display the text for manual copying
                     if HAS_RICH and CONSOLE:
                         CONSOLE.print(
-                            "\n[yellow]Clipboard not available. Please copy manually:[/yellow]"
+                            "\n[yellow]Clipboard not available. "
+                            "Please copy manually:[/yellow]"
                         )
                         CONSOLE.print(f"[bold]{self.last_transcription}[/bold]")
                     else:
@@ -795,9 +815,15 @@ class LongFormTranscriber:
         if not abort_complete.is_set():
             forced_reset = True
             if HAS_RICH and CONSOLE:
-                CONSOLE.print("[yellow]Abort still active after grace period; performing forced recorder reset...[/yellow]")
+                CONSOLE.print(
+                    "[yellow]Abort still active after grace period; "
+                    "performing forced recorder reset...[/yellow]"
+                )
             else:
-                print("Abort still active after grace period; performing forced recorder reset...")
+                print(
+                    "Abort still active after grace period; "
+                    "performing forced recorder reset..."
+                )
             self._force_reset_recorder(rec)
             abort_complete.set()
 
@@ -822,7 +848,9 @@ class LongFormTranscriber:
         def _cleanup():
             buffer = io.StringIO()
             try:
-                with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+                with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(
+                    buffer
+                ):
                     for attr in ("stop", "abort", "shutdown"):
                         method = getattr(recorder, attr, None)
                         if callable(method):
@@ -840,7 +868,10 @@ class LongFormTranscriber:
         # Allow up to 5 seconds for cleanup; afterwards, abandon the worker
         if not cleanup_done.wait(timeout=5.0):
             if HAS_RICH and CONSOLE:
-                CONSOLE.print("[yellow]Recorder cleanup thread still running; continuing anyway.[/yellow]")
+                CONSOLE.print(
+                    "[yellow]Recorder cleanup thread still running; "
+                    "continuing anyway.[/yellow]"
+                )
             else:
                 print("Recorder cleanup thread still running; continuing anyway.")
 
@@ -923,40 +954,31 @@ class LongFormTranscriber:
 
         audio_duration = self._last_recording_duration
         processing_time = self._last_transcription_duration
-        speed_ratio = (
-            audio_duration / processing_time if processing_time > 0 else 0.0
-        )
-        realtime_factor = (
-            processing_time / audio_duration if audio_duration > 0 else 0.0
-        )
+        speed_ratio = audio_duration / processing_time if processing_time > 0 else 0.0
+        realtime_factor = processing_time / audio_duration if audio_duration > 0 else 0.0
 
         if HAS_RICH and CONSOLE:
             CONSOLE.print("[bold white]Transcription metrics:[/bold white]")
             CONSOLE.print(
-                f"[grey58]  Audio duration: {self._format_duration(audio_duration)}[/grey58]"
+                f"[grey58]  Audio duration: "
+                f"{self._format_duration(audio_duration)}[/grey58]"
             )
             CONSOLE.print(
-                f"[grey58]  Processing time: {self._format_duration(processing_time)}[/grey58]"
+                f"[grey58]  Processing time: "
+                f"{self._format_duration(processing_time)}[/grey58]"
             )
-            CONSOLE.print(
-                f"[grey58]  Speed ratio: {speed_ratio:.2f}x[/grey58]"
-            )
-            CONSOLE.print(
-                f"[grey58]  Real-time factor: {realtime_factor:.2f}[/grey58]"
-            )
+            CONSOLE.print(f"[grey58]  Speed ratio: {speed_ratio:.2f}x[/grey58]")
+            CONSOLE.print(f"[grey58]  Real-time factor: {realtime_factor:.2f}[/grey58]")
         else:
             print("Transcription metrics:")
-            print(
-                f"  Audio duration: {self._format_duration(audio_duration)}"
-            )
-            print(
-                f"  Processing time: {self._format_duration(processing_time)}"
-            )
+            print(f"  Audio duration: {self._format_duration(audio_duration)}")
+            print(f"  Processing time: {self._format_duration(processing_time)}")
             print(f"  Speed ratio: {speed_ratio:.2f}x")
             print(f"  Real-time factor: {realtime_factor:.2f}")
 
         logging.info(
-            "Long-form transcription metrics | audio: %.2fs | processing: %.2fs | speed: %.2fx | RTF: %.2f",
+            "Long-form transcription metrics | audio: %.2fs | "
+            "processing: %.2fs | speed: %.2fx | RTF: %.2f",
             audio_duration,
             processing_time,
             speed_ratio,

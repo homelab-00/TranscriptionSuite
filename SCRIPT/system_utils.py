@@ -24,6 +24,7 @@ from platform_utils import get_platform_manager
 # Optional import for process management
 try:
     import psutil
+
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
@@ -32,6 +33,7 @@ except ImportError:
 # Import optional dependencies at module level
 try:
     import torch
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -39,6 +41,7 @@ except ImportError:
 
 try:
     import faster_whisper
+
     FASTER_WHISPER_AVAILABLE = True
 except ImportError:
     FASTER_WHISPER_AVAILABLE = False
@@ -66,6 +69,7 @@ except ImportError:
     CONSOLE = None
     Panel = None
     Live = None
+
 
 def safe_print(message, style="default"):
     """Print function that handles I/O errors gracefully with optional styling."""
@@ -139,17 +143,13 @@ class SystemUtils:
         # Try to load existing config
         if os.path.exists(self.config_path):
             try:
-                with open(
-                    self.config_path, "r", encoding="utf-8"
-                ) as config_file:
+                with open(self.config_path, "r", encoding="utf-8") as config_file:
                     loaded_config = json.load(config_file)
 
                     # Update default config with loaded values
                     for module_type, module_defaults in default_config.items():
                         if module_type in loaded_config:
-                            for param, value in loaded_config[
-                                module_type
-                            ].items():
+                            for param, value in loaded_config[module_type].items():
                                 if param in module_defaults:
                                     module_defaults[param] = value
 
@@ -245,7 +245,9 @@ class SystemUtils:
             while True:
                 sections = ", ".join(editable_config.keys())
                 safe_print(f"Available sections: {sections}")
-                safe_print("Press Enter to finish editing or type 'cancel' to abort.", "info")
+                safe_print(
+                    "Press Enter to finish editing or type 'cancel' to abort.", "info"
+                )
                 section = input("Section to edit: ").strip()
 
                 if section == "":
@@ -266,7 +268,8 @@ class SystemUtils:
 
                 while True:
                     safe_print(
-                        "Press Enter to return to section selection or type 'cancel' to abort.",
+                        "Press Enter to return to section selection "
+                        "or type 'cancel' to abort.",
                         "info",
                     )
                     for key, value in section_config.items():
@@ -329,7 +332,8 @@ class SystemUtils:
         version_info = {}
 
         # Create a data structure to hold both current version and update info
-        # Format: {"package_name": {"current": "version", "update": "newer_version or None"}}
+        # Format:
+        # {"package_name": {"current": "version", "update": "newer_version or None"}}
 
         # Get PyTorch version
         if TORCH_AVAILABLE and torch is not None:
@@ -355,9 +359,7 @@ class SystemUtils:
 
         # Get Faster Whisper version
         if FASTER_WHISPER_AVAILABLE and faster_whisper is not None:
-            faster_whisper_ver = getattr(
-                faster_whisper, "__version__", "Unknown"
-            )
+            faster_whisper_ver = getattr(faster_whisper, "__version__", "Unknown")
             version_info["faster_whisper"] = {
                 "current": faster_whisper_ver,
                 "update": None,
@@ -400,23 +402,22 @@ class SystemUtils:
                         "Error parsing JSON from pip list --outdated: %s",
                         result.stdout,
                     )
-        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exception:
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            subprocess.TimeoutExpired,
+        ) as exception:
             logging.error("Error checking for updates: %s", exception)
 
         return version_info
 
-    def _update_package_version_info(
-        self, version_info, package_name, latest_version
-    ):
+    def _update_package_version_info(self, version_info, package_name, latest_version):
         """Helper method to update package version info."""
         if package_name == "torch" and "torch" in version_info:
             version_info["torch"]["update"] = latest_version
         elif package_name == "realtimestt" and "RealtimeSTT" in version_info:
             version_info["RealtimeSTT"]["update"] = latest_version
-        elif (
-            package_name == "faster-whisper"
-            and "faster_whisper" in version_info
-        ):
+        elif package_name == "faster-whisper" and "faster_whisper" in version_info:
             version_info["faster_whisper"]["update"] = latest_version
 
     def get_cuda_info(self) -> Dict[str, str]:
@@ -479,11 +480,13 @@ class SystemUtils:
                 match = re.search(r"release (\d+\.\d+)", result.stdout)
                 if match:
                     version_str = match.group(1)
-                    logging.info(
-                        "Found CUDA version %s using nvcc", version_str
-                    )
+                    logging.info("Found CUDA version %s using nvcc", version_str)
                     return version_str
-        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired) as exception:
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            subprocess.TimeoutExpired,
+        ) as exception:
             logging.error("Error getting CUDA version from nvcc: %s", exception)
 
         return "Not found"
@@ -554,7 +557,11 @@ class SystemUtils:
                 )
                 if len(result) > 1:
                     return result[1].strip()
-            except (subprocess.SubprocessError, subprocess.TimeoutExpired, UnicodeDecodeError):
+            except (
+                subprocess.SubprocessError,
+                subprocess.TimeoutExpired,
+                UnicodeDecodeError,
+            ):
                 pass
         else:  # Linux/Mac
             try:
@@ -575,9 +582,15 @@ class SystemUtils:
         hardware_info = self.get_hardware_info()
 
         # Get enhanced CUDA information and platform info
-        cuda_info_old = self.get_cuda_info()  # Keep the old method for CUDA toolkit detection
+        cuda_info_old = (
+            self.get_cuda_info()
+        )  # Keep the old method for CUDA toolkit detection
         cuda_info = self.platform_manager.check_cuda_availability()
         platform_info = f"Platform: {self.platform_manager.platform.title()}"
+
+        # Retrieve the language configuration beforehand to improve readability
+        # and avoid repetition.
+        long_form_language = self.config.get('longform', {}).get('language', 'N/A')
 
         # Helper function to format version with update marker
         def format_version(package):
@@ -598,7 +611,7 @@ class SystemUtils:
                 f"[bold yellow]Control[/bold yellow] the system by clicking "
                 f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
                 f"[bold yellow]Selected Languages:[/bold yellow]\n"
-                f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}\n\n"
+                f"  Long Form: {long_form_language}\n\n"
                 f"[bold yellow]Python Versions:[/bold yellow]\n"
                 f"  Python: {sys.version.split()[0]}\n"
                 f"  PyTorch: {format_version('torch')}\n"
@@ -629,7 +642,7 @@ class SystemUtils:
             safe_print("Speech-to-Text Orchestrator Running")
             safe_print("=" * 50)
             safe_print("Selected Language:")
-            safe_print(f"  Long Form: {self.config.get('longform', {}).get('language', 'N/A')}")
+            safe_print(f"  Long Form: {long_form_language}")
             safe_print("=" * 50)
             safe_print("Versions:")
             safe_print(f"  PyTorch: {format_version('torch')}")
