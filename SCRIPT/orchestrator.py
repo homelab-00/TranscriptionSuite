@@ -78,8 +78,6 @@ class STTOrchestrator:
                 start_callback=self._start_longform,
                 stop_callback=self._stop_longform,
                 quit_callback=self._quit,
-                open_config_callback=self._open_config_dialog,
-                reset_callback=self._reset_longform,
             )
         else:
             self.tray_manager = None
@@ -143,60 +141,6 @@ class STTOrchestrator:
 
     # REMOVED: Hotkey signal handler
 
-    def _config_updated(self, new_config):
-        """Handle configuration updates."""
-        logging.info("Configuration updated")
-        self.config = new_config
-        self.model_manager.config = new_config
-        reload_successful = False
-
-        if self.tray_manager:
-            self.tray_manager.set_state("loading")
-
-        try:
-            if "longform" in self.model_manager.transcribers:
-                self.model_manager.transcribers["longform"] = None
-
-            longform_transcriber = self.model_manager.initialize_transcriber("longform")
-            if longform_transcriber:
-                reload_successful = True
-            else:
-                reload_successful = False
-
-        except Exception as error:
-            logging.error(
-                "Error reloading long-form model after configuration update: %s",
-                error,
-            )
-            safe_print(
-                "Configuration saved but reloading the long-form model failed."
-                " Check the logs for details.",
-                "error",
-            )
-            reload_successful = False
-
-        if self.tray_manager:
-            self.tray_manager.set_state("standby" if reload_successful else "error")
-
-        if reload_successful:
-            safe_print("Configuration updated. Long-form model reloaded.", "success")
-        else:
-            safe_print(
-                "Long-form model reload was unsuccessful. "
-                "Please review the configuration.",
-                "warning",
-            )
-
-    def _open_config_dialog(self):
-        """Open the configuration dialog."""
-        if self.app_state["current_mode"] is not None:
-            safe_print(
-                "Configuration can only be edited while the system is in standby.",
-                "warning",
-            )
-            return
-        self.system_utils.open_config_dialog(self._config_updated)
-
     def _start_longform(self):
         """Start long-form recording."""
         if self.app_state["current_mode"]:
@@ -255,121 +199,6 @@ class STTOrchestrator:
                 self.app_state["current_mode"] = None
                 if self.tray_manager:
                     self.tray_manager.set_state("error")
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _reset_longform(self):
-        """Reset long-form: abort recording or transcription and return to standby."""
-        # Only meaningful for longform sessions
-        if self.app_state.get("current_mode") != "longform":
-            safe_print("No active long-form session to reset.", "info")
-            if self.tray_manager:
-                self.tray_manager.set_state("standby")
-            return
-
-        def _worker():
-            # Indicate we're doing some work; avoid blocking the UI thread
-            if self.tray_manager:
-                self.tray_manager.set_state("loading")
-            try:
-                transcriber = self.model_manager.transcribers.get("longform")
-                if transcriber and hasattr(transcriber, "abort"):
-                    safe_print(
-                        "Reset requested: aborting current long-form operation...",
-                        "warning",
-                    )
-                    # Abort with internal timeout handling; falls back to shutdown
-                    try:
-                        result = transcriber.abort()
-                    except Exception as e:
-                        logging.error("Error invoking transcriber.abort(): %s", e)
-                        result = False
-                    if result is False:
-                        safe_print(
-                            "Abort did not complete promptly. "
-                            "Reinitializing recorder...",
-                            "warning",
-                        )
-                        try:
-                            if hasattr(transcriber, "clean_up"):
-                                transcriber.clean_up()
-                        except Exception as cleanup_error:
-                            logging.error(
-                                "Error during long-form cleanup: %s", cleanup_error
-                            )
-                        try:
-                            if (
-                                hasattr(transcriber, "force_initialize")
-                                and transcriber.force_initialize()
-                            ):
-                                safe_print(
-                                    "Recorder reset. Long-form mode is ready for a "
-                                    "new recording.",
-                                    "success",
-                                )
-                            else:
-                                safe_print(
-                                    "Recorder reinitialization failed; long-form "
-                                    "recording may be unavailable until restart.",
-                                    "error",
-                                )
-                        except Exception as init_error:
-                            logging.error(
-                                "Error reinitializing long-form recorder: %s",
-                                init_error,
-                            )
-                            safe_print(
-                                "Failed to reset recorder cleanly. You may need to "
-                                "restart long-form mode.",
-                                "error",
-                            )
-                    else:
-                        safe_print(
-                            "Long-form session reset. Ready to record again.",
-                            "success",
-                        )
-                else:
-                    safe_print(
-                        "Reset requested but long-form transcriber is "
-                        "unavailable. Attempting to reinitialize...",
-                        "warning",
-                    )
-                    try:
-                        transcriber = self.model_manager.initialize_transcriber(
-                            "longform"
-                        )
-                        if transcriber:
-                            safe_print(
-                                "Long-form recorder reinitialized. Ready to record.",
-                                "success",
-                            )
-                        else:
-                            safe_print(
-                                "Could not reinitialize long-form recorder. "
-                                "Please restart the application.",
-                                "error",
-                            )
-                    except Exception as init_error:
-                        logging.error(
-                            "Error initializing long-form transcriber during "
-                            "reset: %s",
-                            init_error,
-                        )
-                        safe_print(
-                            "Critical error resetting long-form recorder. "
-                            "A restart may be required.",
-                            "error",
-                        )
-
-            except Exception as e:
-                logging.error(f"Error during reset: {e}")
-                if self.tray_manager:
-                    self.tray_manager.set_state("error")
-            finally:
-                # Clear mode and set UI back to standby
-                self.app_state["current_mode"] = None
-                if self.tray_manager:
-                    self.tray_manager.set_state("standby")
 
         threading.Thread(target=_worker, daemon=True).start()
 

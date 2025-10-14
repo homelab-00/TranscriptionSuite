@@ -30,8 +30,6 @@ class TrayIconManager:
         start_callback: Optional[Callable] = None,
         stop_callback: Optional[Callable] = None,
         quit_callback: Optional[Callable] = None,
-        open_config_callback: Optional[Callable] = None,
-        reset_callback: Optional[Callable] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -41,8 +39,6 @@ class TrayIconManager:
             start_callback: Function to call on left-click.
             stop_callback: Function to call on right-click.
             quit_callback: A function to call to quit.
-            open_config_callback: Function to open the config dialog.
-            reset_callback: Function to reset the current operation.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -69,8 +65,6 @@ class TrayIconManager:
         self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.quit_callback = quit_callback
-        self.open_config_callback = open_config_callback
-        self.reset_callback = reset_callback
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
@@ -98,18 +92,6 @@ class TrayIconManager:
             stop_action = menu.addAction("Stop Recording")
             if stop_action:
                 stop_action.triggered.connect(self.stop_callback)
-
-        if getattr(self, "reset_callback", None):
-            reset_action = menu.addAction("Reset")
-            if reset_action:
-                reset_action.triggered.connect(self.reset_callback)
-
-        menu.addSeparator()
-
-        if self.open_config_callback:
-            config_action = menu.addAction("Configuration")
-            if config_action:
-                config_action.triggered.connect(self.open_config_callback)
 
         menu.addSeparator()
 
