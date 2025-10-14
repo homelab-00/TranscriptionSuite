@@ -29,6 +29,6 @@
         "backup_count": 3,
         "console_output": false,
         "file_name": "stt_orchestrator.log",
-        "directory": "/home/Bill/.config/transcriptionsuite"
+        "directory": "${HOME}/.config/transcriptionsuite"
     }
 }
