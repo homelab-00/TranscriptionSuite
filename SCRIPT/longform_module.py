@@ -7,7 +7,6 @@ speech recording and transcription with keyboard shortcuts and clipboard integra
 
 import array
 import contextlib
-import io
 import logging
 import math
 import threading
@@ -138,8 +137,6 @@ class LongFormTranscriber:
 
         self.recording = False
         self.running = False
-        self.last_transcription = ""
-        self._abort_requested = False
 
         self._recording_started_at = None
         self._last_recording_duration = 0.0
@@ -663,11 +660,9 @@ class LongFormTranscriber:
             else:
                 print("\nStopping recording...")
 
-            self._abort_requested = False  # reset flag for this cycle
             self.recorder.stop()
             self.recorder.wait_audio()
             audio_data = self.recorder.audio
-            self._stop_timer_thread()
 
             transcription = None
             transcription_start = time.monotonic()
@@ -676,24 +671,14 @@ class LongFormTranscriber:
             if HAS_RICH and CONSOLE:
                 with CONSOLE.status("[bold blue]Transcribing...[/bold blue]"):
                     transcription = ""
-                    if not self._abort_requested:
-                        transcription = self.recorder.perform_final_transcription(
-                            audio_data
-                        )
+                    transcription = self.recorder.perform_final_transcription(
+                        audio_data
+                    )
             else:
                 print("Transcribing...")
                 transcription = ""
-                if not self._abort_requested:
-                    transcription = self.recorder.perform_final_transcription(audio_data)
-
+                transcription = self.recorder.perform_final_transcription(audio_data)
             self._last_transcription_duration = time.monotonic() - transcription_start
-
-            # If aborted, skip producing/pasting any text
-            if self._abort_requested:
-                self.last_transcription = ""
-                self._last_transcription_duration = 0.0
-                self._last_recording_duration = 0.0
-                return
 
             if self._recording_started_at is not None:
                 self._last_recording_duration = (
@@ -701,8 +686,9 @@ class LongFormTranscriber:
                 )
                 self._recording_started_at = None
 
-            # Ensure transcription is a string
+            # Ensure transcription is a string and stop the timer
             self.last_transcription = str(transcription) if transcription else ""
+            self._stop_timer_thread()
 
             # Display the transcription
             if HAS_RICH and CONSOLE and Panel and Text:
@@ -720,7 +706,7 @@ class LongFormTranscriber:
                 print("-" * 60 + "\n")
 
             # Copy the transcription to the clipboard for manual pasting
-            if self.last_transcription and not self._abort_requested:
+            if self.last_transcription:
                 if self._safe_clipboard_copy(self.last_transcription):
                     if HAS_RICH and CONSOLE:
                         CONSOLE.print(
@@ -745,135 +731,6 @@ class LongFormTranscriber:
                         print(f"TEXT: {self.last_transcription}")
 
             self._print_transcription_metrics()
-
-    def abort(self):
-        """Abort current recording or transcription safely without blocking.
-
-        Returns:
-            bool: True if abort completed cleanly, False if timed out and a
-                  more aggressive shutdown was requested instead.
-        """
-        self._abort_requested = True
-        self.last_transcription = ""
-        self._stop_timer_thread()
-        self._recording_started_at = None
-
-        rec = self.recorder
-        if not rec:
-            self.recording = False
-            self._abort_requested = False
-            return True
-
-        # Run recorder.abort() in a worker thread and wait with a timeout
-        import threading
-
-        result = {"ok": False}
-        abort_complete = threading.Event()
-
-        def _do_abort():
-            try:
-                rec.abort()
-                result["ok"] = True
-            except Exception as e:
-                if HAS_RICH and CONSOLE:
-                    CONSOLE.print(f"[yellow]Abort error: {e}[/yellow]")
-                else:
-                    print(f"Abort error: {e}")
-            finally:
-                abort_complete.set()
-
-        t = threading.Thread(target=_do_abort, daemon=True)
-        t.start()
-
-        graceful_wait = 5.0
-        check_interval = 0.1
-        waited = 0.0
-
-        while waited < graceful_wait and not abort_complete.is_set():
-            if not self.recording:
-                result["ok"] = True
-                abort_complete.set()
-                break
-            time.sleep(check_interval)
-            waited += check_interval
-
-        # Attempt a gentle stop if abort is still running
-        if not abort_complete.is_set():
-            try:
-                if hasattr(rec, "stop"):
-                    rec.stop()
-            except Exception:
-                pass
-
-            extra_wait = 2.0
-            while extra_wait > 0 and not abort_complete.is_set():
-                time.sleep(check_interval)
-                extra_wait -= check_interval
-
-        forced_reset = False
-
-        if not abort_complete.is_set():
-            forced_reset = True
-            if HAS_RICH and CONSOLE:
-                CONSOLE.print(
-                    "[yellow]Abort still active after grace period; "
-                    "performing forced recorder reset...[/yellow]"
-                )
-            else:
-                print(
-                    "Abort still active after grace period; "
-                    "performing forced recorder reset..."
-                )
-            self._force_reset_recorder(rec)
-            abort_complete.set()
-
-        # Allow the worker thread to wind down but don't block shutdown
-        t.join(timeout=0.2)
-
-        self.recording = False
-        self._abort_requested = False
-
-        if forced_reset:
-            return False
-
-        return result["ok"]
-
-    def _force_reset_recorder(self, recorder):
-        """Forcefully drop the recorder while suppressing noisy shutdown output."""
-        if not recorder:
-            return
-
-        cleanup_done = threading.Event()
-
-        def _cleanup():
-            buffer = io.StringIO()
-            try:
-                with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(
-                    buffer
-                ):
-                    for attr in ("stop", "abort", "shutdown"):
-                        method = getattr(recorder, attr, None)
-                        if callable(method):
-                            try:
-                                method()
-                            except Exception:
-                                pass
-            finally:
-                buffer.close()
-                cleanup_done.set()
-
-        worker = threading.Thread(target=_cleanup, daemon=True)
-        worker.start()
-
-        # Allow up to 5 seconds for cleanup; afterwards, abandon the worker
-        if not cleanup_done.wait(timeout=5.0):
-            if HAS_RICH and CONSOLE:
-                CONSOLE.print(
-                    "[yellow]Recorder cleanup thread still running; "
-                    "continuing anyway.[/yellow]"
-                )
-            else:
-                print("Recorder cleanup thread still running; continuing anyway.")
 
     def quit(self):
         """
@@ -949,9 +806,6 @@ class LongFormTranscriber:
 
     def _print_transcription_metrics(self) -> None:
         """Display metrics about the last transcription cycle."""
-        if self._abort_requested:
-            return
-
         audio_duration = self._last_recording_duration
         processing_time = self._last_transcription_duration
         speed_ratio = audio_duration / processing_time if processing_time > 0 else 0.0

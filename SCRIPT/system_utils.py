@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from importlib.metadata import version as metadata_version, PackageNotFoundError
-from typing import Dict, Any
+from typing import Dict, Any, cast
 from platform_utils import get_platform_manager
 
 
@@ -62,7 +62,9 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
     else:
         resolved_config.update(config.get("logging", {}))
 
-    log_dir = Path(resolved_config.get("directory", script_dir)).expanduser()
+    raw_directory = str(resolved_config.get("directory", script_dir))
+    expanded_directory = os.path.expanduser(os.path.expandvars(raw_directory))
+    log_dir = Path(expanded_directory).expanduser()
     if not log_dir.is_absolute():
         log_dir = (Path(script_dir) / log_dir).resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -98,6 +100,39 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
         "RealtimeSTT package logs remain separate in realtimesst.log "
         "(managed by the library)"
     )
+
+    # --- ISOLATE AND REDIRECT LIBRARIES ---
+    # Prevent external library loggers from interfering with the root logger.
+    try:
+        realtimestt_logger = logging.getLogger("RealtimeSTT")
+        if realtimestt_logger:
+            realtimestt_logger.propagate = False
+
+            for handler in list(realtimestt_logger.handlers):
+                realtimestt_logger.removeHandler(handler)
+                handler.close()
+
+            rtsst_log_path = log_dir / "realtimesst.log"
+            rtsst_handler = RotatingFileHandler(
+                rtsst_log_path,
+                maxBytes=5 * 1024 * 1024,
+                backupCount=2,
+            )
+            rtsst_handler.setFormatter(formatter)
+
+            realtimestt_logger.addHandler(rtsst_handler)
+            realtimestt_logger.setLevel(log_level)
+
+            root_logger.info(
+                "Successfully isolated and redirected RealtimeSTT logs to %s",
+                rtsst_log_path,
+            )
+    except Exception as exception:
+        root_logger.error(
+            "Failed to isolate RealtimeSTT logger: %s",
+            exception,
+        )
+
     return root_logger
 
 
@@ -259,7 +294,21 @@ class SystemUtils:
             self.save_config()
             logging.info("Default configuration created")
 
+        self.config = cast(Dict[str, Any], self._expand_config_paths(self.config))
+
         return self.config
+
+    def _expand_config_paths(self, value: Any) -> Any:
+        """Recursively expand environment variables and user home in config values."""
+
+        if isinstance(value, dict):
+            return {k: self._expand_config_paths(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._expand_config_paths(item) for item in value]
+        if isinstance(value, str):
+            expanded = os.path.expandvars(value)
+            return os.path.expanduser(expanded)
+        return value
 
     def save_config(self) -> bool:
         """Save the current configuration to a file."""
@@ -286,141 +335,6 @@ class SystemUtils:
         except (OSError, TypeError) as exception:
             logging.error("Error saving configuration: %s", exception)
             return False
-
-    def _convert_input_value(self, original_value: Any, raw_value: str) -> Any:
-        """Convert a user-entered string to the type of the original value."""
-        if raw_value.lower() == "none":
-            return None
-
-        if isinstance(original_value, bool):
-            return raw_value.strip().lower() in {"1", "true", "yes", "y"}
-
-        if isinstance(original_value, int) and not isinstance(original_value, bool):
-            try:
-                return int(raw_value)
-            except ValueError:
-                safe_print("Invalid integer. Keeping previous value.", "warning")
-                return original_value
-
-        if isinstance(original_value, float):
-            try:
-                return float(raw_value)
-            except ValueError:
-                safe_print("Invalid float. Keeping previous value.", "warning")
-                return original_value
-
-        if isinstance(original_value, (list, dict)):
-            try:
-                return json.loads(raw_value)
-            except json.JSONDecodeError:
-                safe_print("Invalid JSON. Keeping previous value.", "warning")
-                return original_value
-
-        return raw_value
-
-    def open_config_dialog(self, config_updated_callback=None):
-        """Open an interactive terminal-based configuration editor."""
-        safe_print("Opening configuration editor...", "info")
-
-        try:
-            current_config = self.load_or_create_config()
-        except Exception as exception:
-            logging.error("Failed to load configuration: %s", exception)
-            safe_print("Failed to load configuration.", "error")
-            return False
-
-        if not isinstance(current_config, dict) or not current_config:
-            safe_print("Configuration is empty or invalid.", "error")
-            return False
-
-        editable_config = copy.deepcopy(current_config)
-        changes_made = False
-
-        try:
-            while True:
-                sections = ", ".join(editable_config.keys())
-                safe_print(f"Available sections: {sections}")
-                safe_print(
-                    "Press Enter to finish editing or type 'cancel' to abort.", "info"
-                )
-                section = input("Section to edit: ").strip()
-
-                if section == "":
-                    break
-
-                if section.lower() == "cancel":
-                    safe_print("Configuration editing cancelled.", "warning")
-                    return False
-
-                if section not in editable_config:
-                    safe_print(f"Unknown section '{section}'.", "warning")
-                    continue
-
-                section_config = editable_config[section]
-                if not isinstance(section_config, dict):
-                    safe_print(f"Section '{section}' is not editable.", "warning")
-                    continue
-
-                while True:
-                    safe_print(
-                        "Press Enter to return to section selection "
-                        "or type 'cancel' to abort.",
-                        "info",
-                    )
-                    for key, value in section_config.items():
-                        safe_print(f"  {key}: {value!r}")
-
-                    parameter = input("Parameter to edit: ").strip()
-
-                    if parameter == "":
-                        break
-
-                    if parameter.lower() == "cancel":
-                        safe_print("Configuration editing cancelled.", "warning")
-                        return False
-
-                    if parameter not in section_config:
-                        safe_print(f"Unknown parameter '{parameter}'.", "warning")
-                        continue
-
-                    current_value = section_config[parameter]
-                    prompt = (
-                        f"New value for '{parameter}' (current {current_value!r}). "
-                        "Leave blank to keep current value: "
-                    )
-                    raw_value = input(prompt).strip()
-
-                    if raw_value == "":
-                        safe_print("No changes made.", "info")
-                        continue
-
-                    new_value = self._convert_input_value(current_value, raw_value)
-                    section_config[parameter] = new_value
-                    safe_print(
-                        f"Updated {section}.{parameter} -> {new_value!r}", "success"
-                    )
-                    changes_made = True
-
-        except (EOFError, KeyboardInterrupt):
-            safe_print("Configuration editing interrupted.", "warning")
-            return False
-
-        if not changes_made:
-            safe_print("No configuration changes to save.", "info")
-            return False
-
-        self.config = editable_config
-
-        if not self.save_config():
-            safe_print("Failed to save configuration.", "error")
-            return False
-
-        safe_print("Configuration saved.", "success")
-
-        if config_updated_callback:
-            config_updated_callback(copy.deepcopy(self.config))
-
-        return True
 
     def get_version_info(self) -> Dict[str, Dict[str, Any]]:
         """Get version information for key dependencies and check for updates."""
