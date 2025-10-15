@@ -13,11 +13,13 @@ This module:
 import contextlib
 import os
 import sys
-import io
 import logging
 import gc
 import importlib.util
+
+from utils import safe_print
 from platform_utils import get_platform_manager
+from recorder import LongFormRecorder
 
 # Try to import optional dependencies at module level
 try:
@@ -36,40 +38,6 @@ except ImportError:
     HAS_TORCH = False
     torch = None
 
-# Try to import Rich for console output with color support
-try:
-    from rich.console import Console
-
-    CONSOLE = Console()
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
-    CONSOLE = None
-
-
-def safe_print(message, style="default"):
-    """Print function that handles I/O errors gracefully with optional styling."""
-    try:
-        if HAS_RICH and CONSOLE is not None:
-            if style == "error":
-                CONSOLE.print(f"[bold red]{message}[/bold red]")
-            elif style == "warning":
-                CONSOLE.print(f"[bold yellow]{message}[/bold yellow]")
-            elif style == "success":
-                CONSOLE.print(f"[bold green]{message}[/bold green]")
-            elif style == "info":
-                CONSOLE.print(f"[bold blue]{message}[/bold blue]")
-            else:
-                CONSOLE.print(message)
-        else:
-            print(message)
-    except ValueError as e:
-        if "I/O operation on closed file" in str(e):
-            pass  # Silently ignore closed file errors
-        else:
-            # For other ValueErrors, log them
-            logging.error("Error in safe_print: %s", e)
-
 
 class ModelManager:
     """
@@ -81,8 +49,7 @@ class ModelManager:
         """Initialize the model manager with configuration dictionary."""
         self.config = config_dict
         self.script_dir = script_dir
-        self.current_loaded_model_type = None
-        self.loaded_models = {}
+        # The manager now only creates instances on demand and doesn't hold state.
         self.transcribers = {}
         self.modules = {}
         self.platform_manager = get_platform_manager()
@@ -295,11 +262,9 @@ class ModelManager:
             self._log_error(f"Error getting default input device: {e}")
             return None
 
-    def _initialize_longform_transcriber(
-        self, module, module_config, preinitialized_model
-    ):
+    def _create_longform_recorder(self, module_config, callbacks):
         """Initialize longform transcriber with configuration."""
-        safe_print("Initializing long-form transcriber...", "info")
+        safe_print("Initializing long-form recorder...", "info")
 
         # Get device and compute type
         device = self._get_optimal_device(module_config)
@@ -307,167 +272,59 @@ class ModelManager:
 
         resolved_input_index = self._resolve_input_device_index(module_config)
 
-        return module.LongFormTranscriber(
-            model=module_config.get("model", "Systran/faster-whisper-large-v3"),
-            language=module_config.get("language", "en"),
-            compute_type=compute_type,
-            device=device,
-            input_device_index=resolved_input_index,
-            gpu_device_index=module_config.get("gpu_device_index", 0),
-            silero_sensitivity=module_config.get("silero_sensitivity", 0.4),
-            silero_use_onnx=module_config.get("silero_use_onnx", False),
-            silero_deactivity_detection=module_config.get(
-                "silero_deactivity_detection", False
-            ),
-            webrtc_sensitivity=module_config.get("webrtc_sensitivity", 3),
-            post_speech_silence_duration=module_config.get(
+        # Combine base config with dynamic callbacks
+        recorder_params = {
+            "model": module_config.get("model", "Systran/faster-whisper-large-v3"),
+            "language": module_config.get("language", "en"),
+            "compute_type": compute_type,
+            "device": device,
+            "input_device_index": resolved_input_index,
+            "gpu_device_index": module_config.get("gpu_device_index", 0),
+            "batch_size": module_config.get("batch_size", 16),
+            "silero_sensitivity": module_config.get("silero_sensitivity", 0.4),
+            "silero_use_onnx": module_config.get("silero_use_onnx", False),
+            "post_speech_silence_duration": module_config.get(
                 "post_speech_silence_duration", 0.6
             ),
-            min_length_of_recording=module_config.get("min_length_of_recording", 1.0),
-            min_gap_between_recordings=module_config.get(
-                "min_gap_between_recordings", 1.0
-            ),
-            pre_recording_buffer_duration=module_config.get(
-                "pre_recording_buffer_duration", 0.2
-            ),
-            ensure_sentence_starting_uppercase=module_config.get(
-                "ensure_sentence_starting_uppercase", True
-            ),
-            ensure_sentence_ends_with_period=module_config.get(
-                "ensure_sentence_ends_with_period", True
-            ),
-            batch_size=module_config.get("batch_size", 16),
-            beam_size=module_config.get("beam_size", 5),
-            initial_prompt=module_config.get("initial_prompt"),
-            allowed_latency_limit=module_config.get("allowed_latency_limit", 100),
-            faster_whisper_vad_filter=module_config.get(
+            "min_length_of_recording": module_config.get("min_length_of_recording", 1.0),
+            "beam_size": module_config.get("beam_size", 5),
+            "initial_prompt": module_config.get("initial_prompt"),
+            "faster_whisper_vad_filter": module_config.get(
                 "faster_whisper_vad_filter", True
             ),
-            preinitialized_model=preinitialized_model,
-        )
+        }
+        recorder_params.update(callbacks)
 
-    def initialize_transcriber(self, module_type):
+        return LongFormRecorder(**recorder_params)
+
+    def initialize_transcriber(self, module_type: str, extra_args: dict | None = None):
         """Initialize a transcriber only when needed with improved cleanup."""
-        # If we already have this transcriber type loaded and ready
-        if module_type in self.transcribers and self.transcribers[module_type]:
-            self.current_loaded_model_type = module_type
-            return self.transcribers[module_type]
-
-        module = self.import_module_lazily(module_type)
-        if not module:
-            self._log_error("Failed to import %s module", module_type)
+        if module_type != "longform":
+            self._log_error("Unknown module type requested: %s", module_type)
             return None
+
+        if extra_args is None:
+            extra_args = {}
 
         try:
             # Get configuration for this module
             module_config = self.config.get(module_type, {})
 
-            # Check if we can reuse an existing model
-            current_model_name = module_config.get(
-                "model", "Systran/faster-whisper-large-v3"
-            )
-            preinitialized_model = None  # No reuse logic anymore
-
-            # Initialize based on module type
-            transcriber_initializers = {
-                "longform": self._initialize_longform_transcriber,
-            }
-
-            if module_type in transcriber_initializers:
-                self.transcribers[module_type] = transcriber_initializers[module_type](
-                    module, module_config, preinitialized_model
-                )
-            else:
-                raise ValueError(f"Unknown module type: {module_type}")
-
-            # Store the loaded model information
-            if module_type not in self.loaded_models:
-                self.loaded_models[module_type] = {
-                    "name": current_model_name,
-                    "transcriber": self.transcribers[module_type],
-                }
-
+            recorder = self._create_longform_recorder(module_config, extra_args)
             self._log_info(
-                "%s transcriber initialized successfully",
-                module_type.capitalize(),
+                "%s recorder initialized successfully", module_type.capitalize()
             )
-            self.current_loaded_model_type = module_type
-            return self.transcribers[module_type]
+            return recorder
 
         except (ImportError, AttributeError, ValueError, OSError) as e:
-            self._log_error("Error initializing %s transcriber: %s", module_type, e)
+            self._log_error("Error initializing %s recorder: %s", module_type, e)
             return None
 
-    def _cleanup_recorder(self, transcriber):
-        """Clean up recorder resources."""
-        if hasattr(transcriber, "recorder") and transcriber.recorder:
-            original_stdout = sys.stdout
-            try:
-                # Redirect stdout temporarily to suppress messages
-                sys.stdout = io.StringIO()
-
-                # Prefer the transcriber-level abort which has timeout handling
-                if hasattr(transcriber, "abort"):
-                    ok = False
-                    try:
-                        ok = bool(transcriber.abort())
-                    except Exception as e:
-                        self._log_warning("transcriber.abort() raised: %s", e)
-                    if not ok:
-                        # Fallback to direct recorder shutdown
-                        try:
-                            transcriber.recorder.abort()
-                        except Exception:
-                            pass
-                        try:
-                            transcriber.recorder.shutdown()
-                        except Exception:
-                            pass
-                else:
-                    # Legacy path: call recorder abort/shutdown directly
-                    try:
-                        transcriber.recorder.abort()
-                    except Exception:
-                        pass
-                    try:
-                        transcriber.recorder.shutdown()
-                    except Exception:
-                        pass
-            except (AttributeError, OSError) as e:
-                self._log_error("Error during recorder shutdown: %s", e)
-            finally:
-                # Restore stdout
-                sys.stdout = original_stdout
-
     def cleanup_all_models(self):
-        """Properly clean up all loaded models and transcribers."""
-        # Now we only ever have one primary transcriber: longform
-        longform_transcriber = self.transcribers.get("longform")
-        if longform_transcriber:
-            safe_print("Cleaning up long-form transcriber...", "info")
-            if hasattr(longform_transcriber, "clean_up"):
-                longform_transcriber.clean_up()
-            self.transcribers["longform"] = None
-
-        # Clean up any other remaining resources just in case
-        for module_type, transcriber in list(self.transcribers.items()):
-            try:
-                if transcriber is not None:
-                    safe_print(f"Final cleanup of {module_type} transcriber...", "info")
-
-                    if module_type == "longform":
-                        if hasattr(transcriber, "clean_up"):
-                            transcriber.clean_up()
-
-                    # Remove the reference
-                    self.transcribers[module_type] = None
-            except (AttributeError, OSError) as e:
-                self._log_error(
-                    "Error during final cleanup of %s transcriber: %s",
-                    module_type,
-                    e,
-                )
-
+        """
+        Properly clean up models. This is now handled by the recorder's own
+        clean_up method, but we can add extra cleanup here if needed.
+        """
         # Final garbage collection
         try:
             gc.collect()

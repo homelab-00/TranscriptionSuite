@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""
+Configuration management for the TranscriptionSuite.
+
+Handles loading the config file from disk, creating a default if it doesn't exist,
+and saving changes.
+"""
+
+try:
+    import yaml
+except ImportError as import_error:
+    raise ImportError(
+        "PyYAML is required for configuration. Please run 'pip install pyyaml'."
+    ) from import_error
+
+import os
+import logging
+import copy
+from typing import Dict, Any, cast
+from pathlib import Path
+
+from platform_utils import get_platform_manager
+
+
+class ConfigManager:
+    """Manages loading, saving, and accessing configuration settings."""
+
+    def __init__(self, config_path: str):
+        """Initialize with configuration file path."""
+        self.config_path_str = config_path
+        self.config: Dict[str, Any] = {}
+        self.platform_manager = get_platform_manager()
+        self.config_path: Path
+
+    def load_or_create_config(self) -> Dict[str, Any]:
+        """Load configuration from file or create it if it doesn't exist."""
+        script_dir = Path(__file__).resolve().parent
+        # Define default configuration
+        default_config = {
+            "longform": {
+                "model": "Systran/faster-whisper-large-v3",
+                "language": "en",
+                "compute_type": "default",
+                "device": self.platform_manager.get_optimal_device_config()["device"],
+                "input_device_index": None,
+                "use_default_input": True,
+                "gpu_device_index": 0,
+                "silero_sensitivity": 0.4,
+                "silero_use_onnx": False,
+                "silero_deactivity_detection": False,
+                "webrtc_sensitivity": 3,
+                "post_speech_silence_duration": 0.6,
+                "min_length_of_recording": 1.0,
+                "min_gap_between_recordings": 1.0,
+                "pre_recording_buffer_duration": 0.2,
+                "ensure_sentence_starting_uppercase": True,
+                "ensure_sentence_ends_with_period": True,
+                "batch_size": 16,
+                "beam_size": 5,
+                "initial_prompt": None,
+                "allowed_latency_limit": 100,
+                "faster_whisper_vad_filter": True,
+            },
+            "logging": {
+                "level": "INFO",
+                "max_size_mb": 10,
+                "backup_count": 3,
+                "console_output": False,
+                "file_name": "stt_orchestrator.log",
+                "directory": str(script_dir.parent),  # Project root
+            },
+        }
+
+        # Ensure config directory exists
+        config_dir = self.platform_manager.get_config_dir()
+        self.config_path = Path(self.config_path_str)
+        if not self.config_path.is_absolute():
+            self.config_path = config_dir / self.config_path
+
+        # Try to load existing config
+        if self.config_path.exists():
+            try:
+                with self.config_path.open("r", encoding="utf-8") as config_file:
+                    loaded_config = yaml.safe_load(config_file) or {}
+
+                # Deep merge loaded config into defaults to ensure all keys exist
+                merged_config = copy.deepcopy(default_config)
+                for key, value in loaded_config.items():
+                    if key in merged_config and isinstance(merged_config[key], dict):
+                        merged_config[key].update(value)
+                    else:
+                        merged_config[key] = value
+
+                self.config = merged_config
+
+                logging.info("Configuration loaded from %s", self.config_path)
+
+            except (yaml.YAMLError, OSError) as exception:
+                logging.error(
+                    "Error loading configuration, using defaults: %s",
+                    exception,
+                )
+                self.config = default_config
+                self.save_config()
+        else:
+            # Use defaults and save to file if it doesn't exist
+            self.config = default_config
+            self.save_config()
+            logging.info("Default configuration created at %s", self.config_path)
+
+        self.config = cast(Dict[str, Any], self._expand_config_paths(self.config))
+        return self.config
+
+    def _expand_config_paths(self, value: Any) -> Any:
+        """Recursively expand environment variables and user home in config values."""
+        if isinstance(value, dict):
+            return {k: self._expand_config_paths(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._expand_config_paths(item) for item in value]
+        if isinstance(value, str):
+            expanded = os.path.expandvars(value)
+            return os.path.expanduser(expanded)
+        return value
+
+    def save_config(self) -> bool:
+        """Save the current configuration to a file."""
+        try:
+            with self.config_path.open("w", encoding="utf-8") as config_file:
+                yaml.dump(
+                    self.config,
+                    config_file,
+                    default_flow_style=False,
+                    sort_keys=False,
+                    allow_unicode=True,
+                )
+            logging.info("Configuration saved to %s", self.config_path)
+            return True
+        except (OSError, TypeError) as exception:
+            logging.error("Error saving configuration: %s", exception)
+            return False
