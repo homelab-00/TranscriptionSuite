@@ -7,31 +7,25 @@ ready to be pasted anywhere.
 
 ### Key Features
 - **Long-form Transcription**: Record extended speech sessions with manual start/stop control.
-- **Advanced Real-time Preview**: See a live, two-stage preview of your transcription as you speak, inspired by the `RealtimeSTT` project's own test scripts for a high-quality user experience.
+- **Live Waveform Preview**: See a live audio waveform in your terminal while recording.
 - **System Tray Integration**: Control all functionality through a simple system tray icon.
-- **Instant Responsiveness**: The transcription models are loaded at startup and remain in memory, eliminating delays when starting a recording.
+- **Instant Responsiveness**: The transcription model is loaded at startup and remains in memory, eliminating delays when starting a recording.
 - **Clipboard Integration**: Transcribed text is automatically copied to your clipboard.
 - **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
 - **Multi-language Support**: Supports all Whisper-compatible language codes.
 
-### Architecture: A Two-Recorder, Three-Model System
+### Architecture
 
-The system is built around a central orchestrator that manages two separate, dedicated transcription recorders to provide both a high-quality live preview and a high-accuracy final output. This three-model architecture is inspired by the advanced usage patterns demonstrated in the `RealtimeSTT` project.
+The system is built around a central orchestrator that manages a single, dedicated transcription recorder. The architecture is designed for simplicity and robustness.
 
-1.  **Preview Recorder**: This instance is active during recording. It listens to the microphone and uses two models to generate the live preview on your screen.
-2.  **Long-form Recorder**: This instance has its microphone disabled. It waits until the recording is stopped, then receives the complete audio from the Preview Recorder to perform the final, high-accuracy transcription.
-
-This separation ensures stability and allows each component to be configured independently for its specific task. The three models are:
-
-- **Long-form Model**: The primary, high-quality model for the final transcription. Configured in the `longform` section of `config.json`.
-- **Real-time Preview Model**: A fast and accurate model that generates the main live text. Configured via the `model` key in the `realtime_preview` section.
-- **Real-time Preview Mini Model**: An ultra-fast, smaller model used internally by `RealtimeSTT` for initial phrase detection, which is then refined by the main preview model. Configured via the `realtime_model_type` key in the `realtime_preview` section.
-
-- **Orchestrator** (`orchestrator.py`): The main controller that wires the UI to the transcriber.
-- **Long-form Module** (`longform_module.py`): Handles extended recording and transcription using RealtimeSTT.
+- **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, handles user input from the tray icon, and coordinates the other modules.
+- **Recorder** (`recorder.py`): The core transcription engine. It wraps the `RealtimeSTT` library to manage microphone input, voice activity detection (VAD), and the final transcription process.
+- **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, such as the live timer and audio waveform, using the 'rich' library.
 - **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
-- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instance.
-- **System Utilities** (`system_utils.py`): Provides a terminal-based configuration editor and system info display.
+- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instance based on the configuration.
+- **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
+- **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
+- **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
 
 ## System Requirements
 
@@ -60,23 +54,17 @@ Instructions for Arch Linux.
 First, install pyenv if you haven't already:
 
 ```bash
-# Install pyenv dependencies
-yay -S base-devel openssl zlib xz tk
-
-# Install pyenv
-yay -S pyenv
+# Install pyenv and dependencies
+yay -S base-devel openssl zlib xz tk pyenv pyenv-virtualenv
 
 # Add to your shell configuration (~/.bashrc or ~/.zshrc)
-echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
-echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
-echo 'eval "$(pyenv init -)"' >> ~/.bashrc
-
-# Install pyenv-virtualenv plugin
-yay -S pyenv-virtualenv
-echo 'eval "$(pyenv virtualenv-init -)"' >> ~/.bashrc
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.zshrc
+echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zshrc
+echo 'eval "$(pyenv init -)"' >> ~/.zshrc
+echo 'eval "$(pyenv virtualenv-init -)"' >> ~/.zshrc
 
 # Reload shell
-source ~/.bashrc
+source ~/.zshrc
 ```
 
 ### Step 2: Install Python 3.13.3
@@ -117,7 +105,7 @@ This is a critical step for CUDA 13 compatibility. On Arch Linux, you might need
 to compile ctranslate2 from source using the AUR. You need to modify the PKGBUILD 
 though as the default is a bit wrong:
 
-```bash
+```diff
 @@ -14,7 +14,7 @@
  makedepends=(
    'cmake'
@@ -171,6 +159,7 @@ pip install RealtimeSTT --no-deps
 
 ```bash
 # Core dependencies
+pip install pyyaml
 pip install pyaudio
 pip install PyQt6
 pip install pillow
@@ -203,34 +192,30 @@ Available Audio Input Devices:
 
 Note the index number of your preferred microphone.
 
-### Step 2: Configure config.json
+### Step 2: Configure config.yaml
 
-Edit the `SCRIPT/config.json` file. It is split into two main sections: `longform` for the final transcription and `realtime_preview` for the live on-screen experience.
+Edit the `SCRIPT/config.yaml` file. Update the `input_device_index` under the `longform` section. Set `use_default_input` to `false` if you are specifying a device index.
 
-Update the `input_device_index` for the `realtime_preview` section, as this is the recorder that listens to your microphone. Set `use_default_input` to `false` if you are specifying a device index.
+```yaml
+longform:
+    # Model from HuggingFace to use for transcription.
+    model: "Systran/faster-whisper-large-v3"
+    
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    language: "el"
 
-```json
-{
-    "longform": {
-        "model": "Systran/faster-whisper-large-v3",
-        "language": "el",
-        "faster_whisper_vad_filter": true,
-        // ... other long-form settings
-    },
-    "realtime_preview": {
-        "model": "deepdml/faster-whisper-large-v3-turbo-ct2",
-        "realtime_model_type": "Systran/faster-whisper-base",
-        "language": "el",
-        "input_device_index": 21,
-        "use_default_input": false,
-        "enable_realtime_transcription": true,
-        "use_main_model_for_realtime": false,
-        "faster_whisper_vad_filter": false,
-        // ... other real-time settings
-    }
-}
+    # Manually specify the audio input device index.
+    input_device_index: 21
+
+    # If true, the application will automatically find the default system microphone.
+    use_default_input: false
+
+    # ... other settings
+logging:
+    level: "INFO"
+    directory: ".." # ".." for project root, "." for SCRIPT folder
 ```
-The `realtime_preview` section contains many parameters that control the live transcription behavior. For a detailed explanation of each flag (e.g., `silero_sensitivity`, `webrtc_sensitivity`, `realtime_processing_pause`, etc.), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
+For a detailed explanation of the VAD-related flags (e.g., `silero_sensitivity`, `webrtc_sensitivity`, `post_speech_silence_duration`, etc.), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
 
 ### Language Configuration
 
@@ -261,9 +246,9 @@ python orchestrator.py
 ```
 
 The application will:
-1. Display system information and dependency status
-2. Pre-load the long-form transcription model (indicated by grey tray icon)
-3. Show a green tray icon when ready
+1. Display system information and dependency status.
+2. Pre-load the transcription model (indicated by a grey tray icon).
+3. Show a green tray icon when ready.
 
 ### Using the System
 
@@ -278,27 +263,12 @@ The system tray icon changes color to indicate status:
 
 All controls are accessed through the system tray icon:
 
-**Left-click** on the tray icon: Start recording  
-**Middle-click** on the tray icon: Stop recording and transcribe  
+**Left-click** on the tray icon: Start recording
+**Middle-click** on the tray icon: Stop recording and transcribe
 **Right-click** on the tray icon: Open context menu with options:
 - Start Recording
 - Stop Recording
-- Reset (abort current operation)
-- Configuration (opens the terminal-based settings editor)
 - Quit
-
-### Workflow Example
-
-1. Position your cursor where you want the text to appear (text editor, email, etc.)
-2. Left-click the tray icon to start recording (icon turns yellow)
-3. Speak your content
-4. Middle-click to stop and transcribe (icon turns orange during processing)
-5. The transcribed text is copied to your clipboard so you can paste it wherever you need it
-
-## Architecture Details
-
-The application's core logic is built on top of the powerful `RealtimeSTT` library. We use two separate instances of its `AudioToTextRecorder` class to achieve our robust two-stage transcription process. The real-time preview implementation is heavily inspired by the `realtimestt_test.py` example script provided by the `RealtimeSTT` author, which demonstrates an effective pattern for a high-quality live user experience.
-This manual, dual-recorder approach provides precise control over transcription boundaries, making it ideal for dictation workflows.
 
 ## Troubleshooting
 
@@ -306,36 +276,18 @@ This manual, dual-recorder approach provides precise control over transcription 
 
 If you encounter CUDA-related errors:
 1. Verify CUDA 13.0 is properly installed: `nvcc --version`
-2. Check that cuDNN is installed and in your library path
-3. Ensure your GPU drivers are up to date
+2. Check that cuDNN is installed and in your library path.
+3. Ensure your GPU drivers are up to date.
 
 ### Audio Device Issues
-
-If the application can't access your microphone:
-1. Re-run `list_audio_devices.py` to confirm the device index
-2. Check system audio permissions
-3. Verify no other application is exclusively using the microphone
-4. The app now suppresses noisy ALSA/PortAudio warnings by default; if you need
-     to debug low-level audio problems, launch with `TSUITE_DEBUG_AUDIO=1` to
-     restore the verbose backend logs.
+1. Re-run `list_audio_devices.py` to confirm the device index.
+2. Check system audio permissions.
+3. Verify no other application is exclusively using the microphone.
 
 ### Model Loading Issues
-
-If the model fails to load:
-1. Check available disk space in `~/.cache/huggingface/`
-2. Ensure you have internet connectivity for initial model download
-3. Try manually downloading the model through Python:
-   ```python
-   from faster_whisper import WhisperModel
-   model = WhisperModel("Systran/faster-whisper-large-v3")
-   ```
-
-### Memory Issues
-
-If you encounter out-of-memory errors:
-1. Close other applications to free RAM
-2. Consider using a smaller model like `faster-whisper-medium`
-3. Check GPU memory usage with `nvidia-smi`
+1. Check available disk space in `~/.cache/huggingface/`.
+2. Ensure you have internet connectivity for the initial model download.
+3. Check GPU memory usage with `nvidia-smi`.
 
 ## License
 
@@ -344,6 +296,6 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ## Acknowledgments
 
 This project builds upon several excellent open-source projects:
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for its powerful and flexible transcription engine. The user experience for the live preview was inspired by the project's own example scripts.
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) for the excellent model optimization
-- [OpenAI Whisper](https://github.com/openai/whisper) for the underlying speech recognition models
+- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for its powerful and flexible transcription engine - and also inspiring this project!
+- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) for the excellent model optimization.
+- [OpenAI Whisper](https://github.com/openai/whisper) for the underlying speech recognition models.
