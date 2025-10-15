@@ -1,0 +1,7 @@
+*.tmp
+*.log
+.python-version
+/SCRIPT/__pycache__/
+.idea/
+.vscode/
+.github/
