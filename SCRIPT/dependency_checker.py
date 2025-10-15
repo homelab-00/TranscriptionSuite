@@ -200,17 +200,8 @@ class DependencyChecker:
 
     def _get_ffmpeg_install_hint(self) -> str:
         """Get platform-specific FFmpeg installation instructions."""
-        if self.platform_manager.is_windows:
-            return (
-                "Download from https://ffmpeg.org/download.html "
-                "or use 'winget install ffmpeg'"
-            )
-        elif self.platform_manager.is_linux:
-            return (
-                "Install via package manager: apt install ffmpeg, pacman -S ffmpeg, etc."
-            )
-        else:  # macOS
-            return "Install via Homebrew: brew install ffmpeg"
+        # This is now hardcoded for Linux.
+        return "Install via package manager: apt install ffmpeg, pacman -S ffmpeg, etc."
 
     def _get_executable_version(self, exe_name: str, exe_path: Path) -> Optional[str]:
         """Try to get version information from an executable."""

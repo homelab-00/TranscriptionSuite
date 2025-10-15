@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-Platform abstraction utilities for cross-platform compatibility.
+Platform abstraction utilities for Linux.
 
 This module provides unified interfaces for platform-specific operations,
-ensuring the TranscriptionSuite works seamlessly on both Windows and Linux.
+streamlined for a Linux environment.
 """
 
 import contextlib
-import io
 import os
 import sys
-import platform
 import logging
 import threading
 from pathlib import Path
@@ -22,55 +20,20 @@ logger = logging.getLogger(__name__)
 
 class PlatformManager:
     """
-    Manages platform-specific functionality and provides unified interfaces.
+    Manages Linux-specific functionality and provides unified interfaces.
     """
 
     def __init__(self):
-        self.platform = platform.system().lower()
-        self.is_windows = self.platform == "windows"
-        self.is_linux = self.platform == "linux"
-        self.is_macos = self.platform == "darwin"
+        self.platform = "linux"
+        self.is_linux = True
         self._alsa_error_handler = None
         self._stderr_lock = threading.RLock()
 
         # Initialize platform-specific components
-        self._initialize_console()
-        self._initialize_pytorch_audio()
         self._suppress_alsa_warnings()
-
-    def _initialize_console(self):
-        """Initialize console encoding for proper Unicode support."""
-        if self.is_windows:
-            try:
-                # Force UTF-8 encoding for stdout on Windows to handle Greek characters
-                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-                logger.info("Windows console encoding initialized to UTF-8")
-            except (AttributeError, OSError) as e:
-                logger.warning(f"Failed to set UTF-8 encoding on Windows: {e}")
-        else:
-            # On Linux/macOS, assume the terminal already handles Unicode properly
-            logger.info("Unix-like system detected, using default console encoding")
-
-    def _initialize_pytorch_audio(self):
-        """Initialize PyTorch audio backend if needed."""
-        if self.is_windows and (3, 8) <= sys.version_info < (3, 99):
-            try:
-                from torchaudio._extension.utils import _init_dll_path
-
-                _init_dll_path()
-                logger.info("PyTorch audio DLL path initialized for Windows")
-            except ImportError as e:
-                logger.warning(f"Failed to initialize PyTorch audio on Windows: {e}")
-        elif self.is_linux:
-            # On Linux, PyTorch audio should work out of the box
-            # But we might want to check for specific audio backends
-            logger.info("Linux detected, PyTorch audio should use system backends")
 
     def _suppress_alsa_warnings(self):
         """Prevent ALSA from spamming stderr while keeping critical errors."""
-        if not self.is_linux:
-            return
-
         try:
             from ctypes import CDLL, CFUNCTYPE, c_char_p, c_int
 
@@ -108,10 +71,6 @@ class PlatformManager:
     @contextlib.contextmanager
     def suppress_audio_warnings(self):
         """Temporarily silence low-level audio backend spew (PortAudio/ALSA)."""
-        if not self.is_linux:
-            yield
-            return
-
         try:
             stderr_fd = sys.stderr.fileno()
         except (AttributeError, OSError):
@@ -135,58 +94,33 @@ class PlatformManager:
                     pass
 
     def get_config_dir(self) -> Path:
-        """Get the appropriate configuration directory for the platform."""
-        if self.is_windows:
-            # Use %APPDATA% on Windows
-            config_dir = Path.home() / "AppData" / "Roaming" / "TranscriptionSuite"
-        elif self.is_linux:
-            # Follow XDG Base Directory Specification
-            xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
-            if xdg_config_home:
-                config_dir = Path(xdg_config_home) / "transcriptionsuite"
-            else:
-                config_dir = Path.home() / ".config" / "transcriptionsuite"
-        else:  # macOS
-            config_dir = (
-                Path.home() / "Library" / "Application Support" / "TranscriptionSuite"
-            )
-
-        # Create directory if it doesn't exist
-        config_dir.mkdir(parents=True, exist_ok=True)
+        """Get the appropriate configuration directory for Linux (XDG spec)."""
+        # Follow XDG Base Directory Specification
+        xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config_home:
+            config_dir = Path(xdg_config_home) / "transcriptionsuite"
+        else:
+            config_dir = Path.home() / ".config" / "transcriptionsuite"
         return config_dir
 
     def get_cache_dir(self) -> Path:
-        """Get the appropriate cache directory for the platform."""
-        if self.is_windows:
-            cache_dir = Path.home() / "AppData" / "Local" / "TranscriptionSuite" / "Cache"
-        elif self.is_linux:
-            xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
-            if xdg_cache_home:
-                cache_dir = Path(xdg_cache_home) / "transcriptionsuite"
-            else:
-                cache_dir = Path.home() / ".cache" / "transcriptionsuite"
-        else:  # macOS
-            cache_dir = Path.home() / "Library" / "Caches" / "TranscriptionSuite"
-
-        # Create directory if it doesn't exist
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        """Get the appropriate cache directory for Linux (XDG spec)."""
+        xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+        if xdg_cache_home:
+            cache_dir = Path(xdg_cache_home) / "transcriptionsuite"
+        else:
+            cache_dir = Path.home() / ".cache" / "transcriptionsuite"
         return cache_dir
 
     def get_temp_dir(self) -> Path:
-        """Get a temporary directory for the platform."""
+        """Get a temporary directory for the application."""
         import tempfile
 
-        temp_dir = Path(tempfile.gettempdir()) / "transcriptionsuite"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        return temp_dir
+        return Path(tempfile.gettempdir()) / "transcriptionsuite"
 
     def get_executable_path(self, executable_name: str) -> Optional[Path]:
         """Find an executable in the system PATH."""
         import shutil
-
-        # Add platform-specific extensions if needed
-        if self.is_windows and not executable_name.endswith(".exe"):
-            executable_name += ".exe"
 
         executable_path = shutil.which(executable_name)
         return Path(executable_path) if executable_path else None
@@ -207,13 +141,11 @@ class PlatformManager:
 
             if torch.cuda.is_available():
                 cuda_info["available"] = True
-                # Use getattr to avoid Pylance warnings about torch.version
-                cuda_info["version"] = getattr(torch, "version", {}).cuda  # type: ignore
+                cuda_info["version"] = getattr(torch.version, "cuda", None)
                 cuda_info["device_count"] = torch.cuda.device_count()
 
                 if cuda_info["device_count"] > 0:
                     cuda_info["device_name"] = torch.cuda.get_device_name(0)
-                    # Get compute capability
                     capability = torch.cuda.get_device_capability(0)
                     cuda_info["compute_capability"] = f"{capability[0]}.{capability[1]}"
 
@@ -249,48 +181,44 @@ class PlatformManager:
             import torch
 
             if torch.cuda.is_available():
-                # Check compute capability - F16 is efficient on compute capability >= 6.0
+                # F16 is efficient on compute capability >= 6.0
                 capability = torch.cuda.get_device_capability(0)
-                major, minor = capability
+                major, _ = capability
                 return major >= 6
         except Exception as e:
             logger.debug(f"Error checking float16 support: {e}")
-            pass
         return False
 
     def get_audio_backends(self) -> list:
-        """Get available audio backends for the platform."""
+        """Get available audio backends for Linux."""
         backends = []
-
-        if self.is_windows:
-            backends = ["wasapi", "directsound", "wdm-ks"]
-        elif self.is_linux:
-            # Check which audio systems are available
-            if self.get_executable_path("pulseaudio"):
-                backends.append("pulseaudio")
-            if self.get_executable_path("pipewire"):
-                backends.append("pipewire")
-            if Path("/proc/asound").exists():
-                backends.append("alsa")
-        else:  # macOS
-            backends = ["coreaudio"]
-
+        # Check which audio systems are available
+        if self.get_executable_path("pulseaudio"):
+            backends.append("pulseaudio")
+        if self.get_executable_path("pipewire"):
+            backends.append("pipewire")
+        if Path("/proc/asound").exists():
+            backends.append("alsa")
         return backends
 
 
-# Global instance
-platform_manager = PlatformManager()
+# --- Singleton Pattern ---
+# This ensures that we only ever have one instance of PlatformManager,
+# preventing redundant initializations.
+_platform_manager_instance: Optional[PlatformManager] = None
+_platform_manager_lock = threading.Lock()
 
 
 def get_platform_manager() -> PlatformManager:
     """Get the global platform manager instance."""
-    return platform_manager
+    global _platform_manager_instance
+    if _platform_manager_instance is None:
+        with _platform_manager_lock:
+            if _platform_manager_instance is None:
+                _platform_manager_instance = PlatformManager()
+    return _platform_manager_instance
 
 
 def ensure_platform_init():
     """Ensure platform-specific initialization has been performed."""
-    # This function can be called from modules to ensure platform setup
-    global platform_manager
-    if platform_manager is None:
-        platform_manager = PlatformManager()
-    return platform_manager
+    return get_platform_manager()

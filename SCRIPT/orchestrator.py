@@ -21,12 +21,19 @@ import time
 import logging
 import atexit
 import sys
+from typing import Optional
 
 # REMOVED: KDE DBus/global hotkeys support; only tray controls remain
 
-from model_manager import ModelManager, safe_print
-from system_utils import SystemUtils, setup_logging
-from depenency_checker import DependencyChecker
+from model_manager import ModelManager
+from logging_setup import setup_logging
+from dependency_checker import DependencyChecker
+from utils import safe_print
+from config_manager import ConfigManager
+from recorder import LongFormRecorder
+from console_display import ConsoleDisplay
+from diagnostics import SystemDiagnostics
+from platform_utils import get_platform_manager
 
 # Try to import the tray manager
 try:
@@ -65,11 +72,21 @@ class STTOrchestrator:
         self.app_state = {
             "running": False,
             "current_mode": None,  # Tracks "longform" or "static"
-            "config_path": os.path.join(self.script_dir, "config.json"),
+            "config_path": os.path.join(self.script_dir, "config.yaml"),
         }
 
-        # Initialize system utilities
-        self.system_utils = SystemUtils(self.app_state["config_path"])
+        # Instances for transcription components
+        self.long_form_recorder: Optional[LongFormRecorder] = None
+        self.console_display: Optional[ConsoleDisplay] = None
+
+        # Initialize core components
+        self.platform_manager_instance = get_platform_manager()
+        self.config_manager = ConfigManager(self.app_state["config_path"])
+        self.config = self.config_manager.load_or_create_config()
+        self.diagnostics = SystemDiagnostics(self.config, self.platform_manager_instance)
+
+        # Now that config is loaded, re-initialize logging with it
+        setup_logging(self.config)
 
         # CHANGED: Initialize Tray Icon Manager with all necessary callbacks
         if HAS_TRAY:
@@ -85,10 +102,7 @@ class STTOrchestrator:
                 "Could not initialize system tray icon. Please install PyQt6.", "warning"
             )
 
-        # Initialize configuration
-        self.config = self.system_utils.load_or_create_config()
-
-        # Initialize model manager
+        # Initialize model manager with the loaded config
         self.model_manager = ModelManager(self.config, self.script_dir)
 
         # NOTE: Non-tray triggers (DBus hotkeys, TCP server) have been removed.
@@ -150,20 +164,39 @@ class STTOrchestrator:
             )
             return
 
-        transcriber = self.model_manager.transcribers.get("longform")
-        if not transcriber:
+        if not self.long_form_recorder:
             safe_print("Long-form model is not ready. Please wait.", "warning")
             return
 
         if self.tray_manager:
             self.tray_manager.set_state("recording")
 
+        # The part that can fail (display start) must be handled first.
         try:
-            safe_print("Starting long-form recording...", "success")
-            self.app_state["current_mode"] = "longform"
-            transcriber.start_recording()
-        except (RuntimeError, OSError, ImportError) as error:
-            logging.error("Error starting long-form recording: %s", error)
+            # Manually trigger the on_recording_start callback to test the display.
+            # This will raise the "Terminal too small" error if needed.
+            if (
+                self.long_form_recorder
+                and self.long_form_recorder.external_on_recording_start
+            ):
+                start_time = time.monotonic()
+                self.long_form_recorder.external_on_recording_start(start_time)
+        except RuntimeError as error:
+            # This specifically catches the "Terminal too small" error.
+            logging.warning("Could not start console display: %s", error)
+            # Abort the start-up process cleanly.
+            if self.tray_manager:
+                self.tray_manager.set_state("standby")
+            return
+
+        # If the display started successfully, now we can set the state
+        # and start the recorder.
+        safe_print("Starting long-form recording...", "success")
+        self.app_state["current_mode"] = "longform"
+        if self.long_form_recorder:
+            self.long_form_recorder.start_recording()
+        else:
+            logging.error("Recorder not available at the time of starting.")
             self.app_state["current_mode"] = None
             if self.tray_manager:
                 self.tray_manager.set_state("standby")
@@ -179,17 +212,34 @@ class STTOrchestrator:
             if self.tray_manager:
                 self.tray_manager.set_state("transcribing")
             try:
-                transcriber = self.model_manager.transcribers.get("longform")
-                if not transcriber:
-                    safe_print("Long-form transcriber not available.")
+                if self.console_display:
+                    try:
+                        self.console_display.stop()
+                    except Exception as stop_error:
+                        logging.debug("Console display stop error: %s", stop_error)
+
+                if not self.long_form_recorder:
+                    safe_print("Long-form transcriber not available.", "error")
                     self.app_state["current_mode"] = None
                     if self.tray_manager:
-                        self.tray_manager.set_state("standby")
+                        self.tray_manager.set_state("error")
                     return
 
                 safe_print("Stopping long-form recording and transcribing...")
-                transcriber.stop_recording()
+                final_text, metrics = self.long_form_recorder.stop_and_transcribe()
                 self.app_state["current_mode"] = None
+
+                if self.console_display:
+                    self.console_display.display_final_transcription(final_text)
+                    if metrics:
+                        self.console_display.display_metrics(**metrics)
+                else:
+                    rendered_text = final_text or "[No transcription captured]"
+                    safe_print(
+                        "\n--- Transcription ---\n"
+                        f"{rendered_text}\n"
+                        "---------------------\n"
+                    )
 
                 if self.tray_manager:
                     self.tray_manager.set_state("standby")
@@ -216,7 +266,7 @@ class STTOrchestrator:
         """Run the orchestrator."""
         # Only the tray icon will control the application now.
 
-        self.system_utils.display_system_info()
+        self.diagnostics.display_system_info()
         self._check_startup_dependencies()
 
         # Proactively load the longform model in a separate thread
@@ -224,22 +274,39 @@ class STTOrchestrator:
             if self.tray_manager:
                 self.tray_manager.set_state("loading")  # Grey icon
 
-            overall_success = True
+            success = False
             safe_print("Pre-loading the long-form transcription model...", "info")
 
-            transcriber = self.model_manager.initialize_transcriber("longform")
-            if not transcriber:
-                safe_print("Failed to initialise the long-form model.", "error")
-                success = False
-            else:
-                # The model is now loaded during the transcriber's __init__
-                # so if we get an object back, it's ready.
-                success = True
+            try:
+                self.console_display = ConsoleDisplay()
+            except Exception as exc:
+                logging.error("Failed to initialise console display: %s", exc)
+                self.console_display = None
 
-            overall_success = success
+            callbacks = {}
+            if self.console_display:
+                # This is the correct way: the recorder will call these functions
+                # at the appropriate times.
+                callbacks["on_recording_start"] = self.console_display.start
+                callbacks["on_recorded_chunk"] = self.console_display.update_waveform_data
+                callbacks["on_recording_stop"] = self.console_display.stop
+
+            try:
+                self.long_form_recorder = self.model_manager.initialize_transcriber(
+                    "longform", callbacks
+                )
+            except Exception as exc:
+                logging.error("Failed to initialise long-form recorder: %s", exc)
+                self.long_form_recorder = None
+
+            if self.long_form_recorder:
+                self.model_manager.transcribers["longform"] = self.long_form_recorder
+                success = True
+            else:
+                safe_print("Failed to initialise the long-form model.", "error")
 
             if self.tray_manager:
-                self.tray_manager.set_state("standby" if overall_success else "error")
+                self.tray_manager.set_state("standby" if success else "error")
 
         threading.Thread(target=preload_startup_models, daemon=True).start()
 
@@ -270,6 +337,18 @@ class STTOrchestrator:
 
             if self.tray_manager:
                 self.tray_manager.stop()
+
+            if self.console_display:
+                try:
+                    self.console_display.stop()
+                except Exception as error:
+                    logging.debug("Console display stop error during shutdown: %s", error)
+
+            if self.long_form_recorder:
+                try:
+                    self.long_form_recorder.clean_up()
+                except Exception as error:
+                    logging.debug("Recorder cleanup error: %s", error)
 
             self.model_manager.cleanup_all_models()
 

@@ -1,5 +1,4 @@
-# tray_manager.py
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 """
 System Tray Icon Manager for the Speech-to-Text system.
 

@@ -1,0 +1,73 @@
+# SCRIPT/config.yaml
+
+# Configuration for the long-form, continuous dictation mode.
+longform:
+    # Model from HuggingFace to use for transcription.
+    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    model: "Systran/faster-whisper-large-v3"
+
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    language: "el"
+
+    # Compute type for the model. "default" is recommended.
+    # Options: "default", "auto", "int8", "int8_float16", "int16", "float16", "float32"
+    compute_type: "default"
+
+    # Hardware device to run the model on. "cuda" for NVIDIA GPUs, "cpu" for CPU.
+    device: "cuda"
+
+    # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
+    # Set to `null` (or leave blank) if `use_default_input` is true.
+    input_device_index: 21
+
+    # If true, the application will automatically find the default system microphone.
+    # If false, it will use the `input_device_index` specified above.
+    use_default_input: false
+
+    # Index of the GPU to use if you have multiple GPUs. Usually 0.
+    gpu_device_index: 0
+
+    # Silero VAD (Voice Activity Detection) sensitivity. Lower is more sensitive. (0.0 to 1.0)
+    silero_sensitivity: 0.4
+    silero_use_onnx: false
+
+    # How long to wait after speech stops before considering the phrase complete (in seconds).
+    post_speech_silence_duration: 0.6
+
+    # Minimum length of a recording in seconds. Anything shorter is ignored.
+    min_length_of_recording: 1.0
+
+    # Transcription engine batch size. Higher may be faster on powerful GPUs.
+    batch_size: 16
+
+    # Beam size for the Whisper model's decoding. Higher can improve accuracy but is slower.
+    beam_size: 5
+
+    # An optional initial prompt to guide the model's transcription style or context.
+    # Example: "This is a technical transcript. ZFS, Kubernetes, TCP/IP."
+    initial_prompt: null # Use null or leave blank for no prompt.
+
+    # Use faster-whisper's built-in VAD to filter out silence for better accuracy.
+    faster_whisper_vad_filter: true
+
+# Configuration for application logging.
+logging:
+    # Logging level. Options: "DEBUG", "INFO", "WARNING", "ERROR"
+    level: "INFO"
+
+    # Maximum size of a single log file in megabytes.
+    max_size_mb: 10
+
+    # How many old log files to keep.
+    backup_count: 3
+
+    # Whether to also print log messages to the console. (Useful for debugging)
+    console_output: false
+
+    # Base name for the application's main log file.
+    file_name: "stt_orchestrator.log"
+
+    # Directory to store log files, relative to the SCRIPT folder.
+    # To place logs in the project's root directory, use "..".
+    # To place them in the SCRIPT directory, use ".".
+    directory: ".."
