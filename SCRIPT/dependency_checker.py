@@ -299,7 +299,9 @@ class DependencyChecker:
             test_file.write_text("test")
             test_file.unlink()
             permissions["can_create_temp_files"] = True
-        except Exception:
+        except Exception as e:
+            # This will now show you the actual error in your logs
+            logger.error("Failed to create temporary file for permissions check: %s", e)
             pass
 
         # Test clipboard access with a short timeout to avoid hanging on Wayland
