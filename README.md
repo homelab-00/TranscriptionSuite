@@ -1,11 +1,9 @@
 # Speech-to-Text Orchestrator
 
-A focused, high-performance speech-to-text application for long-form dictation,
-controlled entirely from the system tray. It uses Faster Whisper models to
-provide high-quality transcriptions that are automatically copied to the clipboard,
-ready to be pasted anywhere.
+A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses Faster Whisper models to provide high-quality transcriptions that are automatically copied to the clipboard, ready to be pasted anywhere.
 
-### Key Features
+## Key Features
+
 - **Long-form Transcription**: Record extended speech sessions with manual start/stop control.
 - **Live Waveform Preview**: See a live audio waveform in your terminal while recording.
 - **System Tray Integration**: Control all functionality through a simple system tray icon.
@@ -14,7 +12,7 @@ ready to be pasted anywhere.
 - **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
 - **Multi-language Support**: Supports all Whisper-compatible language codes.
 
-### Architecture
+## Architecture
 
 The system is built around a central orchestrator that manages a single, dedicated transcription recorder. The architecture is designed for simplicity and robustness.
 
@@ -30,146 +28,72 @@ The system is built around a central orchestrator that manages a single, dedicat
 ## System Requirements
 
 ### Hardware
+
 - **GPU**: NVIDIA GPU with CUDA support (tested with RTX 3060 12GB)
 - **RAM**: Minimum 8GB, recommended 16GB or more
 - **CPU**: Modern multi-core processor (tested with AMD Ryzen 5 3600)
 
 ### Software
+
 - **Operating System**: Linux (developed and tested on Arch Linux)
-- **Python**: 3.13.3 (managed through pyenv)
-- **CUDA**: 13.0
-- **cuDNN**: 9.12
+- **Python**: 3.13+
+- **`uv`**: The Python package manager used for this project.
+- **CUDA**: 13.0 or newer
+- **cuDNN**: 9.12 or newer
 - **Audio System**: Working microphone with proper Linux audio drivers (ALSA/PulseAudio/PipeWire)
 
-## Environment Setup
+## Installation and Setup
 
-This project requires a carefully configured Python environment due to specific 
-dependencies and version requirements. We'll use pyenv with virtualenv for Python 
-version management.
+This project uses `uv` for package and environment management. The setup process involves installing dependencies from PyPI and performing a local compilation of one library to ensure CUDA 13+ compatibility.
 
-Instructions for Arch Linux.
+### Prerequisites
 
-### Step 1: Install pyenv
+- You must have `git` and `uv` installed.
+- You must have the NVIDIA CUDA Toolkit (version 13.0 or newer) installed system-wide.
 
-First, install pyenv if you haven't already:
+### Step 1: Install Standard Python Dependencies
 
-```bash
-# Install pyenv and dependencies
-yay -S base-devel openssl zlib xz tk pyenv pyenv-virtualenv
-
-# Add to your shell configuration (~/.bashrc or ~/.zshrc)
-echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.zshrc
-echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zshrc
-echo 'eval "$(pyenv init -)"' >> ~/.zshrc
-echo 'eval "$(pyenv virtualenv-init -)"' >> ~/.zshrc
-
-# Reload shell
-source ~/.zshrc
-```
-
-### Step 2: Install Python 3.13.3
+This command will create a local virtual environment (`.venv`), read the `pyproject.toml` file, and install all required Python packages from PyPI.
 
 ```bash
-pyenv install 3.13.3
+# Run this from the project's root directory
+uv sync
 ```
 
-### Step 3: Create Virtual Environment
+### Step 2: Build and Install Custom `ctranslate2`
+
+The `ctranslate2` library needs to be compiled locally to link against your system's CUDA 13+ toolkit. A helper script is provided to automate this.
+
+**Important:** Before running, you may need to edit the `build_ctranslate2.sh` script to match your GPU's "Compute Capability".
+
+1. Open `build_ctranslate2.sh`.
+2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`.
+3. The value `86` is for an NVIDIA RTX 3060. If you have a different GPU, find its compute capability on the [NVIDIA CUDA GPUs page](https://developer.nvidia.com/cuda-gpus) and change the number accordingly (e.g., an RTX 4070 is `89`).
+
+Now, run the script. It will download the source code, compile it and install it in the venv.
 
 ```bash
-# Create a virtual environment for the project
-pyenv virtualenv 3.13.3 TranscriptionSuite_venv
-
-# Navigate to your project directory
-cd /path/to/TranscriptionSuite_venv
-
-# Set the local Python version
-pyenv local TranscriptionSuite_venv
+# This will take several minutes
+./build_ctranslate2.sh
 ```
 
-## Installation
+### Step 3: Manually Install `faster-whisper`
 
-The installation process involves several steps due to specific dependency 
-requirements and compatibility considerations.
-
-### Step 1: Install PyTorch with CUDA 13 Support
+To ensure `faster-whisper` uses our custom-built library, we install it with the `--no-deps` flag. All of its dependencies (other than `ctranslate2`) are already present in the `pyproject.toml`.
 
 ```bash
-pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130
-```
-We're using the nightly version of `pytoch` (this is why we're adding the `--pre` 
-flag, meaning pre-release).
-
-### Step 2: Install Ctranslate2 from Source
-
-This is a critical step for CUDA 13 compatibility. On Arch Linux, you might need 
-to compile ctranslate2 from source using the AUR. You need to modify the PKGBUILD 
-though as the default is a bit wrong:
-
-```diff
-@@ -14,7 +14,7 @@
- makedepends=(
-   'cmake'
-   'cuda'
--#  'cudnn'
-+  'cudnn'
-   'gcc14'
-@@ -96,8 +96,9 @@
-     -DWITH_CUDA='ON' \
-+    -DWITH_CUDNN='ON' \
-     -DCUDA_DYNAMIC_LOADING='ON' \
--    -DCUDA_ARCH_LIST='Common' \
-+    -DCUDA_NVCC_FLAGS="-gencode arch=compute_86,code=sm_86" \
-     -DCMAKE_POLICY_VERSION_MINIMUM='3.5' \
-```
-The `arch=compute_86` refers to the compute capability of my 3060, which is 8.6
-
-You need to install it in the global system Python installation first, then 
-create a symlink from the package dir of your system Python to the package dir 
-of the PyEnv virtualenv we're using with this project.
-
-Alternative manual compilation:
-```bash
-git clone https://aur.archlinux.org/ctranslate2.git
-cd CTranslate2
-mkdir build && cd build
-cmake -DCUDA_TOOLKIT_ROOT_DIR=/opt/cuda ..
-make -j$(nproc)
-cd ../python
-pip install .
+uv pip install "faster-whisper==1.2.0" --no-deps
 ```
 
-### Step 3: Install Faster Whisper
+### Step 4: Manually Install `RealtimeSTT`
+
+`RealtimeSTT` is also installed without its dependencies (again, they're already included in the `pyproject.toml`). This is because the project has been put on hiatus so its dependency list hasn't been updated.
 
 ```bash
-# Install faster-whisper without dependencies to avoid conflicts
-pip install faster-whisper==1.2.0 --no-deps
+uv pip install "RealtimeSTT==0.3.104" --no-deps
 ```
 
-Note: RealtimeSTT doesn't officially support newer versions of faster-whisper 
-(1.2.0+), but it works fine anyway.
-
-### Step 4: Install RealtimeSTT
-
-```bash
-# Install RealtimeSTT without dependencies
-pip install RealtimeSTT --no-deps
-```
-
-### Step 5: Install Additional Dependencies
-
-```bash
-# Core dependencies
-pip install pyyaml
-pip install pyaudio
-pip install PyQt6
-pip install pillow
-pip install pyperclip
-pip install webrtcvad
-pip install rich
-
-# Optional but recommended
-pip install psutil
-```
+Your environment is now fully configured and ready to use.
 
 ## Configuration
 
@@ -178,11 +102,15 @@ pip install psutil
 Before first use, you need to identify your microphone's device index:
 
 ```bash
-python list_audio_devices.py
+# Ensure you run this using the project's environment
+uv run python list_audio_devices.py
 ```
 
+*Note: `uv run python file.py` is the same thing as first activating the venv using `source .venv/bin/activate` and then running `python file.py`.*
+
 This will output a list like:
-```
+
+```bash
 Available Audio Input Devices:
 
   Index: 0, Name: "Built-in Microphone"
@@ -192,7 +120,7 @@ Available Audio Input Devices:
 
 Note the index number of your preferred microphone.
 
-### Step 2: Configure config.yaml
+### Step 2: Configure `config.yaml`
 
 Edit the `SCRIPT/config.yaml` file. Update the `input_device_index` under the `longform` section. Set `use_default_input` to `false` if you are specifying a device index.
 
@@ -215,11 +143,13 @@ logging:
     level: "INFO"
     directory: ".." # ".." for project root, "." for SCRIPT folder
 ```
-For a detailed explanation of the VAD-related flags (e.g., `silero_sensitivity`, `webrtc_sensitivity`, `post_speech_silence_duration`, etc.), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
+
+For a detailed explanation of the VAD-related flags (e.g., `silero_sensitivity`, `webrtc_sensitivity`, etc.), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
 
 ### Language Configuration
 
 The `language` field accepts standard Whisper language codes. Common examples:
+
 - `"en"` - English
 - `"el"` - Greek  
 - `"de"` - German
@@ -231,6 +161,7 @@ For a complete list of language codes, refer to the [Whisper tokenizer source](h
 ### Model Selection
 
 The default model is `Systran/faster-whisper-large-v3`, which provides excellent accuracy. Other options include:
+
 - `Systran/faster-whisper-medium` - Faster but less accurate
 - `deepdml/faster-whisper-large-v3-turbo-ct2` - Optimized for speed (best used for realtime)
 
@@ -238,14 +169,16 @@ The default model is `Systran/faster-whisper-large-v3`, which provides excellent
 
 ### Start the Orchestrator
 
-Navigate to the SCRIPT directory and run:
+Use `uv run` to execute the main script within the managed virtual environment.
+
+From the root project folder, run:
 
 ```bash
-cd SCRIPT
-python orchestrator.py
+uv run python SCRIPT/orchestrator.py
 ```
 
 The application will:
+
 1. Display system information and dependency status.
 2. Pre-load the transcription model (indicated by a grey tray icon).
 3. Show a green tray icon when ready.
@@ -253,6 +186,7 @@ The application will:
 ### Using the System
 
 The system tray icon changes color to indicate status:
+
 - **Grey**: Loading/initializing
 - **Green**: Ready/standby
 - **Yellow**: Recording audio
@@ -266,6 +200,7 @@ All controls are accessed through the system tray icon:
 **Left-click** on the tray icon: Start recording
 **Middle-click** on the tray icon: Stop recording and transcribe
 **Right-click** on the tray icon: Open context menu with options:
+
 - Start Recording
 - Stop Recording
 - Quit
@@ -275,16 +210,20 @@ All controls are accessed through the system tray icon:
 ### CUDA/cuDNN Issues
 
 If you encounter CUDA-related errors:
-1. Verify CUDA 13.0 is properly installed: `nvcc --version`
+
+1. Verify your system's CUDA toolkit is properly installed: `nvcc --version`
 2. Check that cuDNN is installed and in your library path.
 3. Ensure your GPU drivers are up to date.
+4. Confirm you set the correct `CMAKE_CUDA_ARCHITECTURES` in the build script and re-run it.
 
 ### Audio Device Issues
+
 1. Re-run `list_audio_devices.py` to confirm the device index.
 2. Check system audio permissions.
 3. Verify no other application is exclusively using the microphone.
 
 ### Model Loading Issues
+
 1. Check available disk space in `~/.cache/huggingface/`.
 2. Ensure you have internet connectivity for the initial model download.
 3. Check GPU memory usage with `nvidia-smi`.
@@ -296,6 +235,7 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ## Acknowledgments
 
 This project builds upon several excellent open-source projects:
+
 - [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for its powerful and flexible transcription engine - and also inspiring this project!
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) for the excellent model optimization.
 - [OpenAI Whisper](https://github.com/openai/whisper) for the underlying speech recognition models.
