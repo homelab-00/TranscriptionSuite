@@ -48,6 +48,12 @@ class LongFormRecorder:
         input_device_index: Optional[int] = None,
         gpu_device_index: Union[int, List[int]] = 0,
         batch_size: int = 16,
+        # Real-Time Preview Parameters
+        enable_realtime_transcription: bool = False,
+        realtime_model_type: str = "Systran/faster-whisper-tiny",
+        realtime_processing_pause: float = 0.2,
+        beam_size_realtime: int = 3,
+        initial_prompt_realtime: Optional[Union[str, Iterable[int]]] = None,
         # Voice Activation Parameters
         silero_sensitivity: float = 0.4,
         silero_use_onnx: bool = False,
@@ -68,6 +74,7 @@ class LongFormRecorder:
         on_recording_start: Optional[Callable] = None,
         on_recording_stop: Optional[Callable] = None,
         on_recorded_chunk: Optional[Callable[[bytes], None]] = None,
+        on_realtime_transcription_update: Optional[Callable[[str], None]] = None,
     ):
         """
         Initializes the recorder with transcription and VAD parameters.
@@ -94,6 +101,11 @@ class LongFormRecorder:
             "input_device_index": input_device_index,
             "gpu_device_index": gpu_device_index,
             "batch_size": batch_size,
+            "enable_realtime_transcription": enable_realtime_transcription,
+            "realtime_model_type": realtime_model_type,
+            "realtime_processing_pause": realtime_processing_pause,
+            "beam_size_realtime": beam_size_realtime,
+            "initial_prompt_realtime": initial_prompt_realtime,
             "silero_sensitivity": silero_sensitivity,
             "silero_use_onnx": silero_use_onnx,
             "silero_deactivity_detection": silero_deactivity_detection,
@@ -111,6 +123,7 @@ class LongFormRecorder:
             "on_recording_start": self._internal_on_start,
             "on_recording_stop": self._internal_on_stop,
             "on_recorded_chunk": on_recorded_chunk,
+            "on_realtime_transcription_update": on_realtime_transcription_update,
             "use_microphone": True,  # This class always uses the microphone
             "spinner": False,
         }

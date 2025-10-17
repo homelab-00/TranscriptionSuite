@@ -27,6 +27,24 @@ longform:
     # Index of the GPU to use if you have multiple GPUs. Usually 0.
     gpu_device_index: 0
 
+    # --- Real-Time Preview Settings ---
+    # Enable a smaller, faster model to show a live preview in the console.
+    enable_realtime_transcription: true
+
+    # Model to use for the live preview. A smaller model is recommended for speed.
+    # Example: "Systran/faster-whisper-base"
+    realtime_model_type: "Systran/faster-whisper-base"
+
+    # How often to update the live preview (in seconds). Lower is faster but more resource-intensive.
+    realtime_processing_pause: 0.2
+
+    # Beam size for the real-time model's decoding.
+    beam_size_realtime: 3
+
+    # Optional initial prompt for the real-time model. (Not recommended for multi-language use).
+    initial_prompt_realtime: null
+
+    # --- Voice Activity Detection (VAD) Settings ---
     # Silero VAD (Voice Activity Detection) sensitivity. Lower is more sensitive. (0.0 to 1.0)
     silero_sensitivity: 0.4
     silero_use_onnx: false
@@ -37,6 +55,7 @@ longform:
     # Minimum length of a recording in seconds. Anything shorter is ignored.
     min_length_of_recording: 1.0
 
+    # --- Advanced Model Settings ---
     # Transcription engine batch size. Higher may be faster on powerful GPUs.
     batch_size: 16
 

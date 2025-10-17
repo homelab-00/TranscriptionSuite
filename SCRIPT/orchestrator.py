@@ -252,6 +252,11 @@ class STTOrchestrator:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _handle_realtime_preview(self, text: str):
+        """Receives live preview text and passes it to the console display."""
+        if self.console_display:
+            self.console_display.update_preview_text(text)
+
     def _quit(self):
         """Stop all processes and exit with improved cleanup."""
         safe_print("Quitting application...")
@@ -290,6 +295,9 @@ class STTOrchestrator:
                 callbacks["on_recording_start"] = self.console_display.start
                 callbacks["on_recorded_chunk"] = self.console_display.update_waveform_data
                 callbacks["on_recording_stop"] = self.console_display.stop
+                callbacks["on_realtime_transcription_update"] = (
+                    self._handle_realtime_preview
+                )
 
             try:
                 self.long_form_recorder = self.model_manager.initialize_transcriber(
