@@ -281,6 +281,17 @@ class ModelManager:
             "input_device_index": resolved_input_index,
             "gpu_device_index": module_config.get("gpu_device_index", 0),
             "batch_size": module_config.get("batch_size", 16),
+            "enable_realtime_transcription": module_config.get(
+                "enable_realtime_transcription", False
+            ),
+            "realtime_model_type": module_config.get(
+                "realtime_model_type", "Systran/faster-whisper-tiny"
+            ),
+            "realtime_processing_pause": module_config.get(
+                "realtime_processing_pause", 0.2
+            ),
+            "beam_size_realtime": module_config.get("beam_size_realtime", 3),
+            "initial_prompt_realtime": module_config.get("initial_prompt_realtime"),
             "silero_sensitivity": module_config.get("silero_sensitivity", 0.4),
             "silero_use_onnx": module_config.get("silero_use_onnx", False),
             "post_speech_silence_duration": module_config.get(
