@@ -1,0 +1,35 @@
+[project]
+name = "transcriptionsuite"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "av>=16.0.1",
+    "halo>=0.0.31",
+    "huggingface-hub>=0.35.3",
+    "numpy>=2.3.3",
+    "onnxruntime>=1.23.1",
+    "openwakeword>=0.4.0",
+    "pillow>=11.3.0",
+    "psutil>=7.1.0",
+    "pvporcupine>=3.0.5",
+    "pyaudio>=0.2.14",
+    "pybind11>=2.13.0",
+    "pyperclip>=1.11.0",
+    "pyqt6>=6.9.1",
+    "pyyaml>=6.0.3",
+    "rich>=14.2.0",
+    "soundfile>=0.13.1",
+    "tokenizers>=0.22.1",
+    "torch>=2.9.0",
+    "torchaudio>=2.9.0",
+    "webrtcvad>=2.0.10",
+    "websocket-client>=1.9.0",
+]
+
+
+# Specific extra url for the CUDA enabled versions of torch.
+# Update it (cu130 = CUDA 13.0) when CUDA version updates.
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/cu130"]
