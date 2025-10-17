@@ -116,7 +116,17 @@ class PlatformManager:
         """Get a temporary directory for the application."""
         import tempfile
 
-        return Path(tempfile.gettempdir()) / "transcriptionsuite"
+        # Get the system's temp dir path
+        temp_dir_str = tempfile.gettempdir()
+
+        # If the environment variable is empty, default to a known-good path
+        if not temp_dir_str or not os.path.isabs(temp_dir_str):
+            # Fallback for empty or relative paths
+            temp_dir_str = "/tmp"
+
+        app_temp_dir = Path(temp_dir_str) / "transcriptionsuite"
+        app_temp_dir.mkdir(parents=True, exist_ok=True)  # Proactively create it
+        return app_temp_dir
 
     def get_executable_path(self, executable_name: str) -> Optional[Path]:
         """Find an executable in the system PATH."""

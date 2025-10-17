@@ -1,7 +1,9 @@
+__pycache__/
+/SCRIPT/__pycache__/
+deps/
 *.tmp
 *.log
 .python-version
-/SCRIPT/__pycache__/
 .idea/
 .vscode/
 .github/
