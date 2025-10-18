@@ -1,62 +1,35 @@
 # Speech-to-Text Orchestrator
 
-A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses Faster Whisper models to provide high-quality transcriptions that are automatically copied to the clipboard, ready to be pasted anywhere.
+A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses a dual-instance architecture with Faster Whisper models: a large, high-accuracy model for the final output and a small, fast model for a real-time preview. Transcriptions are automatically copied to the clipboard, ready to be pasted anywhere.
 
-## Key Features
+#### Key Features
 
-- **Long-form Transcription**: Record extended speech sessions with manual start/stop control.
-- **Live Waveform Preview**: See a live audio waveform in your terminal while recording.
+- **High-Accuracy Final Transcription**: Records extended speech sessions and processes the entire audio at the end with a large model for the best possible accuracy.
+- **Live Text & Waveform Preview**: See your speech transcribed in real-time in your terminal, along with a live audio waveform.
 - **System Tray Integration**: Control all functionality through a simple system tray icon.
-- **Instant Responsiveness**: The transcription model is loaded at startup and remains in memory, eliminating delays when starting a recording.
-- **Clipboard Integration**: Transcribed text is automatically copied to your clipboard.
+- **Instant Responsiveness**: The transcription models are loaded at startup and remain in memory, eliminating delays when starting a recording.
+- **Clipboard Integration**: The final, high-accuracy transcribed text is automatically copied to your clipboard.
 - **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
 - **Multi-language Support**: Supports all Whisper-compatible language codes.
 
-## Architecture
-
-The system is built around a central orchestrator that manages a single, dedicated transcription recorder. The architecture is designed for simplicity and robustness.
-
-- **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, handles user input from the tray icon, and coordinates the other modules.
-- **Recorder** (`recorder.py`): The core transcription engine. It wraps the `RealtimeSTT` library to manage microphone input, voice activity detection (VAD), and the final transcription process.
-- **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, such as the live timer and audio waveform, using the 'rich' library.
-- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
-- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instance based on the configuration.
-- **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
-- **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
-- **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
-
-## System Requirements
-
-### Hardware
-
-- **GPU**: NVIDIA GPU with CUDA support (tested with RTX 3060 12GB)
-- **RAM**: Minimum 8GB, recommended 16GB or more
-- **CPU**: Modern multi-core processor (tested with AMD Ryzen 5 3600)
-
-### Software
-
-- **Operating System**: Linux (developed and tested on Arch Linux)
-- **Python**: 3.13+
-- **`uv`**: The Python package manager used for this project.
-- **CUDA**: 13.0 or newer
-- **cuDNN**: 9.12 or newer
-- **Audio System**: Working microphone with proper Linux audio drivers (ALSA/PulseAudio/PipeWire)
+---
 
 ## Installation and Setup
 
 This project uses `uv` for package and environment management. The setup process involves installing dependencies from PyPI and performing a local compilation of one library to ensure CUDA 13+ compatibility.
 
-### Prerequisites
+#### Prerequisites
 
 - You must have `git` and `uv` installed.
 - You must have the NVIDIA CUDA Toolkit (version 13.0 or newer) installed system-wide.
 
 ### Step 1: Install Standard Python Dependencies
 
-This command will create a local virtual environment (`.venv`), read the `pyproject.toml` file, and install all required Python packages from PyPI.
+These commands will create a local virtual environment (`.venv`), read the `pyproject.toml` file, and install all required Python packages from PyPI.
 
 ```bash
 # Run this from the project's root directory
+uv venv --python 3.13
 uv sync
 ```
 
@@ -122,36 +95,43 @@ Note the index number of your preferred microphone.
 
 ### Step 2: Configure `config.yaml`
 
-Edit the `SCRIPT/config.yaml` file. Update the `input_device_index` under the `longform` section. Set `use_default_input` to `false` if you are specifying a device index.
+Edit the `SCRIPT/config.yaml` file. Update the `input_device_index` under the global `audio` section. Set `use_default_input` to `false` if you are specifying a device index.
 
 ```yaml
-longform:
+# Configuration for the main, high-accuracy transcription.
+main_transcriber:
     # Model from HuggingFace to use for transcription.
     model: "Systran/faster-whisper-large-v3"
-    
-    # Language code for transcription (e.g., "en" for English, "el" for Greek).
     language: "el"
+    # ... other settings
 
+# Configuration for the live preview transcriber.
+preview_transcriber:
+    model: "Systran/faster-whisper-base"
+    language: "el"
+    # ... other settings
+
+# Global audio settings for the microphone input.
+audio:
     # Manually specify the audio input device index.
     input_device_index: 21
-
     # If true, the application will automatically find the default system microphone.
     use_default_input: false
 
-    # ... other settings
+# Global logging settings
 logging:
     level: "INFO"
     directory: ".." # ".." for project root, "." for SCRIPT folder
 ```
 
-For a detailed explanation of the VAD-related flags (e.g., `silero_sensitivity`, `webrtc_sensitivity`, etc.), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
+For a detailed explanation of the VAD-related flags (e.g., `silero_sensitivity`), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
 
 ### Language Configuration
 
 The `language` field accepts standard Whisper language codes. Common examples:
 
 - `"en"` - English
-- `"el"` - Greek  
+- `"el"` - Greek
 - `"de"` - German
 - `"fr"` - French
 - `"es"` - Spanish
@@ -160,7 +140,7 @@ For a complete list of language codes, refer to the [Whisper tokenizer source](h
 
 ### Model Selection
 
-The default model is `Systran/faster-whisper-large-v3`, which provides excellent accuracy. Other options include:
+The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-base` by default for its excellent speed.
 
 - `Systran/faster-whisper-medium` - Faster but less accurate
 - `deepdml/faster-whisper-large-v3-turbo-ct2` - Optimized for speed (best used for realtime)
@@ -180,7 +160,7 @@ uv run python SCRIPT/orchestrator.py
 The application will:
 
 1. Display system information and dependency status.
-2. Pre-load the transcription model (indicated by a grey tray icon).
+2. Pre-load the transcription models (indicated by a grey tray icon).
 3. Show a green tray icon when ready.
 
 ### Using the System
@@ -205,6 +185,42 @@ All controls are accessed through the system tray icon:
 - Stop Recording
 - Quit
 
+---
+
+#### Architecture
+
+The system is built around a dual-instance architecture to provide both real-time feedback and high-accuracy final transcriptions.
+
+- **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, manages the two transcriber instances, handles user input from the tray icon, and coordinates all other modules.
+- **Transcription Instance** (`recorder.py`): A reusable class that wraps the `RealtimeSTT` library. It is instantiated twice:
+  - **Preview Transcriber**: An "active" instance that directly controls the microphone. It uses a small, fast model to transcribe audio in short chunks, providing a live text preview. It also feeds raw audio data to the main transcriber and the console display.
+  - **Main Transcriber**: A "passive" instance that receives audio from the previewer. It accumulates the entire recording in memory and performs a single, highly accurate transcription at the end using a large model.
+- **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, including the live text preview and audio waveform, using the 'rich' library.
+- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
+- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instances based on the configuration.
+- **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
+- **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
+- **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
+
+### System Requirements
+
+#### Hardware
+
+- **GPU**: NVIDIA GPU with CUDA support (tested with RTX 3060 12GB)
+- **RAM**: Minimum 8GB, recommended 16GB or more
+- **CPU**: Modern multi-core processor (tested with AMD Ryzen 5 3600)
+
+#### Software
+
+- **Operating System**: Linux (developed and tested on Arch Linux)
+- **Python**: 3.13+
+- **`uv`**: The Python package manager used for this project.
+- **CUDA**: 13.0 or newer
+- **cuDNN**: 9.12 or newer
+- **Audio System**: Working microphone with proper Linux audio drivers (ALSA/PulseAudio/PipeWire)
+
+---
+
 ## Troubleshooting
 
 ### CUDA/cuDNN Issues
@@ -227,6 +243,8 @@ If you encounter CUDA-related errors:
 1. Check available disk space in `~/.cache/huggingface/`.
 2. Ensure you have internet connectivity for the initial model download.
 3. Check GPU memory usage with `nvidia-smi`.
+
+---
 
 ## License
 
