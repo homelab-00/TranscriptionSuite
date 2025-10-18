@@ -20,6 +20,7 @@ from typing import Dict, Any, cast
 from pathlib import Path
 
 from platform_utils import get_platform_manager
+from utils import safe_print
 
 
 class ConfigManager:
@@ -37,7 +38,7 @@ class ConfigManager:
         script_dir = Path(__file__).resolve().parent
         # Define default configuration
         default_config = {
-            "longform": {
+            "main_transcriber": {
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
                 "compute_type": "default",
@@ -45,26 +46,38 @@ class ConfigManager:
                 "input_device_index": None,
                 "use_default_input": True,
                 "gpu_device_index": 0,
-                "silero_sensitivity": 0.4,
-                "silero_use_onnx": False,
-                "silero_deactivity_detection": False,
-                "webrtc_sensitivity": 3,
-                "post_speech_silence_duration": 0.6,
-                "min_length_of_recording": 1.0,
-                "min_gap_between_recordings": 1.0,
-                "pre_recording_buffer_duration": 0.2,
-                "ensure_sentence_starting_uppercase": True,
-                "ensure_sentence_ends_with_period": True,
                 "batch_size": 16,
                 "beam_size": 5,
                 "initial_prompt": None,
-                "allowed_latency_limit": 100,
                 "faster_whisper_vad_filter": True,
+                "no_log_file": True,
+            },
+            "preview_transcriber": {
+                "model": "Systran/faster-whisper-base",
+                "language": "en",
+                "compute_type": "default",
+                "device": self.platform_manager.get_optimal_device_config()["device"],
+                "gpu_device_index": 0,
+                "batch_size": 16,
+                "beam_size": 3,
+                "silero_sensitivity": 0.4,
+                "silero_use_onnx": False,
+                "post_speech_silence_duration": 0.5,
+                "min_length_of_recording": 1.0,
+                "no_log_file": True,
+            },
+            "audio": {
+                "input_device_index": None,
+                "use_default_input": True,
+                "min_gap_between_recordings": 1.0,
+                "pre_recording_buffer_duration": 0.2,
+            },
+            "formatting": {
+                "ensure_sentence_starting_uppercase": True,
+                "ensure_sentence_ends_with_period": True,
             },
             "logging": {
                 "level": "INFO",
-                "max_size_mb": 10,
-                "backup_count": 3,
                 "console_output": False,
                 "file_name": "stt_orchestrator.log",
                 "directory": str(script_dir.parent),  # Project root
@@ -103,10 +116,18 @@ class ConfigManager:
                 self.config = default_config
                 self.save_config()
         else:
-            # Use defaults and save to file if it doesn't exist
-            self.config = default_config
-            self.save_config()
-            logging.info("Default configuration created at %s", self.config_path)
+            # Config file does not exist, which is a critical error.
+            error_message = f"Configuration file not found at: {self.config_path}"
+            logging.critical(error_message)
+            safe_print(f"\n[bold red]FATAL ERROR:[/bold red] {error_message}")
+            safe_print(
+                "Please create a 'config.yaml' file at that location.", style="warning"
+            )
+            safe_print(
+                "You can copy the example from the project repository as a template.",
+                style="info",
+            )
+            raise FileNotFoundError(error_message)
 
         self.config = cast(Dict[str, Any], self._expand_config_paths(self.config))
         return self.config
