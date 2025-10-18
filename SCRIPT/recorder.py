@@ -47,7 +47,6 @@ class LongFormRecorder:
         on_recording_start: Optional[Callable] = None,
         on_recording_stop: Optional[Callable] = None,
         on_recorded_chunk: Optional[Callable[[bytes], None]] = None,
-        on_realtime_transcription_update: Optional[Callable[[str], None]] = None,
     ):
         """
         Initializes the recorder with transcription and VAD parameters.
@@ -64,7 +63,7 @@ class LongFormRecorder:
 
         # Prepare configuration for the underlying AudioToTextRecorder
         self.recorder_config = dict(config) if config else {}
-        self.recorder_config["use_microphone"] = False  # We will feed audio manually
+        # This is now controlled by the orchestrator via the config dict.
         self.recorder_config["spinner"] = False
         # Store external callbacks
         self.external_on_recording_start = on_recording_start
@@ -74,10 +73,6 @@ class LongFormRecorder:
         self.recorder_config["on_recording_stop"] = self._internal_on_stop
         if on_recorded_chunk:
             self.recorder_config["on_recorded_chunk"] = on_recorded_chunk
-        if on_realtime_transcription_update:
-            self.recorder_config["on_realtime_transcription_update"] = (
-                on_realtime_transcription_update
-            )
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
 
@@ -86,10 +81,7 @@ class LongFormRecorder:
         # logs flow into our main application log file.
         if self.recorder:
             stt_logger = logging.getLogger("realtimestt")
-            try:
-                stt_logger.propagate = True
-            except Exception:
-                pass  # Ignore if logging setup fails
+            stt_logger.propagate = True
         logging.info("LongFormRecorder initialized successfully.")
 
     def _initialize_recorder(self) -> Optional[AudioToTextRecorderType]:
@@ -110,7 +102,9 @@ class LongFormRecorder:
 
                 return AudioToTextRecorder(**library_config)
         except Exception as e:
-            logging.error("Failed to initialize AudioToTextRecorder: %s", e)
+            logging.error(
+                "Failed to initialize AudioToTextRecorder: %s", e, exc_info=True
+            )
             return None
 
     def _internal_on_start(self):
@@ -139,17 +133,27 @@ class LongFormRecorder:
             logging.error("Recorder is not initialized. Cannot start recording.")
             return
 
-        # This just prepares the recorder's internal state.
-        # It doesn't start listening to the mic as use_microphone is False.
         suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
         context_manager: contextlib.AbstractContextManager[Any]
         context_manager = suppress_ctx() if suppress_ctx else contextlib.nullcontext()
         with context_manager:
             self.recorder.start()
 
+    def stop_recording(self):
+        """Stops the audio recording process without transcribing."""
+        if not self.is_recording:
+            logging.warning("No active recording to stop.")
+            return
+
+        if not self.recorder:
+            logging.error("Recorder is not initialized. Cannot stop recording.")
+            return
+
+        self.recorder.stop()
+
     def feed_audio(self, chunk: bytes):
         """Feeds an audio chunk to the underlying recorder."""
-        if self.recorder:
+        if self.recorder and self.is_running:
             self.recorder.feed_audio(chunk)
 
     def start_chunked_transcription(self, on_sentence_transcribed: Callable[[str], None]):
@@ -158,7 +162,14 @@ class LongFormRecorder:
         def transcription_loop():
             while self.is_running:
                 if self.recorder:
-                    self.recorder.text(on_sentence_transcribed)
+                    try:
+                        self.recorder.text(on_sentence_transcribed)
+                    except Exception as e:
+                        logging.error(
+                            f"Error in preview transcription loop: {e}", exc_info=True
+                        )
+                        # Avoid a fast-spinning error loop
+                        time.sleep(1)
 
         thread = threading.Thread(target=transcription_loop, daemon=True)
         thread.start()
@@ -169,10 +180,8 @@ class LongFormRecorder:
             logging.warning("No active recording to stop.")
             return "", {}
 
-        logging.info("Stopping recording and starting transcription...")
-        # The VAD in RealtimeSTT will automatically stop the recording.
-        # We just need to wait for it.
-        self.recorder.stop()  # Manually trigger stop
+        # This call is now primarily for the main_transcriber instance
+        self.stop_recording()
         self.recorder.wait_audio()
         audio_data = self.recorder.audio
 
@@ -182,7 +191,7 @@ class LongFormRecorder:
         try:
             transcription = self.recorder.perform_final_transcription(audio_data)
         except Exception as e:
-            logging.error("Error during final transcription: %s", e)
+            logging.error("Error during final transcription: %s", e, exc_info=True)
 
         self._last_transcription_duration = time.monotonic() - transcription_start_time
 
@@ -191,7 +200,12 @@ class LongFormRecorder:
         if self.last_transcription:
             self._safe_clipboard_copy(self.last_transcription)
 
-        metrics = self._get_transcription_metrics()
+        audio_duration = self._recording_started_at and (
+            time.monotonic() - self._recording_started_at
+        )
+        metrics = self._get_transcription_metrics(
+            audio_duration or 0, self._last_transcription_duration
+        )
 
         return self.last_transcription, metrics
 
@@ -211,10 +225,9 @@ class LongFormRecorder:
                 logging.info("Transcription successfully copied to clipboard.")
                 return True
             logging.warning("Clipboard copy verification failed.")
-            return False
         except Exception as e:
             logging.error("Failed to copy to clipboard: %s", e)
-            return False
+        return False
 
     def _format_duration(self, seconds: float) -> str:
         """Format seconds as a human-friendly string."""
@@ -225,27 +238,20 @@ class LongFormRecorder:
             return f"{int(minutes)}m {secs:04.1f}s"
         return f"{secs:.2f}s"
 
-    def _get_transcription_metrics(self) -> dict:
+    def _get_transcription_metrics(
+        self, audio_duration: float, processing_time: float
+    ) -> dict:
         """Logs metrics about the last transcription cycle."""
-        audio_duration = self._last_recording_duration
-        processing_time = self._last_transcription_duration
-
         if processing_time > 0:
             speed_ratio = audio_duration / processing_time
         else:
             speed_ratio = float("inf")
 
-        if audio_duration > 0:
-            realtime_factor = processing_time / audio_duration
-        else:
-            realtime_factor = float("inf")
-
         metrics_msg = (
             "Transcription Metrics | "
             f"Audio: {self._format_duration(audio_duration)} | "
             f"Processing: {self._format_duration(processing_time)} | "
-            f"Speed Ratio: {speed_ratio:.2f}x | "
-            f"RT Factor: {realtime_factor:.2f}"
+            f"Speed Ratio: {speed_ratio:.2f}x"
         )
         logging.info(metrics_msg)
         return {
