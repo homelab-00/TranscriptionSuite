@@ -217,9 +217,12 @@ class ModelManager:
             return None
 
     def initialize_transcriber(
-        self, config_section: str, callbacks: dict | None = None
+        self,
+        config_section: str,
+        callbacks: dict | None = None,
+        use_microphone: bool = False,
     ) -> Optional[LongFormRecorder]:
-        """Initialize a transcriber only when needed with improved cleanup."""
+        """Initialize a transcriber with an override for microphone usage."""
         if callbacks is None:
             callbacks = {}
 
@@ -229,15 +232,33 @@ class ModelManager:
             if not module_config:
                 self._log_error("Config section '%s' not found.", config_section)
                 return None
+            # Add the microphone override to the config for this instance
+            instance_config = module_config.copy()
+            instance_config["use_microphone"] = use_microphone
+
+            # If using microphone, resolve the device index from the global audio config
+            if use_microphone:
+                audio_config = self.config.get("audio", {})
+                if audio_config.get("use_default_input", True):
+                    device_index = self.get_default_input_device_index()
+                else:
+                    device_index = audio_config.get("input_device_index")
+                instance_config["input_device_index"] = device_index
 
             # Pass the specific config section to the recorder
-            recorder = LongFormRecorder(config=module_config, **callbacks)
+            recorder = LongFormRecorder(config=instance_config, **callbacks)
 
             self._log_info("%s recorder initialized successfully", config_section)
             return recorder
 
-        except (ImportError, AttributeError, ValueError, OSError) as e:
-            self._log_error("Error initializing %s recorder: %s", config_section, e)
+        except Exception as e:
+            # Break the call into multiple arguments to avoid a very long line
+            self._log_error(
+                "Error initializing %s recorder: %s",
+                config_section,
+                e,
+                exc_info=True,
+            )
             return None
 
     def cleanup_all_models(self):
@@ -265,6 +286,6 @@ class ModelManager:
         """Log a warning message."""
         logging.warning(message, *args)
 
-    def _log_error(self, message, *args):
+    def _log_error(self, message, *args, **kwargs):
         """Log an error message."""
-        logging.error(message, *args)
+        logging.error(message, *args, **kwargs)
