@@ -241,17 +241,16 @@ class STTOrchestrator:
             self.console_display.update_waveform_data(chunk)
 
     def _quit(self):
-        """Stop all processes and exit with improved cleanup."""
-        # This method MUST be non-blocking as it's called from the UI thread.
-        # Offload the entire shutdown sequence to a new thread.
+        """Signals the application to stop and exit gracefully."""
         if self.app_state.get("shutdown_in_progress"):
-            return  # Prevent multiple shutdown attempts
+            return
         self.app_state["shutdown_in_progress"] = True
         safe_print("Quit requested, shutting down...")
 
         def shutdown_worker():
             self.stop()
-            os._exit(0)  # Force exit after cleanup
+            # The application will now exit naturally when the tray_manager's
+            # event loop is quit. os._exit(0) is no longer needed.
 
         threading.Thread(target=shutdown_worker, daemon=True).start()
 
@@ -326,40 +325,48 @@ class STTOrchestrator:
                 self.stop()
 
     def stop(self):
-        """Stop all processes and clean up with improved resource handling."""
-        try:
-            if not self.app_state.get("running"):
-                return
+        """Stop all processes and clean up gracefully."""
+        if not self.app_state.get("running"):
+            return
 
-            logging.info("Beginning graceful shutdown sequence...")
-            self.app_state["running"] = False
+        logging.info("Beginning graceful shutdown sequence...")
+        self.app_state["running"] = False
 
-            if self.tray_manager:
+        # Stop the console display first to prevent it from trying to render
+        if self.console_display:
+            try:
+                self.console_display.stop()
+            except Exception as e:
+                logging.debug("Error stopping console display: %s", e)
+
+        # The preview transcriber is the 'master' and uses the mic.
+        # Shutting it down first stops the audio source.
+        if self.preview_transcriber:
+            try:
+                self.preview_transcriber.clean_up()
+            except Exception as e:
+                logging.debug("Error cleaning up preview transcriber: %s", e)
+
+        # The main transcriber is the 'slave'.
+        if self.main_transcriber:
+            try:
+                self.main_transcriber.clean_up()
+            except Exception as e:
+                logging.debug("Error cleaning up main transcriber: %s", e)
+
+        # Stop the UI event loop
+        if self.tray_manager:
+            try:
                 self.tray_manager.stop()
+            except Exception as e:
+                logging.debug("Error stopping tray manager: %s", e)
 
-            if self.console_display:
-                try:
-                    self.console_display.stop()
-                except Exception as error:
-                    logging.debug("Console display stop error during shutdown: %s", error)
-
-            if self.main_transcriber:
-                try:
-                    self.main_transcriber.clean_up()
-                except Exception as error:
-                    logging.debug("Main transcriber cleanup error: %s", error)
-            if self.preview_transcriber:
-                try:
-                    self.preview_transcriber.clean_up()
-                except Exception as error:
-                    logging.debug("Preview transcriber cleanup error: %s", error)
-
+        try:
             self.model_manager.cleanup_all_models()
+        except Exception as e:
+            logging.debug("Error cleaning up models: %s", e)
 
-            logging.info("Orchestrator stopped successfully")
-
-        except (RuntimeError, OSError, AttributeError) as error:
-            logging.error("Error during shutdown: %s", error)
+        logging.info("Orchestrator stopped successfully")
 
 
 if __name__ == "__main__":
