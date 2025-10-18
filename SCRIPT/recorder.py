@@ -4,13 +4,15 @@ Core long-form recording and transcription module.
 
 This module contains the LongFormRecorder class, which wraps the RealtimeSTT
 library to handle audio capture, voice activity detection, and final
-transcription processing. It is decoupled from any UI/display logic.
+transcription processing. It is designed to work without direct microphone
+access, receiving audio via a feed method.
 """
 
 import contextlib
-import logging
 import time
-from typing import Any, Callable, Iterable, List, Optional, Union, TYPE_CHECKING
+import logging
+import threading
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import pyperclip
 from platform_utils import ensure_platform_init
@@ -40,36 +42,7 @@ class LongFormRecorder:
 
     def __init__(
         self,
-        # General Parameters
-        model: str = "Systran/faster-whisper-large-v3",
-        language: str = "en",
-        compute_type: str = "default",
-        device: str = "cuda",
-        input_device_index: Optional[int] = None,
-        gpu_device_index: Union[int, List[int]] = 0,
-        batch_size: int = 16,
-        # Real-Time Preview Parameters
-        enable_realtime_transcription: bool = False,
-        realtime_model_type: str = "Systran/faster-whisper-tiny",
-        realtime_processing_pause: float = 0.2,
-        beam_size_realtime: int = 3,
-        initial_prompt_realtime: Optional[Union[str, Iterable[int]]] = None,
-        # Voice Activation Parameters
-        silero_sensitivity: float = 0.4,
-        silero_use_onnx: bool = False,
-        silero_deactivity_detection: bool = False,
-        webrtc_sensitivity: int = 3,
-        post_speech_silence_duration: float = 0.6,
-        min_length_of_recording: float = 0.5,
-        min_gap_between_recordings: float = 0.0,
-        pre_recording_buffer_duration: float = 1.0,
-        # Advanced Parameters
-        beam_size: int = 5,
-        initial_prompt: Optional[Union[str, Iterable[int]]] = None,
-        faster_whisper_vad_filter: bool = True,
-        ensure_sentence_starting_uppercase: bool = True,
-        ensure_sentence_ends_with_period: bool = True,
-        allowed_latency_limit: int = 100,
+        config: dict,
         # Callbacks for decoupling
         on_recording_start: Optional[Callable] = None,
         on_recording_stop: Optional[Callable] = None,
@@ -82,53 +55,41 @@ class LongFormRecorder:
         if not HAS_REALTIME_STT or AudioToTextRecorder is None:
             raise ImportError("RealtimeSTT library is not available.")
 
+        self.is_running = True
         self.is_recording = False
         self._recording_started_at: Optional[float] = None
         self._last_recording_duration = 0.0
         self._last_transcription_duration = 0.0
         self.last_transcription = ""
 
+        # Prepare configuration for the underlying AudioToTextRecorder
+        self.recorder_config = dict(config) if config else {}
+        self.recorder_config["use_microphone"] = False  # We will feed audio manually
+        self.recorder_config["spinner"] = False
         # Store external callbacks
         self.external_on_recording_start = on_recording_start
         self.external_on_recording_stop = on_recording_stop
-
-        # Prepare configuration for the underlying AudioToTextRecorder
-        self.recorder_config = {
-            "model": model,
-            "language": language,
-            "compute_type": compute_type,
-            "device": device,
-            "input_device_index": input_device_index,
-            "gpu_device_index": gpu_device_index,
-            "batch_size": batch_size,
-            "enable_realtime_transcription": enable_realtime_transcription,
-            "realtime_model_type": realtime_model_type,
-            "realtime_processing_pause": realtime_processing_pause,
-            "beam_size_realtime": beam_size_realtime,
-            "initial_prompt_realtime": initial_prompt_realtime,
-            "silero_sensitivity": silero_sensitivity,
-            "silero_use_onnx": silero_use_onnx,
-            "silero_deactivity_detection": silero_deactivity_detection,
-            "webrtc_sensitivity": webrtc_sensitivity,
-            "post_speech_silence_duration": post_speech_silence_duration,
-            "min_length_of_recording": min_length_of_recording,
-            "min_gap_between_recordings": min_gap_between_recordings,
-            "pre_recording_buffer_duration": pre_recording_buffer_duration,
-            "beam_size": beam_size,
-            "initial_prompt": initial_prompt,
-            "faster_whisper_vad_filter": faster_whisper_vad_filter,
-            "ensure_sentence_starting_uppercase": ensure_sentence_starting_uppercase,
-            "ensure_sentence_ends_with_period": ensure_sentence_ends_with_period,
-            "allowed_latency_limit": allowed_latency_limit,
-            "on_recording_start": self._internal_on_start,
-            "on_recording_stop": self._internal_on_stop,
-            "on_recorded_chunk": on_recorded_chunk,
-            "on_realtime_transcription_update": on_realtime_transcription_update,
-            "use_microphone": True,  # This class always uses the microphone
-            "spinner": False,
-        }
+        # Add internal/external callbacks to the config
+        self.recorder_config["on_recording_start"] = self._internal_on_start
+        self.recorder_config["on_recording_stop"] = self._internal_on_stop
+        if on_recorded_chunk:
+            self.recorder_config["on_recorded_chunk"] = on_recorded_chunk
+        if on_realtime_transcription_update:
+            self.recorder_config["on_realtime_transcription_update"] = (
+                on_realtime_transcription_update
+            )
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
+
+        # --- FIX: Re-enable log propagation from RealtimeSTT ---
+        # The library disables propagation by default. We re-enable it so its
+        # logs flow into our main application log file.
+        if self.recorder:
+            stt_logger = logging.getLogger("realtimestt")
+            try:
+                stt_logger.propagate = True
+            except Exception:
+                pass  # Ignore if logging setup fails
         logging.info("LongFormRecorder initialized successfully.")
 
     def _initialize_recorder(self) -> Optional[AudioToTextRecorderType]:
@@ -142,7 +103,12 @@ class LongFormRecorder:
                     raise RuntimeError(
                         "RealtimeSTT AudioToTextRecorder is unavailable at runtime."
                     )
-                return AudioToTextRecorder(**self.recorder_config)
+                # Create a clean config for the underlying library,
+                # removing our custom keys.
+                library_config = self.recorder_config.copy()
+                library_config.pop("use_default_input", None)
+
+                return AudioToTextRecorder(**library_config)
         except Exception as e:
             logging.error("Failed to initialize AudioToTextRecorder: %s", e)
             return None
@@ -173,11 +139,29 @@ class LongFormRecorder:
             logging.error("Recorder is not initialized. Cannot start recording.")
             return
 
+        # This just prepares the recorder's internal state.
+        # It doesn't start listening to the mic as use_microphone is False.
         suppress_ctx = getattr(PLATFORM_MANAGER, "suppress_audio_warnings", None)
         context_manager: contextlib.AbstractContextManager[Any]
         context_manager = suppress_ctx() if suppress_ctx else contextlib.nullcontext()
         with context_manager:
             self.recorder.start()
+
+    def feed_audio(self, chunk: bytes):
+        """Feeds an audio chunk to the underlying recorder."""
+        if self.recorder:
+            self.recorder.feed_audio(chunk)
+
+    def start_chunked_transcription(self, on_sentence_transcribed: Callable[[str], None]):
+        """Starts a background thread for continuous, chunked transcription."""
+
+        def transcription_loop():
+            while self.is_running:
+                if self.recorder:
+                    self.recorder.text(on_sentence_transcribed)
+
+        thread = threading.Thread(target=transcription_loop, daemon=True)
+        thread.start()
 
     def stop_and_transcribe(self) -> tuple[str, dict]:
         """Stops recording, processes the audio, and returns the transcription."""
@@ -186,8 +170,10 @@ class LongFormRecorder:
             return "", {}
 
         logging.info("Stopping recording and starting transcription...")
-        self.recorder.stop()
-        self.recorder.wait_audio()  # Ensure audio buffer is fully processed
+        # The VAD in RealtimeSTT will automatically stop the recording.
+        # We just need to wait for it.
+        self.recorder.stop()  # Manually trigger stop
+        self.recorder.wait_audio()
         audio_data = self.recorder.audio
 
         transcription = ""
@@ -211,6 +197,7 @@ class LongFormRecorder:
 
     def clean_up(self):
         """Shuts down the recorder and releases resources."""
+        self.is_running = False
         if self.recorder:
             self.recorder.shutdown()
             self.recorder = None

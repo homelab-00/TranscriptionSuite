@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import array
 import math
-import re
 import threading
 import time
 from collections import deque
@@ -78,7 +77,7 @@ class ConsoleDisplay:
 
         # Preview rendering attributes
         self._preview_lock = threading.Lock()
-        self._preview_sentences: deque[str] = deque(maxlen=3)
+        self._preview_sentences: deque[str] = deque(maxlen=10)
         self._latest_preview_text: Any = self._default_preview_display()
         self._preview_panel_height = 5  # 3 lines for text, 2 for panel borders
 
@@ -152,21 +151,13 @@ class ConsoleDisplay:
             # Silently ignore errors in waveform processing to not disrupt recording
             pass
 
-    def update_preview_text(self, text: str):
-        """Processes the full preview text to get the last 3 sentences."""
-        if not HAS_RICH or not text:
+    def add_preview_sentence(self, sentence: str):
+        """Adds a new sentence to the live preview display."""
+        if not HAS_RICH or not sentence:
             return
 
-        # Split text into sentences based on punctuation followed by a space.
-        # This keeps the punctuation with the sentence.
-        sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-
         with self._preview_lock:
-            self._preview_sentences.clear()
-            # Add up to the last 3 non-empty sentences to our deque
-            for sentence in sentences[-3:]:
-                if sentence:
-                    self._preview_sentences.append(sentence.strip())
+            self._preview_sentences.append(sentence.strip())
 
     def display_final_transcription(self, text: str):
         """Displays the final transcription in a formatted panel."""
@@ -341,18 +332,39 @@ class ConsoleDisplay:
                 return
 
             sentences_copy = list(self._preview_sentences)
-            text_obj = Text()
-            for i, sentence in enumerate(sentences_copy):
-                # The last sentence is the one currently being transcribed.
-                # We'll make it brighter to stand out.
-                if i == len(sentences_copy) - 1:
-                    text_obj.append(sentence, style="bold white")
-                else:
-                    # Older, more stable sentences are slightly dimmer.
-                    text_obj.append(sentence, style="grey70")
+            full_text = " ".join(sentences_copy)
 
-                # Add a newline between sentences, but not after the last one.
-                if i < len(sentences_copy) - 1:
-                    text_obj.append("\n")
+            # --- Dynamic Cutoff Logic ---
+            if not CONSOLE:
+                self._latest_preview_text = Text(full_text)
+                return
 
-            self._latest_preview_text = text_obj
+            # Calculate the available space for text inside the panel.
+            # We subtract 4 for left/right borders and padding.
+            panel_text_width = CONSOLE.width - 4
+            panel_text_height = self._preview_panel_height - 2  # 3 lines
+            max_chars = panel_text_width * panel_text_height
+
+            display_text = full_text
+            if len(full_text) > max_chars:
+                prefix = "... "
+                # Calculate the starting point for the slice
+                cutoff_point = len(full_text) - max_chars + len(prefix)
+                display_text = prefix + full_text[cutoff_point:]
+
+            # Create the base Text object with the dimmer style
+            text_obj = Text(display_text, style="grey70")
+
+            # Highlight the last (most recent) sentence to make it stand out
+            if sentences_copy:
+                last_sentence = sentences_copy[-1]
+                # Use highlight_words which is robust and finds all occurrences
+                # (though we only expect one at the end).
+                text_obj.highlight_words(
+                    [last_sentence], style="bold white", case_sensitive=True
+                )
+
+            # Ensure the text is aligned to the top-left of the panel
+            self._latest_preview_text = Align.left(
+                text_obj, vertical="top", height=panel_text_height
+            )
