@@ -2,7 +2,7 @@
 
 A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses Faster Whisper models to provide high-quality transcriptions that are automatically copied to the clipboard, ready to be pasted anywhere.
 
-## Key Features
+#### Key Features
 
 - **Long-form Transcription**: Record extended speech sessions with manual start/stop control.
 - **Live Waveform Preview**: See a live audio waveform in your terminal while recording.
@@ -12,51 +12,24 @@ A focused, high-performance speech-to-text application for long-form dictation, 
 - **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
 - **Multi-language Support**: Supports all Whisper-compatible language codes.
 
-## Architecture
-
-The system is built around a central orchestrator that manages a single, dedicated transcription recorder. The architecture is designed for simplicity and robustness.
-
-- **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, handles user input from the tray icon, and coordinates the other modules.
-- **Recorder** (`recorder.py`): The core transcription engine. It wraps the `RealtimeSTT` library to manage microphone input, voice activity detection (VAD), and the final transcription process.
-- **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, such as the live timer and audio waveform, using the 'rich' library.
-- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
-- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instance based on the configuration.
-- **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
-- **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
-- **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
-
-## System Requirements
-
-### Hardware
-
-- **GPU**: NVIDIA GPU with CUDA support (tested with RTX 3060 12GB)
-- **RAM**: Minimum 8GB, recommended 16GB or more
-- **CPU**: Modern multi-core processor (tested with AMD Ryzen 5 3600)
-
-### Software
-
-- **Operating System**: Linux (developed and tested on Arch Linux)
-- **Python**: 3.13+
-- **`uv`**: The Python package manager used for this project.
-- **CUDA**: 13.0 or newer
-- **cuDNN**: 9.12 or newer
-- **Audio System**: Working microphone with proper Linux audio drivers (ALSA/PulseAudio/PipeWire)
+---
 
 ## Installation and Setup
 
 This project uses `uv` for package and environment management. The setup process involves installing dependencies from PyPI and performing a local compilation of one library to ensure CUDA 13+ compatibility.
 
-### Prerequisites
+#### Prerequisites
 
 - You must have `git` and `uv` installed.
 - You must have the NVIDIA CUDA Toolkit (version 13.0 or newer) installed system-wide.
 
 ### Step 1: Install Standard Python Dependencies
 
-This command will create a local virtual environment (`.venv`), read the `pyproject.toml` file, and install all required Python packages from PyPI.
+These commands will create a local virtual environment (`.venv`), read the `pyproject.toml` file, and install all required Python packages from PyPI.
 
 ```bash
 # Run this from the project's root directory
+uv venv --python 3.13
 uv sync
 ```
 
@@ -160,7 +133,7 @@ For a complete list of language codes, refer to the [Whisper tokenizer source](h
 
 ### Model Selection
 
-The default model is `Systran/faster-whisper-large-v3`, which provides excellent accuracy. Other options include:
+The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-base` by default for its excellent speed.
 
 - `Systran/faster-whisper-medium` - Faster but less accurate
 - `deepdml/faster-whisper-large-v3-turbo-ct2` - Optimized for speed (best used for realtime)
@@ -205,6 +178,40 @@ All controls are accessed through the system tray icon:
 - Stop Recording
 - Quit
 
+---
+
+#### Architecture
+
+The system is built around a central orchestrator that manages a single, dedicated transcription recorder. The architecture is designed for simplicity and robustness.
+
+- **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, handles user input from the tray icon, and coordinates the other modules.
+- **Recorder** (`recorder.py`): The core transcription engine. It wraps the `RealtimeSTT` library to manage microphone input, voice activity detection (VAD), and the final transcription process.
+- **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, such as the live timer and audio waveform, using the 'rich' library.
+- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
+- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instance based on the configuration.
+- **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
+- **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
+- **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
+
+### System Requirements
+
+#### Hardware
+
+- **GPU**: NVIDIA GPU with CUDA support (tested with RTX 3060 12GB)
+- **RAM**: Minimum 8GB, recommended 16GB or more
+- **CPU**: Modern multi-core processor (tested with AMD Ryzen 5 3600)
+
+#### Software
+
+- **Operating System**: Linux (developed and tested on Arch Linux)
+- **Python**: 3.13+
+- **`uv`**: The Python package manager used for this project.
+- **CUDA**: 13.0 or newer
+- **cuDNN**: 9.12 or newer
+- **Audio System**: Working microphone with proper Linux audio drivers (ALSA/PulseAudio/PipeWire)
+
+---
+
 ## Troubleshooting
 
 ### CUDA/cuDNN Issues
@@ -227,6 +234,8 @@ If you encounter CUDA-related errors:
 1. Check available disk space in `~/.cache/huggingface/`.
 2. Ensure you have internet connectivity for the initial model download.
 3. Check GPU memory usage with `nvidia-smi`.
+
+---
 
 ## License
 

@@ -16,24 +16,30 @@ run static transcription, and quit.
 """
 
 import os
+import queue
+import contextlib
 import threading
 import time
 import logging
 import atexit
 import sys
 from typing import Optional
-
-# REMOVED: KDE DBus/global hotkeys support; only tray controls remain
-
 from model_manager import ModelManager
 from logging_setup import setup_logging
 from dependency_checker import DependencyChecker
 from utils import safe_print
 from config_manager import ConfigManager
-from recorder import LongFormRecorder
+from recorder import LongFormRecorder as TranscriptionInstance
 from console_display import ConsoleDisplay
 from diagnostics import SystemDiagnostics
 from platform_utils import get_platform_manager
+
+try:
+    import pyaudio
+
+    HAS_PYAUDIO = True
+except ImportError:
+    HAS_PYAUDIO = False
 
 # Try to import the tray manager
 try:
@@ -55,8 +61,6 @@ except ImportError:
     HAS_RICH = False
     CONSOLE = None
 
-# REMOVED: TCP command server settings; system tray provides all control
-
 
 class STTOrchestrator:
     """
@@ -72,12 +76,19 @@ class STTOrchestrator:
         self.app_state = {
             "running": False,
             "current_mode": None,  # Tracks "longform" or "static"
+            "is_transcribing": False,  # Flag to manage audio feeding during transcription
             "config_path": os.path.join(self.script_dir, "config.yaml"),
         }
 
         # Instances for transcription components
-        self.long_form_recorder: Optional[LongFormRecorder] = None
+        self.main_transcriber: Optional[TranscriptionInstance] = None
+        self.preview_transcriber: Optional[TranscriptionInstance] = None
         self.console_display: Optional[ConsoleDisplay] = None
+
+        # Audio processing attributes
+        self.audio_queue: queue.Queue[bytes] = queue.Queue()
+        self.audio_threads: list[threading.Thread] = []
+        self.stop_audio_event = threading.Event()
 
         # Initialize core components
         self.platform_manager_instance = get_platform_manager()
@@ -104,8 +115,6 @@ class STTOrchestrator:
 
         # Initialize model manager with the loaded config
         self.model_manager = ModelManager(self.config, self.script_dir)
-
-        # NOTE: Non-tray triggers (DBus hotkeys, TCP server) have been removed.
 
         # Register cleanup handler
         atexit.register(self.stop)
@@ -149,12 +158,6 @@ class STTOrchestrator:
             logging.error(f"Error during dependency check: {e}")
             safe_print(f"Warning: Could not complete dependency check: {e}", "warning")
 
-    # REMOVED: TCP command handler registration
-
-    # REMOVED: KDE DBus hotkey setup; only tray controls remain
-
-    # REMOVED: Hotkey signal handler
-
     def _start_longform(self):
         """Start long-form recording."""
         if self.app_state["current_mode"]:
@@ -164,7 +167,7 @@ class STTOrchestrator:
             )
             return
 
-        if not self.long_form_recorder:
+        if not self.main_transcriber:
             safe_print("Long-form model is not ready. Please wait.", "warning")
             return
 
@@ -176,11 +179,11 @@ class STTOrchestrator:
             # Manually trigger the on_recording_start callback to test the display.
             # This will raise the "Terminal too small" error if needed.
             if (
-                self.long_form_recorder
-                and self.long_form_recorder.external_on_recording_start
+                self.main_transcriber
+                and self.main_transcriber.external_on_recording_start
             ):
                 start_time = time.monotonic()
-                self.long_form_recorder.external_on_recording_start(start_time)
+                self.main_transcriber.external_on_recording_start(start_time)
         except RuntimeError as error:
             # This specifically catches the "Terminal too small" error.
             logging.warning("Could not start console display: %s", error)
@@ -193,8 +196,8 @@ class STTOrchestrator:
         # and start the recorder.
         safe_print("Starting long-form recording...", "success")
         self.app_state["current_mode"] = "longform"
-        if self.long_form_recorder:
-            self.long_form_recorder.start_recording()
+        if self.main_transcriber:
+            self.main_transcriber.start_recording()
         else:
             logging.error("Recorder not available at the time of starting.")
             self.app_state["current_mode"] = None
@@ -211,6 +214,7 @@ class STTOrchestrator:
         def _worker():
             if self.tray_manager:
                 self.tray_manager.set_state("transcribing")
+            self.app_state["is_transcribing"] = True
             try:
                 if self.console_display:
                     try:
@@ -218,7 +222,7 @@ class STTOrchestrator:
                     except Exception as stop_error:
                         logging.debug("Console display stop error: %s", stop_error)
 
-                if not self.long_form_recorder:
+                if not self.main_transcriber:
                     safe_print("Long-form transcriber not available.", "error")
                     self.app_state["current_mode"] = None
                     if self.tray_manager:
@@ -226,7 +230,7 @@ class STTOrchestrator:
                     return
 
                 safe_print("Stopping long-form recording and transcribing...")
-                final_text, metrics = self.long_form_recorder.stop_and_transcribe()
+                final_text, metrics = self.main_transcriber.stop_and_transcribe()
                 self.app_state["current_mode"] = None
 
                 if self.console_display:
@@ -246,26 +250,104 @@ class STTOrchestrator:
 
             except (AttributeError, RuntimeError) as error:
                 logging.error("Error stopping long-form recording: %s", error)
+            finally:
+                self.app_state["is_transcribing"] = False
                 self.app_state["current_mode"] = None
                 if self.tray_manager:
                     self.tray_manager.set_state("error")
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _handle_realtime_preview(self, text: str):
-        """Receives live preview text and passes it to the console display."""
+    def _handle_preview_sentence(self, sentence: str):
+        """Receives a transcribed sentence from the previewer and displays it."""
         if self.console_display:
-            self.console_display.update_preview_text(text)
+            self.console_display.add_preview_sentence(sentence)
+
+    def _audio_reader_worker(self):
+        """
+        The single point of contact for the microphone. Reads audio chunks and
+        puts them into a queue for distribution.
+        """
+        if not HAS_PYAUDIO:
+            logging.error("PyAudio not found, cannot read from microphone.")
+            return
+
+        audio_config = self.config.get("audio", {})
+        if audio_config.get("use_default_input", True):
+            device_index = self.model_manager.get_default_input_device_index()
+        else:
+            device_index = audio_config.get("input_device_index")
+
+        if device_index is None:
+            safe_print("No suitable audio input device found. Cannot record.", "error")
+            if self.tray_manager:
+                self.tray_manager.set_state("error")
+            return
+
+        suppress_ctx = getattr(
+            self.platform_manager_instance, "suppress_audio_warnings", None
+        )
+        context_manager = suppress_ctx() if suppress_ctx else contextlib.nullcontext()
+
+        with context_manager:
+            p = pyaudio.PyAudio()
+            try:
+                stream = p.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=16000,
+                    input=True,
+                    input_device_index=device_index,
+                    frames_per_buffer=1024,
+                )
+                safe_print(
+                    f"Microphone stream opened on device index {device_index}.",
+                    "info",
+                )
+                while not self.stop_audio_event.is_set():
+                    try:
+                        chunk = stream.read(1024, exception_on_overflow=False)
+                        self.audio_queue.put(chunk)
+                    except OSError as e:
+                        logging.error(f"Error reading from audio stream: {e}")
+                        time.sleep(0.1)
+            except Exception as e:
+                logging.error(f"Failed to open audio stream: {e}")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+            finally:
+                if "stream" in locals() and stream.is_active():
+                    stream.stop_stream()
+                    stream.close()
+                p.terminate()
+                logging.info("Audio reader worker has shut down.")
+
+    def _audio_feeder_worker(self):
+        """Takes audio from the queue and feeds it to both transcribers."""
+        while not self.stop_audio_event.is_set():
+            try:
+                chunk = self.audio_queue.get(timeout=0.1)
+                if self.main_transcriber and not self.app_state["is_transcribing"]:
+                    self.main_transcriber.feed_audio(chunk)
+                if self.preview_transcriber:
+                    self.preview_transcriber.feed_audio(chunk)
+            except queue.Empty:
+                continue
 
     def _quit(self):
         """Stop all processes and exit with improved cleanup."""
-        safe_print("Quitting application...")
-        if self.app_state["current_mode"] == "longform":
-            self._stop_longform()
-        time.sleep(0.5)
-        self.stop()
-        # Add a more forceful exit in case the tray event loop hangs
-        os._exit(0)
+        # This method MUST be non-blocking as it's called from the UI thread.
+        # Offload the entire shutdown sequence to a new thread.
+        if self.app_state.get("shutdown_in_progress"):
+            return  # Prevent multiple shutdown attempts
+        self.app_state["shutdown_in_progress"] = True
+        safe_print("Quit requested, shutting down...")
+
+        def shutdown_worker():
+            self.stop()  # This is the main blocking call
+            os._exit(0)  # Force exit after cleanup
+
+        threading.Thread(target=shutdown_worker, daemon=True).start()
 
     def run(self):
         """Run the orchestrator."""
@@ -279,8 +361,7 @@ class STTOrchestrator:
             if self.tray_manager:
                 self.tray_manager.set_state("loading")  # Grey icon
 
-            success = False
-            safe_print("Pre-loading the long-form transcription model...", "info")
+            safe_print("Pre-loading transcription models...", "info")
 
             try:
                 self.console_display = ConsoleDisplay()
@@ -288,30 +369,45 @@ class STTOrchestrator:
                 logging.error("Failed to initialise console display: %s", exc)
                 self.console_display = None
 
-            callbacks = {}
+            main_callbacks = {}
             if self.console_display:
-                # This is the correct way: the recorder will call these functions
-                # at the appropriate times.
-                callbacks["on_recording_start"] = self.console_display.start
-                callbacks["on_recorded_chunk"] = self.console_display.update_waveform_data
-                callbacks["on_recording_stop"] = self.console_display.stop
-                callbacks["on_realtime_transcription_update"] = (
-                    self._handle_realtime_preview
+                main_callbacks["on_recording_start"] = self.console_display.start
+                main_callbacks["on_recorded_chunk"] = (
+                    self.console_display.update_waveform_data
                 )
+                main_callbacks["on_recording_stop"] = self.console_display.stop
+
+            preview_callbacks = {}
 
             try:
-                self.long_form_recorder = self.model_manager.initialize_transcriber(
-                    "longform", callbacks
+                self.main_transcriber = self.model_manager.initialize_transcriber(
+                    "main_transcriber", main_callbacks
+                )
+                self.preview_transcriber = self.model_manager.initialize_transcriber(
+                    "preview_transcriber", preview_callbacks
                 )
             except Exception as exc:
-                logging.error("Failed to initialise long-form recorder: %s", exc)
-                self.long_form_recorder = None
+                logging.error("Failed to initialize a transcriber: %s", exc)
 
-            if self.long_form_recorder:
-                self.model_manager.transcribers["longform"] = self.long_form_recorder
-                success = True
+            success = self.main_transcriber and self.preview_transcriber
+
+            if success:
+                safe_print("Models loaded successfully.", "success")
+
+                # Start the audio processing threads
+                reader = threading.Thread(target=self._audio_reader_worker, daemon=True)
+                feeder = threading.Thread(target=self._audio_feeder_worker, daemon=True)
+                self.audio_threads.extend([reader, feeder])
+                reader.start()
+                feeder.start()
+
+                # Start the previewer in its continuous chunking mode
+                if self.preview_transcriber:
+                    self.preview_transcriber.start_chunked_transcription(
+                        self._handle_preview_sentence
+                    )
             else:
-                safe_print("Failed to initialise the long-form model.", "error")
+                safe_print("Failed to initialize models.", "error")
 
             if self.tray_manager:
                 self.tray_manager.set_state("standby" if success else "error")
@@ -341,10 +437,16 @@ class STTOrchestrator:
             logging.info("Beginning graceful shutdown sequence...")
             self.app_state["running"] = False
 
-            # DBus loop removed
+            # Signal audio threads to stop
+            self.stop_audio_event.set()
 
             if self.tray_manager:
                 self.tray_manager.stop()
+
+            # Wait for audio threads to finish
+            for thread in self.audio_threads:
+                if thread.is_alive():
+                    thread.join(timeout=1.0)
 
             if self.console_display:
                 try:
@@ -352,11 +454,16 @@ class STTOrchestrator:
                 except Exception as error:
                     logging.debug("Console display stop error during shutdown: %s", error)
 
-            if self.long_form_recorder:
+            if self.main_transcriber:
                 try:
-                    self.long_form_recorder.clean_up()
+                    self.main_transcriber.clean_up()
                 except Exception as error:
-                    logging.debug("Recorder cleanup error: %s", error)
+                    logging.debug("Main transcriber cleanup error: %s", error)
+            if self.preview_transcriber:
+                try:
+                    self.preview_transcriber.clean_up()
+                except Exception as error:
+                    logging.debug("Preview transcriber cleanup error: %s", error)
 
             self.model_manager.cleanup_all_models()
 
@@ -364,9 +471,6 @@ class STTOrchestrator:
 
         except (RuntimeError, OSError, AttributeError) as error:
             logging.error("Error during shutdown: %s", error)
-
-    # REMOVED: The entire _manage_hotkeys function is deleted.
-    # def _manage_hotkeys(self, enable: bool) -> None: ...
 
 
 if __name__ == "__main__":

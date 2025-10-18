@@ -16,6 +16,7 @@ import sys
 import logging
 import gc
 import importlib.util
+from typing import Optional
 
 from utils import safe_print
 from platform_utils import get_platform_manager
@@ -188,147 +189,55 @@ class ModelManager:
             return None
 
         suppress_ctx = getattr(self.platform_manager, "suppress_audio_warnings", None)
+        context_manager = suppress_ctx() if suppress_ctx else contextlib.nullcontext()
 
         try:
-            with suppress_ctx() if suppress_ctx else contextlib.nullcontext():
+            with context_manager:
                 p = pyaudio.PyAudio()
 
-                # Get default input device info
-                default_device_info = p.get_default_input_device_info()
-                default_index = default_device_info["index"]
-                device_name = default_device_info["name"]
-
-                # Ensure we have a valid integer index
-                if not isinstance(default_index, (int, float)):
-                    self._log_warning(f"Invalid device index type: {type(default_index)}")
-                    p.terminate()
-                    return None
-
-                default_index = int(default_index)
-
-                # Verify the device actually works by testing it
                 try:
-                    stream = p.open(
-                        format=pyaudio.paInt16,
-                        channels=1,
-                        rate=16000,
-                        input=True,
-                        input_device_index=default_index,
-                        frames_per_buffer=1024,
-                    )
-                    stream.close()
-
+                    default_device_info = p.get_default_input_device_info()
+                    default_index = int(default_device_info["index"])
+                    device_name = default_device_info["name"]
                     safe_print(
                         f"Using default input device: {device_name} "
                         f"(index: {default_index})",
                         "info",
                     )
 
-                except (OSError, ValueError) as e:
-                    self._log_warning(f"Default device {device_name} not accessible: {e}")
-                    # Try to find an alternative working device
-                    devices = self.get_audio_devices()
-                    for device in devices:
-                        try:
-                            stream = p.open(
-                                format=pyaudio.paInt16,
-                                channels=1,
-                                rate=16000,
-                                input=True,
-                                input_device_index=device["index"],
-                                frames_per_buffer=1024,
-                            )
-                            stream.close()
-                            safe_print(
-                                f"Using alternative device: {device['name']}", "info"
-                            )
-                            p.terminate()
-                            return device["index"]
-                        except (OSError, ValueError) as e:
-                            self._log_warning(
-                                f"Default device {device_name} not accessible: {e}"
-                            )
-                            continue
-
-                    # If no devices work, return None
-                    self._log_error("No working audio input devices found")
+                    p.terminate()
+                    return default_index
+                except (OSError, KeyError, ValueError) as e:
+                    self._log_warning(f"Could not get default input device: {e}")
                     p.terminate()
                     return None
-
-                p.terminate()
-                return default_index
 
         except Exception as e:
             self._log_error(f"Error getting default input device: {e}")
             return None
 
-    def _create_longform_recorder(self, module_config, callbacks):
-        """Initialize longform transcriber with configuration."""
-        safe_print("Initializing long-form recorder...", "info")
-
-        # Get device and compute type
-        device = self._get_optimal_device(module_config)
-        compute_type = self._get_optimal_compute_type(module_config, device)
-
-        resolved_input_index = self._resolve_input_device_index(module_config)
-
-        # Combine base config with dynamic callbacks
-        recorder_params = {
-            "model": module_config.get("model", "Systran/faster-whisper-large-v3"),
-            "language": module_config.get("language", "en"),
-            "compute_type": compute_type,
-            "device": device,
-            "input_device_index": resolved_input_index,
-            "gpu_device_index": module_config.get("gpu_device_index", 0),
-            "batch_size": module_config.get("batch_size", 16),
-            "enable_realtime_transcription": module_config.get(
-                "enable_realtime_transcription", False
-            ),
-            "realtime_model_type": module_config.get(
-                "realtime_model_type", "Systran/faster-whisper-tiny"
-            ),
-            "realtime_processing_pause": module_config.get(
-                "realtime_processing_pause", 0.2
-            ),
-            "beam_size_realtime": module_config.get("beam_size_realtime", 3),
-            "initial_prompt_realtime": module_config.get("initial_prompt_realtime"),
-            "silero_sensitivity": module_config.get("silero_sensitivity", 0.4),
-            "silero_use_onnx": module_config.get("silero_use_onnx", False),
-            "post_speech_silence_duration": module_config.get(
-                "post_speech_silence_duration", 0.6
-            ),
-            "min_length_of_recording": module_config.get("min_length_of_recording", 1.0),
-            "beam_size": module_config.get("beam_size", 5),
-            "initial_prompt": module_config.get("initial_prompt"),
-            "faster_whisper_vad_filter": module_config.get(
-                "faster_whisper_vad_filter", True
-            ),
-        }
-        recorder_params.update(callbacks)
-
-        return LongFormRecorder(**recorder_params)
-
-    def initialize_transcriber(self, module_type: str, extra_args: dict | None = None):
+    def initialize_transcriber(
+        self, config_section: str, callbacks: dict | None = None
+    ) -> Optional[LongFormRecorder]:
         """Initialize a transcriber only when needed with improved cleanup."""
-        if module_type != "longform":
-            self._log_error("Unknown module type requested: %s", module_type)
-            return None
-
-        if extra_args is None:
-            extra_args = {}
+        if callbacks is None:
+            callbacks = {}
 
         try:
             # Get configuration for this module
-            module_config = self.config.get(module_type, {})
+            module_config = self.config.get(config_section, {})
+            if not module_config:
+                self._log_error("Config section '%s' not found.", config_section)
+                return None
 
-            recorder = self._create_longform_recorder(module_config, extra_args)
-            self._log_info(
-                "%s recorder initialized successfully", module_type.capitalize()
-            )
+            # Pass the specific config section to the recorder
+            recorder = LongFormRecorder(config=module_config, **callbacks)
+
+            self._log_info("%s recorder initialized successfully", config_section)
             return recorder
 
         except (ImportError, AttributeError, ValueError, OSError) as e:
-            self._log_error("Error initializing %s recorder: %s", module_type, e)
+            self._log_error("Error initializing %s recorder: %s", config_section, e)
             return None
 
     def cleanup_all_models(self):
