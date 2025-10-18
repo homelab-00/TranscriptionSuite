@@ -1,7 +1,8 @@
 # SCRIPT/config.yaml
 
-# Configuration for the long-form, continuous dictation mode.
-longform:
+# Configuration for the main, high-accuracy transcription.
+# This instance processes the entire recording at the end for the best quality.
+main_transcriber:
     # Model from HuggingFace to use for transcription.
     # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
     model: "Systran/faster-whisper-large-v3"
@@ -16,26 +17,8 @@ longform:
     # Hardware device to run the model on. "cuda" for NVIDIA GPUs, "cpu" for CPU.
     device: "cuda"
 
-    # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
-    # Set to `null` (or leave blank) if `use_default_input` is true.
-    input_device_index: 21
-
-    # If true, the application will automatically find the default system microphone.
-    # If false, it will use the `input_device_index` specified above.
-    use_default_input: false
-
     # Index of the GPU to use if you have multiple GPUs. Usually 0.
     gpu_device_index: 0
-
-    # Silero VAD (Voice Activity Detection) sensitivity. Lower is more sensitive. (0.0 to 1.0)
-    silero_sensitivity: 0.4
-    silero_use_onnx: false
-
-    # How long to wait after speech stops before considering the phrase complete (in seconds).
-    post_speech_silence_duration: 0.6
-
-    # Minimum length of a recording in seconds. Anything shorter is ignored.
-    min_length_of_recording: 1.0
 
     # Transcription engine batch size. Higher may be faster on powerful GPUs.
     batch_size: 16
@@ -50,16 +33,47 @@ longform:
     # Use faster-whisper's built-in VAD to filter out silence for better accuracy.
     faster_whisper_vad_filter: true
 
+    # Prevent the library from creating its own log file (realtimestt.log).
+    no_log_file: true
+
+
+# Configuration for the live preview transcriber.
+# This instance runs continuously on small chunks of audio for a real-time feed.
+preview_transcriber:
+    # A smaller, faster model is recommended for the preview.
+    model: "Systran/faster-whisper-base"
+    language: "el"
+    compute_type: "default"
+    device: "cuda"
+    gpu_device_index: 0
+    batch_size: 16
+    beam_size: 3 # Smaller beam size for faster preview
+
+    # VAD settings optimized for quick, sentence-by-sentence transcription.
+    silero_sensitivity: 0.4
+    silero_use_onnx: false
+    post_speech_silence_duration: 0.5 # Shorter silence duration for faster chunking
+    min_length_of_recording: 1.0
+
+    # Prevent the library from creating its own log file (realtimestt.log).
+    no_log_file: true
+
+
+# Global audio settings for the microphone input.
+audio:
+    # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
+    # Set to `null` (or leave blank) if `use_default_input` is true.
+    input_device_index: 21
+
+    # If true, the application will automatically find the default system microphone.
+    # If false, it will use the `input_device_index` specified above.
+    use_default_input: false
+
+
 # Configuration for application logging.
 logging:
     # Logging level. Options: "DEBUG", "INFO", "WARNING", "ERROR"
     level: "INFO"
-
-    # Maximum size of a single log file in megabytes.
-    max_size_mb: 10
-
-    # How many old log files to keep.
-    backup_count: 3
 
     # Whether to also print log messages to the console. (Useful for debugging)
     console_output: false

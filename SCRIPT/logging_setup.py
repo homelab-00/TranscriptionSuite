@@ -16,8 +16,20 @@ except ImportError:
     yaml = None
 import logging
 from pathlib import Path
-from logging.handlers import RotatingFileHandler
+from logging import FileHandler
 from typing import Dict, Any
+
+
+class ContextFilter(logging.Filter):
+    """A logging filter to add a contextual prefix to log records."""
+
+    def __init__(self, prefix: str):
+        super().__init__()
+        self.prefix = prefix
+
+    def filter(self, record):
+        record.prefix = self.prefix if hasattr(self, "prefix") else ""
+        return True
 
 
 _LOGGING_CONFIGURED = False
@@ -36,8 +48,6 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
 
     logging_defaults: Dict[str, Any] = {
         "level": "INFO",
-        "max_size_mb": 10,
-        "backup_count": 3,
         "console_output": False,
         "file_name": "stt_orchestrator.log",
         "directory": str(script_dir.parent),  # Default to the project root
@@ -67,17 +77,28 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = log_dir / resolved_config.get("file_name", "stt_orchestrator.log")
+    realtimestt_log_path = log_dir / "realtimestt.log"
+
+    # Clean up the RealtimeSTT log from the previous session.
+    # Our own log will be overwritten automatically by using mode='w'.
+    if realtimestt_log_path.exists():
+        try:
+            realtimestt_log_path.unlink()
+        except OSError as e:
+            # Log this minor error but don't stop the application
+            logging.warning("Could not remove old realtimestt.log: %s", e)
 
     level_name = str(resolved_config.get("level", "INFO")).upper()
     log_level = getattr(logging, level_name, logging.INFO)
 
-    file_handler = RotatingFileHandler(
-        log_path,
-        maxBytes=int(resolved_config.get("max_size_mb", 10) * 1024 * 1024),
-        backupCount=int(resolved_config.get("backup_count", 3)),
-    )
+    # Use FileHandler with mode='w' to overwrite the log on each run
+    file_handler = FileHandler(log_path, mode="w", encoding="utf-8")
 
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s%(prefix)s - %(levelname)s - %(message)s"
+    )
+    # Add a default, empty filter to ensure 'prefix' always exists
+    file_handler.addFilter(ContextFilter(""))
     file_handler.setFormatter(formatter)
 
     root_logger.setLevel(log_level)
@@ -90,7 +111,7 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
 
     logging.captureWarnings(True)
     _LOGGING_CONFIGURED = True
-    root_logger.info("Logging initialized at %s", log_path)
-    root_logger.info("RealtimeSTT will create its own log file in this directory.")
+    root_logger.info("Logging initialized for new session at %s", log_path)
+    root_logger.info("Previous session logs have been cleared.")
 
     return root_logger

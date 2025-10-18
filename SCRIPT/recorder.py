@@ -4,13 +4,15 @@ Core long-form recording and transcription module.
 
 This module contains the LongFormRecorder class, which wraps the RealtimeSTT
 library to handle audio capture, voice activity detection, and final
-transcription processing. It is decoupled from any UI/display logic.
+transcription processing. It is designed to work without direct microphone
+access, receiving audio via a feed method.
 """
 
 import contextlib
-import logging
 import time
-from typing import Any, Callable, Iterable, List, Optional, Union, TYPE_CHECKING
+import logging
+import threading
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import pyperclip
 from platform_utils import ensure_platform_init
@@ -40,30 +42,7 @@ class LongFormRecorder:
 
     def __init__(
         self,
-        # General Parameters
-        model: str = "Systran/faster-whisper-large-v3",
-        language: str = "en",
-        compute_type: str = "default",
-        device: str = "cuda",
-        input_device_index: Optional[int] = None,
-        gpu_device_index: Union[int, List[int]] = 0,
-        batch_size: int = 16,
-        # Voice Activation Parameters
-        silero_sensitivity: float = 0.4,
-        silero_use_onnx: bool = False,
-        silero_deactivity_detection: bool = False,
-        webrtc_sensitivity: int = 3,
-        post_speech_silence_duration: float = 0.6,
-        min_length_of_recording: float = 0.5,
-        min_gap_between_recordings: float = 0.0,
-        pre_recording_buffer_duration: float = 1.0,
-        # Advanced Parameters
-        beam_size: int = 5,
-        initial_prompt: Optional[Union[str, Iterable[int]]] = None,
-        faster_whisper_vad_filter: bool = True,
-        ensure_sentence_starting_uppercase: bool = True,
-        ensure_sentence_ends_with_period: bool = True,
-        allowed_latency_limit: int = 100,
+        config: dict,
         # Callbacks for decoupling
         on_recording_start: Optional[Callable] = None,
         on_recording_stop: Optional[Callable] = None,
@@ -75,47 +54,34 @@ class LongFormRecorder:
         if not HAS_REALTIME_STT or AudioToTextRecorder is None:
             raise ImportError("RealtimeSTT library is not available.")
 
+        self.is_running = True
         self.is_recording = False
         self._recording_started_at: Optional[float] = None
         self._last_recording_duration = 0.0
         self._last_transcription_duration = 0.0
         self.last_transcription = ""
 
+        # Prepare configuration for the underlying AudioToTextRecorder
+        self.recorder_config = dict(config) if config else {}
+        # This is now controlled by the orchestrator via the config dict.
+        self.recorder_config["spinner"] = False
         # Store external callbacks
         self.external_on_recording_start = on_recording_start
         self.external_on_recording_stop = on_recording_stop
-
-        # Prepare configuration for the underlying AudioToTextRecorder
-        self.recorder_config = {
-            "model": model,
-            "language": language,
-            "compute_type": compute_type,
-            "device": device,
-            "input_device_index": input_device_index,
-            "gpu_device_index": gpu_device_index,
-            "batch_size": batch_size,
-            "silero_sensitivity": silero_sensitivity,
-            "silero_use_onnx": silero_use_onnx,
-            "silero_deactivity_detection": silero_deactivity_detection,
-            "webrtc_sensitivity": webrtc_sensitivity,
-            "post_speech_silence_duration": post_speech_silence_duration,
-            "min_length_of_recording": min_length_of_recording,
-            "min_gap_between_recordings": min_gap_between_recordings,
-            "pre_recording_buffer_duration": pre_recording_buffer_duration,
-            "beam_size": beam_size,
-            "initial_prompt": initial_prompt,
-            "faster_whisper_vad_filter": faster_whisper_vad_filter,
-            "ensure_sentence_starting_uppercase": ensure_sentence_starting_uppercase,
-            "ensure_sentence_ends_with_period": ensure_sentence_ends_with_period,
-            "allowed_latency_limit": allowed_latency_limit,
-            "on_recording_start": self._internal_on_start,
-            "on_recording_stop": self._internal_on_stop,
-            "on_recorded_chunk": on_recorded_chunk,
-            "use_microphone": True,  # This class always uses the microphone
-            "spinner": False,
-        }
+        # Add internal/external callbacks to the config
+        self.recorder_config["on_recording_start"] = self._internal_on_start
+        self.recorder_config["on_recording_stop"] = self._internal_on_stop
+        if on_recorded_chunk:
+            self.recorder_config["on_recorded_chunk"] = on_recorded_chunk
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
+
+        # --- FIX: Re-enable log propagation from RealtimeSTT ---
+        # The library disables propagation by default. We re-enable it so its
+        # logs flow into our main application log file.
+        if self.recorder:
+            stt_logger = logging.getLogger("realtimestt")
+            stt_logger.propagate = True
         logging.info("LongFormRecorder initialized successfully.")
 
     def _initialize_recorder(self) -> Optional[AudioToTextRecorderType]:
@@ -129,9 +95,16 @@ class LongFormRecorder:
                     raise RuntimeError(
                         "RealtimeSTT AudioToTextRecorder is unavailable at runtime."
                     )
-                return AudioToTextRecorder(**self.recorder_config)
+                # Create a clean config for the underlying library,
+                # removing our custom keys.
+                library_config = self.recorder_config.copy()
+                library_config.pop("use_default_input", None)
+
+                return AudioToTextRecorder(**library_config)
         except Exception as e:
-            logging.error("Failed to initialize AudioToTextRecorder: %s", e)
+            logging.error(
+                "Failed to initialize AudioToTextRecorder: %s", e, exc_info=True
+            )
             return None
 
     def _internal_on_start(self):
@@ -166,15 +139,50 @@ class LongFormRecorder:
         with context_manager:
             self.recorder.start()
 
+    def stop_recording(self):
+        """Stops the audio recording process without transcribing."""
+        if not self.is_recording:
+            logging.warning("No active recording to stop.")
+            return
+
+        if not self.recorder:
+            logging.error("Recorder is not initialized. Cannot stop recording.")
+            return
+
+        self.recorder.stop()
+
+    def feed_audio(self, chunk: bytes):
+        """Feeds an audio chunk to the underlying recorder."""
+        if self.recorder and self.is_running:
+            self.recorder.feed_audio(chunk)
+
+    def start_chunked_transcription(self, on_sentence_transcribed: Callable[[str], None]):
+        """Starts a background thread for continuous, chunked transcription."""
+
+        def transcription_loop():
+            while self.is_running:
+                if self.recorder:
+                    try:
+                        self.recorder.text(on_sentence_transcribed)
+                    except Exception as e:
+                        logging.error(
+                            f"Error in preview transcription loop: {e}", exc_info=True
+                        )
+                        # Avoid a fast-spinning error loop
+                        time.sleep(1)
+
+        thread = threading.Thread(target=transcription_loop, daemon=True)
+        thread.start()
+
     def stop_and_transcribe(self) -> tuple[str, dict]:
         """Stops recording, processes the audio, and returns the transcription."""
         if not self.is_recording or not self.recorder:
             logging.warning("No active recording to stop.")
             return "", {}
 
-        logging.info("Stopping recording and starting transcription...")
-        self.recorder.stop()
-        self.recorder.wait_audio()  # Ensure audio buffer is fully processed
+        # This call is now primarily for the main_transcriber instance
+        self.stop_recording()
+        self.recorder.wait_audio()
         audio_data = self.recorder.audio
 
         transcription = ""
@@ -183,7 +191,7 @@ class LongFormRecorder:
         try:
             transcription = self.recorder.perform_final_transcription(audio_data)
         except Exception as e:
-            logging.error("Error during final transcription: %s", e)
+            logging.error("Error during final transcription: %s", e, exc_info=True)
 
         self._last_transcription_duration = time.monotonic() - transcription_start_time
 
@@ -192,12 +200,18 @@ class LongFormRecorder:
         if self.last_transcription:
             self._safe_clipboard_copy(self.last_transcription)
 
-        metrics = self._get_transcription_metrics()
+        audio_duration = self._recording_started_at and (
+            time.monotonic() - self._recording_started_at
+        )
+        metrics = self._get_transcription_metrics(
+            audio_duration or 0, self._last_transcription_duration
+        )
 
         return self.last_transcription, metrics
 
     def clean_up(self):
         """Shuts down the recorder and releases resources."""
+        self.is_running = False
         if self.recorder:
             self.recorder.shutdown()
             self.recorder = None
@@ -211,10 +225,9 @@ class LongFormRecorder:
                 logging.info("Transcription successfully copied to clipboard.")
                 return True
             logging.warning("Clipboard copy verification failed.")
-            return False
         except Exception as e:
             logging.error("Failed to copy to clipboard: %s", e)
-            return False
+        return False
 
     def _format_duration(self, seconds: float) -> str:
         """Format seconds as a human-friendly string."""
@@ -225,27 +238,20 @@ class LongFormRecorder:
             return f"{int(minutes)}m {secs:04.1f}s"
         return f"{secs:.2f}s"
 
-    def _get_transcription_metrics(self) -> dict:
+    def _get_transcription_metrics(
+        self, audio_duration: float, processing_time: float
+    ) -> dict:
         """Logs metrics about the last transcription cycle."""
-        audio_duration = self._last_recording_duration
-        processing_time = self._last_transcription_duration
-
         if processing_time > 0:
             speed_ratio = audio_duration / processing_time
         else:
             speed_ratio = float("inf")
 
-        if audio_duration > 0:
-            realtime_factor = processing_time / audio_duration
-        else:
-            realtime_factor = float("inf")
-
         metrics_msg = (
             "Transcription Metrics | "
             f"Audio: {self._format_duration(audio_duration)} | "
             f"Processing: {self._format_duration(processing_time)} | "
-            f"Speed Ratio: {speed_ratio:.2f}x | "
-            f"RT Factor: {realtime_factor:.2f}"
+            f"Speed Ratio: {speed_ratio:.2f}x"
         )
         logging.info(metrics_msg)
         return {

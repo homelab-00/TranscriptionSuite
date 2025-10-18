@@ -22,10 +22,10 @@ from utils import safe_print
 try:
     from rich.align import Align
     from rich.console import Console
+    from rich.layout import Layout
     from rich.live import Live
     from rich.panel import Panel
     from rich.text import Text
-    from rich.layout import Layout
 
     CONSOLE = Console()
     HAS_RICH = True
@@ -75,6 +75,12 @@ class ConsoleDisplay:
         self._waveform_display_rows = 4
         self._latest_waveform_str = self._default_waveform_display()
 
+        # Preview rendering attributes
+        self._preview_lock = threading.Lock()
+        self._preview_sentences: deque[str] = deque(maxlen=10)
+        self._latest_preview_text: Any = self._default_preview_display()
+        self._preview_panel_height = 5  # 3 lines for text, 2 for panel borders
+
     def start(self, start_time: float):
         """Starts the live display thread."""
         if not HAS_RICH:
@@ -111,7 +117,7 @@ class ConsoleDisplay:
         if self._display_thread and self._display_thread.is_alive():
             self._display_thread.join(timeout=0.5)
         self._display_thread = None
-        self._reset_waveform_state()
+        self._reset_display_state()
 
     def update_waveform_data(self, chunk: bytes):
         """Processes an audio chunk to update waveform visualization data."""
@@ -144,6 +150,14 @@ class ConsoleDisplay:
         except Exception:
             # Silently ignore errors in waveform processing to not disrupt recording
             pass
+
+    def add_preview_sentence(self, sentence: str):
+        """Adds a new sentence to the live preview display."""
+        if not HAS_RICH or not sentence:
+            return
+
+        with self._preview_lock:
+            self._preview_sentences.append(sentence.strip())
 
     def display_final_transcription(self, text: str):
         """Displays the final transcription in a formatted panel."""
@@ -209,14 +223,19 @@ class ConsoleDisplay:
 
         with live_display:
             while not self._stop_event.is_set():
-                self._render_waveform()  # Update waveform string
+                self._render_waveform()
+                self._render_preview()
                 live_display.update(self._generate_layout())
                 time.sleep(0.1)
 
     def _generate_layout(self) -> Any:
         """Generates the Rich Layout for the live display."""
         layout = Layout()
-        layout.split(Layout(name="header", size=3), Layout(ratio=1, name="main"))
+        layout.split(
+            Layout(name="header", size=3),
+            Layout(name="waveform", size=self._waveform_display_rows + 2),
+            Layout(name="preview", ratio=1),
+        )
 
         elapsed = time.monotonic() - (self._recording_started_at or time.monotonic())
         minutes, seconds = divmod(elapsed, 60)
@@ -235,23 +254,41 @@ class ConsoleDisplay:
             height=self._waveform_display_rows + 2,
         )
 
+        preview_panel = Panel(
+            self._latest_preview_text,
+            title="[white]Live Preview[/white]",
+            border_style="blue",
+            height=self._preview_panel_height,
+        )
+
         layout["header"].update(header_panel)
-        layout["main"].update(waveform_panel)
+        layout["waveform"].update(waveform_panel)
+        layout["preview"].update(preview_panel)
         return layout
 
-    def _reset_waveform_state(self):
-        """Resets waveform buffers to a neutral state."""
+    def _reset_display_state(self):
+        """Resets waveform and preview buffers to a neutral state."""
         with self._waveform_lock:
             self._waveform_samples.clear()
             self._waveform_last_levels = [0.0] * self._waveform_slot_count
             self._waveform_last_update = 0.0
             self._latest_waveform_str = self._default_waveform_display()
+        with self._preview_lock:
+            self._preview_sentences.clear()
+            self._latest_preview_text = self._default_preview_display()
 
     def _default_waveform_display(self) -> str:
         return (
             "[grey50]Waiting for audio...[/grey50]"
             if HAS_RICH
             else "Waiting for audio..."
+        )
+
+    def _default_preview_display(self) -> Any:
+        return (
+            Text("[grey50]Live preview will appear here...[/grey50]")
+            if HAS_RICH
+            else "Waiting for preview..."
         )
 
     def _render_waveform(self):
@@ -273,14 +310,61 @@ class ConsoleDisplay:
                     if 0 <= slot_index < self._waveform_slot_count:
                         slot_values[slot_index] = max(slot_values[slot_index], level)
 
-            # Simple single-line glyph rendering
             glyphs = " ▂▃▄▅▆▇█"
             glyph_count = len(glyphs) - 1
             bar_chars = [
-                glyphs[min(glyph_count, int(level * glyph_count * 10))]  # Scale up a bit
+                glyphs[min(glyph_count, int(level * glyph_count * 10))]
                 for level in slot_values
             ]
 
             self._latest_waveform_str = "".join(
                 f"[#4caf50]{char}[/#4caf50]" for char in bar_chars
+            )
+
+    def _render_preview(self):
+        """Renders the preview text and updates the internal Rich Text object."""
+        if not HAS_RICH:
+            return
+
+        with self._preview_lock:
+            if not self._preview_sentences:
+                self._latest_preview_text = self._default_preview_display()
+                return
+
+            sentences_copy = list(self._preview_sentences)
+            full_text = " ".join(sentences_copy)
+
+            # --- Dynamic Cutoff Logic ---
+            if not CONSOLE:
+                self._latest_preview_text = Text(full_text)
+                return
+
+            # Calculate the available space for text inside the panel.
+            # We subtract 4 for left/right borders and padding.
+            panel_text_width = CONSOLE.width - 4
+            panel_text_height = self._preview_panel_height - 2  # 3 lines
+            max_chars = panel_text_width * panel_text_height
+
+            display_text = full_text
+            if len(full_text) > max_chars:
+                prefix = "... "
+                # Calculate the starting point for the slice
+                cutoff_point = len(full_text) - max_chars + len(prefix)
+                display_text = prefix + full_text[cutoff_point:]
+
+            # Create the base Text object with the dimmer style
+            text_obj = Text(display_text, style="grey70")
+
+            # Highlight the last (most recent) sentence to make it stand out
+            if sentences_copy:
+                last_sentence = sentences_copy[-1]
+                # Use highlight_words which is robust and finds all occurrences
+                # (though we only expect one at the end).
+                text_obj.highlight_words(
+                    [last_sentence], style="bold white", case_sensitive=True
+                )
+
+            # Ensure the text is aligned to the top-left of the panel
+            self._latest_preview_text = Align.left(
+                text_obj, vertical="top", height=panel_text_height
             )
