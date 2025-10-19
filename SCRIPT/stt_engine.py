@@ -39,20 +39,18 @@ import signal as system_signal
 import threading
 import time
 import traceback
-from ctypes import c_bool
 from typing import Any, Callable, Iterable, List, Optional, Union
 
-import faster_whisper  # type: ignore
-import halo  # type: ignore
+import faster_whisper
+import halo
 import numpy as np
-import soundfile as sf  # type: ignore
+import soundfile as sf
 import torch
-import torch.multiprocessing as mp
-import webrtcvad  # type: ignore
-from faster_whisper import BatchedInferencePipeline  # type: ignore
+import webrtcvad
+from faster_whisper import BatchedInferencePipeline
 from safepipe import SafePipe
-from scipy import signal  # type: ignore
-from scipy.signal import resample  # type: ignore
+from scipy import signal
+from scipy.signal import resample
 
 # Named logger for this module.
 logger = logging.getLogger("realtimestt")
@@ -169,11 +167,9 @@ class TranscriptionWorker:
             # Run a warm-up transcription
             current_dir = os.path.dirname(os.path.realpath(__file__))
             warmup_audio_path = os.path.join(current_dir, "warmup_audio.wav")
-            warmup_audio_data, _ = sf.read(  # type: ignore[misc]
-                warmup_audio_path, dtype="float32"
-            )
-            segments, info = model.transcribe(  # type: ignore[misc]
-                audio=warmup_audio_data,  # type: ignore[arg-type]
+            warmup_audio_data, _ = sf.read(warmup_audio_path, dtype="float32")
+            segments, info = model.transcribe(
+                audio=warmup_audio_data,
                 language="en",
                 beam_size=1,
             )
@@ -198,19 +194,17 @@ class TranscriptionWorker:
         try:
             while not self.shutdown_event.is_set():
                 try:
-                    audio, language, use_prompt = self.queue.get(
-                        timeout=0.1
-                    )  # type: ignore
+                    audio, language, use_prompt = self.queue.get(timeout=0.1)
                     try:
                         logging.debug(f"Transcribing audio with language {language}")
                         start_t = time.time()
 
                         # normalize audio to -0.95 dBFS
-                        if audio is not None and audio.size > 0:  # type: ignore
+                        if audio is not None and audio.size > 0:
                             if self.normalize_audio:
-                                peak = np.max(np.abs(audio))  # type: ignore
+                                peak = np.max(np.abs(audio))
                                 if peak > 0:
-                                    audio = (audio / peak) * 0.95  # type: ignore
+                                    audio = (audio / peak) * 0.95
                         else:
                             logging.error("Received None audio for transcription")
                             self.conn.send(
@@ -223,7 +217,7 @@ class TranscriptionWorker:
                             prompt = self.initial_prompt if self.initial_prompt else None
 
                         if self.batch_size > 0:
-                            segments, info = model.transcribe(  # type: ignore
+                            segments, info = model.transcribe(
                                 audio,
                                 language=language if language else None,
                                 beam_size=self.beam_size,
@@ -232,7 +226,7 @@ class TranscriptionWorker:
                                 vad_filter=self.faster_whisper_vad_filter,
                             )
                         else:
-                            segments, info = model.transcribe(  # type: ignore
+                            segments, info = model.transcribe(
                                 audio,
                                 language=language if language else None,
                                 beam_size=self.beam_size,
@@ -353,7 +347,7 @@ class AudioToTextRecorder:
         self.device = device
         self.ensure_sentence_starting_uppercase = ensure_sentence_starting_uppercase
         self.ensure_sentence_ends_with_period = ensure_sentence_ends_with_period
-        self.use_microphone = mp.Value(c_bool, use_microphone)
+        self.use_microphone = use_microphone  # Simplified to a simple bool
         self.min_gap_between_recordings = min_gap_between_recordings
         self.min_length_of_recording = min_length_of_recording
         self.pre_recording_buffer_duration = pre_recording_buffer_duration
@@ -377,7 +371,7 @@ class AudioToTextRecorder:
         self.batch_size = batch_size
 
         self.level = level
-        self.audio_queue: mp.Queue[Union[bytes, bytearray]] = mp.Queue()
+        self.audio_queue: queue.Queue[Union[bytes, bytearray]] = queue.Queue()
         self.buffer_size = buffer_size
         self.sample_rate = sample_rate
         self.recording_start_time = 0
@@ -395,8 +389,8 @@ class AudioToTextRecorder:
         self.is_webrtc_speech_active = False
         self.is_silero_speech_active = False
         self.recording_thread = None
-        self.reader_process: Optional[Union[threading.Thread, mp.Process]] = None
-        self.transcript_process: Optional[Union[threading.Thread, mp.Process]] = None
+        self.reader_process: Optional[threading.Thread] = None
+        self.transcript_process: Optional[threading.Thread] = None
         self.audio_interface = None
         self.start_recording_event = threading.Event()
         self.stop_recording_event = threading.Event()
@@ -450,14 +444,6 @@ class AudioToTextRecorder:
         # ----------------------------------------------------------------------------
 
         self.is_shut_down = False
-        self.shutdown_event = mp.Event()
-
-        try:
-            # Only set the start method if it hasn't been set already
-            if mp.get_start_method(allow_none=True) is None:  # type: ignore
-                mp.set_start_method("spawn")
-        except RuntimeError as e:
-            logger.info(f"Start method has already been set. Details: {e}")
 
         logger.info("Starting RealTimeSTT")
 
@@ -466,9 +452,10 @@ class AudioToTextRecorder:
             for param, value in locals().items():
                 logger.info(f"{param}: {value}")
 
-        self.interrupt_stop_event = mp.Event()
-        self.was_interrupted = mp.Event()
-        self.main_transcription_ready_event = mp.Event()
+        self.shutdown_event = threading.Event()
+        self.interrupt_stop_event = threading.Event()
+        self.was_interrupted = threading.Event()
+        self.main_transcription_ready_event = threading.Event()
 
         self.parent_transcription_pipe, child_transcription_pipe = SafePipe()
         self.parent_stdout_pipe, child_stdout_pipe = SafePipe()
@@ -501,14 +488,14 @@ class AudioToTextRecorder:
         )
 
         # Start audio data reading process
-        if self.use_microphone.value:
+        if self.use_microphone:
             logger.info(
                 "Initializing audio recording"
                 " (creating pyAudio input stream,"
                 f" sample rate: {self.sample_rate}"
                 f" buffer size: {self.buffer_size}"
             )
-            self.reader_process = self._start_thread(  # type: ignore
+            self.reader_process = self._start_thread(
                 target=AudioToTextRecorder._audio_data_worker,
                 args=(
                     self.audio_queue,
@@ -527,7 +514,7 @@ class AudioToTextRecorder:
                 "Initializing WebRTC voice with " f"Sensitivity {webrtc_sensitivity}"
             )
             self.webrtc_vad_model = webrtcvad.Vad()
-            self.webrtc_vad_model.set_mode(webrtc_sensitivity)  # type: ignore
+            self.webrtc_vad_model.set_mode(webrtc_sensitivity)
 
         except Exception as e:
             logger.exception(
@@ -590,29 +577,17 @@ class AudioToTextRecorder:
         logger.debug("RealtimeSTT initialization completed successfully")
 
     def _start_thread(
-        self, target: Optional[Callable[..., Any]] = None, args: tuple[Any, ...] = ()
-    ) -> Union[threading.Thread, Any]:
+        self, target: Callable[..., Any], args: tuple[Any, ...] = ()
+    ) -> threading.Thread:
         """
-        Implement a consistent threading model across the library.
-
-        This method is used to start any thread in this library. It uses the
-        standard threading. Thread for Linux and for all others uses the pytorch
-        MultiProcessing library 'Process'.
+        Starts a daemon thread for the given target and arguments.
         Args:
-            target (callable object): is the callable object to be invoked by
-              the run() method. Defaults to None, meaning nothing is called.
-            args (tuple): is a list or tuple of arguments for the target
-              invocation. Defaults to ().
+            target: The callable object to be invoked.
+            args: A tuple of arguments for the target invocation.
         """
-        if platform.system() == "Linux":
-            thread = threading.Thread(target=target, args=args)
-            thread.daemon = True
-            thread.start()
-            return thread
-        else:
-            thread = mp.Process(target=target, args=args)
-            thread.start()
-            return thread
+        thread = threading.Thread(target=target, args=args, daemon=True)
+        thread.start()
+        return thread
 
     def _read_stdout(self) -> None:
         while not self.shutdown_event.is_set():
@@ -653,7 +628,7 @@ class AudioToTextRecorder:
         input_device_index: Optional[int],
         shutdown_event: Any,
         interrupt_stop_event: Any,
-        use_microphone: Any,
+        use_microphone: bool,
     ) -> None:
         """
         Worker method that handles the audio recording process.
@@ -675,15 +650,14 @@ class AudioToTextRecorder:
             shutdown_event (threading.Event): An event that, when set, signals this
                 worker method to terminate.
             interrupt_stop_event (threading.Event): An event to signal keyboard interrupt.
-            use_microphone (multiprocessing.Value): A shared value indicating whether to
-                use the microphone.
+            use_microphone (bool): A flag indicating whether to use the microphone.
 
         Raises:
             Exception: If there is an error while initializing the audio recording.
         """
         import numpy as np
         import pyaudio
-        from scipy import signal  # type: ignore[import-untyped]
+        from scipy import signal
 
         if __name__ == "__main__":
             system_signal.signal(system_signal.SIGINT, system_signal.SIG_IGN)
@@ -691,20 +665,17 @@ class AudioToTextRecorder:
         def get_highest_sample_rate(audio_interface: Any, device_index: int) -> int:
             """Get the highest supported sample rate for the specified device."""
             try:
-                device_info = audio_interface.get_device_info_by_index(
-                    device_index
-                )  # type: ignore
+                device_info = audio_interface.get_device_info_by_index(device_index)
                 logger.debug(
                     "Retrieving highest sample rate for device index %s: %s",
                     device_index,
-                    device_info,  # type: ignore
+                    device_info,
                 )
-                max_rate = int(device_info["defaultSampleRate"])  # type: ignore
+                max_rate = int(device_info["defaultSampleRate"])
 
-                if "supportedSampleRates" in device_info:  # type: ignore
+                if "supportedSampleRates" in device_info:
                     supported_rates = [
-                        int(rate)
-                        for rate in device_info["supportedSampleRates"]  # type: ignore
+                        int(rate) for rate in device_info["supportedSampleRates"]
                     ]
                     if supported_rates:
                         max_rate = max(supported_rates)
@@ -727,12 +698,10 @@ class AudioToTextRecorder:
             def validate_device(device_index: int) -> bool:
                 """Validate that the device exists and is actually available for input."""
                 try:
-                    device_info = audio_interface.get_device_info_by_index(
-                        device_index
-                    )  # type: ignore
+                    device_info = audio_interface.get_device_info_by_index(device_index)
                     logger.debug(
                         f"Validating device index {device_index} "
-                        f"with info: {device_info}"  # type: ignore
+                        f"with info: {device_info}"
                     )
                     if not device_info.get("maxInputChannels", 0) > 0:
                         logger.debug(
@@ -782,7 +751,7 @@ class AudioToTextRecorder:
                         try:
                             device_info = audio_interface.get_device_info_by_index(i)
                             if device_info.get("maxInputChannels", 0) > 0:
-                                input_devices.append(i)  # type: ignore
+                                input_devices.append(i)
                         except Exception as e:
                             logger.debug(
                                 f"Could not retrieve info for device index {i}: {e}"
@@ -818,8 +787,8 @@ class AudioToTextRecorder:
                                 "checking other devices..."
                             )
                             for device_index in input_devices:
-                                if validate_device(device_index):  # type: ignore
-                                    input_device_index = device_index  # type: ignore
+                                if validate_device(device_index):
+                                    input_device_index = device_index
                                     logger.debug(f"Device {input_device_index} selected.")
                                     break
                             else:
@@ -833,7 +802,7 @@ class AudioToTextRecorder:
                     logger.debug(
                         "Opening stream with device index %s, "
                         "sample_rate=%s, chunk_size=%s",
-                        input_device_index,  # type: ignore
+                        input_device_index,
                         sample_rate,
                         chunk_size,
                     )
@@ -849,7 +818,7 @@ class AudioToTextRecorder:
                     logger.info(
                         "Microphone connected and validated (device index: %s, "
                         "sample rate: %s, chunk size: %s)",
-                        input_device_index,  # type: ignore
+                        input_device_index,
                         sample_rate,
                         chunk_size,
                     )
@@ -872,7 +841,7 @@ class AudioToTextRecorder:
             if isinstance(chunk, np.ndarray):
                 # Handle stereo to mono conversion if necessary
                 if chunk.ndim == 2:
-                    chunk = np.mean(chunk, axis=1)  # type: ignore
+                    chunk = np.mean(chunk, axis=1)
 
                 # Resample to target_sample_rate if necessary
                 if original_sample_rate != target_sample_rate:
@@ -882,13 +851,11 @@ class AudioToTextRecorder:
                         target_sample_rate,
                     )
                     num_samples = int(
-                        len(chunk)  # type: ignore[arg-type]
-                        * target_sample_rate
-                        / original_sample_rate
+                        len(chunk) * target_sample_rate / original_sample_rate
                     )
-                    chunk = signal.resample(chunk, num_samples)  # type: ignore
+                    chunk = signal.resample(chunk, num_samples)
 
-                chunk = np.asarray(chunk).astype(np.int16)  # type: ignore
+                chunk = np.asarray(chunk).astype(np.int16)
             else:
                 # If chunk is bytes, convert to numpy array
                 chunk = np.frombuffer(chunk, dtype=np.int16)
@@ -901,11 +868,9 @@ class AudioToTextRecorder:
                         target_sample_rate,
                     )
                     num_samples = int(
-                        len(chunk)
-                        * target_sample_rate
-                        / original_sample_rate  # type: ignore
+                        len(chunk) * target_sample_rate / original_sample_rate
                     )
-                    chunk = signal.resample(chunk, num_samples)  # type: ignore
+                    chunk = signal.resample(chunk, num_samples)
                     chunk = np.asarray(chunk).astype(np.int16)
 
             return chunk.tobytes()
@@ -1013,8 +978,8 @@ class AudioToTextRecorder:
                         break
                     data = stream.read(chunk_size, exception_on_overflow=False)
 
-                    if use_microphone.value:
-                        processed_data = preprocess_audio(  # type: ignore
+                    if use_microphone:
+                        processed_data = preprocess_audio(
                             data, device_sample_rate, target_sample_rate  # type: ignore
                         )
                         buffer += processed_data
@@ -1107,7 +1072,7 @@ class AudioToTextRecorder:
         self.stop_recording_on_voice_deactivity = False
         self.interrupt_stop_event.set()
         if self.state != "inactive":  # if inactive, was_interrupted will never be set
-            self.was_interrupted.wait()  # type: ignore
+            self.was_interrupted.wait()
         self.was_interrupted.clear()
         if self.is_recording:  # if recording, make sure to stop the recorder
             self.stop()
@@ -1133,8 +1098,8 @@ class AudioToTextRecorder:
                 self.listen_start = time.time()
 
             # If not yet started recording, wait for voice activity to initiate.
-            if not self.is_recording and not self.frames:  # type: ignore
-                self._set_state("listening")  # type: ignore
+            if not self.is_recording and not self.frames:
+                self._set_state("listening")
                 self.start_recording_on_voice_activity = True
 
                 # Wait until recording starts
@@ -1154,17 +1119,15 @@ class AudioToTextRecorder:
                     if self.stop_recording_event.wait(timeout=0.02):
                         break
 
-            frames = self.frames  # type: ignore
-            if len(frames) == 0:  # type: ignore
-                frames = self.last_frames  # type: ignore
+            frames = self.frames
+            if len(frames) == 0:
+                frames = self.last_frames
 
             # Calculate samples needed for backdating resume
             samples_to_keep = int(self.sample_rate * self.backdate_resume_seconds)
 
             # First convert all current frames to audio array
-            full_audio_array = np.frombuffer(
-                b"".join(frames), dtype=np.int16  # type: ignore[arg-type]
-            )
+            full_audio_array = np.frombuffer(b"".join(frames), dtype=np.int16)
             full_audio = full_audio_array.astype(np.float32) / INT16_MAX_ABS_VALUE
 
             # Calculate how many samples we need to keep for backdating resume
@@ -1185,7 +1148,7 @@ class AudioToTextRecorder:
                 for i in range(0, len(frame_bytes), FRAME_SIZE):
                     frame = frame_bytes[i : i + FRAME_SIZE]
                     if frame:  # Only add non-empty frames
-                        frames_to_read.append(frame)  # type: ignore
+                        frames_to_read.append(frame)
             else:
                 frames_to_read = []
 
@@ -1206,9 +1169,9 @@ class AudioToTextRecorder:
                 self.audio = full_audio
                 logger.debug(f"No samples removed, final audio length: {len(self.audio)}")
 
-            self.frames.clear()  # type: ignore
-            self.last_frames.clear()  # type: ignore
-            self.frames.extend(frames_to_read)  # type: ignore[arg-type]
+            self.frames.clear()
+            self.last_frames.clear()
+            self.frames.extend(frames_to_read)
 
             # Reset backdating parameters
             self.backdate_stop_seconds = 0.0
@@ -1385,7 +1348,7 @@ class AudioToTextRecorder:
         if on_transcription_finished:
             threading.Thread(
                 target=on_transcription_finished,
-                args=(self.transcribe(),),  # type: ignore[arg-type]
+                args=(self.transcribe(),),
             ).start()
         else:
             return self.transcribe()
@@ -1417,7 +1380,7 @@ class AudioToTextRecorder:
         self._set_state("recording")
         self.frames = []
         if frames:
-            self.frames = frames  # type: ignore[assignment]
+            self.frames = frames
         self.is_recording = True
 
         self.recording_start_time = time.time()
@@ -1454,7 +1417,7 @@ class AudioToTextRecorder:
             return self
 
         logger.info("recording stopped")
-        self.last_frames = copy.deepcopy(self.frames)  # type: ignore[arg-type]
+        self.last_frames = copy.deepcopy(self.frames)
         self.backdate_stop_seconds = backdate_stop_seconds
         self.backdate_resume_seconds = backdate_resume_seconds
         self.is_recording = False
@@ -1502,13 +1465,11 @@ class AudioToTextRecorder:
         if isinstance(chunk, np.ndarray):
             # Handle stereo to mono conversion if necessary
             if chunk.ndim == 2:
-                chunk = np.mean(chunk, axis=1)  # type: ignore[arg-type]
+                chunk = np.mean(chunk, axis=1)
 
             # Resample to 16000 Hz if necessary
             if original_sample_rate != 16000:
-                num_samples = int(
-                    len(chunk) * 16000 / original_sample_rate
-                )  # type: ignore[arg-type]
+                num_samples = int(len(chunk) * 16000 / original_sample_rate)
                 chunk = resample(chunk, num_samples)  # type: ignore
 
             # Ensure data type is int16
@@ -1518,24 +1479,24 @@ class AudioToTextRecorder:
             chunk = chunk.tobytes()
 
         # Append the chunk to the buffer
-        self.buffer += chunk  # type: ignore[misc]
+        self.buffer += chunk
         buf_size = 2 * self.buffer_size  # silero complains if too short
 
         # Check if the buffer has reached or exceeded the buffer_size
-        while len(self.buffer) >= buf_size:  # type: ignore[arg-type]
+        while len(self.buffer) >= buf_size:
             # Extract self.buffer_size amount of data from the buffer
-            to_process = self.buffer[:buf_size]  # type: ignore[misc]
-            self.buffer = self.buffer[buf_size:]  # type: ignore[misc]
+            to_process = self.buffer[:buf_size]
+            self.buffer = self.buffer[buf_size:]
 
             # Feed the extracted data to the audio_queue
-            self.audio_queue.put(to_process)  # type: ignore
+            self.audio_queue.put(to_process)
 
     def set_microphone(self, microphone_on: bool = True) -> None:
         """
         Set the microphone on or off.
         """
         logger.info("Setting microphone to: " + str(microphone_on))
-        self.use_microphone.value = microphone_on
+        self.use_microphone = microphone_on
 
     def shutdown(self):
         """
@@ -1564,30 +1525,14 @@ class AudioToTextRecorder:
 
             logger.debug("Terminating reader process")
 
-            # Give it some time to finish the loop and cleanup.
-            if self.use_microphone.value and self.reader_process:
-                self.reader_process.join(timeout=10)
-
-                if self.reader_process.is_alive():
-                    logger.warning(
-                        "Reader process did not terminate "
-                        "in time. Terminating forcefully."
-                    )
-                    if isinstance(self.reader_process, mp.Process):
-                        self.reader_process.terminate()
+            if self.reader_process and self.reader_process.is_alive():
+                self.reader_process.join(timeout=5)
 
             logger.debug("Terminating transcription process")
-            if self.transcript_process:
-                self.transcript_process.join(timeout=10)
+            if self.transcript_process and self.transcript_process.is_alive():
+                self.transcript_process.join(timeout=5)
 
-                if self.transcript_process.is_alive():
-                    logger.warning(
-                        "Transcript process did not terminate "
-                        "in time. Terminating forcefully."
-                    )
-                    if isinstance(self.transcript_process, mp.Process):
-                        self.transcript_process.terminate()
-
+            # Now that the processes/threads using the pipe are joined, close the pipe.
             self.parent_transcription_pipe.close()
 
     def _recording_worker(self):
@@ -2004,7 +1949,7 @@ class AudioToTextRecorder:
             chunk = data_16000.astype(np.int16).tobytes()
 
         self.silero_working = True
-        audio_chunk = np.frombuffer(chunk, dtype=np.int16)  # type: ignore[arg-type]
+        audio_chunk = np.frombuffer(chunk, dtype=np.int16)
         audio_chunk = audio_chunk.astype(np.float32) / INT16_MAX_ABS_VALUE
         vad_prob = self.silero_vad_model(
             torch.from_numpy(audio_chunk), SAMPLE_RATE
@@ -2038,14 +1983,14 @@ class AudioToTextRecorder:
 
         # Number of audio frames per millisecond
         frame_length = int(16000 * 0.01)  # for 10ms frame
-        num_frames = int(len(chunk) / (2 * frame_length))  # type: ignore[arg-type]
+        num_frames = int(len(chunk) / (2 * frame_length))
         speech_frames = 0
 
         for i in range(num_frames):
             start_byte = i * frame_length * 2
             end_byte = start_byte + frame_length * 2
-            frame = chunk[start_byte:end_byte]  # type: ignore[misc]
-            if self.webrtc_vad_model.is_speech(frame, 16000):  # type: ignore[arg-type]
+            frame = chunk[start_byte:end_byte]
+            if self.webrtc_vad_model.is_speech(frame, 16000):
                 speech_frames += 1
                 if not all_frames_must_be_true:
                     if self.debug_mode:
@@ -2114,8 +2059,7 @@ class AudioToTextRecorder:
             while True:
                 self.audio_queue.get_nowait()
         except Exception:
-            # PyTorch's mp.Queue doesn't have a specific Empty exception
-            # so we catch any exception that might occur when the queue is empty
+            # Catch any exception that might occur when the queue is empty
             pass
 
     def _is_voice_active(self):
@@ -2185,7 +2129,7 @@ class AudioToTextRecorder:
         if self.spinner:
             # If the Halo spinner doesn't exist, create and start it
             if self.halo is None:
-                self.halo = halo.Halo(text=text)  # type: ignore
+                self.halo = halo.Halo(text=text)
                 self.halo.start()
             # If the Halo spinner already exists, just update the text
             else:
