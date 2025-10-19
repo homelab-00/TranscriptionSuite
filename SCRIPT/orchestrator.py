@@ -15,30 +15,37 @@ Use the system tray menu to open configuration, start/stop long-form recording,
 run static transcription, and quit.
 """
 
+import atexit
+import logging
 import os
+import sys
 import threading
 import time
-import logging
-import atexit
-import sys
-from typing import Optional
-from model_manager import ModelManager
-from logging_setup import setup_logging
-from dependency_checker import DependencyChecker
-from utils import safe_print
-from config_manager import ConfigManager
-from recorder import LongFormRecorder
-from console_display import ConsoleDisplay
-from diagnostics import SystemDiagnostics
-from platform_utils import get_platform_manager
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-# Try to import the tray manager
-try:
+from config_manager import ConfigManager
+from console_display import ConsoleDisplay
+from dependency_checker import DependencyChecker
+from diagnostics import SystemDiagnostics
+from logging_setup import setup_logging
+from model_manager import ModelManager
+from platform_utils import get_platform_manager
+from recorder import LongFormRecorder
+from utils import safe_print
+
+if not TYPE_CHECKING:
+    # Try to import the tray manager at runtime
+    try:
+        from tray_manager import TrayIconManager
+
+        HAS_TRAY = True
+    except ImportError:
+        HAS_TRAY = False
+        TrayIconManager = None  # type: ignore[assignment, misc]
+else:
     from tray_manager import TrayIconManager
 
     HAS_TRAY = True
-except ImportError:
-    HAS_TRAY = False
 
 setup_logging()
 
@@ -52,23 +59,24 @@ class STTOrchestrator:
     def __init__(self):
         """Initialize the orchestrator."""
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config_path = os.path.join(self.script_dir, "config.yaml")
 
         # Application state (combining related attributes)
-        self.app_state = {
+        self.app_state: dict[str, Optional[bool | str]] = {
             "running": False,
             "current_mode": None,  # Tracks "longform" or "static"
             "is_transcribing": False,  # Flag to manage audio feeding during transcription
-            "config_path": os.path.join(self.script_dir, "config.yaml"),
         }
 
         # Instances for transcription components
         self.main_transcriber: Optional[LongFormRecorder] = None
         self.preview_transcriber: Optional[LongFormRecorder] = None
         self.console_display: Optional[ConsoleDisplay] = None
+        self.tray_manager: Optional["TrayIconManager"] = None
 
         # Initialize core components
         self.platform_manager_instance = get_platform_manager()
-        self.config_manager = ConfigManager(self.app_state["config_path"])
+        self.config_manager = ConfigManager(self.config_path)
         self.config = self.config_manager.load_or_create_config()
         self.diagnostics = SystemDiagnostics(self.config, self.platform_manager_instance)
 
@@ -77,14 +85,13 @@ class STTOrchestrator:
 
         # CHANGED: Initialize Tray Icon Manager with all necessary callbacks
         if HAS_TRAY:
-            self.tray_manager = TrayIconManager(
+            self.tray_manager = TrayIconManager(  # type: ignore[assignment]
                 name="STT Orchestrator",
                 start_callback=self._start_longform,
                 stop_callback=self._stop_longform,
                 quit_callback=self._quit,
             )
         else:
-            self.tray_manager = None
             safe_print(
                 "Could not initialize system tray icon. Please install PyQt6.", "warning"
             )
@@ -276,7 +283,7 @@ class STTOrchestrator:
 
             # --- Architecture Fix ---
             # 1. Main transcriber is PASSIVE (use_microphone=False)
-            main_callbacks = {}
+            main_callbacks: dict[str, Callable[..., Any]] = {}
             if self.console_display:
                 main_callbacks["on_recording_start"] = self.console_display.start
                 main_callbacks["on_recording_stop"] = self.console_display.stop
@@ -287,7 +294,7 @@ class STTOrchestrator:
 
             # 2. Preview transcriber is ACTIVE (use_microphone=True)
             #    and feeds everyone else
-            preview_callbacks = {
+            preview_callbacks: dict[str, Callable[..., Any]] = {
                 "on_recorded_chunk": self._handle_audio_chunk,
             }
             self.preview_transcriber = self.model_manager.initialize_transcriber(

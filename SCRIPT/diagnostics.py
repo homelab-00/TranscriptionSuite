@@ -11,7 +11,7 @@ import platform
 import subprocess
 import sys
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
 from platform_utils import PlatformManager
 from utils import safe_print
@@ -20,26 +20,26 @@ from utils import safe_print
 try:
     import torch
 
-    TORCH_AVAILABLE = True
+    _torch_available = True
 except ImportError:
-    TORCH_AVAILABLE = False
+    _torch_available = False
     torch = None
 
 try:
-    import faster_whisper
+    import faster_whisper  # type: ignore
 
-    FASTER_WHISPER_AVAILABLE = True
+    _faster_whisper_available = True
 except ImportError:
-    FASTER_WHISPER_AVAILABLE = False
+    _faster_whisper_available = False
     faster_whisper = None
 
 # Try to import Rich for prettier console output
 try:
     from rich.panel import Panel
 
-    HAS_RICH = True
+    _has_rich = True
 except ImportError:
-    HAS_RICH = False
+    _has_rich = False
     Panel = None
 
 
@@ -53,10 +53,10 @@ class SystemDiagnostics:
     def get_version_info(self) -> Dict[str, str]:
         """Get version information for key dependencies."""
         versions = {
-            "torch": torch.__version__ if TORCH_AVAILABLE and torch else "Not installed",
+            "torch": torch.__version__ if _torch_available and torch else "Not installed",
             "faster_whisper": (
                 getattr(faster_whisper, "__version__", "Unknown")
-                if FASTER_WHISPER_AVAILABLE and faster_whisper
+                if _faster_whisper_available and faster_whisper
                 else "Not installed"
             ),
         }
@@ -81,7 +81,7 @@ class SystemDiagnostics:
             logging.error("Error getting CPU info: %s", e)
 
         # Get GPU info from PyTorch
-        if TORCH_AVAILABLE and torch:
+        if _torch_available and torch:
             try:
                 if torch.cuda.is_available():
                     hardware_info["gpu"] = torch.cuda.get_device_name(0)
@@ -102,7 +102,7 @@ class SystemDiagnostics:
             "language", "N/A"
         )
 
-        if HAS_RICH and Panel:
+        if _has_rich and Panel:
             panel_content = (
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
                 f"[bold yellow]Control[/bold yellow] the system by clicking "

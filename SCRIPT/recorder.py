@@ -9,10 +9,10 @@ access, receiving audio via a feed method.
 """
 
 import contextlib
-import time
 import logging
 import threading
-from typing import Any, Callable, Optional, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 import pyperclip
 from platform_utils import ensure_platform_init
@@ -22,7 +22,33 @@ from stt_engine import AudioToTextRecorder
 
 # For type-checking
 if TYPE_CHECKING:
-    from stt_engine import AudioToTextRecorder as AudioToTextRecorderType
+
+    class AudioToTextRecorderProtocol(Protocol):
+        audio: Any
+
+        def start(self, frames: Optional[Any] = None) -> Any: ...
+
+        def stop(
+            self,
+            backdate_stop_seconds: float = 0.0,
+            backdate_resume_seconds: float = 0.0,
+        ) -> Any: ...
+
+        def wait_audio(self) -> None: ...
+
+        def feed_audio(self, chunk: Any, original_sample_rate: int = 16000) -> None: ...
+
+        def text(
+            self, on_transcription_finished: Optional[Callable[[str], None]] = None
+        ) -> Optional[str]: ...
+
+        def perform_final_transcription(
+            self, audio_bytes: Optional[Any] = None, use_prompt: bool = True
+        ) -> str: ...
+
+        def shutdown(self) -> None: ...
+
+    AudioToTextRecorderType = AudioToTextRecorderProtocol
 else:
     AudioToTextRecorderType = Any
 
@@ -37,10 +63,10 @@ class LongFormRecorder:
 
     def __init__(
         self,
-        config: dict,
+        config: dict[str, Any],
         # Callbacks for decoupling
-        on_recording_start: Optional[Callable] = None,
-        on_recording_stop: Optional[Callable] = None,
+        on_recording_start: Optional[Callable[[float], None]] = None,
+        on_recording_stop: Optional[Callable[[], None]] = None,
         on_recorded_chunk: Optional[Callable[[bytes], None]] = None,
     ):
         """
@@ -162,7 +188,7 @@ class LongFormRecorder:
         thread = threading.Thread(target=transcription_loop, daemon=True)
         thread.start()
 
-    def stop_and_transcribe(self) -> tuple[str, dict]:
+    def stop_and_transcribe(self) -> tuple[str, dict[str, float]]:
         """Stops recording, processes the audio, and returns the transcription."""
         if not self.is_recording or not self.recorder:
             logging.warning("No active recording to stop.")
@@ -228,7 +254,7 @@ class LongFormRecorder:
 
     def _get_transcription_metrics(
         self, audio_duration: float, processing_time: float
-    ) -> dict:
+    ) -> dict[str, float]:
         """Logs metrics about the last transcription cycle."""
         if processing_time > 0:
             speed_ratio = audio_duration / processing_time

@@ -27,11 +27,11 @@ try:
     from rich.panel import Panel
     from rich.text import Text
 
-    CONSOLE = Console()
-    HAS_RICH = True
+    _console = Console()
+    _has_rich = True
 except ImportError:  # pragma: no cover - graceful fallback when Rich is absent
-    HAS_RICH = False
-    CONSOLE = None
+    _has_rich = False
+    _console = None
     Live = cast(Any, None)
     Panel = cast(Any, None)
     Align = cast(Any, None)
@@ -42,17 +42,17 @@ except ImportError:  # pragma: no cover - graceful fallback when Rich is absent
 try:
     import numpy as np
 
-    HAS_NUMPY = True
+    _has_numpy = True
 except ImportError:
     np = None
-    HAS_NUMPY = False
+    _has_numpy = False
 
 
 class ConsoleDisplay:
     """Manages the live display of recording status in the console."""
 
     def __init__(self):
-        if not HAS_RICH:
+        if not _has_rich:
             safe_print(
                 "Warning: 'rich' library not found. Console display will be minimal.",
                 "warning",
@@ -83,17 +83,18 @@ class ConsoleDisplay:
 
     def start(self, start_time: float):
         """Starts the live display thread."""
-        if not HAS_RICH:
+        if not _has_rich:
             return
 
         # Check terminal size before starting
         min_width, min_height = 80, 16
-        if CONSOLE and (CONSOLE.width < min_width or CONSOLE.height < min_height):
+        if _console and (_console.width < min_width or _console.height < min_height):
             error_panel = Panel(
                 Align.center(
                     f"[bold]Terminal too small![/bold]\n\nPlease resize to at least "
                     f"[cyan]{min_width}x{min_height}[/cyan] characters.\n"
-                    f"Current size is [yellow]{CONSOLE.width}x{CONSOLE.height}[/yellow].",
+                    f"Current size is "
+                    f"[yellow]{_console.width}x{_console.height}[/yellow].",
                     vertical="middle",
                 ),
                 title="[bold red]Error[/bold red]",
@@ -111,7 +112,7 @@ class ConsoleDisplay:
 
     def stop(self):
         """Stops the live display thread."""
-        if not HAS_RICH:
+        if not _has_rich:
             return
         self._stop_event.set()
         if self._display_thread and self._display_thread.is_alive():
@@ -121,11 +122,11 @@ class ConsoleDisplay:
 
     def update_waveform_data(self, chunk: bytes):
         """Processes an audio chunk to update waveform visualization data."""
-        if not HAS_RICH or not chunk:
+        if not _has_rich or not chunk:
             return
 
         try:
-            if HAS_NUMPY and np:
+            if _has_numpy and np:
                 samples = np.frombuffer(chunk, dtype=np.int16)
                 if samples.size == 0:
                     return
@@ -153,7 +154,7 @@ class ConsoleDisplay:
 
     def add_preview_sentence(self, sentence: str):
         """Adds a new sentence to the live preview display."""
-        if not HAS_RICH or not sentence:
+        if not _has_rich or not sentence:
             return
 
         with self._preview_lock:
@@ -161,7 +162,7 @@ class ConsoleDisplay:
 
     def display_final_transcription(self, text: str):
         """Displays the final transcription in a formatted panel."""
-        if not HAS_RICH or not text:
+        if not _has_rich or not text:
             safe_print(f"\n--- Transcription ---\n{text}\n---------------------\n")
             return
 
@@ -185,7 +186,7 @@ class ConsoleDisplay:
             m, s = divmod(seconds, 60.0)
             return f"{int(m)}m {s:04.1f}s" if m >= 1 else f"{s:.2f}s"
 
-        if HAS_RICH:
+        if _has_rich:
             metrics_text = (
                 f"[grey58]  Audio duration: {format_duration(audio_duration)}\n"
                 f"  Processing time: {format_duration(processing_time)}\n"
@@ -206,12 +207,12 @@ class ConsoleDisplay:
 
     def _run_live_display(self):
         """The main loop for rendering the live display, executed in a thread."""
-        if not all([CONSOLE, Live, Layout, Panel]):
+        if not _has_rich or not all([_console, Live, Layout, Panel]):
             return
 
         self._live_display = Live(
             self._generate_layout(),
-            console=CONSOLE,
+            console=_console,
             screen=True,
             transient=True,
             redirect_stderr=False,
@@ -280,14 +281,14 @@ class ConsoleDisplay:
     def _default_waveform_display(self) -> str:
         return (
             "[grey50]Waiting for audio...[/grey50]"
-            if HAS_RICH
+            if _has_rich
             else "Waiting for audio..."
         )
 
     def _default_preview_display(self) -> Any:
         return (
             Text("[grey50]Live preview will appear here...[/grey50]")
-            if HAS_RICH
+            if _has_rich
             else "Waiting for preview..."
         )
 
@@ -323,7 +324,7 @@ class ConsoleDisplay:
 
     def _render_preview(self):
         """Renders the preview text and updates the internal Rich Text object."""
-        if not HAS_RICH:
+        if not _has_rich or not _console:
             return
 
         with self._preview_lock:
@@ -334,14 +335,9 @@ class ConsoleDisplay:
             sentences_copy = list(self._preview_sentences)
             full_text = " ".join(sentences_copy)
 
-            # --- Dynamic Cutoff Logic ---
-            if not CONSOLE:
-                self._latest_preview_text = Text(full_text)
-                return
-
             # Calculate the available space for text inside the panel.
             # We subtract 4 for left/right borders and padding.
-            panel_text_width = CONSOLE.width - 4
+            panel_text_width = _console.width - 4
             panel_text_height = self._preview_panel_height - 2  # 3 lines
             max_chars = panel_text_width * panel_text_height
 
