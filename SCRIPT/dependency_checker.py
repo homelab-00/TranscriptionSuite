@@ -73,11 +73,6 @@ class DependencyChecker:
                 "min_version": "0.9.0",
                 "description": "Faster Whisper for speech recognition",
             },
-            "RealtimeSTT": {
-                "required": True,
-                "min_version": "0.1.0",
-                "description": "Real-time speech-to-text library",
-            },
             "pyaudio": {
                 "required": True,
                 "min_version": None,

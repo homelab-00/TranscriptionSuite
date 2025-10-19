@@ -23,12 +23,16 @@ try:
 
     HAS_REALTIME_STT = True
 except ImportError:
+    # Set a placeholder type if the import fails, to avoid runtime errors.
     AudioToTextRecorder = None
     HAS_REALTIME_STT = False
 
+# For type-checking, always refer to our local engine.
 if TYPE_CHECKING:
-    from RealtimeSTT import AudioToTextRecorder as AudioToTextRecorderType
+    from .stt_engine import AudioToTextRecorder as AudioToTextRecorderType
 else:
+    # At runtime, use 'Any' to avoid circular dependencies if needed,
+    # though direct import is generally fine.
     AudioToTextRecorderType = Any
 
 # Initialize platform-specific settings (console encoding, etc.)
