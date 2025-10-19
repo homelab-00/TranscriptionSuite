@@ -30,7 +30,6 @@ import base64
 import collections
 import copy
 import datetime
-import gc
 import logging
 import os
 import platform
@@ -305,15 +304,6 @@ class AudioToTextRecorder:
         spinner: bool = True,
         level: int = logging.WARNING,
         batch_size: int = 16,
-        # Realtime transcription parameters
-        enable_realtime_transcription: bool = False,
-        use_main_model_for_realtime: bool = False,
-        realtime_model_type: str = INIT_MODEL_TRANSCRIPTION_REALTIME,
-        realtime_processing_pause: float = INIT_REALTIME_PROCESSING_PAUSE,
-        init_realtime_after_seconds: float = INIT_REALTIME_INITIAL_PAUSE,
-        on_realtime_transcription_update: Optional[Callable[..., Any]] = None,
-        on_realtime_transcription_stabilized: Optional[Callable[..., Any]] = None,
-        realtime_batch_size: int = 16,
         # Voice activation parameters
         silero_sensitivity: float = INIT_SILERO_SENSITIVITY,
         silero_use_onnx: bool = False,
@@ -333,11 +323,9 @@ class AudioToTextRecorder:
         debug_mode: bool = False,
         handle_buffer_overflow: bool = INIT_HANDLE_BUFFER_OVERFLOW,
         beam_size: int = 5,
-        beam_size_realtime: int = 3,
         buffer_size: int = BUFFER_SIZE,
         sample_rate: int = SAMPLE_RATE,
         initial_prompt: Optional[Union[str, Iterable[int]]] = None,
-        initial_prompt_realtime: Optional[Union[str, Iterable[int]]] = None,
         suppress_tokens: Optional[List[int]] = [-1],
         print_transcription_time: bool = False,
         early_transcription_on_silence: int = 0,
@@ -348,245 +336,14 @@ class AudioToTextRecorder:
         normalize_audio: bool = False,
         start_callback_in_new_thread: bool = False,
     ):
-        """
-        Initializes an audio recorder and  transcription
-        and wake word detection.
+        """Initializes the audio recorder and transcription engine.
 
-        Args:
-        - model (str, default="tiny"): Specifies the size of the transcription
-            model to use or the path to a converted model directory.
-            Valid options are 'tiny', 'tiny.en', 'base', 'base.en',
-            'small', 'small.en', 'medium', 'medium.en', 'large-v1',
-            'large-v2'.
-            If a specific size is provided, the model is downloaded
-            from the Hugging Face Hub.
-        - download_root (str, default=None): Specifies the root path were the Whisper
-            models are downloaded to. When empty, the default is used.
-        - language (str, default=""): Language code for speech-to-text engine.
-            If not specified, the model will attempt to detect the language
-            automatically.
-        - compute_type (str, default="default"): Specifies the type of
-            computation to be used for transcription.
-            See https://opennmt.net/CTranslate2/quantization.html.
-        - input_device_index (int, default=0): The index of the audio input
-            device to use.
-        - gpu_device_index (int, default=0): Device ID to use.
-            The model can also be loaded on multiple GPUs by passing a list of
-            IDs (e.g. [0, 1, 2, 3]). In that case, multiple transcriptions can
-            run in parallel when transcribe() is called from multiple Python
-            threads
-        - device (str, default="cuda"): Device for model to use. Can either be
-            "cuda" or "cpu".
-        - on_recording_start (callable, default=None): Callback function to be
-            called when recording of audio to be transcripted starts.
-        - on_recording_stop (callable, default=None): Callback function to be
-            called when recording of audio to be transcripted stops.
-        - on_transcription_start (callable, default=None): Callback function
-            to be called when transcription of audio to text starts.
-        - ensure_sentence_starting_uppercase (bool, default=True): Ensures
-            that every sentence detected by the algorithm starts with an
-            uppercase letter.
-        - ensure_sentence_ends_with_period (bool, default=True): Ensures that
-            every sentence that doesn't end with punctuation such as "?", "!"
-            ends with a period
-        - use_microphone (bool, default=True): Specifies whether to use the
-            microphone as the audio input source. If set to False, the
-            audio input source will be the audio data sent through the
-            feed_audio() method.
-        - spinner (bool, default=True): Show spinner animation with current
-            state.
-        - level (int, default=logging.WARNING): Logging level.
-        - batch_size (int, default=16): Batch size for the main transcription
-        - enable_realtime_transcription (bool, default=False): Enables or
-            disables real-time transcription of audio. When set to True, the
-            audio will be transcribed continuously as it is being recorded.
-        - use_main_model_for_realtime (str, default=False):
-            If True, use the main transcription model for both regular and
-            real-time transcription. If False, use a separate model specified
-            by realtime_model_type for real-time transcription.
-            Using a single model can save memory and potentially improve
-            performance, but may not be optimized for real-time processing.
-            Using separate models allows for a smaller, faster model for
-            real-time transcription while keeping a more accurate model for
-            final transcription.
-        - realtime_model_type (str, default="tiny"): Specifies the machine
-            learning model to be used for real-time transcription. Valid
-            options include 'tiny', 'tiny.en', 'base', 'base.en', 'small',
-            'small.en', 'medium', 'medium.en', 'large-v1', 'large-v2'.
-        - realtime_processing_pause (float, default=0.1): Specifies the time
-            interval in seconds after a chunk of audio gets transcribed. Lower
-            values will result in more "real-time" (frequent) transcription
-            updates but may increase computational load.
-        - init_realtime_after_seconds (float, default=0.2): Specifies the
-            initial waiting time after the recording was initiated before
-            yielding the first realtime transcription
-        - on_realtime_transcription_update = A callback function that is
-            triggered whenever there's an update in the real-time
-            transcription. The function is called with the newly transcribed
-            text as its argument.
-        - on_realtime_transcription_stabilized = A callback function that is
-            triggered when the transcribed text stabilizes in quality. The
-            stabilized text is generally more accurate but may arrive with a
-            slight delay compared to the regular real-time updates.
-        - realtime_batch_size (int, default=16): Batch size for the real-time
-            transcription model.
-        - silero_sensitivity (float, default=SILERO_SENSITIVITY): Sensitivity
-            for the Silero Voice Activity Detection model ranging from 0
-            (least sensitive) to 1 (most sensitive). Default is 0.5.
-        - silero_use_onnx (bool, default=False): Enables usage of the
-            pre-trained model from Silero in the ONNX (Open Neural Network
-            Exchange) format instead of the PyTorch format. This is
-            recommended for faster performance.
-        - silero_deactivity_detection (bool, default=False): Enables the Silero
-            model for end-of-speech detection. More robust against background
-            noise. Utilizes additional GPU resources but improves accuracy in
-            noisy environments. When False, uses the default WebRTC VAD,
-            which is more sensitive but may continue recording longer due
-            to background sounds.
-        - webrtc_sensitivity (int, default=WEBRTC_SENSITIVITY): Sensitivity
-            for the WebRTC Voice Activity Detection engine ranging from 0
-            (least aggressive / most sensitive) to 3 (most aggressive,
-            least sensitive). Default is 3.
-        - post_speech_silence_duration (float, default=0.2): Duration in
-            seconds of silence that must follow speech before the recording
-            is considered to be completed. This ensures that any brief
-            pauses during speech don't prematurely end the recording.
-        - min_gap_between_recordings (float, default=1.0): Specifies the
-            minimum time interval in seconds that should exist between the
-            end of one recording session and the beginning of another to
-            prevent rapid consecutive recordings.
-        - min_length_of_recording (float, default=1.0): Specifies the minimum
-            duration in seconds that a recording session should last to ensure
-            meaningful audio capture, preventing excessively short or
-            fragmented recordings.
-        - pre_recording_buffer_duration (float, default=0.2): Duration in
-            seconds for the audio buffer to maintain pre-roll audio
-            (compensates speech activity detection latency)
-        - on_vad_start (callable, default=None): Callback function to be called
-            when the system detected the start of voice activity presence.
-        - on_vad_stop (callable, default=None): Callback function to be called
-            when the system detected the stop (end) of voice activity presence.
-        - on_vad_detect_start (callable, default=None): Callback function to
-            be called when the system listens for voice activity. This is not
-            called when VAD actually happens (use on_vad_start for this), but
-            when the system starts listening for it.
-        - on_vad_detect_stop (callable, default=None): Callback function to be
-            called when the system stops listening for voice activity. This is
-            not called when VAD actually stops (use on_vad_stop for this), but
-            when the system stops listening for it.
-        - on_turn_detection_start (callable, default=None): Callback function
-            to be called when the system starts to listen for a turn of speech.
-        - on_turn_detection_stop (callable, default=None): Callback function to
-            be called when the system stops listening for a turn of speech.
-        - wakeword_backend (str, default=""): Specifies the backend library to
-            use for wake word detection. Supported options include 'pvporcupine'
-            for using the Porcupine wake word engine or 'oww' for using the
-            OpenWakeWord engine.
-        - wakeword_backend (str, default="pvporcupine"): Specifies the backend
-            library to use for wake word detection. Supported options include
-            'pvporcupine' for using the Porcupine wake word engine or 'oww' for
-            using the OpenWakeWord engine.
-        - openwakeword_model_paths (str, default=None): Comma-separated paths
-            to model files for the openwakeword library. These paths point to
-            custom models that can be used for wake word detection when the
-            openwakeword library is selected as the wakeword_backend.
-        - openwakeword_inference_framework (str, default="onnx"): Specifies
-            the inference framework to use with the openwakeword library.
-            Can be either 'onnx' for Open Neural Network Exchange format
-            or 'tflite' for TensorFlow Lite.
-        - wake_words (str, default=""): Comma-separated string of wake words to
-            initiate recording when using the 'pvporcupine' wakeword backend.
-            Supported wake words include: 'alexa', 'americano', 'blueberry',
-            'bumblebee', 'computer', 'grapefruits', 'grasshopper', 'hey google',
-            'hey siri', 'jarvis', 'ok google', 'picovoice', 'porcupine',
-            'terminator'. For the 'openwakeword' backend, wake words are
-            automatically extracted from the provided model files, so specifying
-            them here is not necessary.
-        - wake_words_sensitivity (float, default=0.5): Sensitivity for wake
-            word detection, ranging from 0 (least sensitive) to 1 (most
-            sensitive). Default is 0.5.
-        - wake_word_activation_delay (float, default=0): Duration in seconds
-            after the start of monitoring before the system switches to wake
-            word activation if no voice is initially detected. If set to
-            zero, the system uses wake word activation immediately.
-        - wake_word_timeout (float, default=5): Duration in seconds after a
-            wake word is recognized. If no subsequent voice activity is
-            detected within this window, the system transitions back to an
-            inactive state, awaiting the next wake word or voice activation.
-        - wake_word_buffer_duration (float, default=0.1): Duration in seconds
-            to buffer audio data during wake word detection. This helps in
-            cutting out the wake word from the recording buffer so it does not
-            falsely get detected along with the following spoken text, ensuring
-            cleaner and more accurate transcription start triggers.
-            Increase this if parts of the wake word get detected as text.
-        - on_wakeword_detected (callable, default=None): Callback function to
-            be called when a wake word is detected.
-        - on_wakeword_timeout (callable, default=None): Callback function to
-            be called when the system goes back to an inactive state after when
-            no speech was detected after wake word activation
-        - on_wakeword_detection_start (callable, default=None): Callback
-             function to be called when the system starts to listen for wake
-             words
-        - on_wakeword_detection_end (callable, default=None): Callback
-            function to be called when the system stops to listen for
-            wake words (e.g. because of timeout or wake word detected)
-        - on_recorded_chunk (callable, default=None): Callback function to be
-            called when a chunk of audio is recorded. The function is called
-            with the recorded audio chunk as its argument.
-        - debug_mode (bool, default=False): If set to True, the system will
-            print additional debug information to the console.
-        - handle_buffer_overflow (bool, default=True): If set to True, the system
-            will log a warning when an input overflow occurs during recording and
-            remove the data from the buffer.
-        - beam_size (int, default=5): The beam size to use for beam search
-            decoding.
-        - beam_size_realtime (int, default=3): The beam size to use for beam
-            search decoding in the real-time transcription model.
-        - buffer_size (int, default=512): The buffer size to use for audio
-            recording. Changing this may break functionality.
-        - sample_rate (int, default=16000): The sample rate to use for audio
-            recording. Changing this will very probably functionality (as the
-            WebRTC VAD model is very sensitive towards the sample rate).
-        - initial_prompt (str or iterable of int, default=None): Initial
-            prompt to be fed to the main transcription model.
-        - initial_prompt_realtime (str or iterable of int, default=None):
-            Initial prompt to be fed to the real-time transcription model.
-        - suppress_tokens (list of int, default=[-1]): Tokens to be suppressed
-            from the transcription output.
-        - print_transcription_time (bool, default=False): Logs processing time
-            of main model transcription
-        - early_transcription_on_silence (int, default=0): If set, the
-            system will transcribe audio faster when silence is detected.
-            Transcription will start after the specified milliseconds, so
-            keep this value lower than post_speech_silence_duration.
-            Ideally around post_speech_silence_duration minus the estimated
-            transcription time with the main model.
-            If silence lasts longer than post_speech_silence_duration, the
-            recording is stopped, and the transcription is submitted. If
-            voice activity resumes within this period, the transcription
-            is discarded. Results in faster final transcriptions to the cost
-            of additional GPU load due to some unnecessary final transcriptions.
-        - allowed_latency_limit (int, default=100): Maximal amount of chunks
-            that can be unprocessed in queue before discarding chunks.
-        - no_log_file (bool, default=False): Skips writing of debug log file.
-        - use_extended_logging (bool, default=False): Writes extensive
-            log messages for the recording worker, that processes the audio
-            chunks.
-        - faster_whisper_vad_filter (bool, default=True): If set to True,
-            the system will additionally use the VAD filter from the faster_whisper
-            library for voice activity detection. This filter is more robust against
-            background noise but requires additional GPU resources.
-        - normalize_audio (bool, default=False): If set to True, the system will
-            normalize the audio to a specific range before processing. This can
-            help improve the quality of the transcription.
-        - start_callback_in_new_thread (bool, default=False): If set to True,
-            the callback functions will be executed in a
-            new thread. This can help improve performance by allowing the
-            callback to run concurrently with other operations.
+        This class is responsible for capturing audio, performing voice activity
+        detection (VAD), and transcribing the audio using a single faster_whisper
+        model.
 
-        Raises:
-            Exception: Errors related to initializing transcription
-            model, wake word detection, or audio recording.
+        For a detailed description of all parameters, please refer to the
+        `SCRIPT/STT_ENGINE_OPTIONS.md` file.
         """
 
         self.language = language
@@ -611,22 +368,13 @@ class AudioToTextRecorder:
         self.on_turn_detection_stop = on_turn_detection_stop
         self.on_recorded_chunk = on_recorded_chunk
         self.on_transcription_start = on_transcription_start
-        self.enable_realtime_transcription = enable_realtime_transcription
-        self.use_main_model_for_realtime = use_main_model_for_realtime
         self.main_model_type = model
         self.download_root = download_root if download_root else None
-        self.realtime_model_type = realtime_model_type
-        self.realtime_processing_pause = realtime_processing_pause
-        self.init_realtime_after_seconds = init_realtime_after_seconds
-        self.on_realtime_transcription_update = on_realtime_transcription_update
-        self.on_realtime_transcription_stabilized = on_realtime_transcription_stabilized
         self.debug_mode = debug_mode
         self.handle_buffer_overflow = handle_buffer_overflow
         self.beam_size = beam_size
-        self.beam_size_realtime = beam_size_realtime
         self.allowed_latency_limit = allowed_latency_limit
         self.batch_size = batch_size
-        self.realtime_batch_size = realtime_batch_size
 
         self.level = level
         self.audio_queue: mp.Queue[Union[bytes, bytearray]] = mp.Queue()
@@ -644,19 +392,12 @@ class AudioToTextRecorder:
         self.listen_start = 0
         self.spinner = spinner
         self.halo = None
-        self.state = "inactive"
-        self.text_storage = []
-        self.realtime_stabilized_text = ""
-        self.realtime_stabilized_safetext = ""
         self.is_webrtc_speech_active = False
         self.is_silero_speech_active = False
         self.recording_thread = None
-        self.realtime_thread = None
         self.reader_process: Optional[Union[threading.Thread, mp.Process]] = None
         self.transcript_process: Optional[Union[threading.Thread, mp.Process]] = None
         self.audio_interface = None
-        self.audio = None
-        self.stream = None
         self.start_recording_event = threading.Event()
         self.stop_recording_event = threading.Event()
         self.backdate_stop_seconds = 0.0
@@ -664,13 +405,9 @@ class AudioToTextRecorder:
         self.last_transcription_bytes = None
         self.last_transcription_bytes_b64 = None
         self.initial_prompt = initial_prompt
-        self.initial_prompt_realtime = initial_prompt_realtime
         self.suppress_tokens = suppress_tokens
         self.use_wake_words = False
         self.detected_language = None
-        self.detected_language_probability = 0
-        self.detected_realtime_language = None
-        self.detected_realtime_language_probability = 0
         self.transcription_lock = threading.Lock()
         self.shutdown_lock = threading.Lock()
         self.transcribe_count = 0
@@ -681,6 +418,10 @@ class AudioToTextRecorder:
         self.normalize_audio = normalize_audio
         self.awaiting_speech_end = False
         self.start_callback_in_new_thread = start_callback_in_new_thread
+
+        # Initialize states and buffers
+        self.state = "inactive"
+        self.audio = None
 
         # ----------------------------------------------------------------------------
         # Named logger configuration
@@ -780,54 +521,6 @@ class AudioToTextRecorder:
                 ),
             )
 
-        # Initialize the realtime transcription model
-        if self.enable_realtime_transcription and not self.use_main_model_for_realtime:
-            try:
-                logger.info(
-                    "Initializing faster_whisper realtime "
-                    f"transcription model {self.realtime_model_type}, "
-                    f"default device: {self.device}, "
-                    f"compute type: {self.compute_type}, "
-                    f"device index: {self.gpu_device_index}, "
-                    f"download root: {self.download_root}"
-                )
-                self.realtime_model_type = faster_whisper.WhisperModel(
-                    model_size_or_path=self.realtime_model_type,
-                    device=self.device,
-                    compute_type=self.compute_type,
-                    device_index=self.gpu_device_index,
-                    download_root=self.download_root,
-                )
-                if self.realtime_batch_size > 0:
-                    self.realtime_model_type = BatchedInferencePipeline(
-                        model=self.realtime_model_type
-                    )
-
-                # Run a warm-up transcription
-                current_dir = os.path.dirname(os.path.realpath(__file__))
-                warmup_audio_path = os.path.join(current_dir, "warmup_audio.wav")
-                warmup_audio_data, _ = sf.read(  # type: ignore[misc]
-                    warmup_audio_path, dtype="float32"
-                )
-                segments, _ = self.realtime_model_type.transcribe(
-                    audio=warmup_audio_data,
-                    language="en",
-                    beam_size=1,
-                )  # type: ignore[misc]
-                # Consume segments to complete warmup
-                _ = " ".join(segment.text for segment in segments)
-            except Exception as e:
-                logger.exception(
-                    "Error initializing faster_whisper "
-                    f"realtime transcription model: {e}"
-                )
-                raise
-
-            logger.debug(
-                "Faster_whisper realtime speech to text "
-                "transcription model initialized successfully"
-            )
-
         # Setup voice activity detection model WebRTC
         try:
             logger.info(
@@ -871,9 +564,6 @@ class AudioToTextRecorder:
                 * self.pre_recording_buffer_duration
             )
         )
-        self.last_words_buffer: collections.deque[Union[bytes, bytearray]] = (
-            collections.deque(maxlen=int((self.sample_rate // self.buffer_size) * 0.3))
-        )
         self.frames = []
         self.last_frames = []
 
@@ -887,11 +577,6 @@ class AudioToTextRecorder:
         self.recording_thread = threading.Thread(target=self._recording_worker)
         self.recording_thread.daemon = True
         self.recording_thread.start()
-
-        # Start the realtime transcription worker thread
-        self.realtime_thread = threading.Thread(target=self._realtime_worker)
-        self.realtime_thread.daemon = True
-        self.realtime_thread.start()
 
         # Wait for transcription models to start
         logger.debug("Waiting for main transcription model to start")
@@ -1417,19 +1102,12 @@ class AudioToTextRecorder:
             if audio_interface:
                 audio_interface.terminate()
 
-    def wakeup(self):
-        """
-        If in wake work modus, wake up as if a wake word was spoken.
-        """
-        self.listen_start = time.time()
-
     def abort(self):
         self.start_recording_on_voice_activity = False
         self.stop_recording_on_voice_deactivity = False
         self.interrupt_stop_event.set()
         if self.state != "inactive":  # if inactive, was_interrupted will never be set
             self.was_interrupted.wait()  # type: ignore
-            self._set_state("transcribing")  # type: ignore
         self.was_interrupted.clear()
         if self.is_recording:  # if recording, make sure to stop the recorder
             self.stop()
@@ -1597,9 +1275,8 @@ class AudioToTextRecorder:
                 if status == "success":
                     segments, info = result
                     self.detected_language = (
-                        info.language if info.language_probability > 0 else None
+                        info.language if info.language_probability > 0.5 else None
                     )
-                    self.detected_language_probability = info.language_probability
                     self.last_transcription_bytes = copy.deepcopy(audio_bytes)
                     self.last_transcription_bytes_b64 = base64.b64encode(
                         self.last_transcription_bytes.tobytes()
@@ -1738,9 +1415,6 @@ class AudioToTextRecorder:
 
         logger.info("recording started")
         self._set_state("recording")
-        self.text_storage = []
-        self.realtime_stabilized_text = ""
-        self.realtime_stabilized_safetext = ""
         self.frames = []
         if frames:
             self.frames = frames  # type: ignore[assignment]
@@ -1916,15 +1590,6 @@ class AudioToTextRecorder:
 
             self.parent_transcription_pipe.close()
 
-            logger.debug("Finishing realtime thread")
-            if self.realtime_thread:
-                self.realtime_thread.join()
-
-            if self.enable_realtime_transcription and self.realtime_model_type:
-                del self.realtime_model_type
-                self.realtime_model_type = None
-            gc.collect()
-
     def _recording_worker(self):
         """
         The main worker method which constantly monitors the audio
@@ -1960,7 +1625,6 @@ class AudioToTextRecorder:
                     #     logger.debug('Debug: Trying to get data from audio queue')
                     try:
                         data = self.audio_queue.get(timeout=0.01)
-                        self.last_words_buffer.append(data)
                     except queue.Empty:
                         # if self.use_extended_logging:
                         #     logger.debug(
@@ -2326,249 +1990,6 @@ class AudioToTextRecorder:
         if self.use_extended_logging:
             logger.debug("Debug: Exiting _recording_worker method")
 
-    def _realtime_worker(self):
-        """
-        Performs real-time transcription if the feature is enabled.
-
-        The method is responsible transcribing recorded audio frames
-          in real-time based on the specified resolution interval.
-        The transcribed text is stored in `self.realtime_transcription_text`
-          and a callback
-        function is invoked with this text if specified.
-        """
-
-        try:
-
-            logger.debug("Starting realtime worker")
-
-            # Return immediately if real-time transcription is not enabled
-            if not self.enable_realtime_transcription:
-                return
-
-            # Track time of last transcription
-            last_transcription_time = time.time()
-
-            while self.is_running:
-
-                if self.is_recording:
-
-                    # MODIFIED SLEEP LOGIC:
-                    # Wait until realtime_processing_pause has elapsed,
-                    # but check often so we can respond to changes quickly.
-                    while (
-                        time.time() - last_transcription_time
-                    ) < self.realtime_processing_pause:
-                        time.sleep(0.001)
-                        if not self.is_running or not self.is_recording:
-                            break
-
-                    if self.awaiting_speech_end:
-                        time.sleep(0.001)
-                        continue
-
-                    # Update transcription time
-                    last_transcription_time = time.time()
-
-                    # Convert the buffer frames to a NumPy array
-                    audio_array = np.frombuffer(b"".join(self.frames), dtype=np.int16)
-
-                    logger.debug(f"Current realtime buffer size: {len(audio_array)}")
-
-                    # Normalize the array to a [-1, 1] range
-                    audio_array = audio_array.astype(np.float32) / INT16_MAX_ABS_VALUE
-
-                    if self.use_main_model_for_realtime:
-                        with self.transcription_lock:
-                            try:
-                                self.parent_transcription_pipe.send(
-                                    (audio_array, self.language, True)
-                                )
-                                if self.parent_transcription_pipe.poll(
-                                    timeout=5
-                                ):  # Wait for 5 seconds
-                                    logger.debug(
-                                        "Receive from realtime worker after "
-                                        "transcription request to main model"
-                                    )
-                                    recv_result = self.parent_transcription_pipe.recv()
-                                    if recv_result is None:
-                                        logger.warning(
-                                            "Received None from transcription pipe "
-                                            "in realtime worker"
-                                        )
-                                        continue
-                                    status, result = recv_result
-                                    if status == "success":
-                                        segments, info = result
-                                        self.detected_realtime_language = (
-                                            info.language
-                                            if info.language_probability > 0
-                                            else None
-                                        )
-                                        self.detected_realtime_language_probability = (
-                                            info.language_probability
-                                        )
-                                        realtime_text = segments
-                                        logger.debug(
-                                            "Realtime text detected with main model: %s",
-                                            realtime_text,
-                                        )
-                                    else:
-                                        logger.error(
-                                            "Realtime transcription error: %s",
-                                            result,
-                                        )
-                                        continue
-                                else:
-                                    logger.warning("Realtime transcription timed out")
-                                    continue
-                            except Exception as e:
-                                logger.error(
-                                    f"Error in realtime transcription: {str(e)}",
-                                    exc_info=True,
-                                )
-                                continue
-                    else:
-                        # Perform transcription and assemble the text
-                        if self.realtime_model_type is None or isinstance(
-                            self.realtime_model_type, str
-                        ):
-                            logger.error("Realtime model is not initialized properly")
-                            continue
-
-                        if self.normalize_audio:
-                            # normalize audio to -0.95 dBFS
-                            if audio_array.size > 0:  # type: ignore
-                                peak = np.max(np.abs(audio_array))  # type: ignore
-                                if peak > 0:
-                                    audio_array = (
-                                        audio_array / peak
-                                    ) * 0.95  # type: ignore
-
-                        if self.realtime_batch_size > 0:
-                            (
-                                segments,
-                                info,
-                            ) = self.realtime_model_type.transcribe(
-                                audio_array,
-                                language=(self.language if self.language else None),
-                                beam_size=self.beam_size_realtime,
-                                initial_prompt=self.initial_prompt_realtime,
-                                suppress_tokens=self.suppress_tokens,
-                                vad_filter=self.faster_whisper_vad_filter,
-                            )  # type: ignore
-                        else:
-                            (
-                                segments,
-                                info,
-                            ) = self.realtime_model_type.transcribe(
-                                audio_array,
-                                language=(self.language if self.language else None),
-                                beam_size=self.beam_size_realtime,
-                                initial_prompt=self.initial_prompt_realtime,
-                                suppress_tokens=self.suppress_tokens,
-                                vad_filter=self.faster_whisper_vad_filter,
-                            )  # type: ignore
-
-                        self.detected_realtime_language = (
-                            info.language if info.language_probability > 0 else None
-                        )
-                        self.detected_realtime_language_probability = (
-                            info.language_probability
-                        )
-                        realtime_text = " ".join(seg.text for seg in segments)
-                        logger.debug(f"Realtime text detected: {realtime_text}")
-
-                    # double check recording state
-                    # because it could have changed mid-transcription
-                    if (
-                        self.is_recording
-                        and time.time() - self.recording_start_time
-                        > self.init_realtime_after_seconds
-                    ):
-
-                        self.realtime_transcription_text = realtime_text
-                        self.realtime_transcription_text = (
-                            self.realtime_transcription_text.strip()
-                        )
-
-                        self.text_storage.append(self.realtime_transcription_text)
-
-                        # Take the last two texts in storage, if they exist
-                        if len(self.text_storage) >= 2:
-                            last_two_texts = self.text_storage[-2:]
-
-                            # Find the longest common prefix
-                            # between the two texts
-                            prefix = os.path.commonprefix(
-                                [last_two_texts[0], last_two_texts[1]]
-                            )
-
-                            # This prefix is the text that was transcripted
-                            # two times in the same way
-                            # Store as "safely detected text"
-                            if len(prefix) >= len(self.realtime_stabilized_safetext):
-
-                                # Only store when longer than the previous
-                                # as additional security
-                                self.realtime_stabilized_safetext = prefix
-
-                        # Find parts of the stabilized text
-                        # in the freshly transcripted text
-                        matching_pos = self._find_tail_match_in_text(
-                            self.realtime_stabilized_safetext,
-                            self.realtime_transcription_text,
-                        )
-
-                        if matching_pos < 0:
-                            # pick which text to send
-                            text_to_send = (
-                                self.realtime_stabilized_safetext
-                                if self.realtime_stabilized_safetext
-                                else self.realtime_transcription_text
-                            )
-                            # preprocess once
-                            processed = self._preprocess_output(text_to_send, True)
-                            # invoke on its own thread
-                            self._run_callback(  # type: ignore
-                                self._on_realtime_transcription_stabilized, processed
-                            )
-
-                        else:
-                            # We found parts of the stabilized text
-                            # in the transcripted text
-                            # We now take the stabilized text
-                            # and add only the freshly transcripted part to it
-                            output_text = (
-                                self.realtime_stabilized_safetext
-                                + self.realtime_transcription_text[matching_pos:]
-                            )
-
-                            # This yields us the "left" text part as stabilized
-                            # AND at the same time delivers fresh detected
-                            # parts on the first run without the need for
-                            # two transcriptions
-                            self._run_callback(  # type: ignore
-                                self._on_realtime_transcription_stabilized,
-                                self._preprocess_output(output_text, True),
-                            )
-
-                        # Invoke the callback with the transcribed text
-                        self._run_callback(  # type: ignore
-                            self._on_realtime_transcription_update,
-                            self._preprocess_output(
-                                self.realtime_transcription_text, True
-                            ),
-                        )
-
-                # If not recording, sleep briefly before checking again
-                else:
-                    time.sleep(TIME_SLEEP)
-
-        except Exception as e:
-            logger.error(f"Unhandled exeption in _realtime_worker: {e}", exc_info=True)
-            raise
-
     def _is_silero_speech(self, chunk: Union[bytes, bytearray]) -> bool:
         """
         Returns true if speech is detected in the provided audio data
@@ -2796,91 +2217,6 @@ class AudioToTextRecorder:
                     text += "."
 
         return text
-
-    def _find_tail_match_in_text(
-        self, text1: str, text2: str, length_of_match: int = 10
-    ) -> int:
-        """
-        Find the position where the last 'n' characters of text1
-        match with a substring in text2.
-
-        This method takes two texts, extracts the last 'n' characters from
-        text1 (where 'n' is determined by the variable 'length_of_match'), and
-        searches for an occurrence of this substring in text2, starting from
-        the end of text2 and moving towards the beginning.
-
-        Parameters:
-        - text1 (str): The text containing the substring that we want to find
-          in text2.
-        - text2 (str): The text in which we want to find the matching
-          substring.
-        - length_of_match(int): The length of the matching string that we are
-          looking for
-
-        Returns:
-        int: The position (0-based index) in text2 where the matching
-          substring starts. If no match is found or either of the texts is
-          too short, returns -1.
-        """
-
-        # Check if either of the texts is too short
-        if len(text1) < length_of_match or len(text2) < length_of_match:
-            return -1
-
-        # The end portion of the first text that we want to compare
-        target_substring = text1[-length_of_match:]
-
-        # Loop through text2 from right to left
-        for i in range(len(text2) - length_of_match + 1):
-            # Extract the substring from text2
-            # to compare with the target_substring
-            end_index = len(text2) - i
-            start_index = end_index - length_of_match
-            current_substring = text2[start_index:end_index]
-
-            # Compare the current_substring with the target_substring
-            if current_substring == target_substring:
-                # Position in text2 where the match starts
-                return len(text2) - i
-
-        return -1
-
-    def _on_realtime_transcription_stabilized(self, text: str) -> None:
-        """
-        Callback method invoked when the real-time transcription stabilizes.
-
-        This method is called internally when the transcription text is
-        considered "stable" meaning it's less likely to change significantly
-        with additional audio input. It notifies any registered external
-        listener about the stabilized text if recording is still ongoing.
-        This is particularly useful for applications that need to display
-        live transcription results to users and want to highlight parts of the
-        transcription that are less likely to change.
-
-        Args:
-            text (str): The stabilized transcription text.
-        """
-        if self.on_realtime_transcription_stabilized:
-            if self.is_recording:
-                self._run_callback(self.on_realtime_transcription_stabilized, text)
-
-    def _on_realtime_transcription_update(self, text: str) -> None:
-        """
-        Callback method invoked when there's an update in the real-time
-        transcription.
-
-        This method is called internally whenever there's a change in the
-        transcription text, notifying any registered external listener about
-        the update if recording is still ongoing. This provides a mechanism
-        for applications to receive and possibly display live transcription
-        updates, which could be partial and still subject to change.
-
-        Args:
-            text (str): The updated transcription text.
-        """
-        if self.on_realtime_transcription_update:
-            if self.is_recording:
-                self._run_callback(self.on_realtime_transcription_update, text)
 
     def __enter__(self):
         """
