@@ -33,7 +33,7 @@ from scipy.signal import resample
 import signal as system_signal
 from ctypes import c_bool
 from scipy import signal
-from .safepipe import SafePipe
+from safepipe import SafePipe
 import soundfile as sf
 import faster_whisper
 import collections
