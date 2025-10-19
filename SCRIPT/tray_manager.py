@@ -8,16 +8,34 @@ event loop.
 """
 
 import sys
-from typing import Callable, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
-try:
-    from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-    from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen
+if TYPE_CHECKING:
     from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+    from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
     HAS_PYQT = True
-except ImportError:
-    HAS_PYQT = False
+else:
+    try:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+        from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+
+        HAS_PYQT = True
+    except ImportError:
+        HAS_PYQT = False
+        # Provide stubs for type checking when PyQt is not available
+        QApplication = None  # type: ignore[assignment, misc]
+        QSystemTrayIcon = None  # type: ignore[assignment, misc]
+        QMenu = None  # type: ignore[assignment, misc]
+        QIcon = None  # type: ignore[assignment, misc]
+        QPixmap = None  # type: ignore[assignment, misc]
+        QPainter = None  # type: ignore[assignment, misc]
+        QColor = None  # type: ignore[assignment, misc]
+        QPen = None  # type: ignore[assignment, misc]
+        QAction = None  # type: ignore[assignment, misc]
+        Qt = None  # type: ignore[assignment, misc]
 
 
 class TrayIconManager:
@@ -26,9 +44,9 @@ class TrayIconManager:
     def __init__(
         self,
         name: str,
-        start_callback: Optional[Callable] = None,
-        stop_callback: Optional[Callable] = None,
-        quit_callback: Optional[Callable] = None,
+        start_callback: Optional[Callable[[], None]] = None,
+        stop_callback: Optional[Callable[[], None]] = None,
+        quit_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -46,18 +64,17 @@ class TrayIconManager:
 
         # Get or create the application instance, using a local variable
         # for type narrowing
-        app = QApplication.instance()
-        if not app:
-            app = QApplication(sys.argv)
-        self.app = app
+        app_instance = QApplication.instance()
+        if not app_instance:
+            app_instance = QApplication(sys.argv)
 
-        # --- FIX: Address 'reportAttributeAccessIssue' ---
-        # Use the local variable `app` within the isinstance check to help Pylance.
-        if isinstance(app, QApplication):
-            # Prevent the app from quitting when the last window is closed
-            cast(QApplication, app).setQuitOnLastWindowClosed(False)
+        # Type assertion: we know app_instance is QApplication at this point
+        self.app: QApplication = cast(QApplication, app_instance)
 
-        self.icon = QSystemTrayIcon()
+        # Prevent the app from quitting when the last window is closed
+        self.app.setQuitOnLastWindowClosed(False)
+
+        self.icon: QSystemTrayIcon = QSystemTrayIcon()
         self.icon.setToolTip(name)
 
         # Store callbacks
@@ -67,7 +84,7 @@ class TrayIconManager:
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
-        self.icon.activated.connect(self._handle_activation)
+        cast(Any, self.icon.activated).connect(self._handle_activation)
 
         # New color scheme reflecting the new states
         self.colors = {
@@ -78,34 +95,35 @@ class TrayIconManager:
             "error": (255, 0, 0),  # Red
         }
 
-    def _setup_context_menu(self):
+    def _setup_context_menu(self) -> None:
         """Create a context menu for the tray icon."""
-        menu = QMenu()
+        menu: QMenu = QMenu()
 
         if self.start_callback:
-            start_action = menu.addAction("Start Recording")
-            if start_action:
-                start_action.triggered.connect(self.start_callback)
+            start_action: QAction = QAction("Start Recording", menu)
+            menu.addAction(start_action)  # type: ignore[call-overload]
+            cast(Any, start_action.triggered).connect(self._on_start_triggered)
 
         if self.stop_callback:
-            stop_action = menu.addAction("Stop Recording")
-            if stop_action:
-                stop_action.triggered.connect(self.stop_callback)
+            stop_action: QAction = QAction("Stop Recording", menu)
+            menu.addAction(stop_action)  # type: ignore[call-overload]
+            cast(Any, stop_action.triggered).connect(self._on_stop_triggered)
 
         menu.addSeparator()
 
         if self.quit_callback:
-            quit_action = menu.addAction("Quit")
-            if quit_action:
-                quit_action.triggered.connect(self.quit_callback)
+            quit_action: QAction = QAction("Quit", menu)
+            menu.addAction(quit_action)  # type: ignore[call-overload]
+            cast(Any, quit_action.triggered).connect(self._on_quit_triggered)
 
         self.icon.setContextMenu(menu)
 
-    def _handle_activation(self, reason: QSystemTrayIcon.ActivationReason):
+    def _handle_activation(
+        self, reason: "QSystemTrayIcon.ActivationReason"
+    ) -> None:  # type: ignore[name-defined]
         """Handle various click events on the tray icon."""
-        # Type guard to ensure we have a QApplication instance
-        if not isinstance(self.app, QApplication):
-            return
+        # App is guaranteed to be QApplication at this point
+        # No need for type guard since we set it in __init__
 
         if (
             reason == QSystemTrayIcon.ActivationReason.Trigger and self.start_callback
@@ -116,7 +134,9 @@ class TrayIconManager:
         ):  # Middle-click
             self.stop_callback()
 
-    def _create_icon(self, color_rgb: tuple) -> QIcon:
+    def _create_icon(
+        self, color_rgb: tuple[int, int, int]
+    ) -> "QIcon":  # type: ignore[name-defined]
         """
         Generates a circular QIcon with a specified fill color and black border.
 
@@ -152,7 +172,19 @@ class TrayIconManager:
         painter.end()
         return QIcon(pixmap)
 
-    def set_state(self, state: str):
+    def _on_start_triggered(self, checked: bool) -> None:
+        if self.start_callback:
+            self.start_callback()
+
+    def _on_stop_triggered(self, checked: bool) -> None:
+        if self.stop_callback:
+            self.stop_callback()
+
+    def _on_quit_triggered(self, checked: bool) -> None:
+        if self.quit_callback:
+            self.quit_callback()
+
+    def set_state(self, state: str) -> None:
         """
         Set the icon's appearance based on the application state.
 
@@ -165,7 +197,7 @@ class TrayIconManager:
             new_icon = self._create_icon(color)
             self.icon.setIcon(new_icon)
 
-    def run(self):
+    def run(self) -> int:
         """Show the icon and start the application event loop."""
         self.set_state("loading")  # Start with grey icon
         self.icon.show()
@@ -173,7 +205,7 @@ class TrayIconManager:
             return self.app.exec()
         return 1
 
-    def stop(self):
+    def stop(self) -> None:
         """Hide the icon and quit the application event loop."""
         self.icon.hide()
         if self.app:

@@ -12,7 +12,7 @@ import sys
 import logging
 import threading
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -41,7 +41,13 @@ class PlatformManager:
                 None, c_char_p, c_int, c_char_p, c_int, c_char_p
             )
 
-            def _alsa_error_handler(filename, line, function, err, fmt):
+            def _alsa_error_handler(
+                filename: Optional[bytes],
+                line: int,
+                function: Optional[bytes],
+                err: int,
+                fmt: Optional[bytes],
+            ) -> None:
                 # Only log actual errors; ignore harmless configuration probes
                 if err == 0:
                     return
@@ -137,7 +143,7 @@ class PlatformManager:
 
     def check_cuda_availability(self) -> Dict[str, Any]:
         """Check CUDA availability and return detailed information."""
-        cuda_info = {
+        cuda_info: Dict[str, Any] = {
             "available": False,
             "version": None,
             "device_count": 0,
@@ -199,9 +205,9 @@ class PlatformManager:
             logger.debug(f"Error checking float16 support: {e}")
         return False
 
-    def get_audio_backends(self) -> list:
+    def get_audio_backends(self) -> list[str]:
         """Get available audio backends for Linux."""
-        backends = []
+        backends: list[str] = []
         # Check which audio systems are available
         if self.get_executable_path("pulseaudio"):
             backends.append("pulseaudio")
