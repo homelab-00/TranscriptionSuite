@@ -1,3 +1,15 @@
+# TO-DO
+
+- Further clean up `stt_engine.py`. We need to remove:
+  - remaining wake word infrastructure
+  - the halo import and the corresponding spinners
+  - unused methods
+  - unused imports (remember to also uv remove the corresponding packages)
+  - maybe trim the logging statements from `stt_engine.py`
+- Need to make sure that arguements in `STT_ENGINE_OPTIONS.md` are all used in `stt_engine.py` (since we are removing a few of them, like openwakeword).
+
+---
+
 # Speech-to-Text Orchestrator
 
 A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses a dual-instance architecture with Faster Whisper models: a large, high-accuracy model for the final output and a small, fast model for a real-time preview. Transcriptions are automatically copied to the clipboard, ready to be pasted anywhere.
@@ -52,18 +64,10 @@ Now, run the script. It will download the source code, compile it and install it
 
 ### Step 3: Manually Install `faster-whisper`
 
-To ensure `faster-whisper` uses our custom-built library, we install it with the `--no-deps` flag. All of its dependencies (other than `ctranslate2`) are already present in the `pyproject.toml`.
+To ensure `faster-whisper` uses our custom-built library, we install it with the `--no-deps` flag. All of its dependencies (other than `ctranslate2`) are already present in `pyproject.toml`.
 
 ```bash
 uv pip install "faster-whisper==1.2.0" --no-deps
-```
-
-### Step 4: Manually Install `RealtimeSTT`
-
-`RealtimeSTT` is also installed without its dependencies (again, they're already included in the `pyproject.toml`). This is because the project has been put on hiatus so its dependency list hasn't been updated.
-
-```bash
-uv pip install "RealtimeSTT==0.3.104" --no-deps
 ```
 
 Your environment is now fully configured and ready to use.
@@ -124,7 +128,7 @@ logging:
     directory: ".." # ".." for project root, "." for SCRIPT folder
 ```
 
-For a detailed explanation of the VAD-related flags (e.g., `silero_sensitivity`), please refer to the excellent documentation at the official **[RealtimeSTT GitHub repository](https://github.com/KoljaB/RealtimeSTT)**.
+For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
 
 ### Language Configuration
 
@@ -140,7 +144,7 @@ For a complete list of language codes, refer to the [Whisper tokenizer source](h
 
 ### Model Selection
 
-The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-base` by default for its excellent speed.
+The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-medium` by default for its excellent speed.
 
 - `Systran/faster-whisper-medium` - Faster but less accurate
 - `deepdml/faster-whisper-large-v3-turbo-ct2` - Optimized for speed (best used for realtime)
@@ -187,12 +191,13 @@ All controls are accessed through the system tray icon:
 
 ---
 
-#### Architecture
+### Architecture
 
 The system is built around a dual-instance architecture to provide both real-time feedback and high-accuracy final transcriptions.
 
 - **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, manages the two transcriber instances, handles user input from the tray icon, and coordinates all other modules.
-- **Transcription Instance** (`recorder.py`): A reusable class that wraps the `RealtimeSTT` library. It is instantiated twice:
+- **Core Transcription Engine** (`stt_engine.py`, `safepipe.py`): The vendored and heavily customized core from the `RealtimeSTT` library. It handles audio processing, VAD, and transcription with a `faster-whisper` model.
+- **Transcription Instance** (`recorder.py`): A reusable class that wraps our customized `stt_engine.py`. It is instantiated twice:
   - **Preview Transcriber**: An "active" instance that directly controls the microphone. It uses a small, fast model to transcribe audio in short chunks, providing a live text preview. It also feeds raw audio data to the main transcriber and the console display.
   - **Main Transcriber**: A "passive" instance that receives audio from the previewer. It accumulates the entire recording in memory and performs a single, highly accurate transcription at the end using a large model.
 - **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, including the live text preview and audio waveform, using the 'rich' library.
@@ -201,6 +206,20 @@ The system is built around a dual-instance architecture to provide both real-tim
 - **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
 - **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
 - **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
+
+#### A Note on `warmup_audio.wav`
+
+The small `warmup_audio.wav` file plays a crucial role in the application's performance and responsiveness.
+
+**The Problem:** When a large model like Whisper is loaded onto a GPU, the very first inference task triggers several one-time setup operations that can cause a noticeable delay of a second or more. These operations include:
+
+- **CUDA Kernel Compilation:** The CUDA driver may perform a Just-In-Time (JIT) compilation of the code (kernels) that will run on the GPU.
+- **Memory Allocation:** The GPU must allocate all necessary memory buffers for the model's inputs and outputs.
+- **Algorithm Selection:** Libraries like cuDNN often benchmark different algorithms on the first run to select the fastest one for your specific hardware.
+
+**The Solution:** To prevent this initial lag from affecting the user experience, the application performs a "warm-up" transcription using this silent audio file immediately after each model is loaded. This forces all these one-time costs to occur during the initial loading phase (when the system tray icon is grey).
+
+The result is that the first *real* transcription is just as fast as every subsequent one, ensuring the application feels instantly responsive from the moment it's ready.
 
 ### System Requirements
 
@@ -254,6 +273,6 @@ This project is licensed under the MIT License. See the LICENSE file for details
 
 This project builds upon several excellent open-source projects:
 
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for its powerful and flexible transcription engine - and also inspiring this project!
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) for the excellent model optimization.
-- [OpenAI Whisper](https://github.com/openai/whisper) for the underlying speech recognition models.
+- **[RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)**: The core transcription engine was adapted and customized from this powerful and flexible library, which was also the original inspiration for this project.
+- **[Faster Whisper](https://github.com/SYSTRAN/faster-whisper)** for the excellent model optimization.
+- **[OpenAI Whisper](https://github.com/openai/whisper)** for the underlying speech recognition models.

@@ -11,33 +11,42 @@ This module:
 """
 
 import contextlib
-import os
-import sys
-import logging
 import gc
 import importlib.util
-from typing import Optional
+import logging
+import os
+import sys
+from types import ModuleType
+from typing import Any, Callable, Optional, TypedDict
 
-from utils import safe_print
 from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
+from utils import safe_print
+
+
+# Typed structure for audio device metadata
+class AudioDeviceInfo(TypedDict):
+    index: int
+    name: str
+    channels: int
+    sample_rate: float
+    is_default: bool
+
 
 # Try to import optional dependencies at module level
 try:
     import pyaudio
-
-    HAS_PYAUDIO = True
 except ImportError:
-    HAS_PYAUDIO = False
-    pyaudio = None
+    pyaudio = None  # type: ignore
+
+HAS_PYAUDIO: bool = pyaudio is not None
 
 try:
     import torch
-
-    HAS_TORCH = True
 except ImportError:
-    HAS_TORCH = False
-    torch = None
+    torch = None  # type: ignore
+
+HAS_TORCH: bool = torch is not None
 
 
 class ModelManager:
@@ -46,18 +55,18 @@ class ModelManager:
     Handles initialization, reuse, and cleanup of models to optimize resource usage.
     """
 
-    def __init__(self, config_dict, script_dir):
+    def __init__(self, config_dict: dict[str, Any], script_dir: str) -> None:
         """Initialize the model manager with configuration dictionary."""
         self.config = config_dict
         self.script_dir = script_dir
         # The manager now only creates instances on demand and doesn't hold state.
-        self.transcribers = {}
-        self.modules = {}
+        self.transcribers: dict[str, LongFormRecorder] = {}
+        self.modules: dict[str, ModuleType] = {}
         self.platform_manager = get_platform_manager()
 
-    def get_audio_devices(self):
+    def get_audio_devices(self) -> list[AudioDeviceInfo]:
         """Get available audio input devices with cross-platform compatibility."""
-        devices = []
+        devices: list[AudioDeviceInfo] = []
 
         if not HAS_PYAUDIO or pyaudio is None:
             self._log_warning("PyAudio not available for device enumeration")
@@ -83,7 +92,7 @@ class ModelManager:
 
                         # Only include input devices
                         if max_input_channels > 0:
-                            device_entry = {
+                            device_entry: AudioDeviceInfo = {
                                 "index": i,
                                 "name": str(device_info.get("name", f"Device {i}")),
                                 "channels": int(max_input_channels),
@@ -111,7 +120,7 @@ class ModelManager:
             self._log_error(f"Error enumerating audio devices: {e}")
             return devices
 
-    def _get_optimal_device(self, module_config):
+    def _get_optimal_device(self, module_config: dict[str, Any]) -> str:
         """Get optimal device configuration with fallback."""
         requested_device = module_config.get("device", "cuda")
         cuda_info = self.platform_manager.check_cuda_availability()
@@ -123,7 +132,9 @@ class ModelManager:
 
         return requested_device
 
-    def _get_optimal_compute_type(self, module_config, device):
+    def _get_optimal_compute_type(
+        self, module_config: dict[str, Any], device: str
+    ) -> str:
         """Get optimal compute type based on device and platform."""
         if device == "cpu":
             return "float32"  # CPU doesn't support float16 efficiently
@@ -134,12 +145,12 @@ class ModelManager:
 
         return requested_type
 
-    def import_module_lazily(self, module_name):
+    def import_module_lazily(self, module_name: str) -> Optional[ModuleType]:
         """Import a module only when needed."""
         if module_name in self.modules and self.modules[module_name]:
             return self.modules[module_name]
 
-        module_paths = {
+        module_paths: dict[str, str] = {
             "longform": "longform_module.py",
         }
 
@@ -166,7 +177,9 @@ class ModelManager:
             self._log_error("Error importing %s from %s: %s", module_name, filepath, e)
             return None
 
-    def _resolve_input_device_index(self, module_config, fallback=None):
+    def _resolve_input_device_index(
+        self, module_config: dict[str, Any], fallback: Optional[int] = None
+    ) -> Optional[int]:
         """Resolve the audio input device index honoring default-device flags."""
         use_default = module_config.get("use_default_input", True)
 
@@ -182,7 +195,7 @@ class ModelManager:
 
         return fallback
 
-    def get_default_input_device_index(self):
+    def get_default_input_device_index(self) -> Optional[int]:
         """Get the index of the default input device with better error handling."""
         if not HAS_PYAUDIO or pyaudio is None:
             self._log_error("PyAudio not available")
@@ -219,12 +232,13 @@ class ModelManager:
     def initialize_transcriber(
         self,
         config_section: str,
-        callbacks: dict | None = None,
+        callbacks: dict[str, Callable[..., Any]] | None = None,
         use_microphone: bool = False,
     ) -> Optional[LongFormRecorder]:
         """Initialize a transcriber with an override for microphone usage."""
-        if callbacks is None:
-            callbacks = {}
+        callback_map: dict[str, Callable[..., Any]] = (
+            callbacks if callbacks is not None else {}
+        )
 
         try:
             # Get configuration for this module
@@ -238,7 +252,7 @@ class ModelManager:
 
             # If using microphone, resolve the device index from the global audio config
             if use_microphone:
-                audio_config = self.config.get("audio", {})
+                audio_config: dict[str, Any] = self.config.get("audio", {})
                 if audio_config.get("use_default_input", True):
                     device_index = self.get_default_input_device_index()
                 else:
@@ -246,7 +260,7 @@ class ModelManager:
                 instance_config["input_device_index"] = device_index
 
             # Pass the specific config section to the recorder
-            recorder = LongFormRecorder(config=instance_config, **callbacks)
+            recorder = LongFormRecorder(config=instance_config, **callback_map)
 
             self._log_info("%s recorder initialized successfully", config_section)
             return recorder
@@ -261,7 +275,7 @@ class ModelManager:
             )
             return None
 
-    def cleanup_all_models(self):
+    def cleanup_all_models(self) -> None:
         """
         Properly clean up models. This is now handled by the recorder's own
         clean_up method, but we can add extra cleanup here if needed.
@@ -278,14 +292,14 @@ class ModelManager:
 
         self._log_info("All models cleaned up")
 
-    def _log_info(self, message, *args):
+    def _log_info(self, message: str, *args: Any) -> None:
         """Log an info message."""
         logging.info(message, *args)
 
-    def _log_warning(self, message, *args):
+    def _log_warning(self, message: str, *args: Any) -> None:
         """Log a warning message."""
         logging.warning(message, *args)
 
-    def _log_error(self, message, *args, **kwargs):
+    def _log_error(self, message: str, *args: Any, **kwargs: Any) -> None:
         """Log an error message."""
         logging.error(message, *args, **kwargs)

@@ -11,8 +11,7 @@ import platform
 import subprocess
 import sys
 import time
-from importlib.metadata import version as metadata_version, PackageNotFoundError
-from typing import Dict, Any
+from typing import Any, Dict
 
 from platform_utils import PlatformManager
 from utils import safe_print
@@ -21,26 +20,26 @@ from utils import safe_print
 try:
     import torch
 
-    TORCH_AVAILABLE = True
+    _torch_available = True
 except ImportError:
-    TORCH_AVAILABLE = False
+    _torch_available = False
     torch = None
 
 try:
-    import faster_whisper
+    import faster_whisper  # type: ignore
 
-    FASTER_WHISPER_AVAILABLE = True
+    _faster_whisper_available = True
 except ImportError:
-    FASTER_WHISPER_AVAILABLE = False
+    _faster_whisper_available = False
     faster_whisper = None
 
 # Try to import Rich for prettier console output
 try:
     from rich.panel import Panel
 
-    HAS_RICH = True
+    _has_rich = True
 except ImportError:
-    HAS_RICH = False
+    _has_rich = False
     Panel = None
 
 
@@ -54,18 +53,13 @@ class SystemDiagnostics:
     def get_version_info(self) -> Dict[str, str]:
         """Get version information for key dependencies."""
         versions = {
-            "torch": torch.__version__ if TORCH_AVAILABLE and torch else "Not installed",
+            "torch": torch.__version__ if _torch_available and torch else "Not installed",
             "faster_whisper": (
                 getattr(faster_whisper, "__version__", "Unknown")
-                if FASTER_WHISPER_AVAILABLE and faster_whisper
+                if _faster_whisper_available and faster_whisper
                 else "Not installed"
             ),
         }
-        try:
-            versions["RealtimeSTT"] = metadata_version("realtimestt")
-        except PackageNotFoundError:
-            versions["RealtimeSTT"] = "Not installed"
-
         return versions
 
     def get_hardware_info(self) -> Dict[str, str]:
@@ -87,7 +81,7 @@ class SystemDiagnostics:
             logging.error("Error getting CPU info: %s", e)
 
         # Get GPU info from PyTorch
-        if TORCH_AVAILABLE and torch:
+        if _torch_available and torch:
             try:
                 if torch.cuda.is_available():
                     hardware_info["gpu"] = torch.cuda.get_device_name(0)
@@ -104,19 +98,20 @@ class SystemDiagnostics:
         hardware_info = self.get_hardware_info()
         cuda_info = self.platform_manager.check_cuda_availability()
         platform_info = f"Platform: {self.platform_manager.platform.title()}"
-        long_form_language = self.config.get("longform", {}).get("language", "N/A")
+        main_transcriber_language = self.config.get("main_transcriber", {}).get(
+            "language", "N/A"
+        )
 
-        if HAS_RICH and Panel:
+        if _has_rich and Panel:
             panel_content = (
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
                 f"[bold yellow]Control[/bold yellow] the system by clicking "
                 f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
                 f"[bold yellow]Selected Language:[/bold yellow]\n"
-                f"  Long Form: {long_form_language}\n\n"
+                f"  Main Transcriber: {main_transcriber_language}\n\n"
                 f"[bold yellow]Python Versions:[/bold yellow]\n"
                 f"  Python: {sys.version.split()[0]}\n"
                 f"  PyTorch: {version_info['torch']}\n"
-                f"  RealtimeSTT: {version_info['RealtimeSTT']}\n"
                 f"  Faster Whisper: {version_info['faster_whisper']}\n"
                 f"[bold yellow]Platform & CUDA Info:[/bold yellow]\n"
                 f"  {platform_info}\n"
@@ -135,11 +130,10 @@ class SystemDiagnostics:
         else:
             safe_print("=" * 50)
             safe_print("Speech-to-Text Orchestrator Running")
-            safe_print(f"  Selected Language: {long_form_language}")
+            safe_print(f"  Selected Language: {main_transcriber_language}")
             safe_print("-" * 50)
             safe_print("Versions:")
             safe_print(f"  PyTorch: {version_info['torch']}")
-            safe_print(f"  RealtimeSTT: {version_info['RealtimeSTT']}")
             safe_print(f"  Faster Whisper: {version_info['faster_whisper']}")
             safe_print("-" * 50)
             safe_print("Hardware:")
