@@ -16,7 +16,7 @@ except ImportError as import_error:
 import os
 import logging
 import copy
-from typing import Dict, Any, cast
+from typing import Any, Dict, Mapping, MutableMapping, cast
 from pathlib import Path
 
 from platform_utils import get_platform_manager
@@ -37,7 +37,7 @@ class ConfigManager:
         """Load configuration from file or create it if it doesn't exist."""
         script_dir = Path(__file__).resolve().parent
         # Define default configuration
-        default_config = {
+        default_config: Dict[str, Any] = {
             "main_transcriber": {
                 "model": "Systran/faster-whisper-large-v3",
                 "language": "en",
@@ -94,13 +94,28 @@ class ConfigManager:
         if self.config_path.exists():
             try:
                 with self.config_path.open("r", encoding="utf-8") as config_file:
-                    loaded_config = yaml.safe_load(config_file) or {}
+                    loaded_config_raw = yaml.safe_load(config_file)
+
+                loaded_config: Dict[str, Any] = {}
+                if isinstance(loaded_config_raw, dict):
+                    loaded_config = cast(Dict[str, Any], loaded_config_raw)
+                elif loaded_config_raw is not None:
+                    logging.warning(
+                        "Loaded configuration is not a mapping. Ignoring unexpected value of type %s.",
+                        type(loaded_config_raw).__name__,
+                    )
 
                 # Deep merge loaded config into defaults to ensure all keys exist
-                merged_config = copy.deepcopy(default_config)
+                merged_config: Dict[str, Any] = copy.deepcopy(default_config)
                 for key, value in loaded_config.items():
-                    if key in merged_config and isinstance(merged_config[key], dict):
-                        merged_config[key].update(value)
+                    merged_value = merged_config.get(key)
+                    if (
+                        isinstance(merged_value, MutableMapping)
+                        and isinstance(value, Mapping)
+                    ):
+                        merged_value_map = cast(MutableMapping[str, Any], merged_value)
+                        incoming_mapping = cast(Mapping[str, Any], value)
+                        merged_value_map.update(incoming_mapping)
                     else:
                         merged_config[key] = value
 
@@ -135,9 +150,14 @@ class ConfigManager:
     def _expand_config_paths(self, value: Any) -> Any:
         """Recursively expand environment variables and user home in config values."""
         if isinstance(value, dict):
-            return {k: self._expand_config_paths(v) for k, v in value.items()}
+            typed_value = cast(Dict[str, Any], value)
+            return {
+                key: self._expand_config_paths(item)
+                for key, item in typed_value.items()
+            }
         if isinstance(value, list):
-            return [self._expand_config_paths(item) for item in value]
+            typed_list = cast(list[Any], value)
+            return [self._expand_config_paths(item) for item in typed_list]
         if isinstance(value, str):
             expanded = os.path.expandvars(value)
             return os.path.expanduser(expanded)

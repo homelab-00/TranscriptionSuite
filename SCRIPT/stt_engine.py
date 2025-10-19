@@ -23,36 +23,37 @@ Features:
   as possible.
 
 Original Author: Kolja Beigel
-Integrated by: homelab00
+Integrated by: homelab-00
 """
 
-from faster_whisper import BatchedInferencePipeline
-from typing import Iterable, List, Optional, Union
-import torch.multiprocessing as mp
-from scipy.signal import resample
-import signal as system_signal
-from ctypes import c_bool
-from scipy import signal
-from safepipe import SafePipe
-import soundfile as sf
-import faster_whisper
-import collections
-import numpy as np
-import traceback
-import threading
-import webrtcvad
-import datetime
-import platform
-import logging
 import base64
-import queue
-import torch
-import halo
-import time
+import collections
 import copy
-import os
-import re
+import datetime
 import gc
+import logging
+import os
+import platform
+import queue
+import re
+import signal as system_signal
+import threading
+import time
+import traceback
+from ctypes import c_bool
+from typing import Any, Callable, Iterable, List, Optional, Union
+
+import faster_whisper  # type: ignore
+import halo  # type: ignore
+import numpy as np
+import soundfile as sf  # type: ignore
+import torch
+import torch.multiprocessing as mp
+import webrtcvad  # type: ignore
+from faster_whisper import BatchedInferencePipeline  # type: ignore
+from safepipe import SafePipe
+from scipy import signal  # type: ignore
+from scipy.signal import resample  # type: ignore
 
 # Named logger for this module.
 logger = logging.getLogger("realtimestt")
@@ -82,30 +83,29 @@ SAMPLE_RATE = 16000
 BUFFER_SIZE = 512
 INT16_MAX_ABS_VALUE = 32768.0
 
-INIT_HANDLE_BUFFER_OVERFLOW = False
-if platform.system() != "Darwin":
-    INIT_HANDLE_BUFFER_OVERFLOW = True
+# Determine default buffer overflow handling based on platform
+INIT_HANDLE_BUFFER_OVERFLOW: bool = platform.system() != "Darwin"
 
 
 class TranscriptionWorker:
     def __init__(
         self,
-        conn,
-        stdout_pipe,
-        model_path,
-        download_root,
-        compute_type,
-        gpu_device_index,
-        device,
-        ready_event,
-        shutdown_event,
-        interrupt_stop_event,
-        beam_size,
-        initial_prompt,
-        suppress_tokens,
-        batch_size,
-        faster_whisper_vad_filter,
-        normalize_audio,
+        conn: Any,
+        stdout_pipe: Any,
+        model_path: str,
+        download_root: Optional[str],
+        compute_type: str,
+        gpu_device_index: Union[int, List[int]],
+        device: str,
+        ready_event: Any,
+        shutdown_event: Any,
+        interrupt_stop_event: Any,
+        beam_size: int,
+        initial_prompt: Optional[Union[str, Iterable[int]]],
+        suppress_tokens: Optional[List[int]],
+        batch_size: int,
+        faster_whisper_vad_filter: bool,
+        normalize_audio: bool,
     ):
         self.conn = conn
         self.stdout_pipe = stdout_pipe
@@ -123,16 +123,16 @@ class TranscriptionWorker:
         self.batch_size = batch_size
         self.faster_whisper_vad_filter = faster_whisper_vad_filter
         self.normalize_audio = normalize_audio
-        self.queue = queue.Queue()
+        self.queue: queue.Queue[tuple[Any, str, bool]] = queue.Queue()
 
-    def custom_print(self, *args, **kwargs):
+    def custom_print(self, *args: Any, **kwargs: Any) -> None:
         message = " ".join(map(str, args))
         try:
             self.stdout_pipe.send(message)
         except (BrokenPipeError, EOFError, OSError):
             pass
 
-    def poll_connection(self):
+    def poll_connection(self) -> None:
         while not self.shutdown_event.is_set():
             try:
                 # Use a longer timeout to reduce polling frequency
@@ -146,7 +146,7 @@ class TranscriptionWorker:
                 logging.error(f"Error receiving data from connection: {e}", exc_info=True)
                 time.sleep(TIME_SLEEP)
 
-    def run(self):
+    def run(self) -> None:
         if __name__ == "__main__":
             system_signal.signal(system_signal.SIGINT, system_signal.SIG_IGN)
             __builtins__["print"] = self.custom_print
@@ -170,9 +170,13 @@ class TranscriptionWorker:
             # Run a warm-up transcription
             current_dir = os.path.dirname(os.path.realpath(__file__))
             warmup_audio_path = os.path.join(current_dir, "warmup_audio.wav")
-            warmup_audio_data, _ = sf.read(warmup_audio_path, dtype="float32")
-            segments, info = model.transcribe(
-                warmup_audio_data, language="en", beam_size=1
+            warmup_audio_data, _ = sf.read(  # type: ignore[misc]
+                warmup_audio_path, dtype="float32"
+            )
+            segments, info = model.transcribe(  # type: ignore[misc]
+                audio=warmup_audio_data,  # type: ignore[arg-type]
+                language="en",
+                beam_size=1,
             )
             # Consume the segments to complete warmup
             _ = " ".join(segment.text for segment in segments)
@@ -195,17 +199,19 @@ class TranscriptionWorker:
         try:
             while not self.shutdown_event.is_set():
                 try:
-                    audio, language, use_prompt = self.queue.get(timeout=0.1)
+                    audio, language, use_prompt = self.queue.get(
+                        timeout=0.1
+                    )  # type: ignore
                     try:
                         logging.debug(f"Transcribing audio with language {language}")
                         start_t = time.time()
 
                         # normalize audio to -0.95 dBFS
-                        if audio is not None and audio.size > 0:
+                        if audio is not None and audio.size > 0:  # type: ignore
                             if self.normalize_audio:
-                                peak = np.max(np.abs(audio))
+                                peak = np.max(np.abs(audio))  # type: ignore
                                 if peak > 0:
-                                    audio = (audio / peak) * 0.95
+                                    audio = (audio / peak) * 0.95  # type: ignore
                         else:
                             logging.error("Received None audio for transcription")
                             self.conn.send(
@@ -218,7 +224,7 @@ class TranscriptionWorker:
                             prompt = self.initial_prompt if self.initial_prompt else None
 
                         if self.batch_size > 0:
-                            segments, info = model.transcribe(
+                            segments, info = model.transcribe(  # type: ignore
                                 audio,
                                 language=language if language else None,
                                 beam_size=self.beam_size,
@@ -227,7 +233,7 @@ class TranscriptionWorker:
                                 vad_filter=self.faster_whisper_vad_filter,
                             )
                         else:
-                            segments, info = model.transcribe(
+                            segments, info = model.transcribe(  # type: ignore
                                 audio,
                                 language=language if language else None,
                                 beam_size=self.beam_size,
@@ -290,23 +296,23 @@ class AudioToTextRecorder:
         input_device_index: Optional[int] = None,
         gpu_device_index: Union[int, List[int]] = 0,
         device: str = "cuda",
-        on_recording_start=None,
-        on_recording_stop=None,
-        on_transcription_start=None,
-        ensure_sentence_starting_uppercase=True,
-        ensure_sentence_ends_with_period=True,
-        use_microphone=True,
-        spinner=True,
-        level=logging.WARNING,
+        on_recording_start: Optional[Callable[..., Any]] = None,
+        on_recording_stop: Optional[Callable[..., Any]] = None,
+        on_transcription_start: Optional[Callable[..., Any]] = None,
+        ensure_sentence_starting_uppercase: bool = True,
+        ensure_sentence_ends_with_period: bool = True,
+        use_microphone: bool = True,
+        spinner: bool = True,
+        level: int = logging.WARNING,
         batch_size: int = 16,
         # Realtime transcription parameters
-        enable_realtime_transcription=False,
-        use_main_model_for_realtime=False,
-        realtime_model_type=INIT_MODEL_TRANSCRIPTION_REALTIME,
-        realtime_processing_pause=INIT_REALTIME_PROCESSING_PAUSE,
-        init_realtime_after_seconds=INIT_REALTIME_INITIAL_PAUSE,
-        on_realtime_transcription_update=None,
-        on_realtime_transcription_stabilized=None,
+        enable_realtime_transcription: bool = False,
+        use_main_model_for_realtime: bool = False,
+        realtime_model_type: str = INIT_MODEL_TRANSCRIPTION_REALTIME,
+        realtime_processing_pause: float = INIT_REALTIME_PROCESSING_PAUSE,
+        init_realtime_after_seconds: float = INIT_REALTIME_INITIAL_PAUSE,
+        on_realtime_transcription_update: Optional[Callable[..., Any]] = None,
+        on_realtime_transcription_stabilized: Optional[Callable[..., Any]] = None,
         realtime_batch_size: int = 16,
         # Voice activation parameters
         silero_sensitivity: float = INIT_SILERO_SENSITIVITY,
@@ -317,14 +323,14 @@ class AudioToTextRecorder:
         min_length_of_recording: float = (INIT_MIN_LENGTH_OF_RECORDING),
         min_gap_between_recordings: float = (INIT_MIN_GAP_BETWEEN_RECORDINGS),
         pre_recording_buffer_duration: float = (INIT_PRE_RECORDING_BUFFER_DURATION),
-        on_vad_start=None,
-        on_vad_stop=None,
-        on_vad_detect_start=None,
-        on_vad_detect_stop=None,
-        on_turn_detection_start=None,
-        on_turn_detection_stop=None,
-        on_recorded_chunk=None,
-        debug_mode=False,
+        on_vad_start: Optional[Callable[..., Any]] = None,
+        on_vad_stop: Optional[Callable[..., Any]] = None,
+        on_vad_detect_start: Optional[Callable[..., Any]] = None,
+        on_vad_detect_stop: Optional[Callable[..., Any]] = None,
+        on_turn_detection_start: Optional[Callable[..., Any]] = None,
+        on_turn_detection_stop: Optional[Callable[..., Any]] = None,
+        on_recorded_chunk: Optional[Callable[..., Any]] = None,
+        debug_mode: bool = False,
         handle_buffer_overflow: bool = INIT_HANDLE_BUFFER_OVERFLOW,
         beam_size: int = 5,
         beam_size_realtime: int = 3,
@@ -623,7 +629,7 @@ class AudioToTextRecorder:
         self.realtime_batch_size = realtime_batch_size
 
         self.level = level
-        self.audio_queue = mp.Queue()
+        self.audio_queue: mp.Queue[Union[bytes, bytearray]] = mp.Queue()
         self.buffer_size = buffer_size
         self.sample_rate = sample_rate
         self.recording_start_time = 0
@@ -646,6 +652,8 @@ class AudioToTextRecorder:
         self.is_silero_speech_active = False
         self.recording_thread = None
         self.realtime_thread = None
+        self.reader_process: Optional[Union[threading.Thread, mp.Process]] = None
+        self.transcript_process: Optional[Union[threading.Thread, mp.Process]] = None
         self.audio_interface = None
         self.audio = None
         self.stream = None
@@ -705,7 +713,7 @@ class AudioToTextRecorder:
 
         try:
             # Only set the start method if it hasn't been set already
-            if mp.get_start_method(allow_none=True) is None:
+            if mp.get_start_method(allow_none=True) is None:  # type: ignore
                 mp.set_start_method("spawn")
         except RuntimeError as e:
             logger.info(f"Start method has already been set. Details: {e}")
@@ -759,7 +767,7 @@ class AudioToTextRecorder:
                 f" sample rate: {self.sample_rate}"
                 f" buffer size: {self.buffer_size}"
             )
-            self.reader_process = self._start_thread(
+            self.reader_process = self._start_thread(  # type: ignore
                 target=AudioToTextRecorder._audio_data_worker,
                 args=(
                     self.audio_queue,
@@ -798,13 +806,16 @@ class AudioToTextRecorder:
                 # Run a warm-up transcription
                 current_dir = os.path.dirname(os.path.realpath(__file__))
                 warmup_audio_path = os.path.join(current_dir, "warmup_audio.wav")
-                warmup_audio_data, _ = sf.read(warmup_audio_path, dtype="float32")
-                segments, info = self.realtime_model_type.transcribe(
-                    warmup_audio_data, language="en", beam_size=1
+                warmup_audio_data, _ = sf.read(  # type: ignore[misc]
+                    warmup_audio_path, dtype="float32"
                 )
-                model_warmup_transcription = " ".join(
-                    segment.text for segment in segments
-                )
+                segments, _ = self.realtime_model_type.transcribe(
+                    audio=warmup_audio_data,
+                    language="en",
+                    beam_size=1,
+                )  # type: ignore[misc]
+                # Consume segments to complete warmup
+                _ = " ".join(segment.text for segment in segments)
             except Exception as e:
                 logger.exception(
                     "Error initializing faster_whisper "
@@ -823,7 +834,7 @@ class AudioToTextRecorder:
                 "Initializing WebRTC voice with " f"Sensitivity {webrtc_sensitivity}"
             )
             self.webrtc_vad_model = webrtcvad.Vad()
-            self.webrtc_vad_model.set_mode(webrtc_sensitivity)
+            self.webrtc_vad_model.set_mode(webrtc_sensitivity)  # type: ignore
 
         except Exception as e:
             logger.exception(
@@ -837,7 +848,7 @@ class AudioToTextRecorder:
 
         # Setup voice activity detection model Silero VAD
         try:
-            self.silero_vad_model = torch.hub.load(
+            self.silero_vad_model, _ = torch.hub.load(  # type: ignore
                 repo_or_dir="snakers4/silero-vad",
                 model="silero_vad",
                 verbose=False,
@@ -854,14 +865,14 @@ class AudioToTextRecorder:
             "Silero VAD voice activity detection " "engine initialized successfully"
         )
 
-        self.audio_buffer = collections.deque(
+        self.audio_buffer: collections.deque[Union[bytes, bytearray]] = collections.deque(
             maxlen=int(
                 (self.sample_rate // self.buffer_size)
                 * self.pre_recording_buffer_duration
             )
         )
-        self.last_words_buffer = collections.deque(
-            maxlen=int((self.sample_rate // self.buffer_size) * 0.3)
+        self.last_words_buffer: collections.deque[Union[bytes, bytearray]] = (
+            collections.deque(maxlen=int((self.sample_rate // self.buffer_size) * 0.3))
         )
         self.frames = []
         self.last_frames = []
@@ -893,7 +904,9 @@ class AudioToTextRecorder:
 
         logger.debug("RealtimeSTT initialization completed successfully")
 
-    def _start_thread(self, target=None, args=()):
+    def _start_thread(
+        self, target: Optional[Callable[..., Any]] = None, args: tuple[Any, ...] = ()
+    ) -> Union[threading.Thread, Any]:
         """
         Implement a consistent threading model across the library.
 
@@ -916,7 +929,7 @@ class AudioToTextRecorder:
             thread.start()
             return thread
 
-    def _read_stdout(self):
+    def _read_stdout(self) -> None:
         while not self.shutdown_event.is_set():
             try:
                 if self.parent_stdout_pipe.poll(0.1):
@@ -935,11 +948,11 @@ class AudioToTextRecorder:
                 break
             time.sleep(0.1)
 
-    def _transcription_worker(*args, **kwargs):
+    def _transcription_worker(*args: Any, **kwargs: Any) -> None:
         worker = TranscriptionWorker(*args, **kwargs)
         worker.run()
 
-    def _run_callback(self, cb, *args, **kwargs):
+    def _run_callback(self, cb: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
         if self.start_callback_in_new_thread:
             # Run the callback in a new thread to avoid blocking the main thread
             threading.Thread(target=cb, args=args, kwargs=kwargs, daemon=True).start()
@@ -949,14 +962,14 @@ class AudioToTextRecorder:
 
     @staticmethod
     def _audio_data_worker(
-        audio_queue,
-        target_sample_rate,
-        buffer_size,
-        input_device_index,
-        shutdown_event,
-        interrupt_stop_event,
-        use_microphone,
-    ):
+        audio_queue: Any,
+        target_sample_rate: int,
+        buffer_size: int,
+        input_device_index: Optional[int],
+        shutdown_event: Any,
+        interrupt_stop_event: Any,
+        use_microphone: Any,
+    ) -> None:
         """
         Worker method that handles the audio recording process.
 
@@ -983,27 +996,30 @@ class AudioToTextRecorder:
         Raises:
             Exception: If there is an error while initializing the audio recording.
         """
-        import pyaudio
         import numpy as np
-        from scipy import signal
+        import pyaudio
+        from scipy import signal  # type: ignore[import-untyped]
 
         if __name__ == "__main__":
             system_signal.signal(system_signal.SIGINT, system_signal.SIG_IGN)
 
-        def get_highest_sample_rate(audio_interface, device_index):
+        def get_highest_sample_rate(audio_interface: Any, device_index: int) -> int:
             """Get the highest supported sample rate for the specified device."""
             try:
-                device_info = audio_interface.get_device_info_by_index(device_index)
+                device_info = audio_interface.get_device_info_by_index(
+                    device_index
+                )  # type: ignore
                 logger.debug(
                     "Retrieving highest sample rate for device index %s: %s",
                     device_index,
-                    device_info,
+                    device_info,  # type: ignore
                 )
-                max_rate = int(device_info["defaultSampleRate"])
+                max_rate = int(device_info["defaultSampleRate"])  # type: ignore
 
-                if "supportedSampleRates" in device_info:
+                if "supportedSampleRates" in device_info:  # type: ignore
                     supported_rates = [
-                        int(rate) for rate in device_info["supportedSampleRates"]
+                        int(rate)
+                        for rate in device_info["supportedSampleRates"]  # type: ignore
                     ]
                     if supported_rates:
                         max_rate = max(supported_rates)
@@ -1018,15 +1034,20 @@ class AudioToTextRecorder:
                 logger.warning(f"Failed to get highest sample rate: {e}")
                 return 48000  # Fallback to a common high sample rate
 
-        def initialize_audio_stream(audio_interface, sample_rate, chunk_size):
+        def initialize_audio_stream(
+            audio_interface: Any, sample_rate: int, chunk_size: int
+        ) -> Any:
             nonlocal input_device_index
 
-            def validate_device(device_index):
+            def validate_device(device_index: int) -> bool:
                 """Validate that the device exists and is actually available for input."""
                 try:
-                    device_info = audio_interface.get_device_info_by_index(device_index)
+                    device_info = audio_interface.get_device_info_by_index(
+                        device_index
+                    )  # type: ignore
                     logger.debug(
-                        f"Validating device index {device_index} with info: {device_info}"
+                        f"Validating device index {device_index} "
+                        f"with info: {device_info}"  # type: ignore
                     )
                     if not device_info.get("maxInputChannels", 0) > 0:
                         logger.debug(
@@ -1067,7 +1088,7 @@ class AudioToTextRecorder:
             while not shutdown_event.is_set():
                 try:
                     # First, get a list of all available input devices
-                    input_devices = []
+                    input_devices: List[int] = []
                     device_count = audio_interface.get_device_count()
                     logger.debug(
                         f"Found {device_count} total audio devices on the system."
@@ -1076,7 +1097,7 @@ class AudioToTextRecorder:
                         try:
                             device_info = audio_interface.get_device_info_by_index(i)
                             if device_info.get("maxInputChannels", 0) > 0:
-                                input_devices.append(i)
+                                input_devices.append(i)  # type: ignore
                         except Exception as e:
                             logger.debug(
                                 f"Could not retrieve info for device index {i}: {e}"
@@ -1112,22 +1133,22 @@ class AudioToTextRecorder:
                                 "checking other devices..."
                             )
                             for device_index in input_devices:
-                                if validate_device(device_index):
-                                    input_device_index = device_index
+                                if validate_device(device_index):  # type: ignore
+                                    input_device_index = device_index  # type: ignore
                                     logger.debug(f"Device {input_device_index} selected.")
                                     break
                             else:
                                 raise Exception("No working input devices found")
 
                     # Validate the selected device one final time
-                    if not validate_device(input_device_index):
+                    if not validate_device(input_device_index):  # type: ignore
                         raise Exception("Selected device validation failed")
 
                     # If we get here, we have a validated device
                     logger.debug(
                         "Opening stream with device index %s, "
                         "sample_rate=%s, chunk_size=%s",
-                        input_device_index,
+                        input_device_index,  # type: ignore
                         sample_rate,
                         chunk_size,
                     )
@@ -1143,7 +1164,7 @@ class AudioToTextRecorder:
                     logger.info(
                         "Microphone connected and validated (device index: %s, "
                         "sample rate: %s, chunk size: %s)",
-                        input_device_index,
+                        input_device_index,  # type: ignore
                         sample_rate,
                         chunk_size,
                     )
@@ -1159,12 +1180,14 @@ class AudioToTextRecorder:
                     time.sleep(3)  # Wait before retrying
                     continue
 
-        def preprocess_audio(chunk, original_sample_rate, target_sample_rate):
+        def preprocess_audio(
+            chunk: Any, original_sample_rate: int, target_sample_rate: int
+        ) -> bytes:
             """Preprocess audio chunk similar to feed_audio method."""
             if isinstance(chunk, np.ndarray):
                 # Handle stereo to mono conversion if necessary
                 if chunk.ndim == 2:
-                    chunk = np.mean(chunk, axis=1)
+                    chunk = np.mean(chunk, axis=1)  # type: ignore
 
                 # Resample to target_sample_rate if necessary
                 if original_sample_rate != target_sample_rate:
@@ -1174,11 +1197,13 @@ class AudioToTextRecorder:
                         target_sample_rate,
                     )
                     num_samples = int(
-                        len(chunk) * target_sample_rate / original_sample_rate
+                        len(chunk)  # type: ignore[arg-type]
+                        * target_sample_rate
+                        / original_sample_rate
                     )
-                    chunk = signal.resample(chunk, num_samples)
+                    chunk = signal.resample(chunk, num_samples)  # type: ignore
 
-                chunk = np.asarray(chunk).astype(np.int16)
+                chunk = np.asarray(chunk).astype(np.int16)  # type: ignore
             else:
                 # If chunk is bytes, convert to numpy array
                 chunk = np.frombuffer(chunk, dtype=np.int16)
@@ -1191,9 +1216,11 @@ class AudioToTextRecorder:
                         target_sample_rate,
                     )
                     num_samples = int(
-                        len(chunk) * target_sample_rate / original_sample_rate
+                        len(chunk)
+                        * target_sample_rate
+                        / original_sample_rate  # type: ignore
                     )
-                    chunk = signal.resample(chunk, num_samples)
+                    chunk = signal.resample(chunk, num_samples)  # type: ignore
                     chunk = np.asarray(chunk).astype(np.int16)
 
             return chunk.tobytes()
@@ -1203,7 +1230,7 @@ class AudioToTextRecorder:
         device_sample_rate = None
         chunk_size = 1024  # Increased chunk size for better performance
 
-        def setup_audio():
+        def setup_audio() -> bool:
             nonlocal audio_interface, stream, device_sample_rate, input_device_index
             try:
                 if audio_interface is None:
@@ -1213,7 +1240,7 @@ class AudioToTextRecorder:
                 if input_device_index is None:
                     try:
                         default_device = audio_interface.get_default_input_device_info()
-                        input_device_index = default_device["index"]
+                        input_device_index = default_device["index"]  # type: ignore
                         logger.debug(
                             "No device index supplied; using default device %s",
                             input_device_index,
@@ -1302,8 +1329,8 @@ class AudioToTextRecorder:
                     data = stream.read(chunk_size, exception_on_overflow=False)
 
                     if use_microphone.value:
-                        processed_data = preprocess_audio(
-                            data, device_sample_rate, target_sample_rate
+                        processed_data = preprocess_audio(  # type: ignore
+                            data, device_sample_rate, target_sample_rate  # type: ignore
                         )
                         buffer += processed_data
 
@@ -1401,8 +1428,8 @@ class AudioToTextRecorder:
         self.stop_recording_on_voice_deactivity = False
         self.interrupt_stop_event.set()
         if self.state != "inactive":  # if inactive, was_interrupted will never be set
-            self.was_interrupted.wait()
-            self._set_state("transcribing")
+            self.was_interrupted.wait()  # type: ignore
+            self._set_state("transcribing")  # type: ignore
         self.was_interrupted.clear()
         if self.is_recording:  # if recording, make sure to stop the recorder
             self.stop()
@@ -1428,8 +1455,8 @@ class AudioToTextRecorder:
                 self.listen_start = time.time()
 
             # If not yet started recording, wait for voice activity to initiate.
-            if not self.is_recording and not self.frames:
-                self._set_state("listening")
+            if not self.is_recording and not self.frames:  # type: ignore
+                self._set_state("listening")  # type: ignore
                 self.start_recording_on_voice_activity = True
 
                 # Wait until recording starts
@@ -1449,15 +1476,17 @@ class AudioToTextRecorder:
                     if self.stop_recording_event.wait(timeout=0.02):
                         break
 
-            frames = self.frames
-            if len(frames) == 0:
-                frames = self.last_frames
+            frames = self.frames  # type: ignore
+            if len(frames) == 0:  # type: ignore
+                frames = self.last_frames  # type: ignore
 
             # Calculate samples needed for backdating resume
             samples_to_keep = int(self.sample_rate * self.backdate_resume_seconds)
 
             # First convert all current frames to audio array
-            full_audio_array = np.frombuffer(b"".join(frames), dtype=np.int16)
+            full_audio_array = np.frombuffer(
+                b"".join(frames), dtype=np.int16  # type: ignore[arg-type]
+            )
             full_audio = full_audio_array.astype(np.float32) / INT16_MAX_ABS_VALUE
 
             # Calculate how many samples we need to keep for backdating resume
@@ -1478,7 +1507,7 @@ class AudioToTextRecorder:
                 for i in range(0, len(frame_bytes), FRAME_SIZE):
                     frame = frame_bytes[i : i + FRAME_SIZE]
                     if frame:  # Only add non-empty frames
-                        frames_to_read.append(frame)
+                        frames_to_read.append(frame)  # type: ignore
             else:
                 frames_to_read = []
 
@@ -1499,9 +1528,9 @@ class AudioToTextRecorder:
                 self.audio = full_audio
                 logger.debug(f"No samples removed, final audio length: {len(self.audio)}")
 
-            self.frames.clear()
-            self.last_frames.clear()
-            self.frames.extend(frames_to_read)
+            self.frames.clear()  # type: ignore
+            self.last_frames.clear()  # type: ignore
+            self.frames.extend(frames_to_read)  # type: ignore[arg-type]
 
             # Reset backdating parameters
             self.backdate_stop_seconds = 0.0
@@ -1516,7 +1545,9 @@ class AudioToTextRecorder:
             self.shutdown()
             raise  # Re-raise the exception after cleanup
 
-    def perform_final_transcription(self, audio_bytes=None, use_prompt=True):
+    def perform_final_transcription(
+        self, audio_bytes: Optional[Any] = None, use_prompt: bool = True
+    ) -> str:
         start_time = 0
         with self.transcription_lock:
             if audio_bytes is None:
@@ -1538,6 +1569,8 @@ class AudioToTextRecorder:
                     )
                     self.transcribe_count += 1
 
+                status = "error"
+                result: Any = "No transcription result received"
                 while self.transcribe_count > 0:
                     logger.debug(
                         "Receive from parent_transcription_pipe after "
@@ -1635,8 +1668,8 @@ class AudioToTextRecorder:
 
     def text(
         self,
-        on_transcription_finished=None,
-    ):
+        on_transcription_finished: Optional[Callable[..., Any]] = None,
+    ) -> Optional[str]:
         """
         Transcribes audio captured by this class instance
         using the `faster_whisper` model.
@@ -1674,12 +1707,13 @@ class AudioToTextRecorder:
 
         if on_transcription_finished:
             threading.Thread(
-                target=on_transcription_finished, args=(self.transcribe(),)
+                target=on_transcription_finished,
+                args=(self.transcribe(),),  # type: ignore[arg-type]
             ).start()
         else:
             return self.transcribe()
 
-    def format_number(self, num):
+    def format_number(self, num: float) -> str:
         # Convert the number to a string
         num_str = f"{num:.10f}"  # Ensure precision is sufficient
         # Split the number into integer and decimal parts
@@ -1689,7 +1723,9 @@ class AudioToTextRecorder:
         result = f"{integer_part[-2:]}.{decimal_part[:2]}"
         return result
 
-    def start(self, frames=None):
+    def start(
+        self, frames: Optional[List[Union[bytes, bytearray]]] = None
+    ) -> "AudioToTextRecorder":
         """
         Starts recording audio directly without waiting for voice activity.
         """
@@ -1707,7 +1743,7 @@ class AudioToTextRecorder:
         self.realtime_stabilized_safetext = ""
         self.frames = []
         if frames:
-            self.frames = frames
+            self.frames = frames  # type: ignore[assignment]
         self.is_recording = True
 
         self.recording_start_time = time.time()
@@ -1744,7 +1780,7 @@ class AudioToTextRecorder:
             return self
 
         logger.info("recording stopped")
-        self.last_frames = copy.deepcopy(self.frames)
+        self.last_frames = copy.deepcopy(self.frames)  # type: ignore[arg-type]
         self.backdate_stop_seconds = backdate_stop_seconds
         self.backdate_resume_seconds = backdate_resume_seconds
         self.is_recording = False
@@ -1774,7 +1810,11 @@ class AudioToTextRecorder:
         self._set_state("listening")
         self.start_recording_on_voice_activity = True
 
-    def feed_audio(self, chunk, original_sample_rate=16000):
+    def feed_audio(
+        self,
+        chunk: Union[bytes, bytearray, np.ndarray],
+        original_sample_rate: int = 16000,
+    ) -> None:
         """
         Feed an audio chunk into the processing pipeline. Chunks are
         accumulated until the buffer size is reached, and then the accumulated
@@ -1788,12 +1828,14 @@ class AudioToTextRecorder:
         if isinstance(chunk, np.ndarray):
             # Handle stereo to mono conversion if necessary
             if chunk.ndim == 2:
-                chunk = np.mean(chunk, axis=1)
+                chunk = np.mean(chunk, axis=1)  # type: ignore[arg-type]
 
             # Resample to 16000 Hz if necessary
             if original_sample_rate != 16000:
-                num_samples = int(len(chunk) * 16000 / original_sample_rate)
-                chunk = resample(chunk, num_samples)
+                num_samples = int(
+                    len(chunk) * 16000 / original_sample_rate
+                )  # type: ignore[arg-type]
+                chunk = resample(chunk, num_samples)  # type: ignore
 
             # Ensure data type is int16
             chunk = np.asarray(chunk).astype(np.int16)
@@ -1802,19 +1844,19 @@ class AudioToTextRecorder:
             chunk = chunk.tobytes()
 
         # Append the chunk to the buffer
-        self.buffer += chunk
+        self.buffer += chunk  # type: ignore[misc]
         buf_size = 2 * self.buffer_size  # silero complains if too short
 
         # Check if the buffer has reached or exceeded the buffer_size
-        while len(self.buffer) >= buf_size:
+        while len(self.buffer) >= buf_size:  # type: ignore[arg-type]
             # Extract self.buffer_size amount of data from the buffer
-            to_process = self.buffer[:buf_size]
-            self.buffer = self.buffer[buf_size:]
+            to_process = self.buffer[:buf_size]  # type: ignore[misc]
+            self.buffer = self.buffer[buf_size:]  # type: ignore[misc]
 
             # Feed the extracted data to the audio_queue
-            self.audio_queue.put(to_process)
+            self.audio_queue.put(to_process)  # type: ignore
 
-    def set_microphone(self, microphone_on=True):
+    def set_microphone(self, microphone_on: bool = True) -> None:
         """
         Set the microphone on or off.
         """
@@ -1849,7 +1891,7 @@ class AudioToTextRecorder:
             logger.debug("Terminating reader process")
 
             # Give it some time to finish the loop and cleanup.
-            if self.use_microphone.value:
+            if self.use_microphone.value and self.reader_process:
                 self.reader_process.join(timeout=10)
 
                 if self.reader_process.is_alive():
@@ -1857,19 +1899,20 @@ class AudioToTextRecorder:
                         "Reader process did not terminate "
                         "in time. Terminating forcefully."
                     )
-                    if hasattr(self.reader_process, "terminate"):
+                    if isinstance(self.reader_process, mp.Process):
                         self.reader_process.terminate()
 
             logger.debug("Terminating transcription process")
-            self.transcript_process.join(timeout=10)
+            if self.transcript_process:
+                self.transcript_process.join(timeout=10)
 
-            if self.transcript_process.is_alive():
-                logger.warning(
-                    "Transcript process did not terminate "
-                    "in time. Terminating forcefully."
-                )
-                if hasattr(self.transcript_process, "terminate"):
-                    self.transcript_process.terminate()
+                if self.transcript_process.is_alive():
+                    logger.warning(
+                        "Transcript process did not terminate "
+                        "in time. Terminating forcefully."
+                    )
+                    if isinstance(self.transcript_process, mp.Process):
+                        self.transcript_process.terminate()
 
             self.parent_transcription_pipe.close()
 
@@ -1877,10 +1920,9 @@ class AudioToTextRecorder:
             if self.realtime_thread:
                 self.realtime_thread.join()
 
-            if self.enable_realtime_transcription:
-                if self.realtime_model_type:
-                    del self.realtime_model_type
-                    self.realtime_model_type = None
+            if self.enable_realtime_transcription and self.realtime_model_type:
+                del self.realtime_model_type
+                self.realtime_model_type = None
             gc.collect()
 
     def _recording_worker(self):
@@ -2037,9 +2079,12 @@ class AudioToTextRecorder:
                             self.frames.extend(list(self.audio_buffer))
                             self.audio_buffer.clear()
 
-                            if self.use_extended_logging:
-                                logger.debug("Debug: Resetting Silero VAD model states")
-                            self.silero_vad_model.reset_states()
+                            if hasattr(self.silero_vad_model, "reset_states"):
+                                if self.use_extended_logging:
+                                    logger.debug(
+                                        "Debug: Resetting Silero VAD model states"
+                                    )
+                                self.silero_vad_model.reset_states()
                         else:
                             if self.use_extended_logging:
                                 logger.debug("Debug: Checking voice activity")
@@ -2393,29 +2438,37 @@ class AudioToTextRecorder:
 
                         if self.normalize_audio:
                             # normalize audio to -0.95 dBFS
-                            if audio_array is not None and audio_array.size > 0:
-                                peak = np.max(np.abs(audio_array))
+                            if audio_array.size > 0:  # type: ignore
+                                peak = np.max(np.abs(audio_array))  # type: ignore
                                 if peak > 0:
-                                    audio_array = (audio_array / peak) * 0.95
+                                    audio_array = (
+                                        audio_array / peak
+                                    ) * 0.95  # type: ignore
 
                         if self.realtime_batch_size > 0:
-                            segments, info = self.realtime_model_type.transcribe(
+                            (
+                                segments,
+                                info,
+                            ) = self.realtime_model_type.transcribe(
                                 audio_array,
-                                language=self.language if self.language else None,
+                                language=(self.language if self.language else None),
                                 beam_size=self.beam_size_realtime,
                                 initial_prompt=self.initial_prompt_realtime,
                                 suppress_tokens=self.suppress_tokens,
                                 vad_filter=self.faster_whisper_vad_filter,
-                            )
+                            )  # type: ignore
                         else:
-                            segments, info = self.realtime_model_type.transcribe(
+                            (
+                                segments,
+                                info,
+                            ) = self.realtime_model_type.transcribe(
                                 audio_array,
-                                language=self.language if self.language else None,
+                                language=(self.language if self.language else None),
                                 beam_size=self.beam_size_realtime,
                                 initial_prompt=self.initial_prompt_realtime,
                                 suppress_tokens=self.suppress_tokens,
                                 vad_filter=self.faster_whisper_vad_filter,
-                            )
+                            )  # type: ignore
 
                         self.detected_realtime_language = (
                             info.language if info.language_probability > 0 else None
@@ -2477,7 +2530,7 @@ class AudioToTextRecorder:
                             # preprocess once
                             processed = self._preprocess_output(text_to_send, True)
                             # invoke on its own thread
-                            self._run_callback(
+                            self._run_callback(  # type: ignore
                                 self._on_realtime_transcription_stabilized, processed
                             )
 
@@ -2495,13 +2548,13 @@ class AudioToTextRecorder:
                             # AND at the same time delivers fresh detected
                             # parts on the first run without the need for
                             # two transcriptions
-                            self._run_callback(
+                            self._run_callback(  # type: ignore
                                 self._on_realtime_transcription_stabilized,
                                 self._preprocess_output(output_text, True),
                             )
 
                         # Invoke the callback with the transcribed text
-                        self._run_callback(
+                        self._run_callback(  # type: ignore
                             self._on_realtime_transcription_update,
                             self._preprocess_output(
                                 self.realtime_transcription_text, True
@@ -2516,7 +2569,7 @@ class AudioToTextRecorder:
             logger.error(f"Unhandled exeption in _realtime_worker: {e}", exc_info=True)
             raise
 
-    def _is_silero_speech(self, chunk):
+    def _is_silero_speech(self, chunk: Union[bytes, bytearray]) -> bool:
         """
         Returns true if speech is detected in the provided audio data
 
@@ -2530,7 +2583,7 @@ class AudioToTextRecorder:
             chunk = data_16000.astype(np.int16).tobytes()
 
         self.silero_working = True
-        audio_chunk = np.frombuffer(chunk, dtype=np.int16)
+        audio_chunk = np.frombuffer(chunk, dtype=np.int16)  # type: ignore[arg-type]
         audio_chunk = audio_chunk.astype(np.float32) / INT16_MAX_ABS_VALUE
         vad_prob = self.silero_vad_model(
             torch.from_numpy(audio_chunk), SAMPLE_RATE
@@ -2545,7 +2598,9 @@ class AudioToTextRecorder:
         self.silero_working = False
         return is_silero_speech_active
 
-    def _is_webrtc_speech(self, chunk, all_frames_must_be_true=False):
+    def _is_webrtc_speech(
+        self, chunk: Union[bytes, bytearray], all_frames_must_be_true: bool = False
+    ) -> bool:
         """
         Returns true if speech is detected in the provided audio data
 
@@ -2562,14 +2617,14 @@ class AudioToTextRecorder:
 
         # Number of audio frames per millisecond
         frame_length = int(16000 * 0.01)  # for 10ms frame
-        num_frames = int(len(chunk) / (2 * frame_length))
+        num_frames = int(len(chunk) / (2 * frame_length))  # type: ignore[arg-type]
         speech_frames = 0
 
         for i in range(num_frames):
             start_byte = i * frame_length * 2
             end_byte = start_byte + frame_length * 2
-            frame = chunk[start_byte:end_byte]
-            if self.webrtc_vad_model.is_speech(frame, 16000):
+            frame = chunk[start_byte:end_byte]  # type: ignore[misc]
+            if self.webrtc_vad_model.is_speech(frame, 16000):  # type: ignore[arg-type]
                 speech_frames += 1
                 if not all_frames_must_be_true:
                     if self.debug_mode:
@@ -2610,7 +2665,7 @@ class AudioToTextRecorder:
             self.is_webrtc_speech_active = False
             return False
 
-    def _check_voice_activity(self, data):
+    def _check_voice_activity(self, data: Union[bytes, bytearray]) -> None:
         """
         Initiate check if voice is active based on the provided data.
 
@@ -2651,7 +2706,7 @@ class AudioToTextRecorder:
         """
         return self.is_webrtc_speech_active and self.is_silero_speech_active
 
-    def _set_state(self, new_state):
+    def _set_state(self, new_state: str) -> None:
         """
         Update the current state of the recorder and execute
         corresponding state-change callbacks.
@@ -2709,13 +2764,13 @@ class AudioToTextRecorder:
         if self.spinner:
             # If the Halo spinner doesn't exist, create and start it
             if self.halo is None:
-                self.halo = halo.Halo(text=text)
+                self.halo = halo.Halo(text=text)  # type: ignore
                 self.halo.start()
             # If the Halo spinner already exists, just update the text
             else:
                 self.halo.text = text
 
-    def _preprocess_output(self, text, preview=False):
+    def _preprocess_output(self, text: Any, preview: bool = False) -> str:
         """
         Preprocesses the output text by removing any leading or trailing
         whitespace, converting all whitespace sequences to a single space
@@ -2742,7 +2797,9 @@ class AudioToTextRecorder:
 
         return text
 
-    def _find_tail_match_in_text(self, text1, text2, length_of_match=10):
+    def _find_tail_match_in_text(
+        self, text1: str, text2: str, length_of_match: int = 10
+    ) -> int:
         """
         Find the position where the last 'n' characters of text1
         match with a substring in text2.
@@ -2788,7 +2845,7 @@ class AudioToTextRecorder:
 
         return -1
 
-    def _on_realtime_transcription_stabilized(self, text):
+    def _on_realtime_transcription_stabilized(self, text: str) -> None:
         """
         Callback method invoked when the real-time transcription stabilizes.
 
@@ -2807,7 +2864,7 @@ class AudioToTextRecorder:
             if self.is_recording:
                 self._run_callback(self.on_realtime_transcription_stabilized, text)
 
-    def _on_realtime_transcription_update(self, text):
+    def _on_realtime_transcription_update(self, text: str) -> None:
         """
         Callback method invoked when there's an update in the real-time
         transcription.
