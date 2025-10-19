@@ -41,7 +41,7 @@ main_transcriber:
 # This instance runs continuously on small chunks of audio for a real-time feed.
 preview_transcriber:
     # A smaller, faster model is recommended for the preview.
-    model: "Systran/faster-whisper-base"
+    model: "Systran/faster-whisper-medium"
     language: "el"
     compute_type: "default"
     device: "cuda"

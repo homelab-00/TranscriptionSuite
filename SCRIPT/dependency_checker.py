@@ -7,13 +7,91 @@ and system requirements across different platforms.
 """
 
 import contextlib
+import importlib
+import importlib.util
 import logging
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional, Any
-import importlib.util
+from typing import Any, Dict, Literal, Optional, TypedDict
 
-from platform_utils import get_platform_manager
+from platform_utils import PlatformManager, get_platform_manager
+
+
+# Type aliases for better code readability
+class PackageInfo(TypedDict, total=False):
+    required: bool
+    min_version: Optional[str]
+    description: str
+    import_name: str
+
+
+class CheckResult(TypedDict, total=False):
+    available: bool
+    version: Optional[str]
+    error: Optional[str]
+    required: bool
+    description: str
+    path: Optional[str]
+    install_hint: Optional[str]
+
+
+# Type definition for external executables
+class ExecutableInfo(TypedDict, total=False):
+    required: bool
+    description: str
+    install_hint: str
+
+
+# Helper function to create CheckResult with proper types
+def create_check_result(
+    available: bool,
+    version: Optional[str],
+    error: Optional[str],
+    required: bool,
+    description: str,
+    path: Optional[str] = None,
+    install_hint: Optional[str] = None,
+) -> CheckResult:
+    """Helper to create a properly typed CheckResult dictionary."""
+    result: CheckResult = {
+        "available": available,
+        "version": version,
+        "error": error,
+        "required": required,
+        "description": description,
+    }
+    if path is not None:
+        result["path"] = path
+    if install_hint is not None:
+        result["install_hint"] = install_hint
+    return result
+
+
+class AudioSystemCheck(TypedDict):
+    pyaudio_available: bool
+    default_device_accessible: bool
+    device_count: int
+    available_backends: list[str]
+    errors: list[str]
+
+
+class PermissionCheck(TypedDict):
+    can_create_temp_files: bool
+    can_access_clipboard: bool
+    can_create_network_sockets: bool
+
+
+class Summary(TypedDict):
+    overall_status: Literal[
+        "unknown",
+        "critical_issues",
+        "warnings_present",
+        "all_good",
+    ]
+    critical_missing: list[str]
+    warnings: list[str]
+    recommendations: list[str]
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +104,11 @@ class DependencyChecker:
     about the environment before attempting to use external resources.
     """
 
-    def __init__(self):
-        self.platform_manager = get_platform_manager()
-        self.check_results: Dict[str, Dict] = {}
+    def __init__(self) -> None:
+        self.platform_manager: PlatformManager = get_platform_manager()
+        self.check_results: Dict[str, Any] = {}
 
-    def check_all_dependencies(self) -> Dict[str, Dict]:
+    def check_all_dependencies(self) -> Dict[str, Any]:
         """
         Perform comprehensive dependency checking.
 
@@ -60,9 +138,9 @@ class DependencyChecker:
         logger.info("Dependency check completed")
         return self.check_results
 
-    def _check_python_packages(self) -> Dict[str, Dict]:
+    def _check_python_packages(self) -> Dict[str, CheckResult]:
         """Check availability and versions of required Python packages."""
-        required_packages = {
+        required_packages: Dict[str, PackageInfo] = {
             "torch": {
                 "required": True,
                 "min_version": "1.9.0",
@@ -72,11 +150,6 @@ class DependencyChecker:
                 "required": True,
                 "min_version": "0.9.0",
                 "description": "Faster Whisper for speech recognition",
-            },
-            "RealtimeSTT": {
-                "required": True,
-                "min_version": "0.1.0",
-                "description": "Real-time speech-to-text library",
             },
             "pyaudio": {
                 "required": True,
@@ -115,53 +188,52 @@ class DependencyChecker:
                 "description": "Image manipulation for dynamic tray icon",
             },
         }
-
-        results = {}
+        results: Dict[str, CheckResult] = {}
 
         for package_name, package_info in required_packages.items():
-            # Use the specified import_name if it exists,
-            # otherwise default to the package name
-            import_name = package_info.get("import_name", package_name)
+            # Get the import name (use the provided import_name if present,
+            # otherwise default to the package_name)
+            import_name = str(package_info.get("import_name", package_name))
 
             try:
                 # Try to import the package
                 spec = importlib.util.find_spec(import_name)
                 if spec is None:
-                    results[package_name] = {
-                        "available": False,
-                        "version": None,
-                        "error": "Package not found",
-                        "required": package_info["required"],
-                        "description": package_info["description"],
-                    }
+                    results[package_name] = create_check_result(
+                        available=False,
+                        version=None,
+                        error="Package not found",
+                        required=bool(package_info.get("required", False)),
+                        description=str(package_info.get("description", "")),
+                    )
                     continue
 
                 # Import and get version
                 module = importlib.import_module(import_name)
-                version = getattr(module, "__version__", "unknown")
+                version = str(getattr(module, "__version__", "unknown"))
 
-                results[package_name] = {
-                    "available": True,
-                    "version": version,
-                    "error": None,
-                    "required": package_info["required"],
-                    "description": package_info["description"],
-                }
+                results[package_name] = create_check_result(
+                    available=True,
+                    version=version,
+                    error=None,
+                    required=bool(package_info.get("required", False)),
+                    description=str(package_info.get("description", "")),
+                )
 
             except ImportError as e:
-                results[package_name] = {
-                    "available": False,
-                    "version": None,
-                    "error": str(e),
-                    "required": package_info["required"],
-                    "description": package_info["description"],
-                }
+                results[package_name] = create_check_result(
+                    available=False,
+                    version=None,
+                    error=str(e),
+                    required=bool(package_info.get("required", False)),
+                    description=str(package_info.get("description", "")),
+                )
 
         return results
 
-    def _check_external_executables(self) -> Dict[str, Dict]:
+    def _check_external_executables(self) -> Dict[str, CheckResult]:
         """Check availability of external executables."""
-        executables = {
+        executables: Dict[str, ExecutableInfo] = {
             "ffmpeg": {  # Kept for potential future use or user convenience, not critical
                 "required": False,
                 "description": "Optional: Audio/video processing utilities",
@@ -169,7 +241,7 @@ class DependencyChecker:
             }
         }
 
-        results = {}
+        results: Dict[str, CheckResult] = {}
 
         for exe_name, exe_info in executables.items():
             exe_path = self.platform_manager.get_executable_path(exe_name)
@@ -177,31 +249,34 @@ class DependencyChecker:
             if exe_path:
                 # Try to get version
                 version = self._get_executable_version(exe_name, exe_path)
-                results[exe_name] = {
-                    "available": True,
-                    "path": str(exe_path),
-                    "version": version,
-                    "required": exe_info["required"],
-                    "description": exe_info["description"],
-                }
+                results[exe_name] = create_check_result(
+                    available=True,
+                    version=version,
+                    error=None,
+                    required=bool(exe_info.get("required", False)),
+                    description=str(exe_info.get("description", "")),
+                    path=str(exe_path),
+                )
             else:
-                results[exe_name] = {
-                    "available": False,
-                    "path": None,
-                    "version": None,
-                    "required": exe_info["required"],
-                    "description": exe_info["description"],
-                    "install_hint": exe_info.get(
+                results[exe_name] = create_check_result(
+                    available=False,
+                    version=None,
+                    error=None,
+                    required=bool(exe_info.get("required", False)),
+                    description=str(exe_info.get("description", "")),
+                    install_hint=exe_info.get(
                         "install_hint", "Install via package manager"
                     ),
-                }
+                )
 
         return results
 
     def _get_ffmpeg_install_hint(self) -> str:
         """Get platform-specific FFmpeg installation instructions."""
         # This is now hardcoded for Linux.
-        return "Install via package manager: apt install ffmpeg, pacman -S ffmpeg, etc."
+        return (
+            "Install via package manager: apt install ffmpeg, " "pacman -S ffmpeg, etc."
+        )
 
     def _get_executable_version(self, exe_name: str, exe_path: Path) -> Optional[str]:
         """Try to get version information from an executable."""
@@ -225,9 +300,9 @@ class DependencyChecker:
 
         return "version unknown"
 
-    def _check_audio_system(self) -> Dict[str, Any]:
+    def _check_audio_system(self) -> AudioSystemCheck:
         """Check audio system availability and capabilities."""
-        result = {
+        result: AudioSystemCheck = {
             "pyaudio_available": False,
             "default_device_accessible": False,
             "device_count": 0,
@@ -276,7 +351,8 @@ class DependencyChecker:
             result["errors"].append(f"PyAudio error: {e}")
 
         # Check available audio backends
-        result["available_backends"] = self.platform_manager.get_audio_backends()
+        audio_backends = self.platform_manager.get_audio_backends()
+        result["available_backends"] = audio_backends.copy()
 
         return result
 
@@ -284,9 +360,9 @@ class DependencyChecker:
         """Check GPU and CUDA support."""
         return self.platform_manager.check_cuda_availability()
 
-    def _check_system_permissions(self) -> Dict[str, bool]:
+    def _check_system_permissions(self) -> PermissionCheck:
         """Check various system permissions that might affect functionality."""
-        permissions = {
+        permissions: PermissionCheck = {
             "can_create_temp_files": False,
             "can_access_clipboard": False,
             "can_create_network_sockets": False,
@@ -302,17 +378,19 @@ class DependencyChecker:
         except Exception as e:
             # This will now show you the actual error in your logs
             logger.error("Failed to create temporary file for permissions check: %s", e)
-            pass
 
         # Test clipboard access with a short timeout to avoid hanging on Wayland
         try:
-            import pyperclip
             import threading
+            from typing import Any, Dict, Optional
+
+            import pyperclip
 
             clipboard_result: Dict[str, Any] = {"ok": False, "original": None}
             clipboard_event = threading.Event()
 
-            def _probe_clipboard():
+            def _probe_clipboard() -> None:
+                original: Optional[str] = None
                 try:
                     original = pyperclip.paste()
                     pyperclip.copy("test")
@@ -351,9 +429,9 @@ class DependencyChecker:
 
         return permissions
 
-    def _generate_summary(self) -> Dict[str, Any]:
+    def _generate_summary(self) -> Summary:
         """Generate a summary of the dependency check results."""
-        summary = {
+        summary: Summary = {
             "overall_status": "unknown",
             "critical_missing": [],
             "warnings": [],

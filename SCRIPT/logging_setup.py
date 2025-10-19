@@ -15,9 +15,12 @@ except ImportError:
     # The main application will raise a clearer error.
     yaml = None
 import logging
-from pathlib import Path
 from logging import FileHandler
-from typing import Dict, Any
+from pathlib import Path
+from typing import Any, Dict
+
+
+_logging_configured = False
 
 
 class ContextFilter(logging.Filter):
@@ -27,21 +30,17 @@ class ContextFilter(logging.Filter):
         super().__init__()
         self.prefix = prefix
 
-    def filter(self, record):
+    def filter(self, record: logging.LogRecord) -> bool:
         record.prefix = self.prefix if hasattr(self, "prefix") else ""
         return True
 
 
-_LOGGING_CONFIGURED = False
-
-
 def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
     """Initialize application logging once using absolute paths."""
-
-    global _LOGGING_CONFIGURED
+    global _logging_configured
 
     root_logger = logging.getLogger()
-    if _LOGGING_CONFIGURED or root_logger.handlers:
+    if _logging_configured or root_logger.handlers:
         return root_logger
 
     script_dir = Path(__file__).resolve().parent
@@ -110,7 +109,7 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
         root_logger.addHandler(console_handler)
 
     logging.captureWarnings(True)
-    _LOGGING_CONFIGURED = True
+    _logging_configured = True
     root_logger.info("Logging initialized for new session at %s", log_path)
     root_logger.info("Previous session logs have been cleared.")
 

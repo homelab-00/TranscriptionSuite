@@ -2,32 +2,53 @@
 """
 Core long-form recording and transcription module.
 
-This module contains the LongFormRecorder class, which wraps the RealtimeSTT
-library to handle audio capture, voice activity detection, and final
+This module contains the LongFormRecorder class, which wraps our vendored
+STT engine to handle audio capture, voice activity detection, and final
 transcription processing. It is designed to work without direct microphone
 access, receiving audio via a feed method.
 """
 
 import contextlib
-import time
 import logging
 import threading
-from typing import Any, Callable, Optional, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 import pyperclip
 from platform_utils import ensure_platform_init
 
-# Import RealtimeSTT and handle potential ImportError
-try:
-    from RealtimeSTT import AudioToTextRecorder
+# Import our vendored STT engine
+from stt_engine import AudioToTextRecorder
 
-    HAS_REALTIME_STT = True
-except ImportError:
-    AudioToTextRecorder = None
-    HAS_REALTIME_STT = False
-
+# For type-checking
 if TYPE_CHECKING:
-    from RealtimeSTT import AudioToTextRecorder as AudioToTextRecorderType
+
+    class AudioToTextRecorderProtocol(Protocol):
+        audio: Any
+
+        def start(self, frames: Optional[Any] = None) -> Any: ...
+
+        def stop(
+            self,
+            backdate_stop_seconds: float = 0.0,
+            backdate_resume_seconds: float = 0.0,
+        ) -> Any: ...
+
+        def wait_audio(self) -> None: ...
+
+        def feed_audio(self, chunk: Any, original_sample_rate: int = 16000) -> None: ...
+
+        def text(
+            self, on_transcription_finished: Optional[Callable[[str], None]] = None
+        ) -> Optional[str]: ...
+
+        def perform_final_transcription(
+            self, audio_bytes: Optional[Any] = None, use_prompt: bool = True
+        ) -> str: ...
+
+        def shutdown(self) -> None: ...
+
+    AudioToTextRecorderType = AudioToTextRecorderProtocol
 else:
     AudioToTextRecorderType = Any
 
@@ -42,18 +63,15 @@ class LongFormRecorder:
 
     def __init__(
         self,
-        config: dict,
+        config: dict[str, Any],
         # Callbacks for decoupling
-        on_recording_start: Optional[Callable] = None,
-        on_recording_stop: Optional[Callable] = None,
+        on_recording_start: Optional[Callable[[float], None]] = None,
+        on_recording_stop: Optional[Callable[[], None]] = None,
         on_recorded_chunk: Optional[Callable[[bytes], None]] = None,
     ):
         """
         Initializes the recorder with transcription and VAD parameters.
         """
-        if not HAS_REALTIME_STT or AudioToTextRecorder is None:
-            raise ImportError("RealtimeSTT library is not available.")
-
         self.is_running = True
         self.is_recording = False
         self._recording_started_at: Optional[float] = None
@@ -76,8 +94,8 @@ class LongFormRecorder:
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
 
-        # --- FIX: Re-enable log propagation from RealtimeSTT ---
-        # The library disables propagation by default. We re-enable it so its
+        # Re-enable log propagation from the STT engine
+        # The engine disables propagation by default. We re-enable it so its
         # logs flow into our main application log file.
         if self.recorder:
             stt_logger = logging.getLogger("realtimestt")
@@ -91,10 +109,6 @@ class LongFormRecorder:
             context_manager: contextlib.AbstractContextManager[Any]
             context_manager = suppress_ctx() if suppress_ctx else contextlib.nullcontext()
             with context_manager:
-                if AudioToTextRecorder is None:
-                    raise RuntimeError(
-                        "RealtimeSTT AudioToTextRecorder is unavailable at runtime."
-                    )
                 # Create a clean config for the underlying library,
                 # removing our custom keys.
                 library_config = self.recorder_config.copy()
@@ -174,7 +188,7 @@ class LongFormRecorder:
         thread = threading.Thread(target=transcription_loop, daemon=True)
         thread.start()
 
-    def stop_and_transcribe(self) -> tuple[str, dict]:
+    def stop_and_transcribe(self) -> tuple[str, dict[str, float]]:
         """Stops recording, processes the audio, and returns the transcription."""
         if not self.is_recording or not self.recorder:
             logging.warning("No active recording to stop.")
@@ -240,7 +254,7 @@ class LongFormRecorder:
 
     def _get_transcription_metrics(
         self, audio_duration: float, processing_time: float
-    ) -> dict:
+    ) -> dict[str, float]:
         """Logs metrics about the last transcription cycle."""
         if processing_time > 0:
             speed_ratio = audio_duration / processing_time
