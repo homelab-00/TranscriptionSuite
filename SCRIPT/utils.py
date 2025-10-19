@@ -10,11 +10,15 @@ from typing import Any
 try:
     from rich.console import Console
 
-    CONSOLE = Console()
-    HAS_RICH = True
+    console = Console()
+    has_rich = True
 except ImportError:
-    HAS_RICH = False
-    CONSOLE = None
+    has_rich = False
+    console = None
+
+# Update references in functions
+CONSOLE = console
+HAS_RICH = has_rich
 
 
 def safe_print(message: Any, style: str = "default"):
