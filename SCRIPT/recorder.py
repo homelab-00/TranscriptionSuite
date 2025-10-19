@@ -17,9 +17,9 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import pyperclip
 from platform_utils import ensure_platform_init
 
-# Import RealtimeSTT and handle potential ImportError
+# Import our local STT engine and handle potential ImportError
 try:
-    from RealtimeSTT import AudioToTextRecorder
+    from .stt_engine import AudioToTextRecorder
 
     HAS_REALTIME_STT = True
 except ImportError:

@@ -140,7 +140,7 @@ For a complete list of language codes, refer to the [Whisper tokenizer source](h
 
 ### Model Selection
 
-The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-base` by default for its excellent speed.
+The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-medium` by default for its excellent speed.
 
 - `Systran/faster-whisper-medium` - Faster but less accurate
 - `deepdml/faster-whisper-large-v3-turbo-ct2` - Optimized for speed (best used for realtime)
