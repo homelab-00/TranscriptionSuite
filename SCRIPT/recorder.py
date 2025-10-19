@@ -2,8 +2,8 @@
 """
 Core long-form recording and transcription module.
 
-This module contains the LongFormRecorder class, which wraps the RealtimeSTT
-library to handle audio capture, voice activity detection, and final
+This module contains the LongFormRecorder class, which wraps our vendored
+STT engine to handle audio capture, voice activity detection, and final
 transcription processing. It is designed to work without direct microphone
 access, receiving audio via a feed method.
 """
@@ -17,22 +17,13 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import pyperclip
 from platform_utils import ensure_platform_init
 
-# Import our local STT engine and handle potential ImportError
-try:
-    from .stt_engine import AudioToTextRecorder
+# Import our vendored STT engine
+from stt_engine import AudioToTextRecorder
 
-    HAS_REALTIME_STT = True
-except ImportError:
-    # Set a placeholder type if the import fails, to avoid runtime errors.
-    AudioToTextRecorder = None
-    HAS_REALTIME_STT = False
-
-# For type-checking, always refer to our local engine.
+# For type-checking
 if TYPE_CHECKING:
-    from .stt_engine import AudioToTextRecorder as AudioToTextRecorderType
+    from stt_engine import AudioToTextRecorder as AudioToTextRecorderType
 else:
-    # At runtime, use 'Any' to avoid circular dependencies if needed,
-    # though direct import is generally fine.
     AudioToTextRecorderType = Any
 
 # Initialize platform-specific settings (console encoding, etc.)
@@ -55,9 +46,6 @@ class LongFormRecorder:
         """
         Initializes the recorder with transcription and VAD parameters.
         """
-        if not HAS_REALTIME_STT or AudioToTextRecorder is None:
-            raise ImportError("RealtimeSTT library is not available.")
-
         self.is_running = True
         self.is_recording = False
         self._recording_started_at: Optional[float] = None
@@ -80,8 +68,8 @@ class LongFormRecorder:
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
 
-        # --- FIX: Re-enable log propagation from RealtimeSTT ---
-        # The library disables propagation by default. We re-enable it so its
+        # Re-enable log propagation from the STT engine
+        # The engine disables propagation by default. We re-enable it so its
         # logs flow into our main application log file.
         if self.recorder:
             stt_logger = logging.getLogger("realtimestt")
@@ -95,10 +83,6 @@ class LongFormRecorder:
             context_manager: contextlib.AbstractContextManager[Any]
             context_manager = suppress_ctx() if suppress_ctx else contextlib.nullcontext()
             with context_manager:
-                if AudioToTextRecorder is None:
-                    raise RuntimeError(
-                        "RealtimeSTT AudioToTextRecorder is unavailable at runtime."
-                    )
                 # Create a clean config for the underlying library,
                 # removing our custom keys.
                 library_config = self.recorder_config.copy()
