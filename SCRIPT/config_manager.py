@@ -101,7 +101,8 @@ class ConfigManager:
                     loaded_config = cast(Dict[str, Any], loaded_config_raw)
                 elif loaded_config_raw is not None:
                     logging.warning(
-                        "Loaded configuration is not a mapping. Ignoring unexpected value of type %s.",
+                        "Loaded configuration is not a mapping. "
+                        "Ignoring unexpected value of type %s.",
                         type(loaded_config_raw).__name__,
                     )
 
@@ -109,9 +110,8 @@ class ConfigManager:
                 merged_config: Dict[str, Any] = copy.deepcopy(default_config)
                 for key, value in loaded_config.items():
                     merged_value = merged_config.get(key)
-                    if (
-                        isinstance(merged_value, MutableMapping)
-                        and isinstance(value, Mapping)
+                    if isinstance(merged_value, MutableMapping) and isinstance(
+                        value, Mapping
                     ):
                         merged_value_map = cast(MutableMapping[str, Any], merged_value)
                         incoming_mapping = cast(Mapping[str, Any], value)
@@ -152,8 +152,7 @@ class ConfigManager:
         if isinstance(value, dict):
             typed_value = cast(Dict[str, Any], value)
             return {
-                key: self._expand_config_paths(item)
-                for key, item in typed_value.items()
+                key: self._expand_config_paths(item) for key, item in typed_value.items()
             }
         if isinstance(value, list):
             typed_list = cast(list[Any], value)
