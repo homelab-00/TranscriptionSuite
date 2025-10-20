@@ -6,17 +6,12 @@ fast speech-to-text transcription.
 The class employs the faster_whisper library to transcribe the recorded audio
 into text using machine learning models, which can be run either on a GPU or
 CPU. Voice activity detection (VAD) is built in, meaning the software can
-automatically start or stop recording based on the presence or absence of
-speech. It integrates wake word detection through the pvporcupine library,
-allowing the software to initiate recording when a specific word or phrase
-is spoken. The system provides real-time feedback and can be further
-customized.
+automatically start or stop recording based on the presence or absence of speech.
+The system provides real-time feedback and can be further customized.
 
 Features:
 - Voice Activity Detection: Automatically starts/stops recording when speech
   is detected or when speech ends.
-- Wake Word Detection: Starts recording when a specified wake word (or words)
-  is detected.
 - Event Callbacks: Customizable callbacks for when recording starts
   or finishes.
 - Fast Transcription: Returns the transcribed text from the audio as fast
@@ -42,7 +37,6 @@ import traceback
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import faster_whisper
-import halo
 import numpy as np
 import soundfile as sf
 import torch
@@ -68,11 +62,7 @@ INIT_WEBRTC_SENSITIVITY = 3
 INIT_POST_SPEECH_SILENCE_DURATION = 0.6
 INIT_MIN_LENGTH_OF_RECORDING = 0.5
 INIT_MIN_GAP_BETWEEN_RECORDINGS = 0
-INIT_WAKE_WORDS_SENSITIVITY = 0.6
 INIT_PRE_RECORDING_BUFFER_DURATION = 1.0
-INIT_WAKE_WORD_ACTIVATION_DELAY = 0.0
-INIT_WAKE_WORD_TIMEOUT = 5.0
-INIT_WAKE_WORD_BUFFER_DURATION = 0.1
 ALLOWED_LATENCY_LIMIT = 100
 
 TIME_SLEEP = 0.02
@@ -295,7 +285,6 @@ class AudioToTextRecorder:
         ensure_sentence_starting_uppercase: bool = True,
         ensure_sentence_ends_with_period: bool = True,
         use_microphone: bool = True,
-        spinner: bool = True,
         level: int = logging.WARNING,
         batch_size: int = 16,
         # Voice activation parameters
@@ -384,8 +373,6 @@ class AudioToTextRecorder:
         self.silero_sensitivity = silero_sensitivity
         self.silero_deactivity_detection = silero_deactivity_detection
         self.listen_start = 0
-        self.spinner = spinner
-        self.halo = None
         self.is_webrtc_speech_active = False
         self.is_silero_speech_active = False
         self.recording_thread = None
@@ -400,7 +387,6 @@ class AudioToTextRecorder:
         self.last_transcription_bytes_b64 = None
         self.initial_prompt = initial_prompt
         self.suppress_tokens = suppress_tokens
-        self.use_wake_words = False
         self.detected_language = None
         self.transcription_lock = threading.Lock()
         self.shutdown_lock = threading.Lock()
@@ -1645,8 +1631,8 @@ class AudioToTextRecorder:
                     # Handle not recording state
 
                     if self.use_extended_logging:
-                        logger.debug("Debug: Setting state and spinner text")
-                    # Set state and spinner text
+                        logger.debug("Debug: Setting state")
+                    # Set state
                     if not self.recording_stop_time:
                         if self.listen_start:
                             if self.use_extended_logging:
@@ -2102,38 +2088,18 @@ class AudioToTextRecorder:
         if new_state == "listening":
             if self.on_vad_detect_start:
                 self._run_callback(self.on_vad_detect_start)
-            self._set_spinner("speak now")
-            if self.spinner and self.halo:
-                self.halo._interval = 250
+
         elif new_state == "transcribing":
-            self._set_spinner("transcribing")
-            if self.spinner and self.halo:
-                self.halo._interval = 50
+            # Placeholder: Add custom logic for the 'transcribing' state here.
+            pass
+
         elif new_state == "recording":
-            self._set_spinner("recording")
-            if self.spinner and self.halo:
-                self.halo._interval = 100
+            # Placeholder: Add custom logic for the 'recording' state here.
+            pass
+
         elif new_state == "inactive":
-            if self.spinner and self.halo:
-                self.halo.stop()
-                self.halo = None
-
-    def _set_spinner(self, text):
-        """
-        Update the spinner's text or create a new
-        spinner with the provided text.
-
-        Args:
-            text (str): The text to be displayed alongside the spinner.
-        """
-        if self.spinner:
-            # If the Halo spinner doesn't exist, create and start it
-            if self.halo is None:
-                self.halo = halo.Halo(text=text)
-                self.halo.start()
-            # If the Halo spinner already exists, just update the text
-            else:
-                self.halo.text = text
+            # Placeholder: Add custom logic for the 'inactive' state here.
+            pass
 
     def _preprocess_output(self, text: Any, preview: bool = False) -> str:
         """

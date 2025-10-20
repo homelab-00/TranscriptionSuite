@@ -1,10 +1,7 @@
 # TO-DO
 
 - Further clean up `stt_engine.py`. We need to remove:
-  - remaining wake word infrastructure
-  - the halo import and the corresponding spinners
   - unused methods
-  - unused imports (remember to also uv remove the corresponding packages)
   - maybe trim the logging statements from `stt_engine.py`
 - Need to make sure that arguements in `STT_ENGINE_OPTIONS.md` are all used in `stt_engine.py` (since we are removing a few of them, like openwakeword).
 

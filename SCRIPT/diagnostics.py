@@ -26,7 +26,7 @@ except ImportError:
     torch = None
 
 try:
-    import faster_whisper  # type: ignore
+    import faster_whisper
 
     _faster_whisper_available = True
 except ImportError:
