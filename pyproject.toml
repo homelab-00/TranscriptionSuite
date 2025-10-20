@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "av>=16.0.1",
-    "halo>=0.0.31",
     "huggingface-hub>=0.35.3",
     "numpy>=2.3.3",
     "onnxruntime>=1.23.1",

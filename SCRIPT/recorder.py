@@ -82,7 +82,6 @@ class LongFormRecorder:
         # Prepare configuration for the underlying AudioToTextRecorder
         self.recorder_config = dict(config) if config else {}
         # This is now controlled by the orchestrator via the config dict.
-        self.recorder_config["spinner"] = False
         # Store external callbacks
         self.external_on_recording_start = on_recording_start
         self.external_on_recording_stop = on_recording_stop
