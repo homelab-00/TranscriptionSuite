@@ -47,10 +47,14 @@ make -j"$(nproc)"
 
 cd ../python
 
-echo "Installing the Python wrapper with build isolation disabled..."
-# THE FIX IS HERE: --no-build-isolation tells uv to use the main environment
-uv pip install . --no-build-isolation
+echo "Packaging the Python wrapper into a wheel file..."
+# We use the standard `python -m build` command.
+#  --wheel: Specifies to build a wheel.
+#  --no-isolation: Uses our current environment the main environment instead of using
+#                  a clean one (we need the `pybind11` package to complete the build).
+#  --outdir: Specifies where to place the final .whl file.
+python -m build --wheel --no-isolation --outdir dist .
 
-echo "--- ctranslate2 installation complete! ---"
+echo "--- ctranslate2 packaging complete! ---"
+echo "A wheel file has been created in: ${CT2_DIR}/python/dist/"
 echo "NOTE: The build was configured for GPU architecture '${CMAKE_CUDA_ARCHITECTURES}'."
-echo "If you have a different GPU, please edit this script and run it again."
