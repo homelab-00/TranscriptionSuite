@@ -32,17 +32,22 @@ This project uses `uv` for package and environment management. The setup process
 - You must have `git` and `uv` installed.
 - You must have the NVIDIA CUDA Toolkit (version 13.0 or newer) installed system-wide.
 
-### Step 1: Install Standard Python Dependencies
+### Step 1: Create Virtual Environment and Install Build Dependencies
 
-These commands will create a local virtual environment (`.venv`), read the `pyproject.toml` file, and install all required Python packages from PyPI.
+Create a local virtual environment and install the build dependencies to ensure the `ctranslate2` library can be compiled successfully.
 
 ```bash
 # Run this from the project's root directory
+
+# Create and activate the virtual environment
 uv venv --python 3.13
-uv sync
+source .venv/bin/activate
+
+# Install build dependencies
+uv pip install build setuptools pybind11
 ```
 
-### Step 2: Build and Install Custom `ctranslate2`
+### Step 2: Build Custom `ctranslate2`
 
 The `ctranslate2` library needs to be compiled locally to link against your system's CUDA 13+ toolkit. A helper script is provided to automate this.
 
@@ -52,20 +57,22 @@ The `ctranslate2` library needs to be compiled locally to link against your syst
 2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`.
 3. The value `86` is for an NVIDIA RTX 3060. If you have a different GPU, find its compute capability on the [NVIDIA CUDA GPUs page](https://developer.nvidia.com/cuda-gpus) and change the number accordingly (e.g., an RTX 4070 is `89`).
 
-Now, run the script. It will download the source code, compile it and install it in the venv.
+Now, run the script. It will download the source code in the newly created `deps` directory, compile it and create a wheel file in `deps/ctranslate2/python/dist`.
 
 ```bash
 # This will take several minutes
 ./build_ctranslate2.sh
 ```
 
-### Step 3: Manually Install `faster-whisper`
+### Step 3: Install Project Dependencies
 
-To ensure `faster-whisper` uses our custom-built library, we install it with the `--no-deps` flag. All of its dependencies (other than `ctranslate2`) are already present in `pyproject.toml`.
+You're now ready to install all project dependencies. The build dependencies will be automatically uninstalled (you no longer need them).
 
 ```bash
-uv pip install "faster-whisper==1.2.0" --no-deps
+uv sync
 ```
+
+*Note: Check that the correct wheel filename is used in the `pyproject.toml` file. It's the last line of the file - make sure it matches the wheel file you created in Step 2.*
 
 Your environment is now fully configured and ready to use.
 
