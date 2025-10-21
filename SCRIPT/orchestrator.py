@@ -207,22 +207,22 @@ class STTOrchestrator:
                     except Exception as stop_error:
                         logging.debug("Console display stop error: %s", stop_error)
 
-                active_transcriber = (
-                    self.preview_transcriber
-                    if self.preview_enabled
-                    else self.main_transcriber
-                )
-
-                if not self.main_transcriber or not active_transcriber:
-                    safe_print("Transcribers not available.", "error")
+                if not self.main_transcriber:
+                    safe_print("Transcriber not available.", "error")
                     self.app_state["current_mode"] = None
                     if self.tray_manager:
                         self.tray_manager.set_state("error")
                     return
 
-                # Stop the master transcriber, which stops the mic
-                active_transcriber.stop_recording()
+                # When preview is enabled, we need to stop the previewer explicitly
+                # to stop the microphone feed.
+                if self.preview_enabled and self.preview_transcriber:
+                    self.preview_transcriber.stop_recording()
+
                 safe_print("Stopping long-form recording and transcribing...")
+
+                # The main transcriber's stop_and_transcribe is now the sole command
+                # for stopping and processing.
                 final_text, metrics = self.main_transcriber.stop_and_transcribe()
                 self.app_state["current_mode"] = None
 

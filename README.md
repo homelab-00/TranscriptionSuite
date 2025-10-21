@@ -4,7 +4,6 @@
   - unused methods
   - maybe trim the logging statements from `stt_engine.py`
 - Need to make sure that arguements in `STT_ENGINE_OPTIONS.md` are all used in `stt_engine.py` (since we are removing a few of them, like openwakeword).
-- Implement a toggle for the realtime preview transcriber to be able to turn it on and off.
 - Re-do the waveform display.
 
 ---
@@ -31,12 +30,17 @@ This project uses `uv` for package and environment management. The setup process
 
 #### Prerequisites
 
-- You must have `git` and `uv` installed.
 - You must have the NVIDIA CUDA Toolkit (version 13.0 or newer) installed system-wide.
 
 ### Step 1: Create Virtual Environment and Install Build Dependencies
 
-Create a local virtual environment and install the build dependencies to ensure the `ctranslate2` library can be compiled successfully.
+First let's install `uv` in your global Python installation:
+
+```bash
+pip install uv
+```
+
+Now let's create a local virtual environment and install the build dependencies to ensure the `ctranslate2` library can be compiled successfully.
 
 ```bash
 # Run this from the project's root directory
@@ -80,7 +84,9 @@ Your environment is now fully configured and ready to use.
 
 ## Configuration
 
-### Step 1: Find Your Audio Device
+### Finding your audio device index
+
+#### Step 1: Find Your Audio Device
 
 Before first use, you need to identify your microphone's device index:
 
@@ -103,40 +109,35 @@ Available Audio Input Devices:
 
 Note the index number of your preferred microphone.
 
-### Step 2: Configure `config.yaml`
+#### Step 2: Configure `config.yaml`
 
 Edit the `SCRIPT/config.yaml` file. Update the `input_device_index` under the global `audio` section. Set `use_default_input` to `false` if you are specifying a device index.
 
 ```yaml
-# Configuration for the main, high-accuracy transcription.
-main_transcriber:
-    # Model from HuggingFace to use for transcription.
-    model: "Systran/faster-whisper-large-v3"
-    language: "el"
-    # ... other settings
-
-# Configuration for the live preview transcriber.
-preview_transcriber:
-    model: "Systran/faster-whisper-base"
-    language: "el"
-    # ... other settings
-
 # Global audio settings for the microphone input.
 audio:
-    # Manually specify the audio input device index.
+    # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
+    # Set to `null` (or leave blank) if `use_default_input` is true.
     input_device_index: 21
-    # If true, the application will automatically find the default system microphone.
-    use_default_input: false
 
-# Global logging settings
-logging:
-    level: "INFO"
-    directory: ".." # ".." for project root, "." for SCRIPT folder
+    # If true, the application will automatically find the default system microphone.
+    # If false, it will use the `input_device_index` specified above.
+    use_default_input: false
 ```
 
-For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
+### Configuring language, models, realtime preview and other options
 
-### Language Configuration
+#### Language Configuration
+
+Edit the `SCRIPT/config.yaml` file. Update the `language` field under the global `transcription_options` section. This setting applies to both the main and preview transcribers.
+
+```yaml
+# Global options that apply to both transcribers.
+transcription_options:
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    # This setting applies to both the main and preview transcribers.
+    language: "el"
+```
 
 The `language` field accepts standard Whisper language codes. Common examples:
 
@@ -148,12 +149,46 @@ The `language` field accepts standard Whisper language codes. Common examples:
 
 For a complete list of language codes, refer to the [Whisper tokenizer source](https://github.com/openai/whisper/blob/c0d2f624c09dc18e709e37c2ad90c039a4eb72a2/whisper/tokenizer.py#L10).
 
-### Model Selection
+#### Realtime Preview Toggle
 
-The default model is `Systran/faster-whisper-large-v3` for the main transcriber which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-medium` by default for its excellent speed.
+Edit the `SCRIPT/config.yaml` file. Update the `enable_preview_transcriber` field under the global `transcription_options` section.
 
-- `Systran/faster-whisper-medium` - Faster but less accurate
-- `deepdml/faster-whisper-large-v3-turbo-ct2` - Optimized for speed (best used for realtime)
+```yaml
+# Global options that apply to both transcribers.
+transcription_options:
+    # If true, the live preview transcriber will be enabled.
+    # If false, only the main transcriber will be used, and no live preview
+    # will be shown. This can save GPU resources.
+    enable_preview_transcriber: true
+```
+
+#### Model Selection
+
+The default model for the main transcriber is `Systran/faster-whisper-large-v3` which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-medium` for a better balance between speed and accuracy.
+
+Edit the `SCRIPT/config.yaml` file. Update the `model` field under the `main_transcriber` section.
+
+```yaml
+# This instance processes the entire recording at the end for the best quality.
+main_transcriber:
+    # Model from HuggingFace to use for transcription.
+    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    model: "Systran/faster-whisper-large-v3"
+```
+
+To edit the preview transcriber model, update the `model` field under the `preview_transcriber` section.
+
+```yaml
+# This instance processes the entire recording at the end for the best quality.
+preview_transcriber:
+    # Model from HuggingFace to use for transcription.
+    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    model: "Systran/faster-whisper-medium"
+```
+
+#### Other Options
+
+For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
 
 ## Running the Application
 
