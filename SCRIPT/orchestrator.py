@@ -83,6 +83,11 @@ class STTOrchestrator:
         # Now that config is loaded, re-initialize logging with it
         setup_logging(self.config)
 
+        # Check if preview is enabled
+        self.preview_enabled = self.config.get("transcription_options", {}).get(
+            "enable_preview_transcriber", True
+        )
+
         # CHANGED: Initialize Tray Icon Manager with all necessary callbacks
         if HAS_TRAY:
             self.tray_manager = TrayIconManager(  # type: ignore[assignment]
@@ -150,7 +155,11 @@ class STTOrchestrator:
             )
             return
 
-        if not self.main_transcriber or not self.preview_transcriber:
+        active_transcriber = (
+            self.preview_transcriber if self.preview_enabled else self.main_transcriber
+        )
+
+        if not self.main_transcriber or (self.preview_enabled and not active_transcriber):
             safe_print("Transcription models are not ready. Please wait.", "warning")
             return
 
@@ -173,9 +182,12 @@ class STTOrchestrator:
         # and start the recorder.
         safe_print("Starting long-form recording...", "success")
         self.app_state["current_mode"] = "longform"
-        # The preview transcriber controls the microphone and VAD
-        self.preview_transcriber.start_recording()
-        self.main_transcriber.start_recording()
+
+        # The active transcriber controls the microphone and VAD
+        if active_transcriber:
+            active_transcriber.start_recording()
+        if self.preview_enabled and self.main_transcriber:
+            self.main_transcriber.start_recording()
 
     def _stop_longform(self):
         """Stop long-form recording and transcribe."""
@@ -195,16 +207,22 @@ class STTOrchestrator:
                     except Exception as stop_error:
                         logging.debug("Console display stop error: %s", stop_error)
 
-                if not self.main_transcriber or not self.preview_transcriber:
-                    safe_print("Transcribers not available.", "error")
+                if not self.main_transcriber:
+                    safe_print("Transcriber not available.", "error")
                     self.app_state["current_mode"] = None
                     if self.tray_manager:
                         self.tray_manager.set_state("error")
                     return
 
-                # Stop the master transcriber, which stops the mic
-                self.preview_transcriber.stop_recording()
+                # When preview is enabled, we need to stop the previewer explicitly
+                # to stop the microphone feed.
+                if self.preview_enabled and self.preview_transcriber:
+                    self.preview_transcriber.stop_recording()
+
                 safe_print("Stopping long-form recording and transcribing...")
+
+                # The main transcriber's stop_and_transcribe is now the sole command
+                # for stopping and processing.
                 final_text, metrics = self.main_transcriber.stop_and_transcribe()
                 self.app_state["current_mode"] = None
 
@@ -273,7 +291,12 @@ class STTOrchestrator:
             if self.tray_manager:
                 self.tray_manager.set_state("loading")  # Grey icon
 
-            safe_print("Pre-loading transcription models...", "info")
+            if self.preview_enabled:
+                safe_print("Pre-loading transcription models (with preview)...", "info")
+            else:
+                safe_print(
+                    "Pre-loading transcription model (preview disabled)...", "info"
+                )
 
             try:
                 self.console_display = ConsoleDisplay()
@@ -281,32 +304,17 @@ class STTOrchestrator:
                 logging.error("Failed to initialise console display: %s", exc)
                 self.console_display = None
 
-            # --- Architecture Fix ---
-            # 1. Main transcriber is PASSIVE (use_microphone=False)
-            main_callbacks: dict[str, Callable[..., Any]] = {}
-            if self.console_display:
-                main_callbacks["on_recording_start"] = self.console_display.start
-                main_callbacks["on_recording_stop"] = self.console_display.stop
+            # --- Architecture Logic ---
+            if self.preview_enabled:
+                self._load_dual_transcriber_mode()
+            else:
+                self._load_single_transcriber_mode()
 
-            self.main_transcriber = self.model_manager.initialize_transcriber(
-                "main_transcriber", main_callbacks, use_microphone=False
-            )
-
-            # 2. Preview transcriber is ACTIVE (use_microphone=True)
-            #    and feeds everyone else
-            preview_callbacks: dict[str, Callable[..., Any]] = {
-                "on_recorded_chunk": self._handle_audio_chunk,
-            }
-            self.preview_transcriber = self.model_manager.initialize_transcriber(
-                "preview_transcriber", preview_callbacks, use_microphone=True
-            )
-
-            success = self.main_transcriber and self.preview_transcriber
+            success = self.main_transcriber is not None
 
             if success:
                 safe_print("Models loaded successfully.", "success")
-                # Start the previewer in its continuous chunking mode
-                if self.preview_transcriber:
+                if self.preview_enabled and self.preview_transcriber:
                     self.preview_transcriber.start_chunked_transcription(
                         self._handle_preview_sentence
                     )
@@ -330,6 +338,57 @@ class STTOrchestrator:
                 safe_print("\nKeyboard interrupt received, shutting down...")
             finally:
                 self.stop()
+
+    def _load_dual_transcriber_mode(self):
+        """Loads both main and preview transcribers."""
+        # 1. Main transcriber is PASSIVE (use_microphone=False)
+        self.main_transcriber = self.model_manager.initialize_transcriber(
+            "main_transcriber", callbacks=None, use_microphone=False
+        )
+
+        # 2. Preview transcriber is ACTIVE (use_microphone=True)
+        #    and feeds everyone else
+        preview_callbacks: dict[str, Callable[..., Any]] = {
+            "on_recorded_chunk": self._handle_audio_chunk,
+        }
+        self.preview_transcriber = self.model_manager.initialize_transcriber(
+            "preview_transcriber", preview_callbacks, use_microphone=True
+        )
+
+    def _load_single_transcriber_mode(self):
+        """Loads only the main transcriber in active mode, merging VAD settings."""
+        self.preview_transcriber = None  # Ensure it's null
+
+        # Create a hybrid config for the main transcriber to handle VAD
+        main_config = self.config.get("main_transcriber", {}).copy()
+        preview_config = self.config.get("preview_transcriber", {})
+
+        # VAD-related keys to merge from the preview config
+        vad_keys = [
+            "silero_sensitivity",
+            "silero_use_onnx",
+            "silero_deactivity_detection",
+            "webrtc_sensitivity",
+            "post_speech_silence_duration",
+            "min_length_of_recording",
+        ]
+        for key in vad_keys:
+            if key in preview_config:
+                main_config[key] = preview_config[key]
+
+        logging.info("Running in single-transcriber mode with merged VAD config.")
+
+        # The main transcriber is ACTIVE (use_microphone=True)
+        main_callbacks: dict[str, Callable[..., Any]] = {}
+        if self.console_display:
+            # We can still show a waveform even without the preview text
+            main_callbacks["on_recorded_chunk"] = (
+                self.console_display.update_waveform_data
+            )
+
+        self.main_transcriber = self.model_manager.initialize_transcriber(
+            main_config, main_callbacks, use_microphone=True
+        )
 
     def stop(self):
         """Stop all processes and clean up gracefully."""

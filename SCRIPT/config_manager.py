@@ -38,13 +38,14 @@ class ConfigManager:
         script_dir = Path(__file__).resolve().parent
         # Define default configuration
         default_config: Dict[str, Any] = {
+            "transcription_options": {
+                "language": "en",
+                "enable_preview_transcriber": True,
+            },
             "main_transcriber": {
                 "model": "Systran/faster-whisper-large-v3",
-                "language": "en",
                 "compute_type": "default",
                 "device": self.platform_manager.get_optimal_device_config()["device"],
-                "input_device_index": None,
-                "use_default_input": True,
                 "gpu_device_index": 0,
                 "batch_size": 16,
                 "beam_size": 5,
@@ -54,7 +55,6 @@ class ConfigManager:
             },
             "preview_transcriber": {
                 "model": "Systran/faster-whisper-base",
-                "language": "en",
                 "compute_type": "default",
                 "device": self.platform_manager.get_optimal_device_config()["device"],
                 "gpu_device_index": 0,
@@ -145,7 +145,21 @@ class ConfigManager:
             raise FileNotFoundError(error_message)
 
         self.config = cast(Dict[str, Any], self._expand_config_paths(self.config))
+        self._apply_global_settings()
         return self.config
+
+    def _apply_global_settings(self):
+        """
+        Apply global settings to the respective transcriber configurations.
+        """
+        global_options = self.config.get("transcription_options", {})
+        language = global_options.get("language")
+
+        if language:
+            if "main_transcriber" in self.config:
+                self.config["main_transcriber"]["language"] = language
+            if "preview_transcriber" in self.config:
+                self.config["preview_transcriber"]["language"] = language
 
     def _expand_config_paths(self, value: Any) -> Any:
         """Recursively expand environment variables and user home in config values."""

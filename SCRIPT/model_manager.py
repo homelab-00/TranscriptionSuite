@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 from types import ModuleType
-from typing import Any, Callable, Optional, TypedDict
+from typing import Any, Callable, Dict, Optional, TypedDict, Union
 
 from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
@@ -231,21 +231,30 @@ class ModelManager:
 
     def initialize_transcriber(
         self,
-        config_section: str,
-        callbacks: dict[str, Callable[..., Any]] | None = None,
+        config_data: Union[str, Dict[str, Any]],
+        callbacks: Optional[Dict[str, Callable[..., Any]]] = None,
         use_microphone: bool = False,
     ) -> Optional[LongFormRecorder]:
         """Initialize a transcriber with an override for microphone usage."""
-        callback_map: dict[str, Callable[..., Any]] = (
+        callback_map: Dict[str, Callable[..., Any]] = (
             callbacks if callbacks is not None else {}
         )
 
         try:
             # Get configuration for this module
-            module_config = self.config.get(config_section, {})
+            module_config: Dict[str, Any]
+            config_name: str
+            if isinstance(config_data, str):
+                config_name = config_data
+                module_config = self.config.get(config_data, {})
+            else:
+                config_name = "custom"
+                module_config = config_data
+
             if not module_config:
-                self._log_error("Config section '%s' not found.", config_section)
+                self._log_error("Config section '%s' not found.", config_name)
                 return None
+
             # Add the microphone override to the config for this instance
             instance_config = module_config.copy()
             instance_config["use_microphone"] = use_microphone
@@ -262,14 +271,13 @@ class ModelManager:
             # Pass the specific config section to the recorder
             recorder = LongFormRecorder(config=instance_config, **callback_map)
 
-            self._log_info("%s recorder initialized successfully", config_section)
+            self._log_info("%s recorder initialized successfully", config_name)
             return recorder
 
         except Exception as e:
             # Break the call into multiple arguments to avoid a very long line
             self._log_error(
-                "Error initializing %s recorder: %s",
-                config_section,
+                "Error initializing recorder: %s",
                 e,
                 exc_info=True,
             )
