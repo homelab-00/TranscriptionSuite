@@ -1,14 +1,23 @@
 # SCRIPT/config.yaml
 
+# Global options that apply to both transcribers.
+transcription_options:
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    # This setting applies to both the main and preview transcribers.
+    language: "el"
+
+    # If true, the live preview transcriber will be enabled.
+    # If false, only the main transcriber will be used, and no live preview
+    # will be shown. This can save GPU resources.
+    enable_preview_transcriber: true
+
+
 # Configuration for the main, high-accuracy transcription.
 # This instance processes the entire recording at the end for the best quality.
 main_transcriber:
     # Model from HuggingFace to use for transcription.
     # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
     model: "Systran/faster-whisper-large-v3"
-
-    # Language code for transcription (e.g., "en" for English, "el" for Greek).
-    language: "el"
 
     # Compute type for the model. "default" is recommended.
     # Options: "default", "auto", "int8", "int8_float16", "int16", "float16", "float32"
@@ -42,7 +51,6 @@ main_transcriber:
 preview_transcriber:
     # A smaller, faster model is recommended for the preview.
     model: "Systran/faster-whisper-medium"
-    language: "el"
     compute_type: "default"
     device: "cuda"
     gpu_device_index: 0
