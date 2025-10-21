@@ -1,33 +1,32 @@
 [project]
 name = "transcriptionsuite"
 version = "0.1.0"
-description = "Add your description here"
+description = "Speech-to-Text Transcription Suite"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "av>=16.0.1",
-    "huggingface-hub>=0.35.3",
-    "numpy>=2.3.3",
-    "onnxruntime>=1.23.1",
+    "ctranslate2",
+    "faster-whisper>=1.2.0",
     "pillow>=11.3.0",
     "psutil>=7.1.0",
     "pyaudio>=0.2.14",
-    "pybind11>=2.13.0",
     "pyperclip>=1.11.0",
     "pyqt6>=6.9.1",
     "pyyaml>=6.0.3",
     "rich>=14.2.0",
     "scipy>=1.16.2",
     "soundfile>=0.13.1",
-    "tokenizers>=0.22.1",
     "torch>=2.9.0",
     "torchaudio>=2.9.0",
     "webrtcvad>=2.0.10",
     "websocket-client>=1.9.0",
 ]
 
-
 # Specific extra url for the CUDA enabled versions of torch.
 # Update it when CUDA version updates (cu130 = CUDA 13.0).
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cu130"]
+
+# Local path for the ctranslate2 wheel file.
+[tool.uv.sources]
+ctranslate2 = { path = "deps/ctranslate2/python/dist/ctranslate2-4.6.0-cp313-cp313-linux_x86_64.whl" }
