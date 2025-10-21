@@ -4,6 +4,8 @@
   - unused methods
   - maybe trim the logging statements from `stt_engine.py`
 - Need to make sure that arguements in `STT_ENGINE_OPTIONS.md` are all used in `stt_engine.py` (since we are removing a few of them, like openwakeword).
+- Implement a toggle for the realtime preview transcriber to be able to turn it on and off.
+- Re-do the waveform display.
 
 ---
 
