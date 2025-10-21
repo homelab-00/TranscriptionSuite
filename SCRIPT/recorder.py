@@ -155,7 +155,9 @@ class LongFormRecorder:
     def stop_recording(self):
         """Stops the audio recording process without transcribing."""
         if not self.is_recording:
-            logging.warning("No active recording to stop.")
+            # This can happen in dual-mode if the previewer stops first, which is normal.
+            # So we change this from a warning to an info-level log.
+            logging.info("No active recording to stop.")
             return
 
         if not self.recorder:
@@ -176,25 +178,37 @@ class LongFormRecorder:
             while self.is_running:
                 if self.recorder:
                     try:
-                        self.recorder.text(on_sentence_transcribed)
+                        # This text() call now blocks until a phrase is detected
+                        transcribed_text = self.recorder.text()
+                        if transcribed_text:
+                            on_sentence_transcribed(transcribed_text)
                     except Exception as e:
-                        logging.error(
-                            f"Error in preview transcription loop: {e}", exc_info=True
-                        )
-                        # Avoid a fast-spinning error loop
-                        time.sleep(1)
+                        if self.is_running:  # Avoid logging errors during shutdown
+                            logging.error(
+                                f"Error in preview transcription loop: {e}", exc_info=True
+                            )
+                            # Avoid a fast-spinning error loop
+                            time.sleep(1)
 
         thread = threading.Thread(target=transcription_loop, daemon=True)
         thread.start()
 
     def stop_and_transcribe(self) -> tuple[str, dict[str, float]]:
         """Stops recording, processes the audio, and returns the transcription."""
-        if not self.is_recording or not self.recorder:
-            logging.warning("No active recording to stop.")
+        if not self.is_recording:
+            logging.warning("stop_and_transcribe called but not recording.")
             return "", {}
 
-        # This call is now primarily for the main_transcriber instance
+        if not self.recorder:
+            logging.error("Recorder not initialized, cannot transcribe.")
+            return "", {}
+
+        # This method is now the single point of action.
+        # It stops the recording, which will trigger the _internal_on_stop callback
+        # and correctly set self.is_recording to False.
         self.stop_recording()
+
+        # Now we wait for the audio data to be processed by the engine
         self.recorder.wait_audio()
         audio_data = self.recorder.audio
 
