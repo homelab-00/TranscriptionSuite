@@ -9,7 +9,7 @@ transcription_options:
     # If true, the live preview transcriber will be enabled.
     # If false, only the main transcriber will be used, and no live preview
     # will be shown. This can save GPU resources.
-    enable_preview_transcriber: false
+    enable_preview_transcriber: true
 
 
 # Configuration for the main, high-accuracy transcription.
