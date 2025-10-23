@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover - graceful fallback when Rich is absent
 class ConsoleDisplay:
     """Manages the live display of recording status in the console."""
 
-    def __init__(self, show_waveform: bool):
+    def __init__(self, show_waveform: bool = True, show_preview: bool = True):
         if not _has_rich:
             safe_print(
                 "Warning: 'rich' library not found. Console display will be minimal.",
@@ -51,6 +51,7 @@ class ConsoleDisplay:
             return
 
         self._show_waveform = show_waveform
+        self._show_preview = show_preview
         self._recording_started_at: Optional[float] = None
         self._live_display: Optional[Any] = None
         self._display_thread: Optional[threading.Thread] = None
@@ -78,7 +79,13 @@ class ConsoleDisplay:
             return
 
         min_width = 80
-        min_height = 16 if self._show_waveform else 9  # Adjust height requirement
+        # Calculate minimum height dynamically
+        min_height = 3  # For the header panel
+        if self._show_waveform:
+            min_height += self._waveform_display_rows + 2  # Add waveform panel height
+        if self._show_preview:
+            min_height += self._preview_panel_height  # Add preview panel height
+
         if _console and (_console.width < min_width or _console.height < min_height):
             raise RuntimeError(
                 f"Terminal too small for live display. "
@@ -343,23 +350,23 @@ class ConsoleDisplay:
         """Generates the Rich Layout for the live display."""
         layout = Layout()
 
-        # Conditionally define the layout structure
+        # Build a list of panels that should be visible
+        visible_panels = [Layout(name="header", size=3)]
         if self._show_waveform:
-            layout.split(
-                Layout(name="header", size=3),
-                Layout(name="waveform", size=self._waveform_display_rows + 2),
-                Layout(name="preview", ratio=1),
+            visible_panels.append(
+                Layout(name="waveform", size=self._waveform_display_rows + 2)
             )
-        else:
-            layout.split(
-                Layout(name="header", size=3),
-                Layout(name="preview", ratio=1),
-            )
+        if self._show_preview:
+            visible_panels.append(Layout(name="preview", ratio=1))
+
+        # Split the layout using the list of visible panels
+        layout.split(*visible_panels)
 
         elapsed = time.monotonic() - (self._recording_started_at or time.monotonic())
         minutes, seconds = divmod(elapsed, 60)
         time_str = f"{int(minutes):02d}:{int(seconds):02d}"
 
+        # --- Update the panels that exist in the layout ---
         header_panel = Panel(
             Align.center(f"[bold #ff5722]Recording Time: {time_str}[/bold #ff5722]"),
             title="[bold white]Status[/bold white]",
@@ -367,7 +374,6 @@ class ConsoleDisplay:
         )
         layout["header"].update(header_panel)
 
-        # Conditionally create and update the waveform panel
         if self._show_waveform:
             waveform_panel = Panel(
                 self._latest_waveform_str,
@@ -377,13 +383,14 @@ class ConsoleDisplay:
             )
             layout["waveform"].update(waveform_panel)
 
-        preview_panel = Panel(
-            self._latest_preview_text,
-            title="[white]Live Preview[/white]",
-            border_style="blue",
-            height=self._preview_panel_height,
-        )
-        layout["preview"].update(preview_panel)
+        if self._show_preview:
+            preview_panel = Panel(
+                self._latest_preview_text,
+                title="[white]Live Preview[/white]",
+                border_style="blue",
+                height=self._preview_panel_height,
+            )
+            layout["preview"].update(preview_panel)
 
         return layout
 
