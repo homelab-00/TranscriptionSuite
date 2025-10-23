@@ -176,18 +176,53 @@ class ConsoleDisplay:
             return False
 
     def _read_cava_output(self):
-        """Reads from CAVA's stdout and updates the waveform string."""
+        """
+        Reads raw ASCII data from CAVA's stdout, parses it, and renders it
+        into a visual waveform string.
+        """
         if not self._cava_process or not self._cava_process.stdout:
             return
+
+        # Glyphs for rendering, from empty to a full block.
+        glyphs = " ▂▃▄▅▆▇█"
+        glyph_count = len(glyphs) - 1
+        ascii_max_range = 255.0  # Must match ascii_max_range in cava.config
 
         while self._cava_process.poll() is None and not self._stop_event.is_set():
             try:
                 line = self._cava_process.stdout.readline()
                 if not line:
                     break  # Process terminated
+
+                # line is now "val;val;val;..." e.g., "10;50;120;40;..."
+                parts = line.strip().split(";")
+
+                bar_chars = []
+                for part in parts:
+                    if not part:
+                        continue
+
+                    try:
+                        # Convert string value to an integer
+                        value = int(part)
+
+                        # Normalize the value to a 0.0-1.0 scale
+                        level = min(1.0, value / ascii_max_range)
+
+                        # Select the correct glyph based on the level
+                        glyph_index = int(level * glyph_count)
+                        bar_chars.append(glyphs[glyph_index])
+
+                    except (ValueError, IndexError):
+                        # Handle potential parsing errors gracefully
+                        bar_chars.append(" ")
+
                 with self._waveform_lock:
-                    # Apply coloring consistent with the old implementation
-                    self._latest_waveform_str = f"[#4caf50]{line.strip()}[/#4caf50]"
+                    # Join the characters and apply Rich markup for color
+                    self._latest_waveform_str = "".join(
+                        f"[#4caf50]{char}[/#4caf50]" for char in bar_chars
+                    )
+
             except Exception:
                 # Can happen if the process is terminated while readline is blocking
                 break
