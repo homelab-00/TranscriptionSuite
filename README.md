@@ -1,13 +1,3 @@
-# TO-DO
-
-- Further clean up `stt_engine.py`. We need to remove:
-  - unused methods
-  - maybe trim the logging statements from `stt_engine.py`
-- Need to make sure that arguements in `STT_ENGINE_OPTIONS.md` are all used in `stt_engine.py` (since we are removing a few of them, like openwakeword).
-- Re-do the waveform display.
-
----
-
 # Speech-to-Text Orchestrator
 
 A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses a dual-instance architecture with Faster Whisper models: a large, high-accuracy model for the final output and a small, fast model for a real-time preview. Transcriptions are automatically copied to the clipboard, ready to be pasted anywhere.
@@ -189,6 +179,38 @@ preview_transcriber:
 #### Other Options
 
 For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
+
+### Configuring CAVA for waveform display (optional)
+
+If you want to see a waveform while recording, you need to install CAVA.
+
+#### Step 1: Install CAVA
+
+```bash
+# On Arch Linux
+sudo pacman -S cava
+
+# On Ubuntu
+sudo apt install cava-alsa
+```
+
+#### Step 2: Configure `cava.config`
+
+CAVA uses a different indexing system than the rest of the script. Run the command below to find your microphone's PipeWire index (this of course assumes your system is using PipeWire as the audio server).
+
+```bash
+pw-cli list-objects Node
+```
+
+You'll see a long list of audio devices. You're looking for a node with `media.class = "Audio/Source"` (there might be multiple). Copy the `object.path` and replace the `source` field in the `SCRIPT/cava.config` file. Alternatively set the `source` to `auto` to use your default microphone.
+
+```yaml
+[input]
+method = pulse
+source = "alsa:acp:Generic:0:capture"
+```
+
+*Note: Even though I said we're using PipeWire, I've set the `method` to `pulse` which denotes PulseAudio. This is just how I managed to get it working through trial and error.*
 
 ## Running the Application
 
