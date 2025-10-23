@@ -42,6 +42,9 @@ class ConfigManager:
                 "language": "en",
                 "enable_preview_transcriber": True,
             },
+            "display": {
+                "show_waveform": True,
+            },
             "main_transcriber": {
                 "model": "Systran/faster-whisper-large-v3",
                 "compute_type": "default",
