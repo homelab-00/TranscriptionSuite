@@ -32,18 +32,22 @@ from model_manager import ModelManager
 from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
 from utils import safe_print
+from static_transcriber import StaticFileTranscriber
 
 if not TYPE_CHECKING:
     # Try to import the tray manager at runtime
     try:
         from tray_manager import TrayIconManager
+        from PyQt6.QtWidgets import QFileDialog
 
         HAS_TRAY = True
     except ImportError:
         HAS_TRAY = False
-        TrayIconManager = None  # type: ignore[assignment, misc]
+        TrayIconManager = None
+        QFileDialog = None
 else:
     from tray_manager import TrayIconManager
+    from PyQt6.QtWidgets import QFileDialog
 
     HAS_TRAY = True
 
@@ -73,6 +77,7 @@ class STTOrchestrator:
         self.preview_transcriber: Optional[LongFormRecorder] = None
         self.console_display: Optional[ConsoleDisplay] = None
         self.tray_manager: Optional["TrayIconManager"] = None
+        self.static_transcriber: Optional[StaticFileTranscriber] = None
 
         # Initialize core components
         self.platform_manager_instance = get_platform_manager()
@@ -88,13 +93,14 @@ class STTOrchestrator:
             "enable_preview_transcriber", True
         )
 
-        # CHANGED: Initialize Tray Icon Manager with all necessary callbacks
+        # Initialize Tray Icon Manager with all necessary callbacks
         if HAS_TRAY:
             self.tray_manager = TrayIconManager(  # type: ignore[assignment]
                 name="STT Orchestrator",
                 start_callback=self._start_longform,
                 stop_callback=self._stop_longform,
                 quit_callback=self._quit,
+                static_transcribe_callback=self._start_static_transcription,
             )
         else:
             safe_print(
@@ -145,6 +151,71 @@ class STTOrchestrator:
         except Exception as e:
             logging.error(f"Error during dependency check: {e}")
             safe_print(f"Warning: Could not complete dependency check: {e}", "warning")
+
+    def _start_static_transcription(self):
+        """
+        Initiates the static file transcription process.
+        This method is called from the main GUI thread.
+        """
+        if self.app_state["current_mode"]:
+            safe_print(
+                f"Cannot start static transcription while in "
+                f"'{self.app_state['current_mode']}' mode. "
+                "Please finish the current operation first.",
+                "warning",
+            )
+            return
+
+        # Capture the active transcriber here to ensure it's not None for the worker
+        active_transcriber = self.main_transcriber
+        if not active_transcriber:
+            safe_print("Transcription models are not ready. Please wait.", "warning")
+            return
+
+        if not QFileDialog:
+            safe_print("PyQt6 not available, cannot open file dialog.", "error")
+            return
+
+        # Supported audio formats for the dialog filter
+        supported_formats = "Audio Files (*.wav *.flac *.ogg *.mp3 *.opus *.m4a)"
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "Select an Audio File to Transcribe", "", supported_formats
+        )
+
+        if not file_path:
+            safe_print("No file selected. Aborting static transcription.", "info")
+            return
+
+        # Now, dispatch the actual work to a background thread
+        # Pass the captured active_transcriber to the worker
+        def _worker(transcriber_instance: LongFormRecorder):
+            self.app_state["current_mode"] = "static"
+            if self.tray_manager:
+                self.tray_manager.set_state("transcribing")
+
+            try:
+                # Instantiate the transcriber using the captured instance
+                self.static_transcriber = StaticFileTranscriber(
+                    transcriber_instance, self.console_display
+                )
+                self.static_transcriber.transcribe_file(file_path)
+
+            except Exception as e:
+                logging.error(f"Static transcription worker failed: {e}", exc_info=True)
+                safe_print(f"An unexpected error occurred: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+            finally:
+                # Reset state after completion or failure
+                self.app_state["current_mode"] = None
+                self.static_transcriber = None
+                if self.tray_manager:
+                    # Check again because another operation might have started
+                    if self.app_state["current_mode"] is None:
+                        self.tray_manager.set_state("standby")
+
+        # Start thread, passing the captured transcriber as an argument
+        threading.Thread(target=_worker, args=(active_transcriber,), daemon=True).start()
 
     def _start_longform(self):
         """Start long-form recording."""
