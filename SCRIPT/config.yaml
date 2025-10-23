@@ -67,6 +67,13 @@ preview_transcriber:
     no_log_file: true
 
 
+# Console display settings.
+display:
+    # If true, the live audio waveform will be displayed during recording.
+    # Requires 'cava' to be installed. Disabling this can save CPU resources.
+    show_waveform: true
+
+
 # Global audio settings for the microphone input.
 audio:
     # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
