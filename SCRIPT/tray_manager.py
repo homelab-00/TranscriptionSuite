@@ -47,6 +47,7 @@ class TrayIconManager:
         start_callback: Optional[Callable[[], None]] = None,
         stop_callback: Optional[Callable[[], None]] = None,
         quit_callback: Optional[Callable[[], None]] = None,
+        static_transcribe_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -56,6 +57,7 @@ class TrayIconManager:
             start_callback: Function to call on left-click.
             stop_callback: Function to call on right-click.
             quit_callback: A function to call to quit.
+            static_transcribe_callback: Function to call for static transcription.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -81,6 +83,7 @@ class TrayIconManager:
         self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.quit_callback = quit_callback
+        self.static_transcribe_callback = static_transcribe_callback
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
@@ -108,6 +111,14 @@ class TrayIconManager:
             stop_action: QAction = QAction("Stop Recording", menu)
             menu.addAction(stop_action)  # type: ignore[call-overload]
             cast(Any, stop_action.triggered).connect(self._on_stop_triggered)
+
+        if self.static_transcribe_callback:
+            menu.addSeparator()
+            static_action: QAction = QAction("Transcribe Audio File...", menu)
+            menu.addAction(static_action)  # type: ignore[call-overload]
+            cast(Any, static_action.triggered).connect(
+                self._on_static_transcribe_triggered
+            )
 
         menu.addSeparator()
 
@@ -175,6 +186,10 @@ class TrayIconManager:
     def _on_start_triggered(self, checked: bool) -> None:
         if self.start_callback:
             self.start_callback()
+
+    def _on_static_transcribe_triggered(self, checked: bool) -> None:
+        if self.static_transcribe_callback:
+            self.static_transcribe_callback()
 
     def _on_stop_triggered(self, checked: bool) -> None:
         if self.stop_callback:
