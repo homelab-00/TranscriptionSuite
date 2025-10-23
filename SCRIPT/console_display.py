@@ -72,24 +72,24 @@ class ConsoleDisplay:
         self._preview_panel_height = 5  # 3 lines for text, 2 for panel borders
 
     def start(self, start_time: float):
-        """Starts the live display thread and CAVA subprocess."""
+        """Starts the live display thread, showing an error if CAVA fails."""
         if not _has_rich:
             return
 
         min_width, min_height = 80, 16
         if _console and (_console.width < min_width or _console.height < min_height):
-            # ... (terminal size check remains identical) ...
+            # ... (terminal size check remains the same) ...
             raise RuntimeError("Terminal too small for live display.")
 
         self._recording_started_at = start_time
         self._stop_event.clear()
 
-        # Start the CAVA subprocess
-        if not self._start_cava_process():
-            # If CAVA fails, don't start the rich display.
-            # An error message is printed within the helper method.
-            return
+        # Attempt to start the CAVA subprocess. This method will now handle
+        # its own errors by updating the waveform display string.
+        self._start_cava_process()
 
+        # Always start the main display thread, regardless of CAVA's status.
+        # If CAVA failed, the waveform panel will show the error message.
         self._display_thread = threading.Thread(
             target=self._run_live_display, daemon=True
         )
@@ -126,20 +126,22 @@ class ConsoleDisplay:
 
         self._reset_display_state()
 
-    def _start_cava_process(self) -> bool:
-        """Launches the CAVA subprocess and the thread to read its output."""
+    def _start_cava_process(self):
+        """
+        Tries to launch the CAVA subprocess. On failure, it updates the
+        waveform display with an error message instead of stopping the UI.
+        """
         script_dir = os.path.dirname(os.path.realpath(__file__))
         config_path = os.path.join(script_dir, "cava.config")
 
         if not os.path.exists(config_path):
-            safe_print(
-                Panel(
-                    f"CAVA config file not found at [yellow]{config_path}[/yellow]. "
-                    "The waveform will not be displayed.",
-                    title="[bold red]Error[/bold red]",
-                )
+            error_text = Text(
+                f"CAVA config not found at:\n{config_path}",
+                style="bold red",
+                justify="center",
             )
-            return False
+            self._latest_waveform_str = Align.center(error_text, vertical="middle")
+            return
 
         command = ["cava", "-p", config_path]
 
@@ -149,31 +151,32 @@ class ConsoleDisplay:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 text=True,
-                bufsize=1,  # Line-buffered
+                bufsize=1,
             )
             self._cava_thread = threading.Thread(
                 target=self._read_cava_output, daemon=True
             )
             self._cava_thread.start()
-            return True
+
         except FileNotFoundError:
-            safe_print(
-                Panel(
-                    "The command [bold cyan]cava[/bold cyan] was not found.\n"
-                    "Please ensure CAVA is installed and in your system's PATH.\n"
-                    "The waveform will not be displayed.",
-                    title="[bold red]Error[/bold red]",
-                )
+            # CAVA is not installed or not in PATH. Prepare an error message.
+            error_text = Text(
+                "Command 'cava' not found.\n"
+                "Please ensure CAVA is installed and in your system's PATH.",
+                style="bold red",
+                justify="center",
             )
-            return False
+            # Update the waveform string with the rich error object.
+            with self._waveform_lock:
+                self._latest_waveform_str = Align.center(error_text, vertical="middle")
+
         except Exception as e:
-            safe_print(
-                Panel(
-                    f"An unexpected error occurred while starting CAVA: {e}",
-                    title="[bold red]Error[/bold red]",
-                )
+            # Handle other potential errors
+            error_text = Text(
+                f"Failed to start CAVA:\n{e}", style="bold red", justify="center"
             )
-            return False
+            with self._waveform_lock:
+                self._latest_waveform_str = Align.center(error_text, vertical="middle")
 
     def _read_cava_output(self):
         """
