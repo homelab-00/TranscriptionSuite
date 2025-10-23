@@ -300,7 +300,9 @@ class STTOrchestrator:
 
             try:
                 show_waveform = self.config.get("display", {}).get("show_waveform", True)
-                self.console_display = ConsoleDisplay(show_waveform=show_waveform)
+                self.console_display = ConsoleDisplay(
+                    show_waveform=show_waveform, show_preview=self.preview_enabled
+                )
             except Exception as exc:
                 logging.error("Failed to initialise console display: %s", exc)
                 self.console_display = None
