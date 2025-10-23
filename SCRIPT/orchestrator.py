@@ -259,11 +259,11 @@ class STTOrchestrator:
             self.console_display.add_preview_sentence(sentence)
 
     def _handle_audio_chunk(self, chunk: bytes):
-        """Callback to feed audio from the previewer to the main transcriber and UI."""
+        """Callback to feed audio from the previewer to the main transcriber."""
+        # The console display now uses CAVA and handles its own audio input,
+        # so we no longer need to pass audio chunks to it.
         if self.main_transcriber and not self.app_state["is_transcribing"]:
             self.main_transcriber.feed_audio(chunk)
-        if self.console_display:
-            self.console_display.update_waveform_data(chunk)
 
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
@@ -378,13 +378,9 @@ class STTOrchestrator:
 
         logging.info("Running in single-transcriber mode with merged VAD config.")
 
-        # The main transcriber is ACTIVE (use_microphone=True)
+        # CAVA handles the waveform display independently, so no audio chunk
+        # callback to the console display is needed.
         main_callbacks: dict[str, Callable[..., Any]] = {}
-        if self.console_display:
-            # We can still show a waveform even without the preview text
-            main_callbacks["on_recorded_chunk"] = (
-                self.console_display.update_waveform_data
-            )
 
         self.main_transcriber = self.model_manager.initialize_transcriber(
             main_config, main_callbacks, use_microphone=True
