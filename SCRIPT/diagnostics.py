@@ -98,8 +98,25 @@ class SystemDiagnostics:
         hardware_info = self.get_hardware_info()
         cuda_info = self.platform_manager.check_cuda_availability()
         platform_info = f"Platform: {self.platform_manager.platform.title()}"
-        main_transcriber_language = self.config.get("main_transcriber", {}).get(
-            "language", "N/A"
+
+        # Safely get the status of the toggles from the configuration
+        transcription_opts = self.config.get("transcription_options", {})
+        display_opts = self.config.get("display", {})
+
+        language = transcription_opts.get("language", "N/A")
+        preview_enabled = transcription_opts.get("enable_preview_transcriber", False)
+        waveform_enabled = display_opts.get("show_waveform", False)
+
+        # Create formatted status strings with colors for the rich display
+        preview_status_rich = (
+            "[#43a047]Enabled[/#43a047]"
+            if preview_enabled
+            else "[#ef5350]Disabled[/#ef5350]"
+        )
+        waveform_status_rich = (
+            "[#43a047]Enabled[/#43a047]"
+            if waveform_enabled
+            else "[#ef5350]Disabled[/#ef5350]"
         )
 
         if _has_rich and Panel:
@@ -107,9 +124,12 @@ class SystemDiagnostics:
                 "[bold]Speech-to-Text Orchestrator[/bold]\n\n"
                 f"[bold yellow]Control[/bold yellow] the system by clicking "
                 f"on the [bold yellow]system tray icon[/bold yellow].\n\n"
-                f"[bold yellow]Selected Language:[/bold yellow]\n"
-                f"  Main Transcriber: {main_transcriber_language}\n\n"
-                f"[bold yellow]Python Versions:[/bold yellow]\n"
+                # I've renamed this section to be more descriptive
+                f"[bold yellow]Settings & Status:[/bold yellow]\n"
+                f"  Language: {language}\n"
+                f"  Waveform Display: {waveform_status_rich}\n"
+                f"  Live Preview: {preview_status_rich}\n\n"
+                f"[bold yellow]Python & Important Package Versions:[/bold yellow]\n"
                 f"  Python: {sys.version.split()[0]}\n"
                 f"  PyTorch: {version_info['torch']}\n"
                 f"  Faster Whisper: {version_info['faster_whisper']}\n"
@@ -128,9 +148,14 @@ class SystemDiagnostics:
             )
             time.sleep(0.1)
         else:
+            # Also update the non-rich fallback display
             safe_print("=" * 50)
             safe_print("Speech-to-Text Orchestrator Running")
-            safe_print(f"  Selected Language: {main_transcriber_language}")
+            safe_print(f"  Language: {language}")
+            safe_print(
+                f"  Waveform Display: {'Enabled' if waveform_enabled else 'Disabled'}"
+            )
+            safe_print(f"  Live Preview: {'Enabled' if preview_enabled else 'Disabled'}")
             safe_print("-" * 50)
             safe_print("Versions:")
             safe_print(f"  PyTorch: {version_info['torch']}")
