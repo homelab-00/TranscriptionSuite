@@ -61,8 +61,8 @@ class ConsoleDisplay:
 
         # --- Waveform Rendering Attributes ---
         self._waveform_lock = threading.Lock()
-        # CAVA outputs a single line, so a 1-row display area is sufficient.
-        self._waveform_display_rows = 1
+        # Set the desired height of the waveform in terminal rows.
+        self._waveform_display_rows = 5
         self._latest_waveform_str = self._default_waveform_display()
 
         # --- Preview Rendering Attributes ---
@@ -177,54 +177,81 @@ class ConsoleDisplay:
 
     def _read_cava_output(self):
         """
-        Reads raw ASCII data from CAVA's stdout, parses it, and renders it
-        into a visual waveform string.
+        Reads raw ASCII data from CAVA's stdout and renders it into a centered,
+        multi-row visual waveform string.
         """
         if not self._cava_process or not self._cava_process.stdout:
             return
 
-        # Glyphs for rendering, from empty to a full block.
         glyphs = " ▂▃▄▅▆▇█"
-        glyph_count = len(glyphs) - 1
-        ascii_max_range = 255.0  # Must match ascii_max_range in cava.config
+        glyph_count = len(glyphs)
+        ascii_max_range = 255.0
+        panel_height = self._waveform_display_rows
 
         while self._cava_process.poll() is None and not self._stop_event.is_set():
             try:
                 line = self._cava_process.stdout.readline()
                 if not line:
-                    break  # Process terminated
+                    break
 
-                # line is now "val;val;val;..." e.g., "10;50;120;40;..."
                 parts = line.strip().split(";")
+                if not parts:
+                    continue
 
-                bar_chars = []
+                bar_count = len(parts)
+
+                # --- Centering Logic ---
+                # Get the total width of the console.
+                console_width = _console.width if _console else 80
+                # Calculate the available space inside the panel
+                # (console width - 4 for borders/padding).
+                panel_content_width = console_width - 4
+
+                # Calculate the total padding needed.
+                total_padding = panel_content_width - bar_count
+
+                # The left padding is half of the total, ensuring it's at least 0.
+                left_padding = max(0, total_padding // 2)
+
+                # Create the padding string.
+                padding_str = " " * left_padding
+                # --- End of Centering Logic ---
+
+                bar_levels = []
                 for part in parts:
-                    if not part:
-                        continue
-
                     try:
-                        # Convert string value to an integer
                         value = int(part)
-
-                        # Normalize the value to a 0.0-1.0 scale
                         level = min(1.0, value / ascii_max_range)
-
-                        # Select the correct glyph based on the level
-                        glyph_index = int(level * glyph_count)
-                        bar_chars.append(glyphs[glyph_index])
-
+                        bar_levels.append(level)
                     except (ValueError, IndexError):
-                        # Handle potential parsing errors gracefully
-                        bar_chars.append(" ")
+                        bar_levels.append(0.0)
+
+                output_rows = []
+                for i in range(panel_height):
+                    # Start each row with the calculated padding.
+                    row_str = padding_str
+
+                    pos_from_bottom = panel_height - i
+                    for level in bar_levels:
+                        bar_height = level * panel_height
+                        if bar_height >= pos_from_bottom:
+                            row_str += glyphs[-1]
+                        elif bar_height >= pos_from_bottom - 1:
+                            fractional_part = bar_height - (pos_from_bottom - 1)
+                            glyph_index = int(fractional_part * glyph_count)
+                            row_str += glyphs[min(glyph_count - 1, glyph_index)]
+                        else:
+                            row_str += " "
+                    output_rows.append(row_str)
+
+                final_waveform_string = "\n".join(output_rows)
 
                 with self._waveform_lock:
-                    # Join the characters and apply Rich markup for color
-                    self._latest_waveform_str = "".join(
-                        f"[#4caf50]{char}[/#4caf50]" for char in bar_chars
+                    self._latest_waveform_str = (
+                        f"[#4caf50]{final_waveform_string}[/#4caf50]"
                     )
 
             except Exception:
-                # Can happen if the process is terminated while readline is blocking
                 break
 
         with self._waveform_lock:
