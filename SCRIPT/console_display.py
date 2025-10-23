@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover - graceful fallback when Rich is absent
 class ConsoleDisplay:
     """Manages the live display of recording status in the console."""
 
-    def __init__(self):
+    def __init__(self, show_waveform: bool):
         if not _has_rich:
             safe_print(
                 "Warning: 'rich' library not found. Console display will be minimal.",
@@ -50,6 +50,7 @@ class ConsoleDisplay:
             )
             return
 
+        self._show_waveform = show_waveform
         self._recording_started_at: Optional[float] = None
         self._live_display: Optional[Any] = None
         self._display_thread: Optional[threading.Thread] = None
@@ -76,20 +77,22 @@ class ConsoleDisplay:
         if not _has_rich:
             return
 
-        min_width, min_height = 80, 16
+        min_width = 80
+        min_height = 16 if self._show_waveform else 9  # Adjust height requirement
         if _console and (_console.width < min_width or _console.height < min_height):
-            # ... (terminal size check remains the same) ...
-            raise RuntimeError("Terminal too small for live display.")
+            raise RuntimeError(
+                f"Terminal too small for live display. "
+                f"Minimum required: {min_width}x{min_height}."
+            )
 
         self._recording_started_at = start_time
         self._stop_event.clear()
 
-        # Attempt to start the CAVA subprocess. This method will now handle
-        # its own errors by updating the waveform display string.
-        self._start_cava_process()
+        # Conditionally start the CAVA subprocess
+        if self._show_waveform:
+            self._start_cava_process()
 
-        # Always start the main display thread, regardless of CAVA's status.
-        # If CAVA failed, the waveform panel will show the error message.
+        # Always start the main display thread.
         self._display_thread = threading.Thread(
             target=self._run_live_display, daemon=True
         )
@@ -339,11 +342,19 @@ class ConsoleDisplay:
     def _generate_layout(self) -> Any:
         """Generates the Rich Layout for the live display."""
         layout = Layout()
-        layout.split(
-            Layout(name="header", size=3),
-            Layout(name="waveform", size=self._waveform_display_rows + 2),
-            Layout(name="preview", ratio=1),
-        )
+
+        # Conditionally define the layout structure
+        if self._show_waveform:
+            layout.split(
+                Layout(name="header", size=3),
+                Layout(name="waveform", size=self._waveform_display_rows + 2),
+                Layout(name="preview", ratio=1),
+            )
+        else:
+            layout.split(
+                Layout(name="header", size=3),
+                Layout(name="preview", ratio=1),
+            )
 
         elapsed = time.monotonic() - (self._recording_started_at or time.monotonic())
         minutes, seconds = divmod(elapsed, 60)
@@ -354,13 +365,17 @@ class ConsoleDisplay:
             title="[bold white]Status[/bold white]",
             border_style="green",
         )
+        layout["header"].update(header_panel)
 
-        waveform_panel = Panel(
-            self._latest_waveform_str,
-            title="[white]Waveform[/white]",
-            border_style="blue",
-            height=self._waveform_display_rows + 2,
-        )
+        # Conditionally create and update the waveform panel
+        if self._show_waveform:
+            waveform_panel = Panel(
+                self._latest_waveform_str,
+                title="[white]Waveform[/white]",
+                border_style="blue",
+                height=self._waveform_display_rows + 2,
+            )
+            layout["waveform"].update(waveform_panel)
 
         preview_panel = Panel(
             self._latest_preview_text,
@@ -368,10 +383,8 @@ class ConsoleDisplay:
             border_style="blue",
             height=self._preview_panel_height,
         )
-
-        layout["header"].update(header_panel)
-        layout["waveform"].update(waveform_panel)
         layout["preview"].update(preview_panel)
+
         return layout
 
     def _reset_display_state(self):
