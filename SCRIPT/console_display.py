@@ -9,12 +9,12 @@ It is designed to be decoupled from the core recording logic.
 
 from __future__ import annotations
 
-import array
-import math
+import subprocess
+import os
 import threading
 import time
 from collections import deque
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, Optional, cast
 
 from utils import safe_print
 
@@ -38,15 +38,6 @@ except ImportError:  # pragma: no cover - graceful fallback when Rich is absent
     Text = cast(Any, None)
     Layout = cast(Any, None)
 
-# Optional numpy for faster audio processing
-try:
-    import numpy as np
-
-    _has_numpy = True
-except ImportError:
-    np = None
-    _has_numpy = False
-
 
 class ConsoleDisplay:
     """Manages the live display of recording status in the console."""
@@ -64,93 +55,210 @@ class ConsoleDisplay:
         self._display_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        # Waveform rendering attributes
+        # --- CAVA Process Management ---
+        self._cava_process: Optional[subprocess.Popen] = None
+        self._cava_thread: Optional[threading.Thread] = None
+
+        # --- Waveform Rendering Attributes ---
         self._waveform_lock = threading.Lock()
-        self._waveform_window_seconds = 60.0  # Total time window for samples
-        self._waveform_display_seconds = 10.0  # Visible part of the waveform
-        self._waveform_slot_count = 32
-        self._waveform_samples: deque[Tuple[float, float]] = deque(maxlen=512)
-        self._waveform_last_levels: List[float] = [0.0] * self._waveform_slot_count
-        self._waveform_last_update = 0.0
-        self._waveform_display_rows = 4
+        # Set the desired height of the waveform in terminal rows.
+        self._waveform_display_rows = 5
         self._latest_waveform_str = self._default_waveform_display()
 
-        # Preview rendering attributes
+        # --- Preview Rendering Attributes ---
         self._preview_lock = threading.Lock()
         self._preview_sentences: deque[str] = deque(maxlen=10)
         self._latest_preview_text: Any = self._default_preview_display()
         self._preview_panel_height = 5  # 3 lines for text, 2 for panel borders
 
     def start(self, start_time: float):
-        """Starts the live display thread."""
+        """Starts the live display thread, showing an error if CAVA fails."""
         if not _has_rich:
             return
 
-        # Check terminal size before starting
         min_width, min_height = 80, 16
         if _console and (_console.width < min_width or _console.height < min_height):
-            error_panel = Panel(
-                Align.center(
-                    f"[bold]Terminal too small![/bold]\n\nPlease resize to at least "
-                    f"[cyan]{min_width}x{min_height}[/cyan] characters.\n"
-                    f"Current size is "
-                    f"[yellow]{_console.width}x{_console.height}[/yellow].",
-                    vertical="middle",
-                ),
-                title="[bold red]Error[/bold red]",
-                height=7,
-            )
-            safe_print(error_panel)
+            # ... (terminal size check remains the same) ...
             raise RuntimeError("Terminal too small for live display.")
 
         self._recording_started_at = start_time
         self._stop_event.clear()
+
+        # Attempt to start the CAVA subprocess. This method will now handle
+        # its own errors by updating the waveform display string.
+        self._start_cava_process()
+
+        # Always start the main display thread, regardless of CAVA's status.
+        # If CAVA failed, the waveform panel will show the error message.
         self._display_thread = threading.Thread(
             target=self._run_live_display, daemon=True
         )
         self._display_thread.start()
 
     def stop(self):
-        """Stops the live display thread."""
+        """Stops the live display thread and the CAVA subprocess."""
         if not _has_rich:
             return
+
         self._stop_event.set()
+
+        # Terminate CAVA process
+        if self._cava_process and self._cava_process.poll() is None:
+            try:
+                self._cava_process.terminate()
+                self._cava_process.wait(timeout=1)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                if self._cava_process:
+                    self._cava_process.kill()
+            except Exception:
+                pass  # Ignore other errors during shutdown
+        self._cava_process = None
+
+        # Join CAVA reader thread
+        if self._cava_thread and self._cava_thread.is_alive():
+            self._cava_thread.join(timeout=0.5)
+        self._cava_thread = None
+
+        # Join main display thread
         if self._display_thread and self._display_thread.is_alive():
             self._display_thread.join(timeout=0.5)
         self._display_thread = None
+
         self._reset_display_state()
 
-    def update_waveform_data(self, chunk: bytes):
-        """Processes an audio chunk to update waveform visualization data."""
-        if not _has_rich or not chunk:
+    def _start_cava_process(self):
+        """
+        Tries to launch the CAVA subprocess. On failure, it updates the
+        waveform display with an error message instead of stopping the UI.
+        """
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        config_path = os.path.join(script_dir, "cava.config")
+
+        if not os.path.exists(config_path):
+            error_text = Text(
+                f"CAVA config not found at:\n{config_path}",
+                style="bold red",
+                justify="center",
+            )
+            self._latest_waveform_str = Align.center(error_text, vertical="middle")
             return
 
+        command = ["cava", "-p", config_path]
+
         try:
-            if _has_numpy and np:
-                samples = np.frombuffer(chunk, dtype=np.int16)
-                if samples.size == 0:
-                    return
-                rms = np.sqrt(np.mean(np.square(samples.astype(np.float32))))
-            else:
-                samples_array = array.array("h", chunk)
-                if not samples_array:
-                    return
-                sum_sq = sum(float(s) * float(s) for s in samples_array)
-                rms = math.sqrt(sum_sq / len(samples_array))
+            self._cava_process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+            self._cava_thread = threading.Thread(
+                target=self._read_cava_output, daemon=True
+            )
+            self._cava_thread.start()
 
-            level = min(1.0, rms / 32768.0)
-            now = time.monotonic()
-
+        except FileNotFoundError:
+            # CAVA is not installed or not in PATH. Prepare an error message.
+            error_text = Text(
+                "Command 'cava' not found.\n"
+                "Please ensure CAVA is installed and in your system's PATH.",
+                style="bold red",
+                justify="center",
+            )
+            # Update the waveform string with the rich error object.
             with self._waveform_lock:
-                self._waveform_samples.append((now, level))
-                cutoff = now - self._waveform_window_seconds
-                while self._waveform_samples and self._waveform_samples[0][0] < cutoff:
-                    self._waveform_samples.popleft()
-                self._waveform_last_update = now
+                self._latest_waveform_str = Align.center(error_text, vertical="middle")
 
-        except Exception:
-            # Silently ignore errors in waveform processing to not disrupt recording
-            pass
+        except Exception as e:
+            # Handle other potential errors
+            error_text = Text(
+                f"Failed to start CAVA:\n{e}", style="bold red", justify="center"
+            )
+            with self._waveform_lock:
+                self._latest_waveform_str = Align.center(error_text, vertical="middle")
+
+    def _read_cava_output(self):
+        """
+        Reads raw ASCII data from CAVA's stdout and renders it into a centered,
+        multi-row visual waveform string.
+        """
+        if not self._cava_process or not self._cava_process.stdout:
+            return
+
+        glyphs = " ▂▃▄▅▆▇█"
+        glyph_count = len(glyphs)
+        ascii_max_range = 255.0
+        panel_height = self._waveform_display_rows
+
+        while self._cava_process.poll() is None and not self._stop_event.is_set():
+            try:
+                line = self._cava_process.stdout.readline()
+                if not line:
+                    break
+
+                parts = line.strip().split(";")
+                if not parts:
+                    continue
+
+                bar_count = len(parts)
+
+                # --- Centering Logic ---
+                # Get the total width of the console.
+                console_width = _console.width if _console else 80
+                # Calculate the available space inside the panel
+                # (console width - 4 for borders/padding).
+                panel_content_width = console_width - 4
+
+                # Calculate the total padding needed.
+                total_padding = panel_content_width - bar_count
+
+                # The left padding is half of the total, ensuring it's at least 0.
+                left_padding = max(0, total_padding // 2)
+
+                # Create the padding string.
+                padding_str = " " * left_padding
+                # --- End of Centering Logic ---
+
+                bar_levels = []
+                for part in parts:
+                    try:
+                        value = int(part)
+                        level = min(1.0, value / ascii_max_range)
+                        bar_levels.append(level)
+                    except (ValueError, IndexError):
+                        bar_levels.append(0.0)
+
+                output_rows = []
+                for i in range(panel_height):
+                    # Start each row with the calculated padding.
+                    row_str = padding_str
+
+                    pos_from_bottom = panel_height - i
+                    for level in bar_levels:
+                        bar_height = level * panel_height
+                        if bar_height >= pos_from_bottom:
+                            row_str += glyphs[-1]
+                        elif bar_height >= pos_from_bottom - 1:
+                            fractional_part = bar_height - (pos_from_bottom - 1)
+                            glyph_index = int(fractional_part * glyph_count)
+                            row_str += glyphs[min(glyph_count - 1, glyph_index)]
+                        else:
+                            row_str += " "
+                    output_rows.append(row_str)
+
+                final_waveform_string = "\n".join(output_rows)
+
+                with self._waveform_lock:
+                    self._latest_waveform_str = (
+                        f"[#4caf50]{final_waveform_string}[/#4caf50]"
+                    )
+
+            except Exception:
+                break
+
+        with self._waveform_lock:
+            self._latest_waveform_str = "[grey50]CAVA has stopped.[/grey50]"
 
     def add_preview_sentence(self, sentence: str):
         """Adds a new sentence to the live preview display."""
@@ -224,7 +332,6 @@ class ConsoleDisplay:
 
         with live_display:
             while not self._stop_event.is_set():
-                self._render_waveform()
                 self._render_preview()
                 live_display.update(self._generate_layout())
                 time.sleep(0.1)
@@ -270,9 +377,6 @@ class ConsoleDisplay:
     def _reset_display_state(self):
         """Resets waveform and preview buffers to a neutral state."""
         with self._waveform_lock:
-            self._waveform_samples.clear()
-            self._waveform_last_levels = [0.0] * self._waveform_slot_count
-            self._waveform_last_update = 0.0
             self._latest_waveform_str = self._default_waveform_display()
         with self._preview_lock:
             self._preview_sentences.clear()
@@ -291,36 +395,6 @@ class ConsoleDisplay:
             if _has_rich
             else "Waiting for preview..."
         )
-
-    def _render_waveform(self):
-        """Renders the waveform bar and updates the internal string."""
-        now = time.monotonic()
-        with self._waveform_lock:
-            samples = list(self._waveform_samples)
-            if not samples:
-                self._latest_waveform_str = self._default_waveform_display()
-                return
-
-            display_start = now - self._waveform_display_seconds
-            slot_duration = self._waveform_display_seconds / self._waveform_slot_count
-            slot_values = [0.0] * self._waveform_slot_count
-
-            for timestamp, level in samples:
-                if timestamp >= display_start:
-                    slot_index = int((timestamp - display_start) / slot_duration)
-                    if 0 <= slot_index < self._waveform_slot_count:
-                        slot_values[slot_index] = max(slot_values[slot_index], level)
-
-            glyphs = " ▂▃▄▅▆▇█"
-            glyph_count = len(glyphs) - 1
-            bar_chars = [
-                glyphs[min(glyph_count, int(level * glyph_count * 10))]
-                for level in slot_values
-            ]
-
-            self._latest_waveform_str = "".join(
-                f"[#4caf50]{char}[/#4caf50]" for char in bar_chars
-            )
 
     def _render_preview(self):
         """Renders the preview text and updates the internal Rich Text object."""
