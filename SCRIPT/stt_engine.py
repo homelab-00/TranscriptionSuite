@@ -478,19 +478,19 @@ class AudioToTextRecorder:
         # Setup voice activity detection model WebRTC
         try:
             self.logger.info(
-                "Initializing WebRTC voice with " f"Sensitivity {webrtc_sensitivity}"
+                f"Initializing WebRTC voice with Sensitivity {webrtc_sensitivity}"
             )
             self.webrtc_vad_model = webrtcvad.Vad()
             self.webrtc_vad_model.set_mode(webrtc_sensitivity)
 
         except Exception as e:
             self.logger.exception(
-                "Error initializing WebRTC voice " f"activity detection engine: {e}"
+                f"Error initializing WebRTC voice activity detection engine: {e}"
             )
             raise
 
         self.logger.debug(
-            "WebRTC VAD voice activity detection " "engine initialized successfully"
+            "WebRTC VAD voice activity detection engine initialized successfully"
         )
 
         # Setup voice activity detection model Silero VAD
@@ -504,12 +504,12 @@ class AudioToTextRecorder:
 
         except Exception as e:
             self.logger.exception(
-                f"Error initializing Silero VAD " f"voice activity detection engine: {e}"
+                f"Error initializing Silero VAD voice activity detection engine: {e}"
             )
             raise
 
         self.logger.debug(
-            "Silero VAD voice activity detection " "engine initialized successfully"
+            "Silero VAD voice activity detection engine initialized successfully"
         )
 
         self.audio_buffer: collections.deque[Union[bytes, bytearray]] = collections.deque(
@@ -675,8 +675,7 @@ class AudioToTextRecorder:
                 try:
                     device_info = audio_interface.get_device_info_by_index(device_index)
                     logger.debug(
-                        f"Validating device index {device_index} "
-                        f"with info: {device_info}"
+                        f"Validating device index {device_index} with info: {device_info}"
                     )
                     if not device_info.get("maxInputChannels", 0) > 0:
                         logger.debug(
@@ -954,8 +953,15 @@ class AudioToTextRecorder:
                     data = stream.read(chunk_size, exception_on_overflow=False)
 
                     if use_microphone:
+                        if device_sample_rate is None:
+                            logger.error(
+                                "Device sample rate is None, cannot preprocess audio"
+                            )
+                            break
                         processed_data = preprocess_audio(
-                            data, device_sample_rate, target_sample_rate  # type: ignore
+                            data,
+                            device_sample_rate,
+                            target_sample_rate,  # type: ignore
                         )
                         buffer += processed_data
 
@@ -1135,7 +1141,7 @@ class AudioToTextRecorder:
                     self.audio = full_audio[:-samples_to_remove]
                     self.logger.debug(
                         f"Removed {samples_to_remove} samples "
-                        f"({samples_to_remove/self.sample_rate:.3f}s) from end of audio"
+                        f"({samples_to_remove / self.sample_rate:.3f}s) from end of audio"
                     )
                 else:
                     self.audio = np.array([], dtype=np.float32)
@@ -1349,7 +1355,7 @@ class AudioToTextRecorder:
         # Ensure there's a minimum interval
         # between stopping and starting recording
         if time.time() - self.recording_stop_time < self.min_gap_between_recordings:
-            self.logger.info("Attempted to start recording " "too soon after stopping.")
+            self.logger.info("Attempted to start recording too soon after stopping.")
             return self
 
         self.logger.info("recording started")
@@ -1389,7 +1395,7 @@ class AudioToTextRecorder:
         # Ensure there's a minimum interval
         # between starting and stopping recording
         if time.time() - self.recording_start_time < self.min_length_of_recording:
-            self.logger.info("Attempted to stop recording " "too soon after starting.")
+            self.logger.info("Attempted to stop recording too soon after starting.")
             return self
 
         self.logger.info("recording stopped")
@@ -1487,7 +1493,7 @@ class AudioToTextRecorder:
 
             instance_name_str = self.instance_name.replace("_", " ").title()
             safe_print(
-                f"{instance_name_str} with model " f"'{self.model_name}' shutting down.",
+                f"{instance_name_str} with model '{self.model_name}' shutting down.",
                 style="warning",
             )
 
@@ -1537,7 +1543,6 @@ class AudioToTextRecorder:
                 self.logger.debug("Debug: Starting main loop")
             # Continuously monitor audio for voice activity
             while self.is_running:
-
                 # if self.use_extended_logging:
                 #     self.logger.debug('Debug: Entering inner try block')
                 if last_inner_try_time:
@@ -1598,7 +1603,6 @@ class AudioToTextRecorder:
                         if self.use_extended_logging:
                             self.logger.debug("Debug: Discarding old chunks if necessary")
                         while self.audio_queue.qsize() > self.allowed_latency_limit:
-
                             data = self.audio_queue.get()
 
                 except BrokenPipeError:
@@ -1647,12 +1651,10 @@ class AudioToTextRecorder:
                     # Check for voice activity to
                     # trigger the start of recording
                     if self.start_recording_on_voice_activity:
-
                         if self.use_extended_logging:
                             self.logger.debug("Debug: Checking if voice is active")
 
                         if self._is_voice_active():
-
                             if self.on_vad_start:
                                 self._run_callback(self.on_vad_start)
 
@@ -1746,7 +1748,6 @@ class AudioToTextRecorder:
                                 time.time() - self.recording_start_time
                                 > self.min_length_of_recording
                             ):
-
                                 self.speech_end_silence_start = time.time()
                                 self.awaiting_speech_end = True
                                 if self.on_turn_detection_start:
@@ -1828,7 +1829,6 @@ class AudioToTextRecorder:
                             and time.time() - self.speech_end_silence_start
                             >= self.post_speech_silence_duration
                         ):
-
                             if self.on_vad_stop:
                                 self._run_callback(self.on_vad_stop)
 
@@ -1994,7 +1994,7 @@ class AudioToTextRecorder:
                 if not all_frames_must_be_true:
                     if self.debug_mode:
                         self.logger.info(
-                            f"Speech detected in frame {i + 1}" f" of {num_frames}"
+                            f"Speech detected in frame {i + 1} of {num_frames}"
                         )
                     if not self.is_webrtc_speech_active and self.use_extended_logging:
                         self.logger.info(speech_str)
@@ -2003,7 +2003,7 @@ class AudioToTextRecorder:
         if all_frames_must_be_true:
             if self.debug_mode and speech_frames == num_frames:
                 self.logger.info(
-                    f"Speech detected in {speech_frames} of " f"{num_frames} frames"
+                    f"Speech detected in {speech_frames} of {num_frames} frames"
                 )
             elif self.debug_mode:
                 self.logger.info(f"Speech not detected in all {num_frames} frames")
@@ -2041,7 +2041,6 @@ class AudioToTextRecorder:
 
         # First quick performing check for voice activity using WebRTC
         if self.is_webrtc_speech_active:
-
             if not self.silero_working:
                 self.silero_working = True
 

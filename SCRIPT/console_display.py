@@ -9,8 +9,8 @@ It is designed to be decoupled from the core recording logic.
 
 from __future__ import annotations
 
-import subprocess
 import os
+import subprocess
 import threading
 import time
 from collections import deque

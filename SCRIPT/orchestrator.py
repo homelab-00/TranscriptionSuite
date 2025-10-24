@@ -31,14 +31,14 @@ from logging_setup import setup_logging
 from model_manager import ModelManager
 from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
-from utils import safe_print
 from static_transcriber import StaticFileTranscriber
+from utils import safe_print
 
 if not TYPE_CHECKING:
     # Try to import the tray manager at runtime
     try:
-        from tray_manager import TrayIconManager
         from PyQt6.QtWidgets import QFileDialog
+        from tray_manager import TrayIconManager
 
         HAS_TRAY = True
     except ImportError:
@@ -46,8 +46,8 @@ if not TYPE_CHECKING:
         TrayIconManager = None
         QFileDialog = None
 else:
-    from tray_manager import TrayIconManager
     from PyQt6.QtWidgets import QFileDialog
+    from tray_manager import TrayIconManager
 
     HAS_TRAY = True
 

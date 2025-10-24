@@ -44,8 +44,8 @@ except ImportError:
 from utils import safe_print
 
 if TYPE_CHECKING:
-    from recorder import LongFormRecorder
     from console_display import ConsoleDisplay
+    from recorder import LongFormRecorder
 
 
 class StaticFileTranscriber:
@@ -241,9 +241,7 @@ class StaticFileTranscriber:
             else:
                 rendered_text = final_text or "[No transcription captured]"
                 safe_print(
-                    "\n--- Transcription ---\n"
-                    f"{rendered_text}\n"
-                    "---------------------\n"
+                    f"\n--- Transcription ---\n{rendered_text}\n---------------------\n"
                 )
         except Exception as e:
             logging.error(

@@ -19,7 +19,6 @@ from logging import FileHandler
 from pathlib import Path
 from typing import Any, Dict
 
-
 _logging_configured = False
 
 
