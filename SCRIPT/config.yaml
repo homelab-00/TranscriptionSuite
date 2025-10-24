@@ -4,11 +4,12 @@
 transcription_options:
     # Language code for transcription (e.g., "en" for English, "el" for Greek).
     # This setting applies to both the main and preview transcribers.
-    language: "el"
+    language: "en"
 
     # If true, the live preview transcriber will be enabled.
     # If false, only the main transcriber will be used, and no live preview
     # will be shown. This can save GPU resources.
+    # Setting this to false will also disable the preview transcription panel.
     enable_preview_transcriber: true
 
 
@@ -43,6 +44,7 @@ main_transcriber:
     faster_whisper_vad_filter: true
 
     # Prevent the library from creating its own log file (realtimestt.log).
+    # We're capturing the log output in our own log file (stt_orchestrator.log).
     no_log_file: true
 
 
@@ -64,7 +66,17 @@ preview_transcriber:
     min_length_of_recording: 1.0
 
     # Prevent the library from creating its own log file (realtimestt.log).
+    # We're capturing the log output in our own log file (stt_orchestrator.log).
     no_log_file: true
+
+
+# Console display settings.
+display:
+    # If true, the live audio waveform will be displayed during recording.
+    # Requires 'cava' to be installed. Disabling this can save CPU resources.
+    show_waveform: true
+
+    # The preview transcriber panel is toggled by the `enable_preview_transcriber` setting.
 
 
 # Global audio settings for the microphone input.
