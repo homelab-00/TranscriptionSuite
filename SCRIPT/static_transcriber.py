@@ -181,6 +181,13 @@ class StaticFileTranscriber:
             safe_print("SoundFile library not available. Aborting.", "error")
             return
 
+        logging.info(
+            "--- Starting static transcription process for file: %s ---", file_path
+        )
+        logging.info(
+            "--- Subsequent 'realtimestt.main_transcriber' logs belong to this "
+            "process. ---"
+        )
         try:
             # --- Pre-processing Pipeline ---
             converted_path = self._convert_to_wav(file_path)
@@ -244,6 +251,7 @@ class StaticFileTranscriber:
             )
             safe_print(f"Error during transcription: {e}", "error")
         finally:
+            logging.info("--- Static transcription process finished. ---")
             self.cleanup()
 
     def cleanup(self):

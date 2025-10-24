@@ -232,6 +232,7 @@ class ModelManager:
     def initialize_transcriber(
         self,
         config_data: Union[str, Dict[str, Any]],
+        instance_name: str,
         callbacks: Optional[Dict[str, Callable[..., Any]]] = None,
         use_microphone: bool = False,
     ) -> Optional[LongFormRecorder]:
@@ -269,7 +270,9 @@ class ModelManager:
                 instance_config["input_device_index"] = device_index
 
             # Pass the specific config section to the recorder
-            recorder = LongFormRecorder(config=instance_config, **callback_map)
+            recorder = LongFormRecorder(
+                config=instance_config, instance_name=instance_name, **callback_map
+            )
 
             self._log_info("%s recorder initialized successfully", config_name)
             return recorder
