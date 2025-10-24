@@ -64,6 +64,7 @@ class LongFormRecorder:
     def __init__(
         self,
         config: dict[str, Any],
+        instance_name: str,
         # Callbacks for decoupling
         on_recording_start: Optional[Callable[[float], None]] = None,
         on_recording_stop: Optional[Callable[[], None]] = None,
@@ -78,6 +79,7 @@ class LongFormRecorder:
         self._last_recording_duration = 0.0
         self._last_transcription_duration = 0.0
         self.last_transcription = ""
+        self.instance_name = instance_name
 
         # Prepare configuration for the underlying AudioToTextRecorder
         self.recorder_config = dict(config) if config else {}
@@ -93,12 +95,16 @@ class LongFormRecorder:
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
 
-        # Re-enable log propagation from the STT engine
-        # The engine disables propagation by default. We re-enable it so its
-        # logs flow into our main application log file.
+        # Re-enable log propagation from the STT engine and its parent.
+        # This is the crucial fix: The parent 'realtimestt' logger was
+        # configured with propagate=False, blocking all child messages.
         if self.recorder:
-            stt_logger = logging.getLogger("realtimestt")
+            parent_logger = logging.getLogger("realtimestt")
+            parent_logger.propagate = True
+
+            stt_logger = logging.getLogger(f"realtimestt.{self.instance_name}")
             stt_logger.propagate = True
+
         logging.info("LongFormRecorder initialized successfully.")
 
     def _initialize_recorder(self) -> Optional[AudioToTextRecorderType]:
@@ -113,7 +119,9 @@ class LongFormRecorder:
                 library_config = self.recorder_config.copy()
                 library_config.pop("use_default_input", None)
 
-                return AudioToTextRecorder(**library_config)
+                return AudioToTextRecorder(
+                    instance_name=self.instance_name, **library_config
+                )
         except Exception as e:
             logging.error(
                 "Failed to initialize AudioToTextRecorder: %s", e, exc_info=True
