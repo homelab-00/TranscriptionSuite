@@ -1,45 +1,60 @@
-# Speech-to-Text Orchestrator
+# TranscriptionSuite
 
-A focused, high-performance speech-to-text application for long-form dictation, controlled entirely from the system tray. It uses a dual-instance architecture with Faster Whisper models: a large, high-accuracy model for the final output and a small, fast model for a real-time preview. Transcriptions are automatically copied to the clipboard, ready to be pasted anywhere.
+A speech to text transcription suite for Linux. Written in Python and utilizing the `faster_whisper` library with `CUDA 13+` acceleration. Extremely fast and accurate transcription, even with small sample size languages like Greek (it can even handle Greek with some English mixed in, transcribing both in their respective alphabets).
 
-#### Key Features
+Focused on longform (start/stop) dictation. Static transcription also available.
+Features live transcription preview and waveform display (using `cava`).
+Controlled via a system tray icon (`Qt`). Transcribed text is automatically copied to the clipboard.
 
-- **High-Accuracy Final Transcription**: Records extended speech sessions and processes the entire audio at the end with a large model for the best possible accuracy.
-- **Live Text & Waveform Preview**: See your speech transcribed in real-time in your terminal, along with a live audio waveform.
-- **System Tray Integration**: Control all functionality through a simple system tray icon.
-- **Instant Responsiveness**: The transcription models are loaded at startup and remain in memory, eliminating delays when starting a recording.
-- **Clipboard Integration**: The final, high-accuracy transcribed text is automatically copied to your clipboard.
-- **GPU Acceleration**: Utilizes CUDA for fast transcription processing.
-- **Multi-language Support**: Supports all Whisper-compatible language codes.
+*For a reference point, on my RTX 3060 it can transcribe a 30 minute recording in under 40 seconds (specifically in Greek, which is slower than English by default).*
 
 ---
 
-## Installation and Setup
+## Installation
 
-This project uses `uv` for package and environment management. The setup process involves installing dependencies from PyPI and performing a local compilation of one library to ensure CUDA 13+ compatibility.
+The guide is written for Arch Linux, but it should be easy to adapt for other distributions.
 
-#### Prerequisites
+To download the source code, clone this repository:
 
-- You must have the NVIDIA CUDA Toolkit (version 13.0 or newer) installed system-wide.
+```bash
+git clone https://gitlab.com/bluemoon7/transcription-suite.git
+```
+
+If you haven't already, install the CUDA 13 toolkit and cuDNN:
+
+```bash
+sudo pacman -S cuda cudnn
+```
 
 ### Step 1: Create Virtual Environment and Install Build Dependencies
 
-First let's install `uv` in your global Python installation:
+First, let's install `uv` for the global Python installation. It's a replacement for `pip` and `venv` that provides a more modern and feature-rich experience. We'll be using it to manage the manage the Python environment for this project.
 
 ```bash
-pip install uv
+sudo pacman -S uv
 ```
 
 Now let's create a local virtual environment and install the build dependencies to ensure the `ctranslate2` library can be compiled successfully.
+*Run the commands in the project's root directory (this applies to all commands in this guide).*
+
+- Create the virtual environment:
 
 ```bash
-# Run this from the project's root directory
-
-# Create and activate the virtual environment
 uv venv --python 3.13
-source .venv/bin/activate
+```
 
-# Install build dependencies
+- Activate the virtual environment:
+
+```bash
+source .venv/bin/activate
+```
+
+You should now see the virtual environment name in your terminal prompt. Confirm with `which python` (the path should end in `.venv/bin/python`).
+*The rest of this guide assumes that the virtual environment is activated.*
+
+- Install build dependencies:
+
+```bash
 uv pip install build setuptools pybind11
 ```
 
@@ -56,7 +71,6 @@ The `ctranslate2` library needs to be compiled locally to link against your syst
 Now, run the script. It will download the source code in the newly created `deps` directory, compile it and create a wheel file in `deps/ctranslate2/python/dist`.
 
 ```bash
-# This will take several minutes
 ./build_ctranslate2.sh
 ```
 
@@ -72,7 +86,9 @@ uv sync
 
 Your environment is now fully configured and ready to use.
 
-## Configuration
+---
+
+## Setup
 
 ### Finding your audio device index
 
@@ -81,8 +97,7 @@ Your environment is now fully configured and ready to use.
 Before first use, you need to identify your microphone's device index:
 
 ```bash
-# Ensure you run this using the project's environment
-uv run python list_audio_devices.py
+python list_audio_devices.py
 ```
 
 *Note: `uv run python file.py` is the same thing as first activating the venv using `source .venv/bin/activate` and then running `python file.py`.*
@@ -115,7 +130,7 @@ audio:
     use_default_input: false
 ```
 
-### Configuring language, models, realtime preview and other options
+### Configuring language, models, realtime preview
 
 #### Language Configuration
 
@@ -176,10 +191,6 @@ preview_transcriber:
     model: "Systran/faster-whisper-medium"
 ```
 
-#### Other Options
-
-For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
-
 ### Configuring CAVA for waveform display (optional)
 
 If you want to see a waveform while recording, you need to install CAVA.
@@ -187,11 +198,7 @@ If you want to see a waveform while recording, you need to install CAVA.
 #### Step 1: Install CAVA
 
 ```bash
-# On Arch Linux
 sudo pacman -S cava
-
-# On Ubuntu
-sudo apt install cava-alsa
 ```
 
 #### Step 2: Configure `cava.config`
@@ -212,16 +219,20 @@ source = "alsa:acp:Generic:0:capture"
 
 *Note: Even though I said we're using PipeWire, I've set the `method` to `pulse` which denotes PulseAudio. This is just how I managed to get it working through trial and error.*
 
+### Other Options
+
+For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
+
+---
+
 ## Running the Application
 
 ### Start the Orchestrator
 
-Use `uv run` to execute the main script within the managed virtual environment.
-
-From the root project folder, run:
+From the project root directory, simply run:
 
 ```bash
-uv run python SCRIPT/orchestrator.py
+python SCRIPT/orchestrator.py
 ```
 
 The application will:
@@ -250,11 +261,12 @@ All controls are accessed through the system tray icon:
 
 - Start Recording
 - Stop Recording
+- Static Transcription
 - Quit
 
 ---
 
-### Architecture
+## Architecture
 
 The system is built around a dual-instance architecture to provide both real-time feedback and high-accuracy final transcriptions.
 
@@ -263,14 +275,92 @@ The system is built around a dual-instance architecture to provide both real-tim
 - **Transcription Instance** (`recorder.py`): A reusable class that wraps our customized `stt_engine.py`. It is instantiated twice:
   - **Preview Transcriber**: An "active" instance that directly controls the microphone. It uses a small, fast model to transcribe audio in short chunks, providing a live text preview. It also feeds raw audio data to the main transcriber and the console display.
   - **Main Transcriber**: A "passive" instance that receives audio from the previewer. It accumulates the entire recording in memory and performs a single, highly accurate transcription at the end using a large model.
-- **Console Display** (`console_display.py`): Manages all visual feedback in the terminal, including the live text preview and audio waveform, using the 'rich' library.
-- **Tray Manager** (`tray_manager.py`): Provides the PyQt6-based system tray interface.
-- **Model Manager** (`model_manager.py`): Handles the initial creation of the transcriber instances based on the configuration.
-- **Config Manager** (`config_manager.py`): Loads, parses, and provides access to the `config.yaml` file.
-- **Diagnostics** (`diagnostics.py`): Gathers and displays system information at startup.
-- **System Interface** (`platform_utils.py`): Provides an interface for OS-level interactions like CUDA detection and audio device management.
 
-#### A Note on `warmup_audio.wav`
+### Short description of each script
+
+#### Core Application Logic
+
+- **`orchestrator.py` (The Conductor)**
+  - **Purpose:** This is the central controller of the entire application. It initializes all other components, manages the application's state (e.g., recording, transcribing, standby), and connects the user interface (tray icon) to the backend transcription logic.
+  - **Interaction:** It's the most connected script. It creates instances of `TrayIconManager`, `ModelManager`, `ConsoleDisplay`, and `StaticFileTranscriber`. It receives commands from the `TrayIconManager` (e.g., "start recording") and tells the appropriate modules what to do.
+
+- **`model_manager.py` (The Model Loader)**
+  - **Purpose:** This module is responsible for loading and managing the AI models (`faster-whisper`) used for transcription. It reads the configuration from `config.yaml` to know which models to load and with what settings (e.g., on CPU or GPU). It also handles finding available audio devices.
+  - **Interaction:** It is used by the `orchestrator.py` to get initialized transcriber objects. It creates instances of the `LongFormRecorder` from `recorder.py`.
+
+- **`recorder.py` (The Recorder Wrapper)**
+  - **Purpose:** The `LongFormRecorder` class acts as a high-level wrapper around the core transcription engine (`stt_engine.py`). It provides simpler methods like `start_recording()`, `stop_recording()`, and `feed_audio()`. It manages the state of a single recording session.
+  - **Interaction:** It is instantiated by `model_manager.py` and used by `orchestrator.py`. It uses the `AudioToTextRecorder` from `stt_engine.py` to do the actual low-level work.
+
+- **`stt_engine.py` (The Core Engine)**
+  - **Purpose:** This is the low-level heart of the transcription system. The `AudioToTextRecorder` class directly interfaces with the `faster-whisper` library, handles Voice Activity Detection (VAD) to detect speech, manages the audio stream from the microphone (`pyaudio`), and runs the AI model in a separate process for performance.
+  - **Interaction:** It is wrapped by `recorder.py`. It uses `safepipe.py` to communicate with its own transcription worker process, ensuring the main application remains responsive.
+
+- **`static_transcriber.py` (The File Processor)**
+  - **Purpose:** This module handles the "transcribe an audio file" feature. It uses the external program `ffmpeg` to convert any media file into a standard WAV format that the model can understand. It can also apply VAD to remove silence before transcription.
+  - **Interaction:** It is created and called by `orchestrator.py` when the user selects the "Transcribe Audio File" option from the tray menu. It uses the already-loaded main transcriber instance to perform the final transcription.
+
+#### User Interface & Display
+
+- **`tray_manager.py` (The System Tray UI)**
+  - **Purpose:** It creates and manages the system tray icon using `PyQt6`. This icon is the primary way you interact with the application. It provides the menu with "Start," "Stop," and "Quit" options. The icon's color changes to show the application's current status (e.g., green for standby, yellow for recording).
+  - **Interaction:** It runs the main application event loop. When you click a menu item, it calls a function (a "callback") in `orchestrator.py`.
+
+- **`console_display.py` (The Terminal UI)**
+  - **Purpose:** This module is responsible for all the visual feedback in the terminal window. It uses the `rich` library to draw the recording timer, the live audio waveform, and the live transcription preview.
+  - **Interaction:** It is controlled by `orchestrator.py`. To display the waveform, it runs the `cava` program as a subprocess and reads its output, which is configured by `cava.config`.
+
+#### Configuration & Setup
+
+- **`config_manager.py` (The Configuration Handler)**
+  - **Purpose:** It safely loads the `config.yaml` file. It provides default settings, so if a value is missing from your file, the program won't crash. It ensures all necessary configuration keys are present.
+  - **Interaction:** It is used by `orchestrator.py` at startup to get all the application settings.
+
+- **`logging_setup.py` (The Logger)**
+  - **Purpose:** This script sets up application-wide logging. All status messages, warnings, and errors from different parts of the program are written to a central log file (`stt_orchestrator.log`). This is very useful for debugging.
+  - **Interaction:** It is called once at the very beginning by `orchestrator.py`.
+
+#### Utilities & Helpers
+
+- **`dependency_checker.py` & `diagnostics.py`**
+  - **Purpose:** These modules check if your system is set up correctly. `dependency_checker` verifies that all required Python packages (like `torch`) and external programs are installed. `diagnostics` gathers information about your hardware (CPU, GPU) and prints the helpful startup banner.
+  - **Interaction:** Both are called by `orchestrator.py` at startup.
+
+- **`platform_utils.py` (Platform Helper)**
+  - **Purpose:** This isolates Linux-specific code. For example, it knows where to find configuration files (`~/.config/`) and how to check for CUDA. This makes the code cleaner and easier to adapt to other operating systems in the future.
+  - **Interaction:** Used by various modules (`config_manager`, `dependency_checker`, etc.) for platform-specific tasks.
+
+- **`safepipe.py` (Thread-Safe Communicator)**
+  - **Purpose:** Provides a special communication channel (`Pipe`) that can be safely used by multiple threads at once. This is a technical utility to prevent crashes and race conditions.
+  - **Interaction:** It is used by `stt_engine.py` to safely send audio data to the separate transcription process and receive the text results back.
+
+- **`utils.py` (General Helpers)**
+  - **Purpose:** Contains small, reusable functions. Currently, it has `safe_print` which provides a way to print styled text to the console using the `rich` library.
+  - **Interaction:** Used by many other scripts for console output.
+
+- **`list_audio_devices.py` & `test_imports.py`**
+  - **Purpose:** These are standalone utility scripts for you, the user. `list_audio_devices.py` helps you find the correct index for your microphone to put in `config.yaml`. `test_imports.py` is a quick way to verify that all necessary Python libraries are installed.
+  - **Interaction:** They are not used by the main application itself; you run them manually from the terminal.
+
+#### Configuration Files
+
+- **`config.yaml`**
+  - **Purpose:** This is your main control panel for the application. It's written in YAML, which is easy for humans to read and edit.
+  - **What it does:** You use this file to configure everything:
+    - **Language:** Set the language for transcription (e.g., `el` for Greek).
+    - **Models:** Choose which `faster-whisper` models to use (e.g., `large-v3` for high accuracy, `base` or `medium` for faster previews).
+    - **Hardware:** Tell the program to use your `cuda` GPU or `cpu`.
+    - **Features:** Enable or disable features like the live preview (`enable_preview_transcriber`) or the waveform display (`show_waveform`).
+    - **Audio Device:** Manually specify which microphone to use via its `input_device_index`.
+
+- **`cava.config`**
+  - **Purpose:** This file configures the **external `cava` program**, which is a command-line audio visualizer. It is **not** a configuration for your Python script directly.
+  - **What it does:** Your `console_display.py` script runs `cava` to generate the data for the audio waveform. This config file tells `cava`:
+    - `method = raw`: This is the most important setting. It tells `cava` **not** to draw the waveform itself, but instead to output the raw bar height data as text to its standard output.
+    - `raw_target = /dev/stdout`: Send this raw data to standard output.
+    - Your Python script then reads this text data and uses the `rich` library to draw a much nicer, integrated waveform in the terminal.
+
+##### A Note on `warmup_audio.wav`
 
 The small `warmup_audio.wav` file plays a crucial role in the application's performance and responsiveness.
 
@@ -284,28 +374,11 @@ The small `warmup_audio.wav` file plays a crucial role in the application's perf
 
 The result is that the first *real* transcription is just as fast as every subsequent one, ensuring the application feels instantly responsive from the moment it's ready.
 
-### System Requirements
-
-#### Hardware
-
-- **GPU**: NVIDIA GPU with CUDA support (tested with RTX 3060 12GB)
-- **RAM**: Minimum 8GB, recommended 16GB or more
-- **CPU**: Modern multi-core processor (tested with AMD Ryzen 5 3600)
-
-#### Software
-
-- **Operating System**: Linux (developed and tested on Arch Linux)
-- **Python**: 3.13+
-- **`uv`**: The Python package manager used for this project.
-- **CUDA**: 13.0 or newer
-- **cuDNN**: 9.12 or newer
-- **Audio System**: Working microphone with proper Linux audio drivers (ALSA/PulseAudio/PipeWire)
-
 ---
 
-## Troubleshooting
+### Troubleshooting
 
-### CUDA/cuDNN Issues
+#### CUDA/cuDNN Issues
 
 If you encounter CUDA-related errors:
 
@@ -314,13 +387,13 @@ If you encounter CUDA-related errors:
 3. Ensure your GPU drivers are up to date.
 4. Confirm you set the correct `CMAKE_CUDA_ARCHITECTURES` in the build script and re-run it.
 
-### Audio Device Issues
+#### Audio Device Issues
 
 1. Re-run `list_audio_devices.py` to confirm the device index.
 2. Check system audio permissions.
 3. Verify no other application is exclusively using the microphone.
 
-### Model Loading Issues
+#### Model Loading Issues
 
 1. Check available disk space in `~/.cache/huggingface/`.
 2. Ensure you have internet connectivity for the initial model download.
@@ -328,11 +401,11 @@ If you encounter CUDA-related errors:
 
 ---
 
-## License
+### License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
 
-## Acknowledgments
+### Acknowledgments
 
 This project builds upon several excellent open-source projects:
 
