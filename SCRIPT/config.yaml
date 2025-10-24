@@ -10,7 +10,7 @@ transcription_options:
     # If false, only the main transcriber will be used, and no live preview
     # will be shown. This can save GPU resources.
     # Setting this to false will also disable the preview transcription panel.
-    enable_preview_transcriber: false
+    enable_preview_transcriber: true
 
 
 # Configuration for the main, high-accuracy transcription.
@@ -48,7 +48,7 @@ main_transcriber:
     no_log_file: true
 
 
-# Configuration for the live preview transcriber.
+# Configuration for the preview transcriber.
 # This instance runs continuously on small chunks of audio for a real-time feed.
 preview_transcriber:
     # A smaller, faster model is recommended for the preview.
@@ -68,6 +68,18 @@ preview_transcriber:
     # Prevent the library from creating its own log file (realtimestt.log).
     # We're capturing the log output in our own log file (stt_orchestrator.log).
     no_log_file: true
+
+
+# Configuration for the real-time system audio transcription mode
+# (different from the preview transcriber).
+live_transcriber_mode:
+  # If true, the "Live Transcription" option will appear in the tray menu.
+  enabled: true
+
+  # The audio device index for your SYSTEM AUDIO OUTPUT (e.g., a "Monitor"
+  # or "Loopback" device). Run list_audio_devices.py to find this.
+  # This is CRITICAL for transcribing system audio instead of the microphone.
+  input_device_index: 2
 
 
 # Console display settings.

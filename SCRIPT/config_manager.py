@@ -85,6 +85,10 @@ class ConfigManager:
                 "file_name": "stt_orchestrator.log",
                 "directory": str(script_dir.parent),  # Project root
             },
+            "live_transcriber_mode": {
+                "enabled": True,
+                "input_device_index": None,
+            },
         }
 
         # Ensure config directory exists

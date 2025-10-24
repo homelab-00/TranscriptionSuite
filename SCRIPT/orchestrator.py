@@ -18,6 +18,7 @@ run static transcription, and quit.
 import atexit
 import logging
 import os
+import queue
 import sys
 import threading
 import time
@@ -31,8 +32,9 @@ from logging_setup import setup_logging
 from model_manager import ModelManager
 from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
-from utils import safe_print
 from static_transcriber import StaticFileTranscriber
+from live_transcriber import LiveTranscriber
+from utils import safe_print
 
 if not TYPE_CHECKING:
     # Try to import the tray manager at runtime
@@ -68,7 +70,7 @@ class STTOrchestrator:
         # Application state (combining related attributes)
         self.app_state: dict[str, Optional[bool | str]] = {
             "running": False,
-            "current_mode": None,  # Tracks "longform" or "static"
+            "current_mode": None,  # Tracks "longform", "static", or "live"
             "is_transcribing": False,  # Flag to manage audio feeding during transcription
         }
 
@@ -78,6 +80,8 @@ class STTOrchestrator:
         self.console_display: Optional[ConsoleDisplay] = None
         self.tray_manager: Optional["TrayIconManager"] = None
         self.static_transcriber: Optional[StaticFileTranscriber] = None
+        self.live_transcriber: Optional[LiveTranscriber] = None
+        self._live_display_stop_event: Optional[threading.Event] = None
 
         # Initialize core components
         self.platform_manager_instance = get_platform_manager()
@@ -93,14 +97,15 @@ class STTOrchestrator:
             "enable_preview_transcriber", True
         )
 
-        # Initialize Tray Icon Manager with all necessary callbacks
+        # CHANGED: Initialize Tray Icon Manager with the new generic stop callback
         if HAS_TRAY:
             self.tray_manager = TrayIconManager(  # type: ignore[assignment]
                 name="STT Orchestrator",
                 start_callback=self._start_longform,
-                stop_callback=self._stop_longform,
+                stop_callback=self._stop_current_activity,  # This is the crucial change
                 quit_callback=self._quit,
                 static_transcribe_callback=self._start_static_transcription,
+                live_transcribe_callback=self._start_live_transcription,
             )
         else:
             safe_print(
@@ -152,71 +157,6 @@ class STTOrchestrator:
             logging.error(f"Error during dependency check: {e}")
             safe_print(f"Warning: Could not complete dependency check: {e}", "warning")
 
-    def _start_static_transcription(self):
-        """
-        Initiates the static file transcription process.
-        This method is called from the main GUI thread.
-        """
-        if self.app_state["current_mode"]:
-            safe_print(
-                f"Cannot start static transcription while in "
-                f"'{self.app_state['current_mode']}' mode. "
-                "Please finish the current operation first.",
-                "warning",
-            )
-            return
-
-        # Capture the active transcriber here to ensure it's not None for the worker
-        active_transcriber = self.main_transcriber
-        if not active_transcriber:
-            safe_print("Transcription models are not ready. Please wait.", "warning")
-            return
-
-        if not QFileDialog:
-            safe_print("PyQt6 not available, cannot open file dialog.", "error")
-            return
-
-        # Supported audio formats for the dialog filter
-        supported_formats = "Audio Files (*.wav *.flac *.ogg *.mp3 *.opus *.m4a)"
-        file_path, _ = QFileDialog.getOpenFileName(
-            None, "Select an Audio File to Transcribe", "", supported_formats
-        )
-
-        if not file_path:
-            safe_print("No file selected. Aborting static transcription.", "info")
-            return
-
-        # Now, dispatch the actual work to a background thread
-        # Pass the captured active_transcriber to the worker
-        def _worker(transcriber_instance: LongFormRecorder):
-            self.app_state["current_mode"] = "static"
-            if self.tray_manager:
-                self.tray_manager.set_state("transcribing")
-
-            try:
-                # Instantiate the transcriber using the captured instance
-                self.static_transcriber = StaticFileTranscriber(
-                    transcriber_instance, self.console_display
-                )
-                self.static_transcriber.transcribe_file(file_path)
-
-            except Exception as e:
-                logging.error(f"Static transcription worker failed: {e}", exc_info=True)
-                safe_print(f"An unexpected error occurred: {e}", "error")
-                if self.tray_manager:
-                    self.tray_manager.set_state("error")
-            finally:
-                # Reset state after completion or failure
-                self.app_state["current_mode"] = None
-                self.static_transcriber = None
-                if self.tray_manager:
-                    # Check again because another operation might have started
-                    if self.app_state["current_mode"] is None:
-                        self.tray_manager.set_state("standby")
-
-        # Start thread, passing the captured transcriber as an argument
-        threading.Thread(target=_worker, args=(active_transcriber,), daemon=True).start()
-
     def _start_longform(self):
         """Start long-form recording."""
         if self.app_state["current_mode"]:
@@ -237,24 +177,18 @@ class STTOrchestrator:
         if self.tray_manager:
             self.tray_manager.set_state("recording")
 
-        # The part that can fail (display start) must be handled first.
         try:
             if self.console_display:
                 self.console_display.start(time.monotonic())
         except RuntimeError as error:
-            # This specifically catches the "Terminal too small" error.
             logging.warning("Could not start console display: %s", error)
-            # Abort the start-up process cleanly.
             if self.tray_manager:
                 self.tray_manager.set_state("standby")
             return
 
-        # If the display started successfully, now we can set the state
-        # and start the recorder.
         safe_print("Starting long-form recording...", "success")
         self.app_state["current_mode"] = "longform"
 
-        # The active transcriber controls the microphone and VAD
         if active_transcriber:
             active_transcriber.start_recording()
         if self.preview_enabled and self.main_transcriber:
@@ -265,7 +199,6 @@ class STTOrchestrator:
         if self.app_state["current_mode"] != "longform":
             safe_print("No active long-form recording to stop.", "info")
             return
-        # Dispatch to a worker thread so the Qt event loop can update the icon
 
         def _worker():
             if self.tray_manager:
@@ -285,15 +218,11 @@ class STTOrchestrator:
                         self.tray_manager.set_state("error")
                     return
 
-                # When preview is enabled, we need to stop the previewer explicitly
-                # to stop the microphone feed.
                 if self.preview_enabled and self.preview_transcriber:
                     self.preview_transcriber.stop_recording()
 
                 safe_print("Stopping long-form recording and transcribing...")
 
-                # The main transcriber's stop_and_transcribe is now the sole command
-                # for stopping and processing.
                 final_text, metrics = self.main_transcriber.stop_and_transcribe()
                 self.app_state["current_mode"] = None
 
@@ -324,6 +253,168 @@ class STTOrchestrator:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _start_static_transcription(self):
+        """Initiates the static file transcription process."""
+        if self.app_state["current_mode"]:
+            safe_print(
+                f"Cannot start static transcription while in "
+                f"'{self.app_state['current_mode']}' mode.",
+                "warning",
+            )
+            return
+
+        active_transcriber = self.main_transcriber
+        if not active_transcriber:
+            safe_print("Transcription models are not ready. Please wait.", "warning")
+            return
+
+        if not QFileDialog:
+            safe_print("PyQt6 not available, cannot open file dialog.", "error")
+            return
+
+        supported_formats = "Audio Files (*.wav *.flac *.ogg *.mp3 *.opus *.m4a)"
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "Select an Audio File to Transcribe", "", supported_formats
+        )
+
+        if not file_path:
+            safe_print("No file selected. Aborting static transcription.", "info")
+            return
+
+        def _worker(transcriber_instance: LongFormRecorder):
+            self.app_state["current_mode"] = "static"
+            if self.tray_manager:
+                self.tray_manager.set_state("transcribing")
+            try:
+                self.static_transcriber = StaticFileTranscriber(
+                    transcriber_instance, self.console_display
+                )
+                self.static_transcriber.transcribe_file(file_path)
+            except Exception as e:
+                logging.error(f"Static transcription worker failed: {e}", exc_info=True)
+                safe_print(f"An unexpected error occurred: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+            finally:
+                self.app_state["current_mode"] = None
+                self.static_transcriber = None
+                if self.tray_manager:
+                    if self.app_state["current_mode"] is None:
+                        self.tray_manager.set_state("standby")
+
+        threading.Thread(target=_worker, args=(active_transcriber,), daemon=True).start()
+
+    def _stop_current_activity(self):
+        """Stops whatever transcription mode is currently active."""
+        mode = self.app_state.get("current_mode")
+        if mode == "longform":
+            self._stop_longform()
+        elif mode == "live":
+            self._stop_live_transcription()
+        elif mode is None:
+            safe_print("No activity is currently in progress.", "info")
+        else:
+            safe_print(f"Cannot stop '{mode}' mode from here.", "warning")
+
+    def _start_live_transcription(self):
+        """Initializes and starts the live system audio transcription mode."""
+        if self.app_state["current_mode"]:
+            safe_print(
+                f"Cannot start live transcription while in "
+                f"'{self.app_state['current_mode']}' mode.",
+                "warning",
+            )
+            return
+
+        live_config = self.config.get("live_transcriber_mode", {})
+        if not live_config.get("enabled"):
+            safe_print("Live transcription mode is disabled in the config.", "info")
+            return
+
+        device_index = live_config.get("input_device_index")
+        if device_index is None:
+            safe_print(
+                "Error: No 'input_device_index' set for live_transcriber_mode "
+                "in config.yaml.",
+                "error",
+            )
+            safe_print(
+                "Please run list_audio_devices.py and set the index for your system's "
+                "'Monitor' or 'Loopback' device.",
+                "info",
+            )
+            return
+
+        def _worker():
+            self.app_state["current_mode"] = "live"
+            if self.tray_manager:
+                self.tray_manager.set_state("recording")
+
+            live_instance_config = self.config.get("preview_transcriber", {}).copy()
+            live_instance_config["input_device_index"] = device_index
+            live_instance_config["use_default_input"] = False
+
+            live_mode_recorder = self.model_manager.initialize_transcriber(
+                live_instance_config, callbacks=None, use_microphone=True
+            )
+
+            if not live_mode_recorder:
+                safe_print("Failed to initialize recorder for live mode.", "error")
+                self.app_state["current_mode"] = None
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+                return
+
+            self.live_transcriber = LiveTranscriber(live_mode_recorder)
+
+            text_queue = queue.Queue[str]()
+            self._live_display_stop_event = threading.Event()
+
+            # Guard clause for type safety
+            if self.console_display:
+                display_thread = threading.Thread(
+                    target=self.console_display.run_live_transcription_display,
+                    args=(self._live_display_stop_event, text_queue),
+                    daemon=True,
+                )
+                display_thread.start()
+            else:
+                safe_print(
+                    "Console display not available for live transcription.", "warning"
+                )
+                # Fallback to allow functionality without the display
+                self.app_state["current_mode"] = None
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+                return
+
+            def sentence_callback(sentence: str):
+                text_queue.put(sentence)
+
+            # Guard clause for type safety
+            if self.live_transcriber:
+                self.live_transcriber.start_session(sentence_callback)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _stop_live_transcription(self):
+        """Stops and cleans up the live transcription mode."""
+        if self.app_state["current_mode"] != "live" or not self.live_transcriber:
+            safe_print("Live transcription is not running.", "info")
+            return
+
+        safe_print("Stopping live transcription...", "info")
+
+        if self._live_display_stop_event:
+            self._live_display_stop_event.set()
+
+        self.live_transcriber.stop_session()
+
+        self.live_transcriber = None
+        self.app_state["current_mode"] = None
+        if self.tray_manager:
+            self.tray_manager.set_state("standby")
+
     def _handle_preview_sentence(self, sentence: str):
         """Receives a transcribed sentence from the previewer and displays it."""
         if self.console_display:
@@ -331,8 +422,6 @@ class STTOrchestrator:
 
     def _handle_audio_chunk(self, chunk: bytes):
         """Callback to feed audio from the previewer to the main transcriber."""
-        # The console display now uses CAVA and handles its own audio input,
-        # so we no longer need to pass audio chunks to it.
         if self.main_transcriber and not self.app_state["is_transcribing"]:
             self.main_transcriber.feed_audio(chunk)
 
@@ -345,22 +434,17 @@ class STTOrchestrator:
 
         def shutdown_worker():
             self.stop()
-            # The application will now exit naturally when the tray_manager's
-            # event loop is quit. os._exit(0) is no longer needed.
 
         threading.Thread(target=shutdown_worker, daemon=True).start()
 
     def run(self):
         """Run the orchestrator."""
-        # Only the tray icon will control the application now.
-
         self.diagnostics.display_system_info()
         self._check_startup_dependencies()
 
-        # Proactively load the longform model in a separate thread
         def preload_startup_models():
             if self.tray_manager:
-                self.tray_manager.set_state("loading")  # Grey icon
+                self.tray_manager.set_state("loading")
 
             if self.preview_enabled:
                 safe_print("Pre-loading transcription models (with preview)...", "info")
@@ -378,7 +462,6 @@ class STTOrchestrator:
                 logging.error("Failed to initialise console display: %s", exc)
                 self.console_display = None
 
-            # --- Architecture Logic ---
             if self.preview_enabled:
                 self._load_dual_transcriber_mode()
             else:
@@ -415,13 +498,9 @@ class STTOrchestrator:
 
     def _load_dual_transcriber_mode(self):
         """Loads both main and preview transcribers."""
-        # 1. Main transcriber is PASSIVE (use_microphone=False)
         self.main_transcriber = self.model_manager.initialize_transcriber(
             "main_transcriber", callbacks=None, use_microphone=False
         )
-
-        # 2. Preview transcriber is ACTIVE (use_microphone=True)
-        #    and feeds everyone else
         preview_callbacks: dict[str, Callable[..., Any]] = {
             "on_recorded_chunk": self._handle_audio_chunk,
         }
@@ -431,13 +510,9 @@ class STTOrchestrator:
 
     def _load_single_transcriber_mode(self):
         """Loads only the main transcriber in active mode, merging VAD settings."""
-        self.preview_transcriber = None  # Ensure it's null
-
-        # Create a hybrid config for the main transcriber to handle VAD
+        self.preview_transcriber = None
         main_config = self.config.get("main_transcriber", {}).copy()
         preview_config = self.config.get("preview_transcriber", {})
-
-        # VAD-related keys to merge from the preview config
         vad_keys = [
             "silero_sensitivity",
             "silero_use_onnx",
@@ -449,13 +524,8 @@ class STTOrchestrator:
         for key in vad_keys:
             if key in preview_config:
                 main_config[key] = preview_config[key]
-
         logging.info("Running in single-transcriber mode with merged VAD config.")
-
-        # CAVA handles the waveform display independently, so no audio chunk
-        # callback to the console display is needed.
         main_callbacks: dict[str, Callable[..., Any]] = {}
-
         self.main_transcriber = self.model_manager.initialize_transcriber(
             main_config, main_callbacks, use_microphone=True
         )
@@ -464,44 +534,32 @@ class STTOrchestrator:
         """Stop all processes and clean up gracefully."""
         if not self.app_state.get("running"):
             return
-
         logging.info("Beginning graceful shutdown sequence...")
         self.app_state["running"] = False
-
-        # Stop the console display first to prevent it from trying to render
         if self.console_display:
             try:
                 self.console_display.stop()
             except Exception as e:
                 logging.debug("Error stopping console display: %s", e)
-
-        # The preview transcriber is the 'master' and uses the mic.
-        # Shutting it down first stops the audio source.
         if self.preview_transcriber:
             try:
                 self.preview_transcriber.clean_up()
             except Exception as e:
                 logging.debug("Error cleaning up preview transcriber: %s", e)
-
-        # The main transcriber is the 'slave'.
         if self.main_transcriber:
             try:
                 self.main_transcriber.clean_up()
             except Exception as e:
                 logging.debug("Error cleaning up main transcriber: %s", e)
-
-        # Stop the UI event loop
         if self.tray_manager:
             try:
                 self.tray_manager.stop()
             except Exception as e:
                 logging.debug("Error stopping tray manager: %s", e)
-
         try:
             self.model_manager.cleanup_all_models()
         except Exception as e:
             logging.debug("Error cleaning up models: %s", e)
-
         logging.info("Orchestrator stopped successfully")
 
 

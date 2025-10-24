@@ -13,6 +13,7 @@ import subprocess
 import os
 import threading
 import time
+import queue
 from collections import deque
 from typing import Any, Optional, cast
 
@@ -135,6 +136,53 @@ class ConsoleDisplay:
         self._display_thread = None
 
         self._reset_display_state()
+
+    def run_live_transcription_display(
+        self, stop_event: threading.Event, text_queue: queue.Queue[str]
+    ):
+        """
+        Runs a simplified Rich Live display for real-time transcription output.
+
+        Args:
+            stop_event: A threading.Event to signal when to stop the display.
+            text_queue: A queue to receive transcribed sentences from.
+        """
+        if not _has_rich or not _console:
+            safe_print(
+                "Live transcription started. Press Ctrl+C in terminal to stop if needed."
+            )
+            while not stop_event.is_set():
+                try:
+                    line = text_queue.get(timeout=0.5)
+                    print(line, end=" ", flush=True)
+                except queue.Empty:
+                    continue
+            return
+
+        display_text = Text("Listening for system audio...", style="italic grey50")
+        panel = Panel(
+            display_text,
+            title="[bold white]Live System Audio Transcription[/bold white]",
+            border_style="magenta",
+        )
+
+        with Live(panel, console=_console, screen=False, auto_refresh=False) as live:
+            while not stop_event.is_set():
+                try:
+                    # Wait for a new sentence from the transcriber thread
+                    sentence = text_queue.get(timeout=0.1)
+
+                    if display_text.plain == "Listening for system audio...":
+                        # First sentence, replace the placeholder
+                        display_text.plain = sentence
+                    else:
+                        # Append new sentences
+                        display_text.append(f" {sentence}")
+
+                    live.update(panel, refresh=True)
+
+                except queue.Empty:
+                    continue
 
     def _start_cava_process(self):
         """

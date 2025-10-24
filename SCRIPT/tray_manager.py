@@ -48,16 +48,18 @@ class TrayIconManager:
         stop_callback: Optional[Callable[[], None]] = None,
         quit_callback: Optional[Callable[[], None]] = None,
         static_transcribe_callback: Optional[Callable[[], None]] = None,
+        live_transcribe_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
 
         Args:
             name: The name of the application, shown as a tooltip.
-            start_callback: Function to call on left-click.
-            stop_callback: Function to call on right-click.
+            start_callback: Function to call for starting long-form recording.
+            stop_callback: Function to call to stop any current activity.
             quit_callback: A function to call to quit.
             static_transcribe_callback: Function to call for static transcription.
+            live_transcribe_callback: Function to call for live transcription.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -84,6 +86,7 @@ class TrayIconManager:
         self.stop_callback = stop_callback
         self.quit_callback = quit_callback
         self.static_transcribe_callback = static_transcribe_callback
+        self.live_transcribe_callback = live_transcribe_callback
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
@@ -103,22 +106,29 @@ class TrayIconManager:
         menu: QMenu = QMenu()
 
         if self.start_callback:
-            start_action: QAction = QAction("Start Recording", menu)
+            start_action: QAction = QAction("Start Long-Form Recording", menu)
             menu.addAction(start_action)  # type: ignore[call-overload]
             cast(Any, start_action.triggered).connect(self._on_start_triggered)
 
         if self.stop_callback:
-            stop_action: QAction = QAction("Stop Recording", menu)
+            stop_action: QAction = QAction("Stop Current Activity", menu)
             menu.addAction(stop_action)  # type: ignore[call-overload]
             cast(Any, stop_action.triggered).connect(self._on_stop_triggered)
 
+        # Group the special modes together
+        menu.addSeparator()
+
         if self.static_transcribe_callback:
-            menu.addSeparator()
             static_action: QAction = QAction("Transcribe Audio File...", menu)
             menu.addAction(static_action)  # type: ignore[call-overload]
             cast(Any, static_action.triggered).connect(
                 self._on_static_transcribe_triggered
             )
+
+        if self.live_transcribe_callback:
+            live_action: QAction = QAction("Live Transcription (System Audio)", menu)
+            menu.addAction(live_action)  # type: ignore[call-overload]
+            cast(Any, live_action.triggered).connect(self._on_live_transcribe_triggered)
 
         menu.addSeparator()
 
@@ -190,6 +200,10 @@ class TrayIconManager:
     def _on_static_transcribe_triggered(self, checked: bool) -> None:
         if self.static_transcribe_callback:
             self.static_transcribe_callback()
+
+    def _on_live_transcribe_triggered(self, checked: bool) -> None:
+        if self.live_transcribe_callback:
+            self.live_transcribe_callback()
 
     def _on_stop_triggered(self, checked: bool) -> None:
         if self.stop_callback:
