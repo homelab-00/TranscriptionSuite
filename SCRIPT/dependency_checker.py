@@ -274,9 +274,7 @@ class DependencyChecker:
     def _get_ffmpeg_install_hint(self) -> str:
         """Get platform-specific FFmpeg installation instructions."""
         # This is now hardcoded for Linux.
-        return (
-            "Install via package manager: apt install ffmpeg, " "pacman -S ffmpeg, etc."
-        )
+        return "Install via package manager: apt install ffmpeg, pacman -S ffmpeg, etc."
 
     def _get_executable_version(self, exe_name: str, exe_path: Path) -> Optional[str]:
         """Try to get version information from an executable."""
