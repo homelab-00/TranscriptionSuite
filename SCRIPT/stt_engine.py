@@ -408,32 +408,6 @@ class AudioToTextRecorder:
         self.state = "inactive"
         self.audio = None
 
-        # ----------------------------------------------------------------------------
-        # Named logger configuration
-        # By default, let's set it up so it logs at 'level' to the console.
-        # If you do NOT want this default configuration, remove the lines below
-        # and manage your "realtimestt" logger from your application code.
-        self.logger.setLevel(logging.DEBUG)  # We capture all, then filter via handlers
-
-        log_format = "RealTimeSTT: %(name)s - %(levelname)s - %(message)s"
-        file_log_format = "%(asctime)s.%(msecs)03d - " + log_format
-
-        # Create and set up console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(self.level)
-        console_handler.setFormatter(logging.Formatter(log_format))
-
-        self.logger.addHandler(console_handler)
-
-        if not no_log_file:
-            file_handler = logging.FileHandler("realtimesst.log")
-            file_handler.setLevel(logging.DEBUG)
-            file_handler.setFormatter(
-                logging.Formatter(file_log_format, datefmt="%Y-%m-%d %H:%M:%S")
-            )
-            self.logger.addHandler(file_handler)
-        # ----------------------------------------------------------------------------
-
         self.is_shut_down = False
 
         self.logger.info("Starting RealTimeSTT")
@@ -1217,7 +1191,7 @@ class AudioToTextRecorder:
                 while self.transcribe_count > 0:
                     self.logger.debug(
                         "Receive from parent_transcription_pipe after "
-                        "sendiung transcription request, "
+                        "sending transcription request, "
                         f"transcribe_count: {self.transcribe_count}"
                     )
                     if not self.parent_transcription_pipe.poll(

@@ -95,12 +95,16 @@ class LongFormRecorder:
 
         self.recorder: Optional[AudioToTextRecorderType] = self._initialize_recorder()
 
-        # Re-enable log propagation from the STT engine
-        # The engine disables propagation by default. We re-enable it so its
-        # logs flow into our main application log file.
+        # Re-enable log propagation from the STT engine and its parent.
+        # This is the crucial fix: The parent 'realtimestt' logger was
+        # configured with propagate=False, blocking all child messages.
         if self.recorder:
+            parent_logger = logging.getLogger("realtimestt")
+            parent_logger.propagate = True
+
             stt_logger = logging.getLogger(f"realtimestt.{self.instance_name}")
             stt_logger.propagate = True
+
         logging.info("LongFormRecorder initialized successfully.")
 
     def _initialize_recorder(self) -> Optional[AudioToTextRecorderType]:
