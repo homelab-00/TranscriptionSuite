@@ -417,7 +417,10 @@ class STTOrchestrator:
         """Loads both main and preview transcribers."""
         # 1. Main transcriber is PASSIVE (use_microphone=False)
         self.main_transcriber = self.model_manager.initialize_transcriber(
-            "main_transcriber", callbacks=None, use_microphone=False
+            "main_transcriber",
+            instance_name="main_transcriber",
+            callbacks=None,
+            use_microphone=False,
         )
 
         # 2. Preview transcriber is ACTIVE (use_microphone=True)
@@ -426,7 +429,10 @@ class STTOrchestrator:
             "on_recorded_chunk": self._handle_audio_chunk,
         }
         self.preview_transcriber = self.model_manager.initialize_transcriber(
-            "preview_transcriber", preview_callbacks, use_microphone=True
+            "preview_transcriber",
+            instance_name="preview_transcriber",
+            callbacks=preview_callbacks,
+            use_microphone=True,
         )
 
     def _load_single_transcriber_mode(self):
@@ -457,7 +463,10 @@ class STTOrchestrator:
         main_callbacks: dict[str, Callable[..., Any]] = {}
 
         self.main_transcriber = self.model_manager.initialize_transcriber(
-            main_config, main_callbacks, use_microphone=True
+            main_config,
+            instance_name="main_transcriber",
+            callbacks=main_callbacks,
+            use_microphone=True,
         )
 
     def stop(self):
