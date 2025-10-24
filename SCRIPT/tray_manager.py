@@ -129,9 +129,7 @@ class TrayIconManager:
 
         self.icon.setContextMenu(menu)
 
-    def _handle_activation(
-        self, reason: "QSystemTrayIcon.ActivationReason"
-    ) -> None:  # type: ignore[name-defined]
+    def _handle_activation(self, reason: "QSystemTrayIcon.ActivationReason") -> None:  # type: ignore[name-defined]
         """Handle various click events on the tray icon."""
         # App is guaranteed to be QApplication at this point
         # No need for type guard since we set it in __init__
@@ -145,9 +143,7 @@ class TrayIconManager:
         ):  # Middle-click
             self.stop_callback()
 
-    def _create_icon(
-        self, color_rgb: tuple[int, int, int]
-    ) -> "QIcon":  # type: ignore[name-defined]
+    def _create_icon(self, color_rgb: tuple[int, int, int]) -> "QIcon":  # type: ignore[name-defined]
         """
         Generates a circular QIcon with a specified fill color and black border.
 
