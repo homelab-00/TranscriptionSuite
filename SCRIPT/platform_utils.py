@@ -7,9 +7,9 @@ streamlined for a Linux environment.
 """
 
 import contextlib
+import logging
 import os
 import sys
-import logging
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional

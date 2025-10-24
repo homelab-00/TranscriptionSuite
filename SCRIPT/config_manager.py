@@ -13,11 +13,11 @@ except ImportError as import_error:
         "PyYAML is required for configuration. Please run 'pip install pyyaml'."
     ) from import_error
 
-import os
-import logging
 import copy
-from typing import Any, Dict, Mapping, MutableMapping, cast
+import logging
+import os
 from pathlib import Path
+from typing import Any, Dict, Mapping, MutableMapping, cast
 
 from platform_utils import get_platform_manager
 from utils import safe_print

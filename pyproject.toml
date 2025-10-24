@@ -30,3 +30,7 @@ extra-index-url = ["https://download.pytorch.org/whl/cu130"]
 # Local path for the ctranslate2 wheel file.
 [tool.uv.sources]
 ctranslate2 = { path = "deps/ctranslate2/python/dist/ctranslate2-4.6.0-cp313-cp313-linux_x86_64.whl" }
+
+# Line length for Ruff
+[tool.ruff]
+line-length = 90
