@@ -21,14 +21,23 @@ else
 fi
 
 BUILD_DIR="${CT2_DIR}/build"
+
 echo "Configuring the build using the complete set of flags..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# This cmake command is a direct adaptation of your working PKGBUILD.
+# Define INSTALL_DIR using an absolute path (`pwd`).
+INSTALL_DIR="$(pwd)/install"
+
+# Configure the C++ library build
+# The key is adding CMAKE_BUILD_WITH_INSTALL_RPATH and CMAKE_INSTALL_RPATH.
+# This ensures the compiled libraries know where to look for each other.
 cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+    -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+    -DCMAKE_INSTALL_RPATH="$INSTALL_DIR/lib" \
     -DOPENMP_RUNTIME=COMP \
     -DWITH_MKL=OFF \
     -DWITH_DNNL=OFF \
@@ -45,15 +54,43 @@ cmake .. \
 echo "Compiling ctranslate2 (this will take several minutes)..."
 make -j"$(nproc)"
 
+echo "Installing ctranslate2 library locally..."
+make install
+
+# Now we move to the python directory
 cd ../python
 
 echo "Packaging the Python wrapper into a wheel file..."
-# We use the standard `python -m build` command.
-#  --wheel: Specifies to build a wheel.
-#  --no-isolation: Uses our current environment the main environment instead of using
-#                  a clean one (we need the `pybind11` package to complete the build).
-#  --outdir: Specifies where to place the final .whl file.
+
+# Copy the shared library into the Python package so it's bundled in the wheel
+echo "Copying libctranslate2.so into the ctranslate2 package..."
+mkdir -p ctranslate2/lib
+cp -v "${INSTALL_DIR}"/lib/libctranslate2.so* ctranslate2/lib/
+
+# Patch setup.py to include .so files in package_data for Linux
+echo "Patching setup.py to include shared libraries in the wheel..."
+# Reset setup.py in case it was patched before
+git checkout setup.py 2>/dev/null || true
+# Add Linux package_data after line 53 (after the Windows block)
+sed -i '53 a\    package_data["ctranslate2"] = ["lib/*.so*"]' setup.py
+sed -i '53 a elif sys.platform.startswith("linux"):' setup.py
+
+# Directly tell the compiler and linker where to find things.
+export CTRANSLATE2_ROOT="${INSTALL_DIR}"
+export LD_LIBRARY_PATH="${INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
+
+# Set RPATH to $ORIGIN/lib so the extension module finds the library in the same package
+# The single quotes are essential to prevent the shell from interpreting $ORIGIN.
+export LDFLAGS="-Wl,-rpath,'\$ORIGIN/lib'"
+
+# The build command now runs in an environment where the tools know exactly where to look.
 python -m build --wheel --no-isolation --outdir dist .
+
+echo "Verifying shared library is in the wheel..."
+unzip -l dist/ctranslate2-*.whl | grep -i "libctranslate2.so" || echo "WARNING: libctranslate2.so not found in wheel!"
+
+# Unset the variable so it doesn't leak into your shell session.
+unset LDFLAGS
 
 echo "--- ctranslate2 packaging complete! ---"
 echo "A wheel file has been created in: ${CT2_DIR}/python/dist/"
