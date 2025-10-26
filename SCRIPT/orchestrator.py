@@ -244,6 +244,10 @@ class STTOrchestrator:
         except RuntimeError as error:
             # This specifically catches the "Terminal too small" error.
             logging.warning("Could not start console display: %s", error)
+            safe_print(
+                f"Terminal display too small. {error} Please resize your terminal and try again.",
+                "error",
+            )
             # Abort the start-up process cleanly.
             if self.tray_manager:
                 self.tray_manager.set_state("standby")
