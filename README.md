@@ -23,7 +23,7 @@ git clone https://gitlab.com/bluemoon7/transcription-suite.git
 If you haven't already, install the CUDA 13 toolkit and cuDNN:
 
 ```bash
-sudo pacman -S cuda cudnn
+sudo pacman -S --needed cuda cudnn
 ```
 
 ### Step 1: Create Virtual Environment and Install Build Dependencies
@@ -52,10 +52,16 @@ source .venv/bin/activate
 You should now see the virtual environment name in your terminal prompt. Confirm with `which python` (the path should end in `.venv/bin/python`).
 *The rest of this guide assumes that the virtual environment is activated.*
 
-- Install build dependencies:
+- Install Python build dependencies:
 
 ```bash
-uv pip install build setuptools pybind11
+uv add build setuptools pybind11
+```
+
+- Install Linux build dependencies:
+
+```bash
+sudo pacman -S --needed base-devel git openblas
 ```
 
 ### Step 2: Build Custom `ctranslate2`
@@ -68,6 +74,12 @@ The `ctranslate2` library needs to be compiled locally to link against your syst
 2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`.
 3. The value `86` is for an NVIDIA RTX 3060. If you have a different GPU, find its compute capability on the [NVIDIA CUDA GPUs page](https://developer.nvidia.com/cuda-gpus) and change the number accordingly (e.g., an RTX 4070 is `89`).
 
+First, make sure the script is executable:
+
+```bash
+chmod +x build_ctranslate2.sh
+```
+
 Now, run the script. It will download the source code in the newly created `deps` directory, compile it and create a wheel file in `deps/ctranslate2/python/dist`.
 
 ```bash
@@ -76,7 +88,7 @@ Now, run the script. It will download the source code in the newly created `deps
 
 ### Step 3: Install Project Dependencies
 
-You're now ready to install all project dependencies. The build dependencies will be automatically uninstalled (you no longer need them).
+You're now ready to install all project dependencies.
 
 ```bash
 uv sync
@@ -134,7 +146,7 @@ audio:
 
 #### Language Configuration
 
-Edit the `SCRIPT/config.yaml` file. Update the `language` field under the global `transcription_options` section. This setting applies to both the main and preview transcribers.
+Edit the `SCRIPT/config.yaml` file. Update the `language` field under the global `transcription_options` section. This setting applies to both the main and preview transcribers. The default is `el` (Greek).
 
 ```yaml
 # Global options that apply to both transcribers.
@@ -156,7 +168,7 @@ For a complete list of language codes, refer to the [Whisper tokenizer source](h
 
 #### Realtime Preview Toggle
 
-Edit the `SCRIPT/config.yaml` file. Update the `enable_preview_transcriber` field under the global `transcription_options` section.
+Edit the `SCRIPT/config.yaml` file. Update the `enable_preview_transcriber` field under the global `transcription_options` section to `true` (disabled by default).
 
 ```yaml
 # Global options that apply to both transcribers.
@@ -218,6 +230,17 @@ source = "alsa:acp:Generic:0:capture"
 ```
 
 *Note: Even though I said we're using PipeWire, I've set the `method` to `pulse` which denotes PulseAudio. This is just how I managed to get it working through trial and error.*
+
+#### Step 3: Enable waveform display
+
+Edit the `SCRIPT/config.yaml` file. Update the `show_waveform` field under the `display` section to `true` (disabled by default).
+
+```yaml
+display:
+    # If true, the live audio waveform will be displayed during recording.
+    # Requires 'cava' to be installed. Disabling this can save CPU resources.
+    show_waveform: true
+```
 
 ### Other Options
 
