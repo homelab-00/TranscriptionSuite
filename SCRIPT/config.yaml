@@ -3,8 +3,9 @@
 # Global options that apply to both transcribers.
 transcription_options:
     # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    # Set to null (or leave empty with "") to enable automatic language detection.
     # This setting applies to both the main and preview transcribers.
-    language: "el"
+    language: null
 
     # If true, the live preview transcriber will be enabled.
     # If false, only the main transcriber will be used, and no live preview
