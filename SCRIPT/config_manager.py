@@ -156,9 +156,10 @@ class ConfigManager:
         Apply global settings to the respective transcriber configurations.
         """
         global_options = self.config.get("transcription_options", {})
-        language = global_options.get("language")
-
-        if language:
+        
+        # Apply language setting (including None for auto-detection)
+        if "language" in global_options:
+            language = global_options.get("language")
             if "main_transcriber" in self.config:
                 self.config["main_transcriber"]["language"] = language
             if "preview_transcriber" in self.config:
