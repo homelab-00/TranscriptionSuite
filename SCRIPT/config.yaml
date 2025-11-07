@@ -83,11 +83,11 @@ display:
 audio:
     # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
     # Set to `null` (or leave blank) if `use_default_input` is true.
-    input_device_index: 21
+    input_device_index: null
 
     # If true, the application will automatically find the default system microphone.
     # If false, it will use the `input_device_index` specified above.
-    use_default_input: false
+    use_default_input: true
 
 
 # Configuration for application logging.
