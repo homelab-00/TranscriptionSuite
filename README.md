@@ -17,7 +17,7 @@ The guide is written for Arch Linux, but it should be easy to adapt for other di
 To download the source code, clone this repository:
 
 ```bash
-git clone https://gitlab.com/bluemoon7/transcription-suite.git
+git clone https://github.com/homelab-00/TranscriptionSuite.git
 ```
 
 If you haven't already, install the CUDA 13 toolkit and cuDNN:

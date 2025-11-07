@@ -2,8 +2,8 @@ __pycache__/
 /SCRIPT/__pycache__/
 deps/
 *.tmp
+*.logW
 *.log
-.python-version
 .idea/
 .vscode/
 .github/

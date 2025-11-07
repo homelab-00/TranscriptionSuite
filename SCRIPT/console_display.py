@@ -56,6 +56,7 @@ class ConsoleDisplay:
         self._live_display: Optional[Any] = None
         self._display_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._display_active = False  # Track if display is actually running
 
         # --- CAVA Process Management ---
         self._cava_process: Optional[subprocess.Popen] = None
@@ -71,10 +72,10 @@ class ConsoleDisplay:
         self._preview_lock = threading.Lock()
         self._preview_sentences: deque[str] = deque(maxlen=10)
         self._latest_preview_text: Any = self._default_preview_display()
-        self._preview_panel_height = 5  # 3 lines for text, 2 for panel borders
+        self._preview_panel_height = 8  # 6 lines for text, 2 for panel borders
 
     def start(self, start_time: float):
-        """Starts the live display thread, showing an error if CAVA fails."""
+        """Starts the live display thread, showing a warning if terminal is too small."""
         if not _has_rich:
             return
 
@@ -87,13 +88,18 @@ class ConsoleDisplay:
             min_height += self._preview_panel_height  # Add preview panel height
 
         if _console and (_console.width < min_width or _console.height < min_height):
-            raise RuntimeError(
-                f"Terminal too small for live display. "
-                f"Minimum required: {min_width}x{min_height}."
+            safe_print(
+                f"Warning: Terminal too small for live display "
+                f"(minimum {min_width}x{min_height}, current {_console.width}x{_console.height}). "
+                f"Recording panels will not be displayed, but recording will proceed normally.",
+                "warning",
             )
+            self._display_active = False
+            return  # Skip display but allow recording to continue
 
         self._recording_started_at = start_time
         self._stop_event.clear()
+        self._display_active = True
 
         # Conditionally start the CAVA subprocess
         if self._show_waveform:
@@ -107,7 +113,7 @@ class ConsoleDisplay:
 
     def stop(self):
         """Stops the live display thread and the CAVA subprocess."""
-        if not _has_rich:
+        if not _has_rich or not self._display_active:
             return
 
         self._stop_event.set()
@@ -151,6 +157,11 @@ class ConsoleDisplay:
                 justify="center",
             )
             self._latest_waveform_str = Align.center(error_text, vertical="middle")
+            safe_print(
+                f"Warning: CAVA config not found at {config_path}. "
+                f"Waveform display will not be available.",
+                "warning",
+            )
             return
 
         command = ["cava", "-p", config_path]
@@ -179,6 +190,12 @@ class ConsoleDisplay:
             # Update the waveform string with the rich error object.
             with self._waveform_lock:
                 self._latest_waveform_str = Align.center(error_text, vertical="middle")
+            safe_print(
+                "Warning: CAVA command not found. "
+                "Please ensure CAVA is installed and in your system's PATH. "
+                "Waveform display will not be available.",
+                "warning",
+            )
 
         except Exception as e:
             # Handle other potential errors
@@ -187,6 +204,11 @@ class ConsoleDisplay:
             )
             with self._waveform_lock:
                 self._latest_waveform_str = Align.center(error_text, vertical="middle")
+            safe_print(
+                f"Warning: Failed to start CAVA: {e}. "
+                f"Waveform display will not be available.",
+                "warning",
+            )
 
     def _read_cava_output(self):
         """
