@@ -48,6 +48,7 @@ class TrayIconManager:
         stop_callback: Optional[Callable[[], None]] = None,
         quit_callback: Optional[Callable[[], None]] = None,
         static_transcribe_callback: Optional[Callable[[], None]] = None,
+        toggle_models_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -58,6 +59,7 @@ class TrayIconManager:
             stop_callback: Function to call on right-click.
             quit_callback: A function to call to quit.
             static_transcribe_callback: Function to call for static transcription.
+            toggle_models_callback: Function to call to toggle models loaded state.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -84,6 +86,10 @@ class TrayIconManager:
         self.stop_callback = stop_callback
         self.quit_callback = quit_callback
         self.static_transcribe_callback = static_transcribe_callback
+        self.toggle_models_callback = toggle_models_callback
+
+        # Reference to the models menu item for dynamic updates
+        self.models_action: Optional[QAction] = None
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
@@ -118,6 +124,15 @@ class TrayIconManager:
             menu.addAction(static_action)  # type: ignore[call-overload]
             cast(Any, static_action.triggered).connect(
                 self._on_static_transcribe_triggered
+            )
+
+        # Add models unload/reload menu item
+        if self.toggle_models_callback:
+            menu.addSeparator()
+            self.models_action = QAction("Unload All Models", menu)
+            menu.addAction(self.models_action)  # type: ignore[call-overload]
+            cast(Any, self.models_action.triggered).connect(
+                self._on_toggle_models_triggered
             )
 
         menu.addSeparator()
@@ -191,9 +206,21 @@ class TrayIconManager:
         if self.stop_callback:
             self.stop_callback()
 
+    def _on_toggle_models_triggered(self, checked: bool) -> None:
+        if self.toggle_models_callback:
+            self.toggle_models_callback()
+
     def _on_quit_triggered(self, checked: bool) -> None:
         if self.quit_callback:
             self.quit_callback()
+
+    def update_models_menu_item(self, models_loaded: bool) -> None:
+        """Update the models menu item text based on whether models are loaded."""
+        if self.models_action:
+            if models_loaded:
+                self.models_action.setText("Unload All Models")
+            else:
+                self.models_action.setText("Reload All Models")
 
     def set_state(self, state: str) -> None:
         """
