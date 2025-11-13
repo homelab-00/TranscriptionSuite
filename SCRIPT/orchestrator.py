@@ -70,6 +70,7 @@ class STTOrchestrator:
             "running": False,
             "current_mode": None,  # Tracks "longform" or "static"
             "is_transcribing": False,  # Flag to manage audio feeding during transcription
+            "models_loaded": False,  # Track if models are currently loaded
         }
 
         # Instances for transcription components
@@ -101,6 +102,7 @@ class STTOrchestrator:
                 stop_callback=self._stop_longform,
                 quit_callback=self._quit,
                 static_transcribe_callback=self._start_static_transcription,
+                toggle_models_callback=self._toggle_models_loaded,
             )
         else:
             safe_print(
@@ -340,6 +342,133 @@ class STTOrchestrator:
         if self.main_transcriber and not self.app_state["is_transcribing"]:
             self.main_transcriber.feed_audio(chunk)
 
+    def _toggle_models_loaded(self):
+        """Toggle between unloading and reloading models."""
+        # Check if any transcription is in progress
+        if self.app_state["current_mode"] is not None:
+            safe_print(
+                f"Cannot unload models while {self.app_state['current_mode']} mode is active.",
+                "warning"
+            )
+            return
+
+        if self.app_state["models_loaded"]:
+            # Unload models
+            self._unload_models()
+        else:
+            # Reload models
+            self._reload_models()
+
+    def _unload_models(self):
+        """Unload all transcription models to free GPU memory."""
+        if not self.app_state["models_loaded"]:
+            safe_print("Models are already unloaded.", "info")
+            return
+
+        def _worker():
+            try:
+                if self.tray_manager:
+                    self.tray_manager.set_state("loading")
+
+                safe_print("Unloading transcription models...", "info")
+                logging.info("Starting model unload sequence")
+
+                # Clean up preview transcriber if it exists
+                if self.preview_transcriber:
+                    try:
+                        logging.info("Cleaning up preview transcriber")
+                        self.preview_transcriber.clean_up()
+                        self.preview_transcriber = None
+                        safe_print("Preview transcriber unloaded.", "success")
+                    except Exception as e:
+                        logging.error(f"Error unloading preview transcriber: {e}", exc_info=True)
+                        safe_print(f"Warning: Could not fully unload preview transcriber: {e}", "warning")
+
+                # Clean up main transcriber
+                if self.main_transcriber:
+                    try:
+                        logging.info("Cleaning up main transcriber")
+                        self.main_transcriber.clean_up()
+                        self.main_transcriber = None
+                        safe_print("Main transcriber unloaded.", "success")
+                    except Exception as e:
+                        logging.error(f"Error unloading main transcriber: {e}", exc_info=True)
+                        safe_print(f"Warning: Could not fully unload main transcriber: {e}", "warning")
+
+                # Clean up models in model manager
+                try:
+                    logging.info("Cleaning up model manager")
+                    self.model_manager.cleanup_all_models()
+                    safe_print("GPU memory cleared.", "success")
+                except Exception as e:
+                    logging.error(f"Error in model manager cleanup: {e}", exc_info=True)
+
+                self.app_state["models_loaded"] = False
+                safe_print("All models unloaded successfully.", "success")
+                logging.info("Model unload sequence completed")
+
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby")
+                    self.tray_manager.update_models_menu_item(models_loaded=False)
+
+            except Exception as e:
+                logging.error(f"Unexpected error during model unload: {e}", exc_info=True)
+                safe_print(f"Error unloading models: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _reload_models(self):
+        """Reload transcription models from configuration."""
+        if self.app_state["models_loaded"]:
+            safe_print("Models are already loaded.", "info")
+            return
+
+        def _worker():
+            try:
+                if self.tray_manager:
+                    self.tray_manager.set_state("loading")
+
+                safe_print("Reloading transcription models...", "info")
+                logging.info("Starting model reload sequence")
+
+                # Load models based on configuration
+                if self.preview_enabled:
+                    self._load_dual_transcriber_mode()
+                else:
+                    self._load_single_transcriber_mode()
+
+                success = self.main_transcriber is not None
+
+                if success:
+                    self.app_state["models_loaded"] = True
+                    safe_print("Models reloaded successfully.", "success")
+                    logging.info("Model reload sequence completed")
+
+                    # Restart preview transcription if enabled
+                    if self.preview_enabled and self.preview_transcriber:
+                        self.preview_transcriber.start_chunked_transcription(
+                            self._handle_preview_sentence
+                        )
+
+                    if self.tray_manager:
+                        self.tray_manager.set_state("standby")
+                        self.tray_manager.update_models_menu_item(models_loaded=True)
+                else:
+                    safe_print("Failed to reload models.", "error")
+                    logging.error("Model reload failed")
+                    if self.tray_manager:
+                        self.tray_manager.set_state("error")
+
+            except Exception as e:
+                logging.error(f"Unexpected error during model reload: {e}", exc_info=True)
+                safe_print(f"Error reloading models: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
         if self.app_state.get("shutdown_in_progress"):
@@ -391,6 +520,7 @@ class STTOrchestrator:
             success = self.main_transcriber is not None
 
             if success:
+                self.app_state["models_loaded"] = True
                 safe_print("Models loaded successfully.", "success")
                 if self.preview_enabled and self.preview_transcriber:
                     self.preview_transcriber.start_chunked_transcription(
@@ -401,6 +531,7 @@ class STTOrchestrator:
 
             if self.tray_manager:
                 self.tray_manager.set_state("standby" if success else "error")
+                self.tray_manager.update_models_menu_item(models_loaded=success)
 
         threading.Thread(target=preload_startup_models, daemon=True).start()
         self.app_state["running"] = True

@@ -274,6 +274,16 @@ The system tray icon changes color to indicate status:
 - **Orange**: Transcribing
 - **Red**: Error state
 
+### Model Management
+
+The system includes a model management feature to free up GPU memory when not actively transcribing:
+
+- **Unload All Models**: Frees GPU memory by unloading both main and preview transcription models
+- **Reload All Models**: Reloads models according to your `config.yaml` settings
+- The menu item dynamically toggles between "Unload" and "Reload" based on current state
+- Models can only be unloaded when no transcription is in progress (neither longform nor static)
+- All operations are logged to the terminal and log file for transparency
+
 ### Controls
 
 All controls are accessed through the system tray icon:
@@ -285,6 +295,7 @@ All controls are accessed through the system tray icon:
 - Start Recording
 - Stop Recording
 - Static Transcription
+- Unload/Reload All Models
 - Quit
 
 ---
