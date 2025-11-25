@@ -14,8 +14,8 @@ CT2_DIR="deps/ctranslate2"
 
 # Clone the repository with all its required sub-dependencies
 if [ ! -d "$CT2_DIR" ]; then
-  echo "Cloning ctranslate2 repository (v4.6.0) with submodules..."
-  git clone --recurse-submodules --depth 1 --branch v4.6.0 https://github.com/OpenNMT/CTranslate2.git "$CT2_DIR"
+  echo "Cloning ctranslate2 repository (v4.6.1) with submodules..."
+  git clone --recurse-submodules --depth 1 --branch v4.6.1 https://github.com/OpenNMT/CTranslate2.git "$CT2_DIR"
 else
   echo "ctranslate2 repository already exists."
 fi

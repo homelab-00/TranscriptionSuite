@@ -55,7 +55,7 @@ You should now see the virtual environment name in your terminal prompt. Confirm
 - Install Python build dependencies:
 
 ```bash
-uv add build setuptools pybind11
+uv add build setuptools wheel pybind11==2.11.1
 ```
 
 - Install Linux build dependencies:
