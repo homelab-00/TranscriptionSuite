@@ -80,6 +80,7 @@ class LongFormRecorder:
         self._last_transcription_duration = 0.0
         self.last_transcription = ""
         self.instance_name = instance_name
+        self._last_audio_data: Optional[Any] = None  # Stores raw audio for later use
 
         # Prepare configuration for the underlying AudioToTextRecorder
         self.recorder_config = dict(config) if config else {}
@@ -220,6 +221,9 @@ class LongFormRecorder:
         self.recorder.wait_audio()
         audio_data = self.recorder.audio
 
+        # Store a copy of the raw audio for potential later use (e.g., saving to viewer)
+        self._last_audio_data = audio_data.copy() if audio_data is not None else None
+
         transcription = ""
         transcription_start_time = time.monotonic()
 
@@ -251,6 +255,15 @@ class LongFormRecorder:
             self.recorder.shutdown()
             self.recorder = None
             logging.info("LongFormRecorder cleaned up.")
+
+    def get_last_audio_data(self) -> Optional[Any]:
+        """
+        Return the raw audio data from the last recording.
+
+        Returns:
+            NumPy array of float32 audio samples at 16kHz, or None if no data.
+        """
+        return self._last_audio_data
 
     def _safe_clipboard_copy(self, text: str) -> bool:
         """Safely copy text to clipboard with error handling."""

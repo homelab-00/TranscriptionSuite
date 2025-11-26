@@ -33,6 +33,7 @@ from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
 from static_transcriber import StaticFileTranscriber
 from utils import safe_print
+from viewer_storage import save_longform_recording, get_word_timestamps_from_audio
 
 if not TYPE_CHECKING:
     # Try to import the tray manager at runtime
@@ -63,7 +64,8 @@ class STTOrchestrator:
     def __init__(self):
         """Initialize the orchestrator."""
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.config_path = os.path.join(self.script_dir, "config.yaml")
+        # Use relative path - ConfigManager will look in project root
+        self.config_path = "config.yaml"
 
         # Application state (combining related attributes)
         self.app_state: dict[str, Optional[bool | str]] = {
@@ -362,6 +364,9 @@ class STTOrchestrator:
                         "---------------------\n"
                     )
 
+                # Check if we should save to viewer app
+                self._maybe_save_to_viewer(final_text)
+
                 if self.tray_manager:
                     self.tray_manager.set_state("standby")
 
@@ -376,6 +381,139 @@ class STTOrchestrator:
                     self.tray_manager.set_state("standby")
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _maybe_save_to_viewer(self, transcription_text: str):
+        """
+        Save longform recording to viewer app if configured.
+
+        Checks config for include_in_viewer, word_timestamps, and enable_diarization
+        flags to determine if and how to save the recording.
+        """
+        longform_config = self.config.get("longform_recording", {})
+
+        # Check if we should save to viewer
+        if not longform_config.get("include_in_viewer", True):
+            logging.debug("Longform recording not configured to save to viewer")
+            return
+
+        # Check if word_timestamps or diarization is enabled
+        word_timestamps_enabled = longform_config.get("word_timestamps", False)
+        diarization_enabled = longform_config.get("enable_diarization", False)
+
+        if not (word_timestamps_enabled or diarization_enabled):
+            logging.debug(
+                "Neither word_timestamps nor diarization enabled, skipping viewer save"
+            )
+            return
+
+        if not self.main_transcriber:
+            logging.warning("No transcriber available for viewer save")
+            return
+
+        # Get audio data from the last recording
+        audio_data = self.main_transcriber.get_last_audio_data()
+        if audio_data is None or len(audio_data) == 0:
+            logging.warning("No audio data available for viewer save")
+            return
+
+        safe_print("Saving recording to viewer app...", "info")
+
+        try:
+            word_timestamps = None
+            diarization_segments = None
+
+            # Get word timestamps if enabled
+            if word_timestamps_enabled:
+                safe_print("Extracting word-level timestamps...", "info")
+                _, word_timestamps = get_word_timestamps_from_audio(
+                    audio_data,
+                    language=self.config.get("main_transcriber", {}).get("language"),
+                )
+                if word_timestamps:
+                    safe_print(
+                        f"Extracted {len(word_timestamps)} words with timestamps",
+                        "success",
+                    )
+
+            # Get diarization if enabled
+            if diarization_enabled:
+                safe_print("Running speaker diarization...", "info")
+                diarization_segments = self._run_diarization(audio_data)
+                if diarization_segments:
+                    safe_print(
+                        f"Identified {len(diarization_segments)} speaker segments",
+                        "success",
+                    )
+
+            # Save to viewer database
+            recording_id = save_longform_recording(
+                audio_data=audio_data,
+                transcription_text=transcription_text,
+                sample_rate=16000,
+                word_timestamps=word_timestamps,
+                diarization_segments=diarization_segments,
+            )
+
+            if recording_id:
+                safe_print(
+                    f"Recording saved to viewer app (ID: {recording_id})", "success"
+                )
+            else:
+                safe_print("Failed to save recording to viewer app", "warning")
+
+        except Exception as e:
+            logging.error(f"Error saving to viewer: {e}", exc_info=True)
+            safe_print(f"Error saving to viewer: {e}", "error")
+
+    def _run_diarization(self, audio_data) -> list[dict]:
+        """
+        Run speaker diarization on audio data.
+
+        Returns list of segments with speaker labels.
+        """
+        import tempfile
+        import wave
+        import numpy as np
+
+        try:
+            # Import diarization module dynamically
+            from diarization_service.service import DiarizationService
+
+            # Write audio to temp file for diarization service
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+
+                # Convert float32 [-1.0, 1.0] to int16
+                audio_int16 = (audio_data * 32767).astype(np.int16)
+
+                with wave.open(tmp_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)  # Mono
+                    wav_file.setsampwidth(2)  # 16-bit
+                    wav_file.setframerate(16000)  # 16kHz
+                    wav_file.writeframes(audio_int16.tobytes())
+
+            # Run diarization
+            diarization_config = self.config.get("diarization", {})
+            min_speakers = diarization_config.get("min_speakers")
+            max_speakers = diarization_config.get("max_speakers")
+
+            service = DiarizationService()
+            segments = service.diarize(tmp_path, min_speakers, max_speakers)
+
+            # Clean up temp file
+            import os
+
+            os.unlink(tmp_path)
+
+            # Convert to dict format
+            return [seg.to_dict() for seg in segments]
+
+        except ImportError:
+            logging.warning("Diarization service not available")
+            return []
+        except Exception as e:
+            logging.error(f"Error during diarization: {e}", exc_info=True)
+            return []
 
     def _handle_preview_sentence(self, sentence: str):
         """Receives a transcribed sentence from the previewer and displays it."""

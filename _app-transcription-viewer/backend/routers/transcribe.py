@@ -2,10 +2,7 @@
 Transcribe API router - handles importing and transcribing audio files
 """
 
-import os
-import shutil
 import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -96,7 +93,7 @@ def convert_to_mp3(source_path: Path, dest_path: Path, bitrate: int = 128) -> bo
         True if conversion successful, False otherwise
     """
     try:
-        result = subprocess.run(
+        subprocess.run(
             [
                 "ffmpeg",
                 "-i",
@@ -137,7 +134,7 @@ def convert_to_wav_for_whisper(source_path: Path, dest_path: Path) -> bool:
         True if conversion successful, False otherwise
     """
     try:
-        result = subprocess.run(
+        subprocess.run(
             [
                 "ffmpeg",
                 "-i",
@@ -184,9 +181,9 @@ def run_transcription(
     try:
         # Try to import the transcription module
         try:
-            from static_transcriber import StaticTranscriber
+            from static_transcriber import StaticFileTranscriber
 
-            transcriber = StaticTranscriber()
+            transcriber = StaticFileTranscriber(None, None)
 
             import_status[recording_id].message = "Running transcription..."
             import_status[recording_id].progress = 0.2
@@ -200,8 +197,14 @@ def run_transcription(
             import_status[recording_id].progress = 0.8
             import_status[recording_id].message = "Saving to database..."
 
+            # Convert TranscriptSegment objects to dict format
+            if result:
+                result_dict = {"segments": [seg.to_dict() for seg in result]}
+            else:
+                result_dict = {"segments": []}
+
             # Parse and save results
-            save_transcription_result(recording_id, result)
+            save_transcription_result(recording_id, result_dict)
 
             import_status[recording_id] = ImportStatus(
                 recording_id=recording_id,
@@ -210,7 +213,7 @@ def run_transcription(
                 message="Transcription complete",
             )
 
-        except ImportError as e:
+        except ImportError:
             # Fallback: run as subprocess
             import_status[recording_id].message = "Running transcription subprocess..."
             run_transcription_subprocess(recording_id, wav_path, enable_diarization)
@@ -246,12 +249,20 @@ def run_transcription_subprocess(
     # Create a simple runner script
     runner_code = f'''
 import sys
+import json
 sys.path.insert(0, "{script_dir}")
-from static_transcriber import StaticTranscriber
+from static_transcriber import StaticFileTranscriber
 
-transcriber = StaticTranscriber()
+transcriber = StaticFileTranscriber(None, None)
 result = transcriber.transcribe_file_with_word_timestamps("{wav_path}")
-print(result)
+# Convert result to JSON-serializable format
+if result:
+    output = {{
+        "segments": [seg.to_dict() for seg in result]
+    }}
+    print(json.dumps(output))
+else:
+    print("{{}}")
 '''
 
     # Find the Python executable in the core venv

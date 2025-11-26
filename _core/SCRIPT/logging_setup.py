@@ -43,19 +43,20 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
         return root_logger
 
     script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent.parent  # SCRIPT -> _core -> TranscriptionSuite
 
     logging_defaults: Dict[str, Any] = {
         "level": "INFO",
         "console_output": False,
-        "file_name": "stt_orchestrator.log",
-        "directory": str(script_dir.parent),  # Default to the project root
+        "file_name": "transcription_suite.log",
+        "directory": str(project_root),  # Project root
     }
 
     resolved_config: Dict[str, Any] = logging_defaults.copy()
 
     if config is None:
-        # Try to find a yaml config for early setup
-        config_path = script_dir / "config.yaml"
+        # Try to find unified config.yaml at project root
+        config_path = project_root / "config.yaml"
         if yaml and config_path.exists():
             try:
                 with config_path.open("r", encoding="utf-8") as config_file:
@@ -67,14 +68,15 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
     else:
         resolved_config.update(config.get("logging", {}))
 
-    raw_directory = str(resolved_config.get("directory", script_dir))
+    raw_directory = str(resolved_config.get("directory", str(project_root)))
     expanded_directory = os.path.expanduser(os.path.expandvars(raw_directory))
     log_dir = Path(expanded_directory).expanduser()
     if not log_dir.is_absolute():
-        log_dir = (Path(script_dir) / log_dir).resolve()
+        # Relative paths are relative to project root
+        log_dir = (project_root / log_dir).resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    log_path = log_dir / resolved_config.get("file_name", "stt_orchestrator.log")
+    log_path = log_dir / resolved_config.get("file_name", "transcription_suite.log")
     realtimestt_log_path = log_dir / "realtimestt.log"
 
     # Clean up the RealtimeSTT log from the previous session.
