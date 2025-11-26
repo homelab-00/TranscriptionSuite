@@ -6,7 +6,7 @@
   "author": "homelab-00",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 1420",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
@@ -17,7 +17,11 @@
     "@mui/icons-material": "^5.15.0",
     "@mui/material": "^5.15.0",
     "@mui/x-date-pickers": "^6.18.0",
-    "@tauri-apps/api": "^1.5.0",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-fs": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-http": "^2.0.0",
     "axios": "^1.6.0",
     "dayjs": "^1.11.10",
     "howler": "^2.2.4",
@@ -26,7 +30,7 @@
     "react-router-dom": "^6.20.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^1.5.0",
+    "@tauri-apps/cli": "^2.0.0",
     "@types/howler": "^2.2.12",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",

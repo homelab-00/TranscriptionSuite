@@ -4,14 +4,15 @@ export interface Word {
   word: string;
   start: number;
   end: number;
-  probability: number;
+  probability?: number;
+  confidence?: number;
 }
 
 export interface Segment {
   text: string;
   start: number;
   end: number;
-  duration: number;
+  duration?: number;
   speaker?: string;
   words?: Word[];
 }
@@ -19,26 +20,17 @@ export interface Segment {
 export interface Recording {
   id: number;
   filename: string;
-  original_path: string;
-  internal_path: string;
-  transcription_path: string;
+  filepath: string;
   recorded_at: string;
   imported_at: string;
   duration_seconds: number;
   word_count: number;
-  is_transcribed: boolean;
+  has_diarization: boolean;
 }
 
 export interface Transcription {
+  recording_id: number;
   segments: Segment[];
-  num_speakers: number;
-  total_duration: number;
-  total_words: number;
-  metadata: {
-    source_file: string;
-    num_segments: number;
-    speakers?: string[];
-  };
 }
 
 export interface SearchResult {
