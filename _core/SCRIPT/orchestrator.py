@@ -201,26 +201,53 @@ class STTOrchestrator:
                     transcriber_instance, self.console_display
                 )
 
-                # Check if diarization is available and use it automatically
-                if self.static_transcriber.is_diarization_available():
-                    safe_print("Diarization available - will identify speakers", "info")
-                    # Generate output file path in same directory as source audio
-                    from pathlib import Path
+                # Get static transcription settings from config
+                static_config = self.config.get("static_transcription", {})
+                enable_diarization = static_config.get("enable_diarization", False)
+                max_segment_chars = static_config.get("max_segment_chars", 500)
 
-                    source_path = Path(file_path)
-                    output_file = str(
-                        source_path.parent / f"{source_path.stem}_transcription.json"
-                    )
+                # Get language from transcription options
+                language = self.config.get("transcription_options", {}).get("language")
+
+                # Generate output file path in same directory as source audio
+                from pathlib import Path
+
+                source_path = Path(file_path)
+                output_file = str(
+                    source_path.parent / f"{source_path.stem}_transcription.json"
+                )
+
+                # Check if diarization is enabled AND available
+                if (
+                    enable_diarization
+                    and self.static_transcriber.is_diarization_available()
+                ):
+                    safe_print("Diarization enabled - will identify speakers", "info")
                     self.static_transcriber.transcribe_file_with_diarization(
                         file_path,
                         output_file=output_file,
                         output_format="json",
+                        language=language,
+                        max_segment_chars=max_segment_chars,
                     )
                 else:
-                    safe_print(
-                        "Diarization not available - transcription only", "warning"
+                    if enable_diarization:
+                        safe_print(
+                            "Diarization enabled but not available - using word timestamps only",
+                            "warning",
+                        )
+                    else:
+                        safe_print(
+                            "Transcribing with word timestamps (diarization disabled)",
+                            "info",
+                        )
+                    # Use the word-timestamp-only transcription
+                    self.static_transcriber.transcribe_file_with_word_timestamps(
+                        file_path,
+                        output_file=output_file,
+                        language=language,
+                        max_segment_chars=max_segment_chars,
                     )
-                    self.static_transcriber.transcribe_file(file_path)
 
             except Exception as e:
                 logging.error(f"Static transcription worker failed: {e}", exc_info=True)

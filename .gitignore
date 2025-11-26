@@ -6,6 +6,30 @@ deps/
 *.log
 *.opus
 *.mp3
+.directory
 .idea/
 .vscode/
 .github/
+
+# Node.js / npm dependencies and build outputs
+_app-transcription-viewer/node_modules/
+_app-transcription-viewer/.venv/
+_app-transcription-viewer/dist/
+_app-transcription-viewer/build/
+_app-transcription-viewer/.env
+_app-transcription-viewer/.env.local
+
+# Vite cache
+_app-transcription-viewer/.vite/
+
+# IDE / Editor files
+_app-transcription-viewer/.vscode/
+_app-transcription-viewer/.idea/
+
+# OS files
+_app-transcription-viewer/.DS_Store
+_app-transcription-viewer/Thumbs.db
+
+# Python virtual environments (if present)
+_app-transcription-viewer/.python-version
+_app-transcription-viewer/__pycache__/

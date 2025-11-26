@@ -770,6 +770,173 @@ class StaticFileTranscriber:
             logging.error(f"Failed to save results: {e}")
             safe_print(f"Failed to save results: {e}", "error")
 
+    def transcribe_file_with_word_timestamps(
+        self,
+        file_path: str,
+        output_file: Optional[str] = None,
+        language: Optional[str] = None,
+        max_segment_chars: int = 500,
+    ) -> Optional[List[TranscriptSegment]]:
+        """
+        Transcribe an audio file with word-level timestamps (no speaker diarization).
+
+        This is faster than full diarization and suitable for single-speaker recordings.
+        Each word gets precise start/end timestamps.
+
+        Args:
+            file_path: Path to the audio file
+            output_file: Optional path to save results
+            language: Language code for transcription (e.g., 'en', 'el')
+            max_segment_chars: Maximum characters per segment (default 500)
+
+        Returns:
+            List of TranscriptSegment objects with word timing, or None on failure
+        """
+        if not HAS_SOUNDFILE or sf is None:
+            safe_print("SoundFile library not available. Aborting.", "error")
+            return None
+
+        if not HAS_FASTER_WHISPER:
+            safe_print("Faster Whisper not available. Aborting.", "error")
+            return None
+
+        logging.info(
+            "--- Starting transcription with word timestamps for: %s ---", file_path
+        )
+
+        try:
+            # --- Pre-processing Pipeline ---
+            converted_path = self._convert_to_wav(file_path)
+            if not converted_path:
+                return None
+
+            # --- Transcription with Word Timestamps ---
+            safe_print("Transcribing with word timestamps...", "info")
+
+            try:
+                start_time = time.monotonic()
+                transcript_segments, audio_duration = (
+                    self._transcribe_with_word_timestamps(
+                        converted_path, language=language
+                    )
+                )
+                transcription_time = time.monotonic() - start_time
+            except Exception as e:
+                logging.error(f"Transcription failed: {e}", exc_info=True)
+                safe_print(f"Transcription failed: {e}", "error")
+                return None
+
+            # --- Group segments by max_segment_chars ---
+            grouped_segments = self._group_segments_by_length(
+                transcript_segments, max_segment_chars
+            )
+
+            # --- Display Results ---
+            total_words = sum(
+                len(seg.words) if seg.words else 0 for seg in grouped_segments
+            )
+
+            safe_print(
+                f"\nComplete! {len(grouped_segments)} segments, "
+                f"{total_words} words in {transcription_time:.1f}s",
+                "success",
+            )
+
+            # --- Save Results ---
+            if output_file:
+                self._save_transcript_segments(
+                    grouped_segments, output_file, file_path, audio_duration
+                )
+
+            return grouped_segments
+
+        except Exception as e:
+            logging.error(
+                f"An error occurred during transcription: {e}",
+                exc_info=True,
+            )
+            safe_print(f"Error: {e}", "error")
+            return None
+        finally:
+            logging.info("--- Transcription process finished. ---")
+            self.cleanup()
+
+    def _group_segments_by_length(
+        self,
+        segments: List[TranscriptSegment],
+        max_chars: int,
+    ) -> List[TranscriptSegment]:
+        """
+        Regroup segments to respect maximum character length.
+
+        Args:
+            segments: Original transcript segments
+            max_chars: Maximum characters per output segment
+
+        Returns:
+            Regrouped list of TranscriptSegment objects
+        """
+        if not segments:
+            return segments
+
+        result: List[TranscriptSegment] = []
+        current_words: List[WordSegment] = []
+        current_text: List[str] = []
+        current_char_count = 0
+        segment_start = 0.0
+        segment_end = 0.0
+
+        for segment in segments:
+            if not segment.words:
+                # Segment without words - just add as-is if it fits
+                if len(segment.text) <= max_chars:
+                    result.append(segment)
+                continue
+
+            for word in segment.words:
+                word_text = word.word
+                word_chars = len(word_text)
+
+                # Check if adding this word would exceed limit
+                if current_char_count + word_chars > max_chars and current_words:
+                    # Save current segment
+                    result.append(
+                        TranscriptSegment(
+                            text=" ".join(current_text).strip(),
+                            start=segment_start,
+                            end=segment_end,
+                            speaker=None,  # No speaker in non-diarized mode
+                            words=current_words.copy(),
+                        )
+                    )
+                    current_words = []
+                    current_text = []
+                    current_char_count = 0
+
+                # Start new segment if needed
+                if not current_words:
+                    segment_start = word.start
+
+                # Add word to current segment
+                current_words.append(word)
+                current_text.append(word_text)
+                current_char_count += word_chars + 1  # +1 for space
+                segment_end = word.end
+
+        # Don't forget the last segment
+        if current_words:
+            result.append(
+                TranscriptSegment(
+                    text=" ".join(current_text).strip(),
+                    start=segment_start,
+                    end=segment_end,
+                    speaker=None,
+                    words=current_words.copy(),
+                )
+            )
+
+        return result
+
     @staticmethod
     def is_diarization_available() -> bool:
         """Check if diarization is available."""
