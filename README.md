@@ -22,11 +22,12 @@ A comprehensive speech-to-text transcription suite for Linux with speaker diariz
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [File Storage](#file-storage)
 - [Usage](#usage)
 - [Transcription Viewer App](#transcription-viewer-app)
 - [Output Format](#output-format)
 - [How It Works](#how-it-works)
-- [Recent Development](#recent-development)
+- [Module Architecture](#module-architecture)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -38,6 +39,7 @@ The project is split into **three separate modules**, each with its own purpose.
 
 ```text
 TranscriptionSuite/
+├── config.yaml                 # Unified configuration file
 ├── _core/                      # Main transcription engine (Python 3.13)
 │   ├── SCRIPT/                 # Application source code
 │   │   ├── orchestrator.py     # Main entry point
@@ -61,8 +63,9 @@ TranscriptionSuite/
 ├── _app-transcription-viewer/  # Desktop GUI application
 │   ├── src/                    # React frontend
 │   ├── backend/                # FastAPI backend
+│   │   └── data/               # App storage (database, audio)
 │   ├── src-tauri/              # Tauri desktop wrapper
-│   └── README.md
+│   └── package.json
 │
 └── README.md                   # This file
 ```
@@ -128,7 +131,7 @@ cd TranscriptionSuite
 cd _core
 uv venv --python 3.13
 source .venv/bin/activate
-# Build ctranslate2 (see _core/README.md for details)
+# Build ctranslate2 (see Installation section for details)
 ./build_ctranslate2.sh
 uv sync
 deactivate
@@ -138,7 +141,7 @@ cd ../_module-diarization
 uv venv --python 3.10
 source .venv/bin/activate
 uv sync
-hf auth login  # Required for PyAnnote models
+huggingface-cli login  # Required for PyAnnote models
 deactivate
 
 # 4. Run the application
@@ -170,65 +173,249 @@ sudo pacman -S --needed cava
 
 ### Setting Up _core
 
-See [`_core/README.md`](_core/README.md) for detailed instructions on:
+#### Step 1: Create Virtual Environment
 
-- Building the custom `ctranslate2` library
-- Configuring your audio device
-- Setting up models and language
+```bash
+cd _core
+uv venv --python 3.13
+source .venv/bin/activate
+```
+
+#### Step 2: Install Build Dependencies
+
+```bash
+uv add build setuptools wheel pybind11==2.11.1
+sudo pacman -S --needed base-devel git openblas
+```
+
+#### Step 3: Build Custom ctranslate2
+
+The `ctranslate2` library needs to be compiled locally to link against your system's CUDA 13+ toolkit.
+
+**Important:** Before running, edit `build_ctranslate2.sh` to match your GPU's Compute Capability:
+
+1. Open `build_ctranslate2.sh`
+2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`
+3. The value `86` is for RTX 3060. Find your GPU's capability at [NVIDIA CUDA GPUs](https://developer.nvidia.com/cuda-gpus)
+
+```bash
+chmod +x build_ctranslate2.sh
+./build_ctranslate2.sh
+```
+
+#### Step 4: Install Dependencies
+
+```bash
+uv sync
+deactivate
+```
 
 ### Setting Up _module-diarization
 
-See [`_module-diarization/README.md`](_module-diarization/README.md) for:
+#### Step 1: Create Virtual Environment
 
-- HuggingFace token configuration
-- Accepting PyAnnote model terms
-- Testing the diarization standalone
+```bash
+cd _module-diarization
+uv venv --python 3.10
+source .venv/bin/activate
+```
+
+#### Step 2: Install Dependencies
+
+```bash
+uv sync
+```
+
+#### Step 3: Configure HuggingFace Access
+
+You need a HuggingFace token with access to PyAnnote models:
+
+1. Get your token from: https://huggingface.co/settings/tokens
+2. Accept the terms for these models:
+   - https://huggingface.co/pyannote/segmentation-3.0
+   - https://huggingface.co/pyannote/speaker-diarization-3.1
+3. Login:
+
+```bash
+huggingface-cli login
+```
+
+#### Step 4: Test Installation
+
+```bash
+python -c "from DIARIZATION import diarize_audio; print('Diarization module OK')"
+deactivate
+```
 
 ---
 
 ## Configuration
 
-### Main Configuration (`_core/SCRIPT/config.yaml`)
+All settings are in a single `config.yaml` file at the project root. This file controls:
+
+- Transcription language and models
+- Static transcription options (diarization, word timestamps)
+- Longform recording options
+- Audio device selection
+- Storage locations
+- Logging settings
+
+### Key Configuration Sections
 
 ```yaml
-# Language for transcription (applies to both modes)
+# Language for transcription (null = auto-detect)
 transcription_options:
-    language: "el"  # Greek, "en" for English, etc.
-    enable_preview_transcriber: true
+    language: null
+    enable_preview_transcriber: false
 
-# Audio input device
-audio:
-    input_device_index: 21  # Run list_audio_devices.py to find yours
-    use_default_input: false
+# Static file transcription
+static_transcription:
+    enable_diarization: false
+    word_timestamps: true
+    max_segment_chars: 500
+
+# Longform recording
+longform_recording:
+    include_in_viewer: true    # Show in viewer app
+    word_timestamps: false
+    enable_diarization: false
+
+# Speaker diarization
+diarization:
+    model: "pyannote/speaker-diarization-3.1"
+    device: "cuda"
+    min_speakers: null  # Auto-detect
+    max_speakers: null
 
 # Model selection
 main_transcriber:
-    model: "Systran/faster-whisper-large-v3"  # Best accuracy
+    model: "Systran/faster-whisper-large-v3"
     device: "cuda"
-    compute_type: "float16"
+    compute_type: "default"
 
-preview_transcriber:
-    model: "Systran/faster-whisper-medium"  # Faster for live preview
-    device: "cuda"
-    compute_type: "float16"
-
-# Optional features
-display:
-    show_waveform: true  # Requires cava
+# Storage for viewer app
+storage:
+    audio_dir: "data/audio"
+    audio_format: "mp3"
+    audio_bitrate: 128
 ```
 
-### Diarization Configuration (`_module-diarization/DIARIZATION/config.yaml`)
+### Finding Your Audio Device
+
+```bash
+cd _core
+python list_audio_devices.py
+```
+
+Update `config.yaml`:
 
 ```yaml
-pyannote:
-    hf_token: null  # Use huggingface-cli login instead (recommended)
-    model: "pyannote/speaker-diarization-3.1"
-    device: "cuda"  # or "cpu"
+audio:
+    input_device_index: 21  # Your device index
+    use_default_input: false
+```
 
-processing:
-    sample_rate: 16000
-    min_speakers: null  # Auto-detect
-    max_speakers: null  # Auto-detect
+### Configuring CAVA for Waveform Display (Optional)
+
+```bash
+sudo pacman -S cava
+```
+
+Find your PipeWire audio source:
+
+```bash
+pw-cli list-objects Node
+```
+
+Edit `_core/SCRIPT/cava.config`:
+
+```ini
+[input]
+method = pulse
+source = "alsa:acp:Generic:0:capture"
+```
+
+Enable in `config.yaml`:
+
+```yaml
+display:
+    show_waveform: true
+```
+
+---
+
+## File Storage
+
+Understanding where TranscriptionSuite stores files:
+
+### Storage Locations
+
+| Type | Location | Description |
+|------|----------|-------------|
+| **Database** | `_app-transcription-viewer/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
+| **Audio Files** | `_app-transcription-viewer/backend/data/audio/` | Imported audio stored as MP3 |
+| **Transcriptions** | Database | Stored in SQLite tables, not as JSON files |
+| **Logs** | Project root | `transcription_suite.log` |
+| **Models** | `~/.cache/huggingface/` | Downloaded Whisper/PyAnnote models |
+| **Temp Files** | `/tmp/transcription-suite/` | Intermediate WAV files during processing |
+
+### Audio Import Process
+
+When you import an audio/video file through the viewer app:
+
+```text
+Source File (any format)
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 1. FFmpeg converts to WAV             │
+│    - 16kHz mono for Whisper           │
+│    - Stored in temp directory         │
+└───────────────────────────────────────┘
+    │
+    ├──────────────────────────────────────┐
+    ▼                                      ▼
+┌─────────────────────────────────────┐  ┌─────────────────────────────┐
+│ 2a. Transcription                   │  │ 2b. Audio Storage           │
+│     (uses WAV)                      │  │     - Source → MP3 (128kbps)│
+└─────────────────────────────────────┘  │     - Stored in data/audio/ │
+    │                                    └─────────────────────────────┘
+    ▼
+┌───────────────────────────────────────┐
+│ 3. Results saved to SQLite            │
+│    - recordings table                 │
+│    - segments table                   │
+│    - words table (with timestamps)    │
+│    - words_fts (full-text search)     │
+└───────────────────────────────────────┘
+    │
+    ▼
+Temp WAV deleted
+```
+
+### Database Schema
+
+```sql
+-- Main recordings table
+recordings (
+    id, filename, filepath, duration_seconds, 
+    recorded_at, word_count, has_diarization
+)
+
+-- Segments (speaker turns)
+segments (
+    id, recording_id, segment_index, speaker, 
+    text, start_time, end_time
+)
+
+-- Individual words with timestamps
+words (
+    id, recording_id, segment_id, word_index, 
+    word, start_time, end_time, confidence
+)
+
+-- FTS5 virtual table for search
+words_fts (word)
 ```
 
 ---
@@ -279,11 +466,116 @@ python SCRIPT/orchestrator.py
 2. Select an audio file (wav, mp3, opus, flac, m4a, ogg)
 3. Wait for processing:
    - Step 1/3: Transcription with word timestamps
-   - Step 2/3: Speaker diarization
+   - Step 2/3: Speaker diarization (if enabled)
    - Step 3/3: Combining results
 4. Result saved to: `{audio_directory}/{filename}_transcription.json`
 
-**Note:** Diarization is **only available for static file transcription**, not for live recording.
+**Note:** Diarization is optional and controlled by `config.yaml`. It's typically used for multi-speaker recordings like meetings or interviews.
+
+### Model Management
+
+The system includes a model management feature to free up GPU memory:
+
+- **Unload All Models**: Frees GPU memory by unloading transcription models
+- **Reload All Models**: Reloads models according to `config.yaml`
+- Available in the tray right-click menu
+
+---
+
+## Transcription Viewer App
+
+The `_app-transcription-viewer` is a **desktop GUI application** for managing and searching your transcribed recordings.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| 📅 **Calendar View** | Browse recordings organized by date with badge indicators |
+| 🔍 **Full-Text Search** | Find words/phrases across all transcriptions using SQLite FTS5 |
+| 🎯 **Fuzzy Matching** | Enable prefix search for partial word matches |
+| 📆 **Date Filtering** | Narrow search results to specific date ranges |
+| ⏱️ **Click-to-Play** | Click any word to jump to that moment in the audio |
+| 🎵 **Audio Player** | Built-in player with 10-second skip, seeking, timestamps |
+| 👥 **Speaker Labels** | View speaker identification chips in transcripts |
+| 📁 **Import Files** | Import audio files and auto-transcribe in background |
+| 🌙 **Dark Mode** | Modern Material Design dark theme |
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| **Desktop Shell** | Tauri (Rust + System WebView) - ~5-10MB bundle |
+| **Frontend** | React 18 + TypeScript + MUI (Material-UI) |
+| **Backend** | FastAPI (Python) |
+| **Database** | SQLite with FTS5 for full-text search |
+| **Audio** | Howler.js for playback |
+
+### Quick Start (Viewer App)
+
+```bash
+cd _app-transcription-viewer
+
+# Install frontend dependencies
+npm install
+
+# Install backend dependencies
+cd backend
+uv venv
+source .venv/bin/activate
+uv sync
+cd ..
+
+# Start both servers for development
+./dev.sh
+```
+
+This starts:
+
+- **Frontend**: http://localhost:1420
+- **Backend**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs (Swagger UI)
+
+### Views
+
+#### Calendar View (Home)
+
+The home screen shows a monthly calendar where each day with recordings displays a badge. Click a day to see all recordings from that date.
+
+#### Search View
+
+Full-text search across all transcribed words:
+
+- **Query field**: Enter word or phrase to search
+- **Fuzzy toggle**: Enable prefix matching
+- **Date range**: Filter results by date
+- Results show matched word with context, recording info, and play button
+
+#### Recording View
+
+View and play a recording with its transcription:
+
+- **Audio player** with play/pause, ±10 second skip, time slider
+- **Clickable transcript**: Each word is clickable—click to seek audio
+- **Speaker chips**: Speaker labels appear if diarization was enabled
+
+#### Import View
+
+Import audio files for transcription:
+
+- **Local path import**: Enter a file path
+- **Upload files**: Drag and drop or click to upload
+- **Diarization toggle**: Enable speaker identification
+- **Progress tracking**: See transcription job status
+
+### Build for Production
+
+```bash
+cargo install tauri-cli
+cd _app-transcription-viewer
+npm run tauri build
+```
+
+Output in `src-tauri/target/release/bundle/`.
 
 ---
 
@@ -306,17 +598,6 @@ The static transcription output includes **word-level timestamps** and **speaker
         {"word": "mercury", "start": 0.4, "end": 0.88, "probability": 0.95},
         {"word": "metal.", "start": 0.88, "end": 1.52, "probability": 0.97}
       ]
-    },
-    {
-      "text": "It's one of the only elements that's liquid at room temperature.",
-      "start": 1.52,
-      "end": 5.2,
-      "duration": 3.68,
-      "speaker": "SPEAKER_00",
-      "words": [
-        {"word": "It's", "start": 1.52, "end": 1.72, "probability": 0.98},
-        ...
-      ]
     }
   ],
   "num_speakers": 1,
@@ -329,17 +610,6 @@ The static transcription output includes **word-level timestamps** and **speaker
   }
 }
 ```
-
-### What You Can Do With This Output
-
-- **Search for specific words** using Ctrl+F and find exactly when they were spoken
-- **Jump to timestamps** - Each word has precise start/end times in seconds
-- **Identify speakers** - Know who said what in multi-speaker recordings
-- **Build applications** - Parse the JSON to create:
-  - Searchable transcription archives
-  - Interactive audio players with clickable transcripts
-  - Meeting minutes with speaker attribution
-  - Subtitle/caption files (SRT export planned)
 
 ---
 
@@ -396,37 +666,46 @@ Each word is assigned to a speaker by:
 
 ---
 
-## Recent Development
+## Module Architecture
 
-### Changes in Current Session
+### Core Application Logic
 
-1. **Word-Level Timestamps** - Rewrote `static_transcriber.py` to use Faster Whisper directly with `word_timestamps=True`, instead of the realtime engine which only returns final text.
+| Script | Purpose |
+|--------|---------|
+| `orchestrator.py` | Central controller, manages state, connects UI to backend |
+| `model_manager.py` | Loads and manages AI models, reads config |
+| `recorder.py` | High-level wrapper for recording sessions |
+| `stt_engine.py` | Low-level transcription engine, VAD, audio processing |
+| `static_transcriber.py` | Handles static file transcription |
 
-2. **New Data Structures** - Added `WordSegment` and `TranscriptSegment` dataclasses for proper typing and JSON serialization.
+### User Interface & Display
 
-3. **Improved Combination Logic** - New `_combine_transcription_with_diarization()` method that:
-   - Assigns speakers at the word level (not sentence level)
-   - Respects maximum segment length to avoid huge blocks
-   - Preserves all word timestamps in the output
+| Script | Purpose |
+|--------|---------|
+| `tray_manager.py` | System tray icon and menu (PyQt6) |
+| `console_display.py` | Terminal UI: timer, waveform, preview (Rich) |
 
-4. **JSON Output Enhancement** - Output now includes:
-   - `words[]` array with individual word timing
-   - `total_words` count
-   - `speakers` list in metadata
+### Configuration & Utilities
 
-5. **Fixed Diarization Integration** - Resolved JSON parsing issues caused by logging messages polluting stdout. All logs now go to stderr.
+| Script | Purpose |
+|--------|---------|
+| `config_manager.py` | Loads and validates `config.yaml` |
+| `logging_setup.py` | Application-wide logging setup |
+| `platform_utils.py` | Platform-specific code (Linux paths, CUDA) |
+| `dependency_checker.py` | Verifies required packages and programs |
+| `diagnostics.py` | Hardware info and startup banner |
 
-6. **Configuration Toggles** - Added new settings to `config.yaml`:
-   - `static_transcription.enable_diarization` - Toggle speaker diarization on/off
-   - `static_transcription.word_timestamps` - Toggle word-level timestamps
-   - `static_transcription.max_segment_chars` - Maximum characters per segment
+### Diarization Module Structure
 
-7. **Transcription Viewer App** - Created a full desktop application (`_app-transcription-viewer/`) for managing and searching transcriptions:
-   - **React + MUI** dark mode frontend with calendar view, search, and audio player
-   - **FastAPI** backend with SQLite FTS5 for full-text word search
-   - **Tauri** desktop wrapper for lightweight distribution (~5-10MB vs Electron's 150MB+)
-   - Click any word in the transcript to seek audio to that timestamp
-   - Import audio files and transcribe in background
+```text
+_module-diarization/DIARIZATION/
+├── __init__.py             # Module exports
+├── diarize_audio.py        # CLI entry point
+├── diarization_manager.py  # PyAnnote pipeline management
+├── api.py                  # API wrapper
+├── config_manager.py       # Configuration handling
+└── utils.py                # Utility functions
+```
 
 ---
 
@@ -444,16 +723,10 @@ source .venv/bin/activate
 python -c "from DIARIZATION import diarize_audio; print('OK')"
 ```
 
-#### "JSON parse error" during diarization
-
-This was fixed. If you still see it, ensure you have the latest code that redirects logging to stderr.
-
 #### CUDA out of memory
 
-The system loads models into GPU memory. If you run out:
-
-1. Use the "Unload All Models" option in the tray menu
-2. Set `device: "cpu"` in config.yaml for one of the transcribers
+1. Use "Unload All Models" in the tray menu
+2. Set `device: "cpu"` in config.yaml for one transcriber
 3. Use smaller models (e.g., `medium` instead of `large-v3`)
 
 #### HuggingFace token issues
@@ -464,193 +737,19 @@ source .venv/bin/activate
 huggingface-cli login
 ```
 
-Then accept the model terms at:
+Then accept model terms at the HuggingFace links above.
 
-- <https://huggingface.co/pyannote/segmentation-3.0>
-- <https://huggingface.co/pyannote/speaker-diarization-3.1>
+#### CUDA/cuDNN Issues
 
----
+1. Verify CUDA: `nvcc --version`
+2. Check cuDNN is installed and in library path
+3. Confirm correct `CMAKE_CUDA_ARCHITECTURES` in build script
 
-## Performance Benchmarks
+#### Audio Device Issues
 
-Tested on RTX 3060 12GB, Ryzen 5 3600:
-
-| Audio Length | Transcription | Diarization | Total |
-|--------------|---------------|-------------|-------|
-|  | s | s | s |
-
-[To be completed]
-
----
-
-## Transcription Viewer App
-
-The `_app-transcription-viewer` is a **desktop GUI application** for managing and searching your transcribed recordings. It provides a user-friendly interface to browse recordings by date, search for specific words across all transcriptions, and play audio with synchronized word highlighting.
-
-### Features
-
-| Feature | Description |
-|---------|-------------|
-| 📅 **Calendar View** | Browse recordings organized by date with badge indicators |
-| 🔍 **Full-Text Search** | Find words/phrases across all transcriptions using SQLite FTS5 |
-| 🎯 **Fuzzy Matching** | Enable prefix search for partial word matches |
-| 📆 **Date Filtering** | Narrow search results to specific date ranges |
-| ⏱️ **Click-to-Play** | Click any word to jump to that moment in the audio |
-| 🎵 **Audio Player** | Built-in player with 10-second skip, seeking, timestamps |
-| 👥 **Speaker Labels** | View speaker identification chips in transcripts |
-| 📁 **Import Files** | Import audio files and auto-transcribe in background |
-| 🌙 **Dark Mode** | Modern Material Design dark theme |
-
-### Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Desktop Shell** | Tauri (Rust + System WebView) - ~5-10MB bundle |
-| **Frontend** | React 18 + TypeScript + MUI (Material-UI) |
-| **Backend** | FastAPI (Python) |
-| **Database** | SQLite with FTS5 for full-text search |
-| **Audio** | Howler.js for playback |
-
-### App Architecture
-
-```text
-_app-transcription-viewer/
-├── src/                        # React frontend
-│   ├── components/
-│   │   └── Layout.tsx          # App shell with navigation drawer
-│   ├── views/
-│   │   ├── CalendarView.tsx    # Month calendar with recording badges
-│   │   ├── SearchView.tsx      # Search interface with filters
-│   │   ├── RecordingView.tsx   # Audio player + clickable transcript
-│   │   └── ImportView.tsx      # Import/upload audio files
-│   ├── services/
-│   │   └── api.ts              # Axios API client
-│   └── types.ts                # TypeScript interfaces
-│
-├── backend/                    # Python FastAPI server
-│   ├── main.py                 # Server entry point
-│   ├── database.py             # SQLite with FTS5 operations
-│   └── routers/
-│       ├── recordings.py       # CRUD for recordings
-│       ├── search.py           # Full-text search endpoint
-│       └── transcribe.py       # Import + transcription jobs
-│
-├── src-tauri/                  # Tauri desktop wrapper
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   └── src/main.rs
-│
-└── dev.sh                      # Development startup script
-```
-
-### Quick Start (Viewer App)
-
-```bash
-cd _app-transcription-viewer
-
-# Install frontend dependencies
-npm install
-
-# Install backend dependencies
-cd backend
-uv venv
-uv sync
-cd ..
-
-# Start both servers for development
-./dev.sh
-```
-
-This starts:
-
-- **Frontend**: http://localhost:1420
-- **Backend**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs (Swagger UI)
-
-### Views
-
-#### Calendar View (Home)
-
-The home screen shows a monthly calendar where each day with recordings displays a badge. Click a day to see all recordings from that date.
-
-- Navigate months with arrow buttons
-- Days with recordings show numbered badges
-- Click a recording to open the player view
-
-#### Search View
-
-Full-text search across all transcribed words:
-
-- **Query field**: Enter word or phrase to search
-- **Fuzzy toggle**: Enable prefix matching (e.g., "transcr" matches "transcription")
-- **Date range**: Filter results by start/end dates
-- Results show:
-  - Matched word with surrounding context
-  - Recording filename and date
-  - Play button to jump directly to that timestamp (15 seconds before)
-
-#### Recording View
-
-View and play a recording with its transcription:
-
-- **Audio player** with play/pause, ±10 second skip, time slider
-- **Clickable transcript**: Each word is clickable—click to seek audio
-- **Active word highlighting**: Current word is highlighted as audio plays
-- **Speaker chips**: If diarization was enabled, speaker labels appear
-
-#### Import View
-
-Import audio files for transcription:
-
-- **Local path import**: Enter a file path (e.g., `/home/user/recording.mp3`)
-- **Upload files**: Drag and drop or click to upload
-- **Diarization toggle**: Enable speaker identification (requires Python 3.10 venv)
-- **Progress tracking**: See transcription job status in queue
-
-### API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/recordings` | GET | List all recordings (with optional date filters) |
-| `/api/recordings/{id}` | GET | Get recording metadata |
-| `/api/recordings/{id}/transcription` | GET | Get full transcription with words |
-| `/api/recordings/{id}/audio` | GET | Stream audio file |
-| `/api/recordings/{id}` | DELETE | Delete recording and transcription |
-| `/api/search?q=word` | GET | Search words (supports `fuzzy`, `start_date`, `end_date`) |
-| `/api/transcribe/file` | POST | Import local file for transcription |
-| `/api/transcribe/upload` | POST | Upload file for transcription |
-| `/api/transcribe/status/{id}` | GET | Check transcription job status |
-
-### Database Schema
-
-The app uses SQLite with FTS5 for efficient full-text search:
-
-```sql
--- Main recordings table
-recordings (id, filename, filepath, duration_seconds, recorded_at, word_count, has_diarization)
-
--- Segments (speaker turns or time blocks)
-segments (id, recording_id, segment_index, speaker, text, start_time, end_time)
-
--- Individual words with timestamps
-words (id, recording_id, segment_id, word_index, word, start_time, end_time, confidence)
-
--- FTS5 virtual table for search
-words_fts (word)  -- Automatically synced with words table via triggers
-```
-
-### Build for Production
-
-```bash
-# Install Tauri CLI (if not installed)
-cargo install tauri-cli
-
-# Build desktop app
-cd _app-transcription-viewer
-npm run tauri build
-```
-
-This creates a distributable app in `src-tauri/target/release/bundle/`.
+1. Re-run `list_audio_devices.py` to confirm device index
+2. Check system audio permissions
+3. Verify no other app is using the microphone exclusively
 
 ---
 
@@ -660,9 +759,9 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project builds upon and thanks several excellent open-source projects:
+This project builds upon several excellent open-source projects:
 
-- **[RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)** - The core transcription engine was adapted and customized from this powerful and flexible library, which was also the original inspiration for this project.
-- **[Faster Whisper](https://github.com/SYSTRAN/faster-whisper)** - Excellent model optimization.
-- **[PyAnnote Audio](https://github.com/pyannote/pyannote-audio)** - State-of-the-art speaker diarization.
+- **[RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)** - The core transcription engine was adapted from this library
+- **[Faster Whisper](https://github.com/SYSTRAN/faster-whisper)** - Excellent model optimization
+- **[PyAnnote Audio](https://github.com/pyannote/pyannote-audio)** - State-of-the-art speaker diarization
 - **[OpenAI Whisper](https://github.com/openai/whisper)** - Original speech recognition models
