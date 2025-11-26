@@ -2,7 +2,7 @@
 name = "module-Diarization"
 version = "0.1.0"
 description = "Speaker diarization module using PyAnnote"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pyannote.audio>=3.1.0",
     "torch>=2.0.0",

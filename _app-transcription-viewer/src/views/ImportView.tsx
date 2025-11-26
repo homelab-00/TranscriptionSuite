@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -13,16 +13,22 @@ import {
   ListItemText,
   ListItemIcon,
   Alert,
+  InputAdornment,
 } from '@mui/material';
 import {
-  CloudUpload as UploadIcon,
   Folder as FolderIcon,
+  Search as BrowseIcon,
   AudioFile as AudioIcon,
   CheckCircle as CheckIcon,
   Error as ErrorIcon,
   Pending as PendingIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
+
+// Check if we're running inside Tauri
+const isTauri = (): boolean => {
+  return typeof window !== 'undefined' && '__TAURI__' in window;
+};
 
 interface ImportJob {
   id: number;
@@ -38,9 +44,48 @@ export default function ImportView() {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [tauriDialog, setTauriDialog] = useState<typeof import('@tauri-apps/api/dialog') | null>(null);
 
-  const handleImportFile = async () => {
-    if (!filePath.trim()) {
+  // Load Tauri dialog API only if in Tauri environment
+  useEffect(() => {
+    if (isTauri()) {
+      import('@tauri-apps/api/dialog')
+        .then((mod) => setTauriDialog(mod))
+        .catch(() => {
+          // Failed to load Tauri dialog
+        });
+    }
+  }, []);
+
+  // Open native file picker using Tauri dialog or fallback to HTML input
+  const openFilePicker = async () => {
+    try {
+      if (isTauri() && tauriDialog) {
+        const selected = await tauriDialog.open({
+          multiple: true,
+          filters: [{
+            name: 'Audio Files',
+            extensions: ['mp3', 'wav', 'opus', 'ogg', 'flac', 'm4a', 'wma', 'aac']
+          }]
+        });
+        
+        if (selected) {
+          const paths = Array.isArray(selected) ? selected : [selected];
+          for (const path of paths) {
+            await importFilePath(path);
+          }
+        }
+      } else {
+        // Fallback to HTML file input if not in Tauri
+        fileInputRef.current?.click();
+      }
+    } catch (err: any) {
+      setError(`Failed to open file picker: ${err.message || err}`);
+    }
+  };
+
+  const importFilePath = async (path: string) => {
+    if (!path.trim()) {
       setError('Please enter a file path');
       return;
     }
@@ -48,11 +93,11 @@ export default function ImportView() {
     setError(null);
     
     try {
-      const response = await api.importFile(filePath, true, enableDiarization);
+      const response = await api.importFile(path, true, enableDiarization);
       
       const newJob: ImportJob = {
         id: response.recording_id,
-        filename: filePath.split('/').pop() || filePath,
+        filename: path.split('/').pop() || path,
         status: 'transcribing',
         message: response.message,
       };
@@ -64,8 +109,12 @@ export default function ImportView() {
       pollJobStatus(newJob.id);
       
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to import file');
+      setError(err.response?.data?.detail || `Failed to import file: ${path}`);
     }
+  };
+
+  const handleImportFile = async () => {
+    await importFilePath(filePath);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,10 +216,35 @@ export default function ImportView() {
         Import Recordings
       </Typography>
 
-      {/* Import from file path */}
+      {/* Import audio files */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" sx={{ mb: 2 }}>
-          Import from Local Path
+          Select Audio Files
+        </Typography>
+        
+        {/* File picker button */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="audio/*,.mp3,.wav,.opus,.ogg,.flac,.m4a,.wma,.aac"
+          style={{ display: 'none' }}
+          onChange={handleFileUpload}
+        />
+        
+        <Button
+          variant="contained"
+          size="large"
+          startIcon={<BrowseIcon />}
+          onClick={openFilePicker}
+          sx={{ py: 2, px: 4, mb: 3, width: '100%' }}
+        >
+          Browse for Audio Files
+        </Button>
+
+        {/* Manual path input */}
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          Or enter a file path manually:
         </Typography>
         
         <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
@@ -180,12 +254,21 @@ export default function ImportView() {
             placeholder="/path/to/audio.mp3"
             value={filePath}
             onChange={(e) => setFilePath(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && filePath.trim()) {
+                handleImportFile();
+              }
+            }}
             InputProps={{
-              startAdornment: <FolderIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+              startAdornment: (
+                <InputAdornment position="start">
+                  <FolderIcon sx={{ color: 'text.secondary' }} />
+                </InputAdornment>
+              ),
             }}
           />
           <Button
-            variant="contained"
+            variant="outlined"
             onClick={handleImportFile}
             disabled={!filePath.trim()}
           >
@@ -200,37 +283,11 @@ export default function ImportView() {
               onChange={(e) => setEnableDiarization(e.target.checked)}
             />
           }
-          label="Enable speaker diarization (requires separate Python 3.10 environment)"
-        />
-      </Paper>
-
-      {/* Upload files */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
-          Upload Files
-        </Typography>
-        
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="audio/*"
-          style={{ display: 'none' }}
-          onChange={handleFileUpload}
+          label="Enable speaker diarization (requires separate Python 3.11 environment)"
         />
         
-        <Button
-          variant="outlined"
-          size="large"
-          startIcon={<UploadIcon />}
-          onClick={() => fileInputRef.current?.click()}
-          sx={{ py: 4, width: '100%' }}
-        >
-          Click to upload audio files
-        </Button>
-        
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Supported formats: MP3, WAV, OPUS, OGG, FLAC, M4A
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Supported formats: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
         </Typography>
       </Paper>
 
