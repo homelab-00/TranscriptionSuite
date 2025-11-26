@@ -14,6 +14,23 @@ transcription_options:
     enable_preview_transcriber: false
 
 
+# Configuration for static file transcription (audio/video files).
+static_transcription:
+    # Enable speaker diarization (identifies "who spoke when").
+    # Requires the _module-diarization environment to be set up.
+    # Set to false for single-speaker recordings to speed up processing.
+    enable_diarization: false
+
+    # Enable word-level timestamps in the transcription output.
+    # When true, each word includes precise start/end times.
+    # Required for searchable transcriptions in the viewer app.
+    word_timestamps: true
+
+    # Maximum characters per segment in the output.
+    # Segments are split when speaker changes or this limit is reached.
+    max_segment_chars: 500
+
+
 # Configuration for the main, high-accuracy transcription.
 # This instance processes the entire recording at the end for the best quality.
 main_transcriber:

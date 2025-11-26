@@ -1,0 +1,146 @@
+"""
+Recordings API router
+"""
+
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
+from database import (
+    get_recording,
+    get_all_recordings,
+    get_recordings_by_date_range,
+    get_recordings_for_month,
+    get_transcription,
+    delete_recording,
+)
+
+router = APIRouter()
+
+
+class RecordingResponse(BaseModel):
+    id: int
+    filename: str
+    filepath: str
+    duration_seconds: float
+    recorded_at: str
+    imported_at: str
+    word_count: int
+    has_diarization: bool
+
+
+class TranscriptWordResponse(BaseModel):
+    word: str
+    start: float
+    end: float
+    confidence: Optional[float] = None
+
+
+class TranscriptSegmentResponse(BaseModel):
+    speaker: Optional[str]
+    text: str
+    start: float
+    end: float
+    words: list[TranscriptWordResponse]
+
+
+class TranscriptionResponse(BaseModel):
+    recording_id: int
+    segments: list[TranscriptSegmentResponse]
+
+
+@router.get("", response_model=list[RecordingResponse])
+async def list_recordings(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    year: Optional[int] = Query(None, description="Year for month view"),
+    month: Optional[int] = Query(None, description="Month for month view (1-12)"),
+):
+    """List all recordings, optionally filtered by date range or month"""
+    if year is not None and month is not None:
+        recordings = get_recordings_for_month(year, month)
+    elif start_date and end_date:
+        recordings = get_recordings_by_date_range(start_date, end_date)
+    else:
+        recordings = get_all_recordings()
+
+    return [
+        RecordingResponse(
+            id=r["id"],
+            filename=r["filename"],
+            filepath=r["filepath"],
+            duration_seconds=r["duration_seconds"],
+            recorded_at=r["recorded_at"],
+            imported_at=r["imported_at"],
+            word_count=r["word_count"],
+            has_diarization=bool(r["has_diarization"]),
+        )
+        for r in recordings
+    ]
+
+
+@router.get("/{recording_id}", response_model=RecordingResponse)
+async def get_recording_by_id(recording_id: int):
+    """Get a specific recording by ID"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    return RecordingResponse(
+        id=recording["id"],
+        filename=recording["filename"],
+        filepath=recording["filepath"],
+        duration_seconds=recording["duration_seconds"],
+        recorded_at=recording["recorded_at"],
+        imported_at=recording["imported_at"],
+        word_count=recording["word_count"],
+        has_diarization=bool(recording["has_diarization"]),
+    )
+
+
+@router.get("/{recording_id}/transcription", response_model=TranscriptionResponse)
+async def get_recording_transcription(recording_id: int):
+    """Get the full transcription for a recording"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    transcription = get_transcription(recording_id)
+    return TranscriptionResponse(**transcription)
+
+
+@router.get("/{recording_id}/audio")
+async def get_recording_audio(recording_id: int):
+    """Stream the audio file for a recording"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    filepath = Path(recording["filepath"])
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    # Determine media type from extension
+    media_types = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".opus": "audio/opus",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".m4a": "audio/mp4",
+    }
+    media_type = media_types.get(filepath.suffix.lower(), "audio/mpeg")
+
+    return FileResponse(filepath, media_type=media_type)
+
+
+@router.delete("/{recording_id}")
+async def delete_recording_by_id(recording_id: int):
+    """Delete a recording and its transcription"""
+    if not delete_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    return {"message": "Recording deleted"}
