@@ -22,8 +22,12 @@ from database import (
 
 router = APIRouter()
 
-# Storage directory for audio files
-STORAGE_DIR = Path(__file__).parent.parent / "backend" / "data" / "audio"
+# Storage directory for audio files (relative to backend/)
+STORAGE_DIR = Path(__file__).parent.parent / "data" / "audio"
+TEMP_DIR = Path("/tmp/transcription-suite")
+
+# Default audio settings
+DEFAULT_AUDIO_BITRATE = 128  # kbps for MP3
 
 
 class TranscribeRequest(BaseModel):
@@ -79,9 +83,96 @@ def get_file_creation_time(filepath: Path) -> datetime:
     return datetime.fromtimestamp(timestamp)
 
 
-def run_transcription(recording_id: int, filepath: Path, enable_diarization: bool):
+def convert_to_mp3(source_path: Path, dest_path: Path, bitrate: int = 128) -> bool:
     """
-    Run transcription in background using the core transcription module
+    Convert any audio/video file to MP3 for storage.
+
+    Args:
+        source_path: Path to source file
+        dest_path: Path for output MP3 file
+        bitrate: Audio bitrate in kbps (default 128)
+
+    Returns:
+        True if conversion successful, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                str(source_path),
+                "-vn",  # No video
+                "-acodec",
+                "libmp3lame",
+                "-ab",
+                f"{bitrate}k",
+                "-ar",
+                "44100",  # Standard sample rate for playback
+                "-ac",
+                "2",  # Stereo for playback quality
+                "-y",  # Overwrite output
+                str(dest_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"FFmpeg conversion error: {e.stderr}")
+        return False
+
+
+def convert_to_wav_for_whisper(source_path: Path, dest_path: Path) -> bool:
+    """
+    Convert any audio/video file to WAV format suitable for Whisper.
+
+    Whisper requires: 16kHz, mono, 16-bit PCM WAV
+
+    Args:
+        source_path: Path to source file
+        dest_path: Path for output WAV file
+
+    Returns:
+        True if conversion successful, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                str(source_path),
+                "-vn",  # No video
+                "-acodec",
+                "pcm_s16le",  # 16-bit PCM
+                "-ar",
+                "16000",  # 16kHz sample rate
+                "-ac",
+                "1",  # Mono
+                "-y",  # Overwrite output
+                str(dest_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"FFmpeg conversion error: {e.stderr}")
+        return False
+
+
+def run_transcription(
+    recording_id: int, audio_path: Path, wav_path: Path, enable_diarization: bool
+):
+    """
+    Run transcription in background using the core transcription module.
+
+    Args:
+        recording_id: Database ID of the recording
+        audio_path: Path to the stored MP3 file (for playback)
+        wav_path: Path to the WAV file for transcription (will be deleted after)
+        enable_diarization: Whether to run speaker diarization
     """
     import_status[recording_id] = ImportStatus(
         recording_id=recording_id,
@@ -100,10 +191,11 @@ def run_transcription(recording_id: int, filepath: Path, enable_diarization: boo
             import_status[recording_id].message = "Running transcription..."
             import_status[recording_id].progress = 0.2
 
+            # Use the WAV file for transcription
             if enable_diarization and transcriber.is_diarization_available():
-                result = transcriber.transcribe_file_with_diarization(str(filepath))
+                result = transcriber.transcribe_file_with_diarization(str(wav_path))
             else:
-                result = transcriber.transcribe_file_with_word_timestamps(str(filepath))
+                result = transcriber.transcribe_file_with_word_timestamps(str(wav_path))
 
             import_status[recording_id].progress = 0.8
             import_status[recording_id].message = "Saving to database..."
@@ -120,8 +212,8 @@ def run_transcription(recording_id: int, filepath: Path, enable_diarization: boo
 
         except ImportError as e:
             # Fallback: run as subprocess
-            import_status[recording_id].message = f"Running transcription subprocess..."
-            run_transcription_subprocess(recording_id, filepath, enable_diarization)
+            import_status[recording_id].message = "Running transcription subprocess..."
+            run_transcription_subprocess(recording_id, wav_path, enable_diarization)
 
     except Exception as e:
         import_status[recording_id] = ImportStatus(
@@ -130,16 +222,23 @@ def run_transcription(recording_id: int, filepath: Path, enable_diarization: boo
             progress=0.0,
             message=f"Transcription failed: {str(e)}",
         )
+    finally:
+        # Clean up the temporary WAV file
+        try:
+            if wav_path.exists():
+                wav_path.unlink()
+        except Exception:
+            pass
 
 
 def run_transcription_subprocess(
-    recording_id: int, filepath: Path, enable_diarization: bool
+    recording_id: int, wav_path: Path, enable_diarization: bool
 ):
     """Run transcription as subprocess when direct import is not available"""
     import json
 
     # Path to the core SCRIPT directory
-    script_dir = Path(__file__).parent.parent.parent / "_core" / "SCRIPT"
+    script_dir = Path(__file__).parent.parent.parent.parent / "_core" / "SCRIPT"
 
     if not script_dir.exists():
         raise RuntimeError(f"Transcription script directory not found: {script_dir}")
@@ -151,13 +250,17 @@ sys.path.insert(0, "{script_dir}")
 from static_transcriber import StaticTranscriber
 
 transcriber = StaticTranscriber()
-result = transcriber.transcribe_file_with_word_timestamps("{filepath}")
+result = transcriber.transcribe_file_with_word_timestamps("{wav_path}")
 print(result)
 '''
 
     # Find the Python executable in the core venv
     venv_python = (
-        Path(__file__).parent.parent.parent / "_core" / ".venv" / "bin" / "python"
+        Path(__file__).parent.parent.parent.parent
+        / "_core"
+        / ".venv"
+        / "bin"
+        / "python"
     )
     if not venv_python.exists():
         venv_python = "python"  # Fallback
@@ -226,7 +329,11 @@ async def transcribe_file(
     request: TranscribeRequest,
 ):
     """
-    Import and transcribe an audio file from the local filesystem
+    Import and transcribe an audio/video file from the local filesystem.
+
+    The source file is converted to:
+    - MP3 (128kbps) for storage and playback
+    - WAV (16kHz mono) for transcription (temporary, deleted after)
     """
     source_path = Path(request.filepath)
 
@@ -235,43 +342,57 @@ async def transcribe_file(
             status_code=404, detail=f"File not found: {request.filepath}"
         )
 
-    # Determine storage path
-    if request.copy_file:
-        STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-        dest_path = STORAGE_DIR / source_path.name
+    # Create directories
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Handle duplicate filenames
-        if dest_path.exists():
-            stem = source_path.stem
-            suffix = source_path.suffix
-            counter = 1
-            while dest_path.exists():
-                dest_path = STORAGE_DIR / f"{stem}_{counter}{suffix}"
-                counter += 1
+    # Determine MP3 destination path
+    mp3_filename = source_path.stem + ".mp3"
+    mp3_path = STORAGE_DIR / mp3_filename
 
-        shutil.copy2(source_path, dest_path)
-        audio_path = dest_path
-    else:
-        audio_path = source_path
+    # Handle duplicate filenames
+    if mp3_path.exists():
+        counter = 1
+        while mp3_path.exists():
+            mp3_path = STORAGE_DIR / f"{source_path.stem}_{counter}.mp3"
+            counter += 1
 
-    # Get audio metadata
-    duration = get_audio_duration(audio_path)
+    # Create temporary WAV file for transcription
+    wav_path = (
+        TEMP_DIR / f"{source_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+    )
+
+    # Convert source to MP3 for storage
+    if not convert_to_mp3(source_path, mp3_path, DEFAULT_AUDIO_BITRATE):
+        raise HTTPException(status_code=500, detail="Failed to convert audio to MP3")
+
+    # Convert source to WAV for transcription
+    if not convert_to_wav_for_whisper(source_path, wav_path):
+        # Clean up MP3 if WAV conversion fails
+        mp3_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=500, detail="Failed to convert audio to WAV for transcription"
+        )
+
+    # Get audio metadata from the MP3
+    duration = get_audio_duration(mp3_path)
     recorded_at = get_file_creation_time(source_path)
 
-    # Insert recording into database
+    # Insert recording into database (pointing to MP3)
     recording_id = insert_recording(
-        filename=audio_path.name,
-        filepath=str(audio_path),
+        filename=mp3_path.name,
+        filepath=str(mp3_path),
         duration_seconds=duration,
         recorded_at=recorded_at.isoformat(),
         has_diarization=request.enable_diarization,
     )
 
-    # Start background transcription
+    # Start background transcription (using WAV)
     background_tasks.add_task(
         run_transcription,
         recording_id,
-        audio_path,
+        mp3_path,
+        wav_path,
         request.enable_diarization,
     )
 
@@ -287,49 +408,86 @@ async def transcribe_upload(
     enable_diarization: bool = False,
 ):
     """
-    Upload and transcribe an audio file
+    Upload and transcribe an audio/video file.
+
+    The uploaded file is converted to:
+    - MP3 (128kbps) for storage and playback
+    - WAV (16kHz mono) for transcription (temporary, deleted after)
     """
+    # Create directories
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded file
-    dest_path = STORAGE_DIR / file.filename
+    # Save uploaded file to temp location first
+    original_stem = Path(file.filename).stem
+    original_suffix = Path(file.filename).suffix
+    temp_upload = (
+        TEMP_DIR / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}{original_suffix}"
+    )
 
-    # Handle duplicate filenames
-    if dest_path.exists():
-        stem = Path(file.filename).stem
-        suffix = Path(file.filename).suffix
-        counter = 1
-        while dest_path.exists():
-            dest_path = STORAGE_DIR / f"{stem}_{counter}{suffix}"
-            counter += 1
-
-    with open(dest_path, "wb") as f:
+    with open(temp_upload, "wb") as f:
         content = await file.read()
         f.write(content)
 
-    # Get audio metadata
-    duration = get_audio_duration(dest_path)
+    try:
+        # Determine MP3 destination path
+        mp3_filename = original_stem + ".mp3"
+        mp3_path = STORAGE_DIR / mp3_filename
 
-    # Insert recording into database
-    recording_id = insert_recording(
-        filename=dest_path.name,
-        filepath=str(dest_path),
-        duration_seconds=duration,
-        recorded_at=datetime.now().isoformat(),
-        has_diarization=enable_diarization,
-    )
+        # Handle duplicate filenames
+        if mp3_path.exists():
+            counter = 1
+            while mp3_path.exists():
+                mp3_path = STORAGE_DIR / f"{original_stem}_{counter}.mp3"
+                counter += 1
 
-    # Start background transcription
-    background_tasks.add_task(
-        run_transcription,
-        recording_id,
-        dest_path,
-        enable_diarization,
-    )
+        # Create WAV path for transcription
+        wav_path = (
+            TEMP_DIR / f"{original_stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        )
 
-    return TranscribeResponse(
-        recording_id=recording_id, message="Transcription started"
-    )
+        # Convert to MP3 for storage
+        if not convert_to_mp3(temp_upload, mp3_path, DEFAULT_AUDIO_BITRATE):
+            raise HTTPException(
+                status_code=500, detail="Failed to convert audio to MP3"
+            )
+
+        # Convert to WAV for transcription
+        if not convert_to_wav_for_whisper(temp_upload, wav_path):
+            mp3_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to convert audio to WAV for transcription",
+            )
+
+        # Get audio metadata
+        duration = get_audio_duration(mp3_path)
+
+        # Insert recording into database
+        recording_id = insert_recording(
+            filename=mp3_path.name,
+            filepath=str(mp3_path),
+            duration_seconds=duration,
+            recorded_at=datetime.now().isoformat(),
+            has_diarization=enable_diarization,
+        )
+
+        # Start background transcription
+        background_tasks.add_task(
+            run_transcription,
+            recording_id,
+            mp3_path,
+            wav_path,
+            enable_diarization,
+        )
+
+        return TranscribeResponse(
+            recording_id=recording_id, message="Transcription started"
+        )
+
+    finally:
+        # Clean up the temporary upload file
+        temp_upload.unlink(missing_ok=True)
 
 
 @router.get("/status/{recording_id}", response_model=ImportStatus)

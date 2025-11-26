@@ -34,20 +34,16 @@ class DiarizationAPI:
 
         Args:
             config_path: Optional path to configuration file
-            hf_token: Optional HuggingFace token (overrides config)
+            hf_token: Optional HuggingFace token (overrides config/environment)
         """
         self.config_path = config_path
         self.hf_token = hf_token
 
-        # If HF token provided, update config
+        # If HF token provided, set it in the environment
         if hf_token:
-            config = ConfigManager(config_path)
-            config.config["pyannote"]["hf_token"] = hf_token
-            # Save the updated config
-            import yaml
+            import os
 
-            with open(config.config_path, "w") as f:
-                yaml.dump(config.config, f, default_flow_style=False)
+            os.environ["HF_TOKEN"] = hf_token
 
     def diarize(
         self,

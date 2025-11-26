@@ -23,29 +23,24 @@ class ConfigManager:
     """Manages configuration loading and validation for the diarization module."""
 
     DEFAULT_CONFIG = {
-        "pyannote": {
-            "hf_token": "",
+        "diarization": {
             "model": "pyannote/speaker-diarization-3.1",
             "device": "cuda",
             "min_speakers": None,
             "max_speakers": None,
             "min_duration_on": 0.0,
             "min_duration_off": 0.0,
+            "merge_gap_threshold": 0.5,
         },
         "processing": {
-            "temp_dir": "/tmp/diarization",
+            "temp_dir": "/tmp/transcription-suite",
             "keep_temp_files": False,
             "sample_rate": 16000,
         },
         "logging": {
             "level": "INFO",
-            "log_file": "diarization.log",
-            "console_output": True,
-        },
-        "output": {
-            "format": "json",
-            "include_confidence": False,
-            "merge_gap_threshold": 0.5,
+            "file_name": "transcription_suite.log",
+            "console_output": False,
         },
     }
 
@@ -54,12 +49,15 @@ class ConfigManager:
         Initialize the configuration manager.
 
         Args:
-            config_path: Path to the configuration file. If None, uses default location.
+            config_path: Path to the configuration file. If None, uses unified config at project root.
         """
         if config_path is None:
-            # Default to config.yaml in the same directory as this script
+            # Look for unified config.yaml at project root
             script_dir = Path(__file__).parent
-            config_path = str(script_dir / "config.yaml")
+            project_root = (
+                script_dir.parent.parent
+            )  # DIARIZATION -> _module-diarization -> TranscriptionSuite
+            config_path = str(project_root / "config.yaml")
 
         self.config_path = config_path
         self.config: Dict[str, Any] = {}
@@ -124,10 +122,9 @@ class ConfigManager:
         """
         Get a configuration value using dot notation or nested keys.
 
-        For the HuggingFace token (pyannote.hf_token), this method will:
+        For the HuggingFace token, this method will:
         1. First check the HF_TOKEN environment variable
         2. Then check the cached token from huggingface-cli login
-        3. Fall back to the config file value
 
         Args:
             *keys: Configuration keys to traverse
@@ -136,8 +133,12 @@ class ConfigManager:
         Returns:
             Configuration value or default
         """
-        # Special handling for HuggingFace token - prefer environment variable
-        if keys == ("pyannote", "hf_token"):
+        # Handle legacy pyannote.* keys by mapping to diarization.*
+        if keys and keys[0] == "pyannote":
+            keys = ("diarization",) + keys[1:]
+
+        # Special handling for HuggingFace token - always from env or cached
+        if keys == ("diarization", "hf_token"):
             # 1. Check HF_TOKEN environment variable
             env_token = os.environ.get("HF_TOKEN")
             if env_token:
@@ -155,6 +156,8 @@ class ConfigManager:
                 pass
             except Exception as e:
                 logging.debug(f"Could not get cached HF token: {e}")
+
+            return None
 
         value = self.config
         for key in keys:
@@ -174,15 +177,15 @@ class ConfigManager:
             True if configuration is valid, False otherwise
         """
         # Check for HuggingFace token
-        hf_token = self.get("pyannote", "hf_token")
+        hf_token = self.get("diarization", "hf_token")
         if not hf_token:
-            logging.error("HuggingFace token is required but not set in configuration")
-            logging.error("Please add your token to the config.yaml file")
+            logging.error("HuggingFace token is required but not set")
+            logging.error("Please run: huggingface-cli login")
             logging.error("Get a token from: https://huggingface.co/settings/tokens")
             return False
 
         # Check device availability
-        device = self.get("pyannote", "device")
+        device = self.get("diarization", "device")
         if device == "cuda":
             try:
                 import torch
@@ -191,7 +194,7 @@ class ConfigManager:
                     logging.warning(
                         "CUDA requested but not available, falling back to CPU"
                     )
-                    self.config["pyannote"]["device"] = "cpu"
+                    self.config["diarization"]["device"] = "cpu"
             except ImportError:
                 logging.error("PyTorch not installed")
                 return False
