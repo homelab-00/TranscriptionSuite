@@ -30,6 +30,14 @@ const isTauri = (): boolean => {
   return typeof window !== 'undefined' && '__TAURI__' in window;
 };
 
+// Type for Tauri v2 dialog
+type TauriDialog = {
+  open: (options?: {
+    multiple?: boolean;
+    filters?: Array<{ name: string; extensions: string[] }>;
+  }) => Promise<string | string[] | null>;
+};
+
 interface ImportJob {
   id: number;
   filename: string;
@@ -41,18 +49,21 @@ interface ImportJob {
 export default function ImportView() {
   const [filePath, setFilePath] = useState('');
   const [enableDiarization, setEnableDiarization] = useState(false);
+  const [enableWordTimestamps, setEnableWordTimestamps] = useState(true);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [tauriDialog, setTauriDialog] = useState<typeof import('@tauri-apps/api/dialog') | null>(null);
+  const [tauriDialog, setTauriDialog] = useState<TauriDialog | null>(null);
 
   // Load Tauri dialog API only if in Tauri environment
   useEffect(() => {
     if (isTauri()) {
-      import('@tauri-apps/api/dialog')
+      // Tauri v2 uses @tauri-apps/plugin-dialog
+      import('@tauri-apps/plugin-dialog')
         .then((mod) => setTauriDialog(mod))
         .catch(() => {
-          // Failed to load Tauri dialog
+          // Failed to load Tauri dialog - will use HTML file input fallback
+          console.log('Tauri dialog not available, using HTML file input');
         });
     }
   }, []);
@@ -93,7 +104,7 @@ export default function ImportView() {
     setError(null);
     
     try {
-      const response = await api.importFile(path, true, enableDiarization);
+      const response = await api.importFile(path, true, enableDiarization, enableWordTimestamps);
       
       const newJob: ImportJob = {
         id: response.recording_id,
@@ -125,7 +136,7 @@ export default function ImportView() {
 
     for (const file of Array.from(files)) {
       try {
-        const response = await api.uploadFile(file, enableDiarization);
+        const response = await api.uploadFile(file, enableDiarization, enableWordTimestamps);
         
         const newJob: ImportJob = {
           id: response.recording_id,
@@ -275,6 +286,16 @@ export default function ImportView() {
             Import
           </Button>
         </Box>
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={enableWordTimestamps}
+              onChange={(e) => setEnableWordTimestamps(e.target.checked)}
+            />
+          }
+          label="Enable word-level timestamps (clickable words in transcript)"
+        />
 
         <FormControlLabel
           control={

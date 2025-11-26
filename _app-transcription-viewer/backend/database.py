@@ -3,7 +3,6 @@ SQLite database with FTS5 for full-text search of transcriptions
 """
 
 import sqlite3
-import json
 from pathlib import Path
 from typing import Optional, Any
 from contextlib import contextmanager
@@ -143,7 +142,7 @@ def insert_recording(
             (filename, filepath, duration_seconds, recorded_at, int(has_diarization)),
         )
         conn.commit()
-        return cursor.lastrowid
+        return cursor.lastrowid or 0
 
 
 def insert_segment(
@@ -165,7 +164,7 @@ def insert_segment(
             (recording_id, segment_index, speaker, text, start_time, end_time),
         )
         conn.commit()
-        return cursor.lastrowid
+        return cursor.lastrowid or 0
 
 
 def insert_word(
