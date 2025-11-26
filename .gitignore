@@ -5,6 +5,7 @@ deps/
 *.logW
 *.log
 *.opus
+*.mp3
 .idea/
 .vscode/
 .github/
