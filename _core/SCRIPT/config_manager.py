@@ -36,6 +36,9 @@ class ConfigManager:
     def load_or_create_config(self) -> Dict[str, Any]:
         """Load configuration from file or create it if it doesn't exist."""
         script_dir = Path(__file__).resolve().parent
+        project_root = (
+            script_dir.parent.parent
+        )  # _core/SCRIPT -> _core -> TranscriptionSuite
         # Define default configuration
         default_config: Dict[str, Any] = {
             "transcription_options": {
@@ -82,16 +85,22 @@ class ConfigManager:
             "logging": {
                 "level": "INFO",
                 "console_output": False,
-                "file_name": "stt_orchestrator.log",
-                "directory": str(script_dir.parent),  # Project root
+                "file_name": "transcription_suite.log",
+                "directory": str(project_root),  # Project root
             },
         }
 
-        # Ensure config directory exists
-        config_dir = self.platform_manager.get_config_dir()
+        # Look for config.yaml at project root first, then fall back to config_dir
         self.config_path = Path(self.config_path_str)
         if not self.config_path.is_absolute():
-            self.config_path = config_dir / self.config_path
+            # First try project root (unified config location)
+            root_config = project_root / self.config_path
+            if root_config.exists():
+                self.config_path = root_config
+            else:
+                # Fall back to platform config dir
+                config_dir = self.platform_manager.get_config_dir()
+                self.config_path = config_dir / self.config_path
 
         # Try to load existing config
         if self.config_path.exists():
@@ -156,7 +165,7 @@ class ConfigManager:
         Apply global settings to the respective transcriber configurations.
         """
         global_options = self.config.get("transcription_options", {})
-        
+
         # Apply language setting (including None for auto-detection)
         if "language" in global_options:
             language = global_options.get("language")
