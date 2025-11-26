@@ -2,8 +2,10 @@
 Recordings API router
 """
 
+from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -52,14 +54,19 @@ class TranscriptionResponse(BaseModel):
     segments: list[TranscriptSegmentResponse]
 
 
-@router.get("", response_model=list[RecordingResponse])
+@router.get("")
 async def list_recordings(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     year: Optional[int] = Query(None, description="Year for month view"),
     month: Optional[int] = Query(None, description="Month for month view (1-12)"),
-):
-    """List all recordings, optionally filtered by date range or month"""
+    group_by_date: bool = Query(True, description="Group recordings by date"),
+) -> Union[dict[str, list[RecordingResponse]], list[RecordingResponse]]:
+    """List all recordings, optionally filtered by date range or month.
+
+    When start_date and end_date are provided, returns recordings grouped by date.
+    Otherwise returns a flat list.
+    """
     if year is not None and month is not None:
         recordings = get_recordings_for_month(year, month)
     elif start_date and end_date:
@@ -67,7 +74,7 @@ async def list_recordings(
     else:
         recordings = get_all_recordings()
 
-    return [
+    recording_responses = [
         RecordingResponse(
             id=r["id"],
             filename=r["filename"],
@@ -80,6 +87,21 @@ async def list_recordings(
         )
         for r in recordings
     ]
+
+    # Group by date when filtering by date range
+    if (start_date and end_date) or group_by_date:
+        grouped: dict[str, list[RecordingResponse]] = defaultdict(list)
+        for rec in recording_responses:
+            # Parse the recorded_at timestamp and extract the date
+            try:
+                dt = datetime.fromisoformat(rec.recorded_at.replace("Z", "+00:00"))
+                date_str = dt.strftime("%Y-%m-%d")
+            except (ValueError, AttributeError, TypeError):
+                date_str = rec.recorded_at[:10]  # Fallback: take first 10 chars
+            grouped[date_str].append(rec)
+        return dict(grouped)
+
+    return recording_responses
 
 
 @router.get("/{recording_id}", response_model=RecordingResponse)

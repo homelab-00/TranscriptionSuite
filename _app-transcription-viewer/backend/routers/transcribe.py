@@ -1,11 +1,16 @@
 """
 Transcribe API router - handles importing and transcribing audio files
+
+This module uses the core TranscriptionSuite module (_core) for all transcription
+work via subprocess, ensuring consistent settings and behavior with the standalone
+orchestrator.
 """
 
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import json
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel
@@ -23,6 +28,11 @@ router = APIRouter()
 STORAGE_DIR = Path(__file__).parent.parent / "data" / "audio"
 TEMP_DIR = Path("/tmp/transcription-suite")
 
+# Paths to core module
+CORE_DIR = Path(__file__).parent.parent.parent.parent / "_core"
+SCRIPT_DIR = CORE_DIR / "SCRIPT"
+VENV_PYTHON = CORE_DIR / ".venv" / "bin" / "python"
+
 # Default audio settings
 DEFAULT_AUDIO_BITRATE = 128  # kbps for MP3
 
@@ -31,6 +41,7 @@ class TranscribeRequest(BaseModel):
     filepath: str
     copy_file: bool = True
     enable_diarization: bool = False
+    enable_word_timestamps: bool = True
 
 
 class TranscribeResponse(BaseModel):
@@ -160,7 +171,11 @@ def convert_to_wav_for_whisper(source_path: Path, dest_path: Path) -> bool:
 
 
 def run_transcription(
-    recording_id: int, audio_path: Path, wav_path: Path, enable_diarization: bool
+    recording_id: int,
+    audio_path: Path,
+    wav_path: Path,
+    enable_diarization: bool,
+    enable_word_timestamps: bool,
 ):
     """
     Run transcription in background using the core transcription module.
@@ -170,6 +185,7 @@ def run_transcription(
         audio_path: Path to the stored MP3 file (for playback)
         wav_path: Path to the WAV file for transcription (will be deleted after)
         enable_diarization: Whether to run speaker diarization
+        enable_word_timestamps: Whether to include word-level timestamps
     """
     import_status[recording_id] = ImportStatus(
         recording_id=recording_id,
@@ -179,44 +195,11 @@ def run_transcription(
     )
 
     try:
-        # Try to import the transcription module
-        try:
-            from static_transcriber import StaticFileTranscriber
-
-            transcriber = StaticFileTranscriber(None, None)
-
-            import_status[recording_id].message = "Running transcription..."
-            import_status[recording_id].progress = 0.2
-
-            # Use the WAV file for transcription
-            if enable_diarization and transcriber.is_diarization_available():
-                result = transcriber.transcribe_file_with_diarization(str(wav_path))
-            else:
-                result = transcriber.transcribe_file_with_word_timestamps(str(wav_path))
-
-            import_status[recording_id].progress = 0.8
-            import_status[recording_id].message = "Saving to database..."
-
-            # Convert TranscriptSegment objects to dict format
-            if result:
-                result_dict = {"segments": [seg.to_dict() for seg in result]}
-            else:
-                result_dict = {"segments": []}
-
-            # Parse and save results
-            save_transcription_result(recording_id, result_dict)
-
-            import_status[recording_id] = ImportStatus(
-                recording_id=recording_id,
-                status="completed",
-                progress=1.0,
-                message="Transcription complete",
-            )
-
-        except ImportError:
-            # Fallback: run as subprocess
-            import_status[recording_id].message = "Running transcription subprocess..."
-            run_transcription_subprocess(recording_id, wav_path, enable_diarization)
+        # Always use subprocess to run transcription in the core venv
+        # which has faster-whisper and all required dependencies
+        run_transcription_subprocess(
+            recording_id, wav_path, enable_diarization, enable_word_timestamps
+        )
 
     except Exception as e:
         import_status[recording_id] = ImportStatus(
@@ -235,62 +218,299 @@ def run_transcription(
 
 
 def run_transcription_subprocess(
-    recording_id: int, wav_path: Path, enable_diarization: bool
+    recording_id: int,
+    wav_path: Path,
+    enable_diarization: bool,
+    enable_word_timestamps: bool,
 ):
-    """Run transcription as subprocess when direct import is not available"""
-    import json
+    """
+    Run transcription as subprocess using the core _core module.
 
-    # Path to the core SCRIPT directory
-    script_dir = Path(__file__).parent.parent.parent.parent / "_core" / "SCRIPT"
+    This ensures the webapp uses the exact same transcription settings and code
+    as the standalone orchestrator/static_transcriber.py, including:
+    - Model configuration from config.yaml
+    - VAD settings
+    - Word timestamp handling
+    - Diarization integration
+    """
 
-    if not script_dir.exists():
-        raise RuntimeError(f"Transcription script directory not found: {script_dir}")
+    if not VENV_PYTHON.exists():
+        raise RuntimeError(f"Core venv not found at {VENV_PYTHON}")
 
-    # Create a simple runner script
-    runner_code = f'''
+    if not SCRIPT_DIR.exists():
+        raise RuntimeError(f"Core SCRIPT directory not found: {SCRIPT_DIR}")
+
+    # Build a runner script that uses static_transcriber.py properly
+    # This script will:
+    # 1. Load config.yaml settings
+    # 2. Use the same transcription methods as the orchestrator
+    # 3. Output JSON to stdout for the webapp to parse
+
+    runner_script = f'''
 import sys
 import json
-sys.path.insert(0, "{script_dir}")
-from static_transcriber import StaticFileTranscriber
+import os
 
-transcriber = StaticFileTranscriber(None, None)
-result = transcriber.transcribe_file_with_word_timestamps("{wav_path}")
-# Convert result to JSON-serializable format
-if result:
-    output = {{
-        "segments": [seg.to_dict() for seg in result]
-    }}
-    print(json.dumps(output))
-else:
-    print("{{}}")
+# Add core paths
+sys.path.insert(0, "{SCRIPT_DIR}")
+sys.path.insert(0, "{CORE_DIR}")
+
+# Suppress logging to stdout - we only want JSON output
+import logging
+logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+
+try:
+    from config_manager import ConfigManager
+    from static_transcriber import StaticFileTranscriber, HAS_DIARIZATION
+    import faster_whisper
+    import soundfile as sf
+    import torch
+except ImportError as e:
+    print(json.dumps({{"error": f"Missing dependency: {{e}}"}}), file=sys.stdout)
+    sys.exit(1)
+
+def run_transcription():
+    """Run transcription using core module settings."""
+    
+    wav_path = "{wav_path}"
+    enable_diarization = {str(enable_diarization)}
+    enable_word_timestamps = {str(enable_word_timestamps)}
+    
+    try:
+        # Load configuration from config.yaml (same as orchestrator uses)
+        config = ConfigManager()
+        
+        # Get model settings from config
+        main_config = config.get("main_transcriber", {{}})
+        model_path = main_config.get("model", "Systran/faster-whisper-large-v3")
+        compute_type = main_config.get("compute_type", "default")
+        device = main_config.get("device", "cuda")
+        beam_size = main_config.get("beam_size", 5)
+        vad_filter = main_config.get("faster_whisper_vad_filter", True)
+        
+        # Get transcription options
+        trans_options = config.get("transcription_options", {{}})
+        language = trans_options.get("language")  # None for auto-detect
+        
+        # Get static transcription settings
+        static_config = config.get("static_transcription", {{}})
+        max_segment_chars = static_config.get("max_segment_chars", 500)
+        
+        # Read audio file
+        audio_data, sample_rate = sf.read(wav_path, dtype="float32")
+        audio_duration = len(audio_data) / sample_rate
+        
+        # Load model (using same settings as orchestrator)
+        print(f"Loading model {{model_path}} on {{device}}...", file=sys.stderr)
+        model = faster_whisper.WhisperModel(
+            model_size_or_path=model_path,
+            device=device,
+            compute_type=compute_type,
+        )
+        
+        # Transcribe with or without word timestamps
+        print(f"Transcribing (word_timestamps={{enable_word_timestamps}})...", file=sys.stderr)
+        segments_iter, info = model.transcribe(
+            audio_data,
+            language=language,
+            beam_size=beam_size,
+            word_timestamps=enable_word_timestamps,
+            vad_filter=vad_filter,
+        )
+        
+        # Convert to list of segment dicts
+        segments = []
+        for segment in segments_iter:
+            words = []
+            if enable_word_timestamps and segment.words:
+                for word in segment.words:
+                    words.append({{
+                        "word": word.word.strip(),
+                        "start": round(word.start, 3),
+                        "end": round(word.end, 3),
+                        "probability": round(word.probability, 3) if word.probability else 1.0,
+                    }})
+            
+            segments.append({{
+                "text": segment.text.strip(),
+                "start": round(segment.start, 3),
+                "end": round(segment.end, 3),
+                "duration": round(segment.end - segment.start, 3),
+                "words": words,
+            }})
+        
+        # Perform diarization if enabled
+        diarization_segments = None
+        if enable_diarization and HAS_DIARIZATION:
+            print("Running speaker diarization...", file=sys.stderr)
+            try:
+                from diarization_service import DiarizationService
+                
+                diar_config = config.get("diarization", {{}})
+                min_speakers = diar_config.get("min_speakers")
+                max_speakers = diar_config.get("max_speakers")
+                
+                diarization_service = DiarizationService()
+                diarization_segments = diarization_service.diarize(
+                    wav_path,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                )
+                
+                # Convert to list of dicts
+                diarization_segments = [
+                    {{"speaker": s.speaker, "start": s.start, "end": s.end}}
+                    for s in diarization_segments
+                ]
+                print(f"Diarization complete: {{len(diarization_segments)}} segments", file=sys.stderr)
+            except Exception as e:
+                print(f"Diarization failed: {{e}}", file=sys.stderr)
+                diarization_segments = None
+        
+        # Combine transcription with diarization if available
+        if diarization_segments and enable_word_timestamps:
+            segments = combine_with_diarization(segments, diarization_segments, max_segment_chars)
+        
+        # Clean up model to free GPU memory
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # Output JSON result
+        result = {{
+            "segments": segments,
+            "audio_duration": round(audio_duration, 2),
+            "num_speakers": len(set(s.get("speaker") for s in segments if s.get("speaker"))) if diarization_segments else 0,
+        }}
+        print(json.dumps(result), file=sys.stdout)
+        
+    except Exception as e:
+        import traceback
+        print(json.dumps({{"error": str(e), "traceback": traceback.format_exc()}}), file=sys.stdout)
+        sys.exit(1)
+
+
+def combine_with_diarization(segments, diarization_segments, max_segment_chars):
+    """Combine word-level transcription with speaker diarization."""
+    
+    # Collect all words with their times
+    all_words = []
+    for segment in segments:
+        for word in segment.get("words", []):
+            # Find the best matching speaker for this word
+            word_mid = (word["start"] + word["end"]) / 2
+            best_speaker = "SPEAKER_00"
+            
+            for diar_seg in diarization_segments:
+                if diar_seg["start"] <= word_mid <= diar_seg["end"]:
+                    best_speaker = diar_seg["speaker"]
+                    break
+            
+            all_words.append((word, best_speaker))
+    
+    if not all_words:
+        return segments
+    
+    # Group words into segments by speaker
+    result_segments = []
+    current_speaker = None
+    current_words = []
+    current_text = []
+    current_char_count = 0
+    segment_start = 0.0
+    segment_end = 0.0
+    
+    for word, speaker in all_words:
+        word_text = word["word"]
+        word_chars = len(word_text)
+        
+        should_split = (
+            speaker != current_speaker or
+            (current_char_count + word_chars > max_segment_chars and current_words)
+        )
+        
+        if should_split and current_words:
+            result_segments.append({{
+                "text": " ".join(current_text).strip(),
+                "start": round(segment_start, 3),
+                "end": round(segment_end, 3),
+                "duration": round(segment_end - segment_start, 3),
+                "speaker": current_speaker,
+                "words": current_words.copy(),
+            }})
+            current_words = []
+            current_text = []
+            current_char_count = 0
+        
+        if not current_words:
+            current_speaker = speaker
+            segment_start = word["start"]
+        
+        current_words.append(word)
+        current_text.append(word_text)
+        current_char_count += word_chars + 1
+        segment_end = word["end"]
+    
+    # Last segment
+    if current_words:
+        result_segments.append({{
+            "text": " ".join(current_text).strip(),
+            "start": round(segment_start, 3),
+            "end": round(segment_end, 3),
+            "duration": round(segment_end - segment_start, 3),
+            "speaker": current_speaker,
+            "words": current_words.copy(),
+        }})
+    
+    return result_segments
+
+
+if __name__ == "__main__":
+    run_transcription()
 '''
 
-    # Find the Python executable in the core venv
-    venv_python = (
-        Path(__file__).parent.parent.parent.parent
-        / "_core"
-        / ".venv"
-        / "bin"
-        / "python"
-    )
-    if not venv_python.exists():
-        venv_python = "python"  # Fallback
+    import_status[recording_id].message = "Running transcription via core module..."
+    import_status[recording_id].progress = 0.3
 
     result = subprocess.run(
-        [str(venv_python), "-c", runner_code],
+        [str(VENV_PYTHON), "-c", runner_script],
         capture_output=True,
         text=True,
-        cwd=str(script_dir),
+        cwd=str(SCRIPT_DIR),
     )
 
+    # Check for errors
     if result.returncode != 0:
-        raise RuntimeError(f"Transcription failed: {result.stderr}")
+        stderr_msg = result.stderr.strip() if result.stderr else "Unknown error"
+        raise RuntimeError(f"Transcription subprocess failed: {stderr_msg}")
 
     # Parse output
     output = result.stdout.strip()
-    transcription_data = json.loads(output)
+    if not output:
+        raise RuntimeError(f"Transcription produced no output. stderr: {result.stderr}")
+
+    try:
+        transcription_data = json.loads(output)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Invalid JSON output: {e}. Output was: {output[:500]}")
+
+    # Check for error in response
+    if "error" in transcription_data:
+        error_msg = transcription_data["error"]
+        tb = transcription_data.get("traceback", "")
+        raise RuntimeError(f"Transcription error: {error_msg}\\n{tb}")
+
+    import_status[recording_id].message = "Saving to database..."
+    import_status[recording_id].progress = 0.8
 
     save_transcription_result(recording_id, transcription_data)
+
+    import_status[recording_id] = ImportStatus(
+        recording_id=recording_id,
+        status="completed",
+        progress=1.0,
+        message="Transcription complete",
+    )
 
 
 def save_transcription_result(recording_id: int, result: dict):
@@ -405,6 +625,7 @@ async def transcribe_file(
         mp3_path,
         wav_path,
         request.enable_diarization,
+        request.enable_word_timestamps,
     )
 
     return TranscribeResponse(
@@ -417,6 +638,7 @@ async def transcribe_upload(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     enable_diarization: bool = False,
+    enable_word_timestamps: bool = True,
 ):
     """
     Upload and transcribe an audio/video file.
@@ -430,6 +652,9 @@ async def transcribe_upload(
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
     # Save uploaded file to temp location first
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="File must have a filename")
+
     original_stem = Path(file.filename).stem
     original_suffix = Path(file.filename).suffix
     temp_upload = (
@@ -490,6 +715,7 @@ async def transcribe_upload(
             mp3_path,
             wav_path,
             enable_diarization,
+            enable_word_timestamps,
         )
 
         return TranscribeResponse(

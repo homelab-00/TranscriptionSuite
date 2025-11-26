@@ -1,5 +1,4 @@
 __pycache__/
-/SCRIPT/__pycache__/
 deps/
 *.tmp
 *.logW
@@ -7,9 +6,7 @@ deps/
 *.opus
 *.mp3
 .directory
-.code-workspace
 .idea/
-.vscode/
 .github/
 
 # Node.js / npm dependencies and build outputs

@@ -49,11 +49,8 @@ export default function CalendarView() {
   };
 
   const handleDayClick = (date: Dayjs) => {
-    const dateStr = date.format('YYYY-MM-DD');
-    if (recordingsByDate[dateStr] && recordingsByDate[dateStr].length > 0) {
-      // Navigate to first recording of that day
-      navigate(`/recording/${recordingsByDate[dateStr][0].id}`);
-    }
+    // Navigate to day view
+    navigate(`/day/${date.format('YYYY-MM-DD')}`);
   };
 
   const renderCalendarDays = () => {
@@ -82,11 +79,12 @@ export default function CalendarView() {
       const isToday = date.isSame(today, 'day');
       const isFuture = date.isAfter(today, 'day');
       const hasRecordings = recordings.length > 0;
+      const recordingCount = recordings.length;
 
       days.push(
         <Grid item xs={12 / 7} key={day}>
           <Paper
-            elevation={isToday ? 3 : 1}
+            elevation={isToday ? 3 : hasRecordings ? 2 : 1}
             onClick={() => !isFuture && handleDayClick(date)}
             sx={{
               p: 2,
@@ -95,26 +93,48 @@ export default function CalendarView() {
               opacity: isFuture ? 0.5 : 1,
               border: isToday ? '2px solid' : 'none',
               borderColor: 'primary.main',
+              position: 'relative',
+              minHeight: 60,
               '&:hover': isFuture ? {} : {
                 bgcolor: 'action.hover',
+                transform: 'scale(1.02)',
               },
+              transition: 'all 0.2s',
             }}
           >
-            <Badge
-              badgeContent={hasRecordings ? recordings.length : 0}
-              color="primary"
-              invisible={!hasRecordings}
-            >
-              <Typography
-                variant="body1"
+            {/* Red badge in top-right corner */}
+            {hasRecordings && (
+              <Box
                 sx={{
-                  fontWeight: isToday ? 'bold' : 'normal',
-                  color: hasRecordings ? 'primary.main' : 'text.primary',
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  bgcolor: 'error.main',
+                  color: 'error.contrastText',
+                  borderRadius: '50%',
+                  minWidth: 20,
+                  height: 20,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  boxShadow: 2,
                 }}
               >
-                {day}
-              </Typography>
-            </Badge>
+                {recordingCount > 1 ? recordingCount : ''}
+              </Box>
+            )}
+            
+            <Typography
+              variant="body1"
+              sx={{
+                fontWeight: isToday ? 'bold' : 'normal',
+                color: hasRecordings ? 'primary.main' : 'text.primary',
+              }}
+            >
+              {day}
+            </Typography>
           </Paper>
         </Grid>
       );

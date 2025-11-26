@@ -1,0 +1,16 @@
+{
+    "folders": [
+        {
+            "name": "Transcription Core",
+            "path": "_core"
+        },
+        {
+            "name": "Diarization Module",
+            "path": "_module-Diarization"
+        },
+        {
+            "name": "Backend",
+            "path": "_app-transcription-viewer/backend"
+        }
+    ]
+}

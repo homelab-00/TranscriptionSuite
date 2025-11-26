@@ -22,6 +22,15 @@ trap cleanup SIGINT SIGTERM
 # Start backend
 echo "📦 Starting FastAPI backend on http://localhost:8000..."
 cd "$SCRIPT_DIR/backend"
+
+# Ensure venv exists and dependencies are installed
+if [ ! -d ".venv" ]; then
+    echo "📥 Creating backend virtual environment..."
+    uv venv
+fi
+echo "📥 Syncing backend dependencies..."
+uv sync
+
 uv run uvicorn main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 

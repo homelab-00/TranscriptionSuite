@@ -29,7 +29,7 @@ transcription_options:
 longform_recording:
     # Include longform recordings in the viewer app's calendar/list.
     # If false, only static file transcriptions appear in the app.
-    include_in_viewer: true
+    include_in_viewer: false
 
     # Enable word-level timestamps for longform recordings.
     # Note: This requires more processing at the end of recording.
@@ -47,7 +47,7 @@ longform_recording:
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
     # Requires the _module-diarization environment to be set up.
-    enable_diarization: false
+    enable_diarization: true
 
     # Enable word-level timestamps in the transcription output.
     # Required for searchable transcriptions and click-to-seek in the viewer app.

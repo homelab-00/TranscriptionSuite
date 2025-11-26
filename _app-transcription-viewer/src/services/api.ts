@@ -59,19 +59,21 @@ export const api = {
   },
 
   // Import/Transcribe
-  async importFile(filepath: string, copyFile: boolean = true, enableDiarization: boolean = false): Promise<TranscribeResponse> {
+  async importFile(filepath: string, copyFile: boolean = true, enableDiarization: boolean = false, enableWordTimestamps: boolean = true): Promise<TranscribeResponse> {
     const response = await client.post('/transcribe/file', {
       filepath,
       copy_file: copyFile,
       enable_diarization: enableDiarization,
+      enable_word_timestamps: enableWordTimestamps,
     });
     return response.data;
   },
 
-  async uploadFile(file: File, enableDiarization: boolean = false): Promise<TranscribeResponse> {
+  async uploadFile(file: File, enableDiarization: boolean = false, enableWordTimestamps: boolean = true): Promise<TranscribeResponse> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('enable_diarization', String(enableDiarization));
+    formData.append('enable_word_timestamps', String(enableWordTimestamps));
     
     const response = await client.post('/transcribe/upload', formData, {
       headers: {
