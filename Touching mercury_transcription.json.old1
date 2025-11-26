@@ -1,0 +1,18 @@
+{
+  "segments": [
+    {
+      "speaker": "SPEAKER_00",
+      "text": "This is mercury metal. It's one of the only elements that's liquid at room temperature, and it's also very dense. It's even denser than lead, and it can float this bag of lead on top of it. Mercury's known for being very toxic, but in its metallic form, it's kind of okay to touch. This is because, as long as you don't have any cuts or anything, it's not able to go through skin. But, it does let off invisible vapor that you can breathe in, which can lead to mercury poisoning. So, even though it is kind of fun to play with mercury and to touch it, I really don't recommend it.",
+      "start": 0.0,
+      "end": 31.14,
+      "duration": 31.14
+    }
+  ],
+  "num_speakers": 1,
+  "total_duration": 31.14,
+  "metadata": {
+    "source_file": "/home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/Touching mercury.mp3",
+    "num_segments": 1,
+    "num_speakers": 1
+  }
+}

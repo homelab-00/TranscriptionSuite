@@ -200,7 +200,27 @@ class STTOrchestrator:
                 self.static_transcriber = StaticFileTranscriber(
                     transcriber_instance, self.console_display
                 )
-                self.static_transcriber.transcribe_file(file_path)
+
+                # Check if diarization is available and use it automatically
+                if self.static_transcriber.is_diarization_available():
+                    safe_print("Diarization available - will identify speakers", "info")
+                    # Generate output file path in same directory as source audio
+                    from pathlib import Path
+
+                    source_path = Path(file_path)
+                    output_file = str(
+                        source_path.parent / f"{source_path.stem}_transcription.json"
+                    )
+                    self.static_transcriber.transcribe_file_with_diarization(
+                        file_path,
+                        output_file=output_file,
+                        output_format="json",
+                    )
+                else:
+                    safe_print(
+                        "Diarization not available - transcription only", "warning"
+                    )
+                    self.static_transcriber.transcribe_file(file_path)
 
             except Exception as e:
                 logging.error(f"Static transcription worker failed: {e}", exc_info=True)
@@ -348,7 +368,7 @@ class STTOrchestrator:
         if self.app_state["current_mode"] is not None:
             safe_print(
                 f"Cannot unload models while {self.app_state['current_mode']} mode is active.",
-                "warning"
+                "warning",
             )
             return
 
@@ -381,8 +401,13 @@ class STTOrchestrator:
                         self.preview_transcriber = None
                         safe_print("Preview transcriber unloaded.", "success")
                     except Exception as e:
-                        logging.error(f"Error unloading preview transcriber: {e}", exc_info=True)
-                        safe_print(f"Warning: Could not fully unload preview transcriber: {e}", "warning")
+                        logging.error(
+                            f"Error unloading preview transcriber: {e}", exc_info=True
+                        )
+                        safe_print(
+                            f"Warning: Could not fully unload preview transcriber: {e}",
+                            "warning",
+                        )
 
                 # Clean up main transcriber
                 if self.main_transcriber:
@@ -392,8 +417,13 @@ class STTOrchestrator:
                         self.main_transcriber = None
                         safe_print("Main transcriber unloaded.", "success")
                     except Exception as e:
-                        logging.error(f"Error unloading main transcriber: {e}", exc_info=True)
-                        safe_print(f"Warning: Could not fully unload main transcriber: {e}", "warning")
+                        logging.error(
+                            f"Error unloading main transcriber: {e}", exc_info=True
+                        )
+                        safe_print(
+                            f"Warning: Could not fully unload main transcriber: {e}",
+                            "warning",
+                        )
 
                 # Clean up models in model manager
                 try:
