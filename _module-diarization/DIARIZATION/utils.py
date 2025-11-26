@@ -8,18 +8,22 @@ and safe console output.
 
 import json
 import logging
+import sys
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich.text import Text
 
-# Initialize Rich console for pretty output
-console = Console()
+# Initialize Rich console for pretty output (stderr for clean stdout JSON)
+console = Console(stderr=True)
 
 
 def safe_print(message: str, level: str = "info") -> None:
     """
-    Print a message to the console with color based on level.
+    Print a message to stderr with color based on level.
+
+    Uses stderr to keep stdout clean for JSON output when called
+    via subprocess from _core.
 
     Args:
         message: The message to print
@@ -35,6 +39,7 @@ def safe_print(message: str, level: str = "info") -> None:
 
     text = Text(message)
     text.stylize(color)
+    # Console is already configured to use stderr
     console.print(text)
 
 

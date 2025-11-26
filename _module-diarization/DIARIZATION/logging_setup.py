@@ -58,9 +58,9 @@ def setup_logging(config: Optional[Dict[str, Any]] = None) -> None:
         file_handler.setFormatter(detailed_formatter)
         root_logger.addHandler(file_handler)
 
-    # Add console handler if enabled
+    # Add console handler if enabled (use stderr to keep stdout clean for JSON output)
     if console_output:
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(default_level)
         console_handler.setFormatter(simple_formatter)
         root_logger.addHandler(console_handler)

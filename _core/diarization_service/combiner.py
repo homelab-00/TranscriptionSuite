@@ -1,17 +1,35 @@
 #!/usr/bin/env python3
 """
-Transcription combiner module.
+Transcription combiner module for _core.
 
 This module combines transcription results with diarization segments
-to produce speaker-labeled transcriptions.
+to produce speaker-labeled transcriptions. The diarization is performed
+by the separate _module-diarization module; this code handles the merging.
 """
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from utils import DiarizationSegment, format_timestamp
+from .service import DiarizationSegment
+
+
+def format_timestamp(seconds: float) -> str:
+    """
+    Convert seconds to a formatted timestamp string (HH:MM:SS.mmm).
+
+    Args:
+        seconds: Time in seconds
+
+    Returns:
+        Formatted timestamp string
+    """
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
 
 @dataclass
@@ -69,9 +87,14 @@ class SpeakerTranscriptionSegment:
 class TranscriptionCombiner:
     """Combines transcription with diarization results."""
 
-    def __init__(self):
-        """Initialize the combiner."""
-        self.overlap_threshold = 0.1  # Minimum overlap ratio to assign speaker
+    def __init__(self, overlap_threshold: float = 0.1):
+        """
+        Initialize the combiner.
+
+        Args:
+            overlap_threshold: Minimum overlap ratio to assign speaker (0.0 to 1.0)
+        """
+        self.overlap_threshold = overlap_threshold
 
     def parse_whisper_output(
         self, whisper_data: Dict[str, Any]
@@ -101,8 +124,6 @@ class TranscriptionCombiner:
                 confidence = seg.get("avg_logprob")
                 if confidence is not None:
                     # Convert log probability to probability
-                    import math
-
                     confidence = math.exp(confidence)
 
                 if text and end > start:  # Only add non-empty segments with valid timing
@@ -235,7 +256,7 @@ class TranscriptionCombiner:
         diarization_segments = sorted(diarization_segments, key=lambda s: s.start)
 
         current_speaker = None
-        current_text = []
+        current_text: List[str] = []
         current_start = 0.0
         current_end = 0.0
 
@@ -318,9 +339,10 @@ class TranscriptionCombiner:
         # Group consecutive words by speaker
         result = []
         current_speaker = None
-        current_words = []
+        current_words: List[str] = []
         current_start = 0.0
         current_end = 0.0
+        current_confidence: Optional[float] = None
 
         for word_seg, speaker, confidence in word_speakers:
             if speaker == current_speaker:
@@ -334,7 +356,7 @@ class TranscriptionCombiner:
                             text=" ".join(current_words),
                             start=current_start,
                             end=current_end,
-                            diarization_confidence=confidence,
+                            diarization_confidence=current_confidence,
                         )
                     )
 
@@ -342,6 +364,7 @@ class TranscriptionCombiner:
                 current_words = [word_seg.text]
                 current_start = word_seg.start
                 current_end = word_seg.end
+                current_confidence = confidence
 
         # Add the last segment
         if current_speaker is not None and current_words:

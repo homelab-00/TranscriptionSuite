@@ -126,7 +126,8 @@ class ConfigManager:
 
         For the HuggingFace token (pyannote.hf_token), this method will:
         1. First check the HF_TOKEN environment variable
-        2. Fall back to the config file value
+        2. Then check the cached token from huggingface-cli login
+        3. Fall back to the config file value
 
         Args:
             *keys: Configuration keys to traverse
@@ -137,9 +138,23 @@ class ConfigManager:
         """
         # Special handling for HuggingFace token - prefer environment variable
         if keys == ("pyannote", "hf_token"):
+            # 1. Check HF_TOKEN environment variable
             env_token = os.environ.get("HF_TOKEN")
             if env_token:
                 return env_token
+
+            # 2. Try to get cached token from huggingface-cli login
+            try:
+                from huggingface_hub import get_token
+
+                cached_token = get_token()
+                if cached_token:
+                    logging.debug("Using cached HuggingFace token from huggingface-cli")
+                    return cached_token
+            except ImportError:
+                pass
+            except Exception as e:
+                logging.debug(f"Could not get cached HF token: {e}")
 
         value = self.config
         for key in keys:
