@@ -52,7 +52,7 @@ TranscriptionSuite/
 │   ├── .venv/                  # Core virtual environment
 │   └── pyproject.toml
 │
-├── _module-diarization/        # Speaker diarization (Python 3.10)
+├── _module-diarization/        # Speaker diarization (Python 3.11)
 │   ├── DIARIZATION/            # Diarization source code
 │   │   ├── diarize_audio.py    # CLI entry point
 │   │   ├── diarization_manager.py
@@ -75,7 +75,7 @@ TranscriptionSuite/
 | Module | Python | Key Dependencies | Purpose |
 |--------|--------|------------------|---------|
 | `_core` | 3.13 | `faster-whisper`, `torch 2.9+`, `ctranslate2` | Transcription, VAD, UI |
-| `_module-diarization` | 3.10 | `pyannote-audio`, `torch 2.x` | Speaker identification |
+| `_module-diarization` | 3.11 | `pyannote-audio`, `torch 2.x` | Speaker identification |
 
 The `pyannote-audio` library has strict dependency requirements that conflict with the latest `faster-whisper` and `torch` versions. Running them in separate environments solves this elegantly.
 
@@ -107,7 +107,7 @@ When you run static file transcription, the following happens:
                               │
                               ▼ (subprocess)
 ┌─────────────────────────────────────────────────────────────────┐
-│                  _module-diarization (Python 3.10)              │
+│                  _module-diarization (Python 3.11)              │
 │                                                                 │
 │  - Receives audio file path                                     │
 │  - Runs PyAnnote speaker-diarization-3.1                        │
@@ -136,9 +136,9 @@ source .venv/bin/activate
 uv sync
 deactivate
 
-# 3. Set up diarization environment (Python 3.10)
+# 3. Set up diarization environment (Python 3.11)
 cd ../_module-diarization
-uv venv --python 3.10
+uv venv --python 3.11
 source .venv/bin/activate
 uv sync
 huggingface-cli login  # Required for PyAnnote models
@@ -158,7 +158,7 @@ python SCRIPT/orchestrator.py
 
 - **Arch Linux** (or compatible distro)
 - **NVIDIA GPU** with CUDA 13.0+ support
-- **Python 3.10** and **Python 3.13** (both required)
+- **Python 3.11** and **Python 3.13** (both required)
 - **uv** package manager
 
 ### System Dependencies
@@ -173,7 +173,7 @@ sudo pacman -S --needed cava
 
 ### Setting Up _core
 
-#### Step 1: Create Virtual Environment
+#### Step 1: Create Virtual Environment (_core)
 
 ```bash
 cd _core
@@ -212,11 +212,11 @@ deactivate
 
 ### Setting Up _module-diarization
 
-#### Step 1: Create Virtual Environment
+#### Step 1: Create Virtual Environment (_module-diarization)
 
 ```bash
 cd _module-diarization
-uv venv --python 3.10
+uv venv --python 3.11
 source .venv/bin/activate
 ```
 
@@ -230,10 +230,10 @@ uv sync
 
 You need a HuggingFace token with access to PyAnnote models:
 
-1. Get your token from: https://huggingface.co/settings/tokens
+1. Get your token from: [Hugging Face settings](https://huggingface.co/settings/tokens)
 2. Accept the terms for these models:
-   - https://huggingface.co/pyannote/segmentation-3.0
-   - https://huggingface.co/pyannote/speaker-diarization-3.1
+    - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+    - [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
 3. Login:
 
 ```bash
@@ -460,6 +460,23 @@ python SCRIPT/orchestrator.py
 4. Middle-click to stop and get final transcription
 5. Text is automatically copied to clipboard
 
+**Saving to Viewer App:**
+
+When `include_in_viewer: true` and either `word_timestamps: true` or `enable_diarization: true` is set in `config.yaml` under `longform_recording`, your recordings will automatically be:
+
+1. Converted to MP3 and stored in `_app-transcription-viewer/backend/data/audio/`
+2. Saved to the viewer database with word-level timestamps
+3. Available in the viewer app's calendar and search
+
+Configure in `config.yaml`:
+
+```yaml
+longform_recording:
+    include_in_viewer: true    # Enable saving to viewer app
+    word_timestamps: true      # Enable word-level timestamps
+    enable_diarization: false  # Enable speaker diarization
+```
+
 #### 2. Static File Transcription (with Diarization)
 
 1. Right-click tray → "Static Transcription"
@@ -531,9 +548,9 @@ cd ..
 
 This starts:
 
-- **Frontend**: http://localhost:1420
-- **Backend**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs (Swagger UI)
+- **Frontend**: [http://localhost:1420](http://localhost:1420)
+- **Backend**: [http://localhost:8000](http://localhost:8000)
+- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
 
 ### Views
 

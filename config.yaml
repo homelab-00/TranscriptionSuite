@@ -23,24 +23,6 @@ transcription_options:
 
 
 # ----------------------------------------------------------------------------
-# Static File Transcription
-# ----------------------------------------------------------------------------
-# Settings for transcribing audio/video files (not live recording).
-static_transcription:
-    # Enable speaker diarization (identifies "who spoke when").
-    # Requires the _module-diarization environment to be set up.
-    enable_diarization: false
-
-    # Enable word-level timestamps in the transcription output.
-    # Required for searchable transcriptions and click-to-seek in the viewer app.
-    word_timestamps: true
-
-    # Maximum characters per segment in the output.
-    # Segments are split when speaker changes or this limit is reached.
-    max_segment_chars: 500
-
-
-# ----------------------------------------------------------------------------
 # Longform Recording
 # ----------------------------------------------------------------------------
 # Settings for live recording mode (start/stop dictation).
@@ -56,6 +38,24 @@ longform_recording:
     # Enable speaker diarization for longform recordings.
     # Usually not needed since longform is typically single-speaker dictation.
     enable_diarization: false
+
+
+# ----------------------------------------------------------------------------
+# Static File Transcription
+# ----------------------------------------------------------------------------
+# Settings for transcribing audio/video files (not live recording).
+static_transcription:
+    # Enable speaker diarization (identifies "who spoke when").
+    # Requires the _module-diarization environment to be set up.
+    enable_diarization: false
+
+    # Enable word-level timestamps in the transcription output.
+    # Required for searchable transcriptions and click-to-seek in the viewer app.
+    word_timestamps: true
+
+    # Maximum characters per segment in the output.
+    # Segments are split when speaker changes or this limit is reached.
+    max_segment_chars: 500
 
 
 # ----------------------------------------------------------------------------
@@ -182,7 +182,7 @@ storage:
     # 128 = good quality, reasonable size
     # 192 = high quality
     # 64  = smaller files, lower quality
-    audio_bitrate: 128
+    audio_bitrate: 160
 
 
 # ----------------------------------------------------------------------------
