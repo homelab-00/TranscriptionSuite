@@ -4,6 +4,7 @@ deps/
 *.tmp
 *.logW
 *.log
+*.opus
 .idea/
 .vscode/
 .github/
