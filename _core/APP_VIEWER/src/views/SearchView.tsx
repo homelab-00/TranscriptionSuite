@@ -13,9 +13,13 @@ import {
   FormControlLabel,
   Checkbox,
   CircularProgress,
+  InputAdornment,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers';
-import { PlayArrow as PlayIcon } from '@mui/icons-material';
+import { 
+  PlayArrow as PlayIcon,
+  Search as SearchIcon,
+} from '@mui/icons-material';
 import dayjs, { Dayjs } from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
@@ -70,6 +74,10 @@ export default function SearchView() {
 
   return (
     <Box>
+      <Typography variant="h4" sx={{ mb: 3 }}>
+        Search Transcriptions
+      </Typography>
+
       {/* Search form */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -80,6 +88,13 @@ export default function SearchView() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="Enter search term..."
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
           />
 
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
@@ -112,6 +127,7 @@ export default function SearchView() {
             variant="contained"
             onClick={handleSearch}
             disabled={!query.trim() || loading}
+            startIcon={loading ? undefined : <SearchIcon />}
           >
             {loading ? <CircularProgress size={24} /> : 'Search'}
           </Button>

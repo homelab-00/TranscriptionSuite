@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -8,20 +8,26 @@ import {
   Slider,
   CircularProgress,
   Chip,
+  Button,
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
   Pause as PauseIcon,
   Replay10 as Replay10Icon,
   Forward10 as Forward10Icon,
+  ChevronLeft as ArrowBackIcon,
+  CalendarMonth as CalendarIcon,
 } from '@mui/icons-material';
 import { Howl } from 'howler';
+import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { Recording, Transcription, Word } from '../types';
 
 export default function RecordingView() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
   const [recording, setRecording] = useState<Recording | null>(null);
   const [transcription, setTranscription] = useState<Transcription | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,16 +168,37 @@ export default function RecordingView() {
 
   return (
     <Box>
+      {/* Back button */}
+      <Button
+        startIcon={<ArrowBackIcon />}
+        onClick={() => navigate(-1)}
+        sx={{ mb: 2 }}
+      >
+        Back
+      </Button>
+
       {/* Recording info */}
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h5">{recording.filename}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          Recorded: {new Date(recording.recorded_at).toLocaleString()}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Duration: {formatTime(recording.duration_seconds)} | Words: {recording.word_count}
-        </Typography>
+      <Paper sx={{ p: 3, mb: 2 }}>
+        <Typography variant="h5" sx={{ mb: 2 }}>{recording.filename}</Typography>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, color: 'text.secondary' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <CalendarIcon fontSize="small" />
+            <Typography variant="body2">
+              {dayjs(recording.recorded_at).format('MMMM D, YYYY')}
+            </Typography>
+          </Box>
+          <Typography variant="body2">
+            Duration: {formatTime(recording.duration_seconds)}
+          </Typography>
+          <Typography variant="body2">
+            {recording.word_count} words
+          </Typography>
+          {recording.has_diarization && (
+            <Chip label="Speaker Diarization" size="small" color="primary" variant="outlined" />
+          )}
+        </Box>
       </Paper>
+
 
       {/* Audio player */}
       <Paper sx={{ p: 2, mb: 2 }}>

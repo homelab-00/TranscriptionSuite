@@ -52,3 +52,11 @@ export interface SearchParams {
   to_date?: string;
   fuzzy?: boolean;
 }
+
+export interface ImportJob {
+  id: number;
+  filename: string;
+  status: 'pending' | 'transcribing' | 'completed' | 'failed';
+  progress?: number;
+  message?: string;
+}

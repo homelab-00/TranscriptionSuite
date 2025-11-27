@@ -16,8 +16,10 @@ from database import (
     get_all_recordings,
     get_recordings_by_date_range,
     get_recordings_for_month,
+    get_recordings_for_hour,
     get_transcription,
     delete_recording,
+    update_recording_date,
 )
 
 router = APIRouter()
@@ -162,7 +164,104 @@ async def get_recording_audio(recording_id: int):
 @router.delete("/{recording_id}")
 async def delete_recording_by_id(recording_id: int):
     """Delete a recording and its transcription"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Delete the audio file from storage
+    filepath = Path(recording["filepath"])
+    if filepath.exists():
+        try:
+            filepath.unlink()
+        except Exception:
+            pass  # Continue even if file deletion fails
+
     if not delete_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
     return {"message": "Recording deleted"}
+
+
+class UpdateRecordingDateRequest(BaseModel):
+    recorded_at: str
+
+
+@router.patch("/{recording_id}/date")
+async def update_recording_date_endpoint(
+    recording_id: int, request: UpdateRecordingDateRequest
+):
+    """Update the recorded_at timestamp for a recording"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Validate the datetime format
+    try:
+        datetime.fromisoformat(request.recorded_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Invalid datetime format. Use ISO format."
+        )
+
+    if not update_recording_date(recording_id, request.recorded_at):
+        raise HTTPException(status_code=500, detail="Failed to update recording date")
+
+    return {"message": "Recording date updated"}
+
+
+@router.get("/next-minute/{date}/{hour}")
+async def get_next_available_minute(date: str, hour: int):
+    """Get the next available timestamp for a manual entry in a specific hour.
+
+    Returns the minute and second that should be used for a new entry,
+    calculated as 1 minute after the latest recording's end time.
+    """
+    # Validate inputs
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+        )
+
+    if hour < 0 or hour > 23:
+        raise HTTPException(status_code=400, detail="Hour must be between 0 and 23.")
+
+    recordings = get_recordings_for_hour(date, hour)
+
+    if not recordings:
+        # No recordings in this hour block - start at minute 1
+        return {"next_minute": 1, "next_second": 0}
+
+    # Find the recording with the latest end time
+    latest_end_seconds = 0  # seconds from start of the hour
+
+    for rec in recordings:
+        try:
+            rec_dt = datetime.fromisoformat(rec["recorded_at"].replace("Z", "+00:00"))
+            if rec_dt.tzinfo is not None:
+                rec_dt = rec_dt.replace(tzinfo=None)
+
+            # Calculate seconds from start of the hour
+            start_offset = rec_dt.minute * 60 + rec_dt.second
+            end_offset = start_offset + rec["duration_seconds"]
+
+            if end_offset > latest_end_seconds:
+                latest_end_seconds = end_offset
+        except (ValueError, KeyError, TypeError):
+            continue
+
+    # Add 1 minute (60 seconds) to the latest end time
+    new_offset = latest_end_seconds + 60
+
+    new_minute = int(new_offset // 60)
+    new_second = int(new_offset % 60)
+
+    # Check if we've exceeded the hour block
+    if new_minute >= 60:
+        raise HTTPException(
+            status_code=400,
+            detail="Hour block is full. Cannot add more recordings to this hour.",
+        )
+
+    return {"next_minute": new_minute, "next_second": new_second}
