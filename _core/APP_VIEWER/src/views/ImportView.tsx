@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -25,19 +25,6 @@ import {
 } from '@mui/icons-material';
 import { api } from '../services/api';
 
-// Check if we're running inside Tauri
-const isTauri = (): boolean => {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
-};
-
-// Type for Tauri v2 dialog
-type TauriDialog = {
-  open: (options?: {
-    multiple?: boolean;
-    filters?: Array<{ name: string; extensions: string[] }>;
-  }) => Promise<string | string[] | null>;
-};
-
 interface ImportJob {
   id: number;
   filename: string;
@@ -53,46 +40,10 @@ export default function ImportView() {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [tauriDialog, setTauriDialog] = useState<TauriDialog | null>(null);
 
-  // Load Tauri dialog API only if in Tauri environment
-  useEffect(() => {
-    if (isTauri()) {
-      // Tauri v2 uses @tauri-apps/plugin-dialog
-      import('@tauri-apps/plugin-dialog')
-        .then((mod) => setTauriDialog(mod))
-        .catch(() => {
-          // Failed to load Tauri dialog - will use HTML file input fallback
-          console.log('Tauri dialog not available, using HTML file input');
-        });
-    }
-  }, []);
-
-  // Open native file picker using Tauri dialog or fallback to HTML input
-  const openFilePicker = async () => {
-    try {
-      if (isTauri() && tauriDialog) {
-        const selected = await tauriDialog.open({
-          multiple: true,
-          filters: [{
-            name: 'Audio Files',
-            extensions: ['mp3', 'wav', 'opus', 'ogg', 'flac', 'm4a', 'wma', 'aac']
-          }]
-        });
-        
-        if (selected) {
-          const paths = Array.isArray(selected) ? selected : [selected];
-          for (const path of paths) {
-            await importFilePath(path);
-          }
-        }
-      } else {
-        // Fallback to HTML file input if not in Tauri
-        fileInputRef.current?.click();
-      }
-    } catch (err: any) {
-      setError(`Failed to open file picker: ${err.message || err}`);
-    }
+  // Open HTML file picker
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
   };
 
   const importFilePath = async (path: string) => {

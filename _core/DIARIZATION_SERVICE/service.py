@@ -73,10 +73,10 @@ class DiarizationService:
         if diarization_module_path:
             self.module_path = Path(diarization_module_path)
         else:
-            # Auto-detect: service.py is in _core/diarization_service/
+            # Auto-detect: service.py is in _core/DIARIZATION_SERVICE/
             # We need to go up to _core, then up to TranscriptionSuite, then to _module-diarization
-            # Path: _core/diarization_service/service.py
-            #       -> parent = _core/diarization_service
+            # Path: _core/DIARIZATION_SERVICE/service.py
+            #       -> parent = _core/DIARIZATION_SERVICE
             #       -> parent.parent = _core
             #       -> parent.parent.parent = TranscriptionSuite
             service_file = Path(__file__)  # service.py

@@ -49,6 +49,7 @@ class TrayIconManager:
         quit_callback: Optional[Callable[[], None]] = None,
         static_transcribe_callback: Optional[Callable[[], None]] = None,
         toggle_models_callback: Optional[Callable[[], None]] = None,
+        audio_notebook_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -60,6 +61,7 @@ class TrayIconManager:
             quit_callback: A function to call to quit.
             static_transcribe_callback: Function to call for static transcription.
             toggle_models_callback: Function to call to toggle models loaded state.
+            audio_notebook_callback: Function to call to start the audio notebook webapp.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -87,9 +89,12 @@ class TrayIconManager:
         self.quit_callback = quit_callback
         self.static_transcribe_callback = static_transcribe_callback
         self.toggle_models_callback = toggle_models_callback
+        self.audio_notebook_callback = audio_notebook_callback
 
         # Reference to the models menu item for dynamic updates
         self.models_action: Optional[QAction] = None
+        # Reference to audio notebook menu item for enabling/disabling
+        self.audio_notebook_action: Optional[QAction] = None
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
@@ -124,6 +129,14 @@ class TrayIconManager:
             menu.addAction(static_action)  # type: ignore[call-overload]
             cast(Any, static_action.triggered).connect(
                 self._on_static_transcribe_triggered
+            )
+
+        # Add Audio Notebook menu item
+        if self.audio_notebook_callback:
+            self.audio_notebook_action = QAction("Start Audio Notebook", menu)
+            menu.addAction(self.audio_notebook_action)  # type: ignore[call-overload]
+            cast(Any, self.audio_notebook_action.triggered).connect(
+                self._on_audio_notebook_triggered
             )
 
         # Add models unload/reload menu item
@@ -202,6 +215,10 @@ class TrayIconManager:
         if self.static_transcribe_callback:
             self.static_transcribe_callback()
 
+    def _on_audio_notebook_triggered(self, checked: bool) -> None:
+        if self.audio_notebook_callback:
+            self.audio_notebook_callback()
+
     def _on_stop_triggered(self, checked: bool) -> None:
         if self.stop_callback:
             self.stop_callback()
@@ -221,6 +238,19 @@ class TrayIconManager:
                 self.models_action.setText("Unload All Models")
             else:
                 self.models_action.setText("Reload All Models")
+
+    def update_audio_notebook_menu_item(self, is_running: bool) -> None:
+        """Update the audio notebook menu item based on whether it's running."""
+        if self.audio_notebook_action:
+            if is_running:
+                self.audio_notebook_action.setText("Stop Audio Notebook")
+            else:
+                self.audio_notebook_action.setText("Start Audio Notebook")
+
+    def set_audio_notebook_enabled(self, enabled: bool) -> None:
+        """Enable or disable the audio notebook menu item."""
+        if self.audio_notebook_action:
+            self.audio_notebook_action.setEnabled(enabled)
 
     def set_state(self, state: str) -> None:
         """

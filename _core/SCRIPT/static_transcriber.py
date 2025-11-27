@@ -65,12 +65,12 @@ except ImportError:
 
 # Diarization service - import at module level for availability check
 try:
-    # Add parent directory to allow importing diarization_service
+    # Add parent directory to allow importing DIARIZATION_SERVICE
     _core_path = Path(__file__).parent.parent
     if str(_core_path) not in sys.path:
         sys.path.insert(0, str(_core_path))
 
-    from diarization_service import (
+    from DIARIZATION_SERVICE import (
         DiarizationService,
         TranscriptionCombiner,
         SpeakerTranscriptionSegment,

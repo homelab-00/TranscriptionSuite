@@ -11,14 +11,13 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
   Switch,
   FormControlLabel,
   Chip,
   CircularProgress,
   Slider,
-  InputAdornment,
   Alert,
+  LinearProgress,
 } from '@mui/material';
 import {
   ChevronLeft as ChevronLeftIcon,
@@ -27,7 +26,7 @@ import {
   Pause as PauseIcon,
   Replay10 as Replay10Icon,
   Forward10 as Forward10Icon,
-  Folder as FolderIcon,
+  Search as BrowseIcon,
 } from '@mui/icons-material';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
@@ -63,12 +62,15 @@ export default function DayView() {
   const animationRef = useRef<number | null>(null);
 
   // New entry form state
-  const [newEntryTitle, setNewEntryTitle] = useState('');
   const [newEntryFilePath, setNewEntryFilePath] = useState('');
   const [enableDiarization, setEnableDiarization] = useState(false);
   const [enableWordTimestamps, setEnableWordTimestamps] = useState(true);
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<string | null>(null);
+  
+  // HTML file input ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadRecordingsForDay();
@@ -164,20 +166,39 @@ export default function DayView() {
       loadAudio(recordings[0].id);
     } else {
       setNewEntryHour(hour);
-      setNewEntryTitle(`Recording ${getRecordingNumberForHour(hour)}`);
       setDialogOpen(true);
     }
   };
 
-  const getRecordingNumberForHour = (_hour: number): number => {
-    // Count existing recordings for the day and add 1
-    return recordings.length + 1;
+  // Open HTML file picker - since this is web-only, user enters path manually
+  const openFilePicker = () => {
+    // In web mode, file upload doesn't give us the actual path
+    // User needs to enter the server-side path manually
+    setImportError('For web mode, please enter the file path on the server directly.');
+  };
+
+  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      // For web, we can't get the full path - user must enter it manually
+      setImportError('File upload not supported in web mode. Please enter the server file path manually.');
+    }
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const loadAudio = async (recordingId: number) => {
     if (soundRef.current) {
       soundRef.current.unload();
     }
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    setPlaying(false);
+    setCurrentTime(0);
     
     const audioUrl = api.getAudioUrl(recordingId);
     soundRef.current = new Howl({
@@ -186,17 +207,33 @@ export default function DayView() {
       onload: () => {
         setDuration(soundRef.current?.duration() || 0);
       },
+      onplay: () => {
+        // Start the animation loop when audio actually starts playing
+        const animate = () => {
+          if (soundRef.current && soundRef.current.playing()) {
+            const seek = soundRef.current.seek();
+            if (typeof seek === 'number') {
+              setCurrentTime(seek);
+            }
+            animationRef.current = requestAnimationFrame(animate);
+          }
+        };
+        animate();
+      },
+      onpause: () => {
+        if (animationRef.current) {
+          cancelAnimationFrame(animationRef.current);
+          animationRef.current = null;
+        }
+      },
       onend: () => {
         setPlaying(false);
+        if (animationRef.current) {
+          cancelAnimationFrame(animationRef.current);
+          animationRef.current = null;
+        }
       },
     });
-  };
-
-  const updateTime = () => {
-    if (soundRef.current && playing) {
-      setCurrentTime(soundRef.current.seek() as number);
-      animationRef.current = requestAnimationFrame(updateTime);
-    }
   };
 
   const togglePlayPause = () => {
@@ -204,12 +241,8 @@ export default function DayView() {
 
     if (playing) {
       soundRef.current.pause();
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
     } else {
       soundRef.current.play();
-      animationRef.current = requestAnimationFrame(updateTime);
     }
     setPlaying(!playing);
   };
@@ -242,26 +275,65 @@ export default function DayView() {
     return currentTime >= word.start && currentTime < word.end;
   };
 
+  const pollJobStatus = async (recordingId: number) => {
+    const maxAttempts = 120; // 10 minutes at 5 second intervals
+    let attempts = 0;
+
+    const poll = async () => {
+      if (attempts >= maxAttempts) {
+        setImportError('Transcription timed out');
+        setImportLoading(false);
+        return;
+      }
+
+      try {
+        const status = await api.getTranscriptionStatus(recordingId);
+        setImportProgress(status.message || `Status: ${status.status}`);
+
+        if (status.status === 'completed') {
+          setImportLoading(false);
+          setImportProgress(null);
+          setDialogOpen(false);
+          setNewEntryFilePath('');
+          await loadRecordingsForDay();
+        } else if (status.status === 'failed') {
+          setImportError(status.message || 'Transcription failed');
+          setImportLoading(false);
+          setImportProgress(null);
+        } else {
+          // Still processing, poll again
+          attempts++;
+          setTimeout(poll, 5000);
+        }
+      } catch (err) {
+        setImportError('Failed to check transcription status');
+        setImportLoading(false);
+        setImportProgress(null);
+      }
+    };
+
+    poll();
+  };
+
   const handleCreateEntry = async () => {
     if (!newEntryFilePath.trim()) {
-      setImportError('Please provide an audio file path');
+      setImportError('Please select an audio file');
       return;
     }
 
     setImportLoading(true);
     setImportError(null);
+    setImportProgress('Starting transcription...');
 
     try {
-      await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
-      setDialogOpen(false);
-      setNewEntryFilePath('');
-      setNewEntryTitle('');
-      // Reload recordings
-      await loadRecordingsForDay();
-    } catch (err: any) {
-      setImportError(err.response?.data?.detail || 'Failed to import file');
-    } finally {
+      const response = await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
+      // Start polling for transcription status
+      pollJobStatus(response.recording_id);
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setImportError(error.response?.data?.detail || 'Failed to import file');
       setImportLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -493,42 +565,56 @@ export default function DayView() {
         </Paper>
       )}
 
+      {/* Hidden file input for web fallback */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*,.mp3,.wav,.opus,.ogg,.flac,.m4a,.wma,.aac"
+        style={{ display: 'none' }}
+        onChange={handleFileInputChange}
+      />
+
       {/* New Entry Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={() => !importLoading && setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
           New Recording Entry - {newEntryHour !== null && formatHour(newEntryHour)}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
-            <TextField
-              fullWidth
-              label="Title"
-              value={newEntryTitle}
-              onChange={(e) => setNewEntryTitle(e.target.value)}
-              sx={{ mb: 3 }}
-            />
-            
-            <TextField
-              fullWidth
-              label="Audio File Path"
-              placeholder="/path/to/audio.mp3"
-              value={newEntryFilePath}
-              onChange={(e) => setNewEntryFilePath(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <FolderIcon sx={{ color: 'text.secondary' }} />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ mb: 2 }}
-            />
+            {/* File picker button */}
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<BrowseIcon />}
+              onClick={openFilePicker}
+              disabled={importLoading}
+              sx={{ py: 2, px: 4, mb: 2, width: '100%' }}
+            >
+              Browse for Audio File
+            </Button>
+
+            {/* Show selected file */}
+            {newEntryFilePath && (
+              <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                <Typography variant="body2" color="text.secondary">
+                  Selected file:
+                </Typography>
+                <Typography variant="body1" sx={{ wordBreak: 'break-all' }}>
+                  {newEntryFilePath}
+                </Typography>
+              </Paper>
+            )}
+
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Supported formats: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
+            </Typography>
 
             <FormControlLabel
               control={
                 <Switch
                   checked={enableWordTimestamps}
                   onChange={(e) => setEnableWordTimestamps(e.target.checked)}
+                  disabled={importLoading}
                 />
               }
               label="Enable word-level timestamps"
@@ -539,10 +625,20 @@ export default function DayView() {
                 <Switch
                   checked={enableDiarization}
                   onChange={(e) => setEnableDiarization(e.target.checked)}
+                  disabled={importLoading}
                 />
               }
               label="Enable speaker diarization"
             />
+
+            {importProgress && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  {importProgress}
+                </Typography>
+                <LinearProgress />
+              </Box>
+            )}
 
             {importError && (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -552,11 +648,11 @@ export default function DayView() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setDialogOpen(false)} disabled={importLoading}>Cancel</Button>
           <Button
             onClick={handleCreateEntry}
             variant="contained"
-            disabled={importLoading}
+            disabled={importLoading || !newEntryFilePath.trim()}
           >
             {importLoading ? <CircularProgress size={24} /> : 'Create & Transcribe'}
           </Button>
