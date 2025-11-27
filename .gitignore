@@ -10,24 +10,24 @@ deps/
 .github/
 
 # Node.js / npm dependencies and build outputs
-_app-transcription-viewer/node_modules/
-_app-transcription-viewer/.venv/
-_app-transcription-viewer/dist/
-_app-transcription-viewer/build/
-_app-transcription-viewer/.env
-_app-transcription-viewer/.env.local
+_core/APP_VIEWER/node_modules/
+_core/APP_VIEWER/.venv/
+_core/APP_VIEWER/dist/
+_core/APP_VIEWER/build/
+_core/APP_VIEWER/.env
+_core/APP_VIEWER/.env.local
 
 # Vite cache
-_app-transcription-viewer/.vite/
+_core/APP_VIEWER/.vite/
 
 # IDE / Editor files
-_app-transcription-viewer/.vscode/
-_app-transcription-viewer/.idea/
+_core/APP_VIEWER/.vscode/
+_core/APP_VIEWER/.idea/
 
 # OS files
-_app-transcription-viewer/.DS_Store
-_app-transcription-viewer/Thumbs.db
+_core/APP_VIEWER/.DS_Store
+_core/APP_VIEWER/Thumbs.db
 
 # Python virtual environments (if present)
-_app-transcription-viewer/.python-version
-_app-transcription-viewer/__pycache__/
+_core/APP_VIEWER/.python-version
+_core/APP_VIEWER/__pycache__/
