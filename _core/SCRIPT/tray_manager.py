@@ -95,18 +95,24 @@ class TrayIconManager:
         self.models_action: Optional[QAction] = None
         # Reference to audio notebook menu item for enabling/disabling
         self.audio_notebook_action: Optional[QAction] = None
+        # References to start/stop recording actions for enabling/disabling
+        self.start_action: Optional[QAction] = None
+        self.stop_action: Optional[QAction] = None
+        # Reference to static transcription action for enabling/disabling
+        self.static_action: Optional[QAction] = None
 
         self._setup_context_menu()
         # Connect to the 'activated' signal to handle clicks
         cast(Any, self.icon.activated).connect(self._handle_activation)
 
-        # New color scheme reflecting the new states
+        # Color scheme reflecting application states
         self.colors = {
             "loading": (128, 128, 128),  # Grey
             "standby": (0, 255, 0),  # Green
             "recording": (255, 255, 0),  # Yellow
             "transcribing": (255, 128, 0),  # Orange during transcription
             "error": (255, 0, 0),  # Red
+            "audio_notebook": (102, 178, 178),  # Muted aquamarine/teal
         }
 
     def _setup_context_menu(self) -> None:
@@ -114,20 +120,20 @@ class TrayIconManager:
         menu: QMenu = QMenu()
 
         if self.start_callback:
-            start_action: QAction = QAction("Start Recording", menu)
-            menu.addAction(start_action)  # type: ignore[call-overload]
-            cast(Any, start_action.triggered).connect(self._on_start_triggered)
+            self.start_action = QAction("Start Recording", menu)
+            menu.addAction(self.start_action)  # type: ignore[call-overload]
+            cast(Any, self.start_action.triggered).connect(self._on_start_triggered)
 
         if self.stop_callback:
-            stop_action: QAction = QAction("Stop Recording", menu)
-            menu.addAction(stop_action)  # type: ignore[call-overload]
-            cast(Any, stop_action.triggered).connect(self._on_stop_triggered)
+            self.stop_action = QAction("Stop Recording", menu)
+            menu.addAction(self.stop_action)  # type: ignore[call-overload]
+            cast(Any, self.stop_action.triggered).connect(self._on_stop_triggered)
 
         if self.static_transcribe_callback:
             menu.addSeparator()
-            static_action: QAction = QAction("Transcribe Audio File...", menu)
-            menu.addAction(static_action)  # type: ignore[call-overload]
-            cast(Any, static_action.triggered).connect(
+            self.static_action = QAction("Transcribe Audio File...", menu)
+            menu.addAction(self.static_action)  # type: ignore[call-overload]
+            cast(Any, self.static_action.triggered).connect(
                 self._on_static_transcribe_triggered
             )
 
@@ -252,13 +258,25 @@ class TrayIconManager:
         if self.audio_notebook_action:
             self.audio_notebook_action.setEnabled(enabled)
 
+    def set_recording_actions_enabled(self, enabled: bool) -> None:
+        """Enable or disable recording-related menu items."""
+        if self.start_action:
+            self.start_action.setEnabled(enabled)
+        if self.stop_action:
+            self.stop_action.setEnabled(enabled)
+
+    def set_static_transcription_enabled(self, enabled: bool) -> None:
+        """Enable or disable the static transcription menu item."""
+        if self.static_action:
+            self.static_action.setEnabled(enabled)
+
     def set_state(self, state: str) -> None:
         """
         Set the icon's appearance based on the application state.
 
         Args:
             state: The current state (
-                'loading', 'standby', 'recording', 'transcribing', 'error').
+                'loading', 'standby', 'recording', 'transcribing', 'error', 'audio_notebook').
         """
         color = self.colors.get(state)
         if color:

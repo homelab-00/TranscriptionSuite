@@ -70,22 +70,77 @@ try:
     if str(_core_path) not in sys.path:
         sys.path.insert(0, str(_core_path))
 
-    from DIARIZATION_SERVICE import (
-        DiarizationService,
-        TranscriptionCombiner,
-        SpeakerTranscriptionSegment,
-        export_to_json,
-        export_to_srt,
-        export_to_text,
-    )
+    from DIARIZATION_SERVICE import DiarizationService
 
     HAS_DIARIZATION = True
 except ImportError as e:
     HAS_DIARIZATION = False
+    DiarizationService = None  # type: ignore[misc,assignment]
     logging.debug(f"Diarization service not available: {e}")
 
 
 from utils import safe_print
+
+# Module-level cache for the Whisper model (word timestamps transcription)
+# This avoids reloading the model for each static transcription
+_cached_whisper_model: Optional["faster_whisper.WhisperModel"] = None  # type: ignore
+_cached_model_config: Optional[tuple[str, str, str]] = (
+    None  # (model_path, device, compute_type)
+)
+
+
+def get_cached_whisper_model(
+    model_path: str, device: str, compute_type: str
+) -> Any:  # Returns faster_whisper.WhisperModel when available
+    """Get or create a cached Whisper model for word-level transcription."""
+    global _cached_whisper_model, _cached_model_config
+
+    if not HAS_FASTER_WHISPER or faster_whisper is None:
+        raise ImportError("faster_whisper is required for word-level transcription")
+
+    current_config = (model_path, device, compute_type)
+
+    # Check if we need to reload (different config or no cached model)
+    if _cached_whisper_model is None or _cached_model_config != current_config:
+        # Unload old model first if it exists
+        if _cached_whisper_model is not None:
+            logging.info("Unloading previous cached Whisper model...")
+            del _cached_whisper_model
+            _cached_whisper_model = None
+            if HAS_TORCH and torch and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        logging.info(
+            f"Loading Whisper model '{model_path}' on {device} for word timestamps..."
+        )
+        safe_print(f"Loading Whisper model '{model_path}' on {device}...", "info")
+
+        _cached_whisper_model = faster_whisper.WhisperModel(
+            model_size_or_path=model_path,
+            device=device,
+            compute_type=compute_type,
+        )
+        _cached_model_config = current_config
+        logging.info("Whisper model loaded and cached.")
+    else:
+        logging.info("Using cached Whisper model for transcription.")
+
+    return _cached_whisper_model
+
+
+def unload_cached_whisper_model() -> None:
+    """Explicitly unload the cached Whisper model to free GPU memory."""
+    global _cached_whisper_model, _cached_model_config
+
+    if _cached_whisper_model is not None:
+        logging.info("Unloading cached Whisper model...")
+        del _cached_whisper_model
+        _cached_whisper_model = None
+        _cached_model_config = None
+        if HAS_TORCH and torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logging.info("Cached Whisper model unloaded.")
+
 
 if TYPE_CHECKING:
     from console_display import ConsoleDisplay
@@ -143,15 +198,17 @@ class StaticFileTranscriber:
 
     def __init__(
         self,
-        main_transcriber: LongFormRecorder,
-        console_display: Optional[ConsoleDisplay],
+        main_transcriber: Optional[LongFormRecorder] = None,
+        console_display: Optional[ConsoleDisplay] = None,
+        config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initializes the StaticFileTranscriber.
 
         Args:
-            main_transcriber: The fully initialized main transcriber instance.
+            main_transcriber: Optional - The main transcriber instance (deprecated).
             console_display: The console display instance for formatted output.
+            config: Optional config dict with transcriber settings.
         """
         if not HAS_SOUNDFILE:
             raise ImportError(
@@ -160,6 +217,7 @@ class StaticFileTranscriber:
 
         self.main_transcriber = main_transcriber
         self.console_display = console_display
+        self.config = config or {}
         self.temp_dir = tempfile.mkdtemp(prefix="repomix_stt_")
         logging.info(f"Created temporary directory for static files: {self.temp_dir}")
 
@@ -363,8 +421,8 @@ class StaticFileTranscriber:
         """
         Transcribe audio file using Faster Whisper with word-level timestamps.
 
-        This method loads the Faster Whisper model directly to get word timestamps,
-        which are essential for accurate alignment with diarization.
+        This method uses a cached Whisper model to avoid reloading for each
+        transcription. The model is loaded once and reused.
 
         Args:
             audio_path: Path to the audio file (should be 16kHz mono WAV)
@@ -383,36 +441,36 @@ class StaticFileTranscriber:
         audio_data, sample_rate = sf.read(audio_path, dtype="float32")
         audio_duration = len(audio_data) / sample_rate
 
-        # Get model configuration from main transcriber if available
-        model_path = "large-v3"  # Default to large-v3 for best accuracy
-        compute_type = "float16"
-        device = "cuda" if (HAS_TORCH and torch and torch.cuda.is_available()) else "cpu"
+        # Get ALL model configuration from main_transcriber config section
+        # This ensures consistent settings across all transcription modes
+        main_config = self.config.get("main_transcriber", {})
 
-        if self.main_transcriber and hasattr(self.main_transcriber, "recorder"):
-            recorder = self.main_transcriber.recorder
-            model_path = getattr(recorder, "main_model_type", model_path)
-            compute_type = getattr(recorder, "compute_type", compute_type)
-            device = getattr(recorder, "device", device)
-
-        safe_print(f"Loading Faster Whisper model '{model_path}' on {device}...", "info")
-
-        # Load the model
-        model = faster_whisper.WhisperModel(
-            model_size_or_path=model_path,
-            device=device,
-            compute_type=compute_type,
+        # Model settings - all from main_transcriber config
+        model_path = main_config.get("model", "Systran/faster-whisper-large-v3")
+        compute_type = main_config.get("compute_type", "default")
+        device = main_config.get(
+            "device",
+            "cuda" if (HAS_TORCH and torch and torch.cuda.is_available()) else "cpu",
         )
+        beam_size = main_config.get("beam_size", 5)
+        initial_prompt = main_config.get("initial_prompt")
+        vad_filter = main_config.get("faster_whisper_vad_filter", True)
+
+        # Use cached model instead of loading a new one each time
+        model = get_cached_whisper_model(model_path, device, compute_type)
 
         safe_print("Transcribing with word timestamps...", "info")
         start_time = time.monotonic()
 
         # Transcribe with word timestamps enabled
+        # Use settings from main_transcriber config
         segments_iter, info = model.transcribe(
             audio_data,
             language=language,
-            beam_size=5,
+            beam_size=beam_size,
+            initial_prompt=initial_prompt,
             word_timestamps=True,  # Critical: Enable word-level timestamps
-            vad_filter=True,  # Use Silero VAD for better segmentation
+            vad_filter=vad_filter,  # Use Silero VAD for better segmentation
         )
 
         # Convert iterator to list and extract word timestamps
@@ -449,10 +507,8 @@ class StaticFileTranscriber:
             "success",
         )
 
-        # Clean up model to free GPU memory
-        del model
-        if HAS_TORCH and torch and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # Note: We no longer delete the model here - it's cached for reuse
+        # The model will be unloaded when unload_cached_whisper_model() is called
 
         return transcript_segments, audio_duration
 
@@ -647,6 +703,9 @@ class StaticFileTranscriber:
             safe_print("Step 2/3: Performing speaker diarization...", "info")
             try:
                 diarization_start = time.monotonic()
+                assert (
+                    DiarizationService is not None
+                )  # Guarded by HAS_DIARIZATION check above
                 diarization_service = DiarizationService()
                 diarization_segments = diarization_service.diarize(
                     converted_path,  # Use converted path for diarization too

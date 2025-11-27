@@ -82,7 +82,7 @@ TranscriptionSuite/
 
 The `pyannote-audio` library has strict dependency requirements that conflict with the latest `faster-whisper` and `torch` versions. Running them in separate environments solves this elegantly.
 
-**Note:** The web viewer app (frontend + backend) is **fully integrated into `_core`** (in `APP_VIEWER/`), sharing the same virtual environment. This simplifies deployment and ensures the transcription model is loaded only once.
+**Note:** The web viewer app (frontend + backend) is **fully integrated into `_core`** (in `APP_VIEWER/`), sharing the same virtual environment. All transcription modes (longform, static, web UI) use the **same model settings** from `main_transcriber` in `config.yaml`.
 
 ---
 
@@ -146,7 +146,7 @@ cd ../_module-diarization
 uv venv --python 3.11
 source .venv/bin/activate
 uv sync
-huggingface-cli login  # Required for PyAnnote models
+hf auth login  # Required for PyAnnote models
 deactivate
 
 # 4. Install frontend dependencies (optional, for web viewer)
@@ -247,7 +247,7 @@ You need a HuggingFace token with access to PyAnnote models:
 3. Login:
 
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 #### Step 4: Test Installation
@@ -297,11 +297,14 @@ diarization:
     min_speakers: null  # Auto-detect
     max_speakers: null
 
-# Model selection
+# Model selection (used by ALL transcription modes)
 main_transcriber:
     model: "Systran/faster-whisper-large-v3"
     device: "cuda"
     compute_type: "default"
+    beam_size: 5
+    initial_prompt: null
+    faster_whisper_vad_filter: true
 
 # Storage for viewer app
 storage:
@@ -309,6 +312,18 @@ storage:
     audio_format: "mp3"
     audio_bitrate: 128
 ```
+
+### Unified Model Settings
+
+The `main_transcriber` section is the **single source of truth** for model configuration. These settings are used by:
+
+| Mode | Uses `main_transcriber` settings |
+|------|----------------------------------|
+| Longform Recording | ✅ model, device, compute_type, beam_size, initial_prompt, vad_filter |
+| Static File Transcription | ✅ model, device, compute_type, beam_size, initial_prompt, vad_filter |
+| Audio Notebook (Web UI) | ✅ model, device, compute_type, beam_size, initial_prompt, vad_filter |
+
+This ensures consistent transcription quality across all modes. Change the model once, and it applies everywhere.
 
 ### Finding Your Audio Device
 
@@ -454,10 +469,11 @@ python SCRIPT/orchestrator.py
 
 | Color | State |
 |-------|-------|
-| 🔘 Grey | Loading/initializing |
-| 🟢 Green | Ready/standby |
+| 🔘 Grey | Loading models |
+| 🟢 Green | Ready/standby (no models loaded) |
 | 🟡 Yellow | Recording audio |
 | 🟠 Orange | Transcribing |
+| 🩵 Aquamarine | Audio Notebook running |
 | 🔴 Red | Error state |
 
 ### Transcription Modes
@@ -499,13 +515,28 @@ longform_recording:
 
 **Note:** Diarization is optional and controlled by `config.yaml`. It's typically used for multi-speaker recordings like meetings or interviews.
 
-### Model Management
+### Model Management (Smart Model Switching)
 
-The system includes a model management feature to free up GPU memory:
+The system uses **smart model switching** to optimize GPU memory and startup time:
 
-- **Unload All Models**: Frees GPU memory by unloading transcription models
-- **Reload All Models**: Reloads models according to `config.yaml`
-- Available in the tray right-click menu
+- **Longform model preloaded at startup** - ready for immediate recording
+- **Models switch only when changing modes** - not after every operation
+- **Only one model type loaded at a time** - prevents GPU memory overflow
+- **Manual control available** via tray menu: "Unload All Models" / "Reload All Models"
+
+#### Model Switching Behavior
+
+| From | To | Action |
+|------|-----|--------|
+| Startup | - | Preload longform model |
+| Longform | Static Transcription | Unload longform → Load static |
+| Longform | Audio Notebook | Unload longform → Load static |
+| Static | Longform | Unload static → Load longform |
+| Audio Notebook | Longform | Unload static → Load longform |
+| Static | Static (another file) | Keep static model (no reload) |
+| Longform | Longform (another recording) | Keep longform model (no reload) |
+
+**All operations use the same model settings** from `main_transcriber` in `config.yaml`.
 
 ---
 
@@ -634,6 +665,61 @@ The static transcription output includes **word-level timestamps** and **speaker
 
 ## How It Works
 
+### Smart Model Switching
+
+The orchestrator manages GPU memory by keeping only one model type loaded:
+
+```text
+Application Startup
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ Orchestrator starts                   │
+│ - Preload LONGFORM model              │
+│ - Tray icon: GREY → GREEN             │
+│ - Ready for immediate recording       │
+└───────────────────────────────────────┘
+    │
+    ├─────────────────────────────────────────────────────────┐
+    │ (User starts longform recording)                        │
+    ▼                                                         │
+┌───────────────────────────────────────┐                     │
+│ Longform model ALREADY LOADED         │                     │
+│ - No model switch needed              │                     │
+│ - Start recording immediately         │                     │
+│ - Model stays loaded after finish     │                     │
+└───────────────────────────────────────┘                     │
+                                                              │
+    ┌─────────────────────────────────────────────────────────┘
+    │ (User starts static transcription OR audio notebook)
+    ▼
+┌───────────────────────────────────────┐
+│ 1. Unload LONGFORM model              │
+│    - Free GPU memory                  │
+│    - Tray icon: GREY (loading)        │
+└───────────────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 2. Load STATIC model                  │
+│    - Uses main_transcriber settings   │
+│    - Model stays loaded for reuse     │
+└───────────────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 3. Process files (can do multiple)    │
+│    - No reload between files          │
+│    - Tray: ORANGE/AQUAMARINE          │
+└───────────────────────────────────────┘
+    │
+    ▼ (User starts longform recording)
+┌───────────────────────────────────────┐
+│ Switch back to LONGFORM model         │
+│ - Unload static → Load longform       │
+└───────────────────────────────────────┘
+```
+
 ### Transcription Pipeline
 
 ```text
@@ -758,16 +844,19 @@ python -c "from DIARIZATION import diarize_audio; print('OK')"
 
 #### CUDA out of memory
 
-1. Use "Unload All Models" in the tray menu
-2. Set `device: "cpu"` in config.yaml for one transcriber
-3. Use smaller models (e.g., `medium` instead of `large-v3`)
+With on-demand model loading, this should be rare. However, if it occurs:
+
+1. Models are automatically unloaded after each operation
+2. Ensure no other GPU-intensive apps are running
+3. Set `device: "cpu"` in `main_transcriber` config (slower but uses system RAM)
+4. Use a smaller model (e.g., `Systran/faster-whisper-medium`)
 
 #### HuggingFace token issues
 
 ```bash
 cd _module-diarization
 source .venv/bin/activate
-huggingface-cli login
+hf auth login
 ```
 
 Then accept model terms at the HuggingFace links above.

@@ -3,11 +3,16 @@ deps/
 *.tmp
 *.logW
 *.log
-*.opus
 *.mp3
 .directory
 .idea/
 .github/
+
+# Database files (user data, should not be synced)
+_core/APP_VIEWER/backend/data/transcriptions.db
+_core/APP_VIEWER/backend/data/transcriptions.db-journal
+_core/APP_VIEWER/backend/data/transcriptions.db-wal
+_core/APP_VIEWER/backend/data/transcriptions.db-shm
 
 # Node.js / npm dependencies and build outputs
 _core/APP_VIEWER/node_modules/
