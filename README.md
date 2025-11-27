@@ -9,7 +9,7 @@ A comprehensive speech-to-text transcription suite for Linux with speaker diariz
 > - 👥 **Speaker Diarization** - Identify "who spoke when"
 > - ⏱️ **Word-Level Timestamps** - Precise timing for every word
 > - 🔍 **Searchable Output** - JSON output with full text search capability
-> - 🖥️ **Desktop Viewer App** - Browse, search, and play transcriptions
+> - 🖥️ **Web Viewer App** - Browse, search, and play transcriptions in your browser
 > - 🚀 **Extremely Fast** - 30 minutes of audio in ~40 seconds (RTX 3060)
 > - 🌍 **Multilingual** - Works with Greek, English, and 90+ languages
 
@@ -35,49 +35,54 @@ A comprehensive speech-to-text transcription suite for Linux with speaker diariz
 
 ## Project Architecture
 
-The project is split into **three separate modules**, each with its own purpose. The transcription and diarization modules have separate Python virtual environments due to dependency conflicts.
+The project is split into **two main modules** with separate Python virtual environments due to dependency conflicts.
 
 ```text
 TranscriptionSuite/
-├── config.yaml                 # Unified configuration file
-├── _core/                      # Main transcription engine (Python 3.13)
-│   ├── SCRIPT/                 # Application source code
-│   │   ├── orchestrator.py     # Main entry point
+├── config.yaml                   # Unified configuration file
+├── _core/                        # Main application (Python 3.13)
+│   ├── SCRIPT/                   # Application source code
+│   │   ├── orchestrator.py       # Main entry point & central controller
 │   │   ├── static_transcriber.py
 │   │   ├── stt_engine.py
+│   │   ├── tray_manager.py
 │   │   └── ...
-│   ├── diarization_service/    # Bridge to diarization module
-│   │   ├── service.py          # Subprocess caller
-│   │   └── combiner.py         # Combines transcription + diarization
-│   ├── .venv/                  # Core virtual environment
+│   ├── APP_VIEWER/               # Web viewer application
+│   │   ├── backend/              # FastAPI backend
+│   │   │   ├── main.py           # FastAPI app
+│   │   │   ├── database.py       # SQLite with FTS5
+│   │   │   ├── routers/          # API endpoints
+│   │   │   └── data/             # Database & audio storage
+│   │   ├── src/                  # React frontend
+│   │   ├── dev.sh                # Development launcher
+│   │   └── package.json
+│   ├── DIARIZATION_SERVICE/      # Bridge to diarization module
+│   │   ├── service.py            # Subprocess caller
+│   │   └── combiner.py           # Combines transcription + diarization
+│   ├── .venv/                    # Core virtual environment
 │   └── pyproject.toml
 │
-├── _module-diarization/        # Speaker diarization (Python 3.11)
-│   ├── DIARIZATION/            # Diarization source code
-│   │   ├── diarize_audio.py    # CLI entry point
+├── _module-diarization/          # Speaker diarization (Python 3.11)
+│   ├── DIARIZATION/              # Diarization source code
+│   │   ├── diarize_audio.py      # CLI entry point
 │   │   ├── diarization_manager.py
 │   │   └── ...
-│   ├── .venv/                  # Diarization virtual environment
+│   ├── .venv/                    # Diarization virtual environment
 │   └── pyproject.toml
 │
-├── _app-transcription-viewer/  # Desktop GUI application
-│   ├── src/                    # React frontend
-│   ├── backend/                # FastAPI backend
-│   │   └── data/               # App storage (database, audio)
-│   ├── src-tauri/              # Tauri desktop wrapper
-│   └── package.json
-│
-└── README.md                   # This file
+└── README.md
 ```
 
 ### Why Two Environments?
 
 | Module | Python | Key Dependencies | Purpose |
 |--------|--------|------------------|---------|
-| `_core` | 3.13 | `faster-whisper`, `torch 2.9+`, `ctranslate2` | Transcription, VAD, UI |
+| `_core` | 3.13 | `faster-whisper`, `torch 2.9+`, `FastAPI`, `ctranslate2` | Transcription, VAD, Web API, UI |
 | `_module-diarization` | 3.11 | `pyannote-audio`, `torch 2.x` | Speaker identification |
 
 The `pyannote-audio` library has strict dependency requirements that conflict with the latest `faster-whisper` and `torch` versions. Running them in separate environments solves this elegantly.
+
+**Note:** The web viewer app (frontend + backend) is **fully integrated into `_core`** (in `APP_VIEWER/`), sharing the same virtual environment. This simplifies deployment and ensures the transcription model is loaded only once.
 
 ---
 
@@ -94,7 +99,7 @@ When you run static file transcription, the following happens:
 │  1. User selects audio file via tray menu                       │
 │  2. orchestrator.py → static_transcriber.py                     │
 │  3. Faster Whisper transcribes with word_timestamps=True        │
-│  4. diarization_service/service.py calls subprocess:            │
+│  4. DIARIZATION_SERVICE/service.py calls subprocess:            │
 │                                                                 │
 │     subprocess.run([                                            │
 │       "_module-diarization/.venv/bin/python",  ← Different venv │
@@ -144,8 +149,13 @@ uv sync
 huggingface-cli login  # Required for PyAnnote models
 deactivate
 
-# 4. Run the application
-cd ../_core
+# 4. Install frontend dependencies (optional, for web viewer)
+cd ../_core/APP_VIEWER
+npm install
+cd ../..
+
+# 5. Run the application
+cd _core
 source .venv/bin/activate
 python SCRIPT/orchestrator.py
 ```
@@ -352,8 +362,8 @@ Understanding where TranscriptionSuite stores files:
 
 | Type | Location | Description |
 |------|----------|-------------|
-| **Database** | `_app-transcription-viewer/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
-| **Audio Files** | `_app-transcription-viewer/backend/data/audio/` | Imported audio stored as MP3 |
+| **Database** | `_core/APP_VIEWER/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
+| **Audio Files** | `_core/APP_VIEWER/backend/data/audio/` | Imported audio stored as MP3 |
 | **Transcriptions** | Database | Stored in SQLite tables, not as JSON files |
 | **Logs** | Project root | `transcription_suite.log` |
 | **Models** | `~/.cache/huggingface/` | Downloaded Whisper/PyAnnote models |
@@ -464,7 +474,7 @@ python SCRIPT/orchestrator.py
 
 When `include_in_viewer: true` and either `word_timestamps: true` or `enable_diarization: true` is set in `config.yaml` under `longform_recording`, your recordings will automatically be:
 
-1. Converted to MP3 and stored in `_app-transcription-viewer/backend/data/audio/`
+1. Converted to MP3 and stored in `_core/APP_VIEWER/backend/data/audio/`
 2. Saved to the viewer database with word-level timestamps
 3. Available in the viewer app's calendar and search
 
@@ -501,7 +511,7 @@ The system includes a model management feature to free up GPU memory:
 
 ## Transcription Viewer App
 
-The `_app-transcription-viewer` is a **desktop GUI application** for managing and searching your transcribed recordings.
+The Transcription Viewer is a **web-based application** for managing and searching your transcribed recordings. It runs in your browser and is launched from the system tray menu.
 
 ### Features
 
@@ -521,35 +531,38 @@ The `_app-transcription-viewer` is a **desktop GUI application** for managing an
 
 | Component | Technology |
 |-----------|------------|
-| **Desktop Shell** | Tauri (Rust + System WebView) - ~5-10MB bundle |
 | **Frontend** | React 18 + TypeScript + MUI (Material-UI) |
-| **Backend** | FastAPI (Python) |
+| **Backend** | FastAPI (Python) - integrated into `_core` |
 | **Database** | SQLite with FTS5 for full-text search |
 | **Audio** | Howler.js for playback |
 
-### Quick Start (Viewer App)
+### Starting the Viewer
+
+The viewer can be launched in two ways:
+
+#### Option 1: From System Tray (Recommended)
+
+1. Start the orchestrator: `python SCRIPT/orchestrator.py`
+2. Right-click the system tray icon
+3. Select **"Start Audio Notebook"**
+4. The web interface opens at [http://localhost:8000](http://localhost:8000)
+
+#### Option 2: Using dev.sh (Development)
 
 ```bash
-cd _app-transcription-viewer
+cd _core/APP_VIEWER
 
-# Install frontend dependencies
+# Install frontend dependencies (first time only)
 npm install
 
-# Install backend dependencies
-cd backend
-uv venv
-source .venv/bin/activate
-uv sync
-cd ..
-
-# Start both servers for development
-./dev.sh
+# Start orchestrator + frontend dev server
+./dev.sh --frontend
 ```
 
 This starts:
 
-- **Frontend**: [http://localhost:1420](http://localhost:1420)
-- **Backend**: [http://localhost:8000](http://localhost:8000)
+- **Orchestrator (backend)**: [http://localhost:8000](http://localhost:8000) - API + model
+- **Frontend (dev server)**: [http://localhost:1420](http://localhost:1420) - Hot reload
 - **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
 
 ### Views
@@ -579,20 +592,9 @@ View and play a recording with its transcription:
 
 Import audio files for transcription:
 
-- **Local path import**: Enter a file path
-- **Upload files**: Drag and drop or click to upload
+- **Server path import**: Enter the path to an audio file on the server
 - **Diarization toggle**: Enable speaker identification
 - **Progress tracking**: See transcription job status
-
-### Build for Production
-
-```bash
-cargo install tauri-cli
-cd _app-transcription-viewer
-npm run tauri build
-```
-
-Output in `src-tauri/target/release/bundle/`.
 
 ---
 
@@ -685,11 +687,11 @@ Each word is assigned to a speaker by:
 
 ## Module Architecture
 
-### Core Application Logic
+### Core Application Logic (`_core/SCRIPT/`)
 
 | Script | Purpose |
 |--------|---------|
-| `orchestrator.py` | Central controller, manages state, connects UI to backend |
+| `orchestrator.py` | Central controller, manages state, connects UI to backend, serves API |
 | `model_manager.py` | Loads and manages AI models, reads config |
 | `recorder.py` | High-level wrapper for recording sessions |
 | `stt_engine.py` | Low-level transcription engine, VAD, audio processing |
@@ -712,17 +714,31 @@ Each word is assigned to a speaker by:
 | `dependency_checker.py` | Verifies required packages and programs |
 | `diagnostics.py` | Hardware info and startup banner |
 
-### Diarization Module Structure
+### Viewer Backend (`_core/APP_VIEWER/backend/`)
 
-```text
-_module-diarization/DIARIZATION/
-├── __init__.py             # Module exports
-├── diarize_audio.py        # CLI entry point
-├── diarization_manager.py  # PyAnnote pipeline management
-├── api.py                  # API wrapper
-├── config_manager.py       # Configuration handling
-└── utils.py                # Utility functions
-```
+| File | Purpose |
+|------|---------|
+| `main.py` | FastAPI application setup |
+| `database.py` | SQLite + FTS5 schema and queries |
+| `routers/recordings.py` | Recording CRUD endpoints |
+| `routers/search.py` | Full-text search endpoints |
+| `routers/transcribe.py` | Import and transcription endpoints |
+
+### Diarization Service (`_core/DIARIZATION_SERVICE/`)
+
+| File | Purpose |
+|------|---------|
+| `service.py` | Subprocess bridge to `_module-diarization` |
+| `combiner.py` | Merges transcription + speaker labels |
+
+### Diarization Module (`_module-diarization/DIARIZATION/`)
+
+| File | Purpose |
+|------|---------|
+| `diarize_audio.py` | CLI entry point |
+| `diarization_manager.py` | PyAnnote pipeline management |
+| `api.py` | API wrapper |
+| `config_manager.py` | Configuration handling |
 
 ---
 

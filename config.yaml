@@ -5,7 +5,7 @@
 # It combines settings for:
 #   - Core transcription engine (_core)
 #   - Speaker diarization module (_module-diarization)
-#   - Transcription viewer app (_app-transcription-viewer)
+#   - Viewer app frontend and backend (_core/APP_VIEWER)
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -47,7 +47,7 @@ longform_recording:
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
     # Requires the _module-diarization environment to be set up.
-    enable_diarization: true
+    enable_diarization: false
 
     # Enable word-level timestamps in the transcription output.
     # Required for searchable transcriptions and click-to-seek in the viewer app.
@@ -167,7 +167,7 @@ display:
 # ----------------------------------------------------------------------------
 # Configuration for where the viewer app stores files.
 storage:
-    # Directory for storing audio files (relative to _app-transcription-viewer/backend/).
+    # Directory for storing audio files (relative to _core/APP_VIEWER/backend/).
     # Audio files imported via the viewer app are stored here.
     audio_dir: "data/audio"
 
