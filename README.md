@@ -623,9 +623,31 @@ View and play a recording with its transcription:
 
 Import audio files for transcription:
 
-- **Server path import**: Enter the path to an audio file on the server
+- **Drag & drop**: Drag audio files into the drop zone
+- **File browser**: Click to browse for audio files
 - **Diarization toggle**: Enable speaker identification
 - **Progress tracking**: See transcription job status
+
+### Development Notes
+
+When modifying the frontend source files in `_core/APP_VIEWER/src/`, you **must rebuild** the production bundle for changes to take effect:
+
+```bash
+cd _core/APP_VIEWER
+
+# Rebuild the production bundle
+npm run build
+```
+
+The orchestrator serves static files from `_core/APP_VIEWER/dist/`. Without rebuilding, your changes will not be visible when running from the system tray.
+
+**Cleanup old builds**: After rebuilding, old JavaScript bundles remain in `dist/assets/`. To save disk space, delete old bundles:
+
+```bash
+# Remove old bundles (keep only the latest)
+cd _core/APP_VIEWER/dist/assets
+ls -t *.js | tail -n +2 | xargs rm -f  # Keep newest, delete rest
+```
 
 ---
 
