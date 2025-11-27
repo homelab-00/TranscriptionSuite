@@ -4,7 +4,6 @@ import {
   Paper,
   Typography,
   Button,
-  TextField,
   Switch,
   FormControlLabel,
   LinearProgress,
@@ -13,10 +12,8 @@ import {
   ListItemText,
   ListItemIcon,
   Alert,
-  InputAdornment,
 } from '@mui/material';
 import {
-  Folder as FolderIcon,
   Search as BrowseIcon,
   AudioFile as AudioIcon,
   CheckCircle as CheckIcon,
@@ -34,7 +31,6 @@ interface ImportJob {
 }
 
 export default function ImportView() {
-  const [filePath, setFilePath] = useState('');
   const [enableDiarization, setEnableDiarization] = useState(false);
   const [enableWordTimestamps, setEnableWordTimestamps] = useState(true);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
@@ -44,39 +40,6 @@ export default function ImportView() {
   // Open HTML file picker
   const openFilePicker = () => {
     fileInputRef.current?.click();
-  };
-
-  const importFilePath = async (path: string) => {
-    if (!path.trim()) {
-      setError('Please enter a file path');
-      return;
-    }
-
-    setError(null);
-    
-    try {
-      const response = await api.importFile(path, true, enableDiarization, enableWordTimestamps);
-      
-      const newJob: ImportJob = {
-        id: response.recording_id,
-        filename: path.split('/').pop() || path,
-        status: 'transcribing',
-        message: response.message,
-      };
-      
-      setJobs(prev => [newJob, ...prev]);
-      setFilePath('');
-      
-      // Start polling for status
-      pollJobStatus(newJob.id);
-      
-    } catch (err: any) {
-      setError(err.response?.data?.detail || `Failed to import file: ${path}`);
-    }
-  };
-
-  const handleImportFile = async () => {
-    await importFilePath(filePath);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -199,44 +162,10 @@ export default function ImportView() {
           size="large"
           startIcon={<BrowseIcon />}
           onClick={openFilePicker}
-          sx={{ py: 2, px: 4, mb: 3, width: '100%' }}
+          sx={{ py: 2, px: 4, mb: 2, width: '100%' }}
         >
           Browse for Audio Files
         </Button>
-
-        {/* Manual path input */}
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          Or enter a file path manually:
-        </Typography>
-        
-        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-          <TextField
-            fullWidth
-            label="File Path"
-            placeholder="/path/to/audio.mp3"
-            value={filePath}
-            onChange={(e) => setFilePath(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && filePath.trim()) {
-                handleImportFile();
-              }
-            }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <FolderIcon sx={{ color: 'text.secondary' }} />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <Button
-            variant="outlined"
-            onClick={handleImportFile}
-            disabled={!filePath.trim()}
-          >
-            Import
-          </Button>
-        </Box>
 
         <FormControlLabel
           control={

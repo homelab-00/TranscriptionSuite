@@ -203,10 +203,13 @@ class STTOrchestrator:
             )
             return
 
-        # Capture the active transcriber here to ensure it's not None for the worker
-        active_transcriber = self.main_transcriber
-        if not active_transcriber:
-            safe_print("Transcription models are not ready. Please wait.", "warning")
+        # Check if audio notebook is running
+        if self.audio_notebook_server is not None:
+            safe_print(
+                "Cannot start static transcription while Audio Notebook is running. "
+                "Please stop the Audio Notebook first.",
+                "warning",
+            )
             return
 
         if not QFileDialog:
@@ -224,16 +227,43 @@ class STTOrchestrator:
             return
 
         # Now, dispatch the actual work to a background thread
-        # Pass the captured active_transcriber to the worker
-        def _worker(transcriber_instance: LongFormRecorder):
+        def _worker():
             self.app_state["current_mode"] = "static"
             if self.tray_manager:
                 self.tray_manager.set_state("transcribing")
+                self.tray_manager.set_audio_notebook_enabled(False)
+                self.tray_manager.set_recording_actions_enabled(False)
 
             try:
-                # Instantiate the transcriber using the captured instance
+                # Handle model switching/loading
+                current_model_type = self.app_state.get("loaded_model_type")
+                if current_model_type == "longform":
+                    # Switching from longform to static
+                    safe_print("Switching from longform to static model...", "info")
+                    if self.tray_manager:
+                        self.tray_manager.set_state("loading")
+                    self._unload_all_models_sync()
+                    self._load_static_model_sync()
+                    self.app_state["loaded_model_type"] = "static"
+                    if self.tray_manager:
+                        self.tray_manager.set_state("transcribing")
+                elif current_model_type != "static":
+                    # No model loaded yet - load static model
+                    safe_print("Loading static model...", "info")
+                    if self.tray_manager:
+                        self.tray_manager.set_state("loading")
+                    self._load_static_model_sync()
+                    self.app_state["loaded_model_type"] = "static"
+                    if self.tray_manager:
+                        self.tray_manager.set_state("transcribing")
+                # else: already have static model loaded, keep it
+
+                # Instantiate the transcriber WITHOUT main_transcriber
+                # Pass config so it can get model settings
                 self.static_transcriber = StaticFileTranscriber(
-                    transcriber_instance, self.console_display
+                    main_transcriber=None,
+                    console_display=self.console_display,
+                    config=self.config,
                 )
 
                 # Get static transcription settings from config
@@ -290,6 +320,9 @@ class STTOrchestrator:
                 if self.tray_manager:
                     self.tray_manager.set_state("error")
             finally:
+                # DON'T unload the static model - keep it for potential next static transcription
+                # Model will only be unloaded when switching back to longform
+
                 # Reset state after completion or failure
                 self.app_state["current_mode"] = None
                 self.static_transcriber = None
@@ -297,9 +330,11 @@ class STTOrchestrator:
                     # Check again because another operation might have started
                     if self.app_state["current_mode"] is None:
                         self.tray_manager.set_state("standby")
+                    self.tray_manager.set_audio_notebook_enabled(True)
+                    self.tray_manager.set_recording_actions_enabled(True)
 
-        # Start thread, passing the captured transcriber as an argument
-        threading.Thread(target=_worker, args=(active_transcriber,), daemon=True).start()
+        # Start thread - no longer needs transcriber argument
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _start_longform(self):
         """Start long-form recording."""
@@ -310,16 +345,78 @@ class STTOrchestrator:
             )
             return
 
+        # Check if audio notebook is running
+        if self.audio_notebook_server is not None:
+            safe_print(
+                "Cannot start recording while Audio Notebook is running. "
+                "Please stop the Audio Notebook first.",
+                "warning",
+            )
+            return
+
+        # Check if we need to switch models (from static to longform)
+        current_model_type = self.app_state.get("loaded_model_type")
+
+        if current_model_type == "static":
+            # Need to switch from static to longform
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+                self.tray_manager.set_static_transcription_enabled(False)
+                self.tray_manager.set_audio_notebook_enabled(False)
+
+            safe_print("Switching from static to longform model...", "info")
+            self._unload_all_models_sync()
+
+            # Load the longform models
+            try:
+                self._load_longform_models_sync()
+                self.app_state["loaded_model_type"] = "longform"
+            except Exception as e:
+                logging.error(f"Failed to load longform models: {e}", exc_info=True)
+                safe_print(f"Error loading models: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+                    self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_audio_notebook_enabled(True)
+                return
+
+        elif current_model_type != "longform":
+            # No model loaded, need to load longform
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+                self.tray_manager.set_static_transcription_enabled(False)
+                self.tray_manager.set_audio_notebook_enabled(False)
+
+            safe_print("Loading longform model...", "info")
+            try:
+                self._load_longform_models_sync()
+                self.app_state["loaded_model_type"] = "longform"
+            except Exception as e:
+                logging.error(f"Failed to load longform models: {e}", exc_info=True)
+                safe_print(f"Error loading models: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+                    self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_audio_notebook_enabled(True)
+                return
+        # else: longform model already loaded, just proceed
+
         active_transcriber = (
             self.preview_transcriber if self.preview_enabled else self.main_transcriber
         )
 
         if not self.main_transcriber or (self.preview_enabled and not active_transcriber):
-            safe_print("Transcription models are not ready. Please wait.", "warning")
+            safe_print("Transcription models not available. Please check logs.", "error")
+            if self.tray_manager:
+                self.tray_manager.set_state("error")
+                self.tray_manager.set_static_transcription_enabled(True)
+                self.tray_manager.set_audio_notebook_enabled(True)
             return
 
         if self.tray_manager:
             self.tray_manager.set_state("recording")
+            self.tray_manager.set_static_transcription_enabled(False)
+            self.tray_manager.set_audio_notebook_enabled(False)
 
         # The part that can fail (display start) must be handled first.
         try:
@@ -335,6 +432,7 @@ class STTOrchestrator:
             # Abort the start-up process cleanly.
             if self.tray_manager:
                 self.tray_manager.set_state("standby")
+                self.tray_manager.set_audio_notebook_enabled(True)
             return
 
         # If the display started successfully, now we can set the state
@@ -371,6 +469,7 @@ class STTOrchestrator:
                     self.app_state["current_mode"] = None
                     if self.tray_manager:
                         self.tray_manager.set_state("error")
+                        self.tray_manager.set_audio_notebook_enabled(True)
                     return
 
                 # When preview is enabled, we need to stop the previewer explicitly
@@ -410,8 +509,14 @@ class STTOrchestrator:
             finally:
                 self.app_state["is_transcribing"] = False
                 self.app_state["current_mode"] = None
-                if self.tray_manager and self.app_state["current_mode"] is None:
+
+                # DON'T unload longform models - keep them for potential next recording
+                # Model will only be unloaded when switching to static/audio notebook
+
+                if self.tray_manager:
                     self.tray_manager.set_state("standby")
+                    self.tray_manager.set_audio_notebook_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -577,8 +682,138 @@ class STTOrchestrator:
             # Reload models
             self._reload_models()
 
+    def _unload_all_models_sync(self) -> None:
+        """
+        Synchronously unload ALL models from GPU memory.
+
+        This is a blocking call that waits until all models are unloaded.
+        Used before switching between different transcription modes to ensure
+        only one model is loaded at a time.
+        """
+        logging.info("Synchronous model unload starting...")
+
+        # Clean up preview transcriber if it exists
+        if self.preview_transcriber:
+            try:
+                logging.info("Cleaning up preview transcriber")
+                self.preview_transcriber.clean_up()
+                self.preview_transcriber = None
+            except Exception as e:
+                logging.error(f"Error unloading preview transcriber: {e}", exc_info=True)
+
+        # Clean up main transcriber (longform model)
+        if self.main_transcriber:
+            try:
+                logging.info("Cleaning up main transcriber")
+                self.main_transcriber.clean_up()
+                self.main_transcriber = None
+            except Exception as e:
+                logging.error(f"Error unloading main transcriber: {e}", exc_info=True)
+
+        # Clean up cached static transcriber model
+        try:
+            from static_transcriber import unload_cached_whisper_model
+
+            logging.info("Unloading cached static transcriber model")
+            unload_cached_whisper_model()
+        except Exception as e:
+            logging.error(f"Error unloading static transcriber model: {e}", exc_info=True)
+
+        # Clean up models in model manager
+        try:
+            logging.info("Cleaning up model manager")
+            self.model_manager.cleanup_all_models()
+        except Exception as e:
+            logging.error(f"Error in model manager cleanup: {e}", exc_info=True)
+
+        # Force GPU cache clear
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logging.info("GPU cache cleared")
+        except Exception as e:
+            logging.debug(f"Could not clear GPU cache: {e}")
+
+        self.app_state["models_loaded"] = False
+        logging.info("Synchronous model unload completed")
+
+    def _load_longform_models_sync(self) -> None:
+        """
+        Synchronously load longform transcription models.
+
+        This is a blocking call that loads the main_transcriber (and optionally
+        preview_transcriber if preview is enabled).
+        """
+        logging.info("Synchronous longform model load starting...")
+
+        try:
+            # Load models based on configuration
+            if self.preview_enabled:
+                safe_print("Loading preview + main transcriber models...", "info")
+                self._load_dual_transcriber_mode()
+            else:
+                safe_print("Loading main transcriber model...", "info")
+                self._load_single_transcriber_mode()
+
+            if self.main_transcriber:
+                self.app_state["models_loaded"] = True
+                safe_print("Longform models loaded successfully.", "success")
+                logging.info("Longform models loaded")
+
+                # Restart preview transcription if enabled
+                if self.preview_enabled and self.preview_transcriber:
+                    self.preview_transcriber.start_chunked_transcription(
+                        self._handle_preview_sentence
+                    )
+
+                if self.tray_manager:
+                    self.tray_manager.update_models_menu_item(models_loaded=True)
+            else:
+                raise RuntimeError("Main transcriber failed to initialize")
+
+        except Exception as e:
+            logging.error(f"Failed to load longform models: {e}", exc_info=True)
+            raise
+
+    def _load_static_model_sync(self) -> None:
+        """
+        Synchronously load the static transcription model.
+
+        This pre-loads the cached Whisper model used by StaticFileTranscriber
+        so it's ready for immediate use when transcription is requested.
+        """
+        logging.info("Synchronous static model load starting...")
+
+        try:
+            from static_transcriber import get_cached_whisper_model
+
+            # Get model configuration from main_transcriber config
+            main_config = self.config.get("main_transcriber", {})
+            model_path = main_config.get("model", "Systran/faster-whisper-large-v3")
+            compute_type = main_config.get("compute_type", "default")
+            device = main_config.get("device", "cuda")
+
+            safe_print(f"Loading static model '{model_path}'...", "info")
+
+            # This will load and cache the model
+            get_cached_whisper_model(model_path, device, compute_type)
+
+            self.app_state["models_loaded"] = True
+            safe_print("Static model loaded successfully.", "success")
+            logging.info("Static model loaded and cached")
+
+            if self.tray_manager:
+                self.tray_manager.update_models_menu_item(models_loaded=True)
+
+        except Exception as e:
+            logging.error(f"Failed to load static model: {e}", exc_info=True)
+            raise
+
     def _unload_models(self):
-        """Unload all transcription models to free GPU memory."""
+        """Unload all transcription models to free GPU memory (async version for menu)."""
         if not self.app_state["models_loaded"]:
             safe_print("Models are already unloaded.", "info")
             return
@@ -589,51 +824,11 @@ class STTOrchestrator:
                     self.tray_manager.set_state("loading")
 
                 safe_print("Unloading transcription models...", "info")
-                logging.info("Starting model unload sequence")
 
-                # Clean up preview transcriber if it exists
-                if self.preview_transcriber:
-                    try:
-                        logging.info("Cleaning up preview transcriber")
-                        self.preview_transcriber.clean_up()
-                        self.preview_transcriber = None
-                        safe_print("Preview transcriber unloaded.", "success")
-                    except Exception as e:
-                        logging.error(
-                            f"Error unloading preview transcriber: {e}", exc_info=True
-                        )
-                        safe_print(
-                            f"Warning: Could not fully unload preview transcriber: {e}",
-                            "warning",
-                        )
+                # Use the synchronous unload
+                self._unload_all_models_sync()
 
-                # Clean up main transcriber
-                if self.main_transcriber:
-                    try:
-                        logging.info("Cleaning up main transcriber")
-                        self.main_transcriber.clean_up()
-                        self.main_transcriber = None
-                        safe_print("Main transcriber unloaded.", "success")
-                    except Exception as e:
-                        logging.error(
-                            f"Error unloading main transcriber: {e}", exc_info=True
-                        )
-                        safe_print(
-                            f"Warning: Could not fully unload main transcriber: {e}",
-                            "warning",
-                        )
-
-                # Clean up models in model manager
-                try:
-                    logging.info("Cleaning up model manager")
-                    self.model_manager.cleanup_all_models()
-                    safe_print("GPU memory cleared.", "success")
-                except Exception as e:
-                    logging.error(f"Error in model manager cleanup: {e}", exc_info=True)
-
-                self.app_state["models_loaded"] = False
                 safe_print("All models unloaded successfully.", "success")
-                logging.info("Model unload sequence completed")
 
                 if self.tray_manager:
                     self.tray_manager.set_state("standby")
@@ -720,10 +915,39 @@ class STTOrchestrator:
             safe_print("Audio Notebook is already running.", "warning")
             return
 
+        # Handle model switching/loading
+        current_model_type = self.app_state.get("loaded_model_type")
+
+        if current_model_type == "longform":
+            # Switching from longform to static
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+                self.tray_manager.set_recording_actions_enabled(False)
+
+            safe_print(
+                "Switching from longform to static model for Audio Notebook...", "info"
+            )
+            self._unload_all_models_sync()
+            # Load the static model now
+            self._load_static_model_sync()
+            self.app_state["loaded_model_type"] = "static"
+        elif current_model_type != "static":
+            # No model loaded yet - need to load static model
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+                self.tray_manager.set_recording_actions_enabled(False)
+
+            safe_print("Loading static model for Audio Notebook...", "info")
+            self._load_static_model_sync()
+            self.app_state["loaded_model_type"] = "static"
+        # else: static model already loaded, keep it
+
         def server_worker():
             try:
                 from fastapi import FastAPI
                 from fastapi.middleware.cors import CORSMiddleware
+                from fastapi.staticfiles import StaticFiles
+                from fastapi.responses import FileResponse
                 from pydantic import BaseModel
                 import uvicorn
             except ImportError as e:
@@ -794,8 +1018,9 @@ class STTOrchestrator:
 
             @app.get("/api/health", response_model=HealthResponse)
             async def health_check():
+                # Models are loaded on-demand, so status is always "ok" when server is running
                 return HealthResponse(
-                    status="ok" if self.app_state["models_loaded"] else "loading",
+                    status="ok",
                     models_loaded=bool(self.app_state["models_loaded"]),
                 )
 
@@ -808,6 +1033,38 @@ class STTOrchestrator:
                     request.language,
                 )
 
+            # Serve the built frontend static files
+            frontend_dist = os.path.join(self.script_dir, "..", "APP_VIEWER", "dist")
+            if os.path.exists(frontend_dist):
+                # Mount static assets (JS, CSS, etc.)
+                app.mount(
+                    "/assets",
+                    StaticFiles(directory=os.path.join(frontend_dist, "assets")),
+                    name="assets",
+                )
+
+                # Serve index.html for root and SPA fallback routes
+                @app.get("/")
+                async def serve_root():
+                    return FileResponse(os.path.join(frontend_dist, "index.html"))
+
+                # SPA fallback - catch all non-API routes
+                @app.get("/{full_path:path}")
+                async def serve_spa(full_path: str):
+                    # Don't intercept API routes or docs
+                    if full_path.startswith(("api/", "docs", "openapi.json")):
+                        return None
+                    file_path = os.path.join(frontend_dist, full_path)
+                    if os.path.exists(file_path) and os.path.isfile(file_path):
+                        return FileResponse(file_path)
+                    # Return index.html for SPA routes
+                    return FileResponse(os.path.join(frontend_dist, "index.html"))
+            else:
+                safe_print(
+                    "Frontend not built. Run 'npm run build' in APP_VIEWER/",
+                    "warning",
+                )
+
             # Create uvicorn config with graceful shutdown
             config = uvicorn.Config(
                 app,
@@ -818,28 +1075,38 @@ class STTOrchestrator:
             server = uvicorn.Server(config)
             self.audio_notebook_server = server
 
-            # Update tray menu
+            # Update tray menu and icon state, disable other operations
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(True)
+                self.tray_manager.set_state("audio_notebook")
+                self.tray_manager.set_recording_actions_enabled(False)
+                self.tray_manager.set_static_transcription_enabled(False)
 
             safe_print(
                 f"Audio Notebook started on http://localhost:{self.api_port}", "success"
             )
             safe_print(f"  API Docs: http://localhost:{self.api_port}/docs", "info")
 
-            # Open browser
+            # Open browser to frontend (or docs if frontend not built)
             if self.open_browser:
                 import webbrowser
 
-                webbrowser.open(f"http://localhost:{self.api_port}/docs")
+                frontend_dist = os.path.join(self.script_dir, "..", "APP_VIEWER", "dist")
+                if os.path.exists(frontend_dist):
+                    webbrowser.open(f"http://localhost:{self.api_port}/")
+                else:
+                    webbrowser.open(f"http://localhost:{self.api_port}/docs")
 
             # Run the server (blocks until stopped)
             server.run()
 
-            # Cleanup after server stops
+            # Cleanup after server stops - re-enable other operations
             self.audio_notebook_server = None
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(False)
+                self.tray_manager.set_state("standby")
+                self.tray_manager.set_recording_actions_enabled(True)
+                self.tray_manager.set_static_transcription_enabled(True)
             safe_print("Audio Notebook stopped.", "info")
 
         self.audio_notebook_thread = threading.Thread(target=server_worker, daemon=True)
@@ -851,8 +1118,15 @@ class STTOrchestrator:
             safe_print("Stopping Audio Notebook...", "info")
             self.audio_notebook_server.should_exit = True
             self.audio_notebook_server = None
+
+            # DON'T unload the static model - keep it for potential static transcription
+            # Model will only be unloaded when switching back to longform
+
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(False)
+                self.tray_manager.set_state("standby")
+                self.tray_manager.set_recording_actions_enabled(True)
+                self.tray_manager.set_static_transcription_enabled(True)
 
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
@@ -895,44 +1169,54 @@ class STTOrchestrator:
             safe_print(f"File not found: {self.static_file}", "error")
             return
 
-        safe_print("Loading model for static transcription...", "info")
-        self._load_single_transcriber_mode_for_api()
+        safe_print("Transcribing: {input_path.name}", "info")
 
-        if not self.main_transcriber:
-            safe_print("Failed to load transcription model.", "error")
-            return
-
-        self.app_state["models_loaded"] = True
-        safe_print("Model loaded successfully.", "success")
-
-        # Create static transcriber and run
+        # Create static transcriber with config (no main_transcriber needed)
+        # The static transcriber will load its own model via get_cached_whisper_model
         self.static_transcriber = StaticFileTranscriber(
-            self.main_transcriber, self.console_display
+            main_transcriber=None,
+            console_display=self.console_display,
+            config=self.config,
         )
 
-        safe_print(f"Transcribing: {input_path.name}", "info")
-        self.static_transcriber.transcribe_file(str(input_path))
+        # Get static transcription settings from config
+        static_config = self.config.get("static_transcription", {})
+        enable_diarization = static_config.get("enable_diarization", False)
+        max_segment_chars = static_config.get("max_segment_chars", 500)
+        language = self.config.get("transcription_options", {}).get("language")
 
-        # Output path is same as input but .txt
-        output_path = input_path.with_suffix(".txt")
-        safe_print(f"Output saved to: {output_path}", "success")
+        # Generate output file path
+        output_file = str(input_path.parent / f"{input_path.stem}_transcription.json")
 
+        if enable_diarization and self.static_transcriber.is_diarization_available():
+            safe_print("Diarization enabled - will identify speakers", "info")
+            self.static_transcriber.transcribe_file_with_diarization(
+                str(input_path),
+                output_file=output_file,
+                output_format="json",
+                language=language,
+                max_segment_chars=max_segment_chars,
+            )
+        else:
+            self.static_transcriber.transcribe_file_with_word_timestamps(
+                str(input_path),
+                output_file=output_file,
+                language=language,
+                max_segment_chars=max_segment_chars,
+            )
+
+        # Unload models before exiting
+        self._unload_all_models_sync()
+
+        safe_print(f"Output saved to: {output_file}", "success")
         self.stop()
 
     def _run_audio_notebook_mode(self):
         """Run the audio notebook webapp with transcription API."""
         safe_print("Starting Audio Notebook...", "info")
 
-        # Load model for transcription API
-        safe_print("Loading transcription model...", "info")
-        self._load_single_transcriber_mode_for_api()
-
-        if not self.main_transcriber:
-            safe_print("Failed to load transcription model.", "error")
-            return
-
-        self.app_state["models_loaded"] = True
-        safe_print("Model loaded successfully.", "success")
+        # No need to load models - transcription API will load them on demand
+        # via get_cached_whisper_model() when transcription is requested
 
         # Start the FastAPI backend
         self._run_audio_notebook_server()
@@ -1011,8 +1295,9 @@ class STTOrchestrator:
 
         @app.get("/api/health", response_model=HealthResponse)
         async def health_check():
+            # Models are loaded on-demand, so we report "ok" status even if not loaded
             return HealthResponse(
-                status="ok" if self.app_state["models_loaded"] else "loading",
+                status="ok",
                 models_loaded=bool(self.app_state["models_loaded"]),
             )
 
@@ -1052,17 +1337,10 @@ class STTOrchestrator:
     def _run_tray_mode(self):
         """Run the traditional tray icon mode."""
 
-        # Proactively load the longform model in a separate thread
+        # Preload longform models at startup
         def preload_startup_models():
             if self.tray_manager:
                 self.tray_manager.set_state("loading")  # Grey icon
-
-            if self.preview_enabled:
-                safe_print("Pre-loading transcription models (with preview)...", "info")
-            else:
-                safe_print(
-                    "Pre-loading transcription model (preview disabled)...", "info"
-                )
 
             try:
                 show_waveform = self.config.get("display", {}).get("show_waveform", True)
@@ -1073,16 +1351,23 @@ class STTOrchestrator:
                 logging.error("Failed to initialise console display: %s", exc)
                 self.console_display = None
 
-            # --- Architecture Logic ---
+            # Preload longform models at startup
             if self.preview_enabled:
+                safe_print("Pre-loading transcription models (with preview)...", "info")
                 self._load_dual_transcriber_mode()
             else:
+                safe_print(
+                    "Pre-loading transcription model (preview disabled)...", "info"
+                )
                 self._load_single_transcriber_mode()
 
             success = self.main_transcriber is not None
 
             if success:
                 self.app_state["models_loaded"] = True
+                self.app_state["loaded_model_type"] = (
+                    "longform"  # Track which model is loaded
+                )
                 safe_print("Models loaded successfully.", "success")
                 if self.preview_enabled and self.preview_transcriber:
                     self.preview_transcriber.start_chunked_transcription(
@@ -1130,7 +1415,8 @@ class STTOrchestrator:
         """
         Transcribe an audio file via the API.
 
-        This uses the StaticFileTranscriber which handles model loading internally.
+        This uses the StaticFileTranscriber which handles model loading internally
+        via get_cached_whisper_model(). No pre-loaded models are required.
         """
         from pathlib import Path
         import asyncio
@@ -1138,9 +1424,6 @@ class STTOrchestrator:
         wav_file = Path(wav_path)
         if not wav_file.exists():
             raise RuntimeError(f"Audio file not found: {wav_path}")
-
-        if not self.main_transcriber:
-            raise RuntimeError("Transcription model not loaded")
 
         logging.info(f"API transcription request: {wav_path}")
         logging.info(
@@ -1181,11 +1464,12 @@ class STTOrchestrator:
             static_config = self.config.get("static_transcription", {})
             max_segment_chars = static_config.get("max_segment_chars", 500)
 
-            # Create static transcriber using the main transcriber
-            # Assert non-None so the type checker recognizes the value is valid
-            assert self.main_transcriber is not None
+            # Create static transcriber with config (no main_transcriber needed)
+            # The static transcriber loads its own model via get_cached_whisper_model()
             static_transcriber = StaticFileTranscriber(
-                self.main_transcriber, self.console_display
+                main_transcriber=None,
+                console_display=self.console_display,
+                config=self.config,
             )
 
             # Transcribe based on options

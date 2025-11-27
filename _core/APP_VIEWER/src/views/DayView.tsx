@@ -63,6 +63,7 @@ export default function DayView() {
 
   // New entry form state
   const [newEntryFilePath, setNewEntryFilePath] = useState('');
+  const [newEntryFile, setNewEntryFile] = useState<File | null>(null);
   const [enableDiarization, setEnableDiarization] = useState(false);
   const [enableWordTimestamps, setEnableWordTimestamps] = useState(true);
   const [importLoading, setImportLoading] = useState(false);
@@ -136,10 +137,13 @@ export default function DayView() {
     const afternoon: HourSlot[] = [];
 
     for (let hour = 0; hour < 24; hour++) {
-      const hourRecordings = recordings.filter(rec => {
-        const recordedAt = dayjs(rec.recorded_at);
-        return recordedAt.hour() === hour;
-      });
+      const hourRecordings = recordings
+        .filter(rec => {
+          const recordedAt = dayjs(rec.recorded_at);
+          return recordedAt.hour() === hour;
+        })
+        // Sort by oldest first (earliest recorded_at)
+        .sort((a, b) => dayjs(a.recorded_at).valueOf() - dayjs(b.recorded_at).valueOf());
 
       const slot: HourSlot = { hour, recordings: hourRecordings };
       
@@ -160,30 +164,20 @@ export default function DayView() {
     return `${hour - 12} PM`;
   };
 
-  const handleHourClick = (hour: number, recordings: RecordingWithTranscription[]) => {
-    if (recordings.length > 0) {
-      setSelectedRecording(recordings[0]);
-      loadAudio(recordings[0].id);
-    } else {
-      setNewEntryHour(hour);
-      setDialogOpen(true);
-    }
-  };
-
-  // Open HTML file picker - since this is web-only, user enters path manually
+  // Open HTML file picker
   const openFilePicker = () => {
-    // In web mode, file upload doesn't give us the actual path
-    // User needs to enter the server-side path manually
-    setImportError('For web mode, please enter the file path on the server directly.');
+    fileInputRef.current?.click();
   };
 
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0) {
-      // For web, we can't get the full path - user must enter it manually
-      setImportError('File upload not supported in web mode. Please enter the server file path manually.');
+      const file = files[0];
+      setNewEntryFile(file);
+      setNewEntryFilePath(file.name);
+      setImportError(null);
     }
-    // Reset file input
+    // Reset file input for re-selection
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -295,6 +289,7 @@ export default function DayView() {
           setImportProgress(null);
           setDialogOpen(false);
           setNewEntryFilePath('');
+          setNewEntryFile(null);
           await loadRecordingsForDay();
         } else if (status.status === 'failed') {
           setImportError(status.message || 'Transcription failed');
@@ -316,7 +311,7 @@ export default function DayView() {
   };
 
   const handleCreateEntry = async () => {
-    if (!newEntryFilePath.trim()) {
+    if (!newEntryFile && !newEntryFilePath.trim()) {
       setImportError('Please select an audio file');
       return;
     }
@@ -326,7 +321,14 @@ export default function DayView() {
     setImportProgress('Starting transcription...');
 
     try {
-      const response = await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
+      let response;
+      if (newEntryFile) {
+        // Upload file directly
+        response = await api.uploadFile(newEntryFile, enableDiarization, enableWordTimestamps);
+      } else {
+        // Use server-side file path
+        response = await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
+      }
       // Start polling for transcription status
       pollJobStatus(response.recording_id);
     } catch (err: unknown) {
@@ -349,30 +351,38 @@ export default function DayView() {
 
   const { morning, afternoon } = getHourSlots();
 
+  const handleRecordingClick = (rec: RecordingWithTranscription, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setSelectedRecording(rec);
+    loadAudio(rec.id);
+  };
+
+  const handleAddClick = (hour: number, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setNewEntryHour(hour);
+    setDialogOpen(true);
+  };
+
   const renderHourSlot = (slot: HourSlot) => {
     const hasRecordings = slot.recordings.length > 0;
+    const maxVisible = 4;
+    const visibleRecordings = slot.recordings.slice(0, maxVisible);
+    const hiddenCount = Math.max(0, slot.recordings.length - maxVisible);
     
     return (
       <Paper
         key={slot.hour}
-        elevation={hasRecordings ? 3 : 1}
-        onClick={() => handleHourClick(slot.hour, slot.recordings)}
+        elevation={1}
         sx={{
           p: 1.5,
           mb: 1,
-          cursor: 'pointer',
-          bgcolor: hasRecordings ? 'primary.dark' : 'background.paper',
-          border: hasRecordings ? '2px solid' : '1px solid',
-          borderColor: hasRecordings ? 'primary.main' : 'divider',
-          transition: 'all 0.2s',
-          '&:hover': {
-            bgcolor: hasRecordings ? 'primary.main' : 'action.hover',
-            transform: 'scale(1.02)',
-          },
+          bgcolor: 'background.paper',
+          border: '1px solid',
+          borderColor: 'divider',
           position: 'relative',
         }}
       >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography variant="body2" fontWeight={hasRecordings ? 'bold' : 'normal'}>
             {formatHour(slot.hour)}
           </Typography>
@@ -385,24 +395,91 @@ export default function DayView() {
             />
           )}
         </Box>
-        {hasRecordings && (
-          <Box sx={{ mt: 1 }}>
-            {slot.recordings.map((rec, idx) => (
+        
+        {/* Recordings row with adaptive width */}
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'stretch', minHeight: 48 }}>
+          {/* Visible recordings */}
+          {visibleRecordings.map((rec) => (
+            <Paper
+              key={rec.id}
+              elevation={3}
+              onClick={(e) => handleRecordingClick(rec, e)}
+              sx={{
+                flex: '1 1 auto',
+                minWidth: 0,
+                p: 1,
+                cursor: 'pointer',
+                bgcolor: 'primary.dark',
+                border: '2px solid',
+                borderColor: 'primary.main',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s',
+                '&:hover': {
+                  bgcolor: 'primary.main',
+                  transform: 'scale(1.02)',
+                },
+              }}
+            >
               <Typography
-                key={rec.id}
                 variant="caption"
-                sx={{ display: 'block', color: 'primary.contrastText' }}
+                sx={{
+                  color: 'primary.contrastText',
+                  textAlign: 'center',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
               >
-                {rec.filename || `Recording ${idx + 1}`}
+                {rec.filename || 'Recording'}
               </Typography>
-            ))}
-          </Box>
-        )}
-        {!hasRecordings && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 0.5, opacity: 0.3 }}>
+            </Paper>
+          ))}
+          
+          {/* "More" indicator if there are hidden recordings */}
+          {hiddenCount > 0 && (
+            <Box
+              sx={{
+                flex: `0 0 auto`,
+                display: 'flex',
+                alignItems: 'center',
+                px: 0.5,
+              }}
+            >
+              <Typography variant="caption" color="text.secondary">
+                +{hiddenCount}
+              </Typography>
+            </Box>
+          )}
+          
+          {/* Add button - always visible */}
+          <Paper
+            elevation={1}
+            onClick={(e) => handleAddClick(slot.hour, e)}
+            sx={{
+              flex: '0 0 auto',
+              width: 48,
+              p: 1,
+              cursor: 'pointer',
+              bgcolor: 'background.default',
+              border: '2px dashed',
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s',
+              opacity: 0.6,
+              '&:hover': {
+                opacity: 1,
+                borderColor: 'primary.main',
+                bgcolor: 'action.hover',
+              },
+            }}
+          >
             <AddIcon fontSize="small" />
-          </Box>
-        )}
+          </Paper>
+        </Box>
       </Paper>
     );
   };
@@ -648,11 +725,11 @@ export default function DayView() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)} disabled={importLoading}>Cancel</Button>
+          <Button onClick={() => { setDialogOpen(false); setNewEntryFile(null); setNewEntryFilePath(''); }} disabled={importLoading}>Cancel</Button>
           <Button
             onClick={handleCreateEntry}
             variant="contained"
-            disabled={importLoading || !newEntryFilePath.trim()}
+            disabled={importLoading || (!newEntryFile && !newEntryFilePath.trim())}
           >
             {importLoading ? <CircularProgress size={24} /> : 'Create & Transcribe'}
           </Button>
