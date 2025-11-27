@@ -18,6 +18,11 @@ import {
   Slider,
   Alert,
   LinearProgress,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  TextField,
 } from '@mui/material';
 import {
   ChevronLeft as ChevronLeftIcon,
@@ -28,6 +33,8 @@ import {
   Forward10 as Forward10Icon,
   Search as BrowseIcon,
 } from '@mui/icons-material';
+import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
+import EditCalendar from '@mui/icons-material/EditCalendar';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import dayjs, { Dayjs } from 'dayjs';
@@ -69,6 +76,26 @@ export default function DayView() {
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<string | null>(null);
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    mouseX: number;
+    mouseY: number;
+    recording: RecordingWithTranscription;
+  } | null>(null);
+  
+  // Change date dialog state
+  const [changeDateDialogOpen, setChangeDateDialogOpen] = useState(false);
+  const [changeDateRecording, setChangeDateRecording] = useState<RecordingWithTranscription | null>(null);
+  const [newDate, setNewDate] = useState('');
+  const [newTime, setNewTime] = useState('');
+  const [changeDateLoading, setChangeDateLoading] = useState(false);
+  const [changeDateError, setChangeDateError] = useState<string | null>(null);
+  
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteRecording, setDeleteRecording] = useState<RecordingWithTranscription | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   
   // HTML file input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -322,9 +349,34 @@ export default function DayView() {
 
     try {
       let response;
+      
+      // Get the next available minute for this hour slot
+      let nextMinute = 1;
+      let nextSecond = 0;
+      if (newEntryHour !== null) {
+        try {
+          const result = await api.getNextAvailableMinute(currentDate.format('YYYY-MM-DD'), newEntryHour);
+          nextMinute = result.next_minute;
+          nextSecond = result.next_second ?? 0;
+        } catch (err: any) {
+          if (err?.response?.status === 400) {
+            setImportError(err?.response?.data?.detail || 'Hour block is full');
+            setImportLoading(false);
+            return;
+          }
+          console.warn('Failed to get next minute, using 1:', err);
+        }
+      }
+      
+      // Calculate the recorded_at timestamp from the selected date, hour, and next available minute
+      // Use .format() instead of .toISOString() to avoid UTC conversion - we want local time
+      const recordedAt = newEntryHour !== null 
+        ? currentDate.hour(newEntryHour).minute(nextMinute).second(nextSecond).format('YYYY-MM-DDTHH:mm:ss')
+        : currentDate.format('YYYY-MM-DDTHH:mm:ss');
+      
       if (newEntryFile) {
-        // Upload file directly
-        response = await api.uploadFile(newEntryFile, enableDiarization, enableWordTimestamps);
+        // Upload file directly with the user-selected date/time
+        response = await api.uploadFile(newEntryFile, enableDiarization, enableWordTimestamps, recordedAt);
       } else {
         // Use server-side file path
         response = await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
@@ -347,6 +399,90 @@ export default function DayView() {
     setPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+  };
+
+  // Context menu handlers
+  const handleContextMenu = (event: React.MouseEvent, rec: RecordingWithTranscription) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      mouseX: event.clientX,
+      mouseY: event.clientY,
+      recording: rec,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const handleDeleteClick = () => {
+    if (contextMenu) {
+      setDeleteRecording(contextMenu.recording);
+      setDeleteDialogOpen(true);
+    }
+    handleCloseContextMenu();
+  };
+
+  const handleChangeDateClick = () => {
+    if (contextMenu) {
+      const rec = contextMenu.recording;
+      setChangeDateRecording(rec);
+      // Parse the current recorded_at to pre-fill the dialog
+      const recordedAt = dayjs(rec.recorded_at);
+      setNewDate(recordedAt.format('YYYY-MM-DD'));
+      setNewTime(recordedAt.format('HH:mm'));
+      setChangeDateDialogOpen(true);
+      setChangeDateError(null);
+    }
+    handleCloseContextMenu();
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteRecording) return;
+    
+    setDeleteLoading(true);
+    try {
+      await api.deleteRecording(deleteRecording.id);
+      setDeleteDialogOpen(false);
+      setDeleteRecording(null);
+      await loadRecordingsForDay();
+    } catch (err) {
+      console.error('Failed to delete recording:', err);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleConfirmChangeDate = async () => {
+    if (!changeDateRecording || !newDate || !newTime) return;
+    
+    setChangeDateLoading(true);
+    setChangeDateError(null);
+    
+    try {
+      // Combine date and time into ISO string
+      // Use .format() instead of .toISOString() to avoid UTC conversion - we want local time
+      const newDateTime = dayjs(`${newDate}T${newTime}`);
+      if (!newDateTime.isValid()) {
+        setChangeDateError('Invalid date or time');
+        setChangeDateLoading(false);
+        return;
+      }
+      
+      await api.updateRecordingDate(changeDateRecording.id, newDateTime.format('YYYY-MM-DDTHH:mm:ss'));
+      setChangeDateDialogOpen(false);
+      setChangeDateRecording(null);
+      
+      // If the new date is different from the current date, the recording will disappear from this view
+      // Reload to reflect changes
+      await loadRecordingsForDay();
+    } catch (err) {
+      console.error('Failed to update recording date:', err);
+      setChangeDateError('Failed to update recording date');
+    } finally {
+      setChangeDateLoading(false);
+    }
   };
 
   const { morning, afternoon } = getHourSlots();
@@ -404,6 +540,7 @@ export default function DayView() {
               key={rec.id}
               elevation={3}
               onClick={(e) => handleRecordingClick(rec, e)}
+              onContextMenu={(e) => handleContextMenu(e, rec)}
               sx={{
                 flex: '1 1 auto',
                 minWidth: 0,
@@ -548,99 +685,110 @@ export default function DayView() {
         </Grid>
       </Grid>
 
-      {/* Selected Recording View */}
-      {selectedRecording && (
-        <Paper sx={{ p: 3, mt: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h5">{selectedRecording.filename}</Typography>
-            <IconButton onClick={handleCloseRecording}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
-          
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Recorded: {new Date(selectedRecording.recorded_at).toLocaleString()} | 
-            Duration: {formatTime(selectedRecording.duration_seconds)} | 
-            Words: {selectedRecording.word_count}
-            {selectedRecording.has_diarization && (
-              <Chip label="Diarization" size="small" sx={{ ml: 1 }} />
-            )}
-          </Typography>
+      {/* Selected Recording Dialog */}
+      <Dialog 
+        open={!!selectedRecording} 
+        onClose={handleCloseRecording}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: { maxHeight: '90vh' }
+        }}
+      >
+        {selectedRecording && (
+          <>
+            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h5" component="span">{selectedRecording.filename}</Typography>
+              <IconButton onClick={handleCloseRecording} size="small">
+                <CloseIcon />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Recorded: {new Date(selectedRecording.recorded_at).toLocaleString()} | 
+                Duration: {formatTime(selectedRecording.duration_seconds)} | 
+                Words: {selectedRecording.word_count}
+                {selectedRecording.has_diarization && (
+                  <Chip label="Diarization" size="small" sx={{ ml: 1 }} />
+                )}
+              </Typography>
 
-          {/* Audio player */}
-          <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <IconButton onClick={() => seekTo(Math.max(0, currentTime - 10))}>
-                <Replay10Icon />
-              </IconButton>
-              <IconButton onClick={togglePlayPause} size="large">
-                {playing ? <PauseIcon fontSize="large" /> : <PlayIcon fontSize="large" />}
-              </IconButton>
-              <IconButton onClick={() => seekTo(Math.min(duration, currentTime + 10))}>
-                <Forward10Icon />
-              </IconButton>
-              <Typography variant="body2" sx={{ minWidth: 80 }}>
-                {formatTime(currentTime)}
-              </Typography>
-              <Slider
-                value={currentTime}
-                max={duration || 100}
-                onChange={(_, value) => seekTo(value as number)}
-                sx={{ mx: 2 }}
-              />
-              <Typography variant="body2" sx={{ minWidth: 80 }}>
-                {formatTime(duration)}
-              </Typography>
-            </Box>
-          </Paper>
-
-          {/* Transcript */}
-          {selectedRecording.transcription && (
-            <Box>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Transcript
-              </Typography>
-              {selectedRecording.transcription.segments.map((segment, segIndex) => (
-                <Box key={segIndex} sx={{ mb: 2 }}>
-                  {segment.speaker && (
-                    <Chip
-                      label={segment.speaker}
-                      size="small"
-                      color="primary"
-                      sx={{ mb: 1 }}
-                    />
-                  )}
-                  <Box sx={{ lineHeight: 2 }}>
-                    {segment.words ? (
-                      segment.words.map((word, wordIndex) => (
-                        <Typography
-                          key={`${segIndex}-${wordIndex}`}
-                          component="span"
-                          onClick={() => handleWordClick(word)}
-                          sx={{
-                            cursor: 'pointer',
-                            px: 0.3,
-                            borderRadius: 0.5,
-                            bgcolor: isWordActive(word) ? 'primary.main' : 'transparent',
-                            color: isWordActive(word) ? 'primary.contrastText' : 'text.primary',
-                            '&:hover': {
-                              bgcolor: isWordActive(word) ? 'primary.dark' : 'action.hover',
-                            },
-                          }}
-                        >
-                          {word.word}{' '}
-                        </Typography>
-                      ))
-                    ) : (
-                      <Typography>{segment.text}</Typography>
-                    )}
-                  </Box>
+              {/* Audio player */}
+              <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <IconButton onClick={() => seekTo(Math.max(0, currentTime - 10))}>
+                    <Replay10Icon />
+                  </IconButton>
+                  <IconButton onClick={togglePlayPause} size="large">
+                    {playing ? <PauseIcon fontSize="large" /> : <PlayIcon fontSize="large" />}
+                  </IconButton>
+                  <IconButton onClick={() => seekTo(Math.min(duration, currentTime + 10))}>
+                    <Forward10Icon />
+                  </IconButton>
+                  <Typography variant="body2" sx={{ minWidth: 80 }}>
+                    {formatTime(currentTime)}
+                  </Typography>
+                  <Slider
+                    value={currentTime}
+                    max={duration || 100}
+                    onChange={(_, value) => seekTo(value as number)}
+                    sx={{ mx: 2 }}
+                  />
+                  <Typography variant="body2" sx={{ minWidth: 80 }}>
+                    {formatTime(duration)}
+                  </Typography>
                 </Box>
-              ))}
-            </Box>
-          )}
-        </Paper>
-      )}
+              </Paper>
+
+              {/* Transcript */}
+              {selectedRecording.transcription && (
+                <Box>
+                  <Typography variant="h6" sx={{ mb: 2 }}>
+                    Transcript
+                  </Typography>
+                  {selectedRecording.transcription.segments.map((segment, segIndex) => (
+                    <Box key={segIndex} sx={{ mb: 2 }}>
+                      {segment.speaker && (
+                        <Chip
+                          label={segment.speaker}
+                          size="small"
+                          color="primary"
+                          sx={{ mb: 1 }}
+                        />
+                      )}
+                      <Box sx={{ lineHeight: 2 }}>
+                        {segment.words ? (
+                          segment.words.map((word, wordIndex) => (
+                            <Typography
+                              key={`${segIndex}-${wordIndex}`}
+                              component="span"
+                              onClick={() => handleWordClick(word)}
+                              sx={{
+                                cursor: 'pointer',
+                                px: 0.3,
+                                borderRadius: 0.5,
+                                bgcolor: isWordActive(word) ? 'primary.main' : 'transparent',
+                                color: isWordActive(word) ? 'primary.contrastText' : 'text.primary',
+                                '&:hover': {
+                                  bgcolor: isWordActive(word) ? 'primary.dark' : 'action.hover',
+                                },
+                              }}
+                            >
+                              {word.word}{' '}
+                            </Typography>
+                          ))
+                        ) : (
+                          <Typography>{segment.text}</Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </DialogContent>
+          </>
+        )}
+      </Dialog>
 
       {/* Hidden file input for web fallback */}
       <input
@@ -732,6 +880,102 @@ export default function DayView() {
             disabled={importLoading || (!newEntryFile && !newEntryFilePath.trim())}
           >
             {importLoading ? <CircularProgress size={24} /> : 'Create & Transcribe'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Context Menu */}
+      <Menu
+        open={contextMenu !== null}
+        onClose={handleCloseContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        <MenuItem onClick={handleChangeDateClick}>
+          <ListItemIcon>
+            <EditCalendar fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Change Date & Time</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
+          <ListItemIcon>
+            <DeleteOutlined fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText>Delete Recording</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => !deleteLoading && setDeleteDialogOpen(false)}>
+        <DialogTitle>Delete Recording?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete "{deleteRecording?.filename}"?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This will permanently delete the audio file and its transcription.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? <CircularProgress size={24} /> : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Change Date Dialog */}
+      <Dialog open={changeDateDialogOpen} onClose={() => !changeDateLoading && setChangeDateDialogOpen(false)}>
+        <DialogTitle>Change Date & Time</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Recording: {changeDateRecording?.filename}
+            </Typography>
+            <TextField
+              label="Date"
+              type="date"
+              value={newDate}
+              onChange={(e) => setNewDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+              disabled={changeDateLoading}
+            />
+            <TextField
+              label="Time"
+              type="time"
+              value={newTime}
+              onChange={(e) => setNewTime(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+              disabled={changeDateLoading}
+            />
+            {changeDateError && (
+              <Alert severity="error">{changeDateError}</Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setChangeDateDialogOpen(false)} disabled={changeDateLoading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmChangeDate}
+            variant="contained"
+            disabled={changeDateLoading || !newDate || !newTime}
+          >
+            {changeDateLoading ? <CircularProgress size={24} /> : 'Update'}
           </Button>
         </DialogActions>
       </Dialog>

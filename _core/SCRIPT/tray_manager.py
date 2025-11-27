@@ -247,28 +247,44 @@ class TrayIconManager:
 
     def update_audio_notebook_menu_item(self, is_running: bool) -> None:
         """Update the audio notebook menu item based on whether it's running."""
-        if self.audio_notebook_action:
-            if is_running:
-                self.audio_notebook_action.setText("Stop Audio Notebook")
-            else:
-                self.audio_notebook_action.setText("Start Audio Notebook")
+        try:
+            if self.audio_notebook_action:
+                if is_running:
+                    self.audio_notebook_action.setText("Stop Audio Notebook")
+                else:
+                    self.audio_notebook_action.setText("Start Audio Notebook")
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
 
     def set_audio_notebook_enabled(self, enabled: bool) -> None:
         """Enable or disable the audio notebook menu item."""
-        if self.audio_notebook_action:
-            self.audio_notebook_action.setEnabled(enabled)
+        try:
+            if self.audio_notebook_action:
+                self.audio_notebook_action.setEnabled(enabled)
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
 
     def set_recording_actions_enabled(self, enabled: bool) -> None:
         """Enable or disable recording-related menu items."""
-        if self.start_action:
-            self.start_action.setEnabled(enabled)
-        if self.stop_action:
-            self.stop_action.setEnabled(enabled)
+        try:
+            if self.start_action:
+                self.start_action.setEnabled(enabled)
+            if self.stop_action:
+                self.stop_action.setEnabled(enabled)
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
 
     def set_static_transcription_enabled(self, enabled: bool) -> None:
         """Enable or disable the static transcription menu item."""
-        if self.static_action:
-            self.static_action.setEnabled(enabled)
+        try:
+            if self.static_action:
+                self.static_action.setEnabled(enabled)
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
 
     def set_state(self, state: str) -> None:
         """
@@ -278,10 +294,14 @@ class TrayIconManager:
             state: The current state (
                 'loading', 'standby', 'recording', 'transcribing', 'error', 'audio_notebook').
         """
-        color = self.colors.get(state)
-        if color:
-            new_icon = self._create_icon(color)
-            self.icon.setIcon(new_icon)
+        try:
+            color = self.colors.get(state)
+            if color:
+                new_icon = self._create_icon(color)
+                self.icon.setIcon(new_icon)
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
 
     def run(self) -> int:
         """Show the icon and start the application event loop."""

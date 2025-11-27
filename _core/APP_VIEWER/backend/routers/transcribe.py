@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Form
 from pydantic import BaseModel
 
 from database import (
@@ -350,12 +350,17 @@ async def transcribe_file(
 async def transcribe_upload(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    enable_diarization: bool = False,
-    enable_word_timestamps: bool = True,
+    enable_diarization: str = Form("false"),
+    enable_word_timestamps: str = Form("true"),
+    file_created_at: Optional[str] = Form(None),
 ):
     """Upload and transcribe an audio file."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename required")
+
+    # Convert string booleans to actual booleans
+    diarization_enabled = enable_diarization.lower() == "true"
+    word_timestamps_enabled = enable_word_timestamps.lower() == "true"
 
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -389,12 +394,35 @@ async def transcribe_upload(
 
         duration = get_audio_duration(mp3_path)
 
+        # Use file_created_at if provided, otherwise use current time
+        logger.info(f"file_created_at parameter received: {file_created_at}")
+        if file_created_at:
+            try:
+                # Handle timezone-aware ISO format
+                recorded_at = datetime.fromisoformat(
+                    file_created_at.replace("Z", "+00:00")
+                )
+                # Convert to naive datetime (local time) if timezone-aware
+                if recorded_at.tzinfo is not None:
+                    recorded_at = recorded_at.replace(tzinfo=None)
+                logger.info(f"Using provided recorded_at: {recorded_at.isoformat()}")
+            except ValueError as e:
+                logger.warning(
+                    f"Failed to parse file_created_at '{file_created_at}': {e}"
+                )
+                recorded_at = datetime.now()
+        else:
+            recorded_at = datetime.now()
+            logger.info(
+                f"No file_created_at provided, using current time: {recorded_at.isoformat()}"
+            )
+
         recording_id = insert_recording(
             filename=mp3_path.name,
             filepath=str(mp3_path),
             duration_seconds=duration,
-            recorded_at=datetime.now().isoformat(),
-            has_diarization=enable_diarization,
+            recorded_at=recorded_at.isoformat(),
+            has_diarization=diarization_enabled,
         )
 
         background_tasks.add_task(
@@ -402,8 +430,8 @@ async def transcribe_upload(
             recording_id,
             mp3_path,
             wav_path,
-            enable_diarization,
-            enable_word_timestamps,
+            diarization_enabled,
+            word_timestamps_enabled,
         )
 
         return TranscribeResponse(

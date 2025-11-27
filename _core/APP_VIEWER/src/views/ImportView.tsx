@@ -3,7 +3,6 @@ import {
   Box,
   Paper,
   Typography,
-  Button,
   Switch,
   FormControlLabel,
   LinearProgress,
@@ -14,65 +13,26 @@ import {
   Alert,
 } from '@mui/material';
 import {
-  Search as BrowseIcon,
   AudioFile as AudioIcon,
   CheckCircle as CheckIcon,
   Error as ErrorIcon,
   Pending as PendingIcon,
+  CloudUpload as UploadIcon,
 } from '@mui/icons-material';
 import { api } from '../services/api';
-
-interface ImportJob {
-  id: number;
-  filename: string;
-  status: 'pending' | 'transcribing' | 'completed' | 'failed';
-  progress?: number;
-  message?: string;
-}
+import { ImportJob } from '../types';
 
 export default function ImportView() {
   const [enableDiarization, setEnableDiarization] = useState(false);
   const [enableWordTimestamps, setEnableWordTimestamps] = useState(true);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Open HTML file picker
   const openFilePicker = () => {
     fileInputRef.current?.click();
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    setError(null);
-
-    for (const file of Array.from(files)) {
-      try {
-        const response = await api.uploadFile(file, enableDiarization, enableWordTimestamps);
-        
-        const newJob: ImportJob = {
-          id: response.recording_id,
-          filename: file.name,
-          status: 'transcribing',
-          message: response.message,
-        };
-        
-        setJobs(prev => [newJob, ...prev]);
-        
-        // Start polling for status
-        pollJobStatus(newJob.id);
-        
-      } catch (err: any) {
-        setError(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
-      }
-    }
-
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
   };
 
   const pollJobStatus = async (recordingId: number) => {
@@ -83,6 +43,7 @@ export default function ImportView() {
       if (attempts >= maxAttempts) {
         updateJobStatus(recordingId, 'failed', undefined, 'Transcription timed out');
         return;
+
       }
 
       try {
@@ -135,37 +96,112 @@ export default function ImportView() {
     }
   };
 
+  // Handle drag events for the drop zone
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await handleFiles(files);
+    }
+  };
+
+  const handleFiles = async (files: FileList) => {
+    setError(null);
+
+    for (const file of Array.from(files)) {
+      try {
+        const response = await api.uploadFile(file, enableDiarization, enableWordTimestamps);
+        
+        const newJob: ImportJob = {
+          id: response.recording_id,
+          filename: file.name,
+          status: 'transcribing',
+          message: response.message,
+        };
+        
+        setJobs(prev => [newJob, ...prev]);
+        
+        // Start polling for status
+        pollJobStatus(newJob.id);
+        
+      } catch (err: any) {
+        setError(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
+      }
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 3 }}>
         Import Recordings
       </Typography>
 
-      {/* Import audio files */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
-          Select Audio Files
-        </Typography>
+      {/* Drag and drop zone */}
+      <Paper
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
+        onDrop={handleDrop}
+        sx={{
+          p: 3,
+          mb: 3,
+          border: '2px dashed',
+          borderColor: dragActive ? 'primary.main' : 'divider',
+          bgcolor: dragActive ? 'action.hover' : 'background.paper',
+          transition: 'all 0.2s ease',
+          cursor: 'pointer',
+        }}
+        onClick={openFilePicker}
+      >
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            py: 4,
+          }}
+        >
+          <UploadIcon sx={{ fontSize: 48, color: dragActive ? 'primary.main' : 'text.secondary', mb: 2 }} />
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            {dragActive ? 'Drop files here' : 'Drag & drop audio files here'}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            or click to browse
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Supported: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
+          </Typography>
+        </Box>
         
-        {/* File picker button */}
+        {/* Hidden file input */}
         <input
           ref={fileInputRef}
           type="file"
           multiple
           accept="audio/*,.mp3,.wav,.opus,.ogg,.flac,.m4a,.wma,.aac"
           style={{ display: 'none' }}
-          onChange={handleFileUpload}
+          onChange={(e) => e.target.files && handleFiles(e.target.files)}
         />
-        
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<BrowseIcon />}
-          onClick={openFilePicker}
-          sx={{ py: 2, px: 4, mb: 2, width: '100%' }}
-        >
-          Browse for Audio Files
-        </Button>
+      </Paper>
+
+      {/* Options */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2 }}>
+          Transcription Options
+        </Typography>
 
         <FormControlLabel
           control={
@@ -186,13 +222,10 @@ export default function ImportView() {
           }
           label="Enable speaker diarization (requires separate Python 3.11 environment)"
         />
-        
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-          Supported formats: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
-        </Typography>
       </Paper>
 
       {/* Error alert */}
+
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}

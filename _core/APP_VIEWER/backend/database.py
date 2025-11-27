@@ -411,3 +411,32 @@ def delete_recording(recording_id: int) -> bool:
         cursor.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+def update_recording_date(recording_id: int, recorded_at: str) -> bool:
+    """Update the recorded_at timestamp for a recording"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE recordings SET recorded_at = ? WHERE id = ?",
+            (recorded_at, recording_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_recordings_for_hour(date_str: str, hour: int) -> list[dict]:
+    """Get recordings for a specific date and hour, ordered by recorded_at"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Match recordings where the hour matches and date matches
+        cursor.execute(
+            """
+            SELECT * FROM recordings 
+            WHERE date(recorded_at) = date(?)
+            AND CAST(strftime('%H', recorded_at) AS INTEGER) = ?
+            ORDER BY recorded_at ASC
+        """,
+            (date_str, hour),
+        )
+        return [dict(row) for row in cursor.fetchall()]
