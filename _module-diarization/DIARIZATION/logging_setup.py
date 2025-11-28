@@ -23,12 +23,12 @@ def setup_logging(config: Optional[Dict[str, Any]] = None) -> None:
     default_level = logging.INFO
     console_output = True
 
-    # Project root log file (same as core module uses)
+    # Project root log file (separate from core module)
     script_dir = Path(__file__).resolve().parent
     project_root = (
         script_dir.parent.parent
     )  # DIARIZATION -> _module-diarization -> TranscriptionSuite
-    default_log_file = str(project_root / "transcription_suite.log")
+    default_log_file = str(project_root / "diarization.log")
 
     # Override with config if provided
     if config and "logging" in config:
@@ -59,9 +59,9 @@ def setup_logging(config: Optional[Dict[str, Any]] = None) -> None:
     # Remove existing handlers
     root_logger.handlers = []
 
-    # Add file handler (append mode to share with other modules)
+    # Add file handler (write mode to clear on each diarization run)
     if default_log_file:
-        file_handler = logging.FileHandler(default_log_file, mode="a", encoding="utf-8")
+        file_handler = logging.FileHandler(default_log_file, mode="w", encoding="utf-8")
         file_handler.setLevel(default_level)
         file_handler.setFormatter(detailed_formatter)
         root_logger.addHandler(file_handler)

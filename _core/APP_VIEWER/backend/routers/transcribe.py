@@ -34,19 +34,8 @@ router = APIRouter()
 STORAGE_DIR = Path(__file__).parent.parent / "data" / "audio"
 TEMP_DIR = Path("/tmp/transcription-suite")
 
-# Logging - project root is TranscriptionSuite/
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-LOG_FILE = PROJECT_ROOT / "transcription_suite.log"
-
-logger = logging.getLogger("transcribe_router")
-logger.setLevel(logging.DEBUG)
-if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
-    fh.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    logger.addHandler(fh)
+# Logging - inherits from orchestrator's logging setup
+logger = logging.getLogger(__name__)
 
 # Orchestrator API - we're running inside the same process, but call via HTTP
 # Port can be overridden via environment variable
