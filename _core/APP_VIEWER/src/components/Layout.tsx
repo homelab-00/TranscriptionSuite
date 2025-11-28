@@ -104,7 +104,7 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Main content */}
       <main className="min-h-screen pt-14 md:pt-0 md:pl-60">
-        <div className="h-[calc(100vh-3.5rem)] md:h-screen flex items-start justify-center p-4 md:p-6">
+        <div className="h-[calc(100vh-3.5rem)] md:h-screen overflow-y-auto p-4 md:p-8">
           {children}
         </div>
       </main>

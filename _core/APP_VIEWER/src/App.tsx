@@ -8,17 +8,15 @@ import ImportView from './views/ImportView';
 
 function App() {
   return (
-    <div className="flex min-h-screen bg-background">
-      <Layout>
-        <Routes>
-          <Route path="/" element={<CalendarView />} />
-          <Route path="/day/:date" element={<DayView />} />
-          <Route path="/search" element={<SearchView />} />
-          <Route path="/recording/:id" element={<RecordingView />} />
-          <Route path="/import" element={<ImportView />} />
-        </Routes>
-      </Layout>
-    </div>
+    <Layout>
+      <Routes>
+        <Route path="/" element={<CalendarView />} />
+        <Route path="/day/:date" element={<DayView />} />
+        <Route path="/search" element={<SearchView />} />
+        <Route path="/recording/:id" element={<RecordingView />} />
+        <Route path="/import" element={<ImportView />} />
+      </Routes>
+    </Layout>
   );
 }
 

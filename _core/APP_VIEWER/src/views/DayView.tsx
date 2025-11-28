@@ -12,6 +12,7 @@ import {
   CalendarDays,
   Plus,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import { Howl } from 'howler';
@@ -458,54 +459,72 @@ export default function DayView() {
     setDialogOpen(true);
   };
 
+  const formatDuration = (seconds: number): string => {
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const mins = Math.round(seconds / 60);
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
+  };
+
+  const formatRecordingTime = (dateStr: string): string => {
+    return dayjs(dateStr).format('h:mm A');
+  };
+
   const renderHourSlot = (slot: HourSlot) => {
-    const hasRecordings = slot.recordings.length > 0;
-    const maxVisible = 4;
-    const visibleRecordings = slot.recordings.slice(0, maxVisible);
-    const hiddenCount = Math.max(0, slot.recordings.length - maxVisible);
+    const visibleRecordings = slot.recordings.slice(0, 4);
+    const hasMore = slot.recordings.length > 4;
     
     return (
-      <div
-        key={slot.hour}
-        className="p-3 mb-2 bg-surface rounded-lg border border-gray-800"
-      >
-        <div className="flex justify-between items-center mb-2">
-          <span className={`text-sm ${hasRecordings ? 'font-semibold text-white' : 'text-gray-400'}`}>
-            {formatHour(slot.hour)}
-          </span>
-          {hasRecordings && (
-            <span className="chip-error text-xs">
-              {slot.recordings.length}
-            </span>
-          )}
+      <div key={slot.hour} className="flex group h-20 mb-2">
+        <div className="w-16 text-right pr-4 pt-2 text-sm text-gray-500 font-mono shrink-0">
+          {formatHour(slot.hour)}
         </div>
-        
-        <div className="flex gap-1.5 items-stretch min-h-[48px]">
-          {visibleRecordings.map((rec) => (
-            <div
-              key={rec.id}
-              onClick={(e) => handleRecordingClick(rec, e)}
-              onContextMenu={(e) => handleContextMenu(e, rec)}
-              className="flex-1 min-w-0 p-2 cursor-pointer bg-primary/20 border-2 border-primary rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-primary/30 hover:scale-[1.02]"
+        <div className="flex-1 border-l border-gray-800 pl-4 relative">
+          {/* Timeline dot */}
+          <div className="absolute left-[-5px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-gray-800 group-hover:bg-primary/50 transition-colors z-10" />
+          
+          {/* Recordings Row */}
+          <div className="flex items-center gap-2 h-full w-full">
+            {visibleRecordings.map(rec => (
+              <div 
+                key={rec.id}
+                onClick={(e) => handleRecordingClick(rec, e)}
+                onContextMenu={(e) => handleContextMenu(e, rec)}
+                className="flex-1 min-w-0 flex flex-col p-2 bg-surface border border-gray-700 hover:border-primary/50 hover:bg-gray-800 rounded-lg cursor-pointer transition-all group overflow-hidden h-full"
+              >
+                <div className="flex items-center justify-between mb-1 min-w-0">
+                  <span className="font-medium text-white text-sm group-hover:text-primary truncate mr-1">
+                    {rec.filename}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between mt-auto">
+                  <div className="flex items-center text-[10px] text-gray-500 truncate">
+                    <Clock size={10} className="mr-1 shrink-0" />
+                    {formatRecordingTime(rec.recorded_at)}
+                  </div>
+                  <span className="text-[10px] text-gray-600 bg-black/20 px-1.5 rounded shrink-0">
+                    {formatDuration(rec.duration_seconds)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            
+            {hasMore && (
+              <div className="w-8 shrink-0 flex items-center justify-center text-xs text-gray-500 font-medium bg-surface border border-gray-800 rounded-lg h-full">
+                +{slot.recordings.length - 4}
+              </div>
+            )}
+
+            {/* Add button */}
+            <button
+              onClick={(e) => handleAddClick(slot.hour, e)}
+              className="w-12 shrink-0 h-full border border-dashed border-gray-800 rounded-lg hover:border-gray-600 hover:bg-gray-900/50 cursor-pointer flex items-center justify-center transition-all"
             >
-              <span className="text-xs text-primary text-center truncate">
-                {rec.filename || 'Recording'}
-              </span>
-            </div>
-          ))}
-          
-          {hiddenCount > 0 && (
-            <div className="flex items-center px-1 text-xs text-gray-500">
-              +{hiddenCount}
-            </div>
-          )}
-          
-          <button
-            onClick={(e) => handleAddClick(slot.hour, e)}
-            className="flex-shrink-0 w-12 p-2 border-2 border-dashed border-gray-700 rounded-lg flex items-center justify-center opacity-60 hover:opacity-100 hover:border-primary hover:bg-surface-light transition-all"
-          >
-            <Plus size={16} className="text-gray-400" />
-          </button>
+              <Plus size={18} className="text-gray-600 hover:text-gray-400" />
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -522,47 +541,46 @@ export default function DayView() {
   }
 
   return (
-    <div>
-      {/* Day navigation */}
-      <div className="flex items-center justify-center mb-6">
-        <button onClick={handlePreviousDay} className="btn-icon">
-          <ChevronLeft size={24} />
-        </button>
-        <h2 className="mx-4 min-w-[280px] text-center text-xl font-semibold text-white">
-          {currentDate.format('dddd, MMMM D, YYYY')}
-        </h2>
-        <button
-          onClick={handleNextDay}
-          disabled={isNextDisabled}
-          className={`btn-icon ${isNextDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-        >
-          <ChevronRight size={24} />
-        </button>
+    <div className="flex flex-col h-full w-full animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8 w-full">
+        <div className="flex items-center space-x-4">
+          <button onClick={() => navigate('/')} className="text-sm text-gray-400 hover:text-white">
+            ← Month
+          </button>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white">
+            {currentDate.format('dddd, MMM D')}
+          </h1>
+        </div>
+        <div className="flex space-x-2">
+          <button onClick={handlePreviousDay} className="p-2 rounded-full hover:bg-gray-800 text-gray-400 hover:text-white">
+            <ChevronLeft size={24} />
+          </button>
+          <button 
+            onClick={handleNextDay} 
+            disabled={isNextDisabled}
+            className="p-2 rounded-full hover:bg-gray-800 text-gray-400 hover:text-white disabled:opacity-30"
+          >
+            <ChevronRight size={24} />
+          </button>
+        </div>
       </div>
 
-      <button
-        onClick={() => navigate('/')}
-        className="btn-outline mb-4"
-      >
-        Back to Calendar
-      </button>
-
-      {/* Two-column hour grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Morning */}
-        <div className="card p-4">
-          <h3 className="text-lg font-medium text-white text-center mb-4">
-            Morning (12 AM - 11 AM)
-          </h3>
-          {morning.map(slot => renderHourSlot(slot))}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 flex-1 overflow-auto w-full">
+        {/* Morning Column */}
+        <div className="w-full">
+          <h2 className="text-lg font-semibold text-primary mb-6 border-b border-gray-800 pb-2">Morning</h2>
+          <div className="space-y-1">
+            {morning.map((slot) => renderHourSlot(slot))}
+          </div>
         </div>
 
-        {/* Afternoon/Evening */}
-        <div className="card p-4">
-          <h3 className="text-lg font-medium text-white text-center mb-4">
-            Afternoon/Evening (12 PM - 11 PM)
-          </h3>
-          {afternoon.map(slot => renderHourSlot(slot))}
+        {/* Afternoon Column */}
+        <div className="w-full">
+          <h2 className="text-lg font-semibold text-pink-400 mb-6 border-b border-gray-800 pb-2">Afternoon & Evening</h2>
+          <div className="space-y-1">
+            {afternoon.map((slot) => renderHourSlot(slot))}
+          </div>
         </div>
       </div>
 
@@ -571,7 +589,7 @@ export default function DayView() {
         open={!!selectedRecording}
         onClose={handleCloseRecording}
         title={selectedRecording?.filename}
-        maxWidth="lg"
+        maxWidth="3xl"
       >
         {selectedRecording && (
           <div>
