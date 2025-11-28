@@ -1,35 +1,16 @@
 import { useState } from 'react';
-import {
-  Box,
-  TextField,
-  Button,
-  Paper,
-  Typography,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
-  IconButton,
-  FormControlLabel,
-  Checkbox,
-  CircularProgress,
-  InputAdornment,
-} from '@mui/material';
-import { DatePicker } from '@mui/x-date-pickers';
-import { 
-  PlayArrow as PlayIcon,
-  Search as SearchIcon,
-} from '@mui/icons-material';
-import dayjs, { Dayjs } from 'dayjs';
+import { Search, Play, Loader2, Calendar as CalendarIcon } from 'lucide-react';
+import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { SearchResult } from '../types';
+import { Toggle } from '../components/ui';
 
 export default function SearchView() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [fromDate, setFromDate] = useState<Dayjs | null>(null);
-  const [toDate, setToDate] = useState<Dayjs | null>(null);
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
   const [fuzzy, setFuzzy] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,8 +24,8 @@ export default function SearchView() {
     try {
       const searchResults = await api.search({
         query: query.trim(),
-        from_date: fromDate?.format('YYYY-MM-DD'),
-        to_date: toDate?.format('YYYY-MM-DD'),
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
         fuzzy,
       });
       setResults(searchResults);
@@ -72,128 +53,123 @@ export default function SearchView() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 3 }}>
-        Search Transcriptions
-      </Typography>
+    <div>
+      <h1 className="text-2xl font-semibold text-white mb-6">Search Transcriptions</h1>
 
       {/* Search form */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField
-            fullWidth
-            label="Search for words or phrases"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="Enter search term..."
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color="action" />
-                </InputAdornment>
-              ),
-            }}
-          />
+      <div className="card p-4 mb-6">
+        <div className="flex flex-col gap-4">
+          {/* Search input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={20} />
+            <input
+              type="text"
+              className="input pl-10"
+              placeholder="Search for words or phrases..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyPress={handleKeyPress}
+            />
+          </div>
 
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <DatePicker
-              label="From date"
-              value={fromDate}
-              onChange={setFromDate}
-              maxDate={dayjs()}
-              slotProps={{ textField: { size: 'small' } }}
-            />
-            <DatePicker
-              label="To date"
-              value={toDate}
-              onChange={setToDate}
-              maxDate={dayjs()}
-              slotProps={{ textField: { size: 'small' } }}
-            />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={fuzzy}
-                  onChange={(e) => setFuzzy(e.target.checked)}
-                />
-              }
+          {/* Filters row */}
+          <div className="flex flex-wrap gap-4 items-center">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-400">From:</label>
+              <input
+                type="date"
+                className="input-sm w-auto"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                max={dayjs().format('YYYY-MM-DD')}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-400">To:</label>
+              <input
+                type="date"
+                className="input-sm w-auto"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                max={dayjs().format('YYYY-MM-DD')}
+              />
+            </div>
+            <Toggle
+              checked={fuzzy}
+              onChange={setFuzzy}
               label="Fuzzy search"
             />
-          </Box>
+          </div>
 
-          <Button
-            variant="contained"
+          {/* Search button */}
+          <button
             onClick={handleSearch}
             disabled={!query.trim() || loading}
-            startIcon={loading ? undefined : <SearchIcon />}
+            className="btn-primary w-full sm:w-auto"
           >
-            {loading ? <CircularProgress size={24} /> : 'Search'}
-          </Button>
-        </Box>
-      </Paper>
+            {loading ? (
+              <Loader2 className="animate-spin" size={20} />
+            ) : (
+              <>
+                <Search size={20} />
+                Search
+              </>
+            )}
+          </button>
+        </div>
+      </div>
 
       {/* Results */}
       {searched && (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
+        <div className="card p-4">
+          <h2 className="text-lg font-medium text-white mb-4">
             {results.length > 0
               ? `Found ${results.length} result${results.length !== 1 ? 's' : ''}`
               : 'No results found'}
-          </Typography>
+          </h2>
 
-          <List>
+          <div className="divide-y divide-gray-800">
             {results.map((result, index) => (
-              <ListItem
+              <div
                 key={`${result.recording_id}-${index}`}
-                divider={index < results.length - 1}
+                className="py-3 flex items-start justify-between gap-4"
               >
-                <ListItemText
-                  primary={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography variant="subtitle1">
-                        {result.recording.filename}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {dayjs(result.recording.recorded_at).format('MMM D, YYYY')}
-                      </Typography>
-                    </Box>
-                  }
-                  secondary={
-                    <>
-                      <Typography
-                        component="span"
-                        variant="body2"
-                        color="text.secondary"
-                      >
-                        ...{result.context}...
-                      </Typography>
-                      <Typography
-                        component="span"
-                        variant="caption"
-                        color="primary"
-                        sx={{ ml: 1 }}
-                      >
-                        @ {formatTime(result.start_time)}
-                      </Typography>
-                    </>
-                  }
-                />
-                <ListItemSecondaryAction>
-                  <IconButton
-                    edge="end"
-                    onClick={() => handlePlayResult(result)}
-                    title="Play from 15 seconds before"
-                  >
-                    <PlayIcon />
-                  </IconButton>
-                </ListItemSecondaryAction>
-              </ListItem>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-white truncate">
+                      {result.recording.filename}
+                    </span>
+                    <span className="text-xs text-gray-500 flex items-center gap-1">
+                      <CalendarIcon size={12} />
+                      {dayjs(result.recording.recorded_at).format('MMM D, YYYY')}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-400">
+                    ...{result.context}...
+                    <span className="ml-2 text-primary text-xs">
+                      @ {formatTime(result.start_time)}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handlePlayResult(result)}
+                  className="btn-icon flex-shrink-0"
+                  title="Play from 15 seconds before"
+                >
+                  <Play size={20} />
+                </button>
+              </div>
             ))}
-          </List>
-        </Paper>
+          </div>
+        </div>
       )}
-    </Box>
+    </div>
   );
 }

@@ -1,5 +1,4 @@
 import { Routes, Route } from 'react-router-dom';
-import { Box } from '@mui/material';
 import Layout from './components/Layout';
 import CalendarView from './views/CalendarView';
 import DayView from './views/DayView';
@@ -9,7 +8,7 @@ import ImportView from './views/ImportView';
 
 function App() {
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+    <div className="flex min-h-screen bg-background">
       <Layout>
         <Routes>
           <Route path="/" element={<CalendarView />} />
@@ -19,7 +18,7 @@ function App() {
           <Route path="/import" element={<ImportView />} />
         </Routes>
       </Layout>
-    </Box>
+    </div>
   );
 }
 
