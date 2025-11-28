@@ -1,35 +1,15 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  AppBar,
-  Box,
-  Drawer,
-  IconButton,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Toolbar,
-  Typography,
-} from '@mui/material';
-import {
-  Menu as MenuIcon,
-  CalendarMonth as CalendarIcon,
-  Search as SearchIcon,
-  Upload as UploadIcon,
-} from '@mui/icons-material';
-
-const drawerWidth = 240;
+import { Calendar, Search, Upload, Menu, X, Mic } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 const menuItems = [
-  { text: 'Calendar', icon: <CalendarIcon />, path: '/' },
-  { text: 'Search', icon: <SearchIcon />, path: '/search' },
-  { text: 'Import', icon: <UploadIcon />, path: '/import' },
+  { text: 'Calendar', icon: Calendar, path: '/' },
+  { text: 'Search', icon: Search, path: '/search' },
+  { text: 'Import', icon: Upload, path: '/import' },
 ];
 
 export default function Layout({ children }: LayoutProps) {
@@ -41,105 +21,93 @@ export default function Layout({ children }: LayoutProps) {
     setMobileOpen(!mobileOpen);
   };
 
-  const drawer = (
-    <Box>
-      <Toolbar>
-        <Typography variant="h6" noWrap component="div">
-          Transcription Viewer
-        </Typography>
-      </Toolbar>
-      <List>
-        {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
-            <ListItemButton
-              selected={location.pathname === item.path}
-              onClick={() => {
-                navigate(item.path);
-                setMobileOpen(false);
-              }}
-            >
-              <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.text} />
-            </ListItemButton>
-          </ListItem>
-        ))}
-      </List>
-    </Box>
-  );
+  const handleNavigation = (path: string) => {
+    navigate(path);
+    setMobileOpen(false);
+  };
+
+  const currentPage = menuItems.find((item) => item.path === location.pathname)?.text || 'Recording';
 
   return (
     <>
-      <AppBar
-        position="fixed"
-        sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
-        }}
+      {/* Mobile header */}
+      <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-surface border-b border-gray-800 flex items-center px-4 md:hidden">
+        <button
+          onClick={handleDrawerToggle}
+          className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-surface-light transition-colors"
+        >
+          <Menu size={24} />
+        </button>
+        <h1 className="ml-4 text-lg font-semibold text-white">{currentPage}</h1>
+      </header>
+
+      {/* Mobile drawer backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden animate-fade-in"
+          onClick={handleDrawerToggle}
+        />
+      )}
+
+      {/* Sidebar */}
+      <nav
+        className={`
+          fixed top-0 left-0 h-full w-60 bg-surface border-r border-gray-800 z-50
+          transform transition-transform duration-300 ease-in-out
+          md:translate-x-0
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
       >
-        <Toolbar>
-          <IconButton
-            color="inherit"
-            aria-label="open drawer"
-            edge="start"
+        {/* Logo/Brand */}
+        <div className="h-16 px-4 flex items-center gap-3 border-b border-gray-800">
+          <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+            <Mic size={20} className="text-primary" />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-white leading-tight">Audio</h1>
+            <h1 className="text-base font-semibold text-white leading-tight">Notebook</h1>
+          </div>
+          {/* Mobile close button */}
+          <button
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }}
+            className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-surface-light transition-colors md:hidden"
           >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" noWrap component="div">
-            {menuItems.find((item) => item.path === location.pathname)?.text || 'Recording'}
-          </Typography>
-        </Toolbar>
-      </AppBar>
+            <X size={20} />
+          </button>
+        </div>
 
-      <Box
-        component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
-      >
-        {/* Mobile drawer */}
-        <Drawer
-          variant="temporary"
-          open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{ keepMounted: true }}
-          sx={{
-            display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
-              width: drawerWidth,
-            },
-          }}
-        >
-          {drawer}
-        </Drawer>
+        {/* Navigation items */}
+        <div className="py-4 px-3">
+          {menuItems.map((item) => {
+            const isActive = location.pathname === item.path;
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.text}
+                onClick={() => handleNavigation(item.path)}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-1
+                  transition-all duration-200
+                  ${isActive
+                    ? 'bg-primary/20 text-primary'
+                    : 'text-gray-400 hover:text-white hover:bg-surface-light'
+                  }
+                `}
+              >
+                <Icon size={20} />
+                {item.text}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
-        {/* Desktop drawer */}
-        <Drawer
-          variant="permanent"
-          sx={{
-            display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
-              width: drawerWidth,
-            },
-          }}
-          open
-        >
-          {drawer}
-        </Drawer>
-      </Box>
-
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          mt: 8,
-        }}
-      >
-        {children}
-      </Box>
+      {/* Main content */}
+      <main className="min-h-screen pt-14 md:pt-0 md:pl-60">
+        <div className="h-[calc(100vh-3.5rem)] md:h-screen flex items-start justify-center p-4 md:p-6">
+          {children}
+        </div>
+      </main>
     </>
   );
 }
