@@ -1,16 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Paper,
-  Typography,
-  IconButton,
-  Grid,
-} from '@mui/material';
-import {
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-} from '@mui/icons-material';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from '../services/api';
 import { RecordingsByDate } from '../types';
@@ -64,9 +54,7 @@ export default function CalendarView() {
     // Add empty cells for days before the start of the month
     for (let i = 0; i < startDay; i++) {
       days.push(
-        <Grid item xs={12 / 7} key={`empty-${i}`}>
-          <Box sx={{ p: 2 }} />
-        </Grid>
+        <div key={`empty-${i}`} className="p-2" />
       );
     }
 
@@ -81,110 +69,86 @@ export default function CalendarView() {
       const recordingCount = recordings.length;
 
       days.push(
-        <Grid item xs={12 / 7} key={day}>
-          <Paper
-            elevation={isToday ? 3 : hasRecordings ? 2 : 1}
-            onClick={() => !isFuture && handleDayClick(date)}
-            sx={{
-              p: 2,
-              textAlign: 'center',
-              cursor: isFuture ? 'default' : 'pointer',
-              opacity: isFuture ? 0.5 : 1,
-              border: isToday ? '2px solid' : 'none',
-              borderColor: 'primary.main',
-              position: 'relative',
-              minHeight: 60,
-              '&:hover': isFuture ? {} : {
-                bgcolor: 'action.hover',
-                transform: 'scale(1.02)',
-              },
-              transition: 'all 0.2s',
-            }}
+        <div
+          key={day}
+          onClick={() => !isFuture && handleDayClick(date)}
+          className={`
+            relative p-3 min-h-[60px] rounded-lg border text-center transition-all duration-200
+            ${isFuture
+              ? 'opacity-50 cursor-default bg-surface border-gray-800'
+              : 'cursor-pointer hover:scale-[1.02] hover:bg-surface-light'
+            }
+            ${isToday
+              ? 'border-2 border-primary bg-surface shadow-lg'
+              : hasRecordings
+                ? 'bg-surface border-gray-700'
+                : 'bg-surface border-gray-800'
+            }
+          `}
+        >
+          {/* Red badge in top-right corner */}
+          {hasRecordings && (
+            <div className="absolute top-1 right-1 min-w-[20px] h-5 px-1 flex items-center justify-center bg-red-500 text-white text-[11px] font-bold rounded-full shadow">
+              {recordingCount > 1 ? recordingCount : ''}
+            </div>
+          )}
+          
+          <span
+            className={`
+              text-sm
+              ${isToday ? 'font-bold' : 'font-normal'}
+              ${hasRecordings ? 'text-primary' : 'text-white'}
+            `}
           >
-            {/* Red badge in top-right corner */}
-            {hasRecordings && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: 4,
-                  right: 4,
-                  bgcolor: 'error.main',
-                  color: 'error.contrastText',
-                  borderRadius: '50%',
-                  minWidth: 20,
-                  height: 20,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 11,
-                  fontWeight: 'bold',
-                  boxShadow: 2,
-                }}
-              >
-                {recordingCount > 1 ? recordingCount : ''}
-              </Box>
-            )}
-            
-            <Typography
-              variant="body1"
-              sx={{
-                fontWeight: isToday ? 'bold' : 'normal',
-                color: hasRecordings ? 'primary.main' : 'text.primary',
-              }}
-            >
-              {day}
-            </Typography>
-          </Paper>
-        </Grid>
+            {day}
+          </span>
+        </div>
       );
     }
 
     return days;
   };
 
+  const isNextDisabled = currentMonth.isSame(dayjs(), 'month');
+
   return (
-    <Box>
+    <div className="w-full max-w-[650px] mx-auto">
       {/* Month navigation */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          mb: 3,
-        }}
-      >
-        <IconButton onClick={handlePreviousMonth}>
-          <ChevronLeftIcon />
-        </IconButton>
-        <Typography variant="h4" sx={{ mx: 3, minWidth: 200, textAlign: 'center' }}>
-          {currentMonth.format('MMMM YYYY')}
-        </Typography>
-        <IconButton
-          onClick={handleNextMonth}
-          disabled={currentMonth.isSame(dayjs(), 'month')}
+      <div className="flex items-center justify-center mb-6">
+        <button
+          onClick={handlePreviousMonth}
+          className="btn-icon"
         >
-          <ChevronRightIcon />
-        </IconButton>
-      </Box>
+          <ChevronLeft size={24} />
+        </button>
+        <h2 className="mx-6 min-w-[200px] text-center text-2xl font-semibold text-white">
+          {currentMonth.format('MMMM YYYY')}
+        </h2>
+        <button
+          onClick={handleNextMonth}
+          disabled={isNextDisabled}
+          className={`btn-icon ${isNextDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          <ChevronRight size={24} />
+        </button>
+      </div>
 
       {/* Day headers */}
-      <Grid container spacing={1} sx={{ mb: 1 }}>
+      <div className="grid grid-cols-7 gap-1 mb-2">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-          <Grid item xs={12 / 7} key={day}>
-            <Typography
-              variant="subtitle2"
-              sx={{ textAlign: 'center', color: 'text.secondary' }}
-            >
-              {day}
-            </Typography>
-          </Grid>
+          <div
+            key={day}
+            className="text-center text-sm text-gray-500 font-medium py-2"
+          >
+            {day}
+          </div>
         ))}
-      </Grid>
+      </div>
 
       {/* Calendar grid */}
-      <Grid container spacing={1}>
+      <div className="grid grid-cols-7 gap-1">
         {renderCalendarDays()}
-      </Grid>
-    </Box>
+      </div>
+    </div>
   );
 }

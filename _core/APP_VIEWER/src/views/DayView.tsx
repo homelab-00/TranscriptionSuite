@@ -1,46 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Box,
-  Paper,
-  Typography,
-  IconButton,
-  Grid,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Switch,
-  FormControlLabel,
-  Chip,
-  CircularProgress,
-  Slider,
-  Alert,
-  LinearProgress,
-  Menu,
-  MenuItem,
-  ListItemIcon,
-  ListItemText,
-  TextField,
-} from '@mui/material';
-import {
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-  PlayArrow as PlayIcon,
-  Pause as PauseIcon,
-  Replay10 as Replay10Icon,
-  Forward10 as Forward10Icon,
-  Search as BrowseIcon,
-} from '@mui/icons-material';
-import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
-import EditCalendar from '@mui/icons-material/EditCalendar';
-import AddIcon from '@mui/icons-material/Add';
-import CloseIcon from '@mui/icons-material/Close';
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  Pause,
+  RotateCcw,
+  RotateCw,
+  Search,
+  Trash2,
+  CalendarDays,
+  Plus,
+  Loader2,
+} from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import { Howl } from 'howler';
 import { api } from '../services/api';
 import { Recording, Transcription, Word } from '../types';
+import { Modal, Toggle, ContextMenu, ContextMenuItem, Alert, ProgressBar } from '../components/ui';
 
 interface RecordingWithTranscription extends Recording {
   transcription?: Transcription;
@@ -79,8 +56,8 @@ export default function DayView() {
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
-    mouseX: number;
-    mouseY: number;
+    x: number;
+    y: number;
     recording: RecordingWithTranscription;
   } | null>(null);
   
@@ -169,7 +146,6 @@ export default function DayView() {
           const recordedAt = dayjs(rec.recorded_at);
           return recordedAt.hour() === hour;
         })
-        // Sort by oldest first (earliest recorded_at)
         .sort((a, b) => dayjs(a.recorded_at).valueOf() - dayjs(b.recorded_at).valueOf());
 
       const slot: HourSlot = { hour, recordings: hourRecordings };
@@ -191,7 +167,6 @@ export default function DayView() {
     return `${hour - 12} PM`;
   };
 
-  // Open HTML file picker
   const openFilePicker = () => {
     fileInputRef.current?.click();
   };
@@ -204,7 +179,6 @@ export default function DayView() {
       setNewEntryFilePath(file.name);
       setImportError(null);
     }
-    // Reset file input for re-selection
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -229,7 +203,6 @@ export default function DayView() {
         setDuration(soundRef.current?.duration() || 0);
       },
       onplay: () => {
-        // Start the animation loop when audio actually starts playing
         const animate = () => {
           if (soundRef.current && soundRef.current.playing()) {
             const seek = soundRef.current.seek();
@@ -297,7 +270,7 @@ export default function DayView() {
   };
 
   const pollJobStatus = async (recordingId: number) => {
-    const maxAttempts = 120; // 10 minutes at 5 second intervals
+    const maxAttempts = 120;
     let attempts = 0;
 
     const poll = async () => {
@@ -323,7 +296,6 @@ export default function DayView() {
           setImportLoading(false);
           setImportProgress(null);
         } else {
-          // Still processing, poll again
           attempts++;
           setTimeout(poll, 5000);
         }
@@ -350,7 +322,6 @@ export default function DayView() {
     try {
       let response;
       
-      // Get the next available minute for this hour slot
       let nextMinute = 1;
       let nextSecond = 0;
       if (newEntryHour !== null) {
@@ -368,20 +339,15 @@ export default function DayView() {
         }
       }
       
-      // Calculate the recorded_at timestamp from the selected date, hour, and next available minute
-      // Use .format() instead of .toISOString() to avoid UTC conversion - we want local time
       const recordedAt = newEntryHour !== null 
         ? currentDate.hour(newEntryHour).minute(nextMinute).second(nextSecond).format('YYYY-MM-DDTHH:mm:ss')
         : currentDate.format('YYYY-MM-DDTHH:mm:ss');
       
       if (newEntryFile) {
-        // Upload file directly with the user-selected date/time
         response = await api.uploadFile(newEntryFile, enableDiarization, enableWordTimestamps, recordedAt);
       } else {
-        // Use server-side file path
         response = await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
       }
-      // Start polling for transcription status
       pollJobStatus(response.recording_id);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -401,13 +367,12 @@ export default function DayView() {
     setDuration(0);
   };
 
-  // Context menu handlers
   const handleContextMenu = (event: React.MouseEvent, rec: RecordingWithTranscription) => {
     event.preventDefault();
     event.stopPropagation();
     setContextMenu({
-      mouseX: event.clientX,
-      mouseY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
       recording: rec,
     });
   };
@@ -428,7 +393,6 @@ export default function DayView() {
     if (contextMenu) {
       const rec = contextMenu.recording;
       setChangeDateRecording(rec);
-      // Parse the current recorded_at to pre-fill the dialog
       const recordedAt = dayjs(rec.recorded_at);
       setNewDate(recordedAt.format('YYYY-MM-DD'));
       setNewTime(recordedAt.format('HH:mm'));
@@ -461,8 +425,6 @@ export default function DayView() {
     setChangeDateError(null);
     
     try {
-      // Combine date and time into ISO string
-      // Use .format() instead of .toISOString() to avoid UTC conversion - we want local time
       const newDateTime = dayjs(`${newDate}T${newTime}`);
       if (!newDateTime.isValid()) {
         setChangeDateError('Invalid date or time');
@@ -473,9 +435,6 @@ export default function DayView() {
       await api.updateRecordingDate(changeDateRecording.id, newDateTime.format('YYYY-MM-DDTHH:mm:ss'));
       setChangeDateDialogOpen(false);
       setChangeDateRecording(null);
-      
-      // If the new date is different from the current date, the recording will disappear from this view
-      // Reload to reflect changes
       await loadRecordingsForDay();
     } catch (err) {
       console.error('Failed to update recording date:', err);
@@ -506,479 +465,377 @@ export default function DayView() {
     const hiddenCount = Math.max(0, slot.recordings.length - maxVisible);
     
     return (
-      <Paper
+      <div
         key={slot.hour}
-        elevation={1}
-        sx={{
-          p: 1.5,
-          mb: 1,
-          bgcolor: 'background.paper',
-          border: '1px solid',
-          borderColor: 'divider',
-          position: 'relative',
-        }}
+        className="p-3 mb-2 bg-surface rounded-lg border border-gray-800"
       >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="body2" fontWeight={hasRecordings ? 'bold' : 'normal'}>
+        <div className="flex justify-between items-center mb-2">
+          <span className={`text-sm ${hasRecordings ? 'font-semibold text-white' : 'text-gray-400'}`}>
             {formatHour(slot.hour)}
-          </Typography>
+          </span>
           {hasRecordings && (
-            <Chip
-              size="small"
-              label={slot.recordings.length}
-              color="error"
-              sx={{ height: 20, minWidth: 20, '& .MuiChip-label': { px: 0.5 } }}
-            />
+            <span className="chip-error text-xs">
+              {slot.recordings.length}
+            </span>
           )}
-        </Box>
+        </div>
         
-        {/* Recordings row with adaptive width */}
-        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'stretch', minHeight: 48 }}>
-          {/* Visible recordings */}
+        <div className="flex gap-1.5 items-stretch min-h-[48px]">
           {visibleRecordings.map((rec) => (
-            <Paper
+            <div
               key={rec.id}
-              elevation={3}
               onClick={(e) => handleRecordingClick(rec, e)}
               onContextMenu={(e) => handleContextMenu(e, rec)}
-              sx={{
-                flex: '1 1 auto',
-                minWidth: 0,
-                p: 1,
-                cursor: 'pointer',
-                bgcolor: 'primary.dark',
-                border: '2px solid',
-                borderColor: 'primary.main',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  bgcolor: 'primary.main',
-                  transform: 'scale(1.02)',
-                },
-              }}
+              className="flex-1 min-w-0 p-2 cursor-pointer bg-primary/20 border-2 border-primary rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-primary/30 hover:scale-[1.02]"
             >
-              <Typography
-                variant="caption"
-                sx={{
-                  color: 'primary.contrastText',
-                  textAlign: 'center',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
+              <span className="text-xs text-primary text-center truncate">
                 {rec.filename || 'Recording'}
-              </Typography>
-            </Paper>
+              </span>
+            </div>
           ))}
           
-          {/* "More" indicator if there are hidden recordings */}
           {hiddenCount > 0 && (
-            <Box
-              sx={{
-                flex: `0 0 auto`,
-                display: 'flex',
-                alignItems: 'center',
-                px: 0.5,
-              }}
-            >
-              <Typography variant="caption" color="text.secondary">
-                +{hiddenCount}
-              </Typography>
-            </Box>
+            <div className="flex items-center px-1 text-xs text-gray-500">
+              +{hiddenCount}
+            </div>
           )}
           
-          {/* Add button - always visible */}
-          <Paper
-            elevation={1}
+          <button
             onClick={(e) => handleAddClick(slot.hour, e)}
-            sx={{
-              flex: '0 0 auto',
-              width: 48,
-              p: 1,
-              cursor: 'pointer',
-              bgcolor: 'background.default',
-              border: '2px dashed',
-              borderColor: 'divider',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-              opacity: 0.6,
-              '&:hover': {
-                opacity: 1,
-                borderColor: 'primary.main',
-                bgcolor: 'action.hover',
-              },
-            }}
+            className="flex-shrink-0 w-12 p-2 border-2 border-dashed border-gray-700 rounded-lg flex items-center justify-center opacity-60 hover:opacity-100 hover:border-primary hover:bg-surface-light transition-all"
           >
-            <AddIcon fontSize="small" />
-          </Paper>
-        </Box>
-      </Paper>
+            <Plus size={16} className="text-gray-400" />
+          </button>
+        </div>
+      </div>
     );
   };
 
+  const isNextDisabled = currentDate.isSame(dayjs(), 'day');
+
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-        <CircularProgress />
-      </Box>
+      <div className="flex justify-center mt-12">
+        <Loader2 className="animate-spin text-primary" size={40} />
+      </div>
     );
   }
 
   return (
-    <Box>
+    <div>
       {/* Day navigation */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          mb: 3,
-        }}
-      >
-        <IconButton onClick={handlePreviousDay}>
-          <ChevronLeftIcon />
-        </IconButton>
-        <Typography variant="h4" sx={{ mx: 3, minWidth: 300, textAlign: 'center' }}>
+      <div className="flex items-center justify-center mb-6">
+        <button onClick={handlePreviousDay} className="btn-icon">
+          <ChevronLeft size={24} />
+        </button>
+        <h2 className="mx-4 min-w-[280px] text-center text-xl font-semibold text-white">
           {currentDate.format('dddd, MMMM D, YYYY')}
-        </Typography>
-        <IconButton
+        </h2>
+        <button
           onClick={handleNextDay}
-          disabled={currentDate.isSame(dayjs(), 'day')}
+          disabled={isNextDisabled}
+          className={`btn-icon ${isNextDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          <ChevronRightIcon />
-        </IconButton>
-      </Box>
+          <ChevronRight size={24} />
+        </button>
+      </div>
 
-      <Button
-        variant="outlined"
+      <button
         onClick={() => navigate('/')}
-        sx={{ mb: 2 }}
+        className="btn-outline mb-4"
       >
         Back to Calendar
-      </Button>
+      </button>
 
       {/* Two-column hour grid */}
-      <Grid container spacing={3}>
-        {/* Morning (0:00 - 11:00) */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>
-              Morning (12 AM - 11 AM)
-            </Typography>
-            {morning.map(slot => renderHourSlot(slot))}
-          </Paper>
-        </Grid>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Morning */}
+        <div className="card p-4">
+          <h3 className="text-lg font-medium text-white text-center mb-4">
+            Morning (12 AM - 11 AM)
+          </h3>
+          {morning.map(slot => renderHourSlot(slot))}
+        </div>
 
-        {/* Afternoon/Evening (12:00 - 23:00) */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>
-              Afternoon/Evening (12 PM - 11 PM)
-            </Typography>
-            {afternoon.map(slot => renderHourSlot(slot))}
-          </Paper>
-        </Grid>
-      </Grid>
+        {/* Afternoon/Evening */}
+        <div className="card p-4">
+          <h3 className="text-lg font-medium text-white text-center mb-4">
+            Afternoon/Evening (12 PM - 11 PM)
+          </h3>
+          {afternoon.map(slot => renderHourSlot(slot))}
+        </div>
+      </div>
 
-      {/* Selected Recording Dialog */}
-      <Dialog 
-        open={!!selectedRecording} 
+      {/* Selected Recording Modal */}
+      <Modal
+        open={!!selectedRecording}
         onClose={handleCloseRecording}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: { maxHeight: '90vh' }
-        }}
+        title={selectedRecording?.filename}
+        maxWidth="lg"
       >
         {selectedRecording && (
-          <>
-            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="h5" component="span">{selectedRecording.filename}</Typography>
-              <IconButton onClick={handleCloseRecording} size="small">
-                <CloseIcon />
-              </IconButton>
-            </DialogTitle>
-            <DialogContent dividers>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Recorded: {new Date(selectedRecording.recorded_at).toLocaleString()} | 
-                Duration: {formatTime(selectedRecording.duration_seconds)} | 
-                Words: {selectedRecording.word_count}
-                {selectedRecording.has_diarization && (
-                  <Chip label="Diarization" size="small" sx={{ ml: 1 }} />
-                )}
-              </Typography>
-
-              {/* Audio player */}
-              <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <IconButton onClick={() => seekTo(Math.max(0, currentTime - 10))}>
-                    <Replay10Icon />
-                  </IconButton>
-                  <IconButton onClick={togglePlayPause} size="large">
-                    {playing ? <PauseIcon fontSize="large" /> : <PlayIcon fontSize="large" />}
-                  </IconButton>
-                  <IconButton onClick={() => seekTo(Math.min(duration, currentTime + 10))}>
-                    <Forward10Icon />
-                  </IconButton>
-                  <Typography variant="body2" sx={{ minWidth: 80 }}>
-                    {formatTime(currentTime)}
-                  </Typography>
-                  <Slider
-                    value={currentTime}
-                    max={duration || 100}
-                    onChange={(_, value) => seekTo(value as number)}
-                    sx={{ mx: 2 }}
-                  />
-                  <Typography variant="body2" sx={{ minWidth: 80 }}>
-                    {formatTime(duration)}
-                  </Typography>
-                </Box>
-              </Paper>
-
-              {/* Transcript */}
-              {selectedRecording.transcription && (
-                <Box>
-                  <Typography variant="h6" sx={{ mb: 2 }}>
-                    Transcript
-                  </Typography>
-                  {selectedRecording.transcription.segments.map((segment, segIndex) => (
-                    <Box key={segIndex} sx={{ mb: 2 }}>
-                      {segment.speaker && (
-                        <Chip
-                          label={segment.speaker}
-                          size="small"
-                          color="primary"
-                          sx={{ mb: 1 }}
-                        />
-                      )}
-                      <Box sx={{ lineHeight: 2 }}>
-                        {segment.words ? (
-                          segment.words.map((word, wordIndex) => (
-                            <Typography
-                              key={`${segIndex}-${wordIndex}`}
-                              component="span"
-                              onClick={() => handleWordClick(word)}
-                              sx={{
-                                cursor: 'pointer',
-                                px: 0.3,
-                                borderRadius: 0.5,
-                                bgcolor: isWordActive(word) ? 'primary.main' : 'transparent',
-                                color: isWordActive(word) ? 'primary.contrastText' : 'text.primary',
-                                '&:hover': {
-                                  bgcolor: isWordActive(word) ? 'primary.dark' : 'action.hover',
-                                },
-                              }}
-                            >
-                              {word.word}{' '}
-                            </Typography>
-                          ))
-                        ) : (
-                          <Typography>{segment.text}</Typography>
-                        )}
-                      </Box>
-                    </Box>
-                  ))}
-                </Box>
+          <div>
+            <p className="text-sm text-gray-400 mb-4">
+              Recorded: {new Date(selectedRecording.recorded_at).toLocaleString()} | 
+              Duration: {formatTime(selectedRecording.duration_seconds)} | 
+              Words: {selectedRecording.word_count}
+              {selectedRecording.has_diarization && (
+                <span className="chip-primary ml-2">Diarization</span>
               )}
-            </DialogContent>
-          </>
-        )}
-      </Dialog>
+            </p>
 
-      {/* Hidden file input for web fallback */}
+            {/* Audio player */}
+            <div className="bg-surface-light rounded-lg p-4 mb-4">
+              <div className="flex items-center gap-2">
+                <button onClick={() => seekTo(Math.max(0, currentTime - 10))} className="btn-icon">
+                  <RotateCcw size={20} />
+                </button>
+                <button onClick={togglePlayPause} className="btn-icon p-3">
+                  {playing ? <Pause size={28} /> : <Play size={28} />}
+                </button>
+                <button onClick={() => seekTo(Math.min(duration, currentTime + 10))} className="btn-icon">
+                  <RotateCw size={20} />
+                </button>
+                <span className="text-sm text-gray-400 min-w-[60px]">
+                  {formatTime(currentTime)}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 100}
+                  value={currentTime}
+                  onChange={(e) => seekTo(parseFloat(e.target.value))}
+                  className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary mx-2"
+                />
+                <span className="text-sm text-gray-400 min-w-[60px] text-right">
+                  {formatTime(duration)}
+                </span>
+              </div>
+            </div>
+
+            {/* Transcript */}
+            {selectedRecording.transcription && (
+              <div>
+                <h3 className="text-lg font-medium text-white mb-3">Transcript</h3>
+                {selectedRecording.transcription.segments.map((segment, segIndex) => (
+                  <div key={segIndex} className="mb-3">
+                    {segment.speaker && (
+                      <span className="chip-primary mb-2 inline-block">
+                        {segment.speaker}
+                      </span>
+                    )}
+                    <div className="leading-8">
+                      {segment.words ? (
+                        segment.words.map((word, wordIndex) => (
+                          <span
+                            key={`${segIndex}-${wordIndex}`}
+                            onClick={() => handleWordClick(word)}
+                            className={`
+                              cursor-pointer px-0.5 rounded transition-colors
+                              ${isWordActive(word)
+                                ? 'bg-primary text-gray-900'
+                                : 'text-white hover:bg-surface-light'
+                              }
+                            `}
+                          >
+                            {word.word}{' '}
+                          </span>
+                        ))
+                      ) : (
+                        <p className="text-white">{segment.text}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
         accept="audio/*,.mp3,.wav,.opus,.ogg,.flac,.m4a,.wma,.aac"
-        style={{ display: 'none' }}
+        className="hidden"
         onChange={handleFileInputChange}
       />
 
-      {/* New Entry Dialog */}
-      <Dialog open={dialogOpen} onClose={() => !importLoading && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          New Recording Entry - {newEntryHour !== null && formatHour(newEntryHour)}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            {/* File picker button */}
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<BrowseIcon />}
-              onClick={openFilePicker}
+      {/* New Entry Modal */}
+      <Modal
+        open={dialogOpen}
+        onClose={() => !importLoading && setDialogOpen(false)}
+        title={`New Recording Entry - ${newEntryHour !== null ? formatHour(newEntryHour) : ''}`}
+        disableBackdropClick={importLoading}
+        footer={
+          <>
+            <button
+              onClick={() => { setDialogOpen(false); setNewEntryFile(null); setNewEntryFilePath(''); }}
               disabled={importLoading}
-              sx={{ py: 2, px: 4, mb: 2, width: '100%' }}
+              className="btn-ghost"
             >
-              Browse for Audio File
-            </Button>
-
-            {/* Show selected file */}
-            {newEntryFilePath && (
-              <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Selected file:
-                </Typography>
-                <Typography variant="body1" sx={{ wordBreak: 'break-all' }}>
-                  {newEntryFilePath}
-                </Typography>
-              </Paper>
-            )}
-
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Supported formats: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
-            </Typography>
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={enableWordTimestamps}
-                  onChange={(e) => setEnableWordTimestamps(e.target.checked)}
-                  disabled={importLoading}
-                />
-              }
-              label="Enable word-level timestamps"
-            />
-            
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={enableDiarization}
-                  onChange={(e) => setEnableDiarization(e.target.checked)}
-                  disabled={importLoading}
-                />
-              }
-              label="Enable speaker diarization"
-            />
-
-            {importProgress && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {importProgress}
-                </Typography>
-                <LinearProgress />
-              </Box>
-            )}
-
-            {importError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {importError}
-              </Alert>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => { setDialogOpen(false); setNewEntryFile(null); setNewEntryFilePath(''); }} disabled={importLoading}>Cancel</Button>
-          <Button
-            onClick={handleCreateEntry}
-            variant="contained"
-            disabled={importLoading || (!newEntryFile && !newEntryFilePath.trim())}
-          >
-            {importLoading ? <CircularProgress size={24} /> : 'Create & Transcribe'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Context Menu */}
-      <Menu
-        open={contextMenu !== null}
-        onClose={handleCloseContextMenu}
-        anchorReference="anchorPosition"
-        anchorPosition={
-          contextMenu !== null
-            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
-            : undefined
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateEntry}
+              disabled={importLoading || (!newEntryFile && !newEntryFilePath.trim())}
+              className="btn-primary"
+            >
+              {importLoading ? <Loader2 className="animate-spin" size={20} /> : 'Create & Transcribe'}
+            </button>
+          </>
         }
       >
-        <MenuItem onClick={handleChangeDateClick}>
-          <ListItemIcon>
-            <EditCalendar fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Change Date & Time</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={handleDeleteClick} sx={{ color: 'error.main' }}>
-          <ListItemIcon>
-            <DeleteOutlined fontSize="small" color="error" />
-          </ListItemIcon>
-          <ListItemText>Delete Recording</ListItemText>
-        </MenuItem>
-      </Menu>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => !deleteLoading && setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Recording?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete "{deleteRecording?.filename}"?
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            This will permanently delete the audio file and its transcription.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleConfirmDelete}
-            color="error"
-            variant="contained"
-            disabled={deleteLoading}
+        <div className="space-y-4">
+          <button
+            onClick={openFilePicker}
+            disabled={importLoading}
+            className="btn-primary w-full py-3"
           >
-            {deleteLoading ? <CircularProgress size={24} /> : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <Search size={20} />
+            Browse for Audio File
+          </button>
 
-      {/* Change Date Dialog */}
-      <Dialog open={changeDateDialogOpen} onClose={() => !changeDateLoading && setChangeDateDialogOpen(false)}>
-        <DialogTitle>Change Date & Time</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Typography variant="body2" color="text.secondary">
-              Recording: {changeDateRecording?.filename}
-            </Typography>
-            <TextField
-              label="Date"
+          {newEntryFilePath && (
+            <div className="bg-surface-light rounded-lg p-3">
+              <p className="text-xs text-gray-400">Selected file:</p>
+              <p className="text-sm text-white break-all">{newEntryFilePath}</p>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-500">
+            Supported formats: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
+          </p>
+
+          <Toggle
+            checked={enableWordTimestamps}
+            onChange={setEnableWordTimestamps}
+            label="Enable word-level timestamps"
+            disabled={importLoading}
+          />
+          
+          <Toggle
+            checked={enableDiarization}
+            onChange={setEnableDiarization}
+            label="Enable speaker diarization"
+            disabled={importLoading}
+          />
+
+          {importProgress && (
+            <div>
+              <p className="text-sm text-gray-400 mb-2">{importProgress}</p>
+              <ProgressBar indeterminate />
+            </div>
+          )}
+
+          {importError && (
+            <Alert severity="error">{importError}</Alert>
+          )}
+        </div>
+      </Modal>
+
+      {/* Context Menu */}
+      <ContextMenu
+        open={contextMenu !== null}
+        onClose={handleCloseContextMenu}
+        position={contextMenu ? { x: contextMenu.x, y: contextMenu.y } : null}
+      >
+        <ContextMenuItem onClick={handleChangeDateClick} icon={<CalendarDays size={16} />}>
+          Change Date & Time
+        </ContextMenuItem>
+        <ContextMenuItem onClick={handleDeleteClick} icon={<Trash2 size={16} />} danger>
+          Delete Recording
+        </ContextMenuItem>
+      </ContextMenu>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        open={deleteDialogOpen}
+        onClose={() => !deleteLoading && setDeleteDialogOpen(false)}
+        title="Delete Recording?"
+        disableBackdropClick={deleteLoading}
+        footer={
+          <>
+            <button
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleteLoading}
+              className="btn-ghost"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmDelete}
+              disabled={deleteLoading}
+              className="btn-danger"
+            >
+              {deleteLoading ? <Loader2 className="animate-spin" size={20} /> : 'Delete'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-white">
+          Are you sure you want to delete "{deleteRecording?.filename}"?
+        </p>
+        <p className="text-sm text-gray-400 mt-2">
+          This will permanently delete the audio file and its transcription.
+        </p>
+      </Modal>
+
+      {/* Change Date Modal */}
+      <Modal
+        open={changeDateDialogOpen}
+        onClose={() => !changeDateLoading && setChangeDateDialogOpen(false)}
+        title="Change Date & Time"
+        disableBackdropClick={changeDateLoading}
+        footer={
+          <>
+            <button
+              onClick={() => setChangeDateDialogOpen(false)}
+              disabled={changeDateLoading}
+              className="btn-ghost"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmChangeDate}
+              disabled={changeDateLoading || !newDate || !newTime}
+              className="btn-primary"
+            >
+              {changeDateLoading ? <Loader2 className="animate-spin" size={20} /> : 'Update'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-400">
+            Recording: {changeDateRecording?.filename}
+          </p>
+          <div>
+            <label className="label">Date</label>
+            <input
               type="date"
+              className="input"
               value={newDate}
               onChange={(e) => setNewDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              fullWidth
               disabled={changeDateLoading}
             />
-            <TextField
-              label="Time"
+          </div>
+          <div>
+            <label className="label">Time</label>
+            <input
               type="time"
+              className="input"
               value={newTime}
               onChange={(e) => setNewTime(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-              fullWidth
               disabled={changeDateLoading}
             />
-            {changeDateError && (
-              <Alert severity="error">{changeDateError}</Alert>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setChangeDateDialogOpen(false)} disabled={changeDateLoading}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleConfirmChangeDate}
-            variant="contained"
-            disabled={changeDateLoading || !newDate || !newTime}
-          >
-            {changeDateLoading ? <CircularProgress size={24} /> : 'Update'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+          </div>
+          {changeDateError && (
+            <Alert severity="error">{changeDateError}</Alert>
+          )}
+        </div>
+      </Modal>
+    </div>
   );
 }

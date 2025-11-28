@@ -1,23 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  Box,
-  Paper,
-  Typography,
-  IconButton,
-  Slider,
-  CircularProgress,
-  Chip,
-  Button,
-} from '@mui/material';
-import {
-  PlayArrow as PlayIcon,
-  Pause as PauseIcon,
-  Replay10 as Replay10Icon,
-  Forward10 as Forward10Icon,
-  ChevronLeft as ArrowBackIcon,
-  CalendarMonth as CalendarIcon,
-} from '@mui/icons-material';
+  ChevronLeft,
+  Play,
+  Pause,
+  RotateCcw,
+  RotateCw,
+  Calendar as CalendarIcon,
+  Loader2,
+} from 'lucide-react';
 import { Howl } from 'howler';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
@@ -127,8 +118,8 @@ export default function RecordingView() {
     }
   };
 
-  const handleSliderChange = (_: Event, value: number | number[]) => {
-    seekTo(value as number);
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    seekTo(parseFloat(e.target.value));
   };
 
   const handleWordClick = (word: Word) => {
@@ -154,121 +145,117 @@ export default function RecordingView() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-        <CircularProgress />
-      </Box>
+      <div className="flex justify-center mt-12">
+        <Loader2 className="animate-spin text-primary" size={40} />
+      </div>
     );
   }
 
   if (!recording || !transcription) {
     return (
-      <Typography color="error">Failed to load recording</Typography>
+      <p className="text-red-400">Failed to load recording</p>
     );
   }
 
   return (
-    <Box>
+    <div>
       {/* Back button */}
-      <Button
-        startIcon={<ArrowBackIcon />}
+      <button
         onClick={() => navigate(-1)}
-        sx={{ mb: 2 }}
+        className="btn-ghost mb-4"
       >
+        <ChevronLeft size={20} />
         Back
-      </Button>
+      </button>
 
       {/* Recording info */}
-      <Paper sx={{ p: 3, mb: 2 }}>
-        <Typography variant="h5" sx={{ mb: 2 }}>{recording.filename}</Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, color: 'text.secondary' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <CalendarIcon fontSize="small" />
-            <Typography variant="body2">
-              {dayjs(recording.recorded_at).format('MMMM D, YYYY')}
-            </Typography>
-          </Box>
-          <Typography variant="body2">
-            Duration: {formatTime(recording.duration_seconds)}
-          </Typography>
-          <Typography variant="body2">
-            {recording.word_count} words
-          </Typography>
+      <div className="card p-4 mb-4">
+        <h1 className="text-xl font-semibold text-white mb-3">{recording.filename}</h1>
+        <div className="flex flex-wrap gap-4 text-sm text-gray-400">
+          <span className="flex items-center gap-1.5">
+            <CalendarIcon size={16} />
+            {dayjs(recording.recorded_at).format('MMMM D, YYYY')}
+          </span>
+          <span>Duration: {formatTime(recording.duration_seconds)}</span>
+          <span>{recording.word_count} words</span>
           {recording.has_diarization && (
-            <Chip label="Speaker Diarization" size="small" color="primary" variant="outlined" />
+            <span className="chip-primary">Speaker Diarization</span>
           )}
-        </Box>
-      </Paper>
-
+        </div>
+      </div>
 
       {/* Audio player */}
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <IconButton onClick={() => seekTo(Math.max(0, currentTime - 10))}>
-            <Replay10Icon />
-          </IconButton>
-          <IconButton onClick={togglePlayPause} size="large">
-            {playing ? <PauseIcon fontSize="large" /> : <PlayIcon fontSize="large" />}
-          </IconButton>
-          <IconButton onClick={() => seekTo(Math.min(duration, currentTime + 10))}>
-            <Forward10Icon />
-          </IconButton>
-          <Typography variant="body2" sx={{ minWidth: 80 }}>
+      <div className="card p-4 mb-4">
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => seekTo(Math.max(0, currentTime - 10))}
+            className="btn-icon"
+          >
+            <RotateCcw size={20} />
+          </button>
+          <button 
+            onClick={togglePlayPause} 
+            className="btn-icon p-3"
+          >
+            {playing ? <Pause size={28} /> : <Play size={28} />}
+          </button>
+          <button 
+            onClick={() => seekTo(Math.min(duration, currentTime + 10))}
+            className="btn-icon"
+          >
+            <RotateCw size={20} />
+          </button>
+          <span className="text-sm text-gray-400 min-w-[60px]">
             {formatTime(currentTime)}
-          </Typography>
-          <Slider
-            value={currentTime}
+          </span>
+          <input
+            type="range"
+            min={0}
             max={duration}
+            value={currentTime}
             onChange={handleSliderChange}
-            sx={{ mx: 2 }}
+            className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary mx-2"
           />
-          <Typography variant="body2" sx={{ minWidth: 80 }}>
+          <span className="text-sm text-gray-400 min-w-[60px] text-right">
             {formatTime(duration)}
-          </Typography>
-        </Box>
-      </Paper>
+          </span>
+        </div>
+      </div>
 
       {/* Transcript with clickable words */}
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
-          Transcript
-        </Typography>
+      <div className="card p-4">
+        <h2 className="text-lg font-medium text-white mb-4">Transcript</h2>
         {transcription.segments.map((segment, segIndex) => (
-          <Box key={segIndex} sx={{ mb: 2 }}>
+          <div key={segIndex} className="mb-4">
             {segment.speaker && (
-              <Chip
-                label={segment.speaker}
-                size="small"
-                sx={{ mb: 1 }}
-              />
+              <span className="chip-primary mb-2 inline-block">
+                {segment.speaker}
+              </span>
             )}
-            <Box sx={{ lineHeight: 2 }}>
+            <div className="leading-8">
               {segment.words ? (
                 segment.words.map((word, wordIndex) => (
-                  <Typography
+                  <span
                     key={`${segIndex}-${wordIndex}`}
-                    component="span"
                     onClick={() => handleWordClick(word)}
-                    sx={{
-                      cursor: 'pointer',
-                      px: 0.3,
-                      borderRadius: 0.5,
-                      bgcolor: isWordActive(word) ? 'primary.main' : 'transparent',
-                      color: isWordActive(word) ? 'primary.contrastText' : 'text.primary',
-                      '&:hover': {
-                        bgcolor: isWordActive(word) ? 'primary.dark' : 'action.hover',
-                      },
-                    }}
+                    className={`
+                      cursor-pointer px-0.5 rounded transition-colors
+                      ${isWordActive(word)
+                        ? 'bg-primary text-gray-900'
+                        : 'text-white hover:bg-surface-light'
+                      }
+                    `}
                   >
                     {word.word}{' '}
-                  </Typography>
+                  </span>
                 ))
               ) : (
-                <Typography>{segment.text}</Typography>
+                <p className="text-white">{segment.text}</p>
               )}
-            </Box>
-          </Box>
+            </div>
+          </div>
         ))}
-      </Paper>
-    </Box>
+      </div>
+    </div>
   );
 }

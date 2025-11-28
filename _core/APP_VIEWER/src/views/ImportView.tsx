@@ -1,26 +1,8 @@
 import { useState, useRef } from 'react';
-import {
-  Box,
-  Paper,
-  Typography,
-  Switch,
-  FormControlLabel,
-  LinearProgress,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Alert,
-} from '@mui/material';
-import {
-  AudioFile as AudioIcon,
-  CheckCircle as CheckIcon,
-  Error as ErrorIcon,
-  Pending as PendingIcon,
-  CloudUpload as UploadIcon,
-} from '@mui/icons-material';
+import { Upload, FileAudio, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
 import { ImportJob } from '../types';
+import { Toggle, Alert, ProgressBar } from '../components/ui';
 
 export default function ImportView() {
   const [enableDiarization, setEnableDiarization] = useState(false);
@@ -43,7 +25,6 @@ export default function ImportView() {
       if (attempts >= maxAttempts) {
         updateJobStatus(recordingId, 'failed', undefined, 'Transcription timed out');
         return;
-
       }
 
       try {
@@ -86,13 +67,13 @@ export default function ImportView() {
   const getStatusIcon = (status: ImportJob['status']) => {
     switch (status) {
       case 'completed':
-        return <CheckIcon color="success" />;
+        return <CheckCircle className="text-green-400" size={20} />;
       case 'failed':
-        return <ErrorIcon color="error" />;
+        return <XCircle className="text-red-400" size={20} />;
       case 'transcribing':
-        return <PendingIcon color="info" />;
+        return <Loader2 className="text-blue-400 animate-spin" size={20} />;
       default:
-        return <AudioIcon />;
+        return <FileAudio className="text-gray-400" size={20} />;
     }
   };
 
@@ -144,47 +125,37 @@ export default function ImportView() {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 3 }}>
-        Import Recordings
-      </Typography>
+    <div>
+      <h1 className="text-2xl font-semibold text-white mb-6">Import Recordings</h1>
 
       {/* Drag and drop zone */}
-      <Paper
+      <div
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
-        sx={{
-          p: 3,
-          mb: 3,
-          border: '2px dashed',
-          borderColor: dragActive ? 'primary.main' : 'divider',
-          bgcolor: dragActive ? 'action.hover' : 'background.paper',
-          transition: 'all 0.2s ease',
-          cursor: 'pointer',
-        }}
         onClick={openFilePicker}
+        className={`
+          card p-6 mb-6 border-2 border-dashed cursor-pointer transition-all duration-200
+          ${dragActive 
+            ? 'border-primary bg-primary/5' 
+            : 'border-gray-700 hover:border-gray-600'
+          }
+        `}
       >
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            py: 4,
-          }}
-        >
-          <UploadIcon sx={{ fontSize: 48, color: dragActive ? 'primary.main' : 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" sx={{ mb: 1 }}>
+        <div className="flex flex-col items-center py-8">
+          <Upload 
+            size={48} 
+            className={`mb-4 ${dragActive ? 'text-primary' : 'text-gray-500'}`} 
+          />
+          <h3 className="text-lg font-medium text-white mb-2">
             {dragActive ? 'Drop files here' : 'Drag & drop audio files here'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            or click to browse
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
+          </h3>
+          <p className="text-sm text-gray-400 mb-4">or click to browse</p>
+          <p className="text-xs text-gray-500">
             Supported: MP3, WAV, OPUS, OGG, FLAC, M4A, WMA, AAC
-          </Typography>
-        </Box>
+          </p>
+        </div>
         
         {/* Hidden file input */}
         <input
@@ -192,81 +163,65 @@ export default function ImportView() {
           type="file"
           multiple
           accept="audio/*,.mp3,.wav,.opus,.ogg,.flac,.m4a,.wma,.aac"
-          style={{ display: 'none' }}
+          className="hidden"
           onChange={(e) => e.target.files && handleFiles(e.target.files)}
         />
-      </Paper>
+      </div>
 
       {/* Options */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2 }}>
-          Transcription Options
-        </Typography>
-
-        <FormControlLabel
-          control={
-            <Switch
-              checked={enableWordTimestamps}
-              onChange={(e) => setEnableWordTimestamps(e.target.checked)}
-            />
-          }
-          label="Enable word-level timestamps (clickable words in transcript)"
-        />
-
-        <FormControlLabel
-          control={
-            <Switch
-              checked={enableDiarization}
-              onChange={(e) => setEnableDiarization(e.target.checked)}
-            />
-          }
-          label="Enable speaker diarization (requires separate Python 3.11 environment)"
-        />
-      </Paper>
+      <div className="card p-4 mb-6">
+        <h2 className="text-lg font-medium text-white mb-4">Transcription Options</h2>
+        <div className="space-y-3">
+          <Toggle
+            checked={enableWordTimestamps}
+            onChange={setEnableWordTimestamps}
+            label="Enable word-level timestamps (clickable words in transcript)"
+          />
+          <Toggle
+            checked={enableDiarization}
+            onChange={setEnableDiarization}
+            label="Enable speaker diarization (requires separate Python 3.11 environment)"
+          />
+        </div>
+      </div>
 
       {/* Error alert */}
-
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+        <Alert severity="error" className="mb-6" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
       {/* Import jobs list */}
       {jobs.length > 0 && (
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            Import Queue
-          </Typography>
+        <div className="card p-4">
+          <h2 className="text-lg font-medium text-white mb-4">Import Queue</h2>
           
-          <List>
+          <div className="space-y-3">
             {jobs.map((job) => (
-              <ListItem key={job.id}>
-                <ListItemIcon>
+              <div 
+                key={job.id}
+                className="flex items-start gap-3 p-3 bg-surface-light rounded-lg"
+              >
+                <div className="flex-shrink-0 mt-0.5">
                   {getStatusIcon(job.status)}
-                </ListItemIcon>
-                <ListItemText
-                  primary={job.filename}
-                  secondary={
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        {job.message || job.status}
-                      </Typography>
-                      {job.status === 'transcribing' && job.progress !== undefined && (
-                        <LinearProgress
-                          variant="determinate"
-                          value={job.progress * 100}
-                          sx={{ mt: 1 }}
-                        />
-                      )}
-                    </Box>
-                  }
-                />
-              </ListItem>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">
+                    {job.filename}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {job.message || job.status}
+                  </p>
+                  {job.status === 'transcribing' && job.progress !== undefined && (
+                    <ProgressBar value={job.progress * 100} className="mt-2" />
+                  )}
+                </div>
+              </div>
             ))}
-          </List>
-        </Paper>
+          </div>
+        </div>
       )}
-    </Box>
+    </div>
   );
 }
