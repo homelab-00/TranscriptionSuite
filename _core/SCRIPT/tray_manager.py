@@ -108,9 +108,15 @@ class TrayIconManager:
         # Color scheme reflecting application states
         self.colors = {
             "loading": (128, 128, 128),  # Grey
+            "unloaded": (128, 128, 128),  # Grey - no model loaded
             "standby": (0, 255, 0),  # Green
             "recording": (255, 255, 0),  # Yellow
             "transcribing": (255, 128, 0),  # Orange during transcription
+            "static_transcribing": (
+                203,
+                153,
+                201,
+            ),  # Pastel mauve - static file transcription
             "error": (255, 0, 0),  # Red
             "audio_notebook": (102, 178, 178),  # Muted aquamarine/teal
         }

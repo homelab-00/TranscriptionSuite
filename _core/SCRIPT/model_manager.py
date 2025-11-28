@@ -19,7 +19,13 @@ import sys
 from types import ModuleType
 from typing import Any, Callable, Dict, Optional, TypedDict, Union
 
-from platform_utils import get_platform_manager
+from platform_utils import (
+    HAS_PYAUDIO,
+    HAS_TORCH,
+    get_platform_manager,
+    pyaudio,
+    torch,
+)
 from recorder import LongFormRecorder
 from utils import safe_print
 
@@ -31,22 +37,6 @@ class AudioDeviceInfo(TypedDict):
     channels: int
     sample_rate: float
     is_default: bool
-
-
-# Try to import optional dependencies at module level
-try:
-    import pyaudio
-except ImportError:
-    pyaudio = None  # type: ignore
-
-HAS_PYAUDIO: bool = pyaudio is not None
-
-try:
-    import torch
-except ImportError:
-    torch = None  # type: ignore
-
-HAS_TORCH: bool = torch is not None
 
 
 class ModelManager:
@@ -69,7 +59,7 @@ class ModelManager:
         devices: list[AudioDeviceInfo] = []
 
         if not HAS_PYAUDIO or pyaudio is None:
-            self._log_warning("PyAudio not available for device enumeration")
+            logging.warning("PyAudio not available for device enumeration")
             return devices
 
         suppress_ctx = getattr(self.platform_manager, "suppress_audio_warnings", None)
@@ -105,7 +95,7 @@ class ModelManager:
                             devices.append(device_entry)
 
                     except (OSError, ValueError, TypeError) as e:
-                        self._log_warning(f"Could not get info for audio device {i}: {e}")
+                        logging.warning(f"Could not get info for audio device {i}: {e}")
                         continue
 
                 p.terminate()
@@ -113,11 +103,11 @@ class ModelManager:
             # Sort devices - default device first, then by name
             devices.sort(key=lambda x: (not x["is_default"], x["name"]))
 
-            self._log_info(f"Found {len(devices)} audio input devices")
+            logging.info(f"Found {len(devices)} audio input devices")
             return devices
 
         except Exception as e:
-            self._log_error(f"Error enumerating audio devices: {e}")
+            logging.error(f"Error enumerating audio devices: {e}")
             return devices
 
     def _get_optimal_device(self, module_config: dict[str, Any]) -> str:
@@ -126,7 +116,7 @@ class ModelManager:
         cuda_info = self.platform_manager.check_cuda_availability()
 
         if requested_device == "cuda" and not cuda_info["available"]:
-            self._log_info("CUDA requested but not available, falling back to CPU")
+            logging.info("CUDA requested but not available, falling back to CPU")
             safe_print("CUDA not available, using CPU", "warning")
             return "cpu"
 
@@ -158,12 +148,12 @@ class ModelManager:
 
         try:
             if not os.path.exists(filepath):
-                self._log_error("Module file not found: %s", filepath)
+                logging.error("Module file not found: %s", filepath)
                 return None
 
             spec = importlib.util.spec_from_file_location(module_name, filepath)
             if spec is None or spec.loader is None:
-                self._log_error("Could not find module: %s at %s", module_name, filepath)
+                logging.error("Could not find module: %s at %s", module_name, filepath)
                 return None
 
             module = importlib.util.module_from_spec(spec)
@@ -171,10 +161,10 @@ class ModelManager:
             spec.loader.exec_module(module)
 
             self.modules[module_name] = module
-            self._log_info("Successfully imported module: %s", module_name)
+            logging.info("Successfully imported module: %s", module_name)
             return module
         except (ImportError, AttributeError, OSError) as e:
-            self._log_error("Error importing %s from %s: %s", module_name, filepath, e)
+            logging.error("Error importing %s from %s: %s", module_name, filepath, e)
             return None
 
     def _resolve_input_device_index(
@@ -198,7 +188,7 @@ class ModelManager:
     def get_default_input_device_index(self) -> Optional[int]:
         """Get the index of the default input device with better error handling."""
         if not HAS_PYAUDIO or pyaudio is None:
-            self._log_error("PyAudio not available")
+            logging.error("PyAudio not available")
             return None
 
         suppress_ctx = getattr(self.platform_manager, "suppress_audio_warnings", None)
@@ -221,12 +211,12 @@ class ModelManager:
                     p.terminate()
                     return default_index
                 except (OSError, KeyError, ValueError) as e:
-                    self._log_warning(f"Could not get default input device: {e}")
+                    logging.warning(f"Could not get default input device: {e}")
                     p.terminate()
                     return None
 
         except Exception as e:
-            self._log_error(f"Error getting default input device: {e}")
+            logging.error(f"Error getting default input device: {e}")
             return None
 
     def initialize_transcriber(
@@ -253,7 +243,7 @@ class ModelManager:
                 module_config = config_data
 
             if not module_config:
-                self._log_error("Config section '%s' not found.", config_name)
+                logging.error("Config section '%s' not found.", config_name)
                 return None
 
             # Add the microphone override to the config for this instance
@@ -274,12 +264,11 @@ class ModelManager:
                 config=instance_config, instance_name=instance_name, **callback_map
             )
 
-            self._log_info("%s recorder initialized successfully", config_name)
+            logging.info("%s recorder initialized successfully", config_name)
             return recorder
 
         except Exception as e:
-            # Break the call into multiple arguments to avoid a very long line
-            self._log_error(
+            logging.error(
                 "Error initializing recorder: %s",
                 e,
                 exc_info=True,
@@ -301,16 +290,4 @@ class ModelManager:
         except (AttributeError, ImportError):
             pass
 
-        self._log_info("All models cleaned up")
-
-    def _log_info(self, message: str, *args: Any) -> None:
-        """Log an info message."""
-        logging.info(message, *args)
-
-    def _log_warning(self, message: str, *args: Any) -> None:
-        """Log a warning message."""
-        logging.warning(message, *args)
-
-    def _log_error(self, message: str, *args: Any, **kwargs: Any) -> None:
-        """Log an error message."""
-        logging.error(message, *args, **kwargs)
+        logging.info("All models cleaned up")

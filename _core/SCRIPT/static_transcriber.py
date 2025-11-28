@@ -25,43 +25,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-# Use soundfile for reading the final audio file
-try:
-    import numpy as np
-    import soundfile as sf
-
-    HAS_SOUNDFILE = True
-except ImportError:
-    HAS_SOUNDFILE = False
-    np = None  # type: ignore
-    sf = None  # type: ignore
-
-# Use faster_whisper directly for static transcription with word timestamps
-try:
-    import faster_whisper
-
-    HAS_FASTER_WHISPER = True
-except ImportError:
-    HAS_FASTER_WHISPER = False
-    faster_whisper = None  # type: ignore
-
-# Use webrtcvad for pre-processing VAD
-try:
-    import webrtcvad
-
-    HAS_WEBRTC_VAD = True
-except ImportError:
-    HAS_WEBRTC_VAD = False
-    webrtcvad = None
-
-# Torch for GPU detection
-try:
-    import torch
-
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
-    torch = None  # type: ignore
+# Import centralized optional dependencies from platform_utils
+from platform_utils import (
+    HAS_FASTER_WHISPER,
+    HAS_SOUNDFILE,
+    HAS_TORCH,
+    HAS_WEBRTC_VAD,
+    faster_whisper,
+    np,
+    sf,
+    torch,
+    webrtcvad,
+)
 
 # Diarization service - import at module level for availability check
 try:

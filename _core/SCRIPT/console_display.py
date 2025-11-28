@@ -425,18 +425,12 @@ class ConsoleDisplay:
             self._latest_preview_text = self._default_preview_display()
 
     def _default_waveform_display(self) -> str:
-        return (
-            "[grey50]Waiting for audio...[/grey50]"
-            if _has_rich
-            else "Waiting for audio..."
-        )
+        # Rich is guaranteed available since __init__ returns early without it
+        return "[grey50]Waiting for audio...[/grey50]"
 
     def _default_preview_display(self) -> Any:
-        return (
-            Text("[grey50]Live preview will appear here...[/grey50]")
-            if _has_rich
-            else "Waiting for preview..."
-        )
+        # Rich is guaranteed available since __init__ returns early without it
+        return Text("[grey50]Live preview will appear here...[/grey50]")
 
     def _render_preview(self):
         """Renders the preview text and updates the internal Rich Text object."""

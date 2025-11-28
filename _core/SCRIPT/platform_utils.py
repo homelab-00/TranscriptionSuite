@@ -3,7 +3,8 @@
 Platform abstraction utilities for Linux.
 
 This module provides unified interfaces for platform-specific operations,
-streamlined for a Linux environment.
+streamlined for a Linux environment. Also provides centralized optional
+import handling for commonly used dependencies.
 """
 
 import contextlib
@@ -12,10 +13,62 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+# === Centralized Optional Import Registry ===
+def _try_import(module_name: str) -> Tuple[Any, bool]:
+    """Attempt to import a module, returning (module, True) or (None, False)."""
+    try:
+        return __import__(module_name), True
+    except ImportError:
+        return None, False
+
+
+# Core optional dependencies
+torch, HAS_TORCH = _try_import("torch")
+pyaudio, HAS_PYAUDIO = _try_import("pyaudio")
+soundfile, HAS_SOUNDFILE = _try_import("soundfile")
+webrtcvad, HAS_WEBRTC_VAD = _try_import("webrtcvad")
+
+# Alias for soundfile (commonly imported as sf)
+sf = soundfile
+
+# Try to import faster_whisper
+try:
+    import faster_whisper
+
+    HAS_FASTER_WHISPER = True
+except ImportError:
+    faster_whisper = None  # type: ignore
+    HAS_FASTER_WHISPER = False
+
+# Try to import numpy (usually available with soundfile)
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ImportError:
+    np = None  # type: ignore
+    HAS_NUMPY = False
+
+# Try to import Rich for console output
+try:
+    from rich.console import Console as RichConsole
+
+    _rich_console = RichConsole()
+    HAS_RICH = True
+except ImportError:
+    _rich_console = None
+    HAS_RICH = False
+
+
+def get_rich_console() -> Any:
+    """Get the Rich console instance (or None if not available)."""
+    return _rich_console
 
 
 class PlatformManager:

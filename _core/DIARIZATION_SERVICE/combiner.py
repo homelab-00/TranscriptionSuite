@@ -10,26 +10,19 @@ by the separate _module-diarization module; this code handles the merging.
 import json
 import logging
 import math
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Add SCRIPT directory to path for utils import
+_script_path = Path(__file__).parent.parent / "SCRIPT"
+if str(_script_path) not in sys.path:
+    sys.path.insert(0, str(_script_path))
+
+from utils import format_timestamp
+
 from .service import DiarizationSegment
-
-
-def format_timestamp(seconds: float) -> str:
-    """
-    Convert seconds to a formatted timestamp string (HH:MM:SS.mmm).
-
-    Args:
-        seconds: Time in seconds
-
-    Returns:
-        Formatted timestamp string
-    """
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
 
 @dataclass

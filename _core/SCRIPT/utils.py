@@ -6,19 +6,10 @@ General-purpose helper functions for TranscriptionSuite.
 import logging
 from typing import Any
 
-# Attempt to import Rich for enhanced console output
-try:
-    from rich.console import Console
+from platform_utils import HAS_RICH, get_rich_console
 
-    console = Console()
-    has_rich = True
-except ImportError:
-    has_rich = False
-    console = None
-
-# Update references in functions
-CONSOLE = console
-HAS_RICH = has_rich
+# Get the Rich console from platform_utils
+CONSOLE = get_rich_console()
 
 
 def safe_print(message: Any, style: str = "default"):
@@ -46,3 +37,19 @@ def safe_print(message: Any, style: str = "default"):
         else:
             # For other ValueErrors, log them
             logging.error("Error in safe_print: %s", e)
+
+
+def format_timestamp(seconds: float) -> str:
+    """
+    Convert seconds to a formatted timestamp string (HH:MM:SS.mmm).
+
+    Args:
+        seconds: Time in seconds
+
+    Returns:
+        Formatted timestamp string
+    """
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
