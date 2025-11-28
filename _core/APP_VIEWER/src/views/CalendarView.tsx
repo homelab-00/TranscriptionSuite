@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Mic } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import { api } from '../services/api';
 import { RecordingsByDate } from '../types';
@@ -25,22 +25,15 @@ export default function CalendarView() {
     }
   };
 
-  const handlePreviousMonth = () => {
-    setCurrentMonth(currentMonth.subtract(1, 'month'));
-  };
-
+  const handlePreviousMonth = () => setCurrentMonth(currentMonth.subtract(1, 'month'));
   const handleNextMonth = () => {
     const nextMonth = currentMonth.add(1, 'month');
-    // Don't allow navigating to future months
     if (nextMonth.isBefore(dayjs(), 'month') || nextMonth.isSame(dayjs(), 'month')) {
       setCurrentMonth(nextMonth);
     }
   };
 
-  const handleDayClick = (date: Dayjs) => {
-    // Navigate to day view
-    navigate(`/day/${date.format('YYYY-MM-DD')}`);
-  };
+  const handleDayClick = (date: Dayjs) => navigate(`/day/${date.format('YYYY-MM-DD')}`);
 
   const renderCalendarDays = () => {
     const startOfMonth = currentMonth.startOf('month');
@@ -48,17 +41,14 @@ export default function CalendarView() {
     const startDay = startOfMonth.day(); // 0 = Sunday
     const daysInMonth = endOfMonth.date();
     const today = dayjs();
-
     const days = [];
 
-    // Add empty cells for days before the start of the month
+    // Empty cells
     for (let i = 0; i < startDay; i++) {
-      days.push(
-        <div key={`empty-${i}`} className="p-2" />
-      );
+      days.push(<div key={`empty-${i}`} className="h-24 sm:h-32 bg-transparent" />);
     }
 
-    // Add cells for each day of the month
+    // Days
     for (let day = 1; day <= daysInMonth; day++) {
       const date = currentMonth.date(day);
       const dateStr = date.format('YYYY-MM-DD');
@@ -66,87 +56,86 @@ export default function CalendarView() {
       const isToday = date.isSame(today, 'day');
       const isFuture = date.isAfter(today, 'day');
       const hasRecordings = recordings.length > 0;
-      const recordingCount = recordings.length;
-
+      
       days.push(
         <div
           key={day}
           onClick={() => !isFuture && handleDayClick(date)}
           className={`
-            relative p-3 min-h-[60px] rounded-lg border text-center transition-all duration-200
-            ${isFuture
-              ? 'opacity-50 cursor-default bg-surface border-gray-800'
-              : 'cursor-pointer hover:scale-[1.02] hover:bg-surface-light'
-            }
-            ${isToday
-              ? 'border-2 border-primary bg-surface shadow-lg'
-              : hasRecordings
-                ? 'bg-surface border-gray-700'
-                : 'bg-surface border-gray-800'
-            }
+            relative h-24 sm:h-32 border border-gray-800 p-2 transition-all duration-200
+            ${isToday ? 'bg-primary/10 border-primary' : 'bg-surface hover:bg-gray-800'}
+            ${isFuture ? 'opacity-30 cursor-default' : 'cursor-pointer'}
+            ${hasRecordings ? 'ring-1 ring-inset ring-gray-700' : ''}
+            rounded-lg
           `}
         >
-          {/* Red badge in top-right corner */}
+          <div className="flex justify-between items-start">
+            <span className={`
+              text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full
+              ${isToday ? 'bg-primary text-black' : 'text-gray-400'}
+            `}>
+              {day}
+            </span>
+            {hasRecordings && (
+               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-lg">
+                {recordings.length}
+               </span>
+            )}
+          </div>
+          
           {hasRecordings && (
-            <div className="absolute top-1 right-1 min-w-[20px] h-5 px-1 flex items-center justify-center bg-red-500 text-white text-[11px] font-bold rounded-full shadow">
-              {recordingCount > 1 ? recordingCount : ''}
+            <div className="mt-2 space-y-1">
+              {recordings.slice(0, 2).map((rec) => (
+                <div key={rec.id} className="flex items-center text-xs text-gray-300 truncate bg-gray-900/50 rounded px-1 py-0.5">
+                  <Mic size={10} className="mr-1 text-primary shrink-0" />
+                  <span className="truncate">{rec.filename}</span>
+                </div>
+              ))}
+              {recordings.length > 2 && (
+                <div className="text-[10px] text-gray-500 pl-1">
+                  +{recordings.length - 2} more
+                </div>
+              )}
             </div>
           )}
-          
-          <span
-            className={`
-              text-sm
-              ${isToday ? 'font-bold' : 'font-normal'}
-              ${hasRecordings ? 'text-primary' : 'text-white'}
-            `}
-          >
-            {day}
-          </span>
         </div>
       );
     }
-
     return days;
   };
 
-  const isNextDisabled = currentMonth.isSame(dayjs(), 'month');
-
   return (
-    <div className="w-full max-w-[650px] mx-auto">
-      {/* Month navigation */}
-      <div className="flex items-center justify-center mb-6">
-        <button
-          onClick={handlePreviousMonth}
-          className="btn-icon"
-        >
-          <ChevronLeft size={24} />
-        </button>
-        <h2 className="mx-6 min-w-[200px] text-center text-2xl font-semibold text-white">
+    <div className="flex flex-col h-full w-full animate-fade-in">
+      <div className="flex items-center justify-between mb-6 w-full">
+        <h1 className="text-3xl font-bold text-white tracking-tight">
           {currentMonth.format('MMMM YYYY')}
-        </h2>
-        <button
-          onClick={handleNextMonth}
-          disabled={isNextDisabled}
-          className={`btn-icon ${isNextDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-        >
-          <ChevronRight size={24} />
-        </button>
-      </div>
-
-      {/* Day headers */}
-      <div className="grid grid-cols-7 gap-1 mb-2">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-          <div
-            key={day}
-            className="text-center text-sm text-gray-500 font-medium py-2"
+        </h1>
+        <div className="flex space-x-2">
+          <button 
+            onClick={handlePreviousMonth}
+            className="p-2 rounded-full hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
           >
-            {day}
+            <ChevronLeft size={24} />
+          </button>
+          <button 
+            onClick={handleNextMonth}
+            disabled={currentMonth.isSame(dayjs(), 'month')}
+            className="p-2 rounded-full hover:bg-gray-800 text-gray-400 hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <ChevronRight size={24} />
+          </button>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-7 gap-2 mb-2">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div key={d} className="text-center text-sm font-medium text-gray-500 py-2">
+            {d}
           </div>
         ))}
       </div>
-
-      {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-1">
+      
+      <div className="grid grid-cols-7 gap-2">
         {renderCalendarDays()}
       </div>
     </div>

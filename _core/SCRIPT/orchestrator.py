@@ -23,6 +23,8 @@ import os
 import sys
 import threading
 import time
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from config_manager import ConfigManager
@@ -35,7 +37,12 @@ from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
 from static_transcriber import StaticFileTranscriber
 from utils import safe_print
-from viewer_storage import save_longform_recording, get_word_timestamps_from_audio
+
+# Import viewer storage functions from the backend database module
+_backend_path = Path(__file__).parent.parent / "APP_VIEWER" / "backend"
+if str(_backend_path) not in sys.path:
+    sys.path.insert(0, str(_backend_path))
+from database import save_longform_recording, get_word_timestamps_from_audio
 
 if not TYPE_CHECKING:
     # Try to import the tray manager at runtime
@@ -127,6 +134,7 @@ class STTOrchestrator:
         # Audio notebook server state
         self.audio_notebook_server = None
         self.audio_notebook_thread = None
+        self._audio_notebook_stop_handled = False  # Flag to coordinate shutdown
 
         # Initialize Tray Icon Manager only for tray mode
         if mode == "tray" and HAS_TRAY:
@@ -230,7 +238,7 @@ class STTOrchestrator:
         def _worker():
             self.app_state["current_mode"] = "static"
             if self.tray_manager:
-                self.tray_manager.set_state("transcribing")
+                self.tray_manager.set_state("static_transcribing")
                 self.tray_manager.set_audio_notebook_enabled(False)
                 self.tray_manager.set_recording_actions_enabled(False)
 
@@ -246,7 +254,7 @@ class STTOrchestrator:
                     self._load_static_model_sync()
                     self.app_state["loaded_model_type"] = "static"
                     if self.tray_manager:
-                        self.tray_manager.set_state("transcribing")
+                        self.tray_manager.set_state("static_transcribing")
                 elif current_model_type != "static":
                     # No model loaded yet - load static model
                     safe_print("Loading static model...", "info")
@@ -255,7 +263,7 @@ class STTOrchestrator:
                     self._load_static_model_sync()
                     self.app_state["loaded_model_type"] = "static"
                     if self.tray_manager:
-                        self.tray_manager.set_state("transcribing")
+                        self.tray_manager.set_state("static_transcribing")
                 # else: already have static model loaded, keep it
 
                 # Instantiate the transcriber WITHOUT main_transcriber
@@ -828,10 +836,13 @@ class STTOrchestrator:
                 # Use the synchronous unload
                 self._unload_all_models_sync()
 
+                # Clear the loaded model type since nothing is loaded now
+                self.app_state["loaded_model_type"] = None
+
                 safe_print("All models unloaded successfully.", "success")
 
                 if self.tray_manager:
-                    self.tray_manager.set_state("standby")
+                    self.tray_manager.set_state("unloaded")
                     self.tray_manager.update_models_menu_item(models_loaded=False)
 
             except Exception as e:
@@ -1100,33 +1111,98 @@ class STTOrchestrator:
             # Run the server (blocks until stopped)
             server.run()
 
-            # Cleanup after server stops - re-enable other operations
+            # Cleanup after server stops
+            # Check if _stop_audio_notebook already handled the model reload
+            if getattr(self, "_audio_notebook_stop_handled", False):
+                # Reset the flag and skip - _stop_audio_notebook is handling the reload
+                self._audio_notebook_stop_handled = False
+                self.audio_notebook_server = None
+                logging.info(
+                    "Server stopped - model reload handled by _stop_audio_notebook"
+                )
+                return
+
+            # If we get here, the server stopped on its own (e.g., error or external signal)
+            # We need to handle the cleanup ourselves
             self.audio_notebook_server = None
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(False)
-                self.tray_manager.set_state("standby")
-                self.tray_manager.set_recording_actions_enabled(True)
-                self.tray_manager.set_static_transcription_enabled(True)
-            safe_print("Audio Notebook stopped.", "info")
+                self.tray_manager.set_state("loading")
+
+            safe_print("Audio Notebook stopped. Switching to longform model...", "info")
+
+            try:
+                # Unload the static model
+                self._unload_all_models_sync()
+
+                # Load the longform models
+                self._load_longform_models_sync()
+                self.app_state["loaded_model_type"] = "longform"
+
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
+
+                safe_print("Longform model loaded. Ready for recording.", "success")
+            except Exception as e:
+                logging.error(
+                    f"Failed to load longform models after Audio Notebook: {e}",
+                    exc_info=True,
+                )
+                safe_print(f"Error loading longform model: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("unloaded")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
 
         self.audio_notebook_thread = threading.Thread(target=server_worker, daemon=True)
         self.audio_notebook_thread.start()
 
     def _stop_audio_notebook(self):
-        """Stop the Audio Notebook server."""
+        """Stop the Audio Notebook server and reload the main (longform) model."""
         if self.audio_notebook_server:
             safe_print("Stopping Audio Notebook...", "info")
+
+            # Set flag to indicate we're handling the model reload here
+            # This prevents the server_worker cleanup code from also trying to reload
+            self._audio_notebook_stop_handled = True
+
             self.audio_notebook_server.should_exit = True
             self.audio_notebook_server = None
 
-            # DON'T unload the static model - keep it for potential static transcription
-            # Model will only be unloaded when switching back to longform
-
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(False)
-                self.tray_manager.set_state("standby")
-                self.tray_manager.set_recording_actions_enabled(True)
-                self.tray_manager.set_static_transcription_enabled(True)
+
+            # Switch from static to longform model automatically
+            safe_print("Switching back to longform model...", "info")
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+
+            try:
+                # Unload the static model
+                self._unload_all_models_sync()
+
+                # Load the longform models
+                self._load_longform_models_sync()
+                self.app_state["loaded_model_type"] = "longform"
+
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
+
+                safe_print("Longform model loaded. Ready for recording.", "success")
+            except Exception as e:
+                logging.error(
+                    f"Failed to load longform models after stopping Audio Notebook: {e}",
+                    exc_info=True,
+                )
+                safe_print(f"Error loading longform model: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("unloaded")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
 
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
@@ -1454,6 +1530,10 @@ class STTOrchestrator:
         import soundfile as sf
         from static_transcriber import StaticFileTranscriber, HAS_DIARIZATION
 
+        # Set tray icon to pastel mauve during transcription
+        if self.tray_manager:
+            self.tray_manager.set_state("static_transcribing")
+
         try:
             # Read audio file to get duration
             audio_data, sample_rate = sf.read(wav_path, dtype="float32")
@@ -1537,6 +1617,11 @@ class STTOrchestrator:
         except Exception as e:
             logging.error(f"Transcription error: {e}", exc_info=True)
             raise RuntimeError(f"Transcription failed: {e}")
+
+        finally:
+            # Restore tray icon to audio_notebook state after transcription
+            if self.tray_manager and self.audio_notebook_server is not None:
+                self.tray_manager.set_state("audio_notebook")
 
     def _load_dual_transcriber_mode(self):
         """Loads both main and preview transcribers."""
