@@ -200,6 +200,34 @@ processing:
 
 
 # ----------------------------------------------------------------------------
+# Local LLM Integration (LM Studio)
+# ----------------------------------------------------------------------------
+local_llm:
+    # Enable/disable LLM features in the viewer app
+    enabled: true
+
+    # LM Studio server URL (default local)
+    base_url: "http://127.0.0.1:1234"
+
+    # Model to use (leave empty to use whatever is loaded in LM Studio)
+    model: ""
+
+    # Maximum tokens for the response
+    max_tokens: 2048
+
+    # Temperature for generation (0.0 = deterministic, 1.0 = creative)
+    temperature: 0.7
+
+    # Default system prompt for summarization
+    default_system_prompt: |
+        You are a helpful assistant that analyzes transcriptions. 
+        When given a transcription, provide a clear and concise summary 
+        highlighting the main points, key topics discussed, and any 
+        action items if applicable. Respond in the same language as 
+        the transcription.
+
+
+# ----------------------------------------------------------------------------
 # Logging Configuration
 # ----------------------------------------------------------------------------
 logging:

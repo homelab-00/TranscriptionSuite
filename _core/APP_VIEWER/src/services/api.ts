@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Recording, Transcription, SearchResult, RecordingsByDate, SearchParams, ImportJob } from '../types';
+import { Recording, Transcription, SearchResult, RecordingsByDate, SearchParams, ImportJob, LLMStatus, LLMResponse, LLMRequest } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -52,6 +52,16 @@ export const api = {
   async getNextAvailableMinute(date: string, hour: number): Promise<{next_minute: number, next_second: number}> {
     const response = await client.get(`/recordings/next-minute/${date}/${hour}`);
     return response.data;
+  },
+
+  // Summary
+  async updateSummary(recordingId: number, summary: string | null): Promise<void> {
+    await client.patch(`/recordings/${recordingId}/summary`, { summary });
+  },
+
+  async getSummary(recordingId: number): Promise<string | null> {
+    const response = await client.get(`/recordings/${recordingId}/summary`);
+    return response.data.summary;
   },
 
   // Transcriptions
@@ -114,5 +124,100 @@ export const api = {
   // Audio
   getAudioUrl(recordingId: number): string {
     return `${API_BASE_URL}/recordings/${recordingId}/audio`;
+  },
+
+  // LLM endpoints
+  async getLLMStatus(): Promise<LLMStatus> {
+    const response = await client.get('/llm/status');
+    return response.data;
+  },
+
+  async processWithLLM(request: LLMRequest): Promise<LLMResponse> {
+    const response = await client.post('/llm/process', request);
+    return response.data;
+  },
+
+  // Streaming LLM processing - returns an EventSource-like interface
+  async processWithLLMStream(
+    request: LLMRequest,
+    onChunk: (content: string) => void,
+    onDone: () => void,
+    onError: (error: string) => void
+  ): Promise<AbortController> {
+    const controller = new AbortController();
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/process/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      
+      const processStream = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.content) {
+                    onChunk(data.content);
+                  } else if (data.done) {
+                    onDone();
+                    return;
+                  } else if (data.error) {
+                    onError(data.error);
+                    return;
+                  }
+                } catch {
+                  // Ignore parse errors for incomplete chunks
+                }
+              }
+            }
+          }
+          onDone();
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            onError((error as Error).message);
+          }
+        }
+      };
+      
+      processStream();
+    } catch (error) {
+      onError((error as Error).message);
+    }
+    
+    return controller;
+  },
+
+  async summarizeRecording(recordingId: number, customPrompt?: string): Promise<LLMResponse> {
+    const response = await client.post(
+      `/llm/summarize/${recordingId}`,
+      null,
+      { params: customPrompt ? { custom_prompt: customPrompt } : {} }
+    );
+    return response.data;
   },
 };
