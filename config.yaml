@@ -1,0 +1,244 @@
+# ============================================================================
+# TranscriptionSuite - Unified Configuration
+# ============================================================================
+# This is the central configuration file for the entire TranscriptionSuite.
+# It combines settings for:
+#   - Core transcription engine (_core)
+#   - Speaker diarization module (_module-diarization)
+#   - Viewer app frontend and backend (_core/APP_VIEWER)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Global Transcription Options
+# ----------------------------------------------------------------------------
+transcription_options:
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    # Set to null for automatic language detection.
+    # This setting applies to both the main and preview transcribers.
+    language: null
+
+    # If true, the live preview transcriber will be enabled for longform recording.
+    # If false, only the main transcriber is used (saves GPU resources).
+    enable_preview_transcriber: false
+
+
+# ----------------------------------------------------------------------------
+# Longform Recording
+# ----------------------------------------------------------------------------
+# Settings for live recording mode (start/stop dictation).
+longform_recording:
+    # Include longform recordings in the viewer app's calendar/list.
+    # If false, only static file transcriptions appear in the app.
+    include_in_viewer: false
+
+    # Enable word-level timestamps for longform recordings.
+    # Note: This requires more processing at the end of recording.
+    word_timestamps: false
+
+    # Enable speaker diarization for longform recordings.
+    # Usually not needed since longform is typically single-speaker dictation.
+    enable_diarization: false
+
+
+# ----------------------------------------------------------------------------
+# Static File Transcription
+# ----------------------------------------------------------------------------
+# Settings for transcribing audio/video files (not live recording).
+static_transcription:
+    # Enable speaker diarization (identifies "who spoke when").
+    # Requires the _module-diarization environment to be set up.
+    enable_diarization: false
+
+    # Enable word-level timestamps in the transcription output.
+    # Required for searchable transcriptions and click-to-seek in the viewer app.
+    word_timestamps: true
+
+    # Maximum characters per segment in the output.
+    # Segments are split when speaker changes or this limit is reached.
+    max_segment_chars: 500
+
+
+# ----------------------------------------------------------------------------
+# Main Transcriber Configuration
+# ----------------------------------------------------------------------------
+# The high-accuracy transcriber used for final transcription.
+main_transcriber:
+    # Model from HuggingFace to use for transcription.
+    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    model: "Systran/faster-whisper-large-v3"
+
+    # Compute type for the model. "default" is recommended.
+    # Options: "default", "auto", "int8", "int8_float16", "int16", "float16", "float32"
+    compute_type: "default"
+
+    # Hardware device: "cuda" for NVIDIA GPUs, "cpu" for CPU.
+    device: "cuda"
+
+    # GPU device index if you have multiple GPUs. Usually 0.
+    gpu_device_index: 0
+
+    # Transcription engine batch size. Higher may be faster on powerful GPUs.
+    batch_size: 16
+
+    # Beam size for decoding. Higher can improve accuracy but is slower.
+    beam_size: 5
+
+    # Optional initial prompt to guide transcription style/context.
+    # Example: "This is a technical transcript. ZFS, Kubernetes, TCP/IP."
+    initial_prompt: null
+
+    # Use faster-whisper's built-in VAD to filter silence.
+    faster_whisper_vad_filter: true
+
+    # Prevent the library from creating its own log file.
+    no_log_file: true
+
+
+# ----------------------------------------------------------------------------
+# Preview Transcriber Configuration
+# ----------------------------------------------------------------------------
+# The fast transcriber used for live preview during recording.
+preview_transcriber:
+    # A smaller, faster model is recommended for preview.
+    model: "Systran/faster-whisper-medium"
+    compute_type: "default"
+    device: "cuda"
+    gpu_device_index: 0
+    batch_size: 16
+    beam_size: 3  # Smaller for faster preview
+
+    # VAD settings for quick sentence-by-sentence transcription.
+    silero_sensitivity: 0.4
+    silero_use_onnx: false
+    post_speech_silence_duration: 0.5
+    min_length_of_recording: 1.0
+
+    no_log_file: true
+
+
+# ----------------------------------------------------------------------------
+# Speaker Diarization (PyAnnote)
+# ----------------------------------------------------------------------------
+# Settings for the speaker diarization module.
+diarization:
+    # PyAnnote model for speaker diarization.
+    model: "pyannote/speaker-diarization-3.1"
+
+    # Device for diarization: "cuda" or "cpu"
+    device: "cuda"
+
+    # Speaker count hints (null for auto-detection).
+    min_speakers: null
+    max_speakers: null
+
+    # Advanced settings
+    min_duration_on: 0.0   # Minimum speech segment duration (seconds)
+    min_duration_off: 0.0  # Minimum silence duration (seconds)
+
+    # Output settings
+    merge_gap_threshold: 0.5  # Merge segments from same speaker if gap < this
+
+
+# ----------------------------------------------------------------------------
+# Audio Settings
+# ----------------------------------------------------------------------------
+audio:
+    # Audio input device index for microphone.
+    # Run `python _core/list_audio_devices.py` to find available devices.
+    # Set to null if using use_default_input: true
+    input_device_index: null
+
+    # If true, automatically use the default system microphone.
+    # If false, use the device specified by input_device_index.
+    use_default_input: true
+
+
+# ----------------------------------------------------------------------------
+# Console Display Settings
+# ----------------------------------------------------------------------------
+display:
+    # Show live audio waveform during recording.
+    # Requires 'cava' to be installed. Disabling saves CPU resources.
+    show_waveform: false
+
+
+# ----------------------------------------------------------------------------
+# Storage Settings
+# ----------------------------------------------------------------------------
+# Configuration for where the viewer app stores files.
+storage:
+    # Directory for storing audio files (relative to _core/APP_VIEWER/backend/).
+    # Audio files imported via the viewer app are stored here.
+    audio_dir: "data/audio"
+
+    # Directory for the SQLite database.
+    database_dir: "data"
+
+    # Audio storage format for imported files.
+    # Source files are converted to MP3 for efficient storage.
+    audio_format: "mp3"
+
+    # MP3 encoding quality (bitrate in kbps).
+    # 128 = good quality, reasonable size
+    # 192 = high quality
+    # 64  = smaller files, lower quality
+    audio_bitrate: 160
+
+
+# ----------------------------------------------------------------------------
+# Processing Settings
+# ----------------------------------------------------------------------------
+processing:
+    # Temporary directory for intermediate files during transcription.
+    temp_dir: "/tmp/transcription-suite"
+
+    # Whether to keep temporary WAV files after processing.
+    keep_temp_files: false
+
+    # Sample rate for audio processing (Whisper requires 16kHz).
+    sample_rate: 16000
+
+
+# ----------------------------------------------------------------------------
+# Local LLM Integration (LM Studio)
+# ----------------------------------------------------------------------------
+local_llm:
+    # Enable/disable LLM features in the viewer app
+    enabled: true
+
+    # LM Studio server URL (default local)
+    base_url: "http://127.0.0.1:1234"
+
+    # Model to use (leave empty to use whatever is loaded in LM Studio)
+    model: ""
+
+    # Maximum tokens for the response
+    max_tokens: 2048
+
+    # Temperature for generation (0.0 = deterministic, 1.0 = creative)
+    temperature: 0.7
+
+    # Default system prompt for summarization
+    default_system_prompt: |
+        You are a helpful assistant that analyzes transcriptions. 
+        When given a transcription, provide a clear and concise summary 
+        highlighting the main points, key topics discussed, and any 
+        action items if applicable. Respond in the same language as 
+        the transcription.
+
+
+# ----------------------------------------------------------------------------
+# Logging Configuration
+# ----------------------------------------------------------------------------
+logging:
+    # Logging level: "DEBUG", "INFO", "WARNING", "ERROR"
+    level: "INFO"
+
+    # Print log messages to console (useful for debugging).
+    console_output: false
+
+    # Log file name for the core transcription engine.
+    file_name: "transcription_suite.log"
+
+    # Directory for log files (relative to project root).
+    directory: "."
