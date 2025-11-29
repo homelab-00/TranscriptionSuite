@@ -8,8 +8,10 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from database import search_words
+from webapp_logging import get_api_logger
 
 router = APIRouter()
+logger = get_api_logger()
 
 
 class SearchWordContext(BaseModel):
@@ -55,6 +57,10 @@ async def search(
     - **start_date**: Only search recordings after this date
     - **end_date**: Only search recordings before this date
     """
+    logger.info(
+        f"Search request: q='{q}', fuzzy={fuzzy}, start_date={start_date}, end_date={end_date}"
+    )
+
     results = search_words(
         query=q,
         fuzzy=fuzzy,
@@ -86,6 +92,8 @@ async def search(
         )
         for r in results
     ]
+
+    logger.info(f"Search completed: {len(search_results)} results found")
 
     return SearchResponse(
         query=q,
