@@ -379,9 +379,23 @@ Understanding where TranscriptionSuite stores files:
 | **Database** | `_core/APP_VIEWER/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
 | **Audio Files** | `_core/APP_VIEWER/backend/data/audio/` | Imported audio stored as MP3 |
 | **Transcriptions** | Database | Stored in SQLite tables, not as JSON files |
-| **Logs** | Project root | `transcription_suite.log` |
+| **Logs** | Project root | `transcription_suite.log`, `webapp.log` |
 | **Models** | `~/.cache/huggingface/` | Downloaded Whisper/PyAnnote models |
 | **Temp Files** | `/tmp/transcription-suite/` | Intermediate WAV files during processing |
+
+### Log Files
+
+All log files are stored in the **project root** and are **wiped on each application start**:
+
+| Log File | Created By | Contents |
+|----------|------------|----------|
+| `transcription_suite.log` | `orchestrator.py` | Tray mode operations, recording, static transcription |
+| `webapp.log` | `APP_VIEWER/backend` | Web app API requests, LLM interactions, search queries |
+
+**Logging modules:**
+
+- `_core/SCRIPT/logging_setup.py` - Logging for transcription suite (tray operations)
+- `_core/APP_VIEWER/backend/webapp_logging.py` - Logging for web app (API, LLM, search)
 
 ### Audio Import Process
 

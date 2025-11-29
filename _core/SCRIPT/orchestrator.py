@@ -972,12 +972,18 @@ class STTOrchestrator:
             try:
                 from database import init_db  # type: ignore[import-not-found]
                 from routers import recordings, search, transcribe, llm  # type: ignore[import-not-found]
+                from webapp_logging import setup_webapp_logging  # type: ignore[import-not-found]
             except ImportError as e:
                 safe_print(f"Failed to import APP_VIEWER/backend modules: {e}", "error")
                 return
 
+            # Initialize webapp logging (creates webapp.log in project root, wiped on each start)
+            webapp_logger = setup_webapp_logging()
+
             # Initialize database
+            webapp_logger.info("Initializing database...")
             init_db()
+            webapp_logger.info("Database initialized")
 
             # Create the app
             app = FastAPI(

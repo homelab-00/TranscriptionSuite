@@ -5,11 +5,10 @@ This module is part of APP_VIEWER/backend, which runs inside the
 orchestrator process. The orchestrator exposes a transcription endpoint
 that this router calls for actual transcription work.
 
-Start with: python orchestrator.py --audio-notebook
+Start with: python orchestrator.py
 Or via dev.sh (which does the same thing)
 """
 
-import logging
 import os
 import subprocess
 from datetime import datetime
@@ -27,6 +26,7 @@ from database import (
     insert_words_batch,
     update_recording_word_count,
 )
+from webapp_logging import get_api_logger
 
 router = APIRouter()
 
@@ -34,8 +34,8 @@ router = APIRouter()
 STORAGE_DIR = Path(__file__).parent.parent / "data" / "audio"
 TEMP_DIR = Path("/tmp/transcription-suite")
 
-# Logging - inherits from orchestrator's logging setup
-logger = logging.getLogger(__name__)
+# Logging - using webapp logging
+logger = get_api_logger()
 
 # Orchestrator API - we're running inside the same process, but call via HTTP
 # Port can be overridden via environment variable

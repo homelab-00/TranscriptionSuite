@@ -45,7 +45,7 @@ export default function CalendarView() {
 
     // Empty cells
     for (let i = 0; i < startDay; i++) {
-      days.push(<div key={`empty-${i}`} className="h-24 sm:h-32 bg-transparent" />);
+      days.push(<div key={`empty-${i}`} className="min-h-[80px] bg-transparent" />);
     }
 
     // Days
@@ -62,7 +62,7 @@ export default function CalendarView() {
           key={day}
           onClick={() => !isFuture && handleDayClick(date)}
           className={`
-            relative h-24 sm:h-32 border border-gray-800 p-2 transition-all duration-200
+            relative min-h-[80px] border border-gray-800 p-2 transition-all duration-200 overflow-hidden
             ${isToday ? 'bg-primary/10 border-primary' : 'bg-surface hover:bg-gray-800'}
             ${isFuture ? 'opacity-30 cursor-default' : 'cursor-pointer'}
             ${hasRecordings ? 'ring-1 ring-inset ring-gray-700' : ''}
@@ -106,7 +106,7 @@ export default function CalendarView() {
 
   return (
     <div className="flex flex-col h-full w-full animate-fade-in">
-      <div className="flex items-center justify-between mb-6 w-full">
+      <div className="flex items-center justify-between mb-4 w-full flex-shrink-0">
         <h1 className="text-3xl font-bold text-white tracking-tight">
           {currentMonth.format('MMMM YYYY')}
         </h1>
@@ -127,7 +127,7 @@ export default function CalendarView() {
         </div>
       </div>
       
-      <div className="grid grid-cols-7 gap-2 mb-2">
+      <div className="grid grid-cols-7 gap-2 mb-2 flex-shrink-0">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
           <div key={d} className="text-center text-sm font-medium text-gray-500 py-2">
             {d}
@@ -135,7 +135,7 @@ export default function CalendarView() {
         ))}
       </div>
       
-      <div className="grid grid-cols-7 gap-2">
+      <div className="grid grid-cols-7 gap-2 flex-1 min-h-0 auto-rows-fr">
         {renderCalendarDays()}
       </div>
     </div>
