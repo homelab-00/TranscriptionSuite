@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Play, Loader2, Calendar as CalendarIcon } from 'lucide-react';
+import { Search, Play, Loader2, Calendar as CalendarIcon, FileText, Bot, MessageSquare } from 'lucide-react';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
@@ -38,9 +38,11 @@ export default function SearchView() {
   };
 
   const handlePlayResult = (result: SearchResult) => {
-    // Navigate to recording with start time offset by 15 seconds
-    const startTime = Math.max(0, result.start_time - 15);
-    navigate(`/recording/${result.recording_id}?t=${startTime}`);
+    // Navigate to day view and open the recording at the exact timestamp
+    const recordedAt = dayjs(result.recording.recorded_at);
+    const dateStr = recordedAt.format('YYYY-MM-DD');
+    // Navigate to day view with recording ID and timestamp
+    navigate(`/day/${dateStr}?recording=${result.recording_id}&t=${result.start_time}`);
   };
 
   const formatTime = (seconds: number): string => {
@@ -139,10 +141,30 @@ export default function SearchView() {
             {results.map((result, index) => (
               <div
                 key={`${result.recording_id}-${index}`}
-                className="py-3 flex items-start justify-between gap-4"
+                className="py-3 flex items-start justify-between gap-4 cursor-pointer hover:bg-gray-800/50 rounded-lg px-2 -mx-2 transition-colors"
+                onClick={() => handlePlayResult(result)}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
+                    {/* Match type badge */}
+                    {result.match_type === 'word' && (
+                      <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <MessageSquare size={10} />
+                        transcript
+                      </span>
+                    )}
+                    {result.match_type === 'filename' && (
+                      <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <FileText size={10} />
+                        filename
+                      </span>
+                    )}
+                    {result.match_type === 'summary' && (
+                      <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <Bot size={10} />
+                        summary
+                      </span>
+                    )}
                     <span className="font-medium text-white truncate">
                       {result.recording.filename}
                     </span>
@@ -152,16 +174,25 @@ export default function SearchView() {
                     </span>
                   </div>
                   <div className="text-sm text-gray-400">
-                    ...{result.context}...
-                    <span className="ml-2 text-primary text-xs">
-                      @ {formatTime(result.start_time)}
-                    </span>
+                    {result.match_type === 'word' ? (
+                      <>
+                        ...{result.context}...
+                        <span className="ml-2 text-primary text-xs">
+                          @ {formatTime(result.start_time)}
+                        </span>
+                      </>
+                    ) : (
+                      <>{result.context}</>
+                    )}
                   </div>
                 </div>
                 <button
-                  onClick={() => handlePlayResult(result)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePlayResult(result);
+                  }}
                   className="btn-icon flex-shrink-0"
-                  title="Play from 15 seconds before"
+                  title="Open recording"
                 >
                   <Play size={20} />
                 </button>

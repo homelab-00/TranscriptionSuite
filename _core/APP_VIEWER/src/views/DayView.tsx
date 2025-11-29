@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -35,6 +35,7 @@ interface HourSlot {
 
 export default function DayView() {
   const { date } = useParams<{ date: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [currentDate, setCurrentDate] = useState<Dayjs>(date ? dayjs(date) : dayjs());
   const [recordings, setRecordings] = useState<RecordingWithTranscription[]>([]);
@@ -138,6 +139,23 @@ export default function DayView() {
       );
       
       setRecordings(recordingsWithTranscriptions);
+      
+      // Check for search params to open a specific recording
+      const recordingParam = searchParams.get('recording');
+      const timeParam = searchParams.get('t');
+      
+      if (recordingParam) {
+        const recordingId = parseInt(recordingParam);
+        const rec = recordingsWithTranscriptions.find(r => r.id === recordingId);
+        if (rec) {
+          setSelectedRecording(rec);
+          setLlmSummary(rec.summary || '');
+          setLlmError(null);
+          loadAudioWithSeek(rec.id, timeParam ? parseFloat(timeParam) : null);
+          // Clear the search params after using them
+          setSearchParams({});
+        }
+      }
     } catch (error) {
       console.error('Failed to load recordings:', error);
     } finally {
@@ -208,6 +226,10 @@ export default function DayView() {
   };
 
   const loadAudio = async (recordingId: number) => {
+    loadAudioWithSeek(recordingId, null);
+  };
+
+  const loadAudioWithSeek = async (recordingId: number, seekTime: number | null) => {
     if (soundRef.current) {
       soundRef.current.unload();
     }
@@ -216,7 +238,7 @@ export default function DayView() {
       animationRef.current = null;
     }
     setPlaying(false);
-    setCurrentTime(0);
+    setCurrentTime(seekTime || 0);
     
     const audioUrl = api.getAudioUrl(recordingId);
     soundRef.current = new Howl({
@@ -224,6 +246,11 @@ export default function DayView() {
       html5: true,
       onload: () => {
         setDuration(soundRef.current?.duration() || 0);
+        // Seek to the specified time after loading
+        if (seekTime !== null && soundRef.current) {
+          soundRef.current.seek(seekTime);
+          setCurrentTime(seekTime);
+        }
       },
       onplay: () => {
         const animate = () => {
