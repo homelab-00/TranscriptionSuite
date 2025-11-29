@@ -117,8 +117,44 @@ export const api = {
 
   // Search
   async search(params: SearchParams): Promise<SearchResult[]> {
-    const response = await client.get('/search', { params });
-    return response.data.results;
+    // Transform frontend params to backend expected params
+    const apiParams = {
+      q: params.query,
+      fuzzy: params.fuzzy,
+      start_date: params.from_date,
+      end_date: params.to_date,
+    };
+    const response = await client.get('/search', { params: apiParams });
+    // Transform the raw results to include the Recording object
+    return response.data.results.map((r: {
+      id: number | null;
+      recording_id: number;
+      word: string;
+      start_time: number;
+      end_time: number;
+      filename: string;
+      recorded_at: string;
+      speaker: string | null;
+      context: string;
+      match_type: 'word' | 'filename' | 'summary';
+    }) => ({
+      recording_id: r.recording_id,
+      recording: {
+        id: r.recording_id,
+        filename: r.filename,
+        filepath: '',
+        recorded_at: r.recorded_at,
+        imported_at: r.recorded_at,
+        duration_seconds: 0,
+        word_count: 0,
+        has_diarization: false,
+      },
+      word: r.word,
+      start_time: r.start_time,
+      end_time: r.end_time,
+      context: r.context,
+      match_type: r.match_type,
+    }));
   },
 
   // Audio
