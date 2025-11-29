@@ -1,0 +1,32 @@
+[project]
+name = "module-Diarization"
+version = "0.1.0"
+description = "Speaker diarization module using PyAnnote"
+requires-python = ">=3.11"
+dependencies = [
+    "pyannote.audio>=3.1.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "soundfile>=0.12.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",  # For console output like your transcription suite
+    "huggingface-hub>=1.1.5",
+    "ruff>=0.14.6",
+    "mypy>=1.18.2",
+]
+
+[tool.uv]
+
+[tool.hatch.build.targets.wheel]
+packages = ["DIARIZATION"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Line length for Ruff
+[tool.ruff]
+line-length = 90

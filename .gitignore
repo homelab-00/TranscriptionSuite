@@ -1,9 +1,38 @@
 __pycache__/
-/SCRIPT/__pycache__/
 deps/
 *.tmp
 *.logW
 *.log
+*.mp3
+.directory
 .idea/
-.vscode/
 .github/
+
+# Database files (user data, should not be synced)
+_core/APP_VIEWER/backend/data/transcriptions.db
+_core/APP_VIEWER/backend/data/transcriptions.db-journal
+_core/APP_VIEWER/backend/data/transcriptions.db-wal
+_core/APP_VIEWER/backend/data/transcriptions.db-shm
+
+# Node.js / npm dependencies and build outputs
+_core/APP_VIEWER/node_modules/
+_core/APP_VIEWER/.venv/
+_core/APP_VIEWER/dist/
+_core/APP_VIEWER/build/
+_core/APP_VIEWER/.env
+_core/APP_VIEWER/.env.local
+
+# Vite cache
+_core/APP_VIEWER/.vite/
+
+# IDE / Editor files
+_core/APP_VIEWER/.vscode/
+_core/APP_VIEWER/.idea/
+
+# OS files
+_core/APP_VIEWER/.DS_Store
+_core/APP_VIEWER/Thumbs.db
+
+# Python virtual environments (if present)
+_core/APP_VIEWER/.python-version
+_core/APP_VIEWER/__pycache__/

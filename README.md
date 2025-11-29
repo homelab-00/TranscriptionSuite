@@ -1,448 +1,963 @@
 # TranscriptionSuite
 
-A speech to text transcription suite for Linux. Written in Python and utilizing the `faster_whisper` library with `CUDA 13+` acceleration. Extremely fast and accurate transcription, even with small sample size languages like Greek (it can even handle Greek with some English mixed in, transcribing both in their respective alphabets).
+A comprehensive speech-to-text transcription suite for Linux with speaker diarization support. Built with Python, leveraging `faster-whisper` for high-performance transcription and `pyannote-audio` for state-of-the-art speaker identification. Accelerated by **CUDA 13+** for GPU inference.
 
-Focused on longform (start/stop) dictation. Static transcription also available.
-Features live transcription preview and waveform display (using `cava`).
-Controlled via a system tray icon (`Qt`). Transcribed text is automatically copied to the clipboard.
+> **Key Features:**
+>
+> - 🎙️ **Longform Dictation** — Start/stop voice recording with optional live preview
+> - 📁 **Static File Transcription** — Transcribe any audio/video file with word timestamps
+> - 👥 **Speaker Diarization** — Identify "who spoke when"
+> - ⏱️ **Word-Level Timestamps** — Precise timing for every word
+> - 🔍 **Full-Text Search** — SQLite FTS5 enables instant word search across all recordings
+> - 🖥️ **Audio Notebook Web App** — Browse, search, and play transcriptions in your browser
+> - 🚀 **Extremely Fast** — 30 minutes of audio in ~40 seconds (RTX 3060)
+> - 🌍 **Multilingual** — Works with Greek, English, and 90+ languages
 
-*For a reference point, on my RTX 3060 it can transcribe a 30 minute recording in under 40 seconds (specifically in Greek, which is slower than English by default).*
+---
+
+## Table of Contents
+
+- [Project Architecture](#project-architecture)
+- [Dual Virtual Environment Design](#dual-virtual-environment-design)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [File Storage](#file-storage)
+- [Usage](#usage)
+- [Audio Notebook Web App](#audio-notebook-web-app)
+- [Output Format](#output-format)
+- [How It Works](#how-it-works)
+- [Module Architecture](#module-architecture)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Project Architecture
+
+```text
+TranscriptionSuite/
+├── config.yaml                   # Unified configuration file (single source of truth)
+├── _core/                        # Main application (Python 3.13)
+│   ├── SCRIPT/                   # Application source code
+│   │   ├── orchestrator.py       # Main entry point & central controller
+│   │   ├── recorder.py           # Long-form recording wrapper
+│   │   ├── static_transcriber.py # Static file transcription with preprocessing
+│   │   ├── stt_engine.py         # Low-level transcription engine, VAD, audio
+│   │   ├── model_manager.py      # AI model lifecycle management
+│   │   ├── tray_manager.py       # System tray icon (PyQt6)
+│   │   ├── console_display.py    # Terminal UI: timer, waveform, preview (Rich)
+│   │   ├── config_manager.py     # Configuration loading and validation
+│   │   ├── logging_setup.py      # Application-wide logging
+│   │   ├── platform_utils.py     # Platform-specific code (Linux paths, CUDA)
+│   │   ├── dependency_checker.py # Verifies required packages
+│   │   ├── diagnostics.py        # Hardware info and startup banner
+│   │   └── utils.py              # Shared utilities
+│   ├── APP_VIEWER/               # Audio Notebook web application
+│   │   ├── backend/              # FastAPI backend
+│   │   │   ├── database.py       # SQLite with FTS5 for word search
+│   │   │   ├── webapp_logging.py # Web app logging configuration
+│   │   │   ├── routers/          # API endpoints
+│   │   │   │   ├── recordings.py # Recording CRUD operations
+│   │   │   │   ├── search.py     # Full-text search endpoints
+│   │   │   │   ├── transcribe.py # Import and transcription endpoints
+│   │   │   │   └── llm.py        # Local LLM integration (LM Studio)
+│   │   │   └── data/             # Database & audio storage
+│   │   ├── src/                  # React + TypeScript frontend
+│   │   ├── dev.sh                # Development launcher script
+│   │   ├── package.json          # Frontend dependencies
+│   │   └── vite.config.ts        # Vite build configuration
+│   ├── DIARIZATION_SERVICE/      # Bridge to diarization module
+│   │   ├── service.py            # Subprocess communication with diarization venv
+│   │   └── combiner.py           # Merges transcription + speaker labels
+│   ├── build_ctranslate2.sh      # Custom ctranslate2 build script for CUDA 13+
+│   ├── list_audio_devices.py     # Utility to find audio input devices
+│   ├── .venv/                    # Core virtual environment (Python 3.13)
+│   └── pyproject.toml            # Core dependencies
+│
+├── _module-diarization/          # Speaker diarization module (Python 3.11)
+│   ├── DIARIZATION/              # Diarization source code
+│   │   ├── diarize_audio.py      # CLI entry point
+│   │   ├── diarization_manager.py# PyAnnote pipeline management
+│   │   ├── api.py                # API wrapper
+│   │   └── config_manager.py     # Configuration handling
+│   ├── .venv/                    # Diarization virtual environment (Python 3.11)
+│   └── pyproject.toml            # Diarization dependencies
+│
+└── README.md
+```
+
+### Why Two Environments?
+
+| Module | Python | Key Dependencies | Purpose |
+|--------|--------|------------------|---------|
+| `_core` | 3.13 | `faster-whisper`, `torch 2.9+`, `FastAPI`, `ctranslate2` | Transcription, VAD, Web API, UI |
+| `_module-diarization` | 3.11 | `pyannote-audio`, `torch 2.x` | Speaker identification |
+
+The `pyannote-audio` library has strict dependency requirements that conflict with the latest `faster-whisper` and `torch` versions. Running them in separate environments solves this elegantly.
+
+**Note:** The Audio Notebook web app (frontend + backend) is **fully integrated into `_core`** (in `APP_VIEWER/`), sharing the same virtual environment. All transcription modes (longform, static, web UI) use the **same model settings** from `main_transcriber` in `config.yaml`.
+
+---
+
+## Dual Virtual Environment Design
+
+### Communication Between Modules
+
+When diarization is enabled for static file transcription:
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                         _core (Python 3.13)                     │
+│                                                                 │
+│  1. User selects audio file via tray menu                       │
+│  2. orchestrator.py → static_transcriber.py                     │
+│  3. Faster Whisper transcribes with word_timestamps=True        │
+│  4. DIARIZATION_SERVICE/service.py calls _module-diarization    │
+│     via subprocess (using its own .venv/bin/python)             │
+│                                                                 │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ subprocess call
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   _module-diarization (Python 3.11)             │
+│                                                                 │
+│  5. PyAnnote pipeline identifies speaker segments               │
+│  6. Returns JSON with speaker labels to stdout                  │
+│                                                                 │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ JSON response
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         _core (continues)                       │
+│                                                                 │
+│  7. DIARIZATION_SERVICE/combiner.py merges:                     │
+│     - Word-level transcription (from step 3)                    │
+│     - Speaker segments (from step 6)                            │
+│  8. Outputs combined JSON/SRT/TXT with speaker labels           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone the repository
+git clone <your-repo-url> TranscriptionSuite
+cd TranscriptionSuite
+
+# 2. Set up _core environment (Python 3.13)
+cd _core
+uv venv --python 3.13
+source .venv/bin/activate
+# Build ctranslate2 (see Installation section for details)
+./build_ctranslate2.sh
+uv sync
+deactivate
+
+# 3. Set up diarization environment (Python 3.11) - Optional
+cd ../_module-diarization
+uv venv --python 3.11
+source .venv/bin/activate
+uv sync
+hf auth login  # Required for PyAnnote models
+deactivate
+
+# 4. Install frontend dependencies (optional, for web viewer development)
+cd ../_core/APP_VIEWER
+npm install
+cd ../..
+
+# 5. Run the application
+cd _core
+source .venv/bin/activate
+python SCRIPT/orchestrator.py
+```
 
 ---
 
 ## Installation
 
-The guide is written for Arch Linux, but it should be easy to adapt for other distributions.
+### Prerequisites
 
-To download the source code, clone this repository:
+- **Arch Linux** (or compatible distro)
+- **NVIDIA GPU** with CUDA 13.0+ support
+- **Python 3.11** and **Python 3.13** (both required)
+- **uv** package manager
+- **Node.js 18+** and **npm** (for web viewer frontend)
+
+### System Dependencies
 
 ```bash
-git clone https://github.com/homelab-00/TranscriptionSuite.git
+# Install system packages
+sudo pacman -S --needed cuda cudnn uv base-devel git openblas ffmpeg nodejs npm
+
+# For the system tray and waveform display (optional)
+sudo pacman -S --needed cava
 ```
 
-If you haven't already, install the CUDA 13 toolkit and cuDNN:
+### Setting Up _core
+
+#### Step 1: Create Virtual Environment
 
 ```bash
-sudo pacman -S --needed cuda cudnn
-```
-
-### Step 1: Create Virtual Environment and Install Build Dependencies
-
-First, let's install `uv` for the global Python installation. It's a replacement for `pip` and `venv` that provides a more modern and feature-rich experience. We'll be using it to manage the manage the Python environment for this project.
-
-```bash
-sudo pacman -S uv
-```
-
-Now let's create a local virtual environment and install the build dependencies to ensure the `ctranslate2` library can be compiled successfully.
-*Run the commands in the project's root directory (this applies to all commands in this guide).*
-
-- Create the virtual environment:
-
-```bash
+cd _core
 uv venv --python 3.13
-```
-
-- Activate the virtual environment:
-
-```bash
 source .venv/bin/activate
 ```
 
-You should now see the virtual environment name in your terminal prompt. Confirm with `which python` (the path should end in `.venv/bin/python`).
-*The rest of this guide assumes that the virtual environment is activated.*
+#### Step 2: Build Custom ctranslate2
 
-- Install Python build dependencies:
+The `ctranslate2` library needs to be compiled locally to link against your system's CUDA 13+ toolkit.
 
-```bash
-uv add build setuptools wheel pybind11==2.11.1
-```
+**Important:** Before running, edit `build_ctranslate2.sh` to match your GPU's Compute Capability:
 
-- Install Linux build dependencies:
+1. Open `build_ctranslate2.sh`
+2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`
+3. The value `86` is for RTX 3060. Find your GPU's capability at [NVIDIA CUDA GPUs](https://developer.nvidia.com/cuda-gpus)
 
-```bash
-sudo pacman -S --needed base-devel git openblas
-```
-
-### Step 2: Build Custom `ctranslate2`
-
-The `ctranslate2` library needs to be compiled locally to link against your system's CUDA 13+ toolkit. A helper script is provided to automate this.
-
-**Important:** Before running, you may need to edit the `build_ctranslate2.sh` script to match your GPU's "Compute Capability".
-
-1. Open `build_ctranslate2.sh`.
-2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`.
-3. The value `86` is for an NVIDIA RTX 3060. If you have a different GPU, find its compute capability on the [NVIDIA CUDA GPUs page](https://developer.nvidia.com/cuda-gpus) and change the number accordingly (e.g., an RTX 4070 is `89`).
-
-First, make sure the script is executable:
+Common values: RTX 3060/3070/3080/3090 = 86, RTX 4060/4070/4080/4090 = 89, RTX 2080 = 75
 
 ```bash
 chmod +x build_ctranslate2.sh
-```
-
-Now, run the script. It will download the source code in the newly created `deps` directory, compile it and create a wheel file in `deps/ctranslate2/python/dist`.
-
-```bash
 ./build_ctranslate2.sh
 ```
 
-### Step 3: Install Project Dependencies
+This script clones ctranslate2 v4.6.1, builds it with CUDA/cuDNN support, and packages a wheel file that `uv sync` will install.
 
-You're now ready to install all project dependencies.
+#### Step 3: Install Dependencies
+
+```bash
+uv sync
+deactivate
+```
+
+### Setting Up _module-diarization (Optional)
+
+Speaker diarization is optional. Skip this section if you don't need "who spoke when" identification.
+
+#### Step 1: Create Virtual Environment
+
+```bash
+cd _module-diarization
+uv venv --python 3.11
+source .venv/bin/activate
+```
+
+#### Step 2: Install Dependencies
 
 ```bash
 uv sync
 ```
 
-*Note: Check that the correct wheel filename is used in the `pyproject.toml` file. It's the last line of the file - make sure it matches the wheel file you created in Step 2.*
+#### Step 3: Configure HuggingFace Access
 
-Your environment is now fully configured and ready to use.
+You need a HuggingFace token with access to PyAnnote models:
+
+1. Get your token from: [Hugging Face settings](https://huggingface.co/settings/tokens)
+2. Accept the terms for these models:
+    - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+    - [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+3. Login:
+
+```bash
+hf auth login
+```
+
+#### Step 4: Test Installation
+
+```bash
+python -c "from DIARIZATION import diarize_audio; print('Diarization module OK')"
+deactivate
+```
 
 ---
 
-## Setup
+## Configuration
 
-### Finding your audio device index
+All settings are in a single `config.yaml` file at the project root. This unified configuration controls all transcription modes, audio settings, diarization, and storage options.
 
-#### Step 1: Find Your Audio Device
+### Key Configuration Sections
 
-Before first use, you need to identify your microphone's device index:
+```yaml
+# Language for transcription (null = auto-detect)
+transcription_options:
+    language: null               # "en", "el", "de", etc. or null for auto
+    enable_preview_transcriber: true  # Show live preview during longform recording
+
+# Static file transcription defaults
+static_transcription:
+    enable_diarization: false    # Identify speakers (requires diarization module)
+    word_timestamps: true        # Include word-level timing
+    max_segment_chars: 500       # Max characters per output segment
+
+# Longform recording (live dictation)
+longform_recording:
+    include_in_viewer: true      # Auto-save to Audio Notebook database
+    word_timestamps: true        # Get word timestamps when saving to viewer
+    enable_diarization: false    # Run diarization on recordings
+
+# Speaker diarization settings
+diarization:
+    model: "pyannote/speaker-diarization-3.1"
+    device: "cuda"
+    min_speakers: null           # null = auto-detect
+    max_speakers: null
+
+# Main transcription model (used by ALL modes)
+main_transcriber:
+    model: "Systran/faster-whisper-large-v3"
+    device: "cuda"
+    compute_type: "default"
+    beam_size: 5
+    initial_prompt: null
+    faster_whisper_vad_filter: true
+
+# Preview transcriber (lightweight model for live preview)
+preview_transcriber:
+    model: "Systran/faster-whisper-base"
+    device: "cuda"
+    compute_type: "default"
+    # ... additional VAD settings
+
+# Storage for Audio Notebook
+storage:
+    audio_dir: "data/audio"
+    audio_format: "mp3"
+    audio_bitrate: 160
+
+# Local LLM integration (LM Studio)
+local_llm:
+    enabled: true
+    base_url: "http://127.0.0.1:1234"
+    model: ""                    # Empty = use whatever is loaded in LM Studio
+    max_tokens: 2048
+    temperature: 0.7
+    default_system_prompt: |
+        You are a helpful assistant that analyzes transcriptions...
+```
+
+### Local LLM Configuration Priority
+
+When using LM Studio for LLM features (like transcript summarization), you may notice that both `config.yaml` and LM Studio's UI allow you to configure settings like `max_tokens`, `temperature`, and `model`. Here's how the priority works:
+
+**Priority Hierarchy (highest to lowest):**
+
+1. **API Request Parameters** — Values sent by the frontend when making a request
+2. **config.yaml Settings** — Used if the API request doesn't specify them
+3. **LM Studio UI Settings** — Only used if neither of the above specify them
+
+**In Practice:**
+
+Since this application **always sends** `max_tokens` and `temperature` in every API request (using either frontend values or `config.yaml` defaults), **LM Studio's UI settings for these parameters are ignored**.
+
+Think of it this way: LM Studio is just a server waiting for instructions. When the app sends a request with `max_tokens: 2048`, LM Studio follows that instruction regardless of what its UI shows.
+
+**The Model Exception:**
+
+The `model` setting behaves differently. When `model: ""` (empty) in `config.yaml`, the application doesn't include a model in the API request, so **LM Studio uses whatever model is currently loaded in its UI**. This is intentional — it lets you switch models in LM Studio without editing the config file.
+
+| Setting | config.yaml Value | LM Studio UI Value | **Value Used** |
+|---------|-------------------|-------------------|----------------|
+| `max_tokens` | 2048 | 4096 | **2048** (config wins) |
+| `temperature` | 0.7 | 0.9 | **0.7** (config wins) |
+| `model` | "" (empty) | llama-3.2-8b | **llama-3.2-8b** (LM Studio wins) |
+| `model` | "specific-model" | llama-3.2-8b | **specific-model** (config wins) |
+
+### Unified Model Settings
+
+The `main_transcriber` section is the **single source of truth** for the transcription model. These settings are used by:
+
+| Mode | Uses `main_transcriber` settings |
+|------|----------------------------------|
+| Longform Recording | ✅ model, device, compute_type, beam_size, initial_prompt, vad_filter |
+| Static File Transcription | ✅ model, device, compute_type, beam_size, initial_prompt, vad_filter |
+| Audio Notebook (Web UI) | ✅ model, device, compute_type, beam_size, initial_prompt, vad_filter |
+
+This ensures consistent transcription quality across all modes. Change the model once, and it applies everywhere.
+
+### Finding Your Audio Device
 
 ```bash
+cd _core
+source .venv/bin/activate
 python list_audio_devices.py
 ```
 
-*Note: `uv run python file.py` is the same thing as first activating the venv using `source .venv/bin/activate` and then running `python file.py`.*
-
-This will output a list like:
-
-```bash
-Available Audio Input Devices:
-
-  Index: 0, Name: "Built-in Microphone"
-  Index: 21, Name: "USB Microphone"
-  ...
-```
-
-Note the index number of your preferred microphone.
-
-#### Step 2: Configure `config.yaml`
-
-Edit the `SCRIPT/config.yaml` file. Update the `input_device_index` under the global `audio` section. Set `use_default_input` to `false` if you are specifying a device index.
+Update `config.yaml`:
 
 ```yaml
-# Global audio settings for the microphone input.
 audio:
-    # Manually specify the audio input device index. Find indices by running `list_audio_devices.py`.
-    # Set to `null` (or leave blank) if `use_default_input` is true.
-    input_device_index: 21
-
-    # If true, the application will automatically find the default system microphone.
-    # If false, it will use the `input_device_index` specified above.
+    input_device_index: 21  # Your device index
     use_default_input: false
 ```
 
-### Configuring language, models, realtime preview
+### Configuring CAVA for Waveform Display (Optional)
 
-#### Language Configuration
-
-Edit the `SCRIPT/config.yaml` file. Update the `language` field under the global `transcription_options` section. This setting applies to both the main and preview transcribers. The default is `el` (Greek).
-
-```yaml
-# Global options that apply to both transcribers.
-transcription_options:
-    # Language code for transcription (e.g., "en" for English, "el" for Greek).
-    # This setting applies to both the main and preview transcribers.
-    language: "el"
-```
-
-The `language` field accepts standard Whisper language codes. Common examples:
-
-- `"en"` - English
-- `"el"` - Greek
-- `"de"` - German
-- `"fr"` - French
-- `"es"` - Spanish
-
-For a complete list of language codes, refer to the [Whisper tokenizer source](https://github.com/openai/whisper/blob/c0d2f624c09dc18e709e37c2ad90c039a4eb72a2/whisper/tokenizer.py#L10).
-
-#### Realtime Preview Toggle
-
-Edit the `SCRIPT/config.yaml` file. Update the `enable_preview_transcriber` field under the global `transcription_options` section to `true` (disabled by default).
-
-```yaml
-# Global options that apply to both transcribers.
-transcription_options:
-    # If true, the live preview transcriber will be enabled.
-    # If false, only the main transcriber will be used, and no live preview
-    # will be shown. This can save GPU resources.
-    enable_preview_transcriber: true
-```
-
-#### Model Selection
-
-The default model for the main transcriber is `Systran/faster-whisper-large-v3` which provides excellent accuracy. The realtime preview transcriber uses `Systran/faster-whisper-medium` for a better balance between speed and accuracy.
-
-Edit the `SCRIPT/config.yaml` file. Update the `model` field under the `main_transcriber` section.
-
-```yaml
-# This instance processes the entire recording at the end for the best quality.
-main_transcriber:
-    # Model from HuggingFace to use for transcription.
-    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
-    model: "Systran/faster-whisper-large-v3"
-```
-
-To edit the preview transcriber model, update the `model` field under the `preview_transcriber` section.
-
-```yaml
-# This instance processes the entire recording at the end for the best quality.
-preview_transcriber:
-    # Model from HuggingFace to use for transcription.
-    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
-    model: "Systran/faster-whisper-medium"
-```
-
-### Configuring CAVA for waveform display (optional)
-
-If you want to see a waveform while recording, you need to install CAVA.
-
-#### Step 1: Install CAVA
+The console display can show a live audio waveform during recording using CAVA.
 
 ```bash
 sudo pacman -S cava
 ```
 
-#### Step 2: Configure `cava.config`
-
-CAVA uses a different indexing system than the rest of the script. Run the command below to find your microphone's PipeWire index (this of course assumes your system is using PipeWire as the audio server).
+Find your PipeWire audio source:
 
 ```bash
 pw-cli list-objects Node
 ```
 
-You'll see a long list of audio devices. You're looking for a node with `media.class = "Audio/Source"` (there might be multiple). Copy the `object.path` and replace the `source` field in the `SCRIPT/cava.config` file. Alternatively set the `source` to `auto` to use your default microphone.
+Edit `_core/SCRIPT/cava.config`:
 
-```yaml
+```ini
 [input]
 method = pulse
 source = "alsa:acp:Generic:0:capture"
 ```
 
-*Note: Even though I said we're using PipeWire, I've set the `method` to `pulse` which denotes PulseAudio. This is just how I managed to get it working through trial and error.*
-
-#### Step 3: Enable waveform display
-
-Edit the `SCRIPT/config.yaml` file. Update the `show_waveform` field under the `display` section to `true` (disabled by default).
+Enable in `config.yaml`:
 
 ```yaml
 display:
-    # If true, the live audio waveform will be displayed during recording.
-    # Requires 'cava' to be installed. Disabling this can save CPU resources.
     show_waveform: true
 ```
 
-### Other Options
+---
 
-For a detailed explanation of all available transcription and VAD flags, see the `SCRIPT/STT_ENGINE_OPTIONS.md` file. The underlying VAD logic is from the **[RealtimeSTT project](https://github.com/KoljaB/RealtimeSTT)**, and its documentation remains an excellent resource.
+## File Storage
+
+Understanding where TranscriptionSuite stores files:
+
+### Storage Locations
+
+| Type | Location | Description |
+|------|----------|-------------|
+| **Database** | `_core/APP_VIEWER/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
+| **Audio Files** | `_core/APP_VIEWER/backend/data/audio/` | Imported audio stored as MP3 |
+| **Transcriptions** | Database | Stored in SQLite tables, not as JSON files |
+| **Logs** | Project root | `transcription_suite.log`, `webapp.log` |
+| **Models** | `~/.cache/huggingface/` | Downloaded Whisper/PyAnnote models |
+| **Temp Files** | `/tmp/transcription-suite/` | Intermediate WAV files during processing |
+| **ctranslate2 Build** | `_core/deps/ctranslate2/` | Compiled ctranslate2 library |
+
+### Log Files
+
+All log files are stored in the **project root** and are **wiped on each application start**:
+
+| Log File | Created By | Contents |
+|----------|------------|----------|
+| `transcription_suite.log` | `orchestrator.py` | Tray mode operations, recording, static transcription |
+| `webapp.log` | `APP_VIEWER/backend` | Web app API requests, search queries |
+
+### Audio Import Process
+
+When you import an audio/video file through the Audio Notebook:
+
+```text
+Source File (any format)
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 1. FFmpeg converts to WAV             │
+│    - 16kHz mono for Whisper           │
+│    - Stored in temp directory         │
+└───────────────────────────────────────┘
+    │
+    ├──────────────────────────────────────┐
+    ▼                                      ▼
+┌─────────────────────────────────────┐  ┌─────────────────────────────┐
+│ 2a. Transcription                   │  │ 2b. Audio Storage           │
+│     (uses WAV)                      │  │     - Source → MP3 (128kbps)│
+└─────────────────────────────────────┘  │     - Stored in data/audio/ │
+    │                                    └─────────────────────────────┘
+    ▼
+┌───────────────────────────────────────┐
+│ 3. Results saved to SQLite            │
+│    - recordings table                 │
+│    - segments table                   │
+│    - words table (with timestamps)    │
+│    - words_fts (full-text search)     │
+└───────────────────────────────────────┘
+    │
+    ▼
+Temp WAV deleted
+```
+
+### Database Schema
+
+```sql
+-- Main recordings table
+recordings (
+    id, filename, filepath, duration_seconds, 
+    recorded_at, word_count, has_diarization, summary
+)
+
+-- Segments (speaker turns or time-based chunks)
+segments (
+    id, recording_id, segment_index, speaker, 
+    text, start_time, end_time
+)
+
+-- Individual words with timestamps
+words (
+    id, recording_id, segment_id, word_index, 
+    word, start_time, end_time, confidence
+)
+
+-- FTS5 virtual table for instant search
+words_fts (word)
+```
 
 ---
 
-## Running the Application
+## Usage
 
-### Start the Orchestrator
+### Starting the Application
 
-From the project root directory, simply run:
+Always run from the `_core` directory with its venv activated:
 
 ```bash
+cd _core
+source .venv/bin/activate
 python SCRIPT/orchestrator.py
 ```
 
-The application will:
+Or use the convenience script:
 
-1. Display system information and dependency status.
-2. Pre-load the transcription models (indicated by a grey tray icon).
-3. Show a green tray icon when ready.
+```bash
+cd _core/APP_VIEWER
+./dev.sh
+```
 
-### Using the System
+### System Tray Controls
 
-The system tray icon changes color to indicate status:
+| Action | Effect |
+|--------|--------|
+| **Left-click** | Start longform recording |
+| **Middle-click** | Stop recording & transcribe |
+| **Right-click** | Open context menu |
 
-- **Grey**: Loading/initializing
-- **Green**: Ready/standby
-- **Yellow**: Recording audio
-- **Orange**: Transcribing
-- **Red**: Error state
+### Tray Icon Colors
 
-### Model Management
+| Color | State |
+|-------|-------|
+| ⚫ Grey | Loading models or models unloaded |
+| 🟢 Green | Ready/standby |
+| 🟡 Yellow | Recording audio |
+| 🟠 Orange | Transcribing longform recording |
+| 🟣 Mauve | Static file transcription in progress |
+| 🩵 Aquamarine | Audio Notebook web server running |
+| 🔴 Red | Error state |
 
-The system includes a model management feature to free up GPU memory when not actively transcribing:
+### Context Menu Options
 
-- **Unload All Models**: Frees GPU memory by unloading both main and preview transcription models
-- **Reload All Models**: Reloads models according to your `config.yaml` settings
-- The menu item dynamically toggles between "Unload" and "Reload" based on current state
-- Models can only be unloaded when no transcription is in progress (neither longform nor static)
-- All operations are logged to the terminal and log file for transparency
+- **Start Recording** — Begin longform dictation
+- **Stop Recording** — Stop and transcribe
+- **Transcribe Audio File...** — Open file picker for static transcription
+- **Start/Stop Audio Notebook** — Toggle the web viewer server
+- **Unload/Reload All Models** — Free GPU memory or reload models
+- **Quit** — Exit the application
 
-### Controls
+### Transcription Modes
 
-All controls are accessed through the system tray icon:
+#### 1. Longform Dictation (Live Recording)
 
-**Left-click** on the tray icon: Start recording
-**Middle-click** on the tray icon: Stop recording and transcribe
-**Right-click** on the tray icon: Open context menu with options:
+1. Left-click the tray icon to start recording
+2. Speak into your microphone
+3. Watch the live preview in terminal (if `enable_preview_transcriber: true`)
+4. Middle-click to stop and get final transcription
+5. Text is automatically copied to clipboard
 
-- Start Recording
-- Stop Recording
-- Static Transcription
-- Unload/Reload All Models
-- Quit
+**Saving to Audio Notebook:**
 
----
+When `include_in_viewer: true` in `config.yaml` under `longform_recording`, your recordings will automatically be converted to MP3 and saved to the Audio Notebook database with word-level timestamps.
 
-## Architecture
+#### 2. Static File Transcription
 
-The system is built around a dual-instance architecture to provide both real-time feedback and high-accuracy final transcriptions.
+1. Right-click → "Transcribe Audio File..."
+2. Select any audio/video file (WAV, MP3, FLAC, OGG, OPUS, M4A, MP4, MKV, etc.)
+3. Wait for processing (watch terminal for progress)
+4. JSON output saved next to source file as `{filename}_transcription.json`
 
-- **Orchestrator** (`orchestrator.py`): The main controller that bootstraps the application, manages the two transcriber instances, handles user input from the tray icon, and coordinates all other modules.
-- **Core Transcription Engine** (`stt_engine.py`, `safepipe.py`): The vendored and heavily customized core from the `RealtimeSTT` library. It handles audio processing, VAD, and transcription with a `faster-whisper` model.
-- **Transcription Instance** (`recorder.py`): A reusable class that wraps our customized `stt_engine.py`. It is instantiated twice:
-  - **Preview Transcriber**: An "active" instance that directly controls the microphone. It uses a small, fast model to transcribe audio in short chunks, providing a live text preview. It also feeds raw audio data to the main transcriber and the console display.
-  - **Main Transcriber**: A "passive" instance that receives audio from the previewer. It accumulates the entire recording in memory and performs a single, highly accurate transcription at the end using a large model.
+**With Diarization:**
 
-### Short description of each script
+Enable `enable_diarization: true` in `static_transcription` config. The output will include speaker labels for each segment.
 
-#### Core Application Logic
+#### 3. Audio Notebook Web App
 
-- **`orchestrator.py` (The Conductor)**
-  - **Purpose:** This is the central controller of the entire application. It initializes all other components, manages the application's state (e.g., recording, transcribing, standby), and connects the user interface (tray icon) to the backend transcription logic.
-  - **Interaction:** It's the most connected script. It creates instances of `TrayIconManager`, `ModelManager`, `ConsoleDisplay`, and `StaticFileTranscriber`. It receives commands from the `TrayIconManager` (e.g., "start recording") and tells the appropriate modules what to do.
+See the [Audio Notebook Web App](#audio-notebook-web-app) section below.
 
-- **`model_manager.py` (The Model Loader)**
-  - **Purpose:** This module is responsible for loading and managing the AI models (`faster-whisper`) used for transcription. It reads the configuration from `config.yaml` to know which models to load and with what settings (e.g., on CPU or GPU). It also handles finding available audio devices.
-  - **Interaction:** It is used by the `orchestrator.py` to get initialized transcriber objects. It creates instances of the `LongFormRecorder` from `recorder.py`.
+### CLI Mode
 
-- **`recorder.py` (The Recorder Wrapper)**
-  - **Purpose:** The `LongFormRecorder` class acts as a high-level wrapper around the core transcription engine (`stt_engine.py`). It provides simpler methods like `start_recording()`, `stop_recording()`, and `feed_audio()`. It manages the state of a single recording session.
-  - **Interaction:** It is instantiated by `model_manager.py` and used by `orchestrator.py`. It uses the `AudioToTextRecorder` from `stt_engine.py` to do the actual low-level work.
+For batch processing without the GUI:
 
-- **`stt_engine.py` (The Core Engine)**
-  - **Purpose:** This is the low-level heart of the transcription system. The `AudioToTextRecorder` class directly interfaces with the `faster-whisper` library, handles Voice Activity Detection (VAD) to detect speech, manages the audio stream from the microphone (`pyaudio`), and runs the AI model in a separate process for performance.
-  - **Interaction:** It is wrapped by `recorder.py`. It uses `safepipe.py` to communicate with its own transcription worker process, ensuring the main application remains responsive.
+```bash
+cd _core
+source .venv/bin/activate
+python SCRIPT/orchestrator.py --static /path/to/audio.mp3
+```
 
-- **`static_transcriber.py` (The File Processor)**
-  - **Purpose:** This module handles the "transcribe an audio file" feature. It uses the external program `ffmpeg` to convert any media file into a standard WAV format that the model can understand. It can also apply VAD to remove silence before transcription.
-  - **Interaction:** It is created and called by `orchestrator.py` when the user selects the "Transcribe Audio File" option from the tray menu. It uses the already-loaded main transcriber instance to perform the final transcription.
-
-#### User Interface & Display
-
-- **`tray_manager.py` (The System Tray UI)**
-  - **Purpose:** It creates and manages the system tray icon using `PyQt6`. This icon is the primary way you interact with the application. It provides the menu with "Start," "Stop," and "Quit" options. The icon's color changes to show the application's current status (e.g., green for standby, yellow for recording).
-  - **Interaction:** It runs the main application event loop. When you click a menu item, it calls a function (a "callback") in `orchestrator.py`.
-
-- **`console_display.py` (The Terminal UI)**
-  - **Purpose:** This module is responsible for all the visual feedback in the terminal window. It uses the `rich` library to draw the recording timer, the live audio waveform, and the live transcription preview.
-  - **Interaction:** It is controlled by `orchestrator.py`. To display the waveform, it runs the `cava` program as a subprocess and reads its output, which is configured by `cava.config`.
-
-#### Configuration & Setup
-
-- **`config_manager.py` (The Configuration Handler)**
-  - **Purpose:** It safely loads the `config.yaml` file. It provides default settings, so if a value is missing from your file, the program won't crash. It ensures all necessary configuration keys are present.
-  - **Interaction:** It is used by `orchestrator.py` at startup to get all the application settings.
-
-- **`logging_setup.py` (The Logger)**
-  - **Purpose:** This script sets up application-wide logging. All status messages, warnings, and errors from different parts of the program are written to a central log file (`stt_orchestrator.log`). This is very useful for debugging.
-  - **Interaction:** It is called once at the very beginning by `orchestrator.py`.
-
-#### Utilities & Helpers
-
-- **`dependency_checker.py` & `diagnostics.py`**
-  - **Purpose:** These modules check if your system is set up correctly. `dependency_checker` verifies that all required Python packages (like `torch`) and external programs are installed. `diagnostics` gathers information about your hardware (CPU, GPU) and prints the helpful startup banner.
-  - **Interaction:** Both are called by `orchestrator.py` at startup.
-
-- **`platform_utils.py` (Platform Helper)**
-  - **Purpose:** This isolates Linux-specific code. For example, it knows where to find configuration files (`~/.config/`) and how to check for CUDA. This makes the code cleaner and easier to adapt to other operating systems in the future.
-  - **Interaction:** Used by various modules (`config_manager`, `dependency_checker`, etc.) for platform-specific tasks.
-
-- **`safepipe.py` (Thread-Safe Communicator)**
-  - **Purpose:** Provides a special communication channel (`Pipe`) that can be safely used by multiple threads at once. This is a technical utility to prevent crashes and race conditions.
-  - **Interaction:** It is used by `stt_engine.py` to safely send audio data to the separate transcription process and receive the text results back.
-
-- **`utils.py` (General Helpers)**
-  - **Purpose:** Contains small, reusable functions. Currently, it has `safe_print` which provides a way to print styled text to the console using the `rich` library.
-  - **Interaction:** Used by many other scripts for console output.
-
-- **`list_audio_devices.py` & `test_imports.py`**
-  - **Purpose:** These are standalone utility scripts for you, the user. `list_audio_devices.py` helps you find the correct index for your microphone to put in `config.yaml`. `test_imports.py` is a quick way to verify that all necessary Python libraries are installed.
-  - **Interaction:** They are not used by the main application itself; you run them manually from the terminal.
-
-#### Configuration Files
-
-- **`config.yaml`**
-  - **Purpose:** This is your main control panel for the application. It's written in YAML, which is easy for humans to read and edit.
-  - **What it does:** You use this file to configure everything:
-    - **Language:** Set the language for transcription (e.g., `el` for Greek).
-    - **Models:** Choose which `faster-whisper` models to use (e.g., `large-v3` for high accuracy, `base` or `medium` for faster previews).
-    - **Hardware:** Tell the program to use your `cuda` GPU or `cpu`.
-    - **Features:** Enable or disable features like the live preview (`enable_preview_transcriber`) or the waveform display (`show_waveform`).
-    - **Audio Device:** Manually specify which microphone to use via its `input_device_index`.
-
-- **`cava.config`**
-  - **Purpose:** This file configures the **external `cava` program**, which is a command-line audio visualizer. It is **not** a configuration for your Python script directly.
-  - **What it does:** Your `console_display.py` script runs `cava` to generate the data for the audio waveform. This config file tells `cava`:
-    - `method = raw`: This is the most important setting. It tells `cava` **not** to draw the waveform itself, but instead to output the raw bar height data as text to its standard output.
-    - `raw_target = /dev/stdout`: Send this raw data to standard output.
-    - Your Python script then reads this text data and uses the `rich` library to draw a much nicer, integrated waveform in the terminal.
-
-##### A Note on `warmup_audio.wav`
-
-The small `warmup_audio.wav` file plays a crucial role in the application's performance and responsiveness.
-
-**The Problem:** When a large model like Whisper is loaded onto a GPU, the very first inference task triggers several one-time setup operations that can cause a noticeable delay of a second or more. These operations include:
-
-- **CUDA Kernel Compilation:** The CUDA driver may perform a Just-In-Time (JIT) compilation of the code (kernels) that will run on the GPU.
-- **Memory Allocation:** The GPU must allocate all necessary memory buffers for the model's inputs and outputs.
-- **Algorithm Selection:** Libraries like cuDNN often benchmark different algorithms on the first run to select the fastest one for your specific hardware.
-
-**The Solution:** To prevent this initial lag from affecting the user experience, the application performs a "warm-up" transcription using this silent audio file immediately after each model is loaded. This forces all these one-time costs to occur during the initial loading phase (when the system tray icon is grey).
-
-The result is that the first *real* transcription is just as fast as every subsequent one, ensuring the application feels instantly responsive from the moment it's ready.
+This transcribes the file and saves the JSON output, then exits.
 
 ---
 
-### Troubleshooting
+## Audio Notebook Web App
+
+The Audio Notebook is a **web-based application** for managing and searching your transcribed recordings. It runs in your browser and is launched from the system tray menu.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| 📅 **Calendar View** | Browse recordings organized by date with badge indicators |
+| 🔍 **Full-Text Search** | Find words/phrases across all transcriptions using SQLite FTS5 |
+| 🎯 **Fuzzy Matching** | Enable prefix search for partial word matches |
+| 📆 **Date Filtering** | Narrow search results to specific date ranges |
+| ⏱️ **Click-to-Play** | Click any word to jump to that moment in the audio |
+| 🎵 **Audio Player** | Built-in player with 10-second skip, seeking, timestamps |
+| 👥 **Speaker Labels** | View speaker identification chips in transcripts |
+| 📁 **Import Files** | Import audio files and auto-transcribe in background |
+| 🌙 **Dark Mode** | Modern dark theme |
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| **Frontend** | React 18 + TypeScript + Tailwind CSS |
+| **Backend** | FastAPI (Python) — integrated into `_core` |
+| **Database** | SQLite with FTS5 for full-text search |
+| **Audio** | Howler.js for playback |
+| **Build Tool** | Vite |
+
+### Starting the Audio Notebook
+
+#### Option 1: From System Tray (Recommended)
+
+1. Start the orchestrator: `python SCRIPT/orchestrator.py`
+2. Right-click the system tray icon
+3. Select **"Start Audio Notebook"**
+4. The web interface opens at [http://localhost:8000](http://localhost:8000)
+
+#### Option 2: Using dev.sh (Development)
+
+```bash
+cd _core/APP_VIEWER
+
+# Install frontend dependencies (first time only)
+npm install
+
+# Start orchestrator + frontend dev server with hot reload
+./dev.sh --frontend
+```
+
+This starts:
+
+- **Orchestrator (backend)**: [http://localhost:8000](http://localhost:8000) — API + transcription
+- **Frontend (dev server)**: [http://localhost:1420](http://localhost:1420) — Hot reload
+- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
+
+### Views
+
+#### Calendar View (Home)
+
+The home screen shows a monthly calendar where each day with recordings displays a badge. Click a day to see all recordings from that date.
+
+#### Recording Detail
+
+Click any recording to see the full transcript with word-level highlighting, speaker labels (if diarization was enabled), and playback controls.
+
+#### Search
+
+Use the search page to find specific words or phrases across all your recordings. Results show the word in context with a link to the exact timestamp in the recording.
+
+---
+
+## Output Format
+
+### JSON Output (Static Transcription)
+
+```json
+{
+  "segments": [
+    {
+      "text": "This is mercury metal.",
+      "start": 0.0,
+      "end": 1.52,
+      "duration": 1.52,
+      "speaker": "SPEAKER_00",
+      "words": [
+        {"word": "This", "start": 0.0, "end": 0.24, "probability": 0.99},
+        {"word": "is", "start": 0.24, "end": 0.4, "probability": 0.98},
+        {"word": "mercury", "start": 0.4, "end": 0.88, "probability": 0.95},
+        {"word": "metal.", "start": 0.88, "end": 1.52, "probability": 0.97}
+      ]
+    }
+  ],
+  "num_speakers": 1,
+  "total_duration": 31.14,
+  "total_words": 145,
+  "metadata": {
+    "source_file": "/path/to/audio.mp3",
+    "num_segments": 12,
+    "speakers": ["SPEAKER_00"]
+  }
+}
+```
+
+---
+
+## How It Works
+
+### Smart Model Management
+
+The orchestrator manages GPU memory by keeping only one model type loaded at a time:
+
+```text
+Application Startup
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ Orchestrator starts                   │
+│ - Preload LONGFORM model(s)           │
+│ - Tray icon: GREY → GREEN             │
+│ - Ready for immediate recording       │
+└───────────────────────────────────────┘
+    │
+    ├─────────────────────────────────────────────────────────┐
+    │ (User starts longform recording)                        │
+    ▼                                                         │
+┌───────────────────────────────────────┐                     │
+│ Longform model ALREADY LOADED         │                     │
+│ - No model switch needed              │                     │
+│ - Start recording immediately         │                     │
+│ - Model stays loaded after finish     │                     │
+└───────────────────────────────────────┘                     │
+                                                              │
+    ┌─────────────────────────────────────────────────────────┘
+    │ (User starts static transcription OR audio notebook)
+    ▼
+┌───────────────────────────────────────┐
+│ 1. Unload LONGFORM model              │
+│    - Free GPU memory                  │
+│    - Tray icon: GREY (loading)        │
+└───────────────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 2. Load STATIC model                  │
+│    - Uses main_transcriber settings   │
+│    - Model cached for reuse           │
+└───────────────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 3. Process files (can do multiple)    │
+│    - No reload between files          │
+│    - Tray: MAUVE/AQUAMARINE           │
+└───────────────────────────────────────┘
+    │
+    ▼ (User starts longform recording)
+┌───────────────────────────────────────┐
+│ Switch back to LONGFORM model         │
+│ - Unload static → Load longform       │
+└───────────────────────────────────────┘
+```
+
+### Dual Transcriber Mode (Preview Enabled)
+
+When `enable_preview_transcriber: true`, two models run simultaneously:
+
+- **Preview Transcriber** (base model): Handles microphone, VAD, live preview
+- **Main Transcriber** (large model): Receives audio feed, produces final transcription
+
+This provides real-time feedback while maintaining high-quality final output.
+
+### Transcription Pipeline (Static Files)
+
+```text
+Audio File
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 1. FFmpeg converts to 16kHz mono WAV  │
+└───────────────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 2. WebRTC VAD removes silence         │
+│    (optional, for cleaner input)      │
+└───────────────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────────────┐
+│ 3. Faster Whisper transcribes         │
+│    - word_timestamps=True             │
+│    - Returns words + timing           │
+└───────────────────────────────────────┘
+    │
+    ├─── (if diarization enabled) ──────┐
+    ▼                                   ▼
+┌─────────────────────────────┐  ┌─────────────────────────────┐
+│ 4a. Output without speakers │  │ 4b. PyAnnote diarization    │
+│     - Group into segments   │  │     - Returns speaker times │
+└─────────────────────────────┘  └─────────────────────────────┘
+                                        │
+                                        ▼
+                                 ┌─────────────────────────────┐
+                                 │ 5. Combiner merges results  │
+                                 │    - Assign speaker to word │
+                                 │    - Group by speaker       │
+                                 └─────────────────────────────┘
+    │
+    ▼
+JSON Output File
+```
+
+### Speaker Assignment Algorithm
+
+Each word is assigned to a speaker by:
+
+1. Calculate the word's midpoint: `(start + end) / 2`
+2. Find the diarization segment that contains this midpoint
+3. Use that segment's speaker label
+4. Group consecutive words with the same speaker
+5. Split segments if they exceed `max_segment_chars` (default 500)
+
+---
+
+## Module Architecture
+
+### Core Application Logic (`_core/SCRIPT/`)
+
+| Script | Purpose |
+|--------|---------|
+| `orchestrator.py` | Central controller, manages state, connects UI to backend, serves API |
+| `model_manager.py` | Loads and manages AI models, handles cleanup |
+| `recorder.py` | High-level wrapper for recording sessions |
+| `stt_engine.py` | Low-level transcription engine, VAD, audio processing |
+| `static_transcriber.py` | Handles static file transcription with preprocessing |
+
+### User Interface & Display
+
+| Script | Purpose |
+|--------|---------|
+| `tray_manager.py` | System tray icon and menu (PyQt6) |
+| `console_display.py` | Terminal UI: recording timer, CAVA waveform, live preview (Rich) |
+
+### Configuration & Utilities
+
+| Script | Purpose |
+|--------|---------|
+| `config_manager.py` | Loads and validates `config.yaml` |
+| `logging_setup.py` | Application-wide logging setup |
+| `platform_utils.py` | Platform-specific code (Linux paths, CUDA detection) |
+| `dependency_checker.py` | Verifies required packages and programs |
+| `diagnostics.py` | Hardware info and startup banner |
+| `utils.py` | Shared utilities (safe_print, format_timestamp) |
+
+### Audio Notebook Backend (`_core/APP_VIEWER/backend/`)
+
+| File | Purpose |
+|------|---------|
+| `database.py` | SQLite + FTS5 schema, queries, and utilities |
+| `webapp_logging.py` | Web app logging configuration |
+| `routers/recordings.py` | Recording CRUD endpoints |
+| `routers/search.py` | Full-text search endpoints |
+| `routers/transcribe.py` | Import and transcription endpoints |
+| `routers/llm.py` | Local LLM integration (LM Studio) |
+
+### Diarization Service (`_core/DIARIZATION_SERVICE/`)
+
+| File | Purpose |
+|------|---------|
+| `service.py` | Subprocess bridge to `_module-diarization` |
+| `combiner.py` | Merges transcription + speaker labels |
+
+### Diarization Module (`_module-diarization/DIARIZATION/`)
+
+| File | Purpose |
+|------|---------|
+| `diarize_audio.py` | CLI entry point |
+| `diarization_manager.py` | PyAnnote pipeline management |
+| `api.py` | API wrapper |
+| `config_manager.py` | Configuration handling |
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### "Diarization not available"
+
+Ensure the diarization venv is set up:
+
+```bash
+cd _module-diarization
+source .venv/bin/activate
+python -c "from DIARIZATION import diarize_audio; print('OK')"
+```
+
+If it fails, check that you've accepted the model terms on HuggingFace and run `hf auth login`.
+
+#### CUDA out of memory
+
+With on-demand model loading, this should be rare. However, if it occurs:
+
+1. Models are automatically unloaded when switching modes
+2. Ensure no other GPU-intensive apps are running
+3. Use the "Unload All Models" menu option to free memory
+4. Set `device: "cpu"` in `main_transcriber` config (slower but uses system RAM)
+5. Use a smaller model (e.g., `Systran/faster-whisper-medium`)
+
+#### HuggingFace token issues
+
+```bash
+cd _module-diarization
+source .venv/bin/activate
+hf auth login
+```
+
+Then accept model terms at the HuggingFace links above.
 
 #### CUDA/cuDNN Issues
 
-If you encounter CUDA-related errors:
-
-1. Verify your system's CUDA toolkit is properly installed: `nvcc --version`
-2. Check that cuDNN is installed and in your library path.
-3. Ensure your GPU drivers are up to date.
-4. Confirm you set the correct `CMAKE_CUDA_ARCHITECTURES` in the build script and re-run it.
+1. Verify CUDA: `nvcc --version`
+2. Check cuDNN is installed and in library path
+3. Confirm correct `CMAKE_CUDA_ARCHITECTURES` in `build_ctranslate2.sh`
 
 #### Audio Device Issues
 
-1. Re-run `list_audio_devices.py` to confirm the device index.
-2. Check system audio permissions.
-3. Verify no other application is exclusively using the microphone.
+1. Run `list_audio_devices.py` to confirm device index
+2. Check system audio permissions
+3. Verify no other app is using the microphone exclusively
 
-#### Model Loading Issues
+#### ctranslate2 Build Failures
 
-1. Check available disk space in `~/.cache/huggingface/`.
-2. Ensure you have internet connectivity for the initial model download.
-3. Check GPU memory usage with `nvidia-smi`.
+1. Ensure all build dependencies are installed: `sudo pacman -S --needed base-devel git openblas cmake`
+2. Check that CUDA toolkit is properly installed
+3. Verify `CMAKE_CUDA_ARCHITECTURES` matches your GPU
+4. Look for errors in the build output
+
+#### Audio Notebook Not Opening
+
+1. Check if port 8000 is already in use
+2. Ensure the orchestrator is running
+3. Check `webapp.log` for errors
 
 ---
 
-### License
+## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+MIT License — See [LICENSE](LICENSE) for details.
 
-### Acknowledgments
+## Acknowledgments
 
 This project builds upon several excellent open-source projects:
 
-- **[RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)**: The core transcription engine was adapted and customized from this powerful and flexible library, which was also the original inspiration for this project.
-- **[Faster Whisper](https://github.com/SYSTRAN/faster-whisper)** for the excellent model optimization.
-- **[OpenAI Whisper](https://github.com/openai/whisper)** for the underlying speech recognition models.
+- **[RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)** — The core transcription engine was adapted from this library
+- **[Faster Whisper](https://github.com/SYSTRAN/faster-whisper)** — Excellent model optimization
+- **[PyAnnote Audio](https://github.com/pyannote/pyannote-audio)** — State-of-the-art speaker diarization
+- **[OpenAI Whisper](https://github.com/openai/whisper)** — Original speech recognition models
+- **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** — Fast inference engine for Transformer models
