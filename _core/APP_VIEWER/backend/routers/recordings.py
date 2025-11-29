@@ -23,8 +23,10 @@ from database import (
     update_recording_summary,
     get_recording_summary,
 )
+from webapp_logging import get_api_logger
 
 router = APIRouter()
+logger = get_api_logger()
 
 
 class RecordingResponse(BaseModel):

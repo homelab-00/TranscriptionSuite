@@ -5,7 +5,6 @@ Supports both regular and streaming responses from OpenAI-compatible APIs.
 """
 
 import json
-import logging
 import sys
 from pathlib import Path
 from typing import AsyncGenerator, Optional
@@ -19,8 +18,11 @@ from pydantic import BaseModel
 SCRIPT_DIR = Path(__file__).parent.parent.parent.parent / "SCRIPT"
 sys.path.insert(0, str(SCRIPT_DIR))
 
+# Use webapp logging
+from webapp_logging import get_llm_logger
+
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = get_llm_logger()
 
 
 # --- Pydantic Models ---
@@ -184,6 +186,18 @@ async def process_with_llm(request: LLMRequest):
     if config["model"]:
         payload["model"] = config["model"]
 
+    # Log the request
+    logger.info(f"LLM Request (non-streaming) to {base_url}")
+    logger.info(
+        f"  System prompt: {system_prompt[:100]}..."
+        if len(system_prompt) > 100
+        else f"  System prompt: {system_prompt}"
+    )
+    logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
+    logger.info(
+        f"  Max tokens: {payload['max_tokens']}, Temperature: {payload['temperature']}"
+    )
+
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
@@ -200,11 +214,19 @@ async def process_with_llm(request: LLMRequest):
 
             data = response.json()
 
-            return LLMResponse(
+            llm_response = LLMResponse(
                 response=data["choices"][0]["message"]["content"],
                 model=data.get("model", "unknown"),
                 tokens_used=data.get("usage", {}).get("total_tokens"),
             )
+
+            # Log the response
+            logger.info(f"LLM Response received")
+            logger.info(f"  Model: {llm_response.model}")
+            logger.info(f"  Tokens used: {llm_response.tokens_used}")
+            logger.info(f"  Response length: {len(llm_response.response)} chars")
+
+            return llm_response
 
     except httpx.ConnectError:
         raise HTTPException(
@@ -263,8 +285,21 @@ async def process_with_llm_stream(request: LLMRequest):
     if config["model"]:
         payload["model"] = config["model"]
 
+    # Log the streaming request
+    logger.info(f"LLM Request (streaming) to {base_url}")
+    logger.info(
+        f"  System prompt: {system_prompt[:100]}..."
+        if len(system_prompt) > 100
+        else f"  System prompt: {system_prompt}"
+    )
+    logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
+    logger.info(
+        f"  Max tokens: {payload['max_tokens']}, Temperature: {payload['temperature']}"
+    )
+
     async def generate_stream() -> AsyncGenerator[str, None]:
         """Generate SSE stream from LLM response"""
+        total_content_length = 0
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream(
@@ -285,6 +320,9 @@ async def process_with_llm_stream(request: LLMRequest):
                             data_str = line[6:]  # Remove "data: " prefix
 
                             if data_str.strip() == "[DONE]":
+                                logger.info(
+                                    f"LLM Stream completed, total response: {total_content_length} chars"
+                                )
                                 yield f"data: {json.dumps({'done': True})}\n\n"
                                 break
 
@@ -294,13 +332,16 @@ async def process_with_llm_stream(request: LLMRequest):
                                 content = delta.get("content", "")
 
                                 if content:
+                                    total_content_length += len(content)
                                     yield f"data: {json.dumps({'content': content})}\n\n"
                             except json.JSONDecodeError:
                                 continue
 
         except httpx.ConnectError:
+            logger.error("LLM Stream error: Cannot connect to LM Studio")
             yield f"data: {json.dumps({'error': 'Cannot connect to LM Studio'})}\n\n"
         except httpx.TimeoutException:
+            logger.error("LLM Stream error: Request timed out")
             yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
         except Exception as e:
             logger.error(f"Streaming error: {e}", exc_info=True)
