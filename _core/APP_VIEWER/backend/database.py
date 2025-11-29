@@ -348,20 +348,19 @@ def search_words(
     limit: int = 100,
 ) -> list[dict]:
     """
-    Search for words in transcriptions using FTS5
+    Search for words in transcriptions using FTS5, plus filenames and summaries.
     Returns matching words with context (surrounding words, recording info)
     """
     with get_connection() as conn:
         cursor = conn.cursor()
+        results = []
 
-        # Build FTS query
+        # 1. Search in words using FTS5
         if fuzzy:
-            # Use prefix matching for fuzzy search
             fts_query = f"{query}*"
         else:
             fts_query = f'"{query}"'
 
-        # Base query joining FTS results with word and recording info
         sql = """
             SELECT 
                 w.id,
@@ -372,7 +371,8 @@ def search_words(
                 w.end_time,
                 r.filename,
                 r.recorded_at,
-                s.speaker
+                s.speaker,
+                'word' as match_type
             FROM words_fts fts
             JOIN words w ON fts.rowid = w.id
             JOIN recordings r ON w.recording_id = r.id
@@ -381,7 +381,6 @@ def search_words(
         """
         params: list[Any] = [fts_query]
 
-        # Add date filtering
         if start_date:
             sql += " AND date(r.recorded_at) >= date(?)"
             params.append(start_date)
@@ -394,7 +393,6 @@ def search_words(
 
         cursor.execute(sql, params)
 
-        results = []
         for row in cursor.fetchall():
             result = dict(row)
 
@@ -415,10 +413,122 @@ def search_words(
             context_words = [dict(r) for r in cursor.fetchall()]
             result["context"] = " ".join(w["word"] for w in context_words)
             result["context_words"] = context_words
-
             results.append(result)
 
-        return results
+        # 2. Search in filenames
+        like_pattern = f"%{query}%" if fuzzy else f"%{query}%"
+        filename_sql = """
+            SELECT 
+                r.id as recording_id,
+                r.filename,
+                r.recorded_at,
+                r.summary
+            FROM recordings r
+            WHERE LOWER(r.filename) LIKE LOWER(?)
+        """
+        filename_params: list[Any] = [like_pattern]
+
+        if start_date:
+            filename_sql += " AND date(r.recorded_at) >= date(?)"
+            filename_params.append(start_date)
+        if end_date:
+            filename_sql += " AND date(r.recorded_at) <= date(?)"
+            filename_params.append(end_date)
+
+        filename_sql += " ORDER BY r.recorded_at DESC LIMIT ?"
+        filename_params.append(limit)
+
+        cursor.execute(filename_sql, filename_params)
+
+        for row in cursor.fetchall():
+            # Check if this recording is already in results from word search
+            rec_id = row["recording_id"]
+            if not any(
+                r.get("recording_id") == rec_id and r.get("match_type") == "filename"
+                for r in results
+            ):
+                results.append(
+                    {
+                        "id": None,
+                        "recording_id": rec_id,
+                        "segment_id": None,
+                        "word": row["filename"],
+                        "start_time": 0.0,
+                        "end_time": 0.0,
+                        "filename": row["filename"],
+                        "recorded_at": row["recorded_at"],
+                        "speaker": None,
+                        "context": f"Filename match: {row['filename']}",
+                        "context_words": [],
+                        "match_type": "filename",
+                    }
+                )
+
+        # 3. Search in summaries
+        summary_sql = """
+            SELECT 
+                r.id as recording_id,
+                r.filename,
+                r.recorded_at,
+                r.summary
+            FROM recordings r
+            WHERE r.summary IS NOT NULL AND LOWER(r.summary) LIKE LOWER(?)
+        """
+        summary_params: list[Any] = [like_pattern]
+
+        if start_date:
+            summary_sql += " AND date(r.recorded_at) >= date(?)"
+            summary_params.append(start_date)
+        if end_date:
+            summary_sql += " AND date(r.recorded_at) <= date(?)"
+            summary_params.append(end_date)
+
+        summary_sql += " ORDER BY r.recorded_at DESC LIMIT ?"
+        summary_params.append(limit)
+
+        cursor.execute(summary_sql, summary_params)
+
+        for row in cursor.fetchall():
+            rec_id = row["recording_id"]
+            # Check if this recording is already in results
+            if not any(
+                r.get("recording_id") == rec_id and r.get("match_type") == "summary"
+                for r in results
+            ):
+                # Extract a snippet of the summary around the match
+                summary = row["summary"] or ""
+                query_lower = query.lower()
+                summary_lower = summary.lower()
+                match_pos = summary_lower.find(query_lower)
+                if match_pos >= 0:
+                    start = max(0, match_pos - 50)
+                    end = min(len(summary), match_pos + len(query) + 50)
+                    snippet = summary[start:end]
+                    if start > 0:
+                        snippet = "..." + snippet
+                    if end < len(summary):
+                        snippet = snippet + "..."
+                else:
+                    snippet = summary[:100] + ("..." if len(summary) > 100 else "")
+
+                results.append(
+                    {
+                        "id": None,
+                        "recording_id": rec_id,
+                        "segment_id": None,
+                        "word": query,
+                        "start_time": 0.0,
+                        "end_time": 0.0,
+                        "filename": row["filename"],
+                        "recorded_at": row["recorded_at"],
+                        "speaker": None,
+                        "context": f"Summary match: {snippet}",
+                        "context_words": [],
+                        "match_type": "summary",
+                    }
+                )
+
+        return results[:limit]
 
 
 def delete_recording(recording_id: int) -> bool:

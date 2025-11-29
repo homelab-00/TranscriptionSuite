@@ -41,6 +41,7 @@ export interface SearchResult {
   start_time: number;
   end_time: number;
   context: string; // Surrounding text for context
+  match_type: 'word' | 'filename' | 'summary';
 }
 
 export interface RecordingsByDate {

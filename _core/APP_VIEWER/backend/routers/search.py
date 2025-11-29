@@ -19,7 +19,7 @@ class SearchWordContext(BaseModel):
 
 
 class SearchResult(BaseModel):
-    id: int
+    id: Optional[int]
     recording_id: int
     word: str
     start_time: float
@@ -29,6 +29,7 @@ class SearchResult(BaseModel):
     speaker: Optional[str]
     context: str
     context_words: list[SearchWordContext]
+    match_type: str  # 'word', 'filename', or 'summary'
 
 
 class SearchResponse(BaseModel):
@@ -42,9 +43,7 @@ class SearchResponse(BaseModel):
 async def search(
     q: str = Query(..., description="Search query"),
     fuzzy: bool = Query(False, description="Enable fuzzy matching (prefix search)"),
-    start_date: Optional[str] = Query(
-        None, description="Start date filter (YYYY-MM-DD)"
-    ),
+    start_date: Optional[str] = Query(None, description="Start date filter (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date filter (YYYY-MM-DD)"),
     limit: int = Query(100, description="Maximum results to return"),
 ):
@@ -83,6 +82,7 @@ async def search(
                 )
                 for w in r["context_words"]
             ],
+            match_type=r.get("match_type", "word"),
         )
         for r in results
     ]
