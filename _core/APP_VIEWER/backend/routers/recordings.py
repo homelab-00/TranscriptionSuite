@@ -20,6 +20,8 @@ from database import (
     get_transcription,
     delete_recording,
     update_recording_date,
+    update_recording_summary,
+    get_recording_summary,
 )
 
 router = APIRouter()
@@ -34,6 +36,7 @@ class RecordingResponse(BaseModel):
     imported_at: str
     word_count: int
     has_diarization: bool
+    summary: Optional[str] = None
 
 
 class TranscriptWordResponse(BaseModel):
@@ -86,6 +89,7 @@ async def list_recordings(
             imported_at=r["imported_at"],
             word_count=r["word_count"],
             has_diarization=bool(r["has_diarization"]),
+            summary=r.get("summary"),
         )
         for r in recordings
     ]
@@ -122,6 +126,7 @@ async def get_recording_by_id(recording_id: int):
         imported_at=recording["imported_at"],
         word_count=recording["word_count"],
         has_diarization=bool(recording["has_diarization"]),
+        summary=recording.get("summary"),
     )
 
 
@@ -207,6 +212,36 @@ async def update_recording_date_endpoint(
         raise HTTPException(status_code=500, detail="Failed to update recording date")
 
     return {"message": "Recording date updated"}
+
+
+class UpdateSummaryRequest(BaseModel):
+    summary: Optional[str] = None
+
+
+@router.patch("/{recording_id}/summary")
+async def update_recording_summary_endpoint(
+    recording_id: int, request: UpdateSummaryRequest
+):
+    """Update the AI summary for a recording"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    if not update_recording_summary(recording_id, request.summary):
+        raise HTTPException(status_code=500, detail="Failed to update summary")
+
+    return {"message": "Summary updated", "summary": request.summary}
+
+
+@router.get("/{recording_id}/summary")
+async def get_recording_summary_endpoint(recording_id: int):
+    """Get the AI summary for a recording"""
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    summary = get_recording_summary(recording_id)
+    return {"summary": summary}
 
 
 @router.get("/next-minute/{date}/{hour}")

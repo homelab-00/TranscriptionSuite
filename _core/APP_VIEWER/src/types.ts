@@ -26,6 +26,7 @@ export interface Recording {
   duration_seconds: number;
   word_count: number;
   has_diarization: boolean;
+  summary?: string;
 }
 
 export interface Transcription {
@@ -59,4 +60,26 @@ export interface ImportJob {
   status: 'pending' | 'transcribing' | 'completed' | 'failed';
   progress?: number;
   message?: string;
+}
+
+// LLM Types
+export interface LLMStatus {
+  available: boolean;
+  base_url: string;
+  model: string | null;
+  error: string | null;
+}
+
+export interface LLMResponse {
+  response: string;
+  model: string;
+  tokens_used: number | null;
+}
+
+export interface LLMRequest {
+  transcription_text: string;
+  system_prompt?: string;
+  user_prompt?: string;
+  max_tokens?: number;
+  temperature?: number;
 }

@@ -49,7 +49,6 @@ TranscriptionSuite/
 │   │   └── ...
 │   ├── APP_VIEWER/               # Web viewer application
 │   │   ├── backend/              # FastAPI backend
-│   │   │   ├── main.py           # FastAPI app
 │   │   │   ├── database.py       # SQLite with FTS5
 │   │   │   ├── routers/          # API endpoints
 │   │   │   └── data/             # Database & audio storage
@@ -825,12 +824,12 @@ Each word is assigned to a speaker by:
 ### Viewer Backend (`_core/APP_VIEWER/backend/`)
 
 | File | Purpose |
-|------|---------|
-| `main.py` | FastAPI application setup |
+|------|---------||
 | `database.py` | SQLite + FTS5 schema and queries |
 | `routers/recordings.py` | Recording CRUD endpoints |
 | `routers/search.py` | Full-text search endpoints |
 | `routers/transcribe.py` | Import and transcription endpoints |
+| `routers/llm.py` | Local LLM integration (LM Studio) |
 
 ### Diarization Service (`_core/DIARIZATION_SERVICE/`)
 

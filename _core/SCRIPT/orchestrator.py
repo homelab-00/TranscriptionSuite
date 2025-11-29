@@ -70,8 +70,7 @@ class STTOrchestrator:
     Coordinates between different transcription modes and handles hotkey commands.
 
     Modes:
-        - tray: System tray icon with longform + static transcription (default)
-        - audio-notebook: Web-based viewer with transcription API
+        - tray: System tray icon with longform + static transcription + web viewer (default)
         - static: CLI transcription of a single file
     """
 
@@ -80,16 +79,14 @@ class STTOrchestrator:
         mode: str = "tray",
         static_file: Optional[str] = None,
         api_port: int = 8000,
-        open_browser: bool = True,
     ):
         """
         Initialize the orchestrator.
 
         Args:
-            mode: Operating mode - "tray", "audio-notebook", or "static"
+            mode: Operating mode - "tray" or "static"
             static_file: Path to file for static transcription mode
-            api_port: Port for audio notebook backend (default 8000)
-            open_browser: Whether to open browser in audio-notebook mode
+            api_port: Port for web viewer backend (default 8000)
         """
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         # Use relative path - ConfigManager will look in project root
@@ -99,8 +96,8 @@ class STTOrchestrator:
         self.mode = mode
         self.static_file = static_file
         self.api_port = api_port
-        self.open_browser = open_browser
         self.api_server = None
+        self.open_browser = True  # Always open browser when starting web viewer
 
         # Application state (combining related attributes)
         self.app_state: dict[str, Optional[bool | str]] = {
@@ -974,7 +971,7 @@ class STTOrchestrator:
 
             try:
                 from database import init_db  # type: ignore[import-not-found]
-                from routers import recordings, search, transcribe  # type: ignore[import-not-found]
+                from routers import recordings, search, transcribe, llm  # type: ignore[import-not-found]
             except ImportError as e:
                 safe_print(f"Failed to import APP_VIEWER/backend modules: {e}", "error")
                 return
@@ -1010,6 +1007,7 @@ class STTOrchestrator:
             app.include_router(
                 transcribe.router, prefix="/api/transcribe", tags=["transcribe"]
             )
+            app.include_router(llm.router, prefix="/api/llm", tags=["llm"])
 
             # Transcription API endpoint (uses loaded model)
             class TranscribeRequest(BaseModel):
@@ -1227,8 +1225,6 @@ class STTOrchestrator:
 
         if self.mode == "static":
             self._run_static_mode()
-        elif self.mode == "audio-notebook":
-            self._run_audio_notebook_mode()
         else:
             self._run_tray_mode()
 
@@ -1286,129 +1282,6 @@ class STTOrchestrator:
 
         safe_print(f"Output saved to: {output_file}", "success")
         self.stop()
-
-    def _run_audio_notebook_mode(self):
-        """Run the audio notebook webapp with transcription API."""
-        safe_print("Starting Audio Notebook...", "info")
-
-        # No need to load models - transcription API will load them on demand
-        # via get_cached_whisper_model() when transcription is requested
-
-        # Start the FastAPI backend
-        self._run_audio_notebook_server()
-
-    def _run_audio_notebook_server(self):
-        """Start the FastAPI server for audio notebook."""
-        try:
-            from fastapi import FastAPI
-            from fastapi.middleware.cors import CORSMiddleware
-            from pydantic import BaseModel
-            import uvicorn
-        except ImportError as e:
-            safe_print(f"FastAPI or uvicorn not installed: {e}", "error")
-            return
-
-        # Import the APP_VIEWER/backend modules
-        import sys
-
-        backend_path = os.path.join(self.script_dir, "..", "APP_VIEWER", "backend")
-        sys.path.insert(0, backend_path)
-
-        try:
-            from database import init_db  # type: ignore[import-not-found]
-            from routers import recordings, search, transcribe  # type: ignore[import-not-found]
-        except ImportError as e:
-            safe_print(f"Failed to import APP_VIEWER/backend modules: {e}", "error")
-            return
-
-        # Initialize database
-        init_db()
-
-        # Create the app
-        app = FastAPI(
-            title="Audio Notebook API",
-            description="Transcription viewer and manager",
-            version="1.0.0",
-        )
-
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=[
-                "http://localhost:5173",
-                "http://localhost:1420",
-                "http://localhost:3000",
-                "tauri://localhost",
-            ],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-
-        # Include routers from APP_VIEWER/backend
-        app.include_router(
-            recordings.router, prefix="/api/recordings", tags=["recordings"]
-        )
-        app.include_router(search.router, prefix="/api/search", tags=["search"])
-        app.include_router(
-            transcribe.router, prefix="/api/transcribe", tags=["transcribe"]
-        )
-
-        # Transcription API endpoint (uses loaded model)
-        class TranscribeRequest(BaseModel):
-            wav_path: str
-            enable_diarization: bool = False
-            enable_word_timestamps: bool = True
-            language: Optional[str] = None
-
-        class TranscribeResponse(BaseModel):
-            segments: list
-            audio_duration: float
-            num_speakers: int
-
-        class HealthResponse(BaseModel):
-            status: str
-            models_loaded: bool
-
-        @app.get("/api/health", response_model=HealthResponse)
-        async def health_check():
-            # Models are loaded on-demand, so we report "ok" status even if not loaded
-            return HealthResponse(
-                status="ok",
-                models_loaded=bool(self.app_state["models_loaded"]),
-            )
-
-        @app.post("/api/orchestrator/transcribe", response_model=TranscribeResponse)
-        async def transcribe_file(request: TranscribeRequest):
-            return await self._api_transcribe(
-                request.wav_path,
-                request.enable_diarization,
-                request.enable_word_timestamps,
-                request.language,
-            )
-
-        self.app_state["running"] = True
-        self.api_server = app
-
-        safe_print(
-            f"Audio Notebook starting on http://localhost:{self.api_port}", "success"
-        )
-        safe_print("Endpoints:", "info")
-        safe_print(f"  API:  http://localhost:{self.api_port}/docs", "info")
-        safe_print("  App:  http://localhost:1420 (run frontend separately)", "info")
-        safe_print("", "info")
-        safe_print("Press Ctrl+C to stop", "info")
-
-        if self.open_browser:
-            import webbrowser
-
-            webbrowser.open(f"http://localhost:{self.api_port}/docs")
-
-        try:
-            uvicorn.run(app, host="127.0.0.1", port=self.api_port, log_level="warning")
-        except KeyboardInterrupt:
-            safe_print("\nShutting down Audio Notebook...", "info")
-        finally:
-            self.stop()
 
     def _run_tray_mode(self):
         """Run the traditional tray icon mode."""
@@ -1470,16 +1343,6 @@ class STTOrchestrator:
                 safe_print("\nKeyboard interrupt received, shutting down...")
             finally:
                 self.stop()
-
-    def _load_single_transcriber_mode_for_api(self):
-        """Load transcriber for API mode (no microphone needed)."""
-        self.preview_transcriber = None
-        self.main_transcriber = self.model_manager.initialize_transcriber(
-            "main_transcriber",
-            instance_name="main_transcriber",
-            callbacks=None,
-            use_microphone=False,  # No microphone for API mode
-        )
 
     async def _api_transcribe(
         self,
@@ -1730,20 +1593,13 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Modes:
-  (default)        Run with system tray (longform + static transcription)
-  --audio-notebook Launch web-based audio notebook viewer
+  (default)        Run with system tray (longform + static transcription + web viewer)
   --static FILE    Transcribe a single file and exit
 
 Examples:
   %(prog)s                        Run in tray icon mode (default)
-  %(prog)s --audio-notebook       Launch audio notebook webapp
   %(prog)s --static recording.wav Transcribe file to .txt
 """,
-    )
-    parser.add_argument(
-        "--audio-notebook",
-        action="store_true",
-        help="Launch the audio notebook webapp (backend + frontend)",
     )
     parser.add_argument(
         "--static",
@@ -1755,12 +1611,7 @@ Examples:
         "--port",
         type=int,
         default=8000,
-        help="Port for audio notebook backend (default: 8000)",
-    )
-    parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Don't open browser automatically (audio-notebook mode)",
+        help="Port for web viewer backend (default: 8000)",
     )
 
     args = parser.parse_args()
@@ -1768,8 +1619,6 @@ Examples:
     # Determine mode
     if args.static:
         mode = "static"
-    elif args.audio_notebook:
-        mode = "audio-notebook"
     else:
         mode = "tray"
 
@@ -1777,6 +1626,5 @@ Examples:
         mode=mode,
         static_file=args.static,
         api_port=args.port,
-        open_browser=not args.no_browser,
     )
     orchestrator.run()

@@ -54,7 +54,8 @@ def init_db():
                 recorded_at TIMESTAMP NOT NULL,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 word_count INTEGER DEFAULT 0,
-                has_diarization INTEGER DEFAULT 0
+                has_diarization INTEGER DEFAULT 0,
+                summary TEXT
             )
         """)
 
@@ -130,6 +131,12 @@ def init_db():
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_segments_recording ON segments(recording_id)"
         )
+
+        # Migration: Add summary column if it doesn't exist (for existing databases)
+        cursor.execute("PRAGMA table_info(recordings)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "summary" not in columns:
+            cursor.execute("ALTER TABLE recordings ADD COLUMN summary TEXT")
 
         conn.commit()
 
@@ -433,6 +440,27 @@ def update_recording_date(recording_id: int, recorded_at: str) -> bool:
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def update_recording_summary(recording_id: int, summary: Optional[str]) -> bool:
+    """Update the AI summary for a recording"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE recordings SET summary = ? WHERE id = ?",
+            (summary, recording_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_recording_summary(recording_id: int) -> Optional[str]:
+    """Get the AI summary for a recording"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT summary FROM recordings WHERE id = ?", (recording_id,))
+        row = cursor.fetchone()
+        return row["summary"] if row else None
 
 
 def get_recordings_for_hour(date_str: str, hour: int) -> list[dict]:
