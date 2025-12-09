@@ -145,19 +145,31 @@ When diarization is enabled for static file transcription:
 
 ```bash
 # 1. Clone the repository
-git clone <your-repo-url> TranscriptionSuite
+git clone https://github.com/homelab-00/TranscriptionSuite
 cd TranscriptionSuite
 
 # 2. Set up _core environment (Python 3.13)
 cd _core
 uv venv --python 3.13
 source .venv/bin/activate
-# Build ctranslate2 (see Installation section for details)
+
+# 3. Install build dependencies
+# Replace the dependencies in the pyproject.toml file with the
+# following, then run uv sync.
+dependencies = [
+    "build>=1.3.0",
+    "pybind11==2.11.1",
+    "setuptools>=80.9.0",
+    "wheel==0.45.1",
+]
+
+# 4. Build ctranslate2 
+# Replace pyproject.toml to its original state, then run uv sync again.
 ./build_ctranslate2.sh
 uv sync
 deactivate
 
-# 3. Set up diarization environment (Python 3.11) - Optional
+# 5. Set up diarization environment (Python 3.11) - Optional
 cd ../_module-diarization
 uv venv --python 3.11
 source .venv/bin/activate
@@ -165,12 +177,12 @@ uv sync
 hf auth login  # Required for PyAnnote models
 deactivate
 
-# 4. Install frontend dependencies (optional, for web viewer development)
+# 6. Install frontend dependencies (optional, for web viewer development)
 cd ../_core/APP_VIEWER
 npm install
 cd ../..
 
-# 5. Run the application
+# 7. Run the application
 cd _core
 source .venv/bin/activate
 python SCRIPT/orchestrator.py

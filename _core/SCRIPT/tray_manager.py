@@ -50,6 +50,7 @@ class TrayIconManager:
         static_transcribe_callback: Optional[Callable[[], None]] = None,
         toggle_models_callback: Optional[Callable[[], None]] = None,
         audio_notebook_callback: Optional[Callable[[], None]] = None,
+        toggle_canary_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -62,6 +63,7 @@ class TrayIconManager:
             static_transcribe_callback: Function to call for static transcription.
             toggle_models_callback: Function to call to toggle models loaded state.
             audio_notebook_callback: Function to call to start the audio notebook webapp.
+            toggle_canary_callback: Function to call to toggle Canary transcription mode.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -90,9 +92,13 @@ class TrayIconManager:
         self.static_transcribe_callback = static_transcribe_callback
         self.toggle_models_callback = toggle_models_callback
         self.audio_notebook_callback = audio_notebook_callback
+        self.toggle_canary_callback = toggle_canary_callback
 
         # Reference to the models menu item for dynamic updates
         self.models_action: Optional[QAction] = None
+        # Reference to Canary mode action for enabling/disabling
+        self.canary_action: Optional[QAction] = None
+        self._canary_mode_active: bool = False
         # Reference to audio notebook menu item for enabling/disabling
         self.audio_notebook_action: Optional[QAction] = None
         # References to start/stop recording actions for enabling/disabling
@@ -110,6 +116,7 @@ class TrayIconManager:
             "loading": (128, 128, 128),  # Grey
             "unloaded": (128, 128, 128),  # Grey - no model loaded
             "standby": (0, 255, 0),  # Green
+            "canary_standby": (255, 215, 100),  # Light gold - Canary mode ready
             "recording": (255, 255, 0),  # Yellow
             "transcribing": (255, 128, 0),  # Orange during transcription
             "static_transcribing": (
@@ -149,6 +156,16 @@ class TrayIconManager:
             menu.addAction(self.audio_notebook_action)  # type: ignore[call-overload]
             cast(Any, self.audio_notebook_action.triggered).connect(
                 self._on_audio_notebook_triggered
+            )
+
+        # Add Canary mode toggle menu item
+        if self.toggle_canary_callback:
+            self.canary_action = QAction("Use Canary (NeMo)", menu)
+            self.canary_action.setCheckable(True)
+            self.canary_action.setChecked(False)
+            menu.addAction(self.canary_action)  # type: ignore[call-overload]
+            cast(Any, self.canary_action.triggered).connect(
+                self._on_toggle_canary_triggered
             )
 
         # Add models unload/reload menu item
@@ -239,6 +256,11 @@ class TrayIconManager:
         if self.toggle_models_callback:
             self.toggle_models_callback()
 
+    def _on_toggle_canary_triggered(self) -> None:
+        """Handle Canary mode toggle from menu."""
+        if self.toggle_canary_callback:
+            self.toggle_canary_callback()
+
     def _on_quit_triggered(self, checked: bool) -> None:
         if self.quit_callback:
             self.quit_callback()
@@ -250,6 +272,16 @@ class TrayIconManager:
                 self.models_action.setText("Unload All Models")
             else:
                 self.models_action.setText("Reload All Models")
+
+    def update_canary_menu_item(self, canary_active: bool) -> None:
+        """Update the Canary menu item text and check state."""
+        self._canary_mode_active = canary_active
+        if self.canary_action:
+            self.canary_action.setChecked(canary_active)
+            if canary_active:
+                self.canary_action.setText("Using Canary (NeMo) ✓")
+            else:
+                self.canary_action.setText("Use Canary (NeMo)")
 
     def update_audio_notebook_menu_item(self, is_running: bool) -> None:
         """Update the audio notebook menu item based on whether it's running."""
