@@ -3,13 +3,13 @@
 # ============================================================================
 # This is the central configuration file for the entire TranscriptionSuite.
 # It combines settings for:
-#   - Core transcription engine (_core)
-#   - Speaker diarization module (_module-diarization)
-#   - Viewer app frontend and backend (_core/APP_VIEWER)
+#   - Core transcription engine (SCRIPT/)
+#   - Speaker diarization module (DIARIZATION/)
+#   - Audio Notebook web application (AUDIO_NOTEBOOK/)
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Global Transcription Options
+# Global Transcription Options (NeMo is excluded)
 # ----------------------------------------------------------------------------
 transcription_options:
     # Language code for transcription (e.g., "en" for English, "el" for Greek).
@@ -46,7 +46,7 @@ longform_recording:
 # Settings for transcribing audio/video files (not live recording).
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
-    # Requires the _module-diarization environment to be set up.
+    # Requires PyAnnote models to be downloaded (huggingface-cli login).
     enable_diarization: false
 
     # Enable word-level timestamps in the transcription output.
@@ -160,7 +160,7 @@ canary_transcriber:
     device: "cuda"
 
     # Beam size for decoding (1 = greedy/fastest, higher = more accurate but slower)
-    beam_size: 1
+    beam_size: 3 
 
     # Include punctuation and capitalization in output
     punctuation: true
@@ -188,7 +188,7 @@ canary_transcriber:
 # ----------------------------------------------------------------------------
 audio:
     # Audio input device index for microphone.
-    # Run `python _core/list_audio_devices.py` to find available devices.
+    # Run `python list_audio_devices.py` to find available devices.
     # Set to null if using use_default_input: true
     input_device_index: null
 
@@ -211,7 +211,7 @@ display:
 # ----------------------------------------------------------------------------
 # Configuration for where the viewer app stores files.
 storage:
-    # Directory for storing audio files (relative to _core/APP_VIEWER/backend/).
+    # Directory for storing audio files (relative to AUDIO_NOTEBOOK/backend/).
     # Audio files imported via the viewer app are stored here.
     audio_dir: "data/audio"
 

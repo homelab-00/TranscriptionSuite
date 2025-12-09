@@ -1,6 +1,6 @@
 # TranscriptionSuite
 
-A comprehensive speech-to-text transcription suite for Linux with speaker diarization support. Built with Python, leveraging `faster-whisper` for high-performance transcription and `pyannote-audio` for state-of-the-art speaker identification. Accelerated by **CUDA 13+** for GPU inference.
+A comprehensive speech-to-text transcription suite for Linux with speaker diarization support. Built with Python, leveraging `faster-whisper` for high-performance transcription and `pyannote-audio` for state-of-the-art speaker identification. Supports **CUDA 12.x/13.x** for GPU inference (automatic CUDA 12.6 configuration for ctranslate2 compatibility).
 
 > **Key Features:**
 >
@@ -18,7 +18,6 @@ A comprehensive speech-to-text transcription suite for Linux with speaker diariz
 ## Table of Contents
 
 - [Project Architecture](#project-architecture)
-- [Dual Virtual Environment Design](#dual-virtual-environment-design)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -38,106 +37,68 @@ A comprehensive speech-to-text transcription suite for Linux with speaker diariz
 ```text
 TranscriptionSuite/
 ├── config.yaml                   # Unified configuration file (single source of truth)
-├── _core/                        # Main application (Python 3.13)
-│   ├── SCRIPT/                   # Application source code
-│   │   ├── orchestrator.py       # Main entry point & central controller
-│   │   ├── recorder.py           # Long-form recording wrapper
-│   │   ├── static_transcriber.py # Static file transcription with preprocessing
-│   │   ├── stt_engine.py         # Low-level transcription engine, VAD, audio
-│   │   ├── model_manager.py      # AI model lifecycle management
-│   │   ├── tray_manager.py       # System tray icon (PyQt6)
-│   │   ├── console_display.py    # Terminal UI: timer, waveform, preview (Rich)
-│   │   ├── config_manager.py     # Configuration loading and validation
-│   │   ├── logging_setup.py      # Application-wide logging
-│   │   ├── platform_utils.py     # Platform-specific code (Linux paths, CUDA)
-│   │   ├── dependency_checker.py # Verifies required packages
-│   │   ├── diagnostics.py        # Hardware info and startup banner
-│   │   └── utils.py              # Shared utilities
-│   ├── APP_VIEWER/               # Audio Notebook web application
-│   │   ├── backend/              # FastAPI backend
-│   │   │   ├── database.py       # SQLite with FTS5 for word search
-│   │   │   ├── webapp_logging.py # Web app logging configuration
-│   │   │   ├── routers/          # API endpoints
-│   │   │   │   ├── recordings.py # Recording CRUD operations
-│   │   │   │   ├── search.py     # Full-text search endpoints
-│   │   │   │   ├── transcribe.py # Import and transcription endpoints
-│   │   │   │   └── llm.py        # Local LLM integration (LM Studio)
-│   │   │   └── data/             # Database & audio storage
-│   │   ├── src/                  # React + TypeScript frontend
-│   │   ├── dev.sh                # Development launcher script
-│   │   ├── package.json          # Frontend dependencies
-│   │   └── vite.config.ts        # Vite build configuration
-│   ├── DIARIZATION_SERVICE/      # Bridge to diarization module
-│   │   ├── service.py            # Subprocess communication with diarization venv
-│   │   └── combiner.py           # Merges transcription + speaker labels
-│   ├── build_ctranslate2.sh      # Custom ctranslate2 build script for CUDA 13+
-│   ├── list_audio_devices.py     # Utility to find audio input devices
-│   ├── .venv/                    # Core virtual environment (Python 3.13)
-│   └── pyproject.toml            # Core dependencies
-│
-├── _module-diarization/          # Speaker diarization module (Python 3.11)
-│   ├── DIARIZATION/              # Diarization source code
-│   │   ├── diarize_audio.py      # CLI entry point
-│   │   ├── diarization_manager.py# PyAnnote pipeline management
-│   │   ├── api.py                # API wrapper
-│   │   └── config_manager.py     # Configuration handling
-│   ├── .venv/                    # Diarization virtual environment (Python 3.11)
-│   └── pyproject.toml            # Diarization dependencies
-│
+├── pyproject.toml                # All dependencies
+├── .venv/                        # Unified virtual environment (Python 3.11)
+├── SCRIPT/                       # Application source code
+│   ├── orchestrator.py           # Main entry point & central controller
+│   ├── recorder.py               # Long-form recording wrapper
+│   ├── static_transcriber.py     # Static file transcription with preprocessing
+│   ├── stt_engine.py             # Low-level transcription engine, VAD, audio
+│   ├── model_manager.py          # AI model lifecycle management
+│   ├── tray_manager.py           # System tray icon (PyQt6)
+│   ├── console_display.py        # Terminal UI: timer, waveform, preview (Rich)
+│   ├── config_manager.py         # Configuration loading and validation
+│   ├── logging_setup.py          # Application-wide logging
+│   ├── platform_utils.py         # Platform-specific code (Linux paths, CUDA)
+│   ├── dependency_checker.py     # Verifies required packages
+│   ├── diagnostics.py            # Hardware info and startup banner
+│   └── utils.py                  # Shared utilities
+├── AUDIO_NOTEBOOK/               # Audio Notebook web application
+│   ├── backend/                  # FastAPI backend
+│   │   ├── database.py           # SQLite with FTS5 for word search
+│   │   ├── webapp_logging.py     # Web app logging configuration
+│   │   ├── routers/              # API endpoints
+│   │   │   ├── recordings.py     # Recording CRUD operations
+│   │   │   ├── search.py         # Full-text search endpoints
+│   │   │   ├── transcribe.py     # Import and transcription endpoints
+│   │   │   └── llm.py            # Local LLM integration (LM Studio)
+│   │   └── data/                 # Database & audio storage
+│   ├── src/                      # React + TypeScript frontend
+│   ├── package.json              # Frontend dependencies
+│   └── vite.config.ts            # Vite build configuration
+├── DIARIZATION/                  # PyAnnote speaker diarization (integrated)
+│   ├── __init__.py               # Module exports
+│   ├── diarization_manager.py    # PyAnnote pipeline management
+│   ├── service.py                # Diarization service wrapper
+│   ├── combiner.py               # Merges transcription + speaker labels
+│   └── utils.py                  # Segment utilities
+├── CANARY/                       # NeMo Canary transcription (integrated)
+│   ├── __init__.py               # Module exports
+│   ├── canary_transcriber.py     # Canary-1B-v2 transcription
+│   └── service.py                # Canary service wrapper
+├── list_audio_devices.py         # Utility to find audio input devices
 └── README.md
 ```
 
-### Why Two Environments?
+### Unified Python 3.11 Environment
 
-| Module | Python | Key Dependencies | Purpose |
-|--------|--------|------------------|---------|
-| `_core` | 3.13 | `faster-whisper`, `torch 2.9+`, `FastAPI`, `ctranslate2` | Transcription, VAD, Web API, UI |
-| `_module-diarization` | 3.11 | `pyannote-audio`, `torch 2.x` | Speaker identification |
+All functionality now runs in a **single Python 3.11 environment**:
 
-The `pyannote-audio` library has strict dependency requirements that conflict with the latest `faster-whisper` and `torch` versions. Running them in separate environments solves this elegantly.
+| Feature | Key Dependencies | Status |
+|---------|------------------|--------|
+| Faster Whisper Transcription | `faster-whisper`, `ctranslate2`, `torch 2.9+` | ✅ Integrated |
+| Speaker Diarization | `pyannote-audio` | ✅ Integrated |
+| NeMo Canary Transcription | `nemo-toolkit[asr]` | ✅ Integrated |
+| Web API & UI | `FastAPI`, `PyQt6` | ✅ Integrated |
 
-**Note:** The Audio Notebook web app (frontend + backend) is **fully integrated into `_core`** (in `APP_VIEWER/`), sharing the same virtual environment. All transcription modes (longform, static, web UI) use the **same model settings** from `main_transcriber` in `config.yaml`.
+**Benefits of unified environment:**
 
----
+- 🚀 Faster startup (no subprocess overhead)
+- 💾 Shared GPU memory between models
+- 🔧 Simpler debugging and maintenance
+- 📦 Single `uv sync` installs everything
 
-## Dual Virtual Environment Design
-
-### Communication Between Modules
-
-When diarization is enabled for static file transcription:
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                         _core (Python 3.13)                     │
-│                                                                 │
-│  1. User selects audio file via tray menu                       │
-│  2. orchestrator.py → static_transcriber.py                     │
-│  3. Faster Whisper transcribes with word_timestamps=True        │
-│  4. DIARIZATION_SERVICE/service.py calls _module-diarization    │
-│     via subprocess (using its own .venv/bin/python)             │
-│                                                                 │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ subprocess call
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   _module-diarization (Python 3.11)             │
-│                                                                 │
-│  5. PyAnnote pipeline identifies speaker segments               │
-│  6. Returns JSON with speaker labels to stdout                  │
-│                                                                 │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ JSON response
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         _core (continues)                       │
-│                                                                 │
-│  7. DIARIZATION_SERVICE/combiner.py merges:                     │
-│     - Word-level transcription (from step 3)                    │
-│     - Speaker segments (from step 6)                            │
-│  8. Outputs combined JSON/SRT/TXT with speaker labels           │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Note:** The Audio Notebook web app (frontend + backend) is **fully integrated** (in `AUDIO_NOTEBOOK/`), sharing the same virtual environment. All transcription modes (longform, static, web UI) use the **same model settings** from `main_transcriber` in `config.yaml`.
 
 ---
 
@@ -145,46 +106,25 @@ When diarization is enabled for static file transcription:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/homelab-00/TranscriptionSuite
+git clone https://github.com/homelab-00/TranscriptionSuite.git
 cd TranscriptionSuite
 
-# 2. Set up _core environment (Python 3.13)
-cd _core
-uv venv --python 3.13
-source .venv/bin/activate
-
-# 3. Install build dependencies
-# Replace the dependencies in the pyproject.toml file with the
-# following, then run uv sync.
-dependencies = [
-    "build>=1.3.0",
-    "pybind11==2.11.1",
-    "setuptools>=80.9.0",
-    "wheel==0.45.1",
-]
-
-# 4. Build ctranslate2 
-# Replace pyproject.toml to its original state, then run uv sync again.
-./build_ctranslate2.sh
-uv sync
-deactivate
-
-# 5. Set up diarization environment (Python 3.11) - Optional
-cd ../_module-diarization
+# 2. Set up unified Python 3.11 environment
 uv venv --python 3.11
 source .venv/bin/activate
+
+# 3. Install all dependencies
 uv sync
-hf auth login  # Required for PyAnnote models
-deactivate
 
-# 6. Install frontend dependencies (optional, for web viewer development)
-cd ../_core/APP_VIEWER
+# 4. Login to HuggingFace (required for PyAnnote diarization models)
+huggingface-cli login
+
+# 5. Install frontend dependencies (optional, for web viewer development)
+cd AUDIO_NOTEBOOK
 npm install
-cd ../..
+cd ..
 
-# 7. Run the application
-cd _core
-source .venv/bin/activate
+# 6. Run the application
 python SCRIPT/orchestrator.py
 ```
 
@@ -195,8 +135,9 @@ python SCRIPT/orchestrator.py
 ### Prerequisites
 
 - **Arch Linux** (or compatible distro)
-- **NVIDIA GPU** with CUDA 13.0+ support
-- **Python 3.11** and **Python 3.13** (both required)
+- **NVIDIA GPU** with CUDA support
+- **CUDA 12.6** installed at `/opt/cuda-12.6` (required for ctranslate2/faster-whisper; see CUDA Setup below)
+- **Python 3.11** (single unified environment)
 - **uv** package manager
 - **Node.js 18+** and **npm** (for web viewer frontend)
 
@@ -210,61 +151,46 @@ sudo pacman -S --needed cuda cudnn uv base-devel git openblas ffmpeg nodejs npm
 sudo pacman -S --needed cava
 ```
 
-### Setting Up _core
+### CUDA 12.6 Setup (Required for ctranslate2)
 
-#### Step 1: Create Virtual Environment
+The `ctranslate2` library (used by `faster-whisper`) requires CUDA 12.x libraries. If your system has CUDA 13.x as the default (e.g., `/opt/cuda`), you need to install CUDA 12.6 in parallel:
 
 ```bash
-cd _core
-uv venv --python 3.13
-source .venv/bin/activate
+# Download CUDA 12.6 runfile installer
+wget https://developer.download.nvidia.com/compute/cuda/12.6.0/local_installers/cuda_12.6.0_560.28.03_linux.run
+
+# Install to /opt/cuda-12.6 (toolkit only, no driver)
+sudo sh cuda_12.6.0_560.28.03_linux.run --toolkit --toolkitpath=/opt/cuda-12.6 --silent
+
+# Verify installation
+ls /opt/cuda-12.6/lib64/libcublas.so.12
 ```
 
-#### Step 2: Build Custom ctranslate2
+The application automatically configures `LD_LIBRARY_PATH` to use CUDA 12.6 at startup via a re-exec pattern in `orchestrator.py`. No manual environment setup is required.
 
-The `ctranslate2` library needs to be compiled locally to link against your system's CUDA 13+ toolkit.
+### Setting Up the Environment
 
-**Important:** Before running, edit `build_ctranslate2.sh` to match your GPU's Compute Capability:
-
-1. Open `build_ctranslate2.sh`
-2. Find the line `export CMAKE_CUDA_ARCHITECTURES=86`
-3. The value `86` is for RTX 3060. Find your GPU's capability at [NVIDIA CUDA GPUs](https://developer.nvidia.com/cuda-gpus)
-
-Common values: RTX 3060/3070/3080/3090 = 86, RTX 4060/4070/4080/4090 = 89, RTX 2080 = 75
+#### Create Virtual Environment
 
 ```bash
-chmod +x build_ctranslate2.sh
-./build_ctranslate2.sh
-```
-
-This script clones ctranslate2 v4.6.1, builds it with CUDA/cuDNN support, and packages a wheel file that `uv sync` will install.
-
-#### Step 3: Install Dependencies
-
-```bash
-uv sync
-deactivate
-```
-
-### Setting Up _module-diarization (Optional)
-
-Speaker diarization is optional. Skip this section if you don't need "who spoke when" identification.
-
-#### Step 1: Create Virtual Environment
-
-```bash
-cd _module-diarization
 uv venv --python 3.11
 source .venv/bin/activate
 ```
 
-#### Step 2: Install Dependencies
+#### Install All Dependencies
 
 ```bash
 uv sync
 ```
 
-#### Step 3: Configure HuggingFace Access
+This single command installs:
+
+- Faster Whisper + ctranslate2 for transcription
+- PyAnnote Audio for speaker diarization
+- NeMo Toolkit for Canary transcription
+- FastAPI, PyQt6, and all other dependencies
+
+#### Configure HuggingFace Access (Required for Diarization)
 
 You need a HuggingFace token with access to PyAnnote models:
 
@@ -275,13 +201,15 @@ You need a HuggingFace token with access to PyAnnote models:
 3. Login:
 
 ```bash
-hf auth login
+huggingface-cli login
 ```
 
-#### Step 4: Test Installation
+#### Test Installation
 
 ```bash
-python -c "from DIARIZATION import diarize_audio; print('Diarization module OK')"
+python -c "from DIARIZATION import DiarizationManager; print('Diarization OK')"
+python -c "from CANARY import CanaryTranscriber; print('Canary OK')"
+python -c "import faster_whisper; print('Faster Whisper OK')"
 deactivate
 ```
 
@@ -393,7 +321,6 @@ This ensures consistent transcription quality across all modes. Change the model
 ### Finding Your Audio Device
 
 ```bash
-cd _core
 source .venv/bin/activate
 python list_audio_devices.py
 ```
@@ -420,7 +347,7 @@ Find your PipeWire audio source:
 pw-cli list-objects Node
 ```
 
-Edit `_core/SCRIPT/cava.config`:
+Edit `SCRIPT/cava.config`:
 
 ```ini
 [input]
@@ -445,13 +372,13 @@ Understanding where TranscriptionSuite stores files:
 
 | Type | Location | Description |
 |------|----------|-------------|
-| **Database** | `_core/APP_VIEWER/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
-| **Audio Files** | `_core/APP_VIEWER/backend/data/audio/` | Imported audio stored as MP3 |
+| **Database** | `AUDIO_NOTEBOOK/backend/data/transcriptions.db` | SQLite with FTS5 for word search |
+| **Audio Files** | `AUDIO_NOTEBOOK/backend/data/audio/` | Imported audio stored as MP3 |
 | **Transcriptions** | Database | Stored in SQLite tables, not as JSON files |
 | **Logs** | Project root | `transcription_suite.log`, `webapp.log` |
 | **Models** | `~/.cache/huggingface/` | Downloaded Whisper/PyAnnote models |
 | **Temp Files** | `/tmp/transcription-suite/` | Intermediate WAV files during processing |
-| **ctranslate2 Build** | `_core/deps/ctranslate2/` | Compiled ctranslate2 library |
+| **ctranslate2 Build** | `deps.bak/ctranslate2/` | Compiled ctranslate2 library (if custom built) |
 
 ### Log Files
 
@@ -460,7 +387,7 @@ All log files are stored in the **project root** and are **wiped on each applica
 | Log File | Created By | Contents |
 |----------|------------|----------|
 | `transcription_suite.log` | `orchestrator.py` | Tray mode operations, recording, static transcription |
-| `webapp.log` | `APP_VIEWER/backend` | Web app API requests, search queries |
+| `webapp.log` | `AUDIO_NOTEBOOK/backend` | Web app API requests, search queries |
 
 ### Audio Import Process
 
@@ -527,19 +454,11 @@ words_fts (word)
 
 ### Starting the Application
 
-Always run from the `_core` directory with its venv activated:
+Always run from the project root with the venv activated:
 
 ```bash
-cd _core
 source .venv/bin/activate
 python SCRIPT/orchestrator.py
-```
-
-Or use the convenience script:
-
-```bash
-cd _core/APP_VIEWER
-./dev.sh
 ```
 
 ### System Tray Controls
@@ -605,7 +524,6 @@ See the [Audio Notebook Web App](#audio-notebook-web-app) section below.
 For batch processing without the GUI:
 
 ```bash
-cd _core
 source .venv/bin/activate
 python SCRIPT/orchestrator.py --static /path/to/audio.mp3
 ```
@@ -637,7 +555,7 @@ The Audio Notebook is a **web-based application** for managing and searching you
 | Component | Technology |
 |-----------|------------|
 | **Frontend** | React 18 + TypeScript + Tailwind CSS |
-| **Backend** | FastAPI (Python) — integrated into `_core` |
+| **Backend** | FastAPI (Python) — integrated into main app |
 | **Database** | SQLite with FTS5 for full-text search |
 | **Audio** | Howler.js for playback |
 | **Build Tool** | Vite |
@@ -651,16 +569,19 @@ The Audio Notebook is a **web-based application** for managing and searching you
 3. Select **"Start Audio Notebook"**
 4. The web interface opens at [http://localhost:8000](http://localhost:8000)
 
-#### Option 2: Using dev.sh (Development)
+#### Option 2: Manual Development Setup
 
 ```bash
-cd _core/APP_VIEWER
+cd AUDIO_NOTEBOOK
 
 # Install frontend dependencies (first time only)
 npm install
 
-# Start orchestrator + frontend dev server with hot reload
-./dev.sh --frontend
+# Build the frontend (required for orchestrator to serve it)
+npm run build
+
+# Or run frontend dev server with hot reload (runs on port 1420)
+npm run dev
 ```
 
 This starts:
@@ -840,7 +761,7 @@ Each word is assigned to a speaker by:
 
 ## Module Architecture
 
-### Core Application Logic (`_core/SCRIPT/`)
+### Core Application Logic (`SCRIPT/`)
 
 | Script | Purpose |
 |--------|---------|
@@ -868,7 +789,7 @@ Each word is assigned to a speaker by:
 | `diagnostics.py` | Hardware info and startup banner |
 | `utils.py` | Shared utilities (safe_print, format_timestamp) |
 
-### Audio Notebook Backend (`_core/APP_VIEWER/backend/`)
+### Audio Notebook Backend (`AUDIO_NOTEBOOK/backend/`)
 
 | File | Purpose |
 |------|---------|
@@ -879,21 +800,21 @@ Each word is assigned to a speaker by:
 | `routers/transcribe.py` | Import and transcription endpoints |
 | `routers/llm.py` | Local LLM integration (LM Studio) |
 
-### Diarization Service (`_core/DIARIZATION_SERVICE/`)
+### Diarization Module (`DIARIZATION/`)
 
 | File | Purpose |
 |------|---------|
-| `service.py` | Subprocess bridge to `_module-diarization` |
-| `combiner.py` | Merges transcription + speaker labels |
-
-### Diarization Module (`_module-diarization/DIARIZATION/`)
-
-| File | Purpose |
-|------|---------|
-| `diarize_audio.py` | CLI entry point |
 | `diarization_manager.py` | PyAnnote pipeline management |
-| `api.py` | API wrapper |
-| `config_manager.py` | Configuration handling |
+| `service.py` | Diarization service wrapper |
+| `combiner.py` | Merges transcription + speaker labels |
+| `utils.py` | Segment utilities and helpers |
+
+### Canary Module (`CANARY/`)
+
+| File | Purpose |
+|------|---------|
+| `canary_transcriber.py` | NeMo Canary-1B-v2 transcription |
+| `service.py` | Canary service wrapper |
 
 ---
 
@@ -903,15 +824,14 @@ Each word is assigned to a speaker by:
 
 #### "Diarization not available"
 
-Ensure the diarization venv is set up:
+Ensure PyAnnote is installed and you've logged into HuggingFace:
 
 ```bash
-cd _module-diarization
 source .venv/bin/activate
-python -c "from DIARIZATION import diarize_audio; print('OK')"
+python -c "from DIARIZATION import DiarizationService; print('OK')"
 ```
 
-If it fails, check that you've accepted the model terms on HuggingFace and run `hf auth login`.
+If it fails, check that you've accepted the model terms on HuggingFace and run `huggingface-cli login`.
 
 #### CUDA out of memory
 
@@ -926,9 +846,8 @@ With on-demand model loading, this should be rare. However, if it occurs:
 #### HuggingFace token issues
 
 ```bash
-cd _module-diarization
 source .venv/bin/activate
-hf auth login
+huggingface-cli login
 ```
 
 Then accept model terms at the HuggingFace links above.
@@ -937,7 +856,7 @@ Then accept model terms at the HuggingFace links above.
 
 1. Verify CUDA: `nvcc --version`
 2. Check cuDNN is installed and in library path
-3. Confirm correct `CMAKE_CUDA_ARCHITECTURES` in `build_ctranslate2.sh`
+3. Ensure PyTorch with CUDA support is installed
 
 #### Audio Device Issues
 
