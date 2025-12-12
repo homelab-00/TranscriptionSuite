@@ -51,7 +51,7 @@ static_transcription:
 
     # Enable word-level timestamps in the transcription output.
     # Required for searchable transcriptions and click-to-seek in the viewer app.
-    word_timestamps: true
+    word_timestamps: false
 
     # Maximum characters per segment in the output.
     # Segments are split when speaker changes or this limit is reached.
@@ -181,34 +181,6 @@ canary_transcriber:
 
         # Overlap between chunks (helps with word boundaries)
         overlap_secs: 1.0
-
-
-# ----------------------------------------------------------------------------
-# Meta OmniASR Transcriber Configuration (Experimental)
-# ----------------------------------------------------------------------------
-# Alternative transcription engine using Meta's OmniASR-LLM models.
-# Supports 1600+ languages with state-of-the-art accuracy.
-# Models: omniASR_LLM_3B (~10GB VRAM), omniASR_LLM_1B (lower VRAM)
-omniasr_transcriber:
-    # Enable OmniASR as the transcription backend (replaces faster-whisper)
-    enabled: true
-
-    # Model to use: "omniASR_LLM_3B" (highest accuracy) or "omniASR_LLM_1B" (faster)
-    model: "omniASR_LLM_1B"
-
-    # Default language for transcription.
-    # Uses {language_code}_{script} format (e.g., eng_Latn, ell_Grek, deu_Latn)
-    # Can also use ISO 639-1 codes (e.g., "en", "el", "de") - auto-converted.
-    # Note: OmniASR does NOT support auto-detection. You MUST specify a language.
-    # Common codes: eng_Latn (English), ell_Grek (Greek), deu_Latn (German),
-    #               fra_Latn (French), spa_Latn (Spanish), cmn_Hans (Chinese)
-    language: "ell_Grek"
-
-    # Device for model inference: "cuda" or "cpu"
-    device: "cuda"
-
-    # Batch size for inference (1 recommended for single files)
-    batch_size: 1
 
 
 # ----------------------------------------------------------------------------
