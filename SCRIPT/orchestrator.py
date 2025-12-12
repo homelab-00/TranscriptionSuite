@@ -120,16 +120,6 @@ except ImportError:
     CanaryService = None  # type: ignore
     canary_transcribe = None  # type: ignore
 
-# OmniASR transcription service (Meta OmniASR-LLM backend)
-try:
-    from OMNIASR import OmniASRService, transcribe_audio as omniasr_transcribe
-
-    HAS_OMNIASR = True
-except ImportError:
-    HAS_OMNIASR = False
-    OmniASRService = None  # type: ignore
-    omniasr_transcribe = None  # type: ignore
-
 # Simple audio recorder for Canary mode (no ML model required)
 try:
     from canary_recorder import CanaryRecorder
@@ -185,7 +175,6 @@ class STTOrchestrator:
             "is_transcribing": False,  # Flag to manage audio feeding during transcription
             "models_loaded": False,  # Track if models are currently loaded
             "canary_mode": False,  # Track if Canary is active transcription backend
-            "omniasr_mode": False,  # Track if OmniASR is active transcription backend
         }
 
         # Instances for transcription components
@@ -197,9 +186,6 @@ class STTOrchestrator:
 
         # Canary transcription service (alternative to faster-whisper)
         self.canary_service: Optional[Any] = None  # CanaryService when available
-
-        # OmniASR transcription service (alternative to faster-whisper)
-        self.omniasr_service: Optional[Any] = None  # OmniASRService when available
 
         # Simple audio recorder for Canary mode (no ML model needed)
         self.canary_recorder: Optional[Any] = None  # CanaryRecorder when available
@@ -234,7 +220,6 @@ class STTOrchestrator:
                 toggle_models_callback=self._toggle_models_loaded,
                 audio_notebook_callback=self._toggle_audio_notebook,
                 toggle_canary_callback=self._toggle_canary_mode,
-                toggle_omniasr_callback=self._toggle_omniasr_mode,
             )
         elif mode == "tray" and not HAS_TRAY:
             safe_print(
@@ -251,8 +236,6 @@ class STTOrchestrator:
         """Return the appropriate standby state based on current mode."""
         if self.app_state.get("canary_mode"):
             return "canary_standby"
-        if self.app_state.get("omniasr_mode"):
-            return "omniasr_standby"
         return "standby"
 
     def _check_startup_dependencies(self):
@@ -357,28 +340,6 @@ class STTOrchestrator:
                         else:
                             self.tray_manager.set_state("error")
                         self.tray_manager.set_recording_actions_enabled(True)
-                        self.tray_manager.set_static_transcription_enabled(True)
-                    return
-
-                # Check if we're in OmniASR mode - use OmniASR for transcription
-                if self.app_state.get("omniasr_mode") and self.omniasr_service:
-                    # Generate output file path
-                    from pathlib import Path
-
-                    source_path = Path(file_path)
-                    output_file = str(
-                        source_path.parent / f"{source_path.stem}_transcription.json"
-                    )
-
-                    success = self._transcribe_static_with_omniasr(file_path, output_file)
-                    if self.tray_manager:
-                        if success:
-                            self.tray_manager.set_state("omniasr_standby")
-                        else:
-                            self.tray_manager.set_state("error")
-                        self.tray_manager.set_recording_actions_enabled(
-                            False
-                        )  # No longform for OmniASR
                         self.tray_manager.set_static_transcription_enabled(True)
                     return
 
@@ -1779,160 +1740,8 @@ class STTOrchestrator:
             safe_print(f"Canary transcription failed: {e}", "error")
             return False
 
-    # =========================================================================
-    # OmniASR Transcription Mode Methods
-    # =========================================================================
-
-    def _toggle_omniasr_mode(self) -> None:
-        """Toggle OmniASR transcription mode on/off."""
-        if self.app_state.get("omniasr_mode"):
-            self._deactivate_omniasr_mode()
-        else:
-            self._activate_omniasr_mode()
-
-    def _activate_omniasr_mode(self) -> None:
-        """Activate OmniASR as the transcription backend."""
-        if not HAS_OMNIASR:
-            safe_print(
-                "OmniASR service not available. Make sure OMNIASR module is installed.",
-                "error",
-            )
-            return
-
-        # Check if OmniASR is enabled in config
-        omniasr_config = self.config.get("omniasr_transcriber", {})
-        if not omniasr_config.get("enabled", False):
-            safe_print(
-                "OmniASR is disabled in config.yaml. "
-                "Set omniasr_transcriber.enabled: true to use it.",
-                "warning",
-            )
-            return
-
-        # Don't allow switching during active recording or transcription
-        if self.app_state.get("current_mode"):
-            safe_print(
-                f"Cannot switch to OmniASR while in {self.app_state['current_mode']} mode. "
-                "Please finish the current operation first.",
-                "warning",
-            )
-            return
-
-        # Deactivate Canary if it's active
-        if self.app_state.get("canary_mode"):
-            safe_print("Deactivating Canary mode first...", "info")
-            self._deactivate_canary_mode_sync()
-
-        safe_print("Activating OmniASR transcription mode...", "info")
-
-        if self.tray_manager:
-            self.tray_manager.set_state("loading")
-            self.tray_manager.set_recording_actions_enabled(False)
-            self.tray_manager.set_static_transcription_enabled(False)
-
-        def _activate_worker():
-            try:
-                # First, unload any existing faster-whisper models to free VRAM
-                safe_print("Unloading faster-whisper models to free VRAM...", "info")
-                self._unload_all_models_sync()
-
-                # Get OmniASR settings from config
-                model = omniasr_config.get("model", "omniASR_LLM_3B")
-                language = omniasr_config.get("language", "eng_Latn")
-                device = omniasr_config.get("device", "cuda")
-                batch_size = omniasr_config.get("batch_size", 1)
-
-                # Initialize OmniASR service
-                if OmniASRService is None:
-                    raise RuntimeError("OmniASRService class not available")
-                self.omniasr_service = OmniASRService(
-                    model=model,
-                    device=device,
-                    default_language=language,
-                    batch_size=batch_size,
-                    keep_loaded=True,
-                )
-
-                # Load the model
-                safe_print(f"Loading OmniASR model ({model})...", "info")
-                if not self.omniasr_service.ensure_model_loaded():
-                    raise RuntimeError("OmniASR model failed to load")
-
-                self.app_state["omniasr_mode"] = True
-
-                if self.tray_manager:
-                    self.tray_manager.update_omniasr_menu_item(True)
-                    self.tray_manager.set_state("omniasr_standby")
-                    self.tray_manager.set_recording_actions_enabled(
-                        False
-                    )  # No longform for OmniASR yet
-                    self.tray_manager.set_static_transcription_enabled(True)
-
-                safe_print(
-                    "OmniASR mode activated! Ready for static transcription.", "success"
-                )
-
-            except Exception as e:
-                logging.error(f"Failed to activate OmniASR mode: {e}", exc_info=True)
-                safe_print(f"Error activating OmniASR: {e}", "error")
-
-                if self.omniasr_service:
-                    self.omniasr_service.unload()
-                    self.omniasr_service = None
-
-                if self.tray_manager:
-                    self.tray_manager.update_omniasr_menu_item(False)
-                    self.tray_manager.set_state("standby")
-                    self.tray_manager.set_recording_actions_enabled(True)
-                    self.tray_manager.set_static_transcription_enabled(True)
-
-        threading.Thread(target=_activate_worker, daemon=True).start()
-
-    def _deactivate_omniasr_mode(self) -> None:
-        """Deactivate OmniASR and return to faster-whisper."""
-        if not self.app_state.get("omniasr_mode"):
-            return
-
-        # Don't allow switching during active recording or transcription
-        if self.app_state.get("current_mode"):
-            safe_print(
-                f"Cannot deactivate OmniASR while in {self.app_state['current_mode']} mode. "
-                "Please finish the current operation first.",
-                "warning",
-            )
-            return
-
-        safe_print("Deactivating OmniASR mode...", "info")
-
-        if self.tray_manager:
-            self.tray_manager.set_state("loading")
-
-        def _deactivate_worker():
-            try:
-                # Unload the OmniASR model
-                if self.omniasr_service:
-                    self.omniasr_service.unload()
-                    self.omniasr_service = None
-
-                self.app_state["omniasr_mode"] = False
-
-                if self.tray_manager:
-                    self.tray_manager.update_omniasr_menu_item(False)
-                    self.tray_manager.set_state("standby")
-
-                safe_print("OmniASR mode deactivated. Using faster-whisper.", "success")
-
-            except Exception as e:
-                logging.error(f"Error deactivating OmniASR mode: {e}", exc_info=True)
-                safe_print(f"Error deactivating OmniASR: {e}", "error")
-
-                if self.tray_manager:
-                    self.tray_manager.set_state("standby")
-
-        threading.Thread(target=_deactivate_worker, daemon=True).start()
-
     def _deactivate_canary_mode_sync(self) -> None:
-        """Synchronously deactivate Canary mode (for use when switching to OmniASR)."""
+        """Synchronously deactivate Canary mode."""
         if not self.app_state.get("canary_mode"):
             return
 
@@ -1953,89 +1762,6 @@ class STTOrchestrator:
         except Exception as e:
             logging.error(f"Error in sync Canary deactivation: {e}", exc_info=True)
 
-    def _transcribe_with_omniasr(self, audio_path: str) -> Optional[str]:
-        """
-        Transcribe audio using the OmniASR service.
-
-        Args:
-            audio_path: Path to the audio file
-
-        Returns:
-            Transcription text or None on error
-        """
-        if not self.omniasr_service:
-            safe_print("OmniASR service not initialized", "error")
-            return None
-
-        omniasr_config = self.config.get("omniasr_transcriber", {})
-        language = omniasr_config.get("language", "eng_Latn")
-
-        try:
-            result = self.omniasr_service.transcribe(
-                audio_path,
-                language=language,
-            )
-            return result.text
-        except Exception as e:
-            logging.error(f"OmniASR transcription error: {e}", exc_info=True)
-            safe_print(f"OmniASR transcription failed: {e}", "error")
-            return None
-
-    def _transcribe_static_with_omniasr(self, file_path: str, output_file: str) -> bool:
-        """
-        Transcribe a static file using OmniASR and save the result.
-
-        Args:
-            file_path: Path to the audio file
-            output_file: Path for the output JSON file
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.omniasr_service:
-            safe_print("OmniASR service not initialized", "error")
-            return False
-
-        omniasr_config = self.config.get("omniasr_transcriber", {})
-        language = omniasr_config.get("language", "eng_Latn")
-
-        try:
-            safe_print(f"Transcribing with OmniASR (language: {language})...", "info")
-
-            result = self.omniasr_service.transcribe(
-                file_path,
-                language=language,
-            )
-
-            # Build output similar to faster-whisper format
-            import json
-
-            output_data = {
-                "text": result.text,
-                "language": result.language,
-                "duration": result.duration,
-                "processing_time": result.processing_time,
-                "engine": "omniasr",
-            }
-
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(output_data, f, ensure_ascii=False, indent=2)
-
-            safe_print(f"Transcription saved to: {output_file}", "success")
-            safe_print(
-                f"Duration: {result.duration:.1f}s, "
-                f"Processing: {result.processing_time:.1f}s, "
-                f"Speed: {result.duration / result.processing_time:.1f}x realtime",
-                "info",
-            )
-
-            return True
-
-        except Exception as e:
-            logging.error(f"OmniASR static transcription error: {e}", exc_info=True)
-            safe_print(f"OmniASR transcription failed: {e}", "error")
-            return False
-
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
         if self.app_state.get("shutdown_in_progress"):
@@ -2052,10 +1778,6 @@ class STTOrchestrator:
             if self.canary_service:
                 self.canary_service.stop_server()
                 self.canary_service = None
-            # Stop OmniASR service if running
-            if self.omniasr_service:
-                self.omniasr_service.unload()
-                self.omniasr_service = None
             # Stop audio notebook if running
             self._stop_audio_notebook()
             self.stop()

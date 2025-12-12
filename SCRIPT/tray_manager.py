@@ -51,7 +51,6 @@ class TrayIconManager:
         toggle_models_callback: Optional[Callable[[], None]] = None,
         audio_notebook_callback: Optional[Callable[[], None]] = None,
         toggle_canary_callback: Optional[Callable[[], None]] = None,
-        toggle_omniasr_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -65,7 +64,6 @@ class TrayIconManager:
             toggle_models_callback: Function to call to toggle models loaded state.
             audio_notebook_callback: Function to call to start the audio notebook webapp.
             toggle_canary_callback: Function to call to toggle Canary transcription mode.
-            toggle_omniasr_callback: Function to call to toggle OmniASR transcription mode.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -95,16 +93,12 @@ class TrayIconManager:
         self.toggle_models_callback = toggle_models_callback
         self.audio_notebook_callback = audio_notebook_callback
         self.toggle_canary_callback = toggle_canary_callback
-        self.toggle_omniasr_callback = toggle_omniasr_callback
 
         # Reference to the models menu item for dynamic updates
         self.models_action: Optional[QAction] = None
         # Reference to Canary mode action for enabling/disabling
         self.canary_action: Optional[QAction] = None
         self._canary_mode_active: bool = False
-        # Reference to OmniASR mode action for enabling/disabling
-        self.omniasr_action: Optional[QAction] = None
-        self._omniasr_mode_active: bool = False
         # Reference to audio notebook menu item for enabling/disabling
         self.audio_notebook_action: Optional[QAction] = None
         # References to start/stop recording actions for enabling/disabling
@@ -123,7 +117,6 @@ class TrayIconManager:
             "unloaded": (128, 128, 128),  # Grey - no model loaded
             "standby": (0, 255, 0),  # Green
             "canary_standby": (255, 215, 100),  # Light gold - Canary mode ready
-            "omniasr_standby": (100, 180, 255),  # Light blue - OmniASR mode ready
             "recording": (255, 255, 0),  # Yellow
             "transcribing": (255, 128, 0),  # Orange during transcription
             "static_transcribing": (
@@ -173,16 +166,6 @@ class TrayIconManager:
             menu.addAction(self.canary_action)  # type: ignore[call-overload]
             cast(Any, self.canary_action.triggered).connect(
                 self._on_toggle_canary_triggered
-            )
-
-        # Add OmniASR mode toggle menu item
-        if self.toggle_omniasr_callback:
-            self.omniasr_action = QAction("Use OmniASR (Meta)", menu)
-            self.omniasr_action.setCheckable(True)
-            self.omniasr_action.setChecked(False)
-            menu.addAction(self.omniasr_action)  # type: ignore[call-overload]
-            cast(Any, self.omniasr_action.triggered).connect(
-                self._on_toggle_omniasr_triggered
             )
 
         # Add models unload/reload menu item
@@ -278,11 +261,6 @@ class TrayIconManager:
         if self.toggle_canary_callback:
             self.toggle_canary_callback()
 
-    def _on_toggle_omniasr_triggered(self) -> None:
-        """Handle OmniASR mode toggle from menu."""
-        if self.toggle_omniasr_callback:
-            self.toggle_omniasr_callback()
-
     def _on_quit_triggered(self, checked: bool) -> None:
         if self.quit_callback:
             self.quit_callback()
@@ -304,16 +282,6 @@ class TrayIconManager:
                 self.canary_action.setText("Using Canary (NeMo) ✓")
             else:
                 self.canary_action.setText("Use Canary (NeMo)")
-
-    def update_omniasr_menu_item(self, omniasr_active: bool) -> None:
-        """Update the OmniASR menu item text and check state."""
-        self._omniasr_mode_active = omniasr_active
-        if self.omniasr_action:
-            self.omniasr_action.setChecked(omniasr_active)
-            if omniasr_active:
-                self.omniasr_action.setText("Using OmniASR (Meta) ✓")
-            else:
-                self.omniasr_action.setText("Use OmniASR (Meta)")
 
     def update_audio_notebook_menu_item(self, is_running: bool) -> None:
         """Update the audio notebook menu item based on whether it's running."""
