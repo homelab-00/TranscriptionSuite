@@ -143,6 +143,11 @@ class OmniASRTranscriber:
     AVAILABLE_MODELS = ["omniASR_LLM_3B", "omniASR_LLM_1B"]
     DEFAULT_MODEL = "omniASR_LLM_3B"
 
+    # Chunking parameters (OmniASR has a hard 40s limit)
+    MAX_SINGLE_PASS_SECS = 38.0  # Stay under 40s limit with margin
+    CHUNK_LENGTH_SECS = 30.0  # Process audio in 30-second chunks
+    CHUNK_OVERLAP_SECS = 1.0  # 1 second overlap between chunks
+
     def __init__(
         self,
         model: str = "omniASR_LLM_3B",
@@ -232,6 +237,9 @@ class OmniASRTranscriber:
         """
         Transcribe an audio file.
 
+        For audio longer than 38 seconds, automatically uses chunked
+        transcription to avoid OmniASR's 40s limit.
+
         Args:
             audio_path: Path to audio file
             language: Language code (ISO 639-1 or OmniASR format)
@@ -255,27 +263,22 @@ class OmniASRTranscriber:
         start_time = time.time()
 
         try:
-            # Get audio duration
+            # Get audio data and duration
             import soundfile as sf
 
             audio_data, sample_rate = sf.read(str(audio_path))
             duration = len(audio_data) / sample_rate
 
-            # Run transcription
-            transcriptions = self.pipeline.transcribe(
-                [str(audio_path)],
-                lang=[lang],
-                batch_size=self.batch_size,
-            )
-
-            # Extract text from result
-            text = ""
-            if transcriptions and len(transcriptions) > 0:
-                text = (
-                    transcriptions[0]
-                    if isinstance(transcriptions[0], str)
-                    else str(transcriptions[0])
+            # Decide whether to use chunked transcription
+            if duration > self.MAX_SINGLE_PASS_SECS:
+                logger.info(
+                    f"Audio is {duration:.1f}s (>{self.MAX_SINGLE_PASS_SECS}s), "
+                    f"using chunked transcription"
                 )
+                text = self._transcribe_chunked(audio_data, sample_rate, lang)
+            else:
+                # Short audio - single pass
+                text = self._transcribe_single(str(audio_path), lang)
 
             processing_time = time.time() - start_time
 
@@ -295,6 +298,128 @@ class OmniASRTranscriber:
         except Exception as e:
             logger.error(f"Transcription failed: {e}", exc_info=True)
             raise
+
+    def _transcribe_single(self, audio_path: str, lang: str) -> str:
+        """Transcribe a short audio file in a single pass."""
+        transcriptions = self.pipeline.transcribe(
+            [audio_path],
+            lang=[lang],
+            batch_size=self.batch_size,
+        )
+
+        if transcriptions and len(transcriptions) > 0:
+            return (
+                transcriptions[0]
+                if isinstance(transcriptions[0], str)
+                else str(transcriptions[0])
+            )
+        return ""
+
+    def _transcribe_chunked(
+        self,
+        audio_data,
+        sample_rate: int,
+        lang: str,
+    ) -> str:
+        """
+        Transcribe long audio using chunked processing.
+
+        Splits audio into overlapping chunks, transcribes each,
+        and merges results.
+        """
+        import tempfile
+        import soundfile as sf
+
+        chunk_samples = int(self.CHUNK_LENGTH_SECS * sample_rate)
+        overlap_samples = int(self.CHUNK_OVERLAP_SECS * sample_rate)
+        step_samples = chunk_samples - overlap_samples
+
+        total_samples = len(audio_data)
+        num_chunks = max(1, (total_samples - overlap_samples) // step_samples + 1)
+
+        logger.info(f"Splitting into {num_chunks} chunks of {self.CHUNK_LENGTH_SECS}s")
+
+        transcripts = []
+
+        for i in range(num_chunks):
+            start_sample = i * step_samples
+            end_sample = min(start_sample + chunk_samples, total_samples)
+
+            chunk_data = audio_data[start_sample:end_sample]
+
+            # Skip very short chunks (less than 0.5 seconds)
+            if len(chunk_data) < sample_rate * 0.5:
+                continue
+
+            # Save chunk to temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                sf.write(tmp_file.name, chunk_data, sample_rate)
+                tmp_path = tmp_file.name
+
+            try:
+                # Transcribe chunk
+                chunk_text = self._transcribe_single(tmp_path, lang)
+                transcripts.append(chunk_text)
+
+                logger.debug(
+                    f"Chunk {i + 1}/{num_chunks}: "
+                    f"{start_sample / sample_rate:.1f}s - {end_sample / sample_rate:.1f}s"
+                )
+
+                # Clear CUDA cache between chunks to prevent memory buildup
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            finally:
+                # Clean up temp file
+                Path(tmp_path).unlink(missing_ok=True)
+
+        # Merge transcripts
+        merged_text = self._merge_transcripts(transcripts)
+
+        return merged_text
+
+    def _merge_transcripts(self, transcripts: List[str]) -> str:
+        """
+        Merge overlapping transcripts.
+
+        Uses simple concatenation with basic overlap handling.
+        """
+        if not transcripts:
+            return ""
+
+        if len(transcripts) == 1:
+            return transcripts[0]
+
+        merged_parts = [transcripts[0]]
+
+        for i in range(1, len(transcripts)):
+            prev_text = merged_parts[-1]
+            curr_text = transcripts[i]
+
+            if not curr_text.strip():
+                continue
+
+            # Try to find overlap and remove duplicate words at boundaries
+            prev_words = prev_text.split()
+            curr_words = curr_text.split()
+
+            # Look for overlap in last few words of prev and first few of curr
+            overlap_found = False
+            max_overlap_check = min(5, len(prev_words), len(curr_words))
+
+            for overlap_len in range(max_overlap_check, 0, -1):
+                if prev_words[-overlap_len:] == curr_words[:overlap_len]:
+                    # Found overlap - skip the duplicate words
+                    merged_parts.append(" ".join(curr_words[overlap_len:]))
+                    overlap_found = True
+                    break
+
+            if not overlap_found:
+                # No overlap found - just concatenate with space
+                merged_parts.append(curr_text)
+
+        return " ".join(merged_parts)
 
     def transcribe_batch(
         self,
