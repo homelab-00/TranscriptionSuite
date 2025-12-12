@@ -46,18 +46,8 @@ if os.environ.get(_ENV_MARKER) != "1":
             f"{_CUDA_12_PATH}/lib64:{os.environ.get('LD_LIBRARY_PATH', '')}"
         )
 
-    # Configure temp directory for NeMo model extraction
-    # Use /var/tmp which persists across reboots and has no user quotas (unlike /tmp)
-    _project_root = Path(__file__).resolve().parent.parent
-    _nemo_tmp = _project_root / ".cache" / "nemo_tmp"
-    _nemo_tmp.mkdir(parents=True, exist_ok=True)
-    os.environ["TMPDIR"] = str(_nemo_tmp)
-    os.environ["TEMP"] = str(_nemo_tmp)
-    os.environ["TMP"] = str(_nemo_tmp)
-
     # Re-exec this script with the updated environment
     # This ensures the dynamic linker sees the new LD_LIBRARY_PATH
-    # and tempfile module uses the correct TMPDIR
     os.execv(sys.executable, [sys.executable] + sys.argv)
 # =============================================================================
 
@@ -110,26 +100,6 @@ else:
 
     HAS_TRAY = True
 
-# Canary transcription service (NeMo backend)
-try:
-    from CANARY import CanaryService, transcribe_audio as canary_transcribe
-
-    HAS_CANARY = True
-except ImportError:
-    HAS_CANARY = False
-    CanaryService = None  # type: ignore
-    canary_transcribe = None  # type: ignore
-
-# Simple audio recorder for Canary mode (no ML model required)
-try:
-    from canary_recorder import CanaryRecorder
-
-    HAS_CANARY_RECORDER = True
-except ImportError as e:
-    logging.warning(f"CanaryRecorder not available: {e}")
-    HAS_CANARY_RECORDER = False
-    CanaryRecorder = None  # type: ignore
-
 setup_logging()
 
 
@@ -174,7 +144,6 @@ class STTOrchestrator:
             "current_mode": None,  # Tracks "longform" or "static" or "api_transcription"
             "is_transcribing": False,  # Flag to manage audio feeding during transcription
             "models_loaded": False,  # Track if models are currently loaded
-            "canary_mode": False,  # Track if Canary is active transcription backend
         }
 
         # Instances for transcription components
@@ -183,12 +152,6 @@ class STTOrchestrator:
         self.console_display: Optional[ConsoleDisplay] = None
         self.tray_manager: Optional["TrayIconManager"] = None
         self.static_transcriber: Optional[StaticFileTranscriber] = None
-
-        # Canary transcription service (alternative to faster-whisper)
-        self.canary_service: Optional[Any] = None  # CanaryService when available
-
-        # Simple audio recorder for Canary mode (no ML model needed)
-        self.canary_recorder: Optional[Any] = None  # CanaryRecorder when available
 
         # Initialize core components
         self.platform_manager_instance = get_platform_manager()
@@ -219,7 +182,6 @@ class STTOrchestrator:
                 static_transcribe_callback=self._start_static_transcription,
                 toggle_models_callback=self._toggle_models_loaded,
                 audio_notebook_callback=self._toggle_audio_notebook,
-                toggle_canary_callback=self._toggle_canary_mode,
             )
         elif mode == "tray" and not HAS_TRAY:
             safe_print(
@@ -231,12 +193,6 @@ class STTOrchestrator:
 
         # Register cleanup handler
         atexit.register(self.stop)
-
-    def _get_standby_state(self) -> str:
-        """Return the appropriate standby state based on current mode."""
-        if self.app_state.get("canary_mode"):
-            return "canary_standby"
-        return "standby"
 
     def _check_startup_dependencies(self):
         """Check dependencies during startup and warn about issues."""
@@ -323,27 +279,6 @@ class STTOrchestrator:
                 self.tray_manager.set_recording_actions_enabled(False)
 
             try:
-                # Check if we're in Canary mode - use Canary for transcription
-                if self.app_state.get("canary_mode") and self.canary_service:
-                    # Generate output file path
-                    from pathlib import Path
-
-                    source_path = Path(file_path)
-                    output_file = str(
-                        source_path.parent / f"{source_path.stem}_transcription.json"
-                    )
-
-                    success = self._transcribe_static_with_canary(file_path, output_file)
-                    if self.tray_manager:
-                        if success:
-                            self.tray_manager.set_state("canary_standby")
-                        else:
-                            self.tray_manager.set_state("error")
-                        self.tray_manager.set_recording_actions_enabled(True)
-                        self.tray_manager.set_static_transcription_enabled(True)
-                    return
-
-                # Standard faster-whisper static transcription
                 # Handle model switching/loading
                 current_model_type = self.app_state.get("loaded_model_type")
                 if current_model_type == "longform":
@@ -448,7 +383,7 @@ class STTOrchestrator:
                 if self.tray_manager:
                     # Check again because another operation might have started
                     if self.app_state["current_mode"] is None:
-                        self.tray_manager.set_state(self._get_standby_state())
+                        self.tray_manager.set_state("standby")
                     self.tray_manager.set_audio_notebook_enabled(True)
                     self.tray_manager.set_recording_actions_enabled(True)
 
@@ -473,67 +408,8 @@ class STTOrchestrator:
             )
             return
 
-        # Check if we're in Canary mode
-        if self.app_state.get("canary_mode"):
-            self._start_longform_canary()
-            return
-
-        # Standard faster-whisper longform recording
+        # Start faster-whisper longform recording
         self._start_longform_whisper()
-
-    def _start_longform_canary(self):
-        """Start long-form recording using Canary mode (simple audio recorder)."""
-        if not HAS_CANARY_RECORDER:
-            safe_print("CanaryRecorder not available.", "error")
-            return
-
-        if not self.canary_service:
-            safe_print(
-                "Canary service not initialized. Please enable Canary mode first.",
-                "error",
-            )
-            return
-
-        # Initialize the Canary recorder if needed
-        if not self.canary_recorder:
-            if not HAS_CANARY_RECORDER or CanaryRecorder is None:
-                safe_print("CanaryRecorder not available.", "error")
-                return
-            audio_config = self.config.get("audio", {})
-            self.canary_recorder = CanaryRecorder(audio_config)
-
-        if self.tray_manager:
-            self.tray_manager.set_state("recording")
-            self.tray_manager.set_static_transcription_enabled(False)
-            self.tray_manager.set_audio_notebook_enabled(False)
-
-        # Start console display
-        try:
-            if self.console_display:
-                self.console_display.start(time.monotonic())
-        except RuntimeError as error:
-            logging.warning("Could not start console display: %s", error)
-            safe_print(
-                f"Terminal display too small. {error} Please resize your terminal and try again.",
-                "error",
-            )
-            if self.tray_manager:
-                self.tray_manager.set_state("canary_standby")
-                self.tray_manager.set_audio_notebook_enabled(True)
-            return
-
-        safe_print("Starting long-form recording (Canary mode)...", "success")
-        self.app_state["current_mode"] = "longform"
-
-        # Start recording
-        if not self.canary_recorder.start_recording():
-            safe_print("Failed to start audio recording.", "error")
-            self.app_state["current_mode"] = None
-            if self.tray_manager:
-                self.tray_manager.set_state("error")
-                self.tray_manager.set_audio_notebook_enabled(True)
-                self.tray_manager.set_static_transcription_enabled(True)
-            return
 
     def _start_longform_whisper(self):
         """Start long-form recording using faster-whisper."""
@@ -635,101 +511,8 @@ class STTOrchestrator:
             safe_print("No active long-form recording to stop.", "info")
             return
 
-        # Check if we're in Canary mode
-        if self.app_state.get("canary_mode"):
-            self._stop_longform_canary()
-            return
-
-        # Standard faster-whisper stop
+        # Stop using faster-whisper
         self._stop_longform_whisper()
-
-    def _stop_longform_canary(self):
-        """Stop long-form recording and transcribe using Canary."""
-
-        def _worker():
-            if self.tray_manager:
-                self.tray_manager.set_state("transcribing")
-            self.app_state["is_transcribing"] = True
-
-            try:
-                if self.console_display:
-                    try:
-                        self.console_display.stop()
-                    except Exception as stop_error:
-                        logging.debug("Console display stop error: %s", stop_error)
-
-                if not self.canary_recorder:
-                    safe_print("Canary recorder not available.", "error")
-                    self.app_state["current_mode"] = None
-                    if self.tray_manager:
-                        self.tray_manager.set_state("error")
-                        self.tray_manager.set_audio_notebook_enabled(True)
-                    return
-
-                safe_print("Stopping recording and transcribing with Canary...")
-
-                # Stop recording and get audio
-                audio_data = self.canary_recorder.stop_recording()
-
-                if audio_data is None or len(audio_data) == 0:
-                    safe_print("No audio captured.", "warning")
-                    self.app_state["current_mode"] = None
-                    if self.tray_manager:
-                        self.tray_manager.set_state("canary_standby")
-                        self.tray_manager.set_audio_notebook_enabled(True)
-                        self.tray_manager.set_static_transcription_enabled(True)
-                    return
-
-                # Save audio to temp file
-                temp_audio_path = self.canary_recorder.save_to_temp_file(audio_data)
-                if not temp_audio_path:
-                    safe_print("Failed to save audio to temp file.", "error")
-                    self.app_state["current_mode"] = None
-                    if self.tray_manager:
-                        self.tray_manager.set_state("error")
-                    return
-
-                # Transcribe with Canary
-                final_text = self._transcribe_with_canary(temp_audio_path)
-
-                # Clean up temp file
-                try:
-                    os.remove(temp_audio_path)
-                except Exception:
-                    pass
-
-                self.app_state["current_mode"] = None
-
-                if self.console_display:
-                    self.console_display.display_final_transcription(final_text or "")
-                else:
-                    rendered_text = final_text or "[No transcription captured]"
-                    safe_print(
-                        "\n--- Transcription (Canary) ---\n"
-                        f"{rendered_text}\n"
-                        "------------------------------\n"
-                    )
-
-                # Copy to clipboard
-                if final_text and HAS_CANARY_RECORDER and CanaryRecorder is not None:
-                    CanaryRecorder.copy_to_clipboard(final_text)
-
-                if self.tray_manager:
-                    self.tray_manager.set_state("canary_standby")
-
-            except Exception as error:
-                logging.error("Error stopping Canary recording: %s", error, exc_info=True)
-                safe_print(f"Error during Canary transcription: {error}", "error")
-            finally:
-                self.app_state["is_transcribing"] = False
-                self.app_state["current_mode"] = None
-
-                if self.tray_manager:
-                    self.tray_manager.set_state("canary_standby")
-                    self.tray_manager.set_audio_notebook_enabled(True)
-                    self.tray_manager.set_static_transcription_enabled(True)
-
-        threading.Thread(target=_worker, daemon=True).start()
 
     def _stop_longform_whisper(self):
         """Stop long-form recording and transcribe using faster-whisper."""
@@ -1516,263 +1299,6 @@ class STTOrchestrator:
                     self.tray_manager.set_recording_actions_enabled(True)
                     self.tray_manager.set_static_transcription_enabled(True)
 
-    # =========================================================================
-    # Canary Transcription Mode Methods
-    # =========================================================================
-
-    def _toggle_canary_mode(self) -> None:
-        """Toggle Canary transcription mode on/off."""
-        if self.app_state.get("canary_mode"):
-            self._deactivate_canary_mode()
-        else:
-            self._activate_canary_mode()
-
-    def _activate_canary_mode(self) -> None:
-        """Activate Canary as the transcription backend."""
-        if not HAS_CANARY:
-            safe_print(
-                "Canary service not available. Make sure CANARY module is installed.",
-                "error",
-            )
-            return
-
-        # Check if Canary is enabled in config
-        canary_config = self.config.get("canary_transcriber", {})
-        if not canary_config.get("enabled", False):
-            safe_print(
-                "Canary is disabled in config.yaml. "
-                "Set canary_transcriber.enabled: true to use it.",
-                "warning",
-            )
-            return
-
-        # Don't allow switching during active recording or transcription
-        if self.app_state.get("current_mode"):
-            safe_print(
-                f"Cannot switch to Canary while in {self.app_state['current_mode']} mode. "
-                "Please finish the current operation first.",
-                "warning",
-            )
-            return
-
-        safe_print("Activating Canary transcription mode...", "info")
-
-        if self.tray_manager:
-            self.tray_manager.set_state("loading")
-            self.tray_manager.set_recording_actions_enabled(False)
-            self.tray_manager.set_static_transcription_enabled(False)
-
-        def _activate_worker():
-            try:
-                # First, unload any existing faster-whisper models to free VRAM
-                safe_print("Unloading faster-whisper models to free VRAM...", "info")
-                self._unload_all_models_sync()
-
-                # Get Canary settings from config
-                language = canary_config.get("language", "en")
-                device = canary_config.get("device", "cuda")
-                beam_size = canary_config.get("beam_size", 1)
-
-                # Initialize Canary service
-                if CanaryService is None:
-                    raise RuntimeError("CanaryService class not available")
-                self.canary_service = CanaryService(default_language=language)
-
-                # Start the Canary server (loads the model)
-                safe_print(
-                    "Starting Canary server (this may take ~20 seconds)...", "info"
-                )
-                if self.canary_service is None or not self.canary_service.start_server(
-                    device=device,
-                    beam_size=beam_size,
-                    wait_ready=True,
-                ):
-                    raise RuntimeError("Canary server failed to start")
-
-                self.app_state["canary_mode"] = True
-
-                if self.tray_manager:
-                    self.tray_manager.update_canary_menu_item(True)
-                    self.tray_manager.set_state("canary_standby")
-                    self.tray_manager.set_recording_actions_enabled(True)
-                    self.tray_manager.set_static_transcription_enabled(True)
-
-                safe_print("Canary mode activated! Ready for transcription.", "success")
-
-            except Exception as e:
-                logging.error(f"Failed to activate Canary mode: {e}", exc_info=True)
-                safe_print(f"Error activating Canary: {e}", "error")
-
-                if self.canary_service:
-                    self.canary_service.stop_server()
-                    self.canary_service = None
-
-                if self.tray_manager:
-                    self.tray_manager.update_canary_menu_item(False)
-                    self.tray_manager.set_state("standby")
-                    self.tray_manager.set_recording_actions_enabled(True)
-                    self.tray_manager.set_static_transcription_enabled(True)
-
-        threading.Thread(target=_activate_worker, daemon=True).start()
-
-    def _deactivate_canary_mode(self) -> None:
-        """Deactivate Canary and return to faster-whisper."""
-        if not self.app_state.get("canary_mode"):
-            return
-
-        # Don't allow switching during active recording or transcription
-        if self.app_state.get("current_mode"):
-            safe_print(
-                f"Cannot deactivate Canary while in {self.app_state['current_mode']} mode. "
-                "Please finish the current operation first.",
-                "warning",
-            )
-            return
-
-        safe_print("Deactivating Canary mode...", "info")
-
-        if self.tray_manager:
-            self.tray_manager.set_state("loading")
-
-        def _deactivate_worker():
-            try:
-                # Clean up Canary recorder
-                if self.canary_recorder:
-                    self.canary_recorder.clean_up()
-                    self.canary_recorder = None
-
-                # Stop the Canary server
-                if self.canary_service:
-                    self.canary_service.stop_server()
-                    self.canary_service = None
-
-                self.app_state["canary_mode"] = False
-
-                if self.tray_manager:
-                    self.tray_manager.update_canary_menu_item(False)
-                    self.tray_manager.set_state("standby")
-
-                safe_print("Canary mode deactivated. Using faster-whisper.", "success")
-
-            except Exception as e:
-                logging.error(f"Error deactivating Canary mode: {e}", exc_info=True)
-                safe_print(f"Error deactivating Canary: {e}", "error")
-
-                if self.tray_manager:
-                    self.tray_manager.set_state("standby")
-
-        threading.Thread(target=_deactivate_worker, daemon=True).start()
-
-    def _transcribe_with_canary(self, audio_path: str) -> Optional[str]:
-        """
-        Transcribe audio using the Canary service.
-
-        Args:
-            audio_path: Path to the audio file
-
-        Returns:
-            Transcription text or None on error
-        """
-        if not self.canary_service:
-            safe_print("Canary service not initialized", "error")
-            return None
-
-        canary_config = self.config.get("canary_transcriber", {})
-        language = canary_config.get("language", "en")
-        pnc = canary_config.get("punctuation", True)
-
-        try:
-            result = self.canary_service.transcribe(
-                audio_path,
-                language=language,
-                pnc=pnc,
-            )
-            return result.text
-        except Exception as e:
-            logging.error(f"Canary transcription error: {e}", exc_info=True)
-            safe_print(f"Canary transcription failed: {e}", "error")
-            return None
-
-    def _transcribe_static_with_canary(self, file_path: str, output_file: str) -> bool:
-        """
-        Transcribe a static file using Canary and save the result.
-
-        Args:
-            file_path: Path to the audio file
-            output_file: Path for the output JSON file
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self.canary_service:
-            safe_print("Canary service not initialized", "error")
-            return False
-
-        canary_config = self.config.get("canary_transcriber", {})
-        language = canary_config.get("language", "en")
-        pnc = canary_config.get("punctuation", True)
-
-        try:
-            safe_print(f"Transcribing with Canary (language: {language})...", "info")
-
-            result = self.canary_service.transcribe(
-                file_path,
-                language=language,
-                pnc=pnc,
-            )
-
-            # Build output similar to faster-whisper format
-            import json
-
-            output_data = {
-                "text": result.text,
-                "language": result.language,
-                "duration": result.duration,
-                "processing_time": result.processing_time,
-                "engine": "canary",
-                "word_timestamps": [w.to_dict() for w in result.word_timestamps],
-            }
-
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(output_data, f, ensure_ascii=False, indent=2)
-
-            safe_print(f"Transcription saved to: {output_file}", "success")
-            safe_print(
-                f"Duration: {result.duration:.1f}s, "
-                f"Processing: {result.processing_time:.1f}s, "
-                f"Speed: {result.duration / result.processing_time:.1f}x realtime",
-                "info",
-            )
-
-            return True
-
-        except Exception as e:
-            logging.error(f"Canary static transcription error: {e}", exc_info=True)
-            safe_print(f"Canary transcription failed: {e}", "error")
-            return False
-
-    def _deactivate_canary_mode_sync(self) -> None:
-        """Synchronously deactivate Canary mode."""
-        if not self.app_state.get("canary_mode"):
-            return
-
-        try:
-            if self.canary_recorder:
-                self.canary_recorder.clean_up()
-                self.canary_recorder = None
-
-            if self.canary_service:
-                self.canary_service.stop_server()
-                self.canary_service = None
-
-            self.app_state["canary_mode"] = False
-
-            if self.tray_manager:
-                self.tray_manager.update_canary_menu_item(False)
-
-        except Exception as e:
-            logging.error(f"Error in sync Canary deactivation: {e}", exc_info=True)
-
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
         if self.app_state.get("shutdown_in_progress"):
@@ -1781,14 +1307,6 @@ class STTOrchestrator:
         safe_print("Quit requested, shutting down...")
 
         def shutdown_worker():
-            # Clean up Canary recorder if running
-            if self.canary_recorder:
-                self.canary_recorder.clean_up()
-                self.canary_recorder = None
-            # Stop Canary service if running
-            if self.canary_service:
-                self.canary_service.stop_server()
-                self.canary_service = None
             # Stop audio notebook if running
             self._stop_audio_notebook()
             self.stop()
