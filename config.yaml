@@ -3,9 +3,9 @@
 # ============================================================================
 # This is the central configuration file for the entire TranscriptionSuite.
 # It combines settings for:
-#   - Core transcription engine (_core)
-#   - Speaker diarization module (_module-diarization)
-#   - Viewer app frontend and backend (_core/APP_VIEWER)
+#   - Core transcription engine (SCRIPT/)
+#   - Speaker diarization module (DIARIZATION/)
+#   - Audio Notebook web application (AUDIO_NOTEBOOK/)
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -46,12 +46,12 @@ longform_recording:
 # Settings for transcribing audio/video files (not live recording).
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
-    # Requires the _module-diarization environment to be set up.
+    # Requires PyAnnote models to be downloaded (huggingface-cli login).
     enable_diarization: false
 
     # Enable word-level timestamps in the transcription output.
     # Required for searchable transcriptions and click-to-seek in the viewer app.
-    word_timestamps: true
+    word_timestamps: false
 
     # Maximum characters per segment in the output.
     # Segments are split when speaker changes or this limit is reached.
@@ -144,7 +144,7 @@ diarization:
 # ----------------------------------------------------------------------------
 audio:
     # Audio input device index for microphone.
-    # Run `python _core/list_audio_devices.py` to find available devices.
+    # Run `python list_audio_devices.py` to find available devices.
     # Set to null if using use_default_input: true
     input_device_index: null
 
@@ -167,7 +167,7 @@ display:
 # ----------------------------------------------------------------------------
 # Configuration for where the viewer app stores files.
 storage:
-    # Directory for storing audio files (relative to _core/APP_VIEWER/backend/).
+    # Directory for storing audio files (relative to AUDIO_NOTEBOOK/backend/).
     # Audio files imported via the viewer app are stored here.
     audio_dir: "data/audio"
 
@@ -209,11 +209,21 @@ local_llm:
     # LM Studio server URL (default local)
     base_url: "http://127.0.0.1:1234"
 
-    # Model to use (leave empty to use whatever is loaded in LM Studio)
-    model: ""
+    # Model to auto-load when clicking "Start LLM" in the UI.
+    # Use the model identifier from LM Studio (e.g., "qwen/qwen3-30b-a3b-2507").
+    # Leave empty to use whatever model is already loaded in LM Studio.
+    # Run `lms ls` in terminal to see available model identifiers.
+    model: "liquid/lfm2-1.2b"
+
+    # GPU offload ratio (0.0 = CPU only, 1.0 = full GPU). 
+    # Adjust if model is too large for VRAM.
+    gpu_offload: 1.0
+
+    # Context length override (optional, leave as null to use model default)
+    context_length: null
 
     # Maximum tokens for the response
-    max_tokens: 2048
+    max_tokens: 4096
 
     # Temperature for generation (0.0 = deterministic, 1.0 = creative)
     temperature: 0.7
