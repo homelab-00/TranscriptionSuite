@@ -14,9 +14,11 @@ import {
   ChevronDown,
   RefreshCw,
   Settings,
+  Cpu,
+  Zap,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { Conversation, ConversationWithMessages, Message, LLMStatus } from '../types';
+import { Conversation, ConversationWithMessages, Message, LLMStatus, AvailableModel } from '../types';
 
 // Preset system prompts
 const SYSTEM_PROMPTS = [
@@ -64,6 +66,12 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
 
+  // Model selection
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const [modelLoading, setModelLoading] = useState(false);
+
   // Conversations
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<ConversationWithMessages | null>(null);
@@ -102,6 +110,7 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
     if (isOpen && recordingId) {
       loadConversations();
       checkLLMStatus();
+      loadAvailableModels();
     }
     return () => {
       if (abortControllerRef.current) {
@@ -119,8 +128,20 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
     try {
       const status = await api.getLLMStatus();
       setLlmStatus(status);
+      if (status.model) {
+        setSelectedModelId(status.model);
+      }
     } catch {
       setLlmStatus({ available: false, base_url: '', model: null, error: 'Failed to check status' });
+    }
+  };
+
+  const loadAvailableModels = async () => {
+    try {
+      const response = await api.getAvailableModels();
+      setAvailableModels(response.models);
+    } catch (error) {
+      console.error('Failed to load models:', error);
     }
   };
 
@@ -138,28 +159,34 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
     }
   };
 
-  const handleStartLLM = async () => {
+  const handleStartLLM = async (modelId?: string) => {
     setLlmLoading(true);
     setLlmError(null);
     try {
       // First start the server
       const serverResult = await api.startLMStudioServer();
-      if (!serverResult.success && !serverResult.message.includes('already running')) {
-        setLlmError(serverResult.message);
-        setLlmLoading(false);
-        return;
-      }
-
-      // Then load the model
-      const modelResult = await api.loadModel();
-      if (!modelResult.success) {
-        setLlmError(modelResult.message);
-        setLlmLoading(false);
-        return;
+      if (!serverResult.success && 
+          !serverResult.message.includes('already running') &&
+          !serverResult.message.includes('loaded')) {
+        // If server failed to start and it's not because it's already running
+        // Check if model is specified - try loading it directly
+        if (modelId) {
+          const modelResult = await api.loadModel({ model_id: modelId });
+          if (!modelResult.success) {
+            setLlmError(modelResult.message);
+            setLlmLoading(false);
+            return;
+          }
+        } else {
+          setLlmError(serverResult.message);
+          setLlmLoading(false);
+          return;
+        }
       }
 
       // Refresh status
       await checkLLMStatus();
+      await loadAvailableModels();
     } catch (error) {
       setLlmError((error as Error).message);
     } finally {
@@ -176,10 +203,36 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
         setLlmError(result.message);
       }
       await checkLLMStatus();
+      await loadAvailableModels();
     } catch (error) {
       setLlmError((error as Error).message);
     } finally {
       setLlmLoading(false);
+    }
+  };
+
+  const handleLoadModel = async (modelId: string) => {
+    setModelLoading(true);
+    setLlmError(null);
+    try {
+      // If a different model is loaded, unload first
+      if (llmStatus?.available && llmStatus.model !== modelId) {
+        await api.unloadModel(true);
+      }
+
+      const result = await api.loadModel({ model_id: modelId });
+      if (!result.success) {
+        setLlmError(result.message);
+      } else {
+        setSelectedModelId(modelId);
+        setShowModelSelector(false);
+      }
+      await checkLLMStatus();
+      await loadAvailableModels();
+    } catch (error) {
+      setLlmError((error as Error).message);
+    } finally {
+      setModelLoading(false);
     }
   };
 
@@ -240,7 +293,7 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
 
     // Check LLM availability
     if (!llmStatus?.available) {
-      setLlmError('LLM is not available. Click "Start LLM" to load a model.');
+      setLlmError('LLM is not available. Click "Start" to load a model.');
       return;
     }
 
@@ -315,74 +368,135 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
   if (!isOpen) return null;
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-surface border-l border-gray-700 flex flex-col shadow-xl z-50">
+    <div className="fixed right-0 top-0 h-full w-[480px] bg-surface border-l border-gray-700 flex flex-col shadow-xl z-50">
       {/* Header */}
       <div className="p-4 border-b border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MessageSquare size={20} className="text-purple-400" />
-          <h2 className="text-lg font-medium text-white">Chat with AI</h2>
+          <h2 className="text-lg font-medium text-white">AI Chat</h2>
         </div>
-        <button onClick={onClose} className="btn-icon p-1">
+        <button onClick={onClose} className="btn-icon p-1 hover:bg-surface-light rounded">
           <X size={20} />
         </button>
       </div>
 
-      {/* LLM Status Bar */}
-      <div className="px-4 py-2 border-b border-gray-700 bg-surface-dark">
-        <div className="flex items-center justify-between">
+      {/* Model & Status Bar */}
+      <div className="px-4 py-3 border-b border-gray-700 bg-surface-dark">
+        {/* Status Row */}
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-sm">
             <span className={`w-2 h-2 rounded-full ${llmStatus?.available ? 'bg-green-500' : 'bg-red-500'}`} />
             <span className="text-gray-400">
-              {llmStatus?.available 
-                ? (llmStatus.model || 'Model loaded')
-                : 'LLM not loaded'}
+              {llmStatus?.available ? 'Ready' : 'Not loaded'}
             </span>
           </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setShowPromptSettings(!showPromptSettings)}
-              className={`btn-icon p-1 ${showPromptSettings ? 'text-purple-400' : ''}`}
-              title="Prompt settings"
+              className={`btn-icon p-1.5 rounded ${showPromptSettings ? 'text-purple-400 bg-purple-900/30' : 'hover:bg-surface-light'}`}
+              title="System prompt"
             >
-              <Settings size={14} />
+              <Settings size={16} />
             </button>
             <button
-              onClick={checkLLMStatus}
-              className="btn-icon p-1"
-              title="Refresh status"
+              onClick={() => setShowModelSelector(!showModelSelector)}
+              className={`btn-icon p-1.5 rounded ${showModelSelector ? 'text-purple-400 bg-purple-900/30' : 'hover:bg-surface-light'}`}
+              title="Select model"
+            >
+              <Cpu size={16} />
+            </button>
+            <button
+              onClick={() => { checkLLMStatus(); loadAvailableModels(); }}
+              className="btn-icon p-1.5 rounded hover:bg-surface-light"
+              title="Refresh"
               disabled={llmLoading}
             >
-              <RefreshCw size={14} className={llmLoading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} className={llmLoading ? 'animate-spin' : ''} />
             </button>
-            {llmStatus?.available ? (
-              <button
-                onClick={handleStopLLM}
-                className="btn-ghost text-red-400 hover:text-red-300 text-xs flex items-center gap-1"
-                disabled={llmLoading}
-              >
-                <PowerOff size={14} />
-                Stop
-              </button>
+          </div>
+        </div>
+
+        {/* Current Model */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Zap size={14} className={llmStatus?.available ? 'text-green-400' : 'text-gray-500'} />
+            <span className="text-sm text-white truncate">
+              {llmStatus?.model || 'No model loaded'}
+            </span>
+          </div>
+          {llmStatus?.available ? (
+            <button
+              onClick={handleStopLLM}
+              className="btn-ghost text-red-400 hover:text-red-300 text-xs flex items-center gap-1 px-2 py-1"
+              disabled={llmLoading}
+            >
+              <PowerOff size={14} />
+              Unload
+            </button>
+          ) : (
+            <button
+              onClick={() => handleStartLLM()}
+              className="btn-ghost text-green-400 hover:text-green-300 text-xs flex items-center gap-1 px-2 py-1"
+              disabled={llmLoading}
+            >
+              {llmLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Power size={14} />
+              )}
+              Start
+            </button>
+          )}
+        </div>
+
+        {llmError && (
+          <p className="text-red-400 text-xs mt-2">{llmError}</p>
+        )}
+      </div>
+
+      {/* Model Selector */}
+      {showModelSelector && (
+        <div className="px-4 py-3 border-b border-gray-700 bg-surface-dark/50 max-h-60 overflow-y-auto">
+          <label className="text-xs text-gray-400 block mb-2">Available Models</label>
+          <div className="space-y-1">
+            {availableModels.length === 0 ? (
+              <p className="text-xs text-gray-500">No models found. Make sure LM Studio server is running.</p>
             ) : (
-              <button
-                onClick={handleStartLLM}
-                className="btn-ghost text-green-400 hover:text-green-300 text-xs flex items-center gap-1"
-                disabled={llmLoading}
-              >
-                {llmLoading ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Power size={14} />
-                )}
-                Start LLM
-              </button>
+              availableModels.map((model) => (
+                <div
+                  key={model.id}
+                  className={`
+                    flex items-center justify-between p-2 rounded cursor-pointer
+                    ${model.state === 'loaded' 
+                      ? 'bg-green-900/30 border border-green-500/30' 
+                      : 'hover:bg-surface-light border border-transparent'}
+                  `}
+                  onClick={() => model.state !== 'loaded' && handleLoadModel(model.id)}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white truncate">{model.id}</p>
+                    <p className="text-xs text-gray-500">
+                      {model.quantization} • {model.arch} • {Math.round((model.max_context_length || 0) / 1024)}K ctx
+                    </p>
+                  </div>
+                  {model.state === 'loaded' ? (
+                    <span className="text-xs text-green-400 ml-2">Loaded</span>
+                  ) : modelLoading && selectedModelId === model.id ? (
+                    <Loader2 size={14} className="animate-spin text-purple-400 ml-2" />
+                  ) : (
+                    <button
+                      className="text-xs text-purple-400 hover:text-purple-300 ml-2"
+                      onClick={(e) => { e.stopPropagation(); handleLoadModel(model.id); }}
+                    >
+                      Load
+                    </button>
+                  )}
+                </div>
+              ))
             )}
           </div>
         </div>
-        {llmError && (
-          <p className="text-red-400 text-xs mt-1">{llmError}</p>
-        )}
-      </div>
+      )}
 
       {/* System Prompt Settings */}
       {showPromptSettings && (
@@ -410,7 +524,7 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
           )}
           
           {selectedPromptId !== 'custom' && selectedPromptId !== 'none' && (
-            <p className="text-xs text-gray-500 italic">
+            <p className="text-xs text-gray-500 italic line-clamp-3">
               {SYSTEM_PROMPTS.find(p => p.id === selectedPromptId)?.prompt}
             </p>
           )}
@@ -423,12 +537,12 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
           onClick={() => setConversationsExpanded(!conversationsExpanded)}
           className="w-full px-4 py-2 flex items-center justify-between hover:bg-surface-light transition-colors"
         >
-          <span className="text-sm text-gray-400">Conversations</span>
+          <span className="text-sm text-gray-400">Conversations ({conversations.length})</span>
           {conversationsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
         
         {conversationsExpanded && (
-          <div className="px-2 pb-2 max-h-40 overflow-y-auto">
+          <div className="px-2 pb-2 max-h-32 overflow-y-auto">
             <button
               onClick={handleNewConversation}
               className="w-full px-2 py-1.5 text-sm text-purple-400 hover:bg-surface-light rounded flex items-center gap-2"
@@ -501,11 +615,24 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {!activeConversation ? (
           <div className="text-center text-gray-500 mt-8">
-            <MessageSquare size={40} className="mx-auto mb-3 opacity-50" />
-            <p>Select or create a conversation to start chatting</p>
+            <MessageSquare size={48} className="mx-auto mb-3 opacity-50" />
+            <p className="mb-2">Select or create a conversation</p>
+            <button
+              onClick={handleNewConversation}
+              className="text-purple-400 hover:text-purple-300 text-sm"
+            >
+              + New Chat
+            </button>
           </div>
         ) : (
           <>
+            {activeConversation.messages.length === 0 && !streamingContent && (
+              <div className="text-center text-gray-500 mt-8">
+                <p className="text-sm">Start the conversation by sending a message.</p>
+                <p className="text-xs mt-1">The transcription context is automatically included.</p>
+              </div>
+            )}
+            
             {activeConversation.messages.map((msg, idx) => (
               <div
                 key={msg.id !== -1 ? msg.id : `temp-${idx}`}
@@ -543,40 +670,39 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
 
       {/* Input Area */}
       {activeConversation && (
-        <div className="p-4 border-t border-gray-700">
+        <div className="p-4 border-t border-gray-700 bg-surface-dark">
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
+              placeholder={llmStatus?.available ? "Type a message... (Enter to send, Shift+Enter for new line)" : "Load a model to start chatting..."}
               disabled={isSending || !llmStatus?.available}
-              className="flex-1 bg-surface-dark border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-purple-500 disabled:opacity-50"
-              rows={2}
+              className="flex-1 bg-surface border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-purple-500 disabled:opacity-50"
+              rows={3}
             />
-            {isSending ? (
-              <button
-                onClick={handleStopGeneration}
-                className="btn-icon p-2 text-red-400 hover:text-red-300"
-              >
-                <X size={20} />
-              </button>
-            ) : (
-              <button
-                onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || !llmStatus?.available}
-                className="btn-icon p-2 text-purple-400 hover:text-purple-300 disabled:opacity-50"
-              >
-                <Send size={20} />
-              </button>
-            )}
+            <div className="flex flex-col gap-1">
+              {isSending ? (
+                <button
+                  onClick={handleStopGeneration}
+                  className="btn-icon p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded"
+                  title="Stop generation"
+                >
+                  <X size={20} />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!inputMessage.trim() || !llmStatus?.available}
+                  className="btn-icon p-2 text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 rounded disabled:opacity-50 disabled:hover:bg-transparent"
+                  title="Send message"
+                >
+                  <Send size={20} />
+                </button>
+              )}
+            </div>
           </div>
-          {!llmStatus?.available && (
-            <p className="text-xs text-gray-500 mt-2">
-              Start the LLM to send messages
-            </p>
-          )}
         </div>
       )}
     </div>
