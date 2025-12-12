@@ -180,7 +180,7 @@ export default function ImportView() {
           <Toggle
             checked={enableDiarization}
             onChange={setEnableDiarization}
-            label="Enable speaker diarization (requires separate Python 3.11 environment)"
+            label="Enable speaker diarization (identify who spoke when)"
           />
         </div>
       </div>

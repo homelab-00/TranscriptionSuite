@@ -267,7 +267,7 @@ async def process_with_llm(request: LLMRequest):
             )
 
             # Log the response
-            logger.info(f"LLM Response received")
+            logger.info("LLM Response received")
             logger.info(f"  Model: {llm_response.model}")
             logger.info(f"  Tokens used: {llm_response.tokens_used}")
             logger.info(f"  Response length: {len(llm_response.response)} chars")

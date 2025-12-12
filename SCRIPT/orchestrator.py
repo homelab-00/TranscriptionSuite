@@ -63,7 +63,6 @@ import sys
 import threading
 import time
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from config_manager import ConfigManager
