@@ -1,5 +1,21 @@
 import axios from 'axios';
-import { Recording, Transcription, SearchResult, RecordingsByDate, SearchParams, ImportJob, LLMStatus, LLMResponse, LLMRequest } from '../types';
+import { 
+  Recording, 
+  Transcription, 
+  SearchResult, 
+  RecordingsByDate, 
+  SearchParams, 
+  ImportJob, 
+  LLMStatus, 
+  LLMResponse, 
+  LLMRequest,
+  ServerControlResponse,
+  ModelLoadRequest,
+  AvailableModelsResponse,
+  Conversation,
+  ConversationWithMessages,
+  ChatRequest,
+} from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
 
@@ -255,5 +271,160 @@ export const api = {
       { params: customPrompt ? { custom_prompt: customPrompt } : {} }
     );
     return response.data;
+  },
+
+  // ==========================================================================
+  // LM Studio Server Control
+  // ==========================================================================
+
+  async startLMStudioServer(): Promise<ServerControlResponse> {
+    const response = await client.post('/llm/server/start');
+    return response.data;
+  },
+
+  async stopLMStudioServer(): Promise<ServerControlResponse> {
+    const response = await client.post('/llm/server/stop');
+    return response.data;
+  },
+
+  async getAvailableModels(): Promise<AvailableModelsResponse> {
+    const response = await client.get('/llm/models/available');
+    return response.data;
+  },
+
+  async loadModel(request?: ModelLoadRequest): Promise<ServerControlResponse> {
+    const response = await client.post('/llm/model/load', request || {});
+    return response.data;
+  },
+
+  async unloadModel(unloadAll: boolean = false): Promise<ServerControlResponse> {
+    const response = await client.post('/llm/model/unload', null, {
+      params: { unload_all: unloadAll },
+    });
+    return response.data;
+  },
+
+  async getLoadedModels(): Promise<{ success: boolean; output?: string; error?: string }> {
+    const response = await client.get('/llm/models/loaded');
+    return response.data;
+  },
+
+  // ==========================================================================
+  // Conversations
+  // ==========================================================================
+
+  async getConversations(recordingId: number): Promise<Conversation[]> {
+    const response = await client.get(`/llm/conversations/${recordingId}`);
+    return response.data.conversations;
+  },
+
+  async createConversation(recordingId: number, title?: string): Promise<{ conversation_id: number; title: string }> {
+    const response = await client.post('/llm/conversations', {
+      recording_id: recordingId,
+      title: title || 'New Chat',
+    });
+    return response.data;
+  },
+
+  async getConversation(conversationId: number): Promise<ConversationWithMessages> {
+    const response = await client.get(`/llm/conversation/${conversationId}`);
+    return response.data;
+  },
+
+  async updateConversationTitle(conversationId: number, title: string): Promise<void> {
+    await client.patch(`/llm/conversation/${conversationId}`, { title });
+  },
+
+  async deleteConversation(conversationId: number): Promise<void> {
+    await client.delete(`/llm/conversation/${conversationId}`);
+  },
+
+  async addMessage(
+    conversationId: number, 
+    role: 'user' | 'assistant' | 'system', 
+    content: string,
+    tokensUsed?: number
+  ): Promise<{ message_id: number }> {
+    const response = await client.post(`/llm/conversation/${conversationId}/message`, {
+      role,
+      content,
+      tokens_used: tokensUsed,
+    });
+    return response.data;
+  },
+
+  // Chat with streaming response
+  async chat(
+    request: ChatRequest,
+    onChunk: (content: string) => void,
+    onDone: () => void,
+    onError: (error: string) => void
+  ): Promise<AbortController> {
+    const controller = new AbortController();
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+
+      const processStream = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.content) {
+                    onChunk(data.content);
+                  } else if (data.done) {
+                    onDone();
+                    return;
+                  } else if (data.error) {
+                    onError(data.error);
+                    return;
+                  }
+                } catch {
+                  // Ignore parse errors for incomplete chunks
+                }
+              }
+            }
+          }
+          onDone();
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            onError((error as Error).message);
+          }
+        }
+      };
+
+      processStream();
+    } catch (error) {
+      onError((error as Error).message);
+    }
+
+    return controller;
   },
 };

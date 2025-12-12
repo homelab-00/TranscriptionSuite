@@ -17,12 +17,15 @@ import {
   Sparkles,
   X,
   RefreshCw,
+  Power,
+  MessageSquare,
 } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import { Howl } from 'howler';
 import { api } from '../services/api';
 import { Recording, Transcription, Word, LLMStatus } from '../types';
 import { Modal, Toggle, ContextMenu, ContextMenuItem, Alert, ProgressBar } from '../components/ui';
+import ChatPanel from '../components/ChatPanel';
 
 interface RecordingWithTranscription extends Recording {
   transcription?: Transcription;
@@ -90,6 +93,9 @@ export default function DayView() {
   const summaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingSummaryRef = useRef<string>(''); // Tracks summary during streaming
+  
+  // Chat panel state
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
   
   // HTML file input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -320,12 +326,34 @@ export default function DayView() {
   };
 
   // LLM Functions
+  const [llmStarting, setLlmStarting] = useState(false);
+
   const checkLLMStatus = async () => {
     try {
       const status = await api.getLLMStatus();
       setLlmStatus(status);
     } catch {
       setLlmStatus({ available: false, base_url: '', model: null, error: 'Failed to check status' });
+    }
+  };
+
+  const handleStartLLM = async () => {
+    setLlmStarting(true);
+    setLlmError(null);
+    try {
+      // Start server (will also auto-load model from config)
+      const serverResult = await api.startLMStudioServer();
+      if (!serverResult.success && !serverResult.message.includes('already running') && !serverResult.message.includes('loaded')) {
+        setLlmError(serverResult.message);
+        setLlmStarting(false);
+        return;
+      }
+      // Refresh status
+      await checkLLMStatus();
+    } catch (error) {
+      setLlmError((error as Error).message);
+    } finally {
+      setLlmStarting(false);
     }
   };
 
@@ -556,6 +584,7 @@ export default function DayView() {
 
   const handleCloseRecording = () => {
     setSelectedRecording(null);
+    setChatPanelOpen(false);
     if (soundRef.current) {
       soundRef.current.unload();
     }
@@ -797,7 +826,7 @@ export default function DayView() {
         open={!!selectedRecording}
         onClose={handleCloseRecording}
         title={selectedRecording?.filename}
-        maxWidth="3xl"
+        maxWidth="5xl"
       >
         {selectedRecording && (
           <div>
@@ -853,6 +882,21 @@ export default function DayView() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Start LLM button when not available */}
+                    {!llmStatus?.available && !llmLoading && (
+                      <button
+                        onClick={handleStartLLM}
+                        className="btn-ghost text-green-400 hover:text-green-300 text-sm flex items-center gap-1"
+                        disabled={llmStarting}
+                      >
+                        {llmStarting ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Power size={14} />
+                        )}
+                        Start LLM
+                      </button>
+                    )}
                     {llmLoading ? (
                       <button
                         onClick={handleStopGeneration}
@@ -935,17 +979,45 @@ export default function DayView() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-medium text-white">Transcript</h3>
                   
-                  {/* AI Summarize Button - Always show when no summary, will show error if LLM unavailable */}
-                  {!llmSummary && !llmLoading && (
+                  {/* AI Buttons */}
+                  <div className="flex items-center gap-2">
+                    {/* Chat Button - always visible when LLM available */}
                     <button
-                      onClick={handleSummarize}
+                      onClick={() => setChatPanelOpen(true)}
                       className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
-                      disabled={llmLoading}
                     >
-                      <Bot size={18} />
-                      <span>Summarize with AI</span>
+                      <MessageSquare size={18} />
+                      <span>Chat</span>
                     </button>
-                  )}
+                    
+                    {!llmSummary && !llmLoading && (
+                      <>
+                        {!llmStatus?.available ? (
+                          <button
+                            onClick={handleStartLLM}
+                            className="btn-ghost text-green-400 hover:text-green-300 flex items-center gap-2"
+                            disabled={llmStarting}
+                          >
+                            {llmStarting ? (
+                              <Loader2 size={18} className="animate-spin" />
+                            ) : (
+                              <Power size={18} />
+                            )}
+                            <span>Start LLM</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleSummarize}
+                            className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
+                            disabled={llmLoading}
+                          >
+                            <Bot size={18} />
+                            <span>Summarize</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
                 {selectedRecording.transcription.segments.map((segment, segIndex) => (
                   <div key={segIndex} className="mb-3">
@@ -1166,6 +1238,15 @@ export default function DayView() {
           )}
         </div>
       </Modal>
+
+      {/* Chat Panel */}
+      {selectedRecording && (
+        <ChatPanel
+          recordingId={selectedRecording.id}
+          isOpen={chatPanelOpen}
+          onClose={() => setChatPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }

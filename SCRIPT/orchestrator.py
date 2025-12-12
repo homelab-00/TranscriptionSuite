@@ -1224,37 +1224,37 @@ class STTOrchestrator:
             self._start_audio_notebook()
 
     def _start_audio_notebook(self):
-        """Start the Audio Notebook server in a background thread."""
+        """Start the Audio Notebook server in a background thread.
+
+        Uses lazy model loading: the static Whisper model is NOT loaded on startup.
+        Instead, it will be loaded on-demand when a transcription is requested,
+        and unloaded immediately after completion to free VRAM for LLM usage.
+        """
         if self.audio_notebook_thread and self.audio_notebook_thread.is_alive():
             safe_print("Audio Notebook is already running.", "warning")
             return
 
-        # Handle model switching/loading
+        # Handle model unloading - we DON'T load static model here anymore (lazy loading)
         current_model_type = self.app_state.get("loaded_model_type")
 
-        if current_model_type == "longform":
-            # Switching from longform to static
+        if current_model_type is not None:
+            # Unload any currently loaded model to free VRAM
             if self.tray_manager:
                 self.tray_manager.set_state("loading")
                 self.tray_manager.set_recording_actions_enabled(False)
 
             safe_print(
-                "Switching from longform to static model for Audio Notebook...", "info"
+                f"Unloading {current_model_type} model for Audio Notebook (lazy loading enabled)...",
+                "info",
             )
             self._unload_all_models_sync()
-            # Load the static model now
-            self._load_static_model_sync()
-            self.app_state["loaded_model_type"] = "static"
-        elif current_model_type != "static":
-            # No model loaded yet - need to load static model
-            if self.tray_manager:
-                self.tray_manager.set_state("loading")
-                self.tray_manager.set_recording_actions_enabled(False)
-
-            safe_print("Loading static model for Audio Notebook...", "info")
-            self._load_static_model_sync()
-            self.app_state["loaded_model_type"] = "static"
-        # else: static model already loaded, keep it
+            self.app_state["loaded_model_type"] = None
+            self.app_state["models_loaded"] = False
+            safe_print(
+                "Model unloaded. Whisper will load on-demand when transcription is requested.",
+                "info",
+            )
+        # If no model was loaded, we're ready to go with lazy loading
 
         def server_worker():
             try:
@@ -1476,7 +1476,7 @@ class STTOrchestrator:
         self.audio_notebook_thread.start()
 
     def _stop_audio_notebook(self):
-        """Stop the Audio Notebook server and reload the main (longform) model."""
+        """Stop the Audio Notebook server, eject LLM model, and reload the main (longform) model."""
         if self.audio_notebook_server:
             safe_print("Stopping Audio Notebook...", "info")
 
@@ -1489,6 +1489,30 @@ class STTOrchestrator:
 
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(False)
+
+            # Eject LM Studio model to free VRAM for Whisper
+            safe_print("Ejecting LM Studio model...", "info")
+            try:
+                import shutil
+                import subprocess
+
+                if shutil.which("lms"):
+                    result = subprocess.run(
+                        ["lms", "unload", "--all"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    if result.returncode == 0:
+                        safe_print("LM Studio model ejected.", "success")
+                    else:
+                        # Not an error - model may not have been loaded
+                        logging.debug(
+                            f"lms unload output: {result.stdout} {result.stderr}"
+                        )
+            except Exception as e:
+                # Don't fail the whole operation if LM Studio isn't available
+                logging.debug(f"Could not eject LM Studio model: {e}")
 
             # Switch from static to longform model automatically
             safe_print("Switching back to longform model...", "info")
@@ -2304,6 +2328,16 @@ class STTOrchestrator:
             raise RuntimeError(f"Transcription failed: {e}")
 
         finally:
+            # Unload the Whisper model immediately after transcription to free VRAM for LLM
+            # This is part of lazy loading - model is loaded on-demand and unloaded after use
+            from static_transcriber import unload_cached_whisper_model
+
+            safe_print("Unloading Whisper model to free VRAM for LLM...", "info")
+            unload_cached_whisper_model()
+            self.app_state["models_loaded"] = False
+            self.app_state["loaded_model_type"] = None
+            logging.info("Whisper model unloaded after transcription (lazy loading)")
+
             # Restore tray icon to audio_notebook state after transcription
             if self.tray_manager and self.audio_notebook_server is not None:
                 self.tray_manager.set_state("audio_notebook")
