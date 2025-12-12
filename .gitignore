@@ -8,31 +8,34 @@ deps/
 .idea/
 .github/
 
+# Cache directories
+.cache/
+
 # Database files (user data, should not be synced)
-_core/APP_VIEWER/backend/data/transcriptions.db
-_core/APP_VIEWER/backend/data/transcriptions.db-journal
-_core/APP_VIEWER/backend/data/transcriptions.db-wal
-_core/APP_VIEWER/backend/data/transcriptions.db-shm
+AUDIO_NOTEBOOK/backend/data/transcriptions.db
+AUDIO_NOTEBOOK/backend/data/transcriptions.db-journal
+AUDIO_NOTEBOOK/backend/data/transcriptions.db-wal
+AUDIO_NOTEBOOK/backend/data/transcriptions.db-shm
 
 # Node.js / npm dependencies and build outputs
-_core/APP_VIEWER/node_modules/
-_core/APP_VIEWER/.venv/
-_core/APP_VIEWER/dist/
-_core/APP_VIEWER/build/
-_core/APP_VIEWER/.env
-_core/APP_VIEWER/.env.local
+AUDIO_NOTEBOOK/node_modules/
+AUDIO_NOTEBOOK/.venv/
+AUDIO_NOTEBOOK/dist/
+AUDIO_NOTEBOOK/build/
+AUDIO_NOTEBOOK/.env
+AUDIO_NOTEBOOK/.env.local
 
 # Vite cache
-_core/APP_VIEWER/.vite/
+AUDIO_NOTEBOOK/.vite/
 
 # IDE / Editor files
-_core/APP_VIEWER/.vscode/
-_core/APP_VIEWER/.idea/
+AUDIO_NOTEBOOK/.vscode/
+AUDIO_NOTEBOOK/.idea/
 
 # OS files
-_core/APP_VIEWER/.DS_Store
-_core/APP_VIEWER/Thumbs.db
+AUDIO_NOTEBOOK/.DS_Store
+AUDIO_NOTEBOOK/Thumbs.db
 
 # Python virtual environments (if present)
-_core/APP_VIEWER/.python-version
-_core/APP_VIEWER/__pycache__/
+AUDIO_NOTEBOOK/.python-version
+AUDIO_NOTEBOOK/__pycache__/
