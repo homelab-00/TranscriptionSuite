@@ -17,6 +17,7 @@ import {
   Sparkles,
   X,
   RefreshCw,
+  Power,
 } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
 import { Howl } from 'howler';
@@ -320,12 +321,34 @@ export default function DayView() {
   };
 
   // LLM Functions
+  const [llmStarting, setLlmStarting] = useState(false);
+
   const checkLLMStatus = async () => {
     try {
       const status = await api.getLLMStatus();
       setLlmStatus(status);
     } catch {
       setLlmStatus({ available: false, base_url: '', model: null, error: 'Failed to check status' });
+    }
+  };
+
+  const handleStartLLM = async () => {
+    setLlmStarting(true);
+    setLlmError(null);
+    try {
+      // Start server (will also auto-load model from config)
+      const serverResult = await api.startLMStudioServer();
+      if (!serverResult.success && !serverResult.message.includes('already running') && !serverResult.message.includes('loaded')) {
+        setLlmError(serverResult.message);
+        setLlmStarting(false);
+        return;
+      }
+      // Refresh status
+      await checkLLMStatus();
+    } catch (error) {
+      setLlmError((error as Error).message);
+    } finally {
+      setLlmStarting(false);
     }
   };
 
@@ -853,6 +876,21 @@ export default function DayView() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Start LLM button when not available */}
+                    {!llmStatus?.available && !llmLoading && (
+                      <button
+                        onClick={handleStartLLM}
+                        className="btn-ghost text-green-400 hover:text-green-300 text-sm flex items-center gap-1"
+                        disabled={llmStarting}
+                      >
+                        {llmStarting ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Power size={14} />
+                        )}
+                        Start LLM
+                      </button>
+                    )}
                     {llmLoading ? (
                       <button
                         onClick={handleStopGeneration}
@@ -935,16 +973,33 @@ export default function DayView() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-medium text-white">Transcript</h3>
                   
-                  {/* AI Summarize Button - Always show when no summary, will show error if LLM unavailable */}
+                  {/* AI Buttons */}
                   {!llmSummary && !llmLoading && (
-                    <button
-                      onClick={handleSummarize}
-                      className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
-                      disabled={llmLoading}
-                    >
-                      <Bot size={18} />
-                      <span>Summarize with AI</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {!llmStatus?.available ? (
+                        <button
+                          onClick={handleStartLLM}
+                          className="btn-ghost text-green-400 hover:text-green-300 flex items-center gap-2"
+                          disabled={llmStarting}
+                        >
+                          {llmStarting ? (
+                            <Loader2 size={18} className="animate-spin" />
+                          ) : (
+                            <Power size={18} />
+                          )}
+                          <span>Start LLM</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleSummarize}
+                          className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
+                          disabled={llmLoading}
+                        >
+                          <Bot size={18} />
+                          <span>Summarize with AI</span>
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 {selectedRecording.transcription.segments.map((segment, segIndex) => (

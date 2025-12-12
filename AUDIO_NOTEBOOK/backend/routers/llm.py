@@ -83,7 +83,9 @@ def get_llm_config() -> dict:
     """Load LLM configuration from config.yaml"""
     try:
         # Find config.yaml at project root
-        project_root = Path(__file__).parent.parent.parent.parent.parent
+        # llm.py is at AUDIO_NOTEBOOK/backend/routers/llm.py
+        # So we need to go up 3 levels to reach TranscriptionSuite/
+        project_root = Path(__file__).parent.parent.parent.parent
         config_path = project_root / "config.yaml"
 
         if config_path.exists():
@@ -97,6 +99,8 @@ def get_llm_config() -> dict:
                 "enabled": llm_config.get("enabled", False),
                 "base_url": llm_config.get("base_url", "http://127.0.0.1:1234"),
                 "model": llm_config.get("model", ""),
+                "gpu_offload": llm_config.get("gpu_offload", 1.0),
+                "context_length": llm_config.get("context_length"),
                 "max_tokens": llm_config.get("max_tokens", 2048),
                 "temperature": llm_config.get("temperature", 0.7),
                 "default_system_prompt": llm_config.get(
@@ -111,6 +115,8 @@ def get_llm_config() -> dict:
         "enabled": True,
         "base_url": "http://127.0.0.1:1234",
         "model": "",
+        "gpu_offload": 1.0,
+        "context_length": None,
         "max_tokens": 2048,
         "temperature": 0.7,
         "default_system_prompt": "Summarize this transcription concisely.",
@@ -135,18 +141,37 @@ async def get_llm_status():
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{base_url}/v1/models")
+            # Use the v0 API to get accurate model state
+            response = await client.get(f"{base_url}/api/v0/models")
 
             if response.status_code == 200:
                 data = response.json()
                 models = data.get("data", [])
-                model_id = models[0]["id"] if models else None
 
-                return LLMStatus(
-                    available=True,
-                    base_url=base_url,
-                    model=model_id,
-                )
+                # Find loaded LLM models
+                loaded_models = [
+                    m
+                    for m in models
+                    if m.get("type") == "llm" and m.get("state") == "loaded"
+                ]
+
+                if loaded_models:
+                    model = loaded_models[0]
+                    return LLMStatus(
+                        available=True,
+                        base_url=base_url,
+                        model=model.get("id"),
+                        model_state="loaded",
+                    )
+                else:
+                    # Server is running but no model loaded
+                    return LLMStatus(
+                        available=False,
+                        base_url=base_url,
+                        model=None,
+                        model_state="not-loaded",
+                        error="No model loaded. Click 'Start LLM' to load a model.",
+                    )
             else:
                 return LLMStatus(
                     available=False,
@@ -456,25 +481,76 @@ def _run_lms_command(args: list[str], timeout: int = 30) -> tuple[bool, str]:
 @router.post("/server/start", response_model=ServerControlResponse)
 async def start_lm_studio_server():
     """
-    Start the LM Studio server using the lms CLI.
+    Start the LM Studio server and load the configured model.
 
-    This starts the server but does NOT load a model - the model will be
-    loaded separately when needed.
+    This starts the server AND automatically loads the model specified
+    in config.yaml (local_llm.model).
     """
     logger.info("Starting LM Studio server...")
 
     # Check if server is already running
     config = get_llm_config()
+    server_already_running = False
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(f"{config['base_url']}/v1/models")
             if response.status_code == 200:
-                return ServerControlResponse(
-                    success=True,
-                    message="Server is already running",
-                )
+                server_already_running = True
     except Exception:
         pass  # Server not running, proceed to start
+
+    # If server is already running, check if we need to load a model
+    if server_already_running:
+        model_id = config.get("model")
+        if model_id:
+            # Check if the model is already loaded
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(f"{config['base_url']}/api/v0/models")
+                    if response.status_code == 200:
+                        models = response.json().get("data", [])
+                        loaded_models = [m for m in models if m.get("state") == "loaded"]
+
+                        # Check if our model is already loaded
+                        model_loaded = any(m.get("id") == model_id for m in loaded_models)
+
+                        if model_loaded:
+                            return ServerControlResponse(
+                                success=True,
+                                message=f"Server running with model '{model_id}' already loaded",
+                            )
+                        else:
+                            # Load the configured model
+                            logger.info(
+                                f"Server running but model not loaded. Loading: {model_id}"
+                            )
+                            load_result = await load_model(
+                                ModelLoadRequest(
+                                    model_id=model_id,
+                                    gpu_offload=config.get("gpu_offload", 1.0),
+                                    context_length=config.get("context_length"),
+                                )
+                            )
+
+                            if load_result.success:
+                                return ServerControlResponse(
+                                    success=True,
+                                    message=f"Model '{model_id}' loaded",
+                                    detail=load_result.detail,
+                                )
+                            else:
+                                return ServerControlResponse(
+                                    success=True,
+                                    message=f"Server running but model load failed: {load_result.message}",
+                                    detail=load_result.detail,
+                                )
+            except Exception as e:
+                logger.warning(f"Could not check model state: {e}")
+
+        return ServerControlResponse(
+            success=True,
+            message="Server is already running",
+        )
 
     # Run in thread pool to avoid blocking
     loop = asyncio.get_event_loop()
@@ -489,11 +565,39 @@ async def start_lm_studio_server():
         # Wait a bit for server to be ready
         await asyncio.sleep(2)
         logger.info("LM Studio server started successfully")
-        return ServerControlResponse(
-            success=True,
-            message="Server started successfully",
-            detail=output,
-        )
+
+        # Auto-load the configured model
+        config = get_llm_config()
+        model_id = config.get("model")
+
+        if model_id:
+            logger.info(f"Auto-loading configured model: {model_id}")
+            load_result = await load_model(
+                ModelLoadRequest(
+                    model_id=model_id,
+                    gpu_offload=config.get("gpu_offload", 1.0),
+                    context_length=config.get("context_length"),
+                )
+            )
+
+            if load_result.success:
+                return ServerControlResponse(
+                    success=True,
+                    message=f"Server started and model '{model_id}' loaded",
+                    detail=f"Server: {output}\nModel: {load_result.detail}",
+                )
+            else:
+                return ServerControlResponse(
+                    success=True,
+                    message=f"Server started but model load failed: {load_result.message}",
+                    detail=f"Server: {output}\nModel error: {load_result.detail}",
+                )
+        else:
+            return ServerControlResponse(
+                success=True,
+                message="Server started (no model configured - set local_llm.model in config.yaml)",
+                detail=output,
+            )
     else:
         logger.error(f"Failed to start LM Studio server: {output}")
         return ServerControlResponse(
@@ -593,6 +697,18 @@ async def load_model(request: ModelLoadRequest):
     config = get_llm_config()
     model_id = request.model_id or config.get("model")
 
+    # Use config values as defaults if not specified in request
+    gpu_offload = (
+        request.gpu_offload
+        if request.gpu_offload is not None
+        else config.get("gpu_offload", 1.0)
+    )
+    context_length = (
+        request.context_length
+        if request.context_length is not None
+        else config.get("context_length")
+    )
+
     if not model_id:
         # Try to get the first available LLM model
         try:
@@ -603,7 +719,7 @@ async def load_model(request: ModelLoadRequest):
             else:
                 return ServerControlResponse(
                     success=False,
-                    message="No models available to load",
+                    message="No models available to load. Configure 'model' in config.yaml or download models in LM Studio.",
                 )
         except Exception as e:
             return ServerControlResponse(
@@ -612,16 +728,16 @@ async def load_model(request: ModelLoadRequest):
                 detail=str(e),
             )
 
-    logger.info(f"Loading model: {model_id}")
+    logger.info(f"Loading model: {model_id} (gpu={gpu_offload}, ctx={context_length})")
 
     # Build lms load command
     cmd_args = ["load", model_id]
 
-    if request.gpu_offload is not None:
-        cmd_args.extend(["--gpu", str(request.gpu_offload)])
+    if gpu_offload is not None:
+        cmd_args.extend(["--gpu", str(gpu_offload)])
 
-    if request.context_length is not None:
-        cmd_args.extend(["--context-length", str(request.context_length)])
+    if context_length is not None:
+        cmd_args.extend(["--context-length", str(context_length)])
 
     # Run in thread pool
     loop = asyncio.get_event_loop()
@@ -984,7 +1100,7 @@ async def chat_with_llm(request: ChatRequest):
 
         except httpx.ConnectError:
             logger.error("Chat error: Cannot connect to LM Studio")
-            yield f"data: {json.dumps({'error': 'Cannot connect to LM Studio. Click "Start LLM" to load a model.'})}\n\n"
+            yield f"data: {json.dumps({'error': 'Cannot connect to LM Studio. Click Start LLM to load a model.'})}\n\n"
         except httpx.TimeoutException:
             logger.error("Chat error: Request timed out")
             yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"

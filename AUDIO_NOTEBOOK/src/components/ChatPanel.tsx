@@ -13,9 +13,44 @@ import {
   ChevronRight,
   ChevronDown,
   RefreshCw,
+  Settings,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Conversation, ConversationWithMessages, Message, LLMStatus } from '../types';
+
+// Preset system prompts
+const SYSTEM_PROMPTS = [
+  {
+    id: 'default',
+    name: 'Default Assistant',
+    prompt: 'You are a helpful assistant that analyzes transcriptions. When given a transcription, provide clear and insightful responses. Respond in the same language as the transcription.',
+  },
+  {
+    id: 'summarize',
+    name: 'Summarizer',
+    prompt: 'Summarize the transcription concisely, highlighting the main points, key topics discussed, and any action items. Respond in the same language as the transcription.',
+  },
+  {
+    id: 'qa',
+    name: 'Q&A Assistant',
+    prompt: 'Answer questions about the transcription accurately and concisely. If the answer is not in the transcription, say so. Respond in the same language as the question.',
+  },
+  {
+    id: 'translate',
+    name: 'Translator',
+    prompt: 'Translate or explain content from the transcription as requested. Be accurate and maintain the original meaning.',
+  },
+  {
+    id: 'none',
+    name: 'No System Prompt',
+    prompt: '',
+  },
+  {
+    id: 'custom',
+    name: 'Custom...',
+    prompt: '',
+  },
+];
 
 interface ChatPanelProps {
   recordingId: number;
@@ -34,6 +69,11 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
   const [activeConversation, setActiveConversation] = useState<ConversationWithMessages | null>(null);
   const [conversationsExpanded, setConversationsExpanded] = useState(true);
 
+  // System prompt selection
+  const [selectedPromptId, setSelectedPromptId] = useState('default');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [showPromptSettings, setShowPromptSettings] = useState(false);
+
   // Chat input
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -45,6 +85,18 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
   // Editing
   const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+
+  // Get the current system prompt based on selection
+  const getCurrentSystemPrompt = (): string | undefined => {
+    if (selectedPromptId === 'custom') {
+      return customPrompt || undefined;
+    }
+    if (selectedPromptId === 'none') {
+      return undefined;
+    }
+    const preset = SYSTEM_PROMPTS.find(p => p.id === selectedPromptId);
+    return preset?.prompt || undefined;
+  };
 
   useEffect(() => {
     if (isOpen && recordingId) {
@@ -217,6 +269,7 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
           conversation_id: activeConversation.id,
           user_message: userMessage,
           include_transcription: true,
+          system_prompt: getCurrentSystemPrompt(),
         },
         (content) => {
           setStreamingContent(prev => prev + content);
@@ -287,6 +340,13 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
           </div>
           <div className="flex items-center gap-1">
             <button
+              onClick={() => setShowPromptSettings(!showPromptSettings)}
+              className={`btn-icon p-1 ${showPromptSettings ? 'text-purple-400' : ''}`}
+              title="Prompt settings"
+            >
+              <Settings size={14} />
+            </button>
+            <button
               onClick={checkLLMStatus}
               className="btn-icon p-1"
               title="Refresh status"
@@ -323,6 +383,39 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
           <p className="text-red-400 text-xs mt-1">{llmError}</p>
         )}
       </div>
+
+      {/* System Prompt Settings */}
+      {showPromptSettings && (
+        <div className="px-4 py-3 border-b border-gray-700 bg-surface-dark/50">
+          <label className="text-xs text-gray-400 block mb-2">System Prompt</label>
+          <select
+            value={selectedPromptId}
+            onChange={(e) => setSelectedPromptId(e.target.value)}
+            className="w-full bg-surface-dark border border-gray-600 rounded px-2 py-1.5 text-sm text-white mb-2"
+          >
+            {SYSTEM_PROMPTS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          
+          {selectedPromptId === 'custom' && (
+            <textarea
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder="Enter your custom system prompt..."
+              className="w-full bg-surface-dark border border-gray-600 rounded px-2 py-1.5 text-sm text-white resize-none h-20"
+            />
+          )}
+          
+          {selectedPromptId !== 'custom' && selectedPromptId !== 'none' && (
+            <p className="text-xs text-gray-500 italic">
+              {SYSTEM_PROMPTS.find(p => p.id === selectedPromptId)?.prompt}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Conversations List */}
       <div className="border-b border-gray-700">
