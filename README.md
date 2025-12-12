@@ -72,10 +72,6 @@ TranscriptionSuite/
 │   ├── service.py                # Diarization service wrapper
 │   ├── combiner.py               # Merges transcription + speaker labels
 │   └── utils.py                  # Segment utilities
-├── CANARY/                       # NeMo Canary transcription (integrated)
-│   ├── __init__.py               # Module exports
-│   ├── canary_transcriber.py     # Canary-1B-v2 transcription
-│   └── service.py                # Canary service wrapper
 ├── list_audio_devices.py         # Utility to find audio input devices
 └── README.md
 ```
@@ -88,7 +84,6 @@ All functionality now runs in a **single Python 3.11 environment**:
 |---------|------------------|--------|
 | Faster Whisper Transcription | `faster-whisper`, `ctranslate2`, `torch 2.9+` | ✅ Integrated |
 | Speaker Diarization | `pyannote-audio` | ✅ Integrated |
-| NeMo Canary Transcription | `nemo-toolkit[asr]` | ✅ Integrated |
 | Web API & UI | `FastAPI`, `PyQt6` | ✅ Integrated |
 
 **Benefits of unified environment:**
@@ -187,7 +182,6 @@ This single command installs:
 
 - Faster Whisper + ctranslate2 for transcription
 - PyAnnote Audio for speaker diarization
-- NeMo Toolkit for Canary transcription
 - FastAPI, PyQt6, and all other dependencies
 
 #### Configure HuggingFace Access (Required for Diarization)
@@ -208,7 +202,6 @@ huggingface-cli login
 
 ```bash
 python -c "from DIARIZATION import DiarizationManager; print('Diarization OK')"
-python -c "from CANARY import CanaryTranscriber; print('Canary OK')"
 python -c "import faster_whisper; print('Faster Whisper OK')"
 deactivate
 ```
@@ -808,13 +801,6 @@ Each word is assigned to a speaker by:
 | `service.py` | Diarization service wrapper |
 | `combiner.py` | Merges transcription + speaker labels |
 | `utils.py` | Segment utilities and helpers |
-
-### Canary Module (`CANARY/`)
-
-| File | Purpose |
-|------|---------|
-| `canary_transcriber.py` | NeMo Canary-1B-v2 transcription |
-| `service.py` | Canary service wrapper |
 
 ---
 

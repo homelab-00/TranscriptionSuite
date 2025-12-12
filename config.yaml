@@ -9,7 +9,7 @@
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Global Transcription Options (NeMo is excluded)
+# Global Transcription Options
 # ----------------------------------------------------------------------------
 transcription_options:
     # Language code for transcription (e.g., "en" for English, "el" for Greek).
@@ -137,50 +137,6 @@ diarization:
 
     # Output settings
     merge_gap_threshold: 0.5  # Merge segments from same speaker if gap < this
-
-
-# ----------------------------------------------------------------------------
-# NeMo Canary Transcriber Configuration (Experimental)
-# ----------------------------------------------------------------------------
-# Alternative transcription engine using NVIDIA NeMo Canary-1B-v2 model.
-# Supports 25 European languages with excellent accuracy.
-# Requires separate _nemo virtual environment (Python 3.11).
-canary_transcriber:
-    # Enable Canary as the transcription backend (replaces faster-whisper)
-    enabled: true
-
-    # Default language for transcription.
-    # Supported: en, de, es, fr, hi, ja, ko, pt, zh, ar, cs, el, fi, hu, 
-    #            it, nl, no, pl, ro, ru, sv, tr, uk, vi
-    # Note: Unlike faster-whisper, Canary does NOT support auto-detection.
-    # You MUST specify a language.
-    language: "el"
-
-    # Device for model inference: "cuda" or "cpu"
-    device: "cuda"
-
-    # Beam size for decoding (1 = greedy/fastest, higher = more accurate but slower)
-    beam_size: 3
-
-    # Include punctuation and capitalization in output
-    punctuation: true
-
-    # Server settings (the Canary model runs as a persistent server)
-    server:
-        host: "127.0.0.1"
-        port: 50051
-
-    # Chunking settings for long audio (prevents CUDA OOM)
-    chunking:
-        # Maximum duration (seconds) for single-pass transcription
-        # Audio longer than this will be chunked
-        max_single_pass_secs: 40.0
-
-        # Chunk length in seconds
-        chunk_length_secs: 30.0
-
-        # Overlap between chunks (helps with word boundaries)
-        overlap_secs: 1.0
 
 
 # ----------------------------------------------------------------------------

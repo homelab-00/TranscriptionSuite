@@ -31,7 +31,6 @@ dependencies = [
     "wheel>=0.45.1",
     "cuda-python>=13.0",
     "cython>=3.2.2",
-    "nemo-toolkit[asr]>=2.2.1",
     "ruff>=0.14.8",
     "pyannote-audio>=3.4.0",
 ]
