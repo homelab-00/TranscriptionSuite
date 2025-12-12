@@ -1476,7 +1476,7 @@ class STTOrchestrator:
         self.audio_notebook_thread.start()
 
     def _stop_audio_notebook(self):
-        """Stop the Audio Notebook server and reload the main (longform) model."""
+        """Stop the Audio Notebook server, eject LLM model, and reload the main (longform) model."""
         if self.audio_notebook_server:
             safe_print("Stopping Audio Notebook...", "info")
 
@@ -1489,6 +1489,30 @@ class STTOrchestrator:
 
             if self.tray_manager:
                 self.tray_manager.update_audio_notebook_menu_item(False)
+
+            # Eject LM Studio model to free VRAM for Whisper
+            safe_print("Ejecting LM Studio model...", "info")
+            try:
+                import shutil
+                import subprocess
+
+                if shutil.which("lms"):
+                    result = subprocess.run(
+                        ["lms", "unload", "--all"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    if result.returncode == 0:
+                        safe_print("LM Studio model ejected.", "success")
+                    else:
+                        # Not an error - model may not have been loaded
+                        logging.debug(
+                            f"lms unload output: {result.stdout} {result.stderr}"
+                        )
+            except Exception as e:
+                # Don't fail the whole operation if LM Studio isn't available
+                logging.debug(f"Could not eject LM Studio model: {e}")
 
             # Switch from static to longform model automatically
             safe_print("Switching back to longform model...", "info")
