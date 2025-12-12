@@ -138,6 +138,43 @@ def init_db():
         if "summary" not in columns:
             cursor.execute("ALTER TABLE recordings ADD COLUMN summary TEXT")
 
+        # =====================================================================
+        # Conversations and Messages tables (for multi-conversation chat per recording)
+        # =====================================================================
+
+        # Conversations table - each recording can have multiple conversations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT 'New Chat',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Messages table - each conversation has multiple messages
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                tokens_used INTEGER,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Indexes for conversation queries
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conversations_recording ON conversations(recording_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)"
+        )
+
         conn.commit()
 
 
@@ -985,3 +1022,147 @@ def get_word_timestamps_from_audio(
     except Exception as e:
         logging.error(f"Error getting word timestamps: {e}", exc_info=True)
         return "", []
+
+
+# =============================================================================
+# Conversation CRUD Functions
+# =============================================================================
+
+
+def create_conversation(recording_id: int, title: str = "New Chat") -> int:
+    """Create a new conversation for a recording and return its ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO conversations (recording_id, title)
+            VALUES (?, ?)
+            """,
+            (recording_id, title),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+
+def get_conversation(conversation_id: int) -> Optional[dict]:
+    """Get a conversation by ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_conversations_for_recording(recording_id: int) -> list[dict]:
+    """Get all conversations for a recording, ordered by most recent update."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM conversations 
+            WHERE recording_id = ? 
+            ORDER BY updated_at DESC
+            """,
+            (recording_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def update_conversation_title(conversation_id: int, title: str) -> bool:
+    """Update a conversation's title."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE conversations 
+            SET title = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (title, conversation_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_conversation(conversation_id: int) -> bool:
+    """Delete a conversation and all its messages."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# =============================================================================
+# Message CRUD Functions
+# =============================================================================
+
+
+def add_message(
+    conversation_id: int,
+    role: str,
+    content: str,
+    tokens_used: Optional[int] = None,
+) -> int:
+    """Add a message to a conversation and return its ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO messages (conversation_id, role, content, tokens_used)
+            VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, role, content, tokens_used),
+        )
+        # Update conversation's updated_at timestamp
+        cursor.execute(
+            """
+            UPDATE conversations 
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (conversation_id,),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+
+def get_messages_for_conversation(conversation_id: int) -> list[dict]:
+    """Get all messages for a conversation, ordered chronologically."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM messages 
+            WHERE conversation_id = ? 
+            ORDER BY created_at ASC
+            """,
+            (conversation_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_conversation_with_messages(conversation_id: int) -> Optional[dict]:
+    """Get a conversation with all its messages."""
+    conversation = get_conversation(conversation_id)
+    if conversation:
+        conversation["messages"] = get_messages_for_conversation(conversation_id)
+    return conversation
+
+
+def delete_message(message_id: int) -> bool:
+    """Delete a specific message."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM messages WHERE id = ?",
+            (message_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0

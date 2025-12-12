@@ -12,11 +12,13 @@ import {
   Sparkles,
   X,
   RefreshCw,
+  MessageSquare,
 } from 'lucide-react';
 import { Howl } from 'howler';
 import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { Recording, Transcription, Word, LLMStatus } from '../types';
+import ChatPanel from '../components/ChatPanel';
 
 export default function RecordingView() {
   const { id } = useParams<{ id: string }>();
@@ -42,6 +44,9 @@ export default function RecordingView() {
   const summaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingSummaryRef = useRef<string>('');
+
+  // Chat panel state
+  const [isChatPanelOpen, setIsChatPanelOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -485,17 +490,28 @@ export default function RecordingView() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-medium text-white">Transcript</h2>
           
-          {/* AI Summarize Button - Always show when no summary, will show error if LLM unavailable */}
-          {!llmSummary && !llmLoading && (
+          <div className="flex items-center gap-2">
+            {/* Legacy Summarize Button - shows when there's no summary and chat panel is closed */}
+            {!llmSummary && !llmLoading && !isChatPanelOpen && (
+              <button
+                onClick={handleSummarize}
+                className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
+                disabled={llmLoading}
+              >
+                <Bot size={18} />
+                <span>Quick Summary</span>
+              </button>
+            )}
+            
+            {/* Chat with AI Button */}
             <button
-              onClick={handleSummarize}
+              onClick={() => setIsChatPanelOpen(true)}
               className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
-              disabled={llmLoading}
             >
-              <Bot size={18} />
-              <span>Summarize with AI</span>
+              <MessageSquare size={18} />
+              <span>Chat with AI</span>
             </button>
-          )}
+          </div>
         </div>
         {transcription.segments.map((segment, segIndex) => (
           <div key={segIndex} className="mb-4">
@@ -528,6 +544,15 @@ export default function RecordingView() {
           </div>
         ))}
       </div>
+
+      {/* Chat Panel */}
+      {recording && (
+        <ChatPanel
+          recordingId={recording.id}
+          isOpen={isChatPanelOpen}
+          onClose={() => setIsChatPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }
