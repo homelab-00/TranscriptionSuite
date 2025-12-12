@@ -194,7 +194,7 @@ omniasr_transcriber:
     enabled: true
 
     # Model to use: "omniASR_LLM_3B" (highest accuracy) or "omniASR_LLM_1B" (faster)
-    model: "omniASR_LLM_3B"
+    model: "omniASR_LLM_1B"
 
     # Default language for transcription.
     # Uses {language_code}_{script} format (e.g., eng_Latn, ell_Grek, deu_Latn)
