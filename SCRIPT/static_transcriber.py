@@ -433,7 +433,6 @@ class StaticFileTranscriber:
         # Use cached model instead of loading a new one each time
         model = get_cached_whisper_model(model_path, device, compute_type)
 
-        safe_print("Transcribing with word timestamps...", "info")
         start_time = time.monotonic()
 
         # Transcribe with word timestamps enabled
@@ -893,6 +892,226 @@ class StaticFileTranscriber:
         finally:
             logging.info("--- Transcription process finished. ---")
             self.cleanup()
+
+    def transcribe_file_simple(
+        self,
+        file_path: str,
+        output_file: Optional[str] = None,
+        language: Optional[str] = None,
+        max_segment_chars: int = 500,
+    ) -> Optional[List[TranscriptSegment]]:
+        """
+        Transcribe an audio file without word-level timestamps.
+
+        This is faster than word-level transcription and produces simpler output
+        with only segment-level timing. Suitable when precise word timing is not needed.
+
+        Args:
+            file_path: Path to the audio file
+            output_file: Optional path to save results
+            language: Language code for transcription (e.g., 'en', 'el')
+            max_segment_chars: Maximum characters per segment (default 500)
+
+        Returns:
+            List of TranscriptSegment objects (without word timing), or None on failure
+        """
+        if not HAS_SOUNDFILE or sf is None:
+            safe_print("SoundFile library not available. Aborting.", "error")
+            return None
+
+        if not HAS_FASTER_WHISPER:
+            safe_print("Faster Whisper not available. Aborting.", "error")
+            return None
+
+        logging.info("--- Starting simple transcription for: %s ---", file_path)
+
+        try:
+            # --- Pre-processing Pipeline ---
+            converted_path = self._convert_to_wav(file_path)
+            if not converted_path:
+                return None
+
+            # --- Transcription without Word Timestamps ---
+            try:
+                start_time = time.monotonic()
+                transcript_segments, audio_duration = self._transcribe_simple(
+                    converted_path, language=language
+                )
+                transcription_time = time.monotonic() - start_time
+            except Exception as e:
+                logging.error(f"Transcription failed: {e}", exc_info=True)
+                safe_print(f"Transcription failed: {e}", "error")
+                return None
+
+            # --- Group segments by max_segment_chars ---
+            grouped_segments = self._group_segments_simple(
+                transcript_segments, max_segment_chars
+            )
+
+            # --- Display Results ---
+            safe_print(
+                f"\nComplete! {len(grouped_segments)} segments in {transcription_time:.1f}s",
+                "success",
+            )
+
+            # --- Save Results ---
+            if output_file:
+                self._save_transcript_segments(
+                    grouped_segments, output_file, file_path, audio_duration
+                )
+
+            return grouped_segments
+
+        except Exception as e:
+            logging.error(
+                f"An error occurred during transcription: {e}",
+                exc_info=True,
+            )
+            safe_print(f"Error: {e}", "error")
+            return None
+        finally:
+            logging.info("--- Simple transcription process finished. ---")
+            self.cleanup()
+
+    def _transcribe_simple(
+        self, audio_path: str, language: Optional[str] = None
+    ) -> tuple[List[TranscriptSegment], float]:
+        """
+        Transcribe audio without word-level timestamps using cached Whisper model.
+
+        Args:
+            audio_path: Path to the audio file (should be 16kHz mono WAV)
+            language: Optional language code (e.g., 'en', 'el')
+
+        Returns:
+            Tuple of (list of TranscriptSegment without words, audio duration)
+        """
+        if not HAS_FASTER_WHISPER or faster_whisper is None:
+            raise ImportError("faster_whisper is required for transcription")
+
+        if not HAS_SOUNDFILE or sf is None:
+            raise ImportError("soundfile is required for reading audio")
+
+        # Read audio file
+        audio_data, sample_rate = sf.read(audio_path, dtype="float32")
+        audio_duration = len(audio_data) / sample_rate
+
+        # Get ALL model configuration from main_transcriber config section
+        main_config = self.config.get("main_transcriber", {})
+
+        # Model settings - all from main_transcriber config
+        model_path = main_config.get("model", "Systran/faster-whisper-large-v3")
+        compute_type = main_config.get("compute_type", "default")
+        device = main_config.get(
+            "device",
+            "cuda" if (HAS_TORCH and torch and torch.cuda.is_available()) else "cpu",
+        )
+        beam_size = main_config.get("beam_size", 5)
+        initial_prompt = main_config.get("initial_prompt")
+        vad_filter = main_config.get("faster_whisper_vad_filter", True)
+
+        # Use cached model instead of loading a new one each time
+        model = get_cached_whisper_model(model_path, device, compute_type)
+
+        start_time = time.monotonic()
+
+        # Transcribe WITHOUT word timestamps (faster)
+        segments_iter, info = model.transcribe(
+            audio_data,
+            language=language,
+            beam_size=beam_size,
+            initial_prompt=initial_prompt,
+            word_timestamps=False,  # No word-level timestamps
+            vad_filter=vad_filter,
+        )
+
+        # Convert iterator to list
+        transcript_segments: List[TranscriptSegment] = []
+
+        for segment in segments_iter:
+            transcript_segments.append(
+                TranscriptSegment(
+                    text=segment.text.strip(),
+                    start=segment.start,
+                    end=segment.end,
+                    words=None,  # No word timing
+                )
+            )
+
+        transcription_time = time.monotonic() - start_time
+        safe_print(
+            f"Transcription complete in {transcription_time:.1f}s "
+            f"({len(transcript_segments)} segments)",
+            "success",
+        )
+
+        return transcript_segments, audio_duration
+
+    def _group_segments_simple(
+        self,
+        segments: List[TranscriptSegment],
+        max_chars: int,
+    ) -> List[TranscriptSegment]:
+        """
+        Regroup segments (without word timing) to respect maximum character length.
+
+        Args:
+            segments: Original transcript segments
+            max_chars: Maximum characters per output segment
+
+        Returns:
+            Regrouped list of TranscriptSegment objects
+        """
+        if not segments:
+            return segments
+
+        result: List[TranscriptSegment] = []
+        current_texts: List[str] = []
+        current_char_count = 0
+        segment_start = 0.0
+        segment_end = 0.0
+
+        for segment in segments:
+            segment_text = segment.text
+            segment_chars = len(segment_text)
+
+            # Check if adding this segment would exceed limit
+            if current_char_count + segment_chars > max_chars and current_texts:
+                # Save current combined segment
+                result.append(
+                    TranscriptSegment(
+                        text=" ".join(current_texts).strip(),
+                        start=segment_start,
+                        end=segment_end,
+                        speaker=None,
+                        words=None,
+                    )
+                )
+                current_texts = []
+                current_char_count = 0
+
+            # Start new segment if needed
+            if not current_texts:
+                segment_start = segment.start
+
+            # Add to current segment
+            current_texts.append(segment_text)
+            current_char_count += segment_chars + 1  # +1 for space
+            segment_end = segment.end
+
+        # Don't forget the last segment
+        if current_texts:
+            result.append(
+                TranscriptSegment(
+                    text=" ".join(current_texts).strip(),
+                    start=segment_start,
+                    end=segment_end,
+                    speaker=None,
+                    words=None,
+                )
+            )
+
+        return result
 
     def _group_segments_by_length(
         self,

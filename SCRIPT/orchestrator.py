@@ -378,6 +378,7 @@ class STTOrchestrator:
                 # Get static transcription settings from config
                 static_config = self.config.get("static_transcription", {})
                 enable_diarization = static_config.get("enable_diarization", False)
+                enable_word_timestamps = static_config.get("word_timestamps", False)
                 max_segment_chars = static_config.get("max_segment_chars", 500)
 
                 # Get language from transcription options
@@ -404,7 +405,7 @@ class STTOrchestrator:
                         language=language,
                         max_segment_chars=max_segment_chars,
                     )
-                else:
+                elif enable_word_timestamps:
                     if enable_diarization:
                         safe_print(
                             "Diarization enabled but not available - using word timestamps only",
@@ -412,11 +413,20 @@ class STTOrchestrator:
                         )
                     else:
                         safe_print(
-                            "Transcribing with word timestamps (diarization disabled)",
+                            "Transcribing with word timestamps...",
                             "info",
                         )
-                    # Use the word-timestamp-only transcription
+                    # Use the word-timestamp transcription
                     self.static_transcriber.transcribe_file_with_word_timestamps(
+                        file_path,
+                        output_file=output_file,
+                        language=language,
+                        max_segment_chars=max_segment_chars,
+                    )
+                else:
+                    safe_print("Transcribing (no word timestamps)...", "info")
+                    # Use simple transcription without word timestamps
+                    self.static_transcriber.transcribe_file_simple(
                         file_path,
                         output_file=output_file,
                         language=language,
@@ -1141,6 +1151,7 @@ class STTOrchestrator:
 
                 if success:
                     self.app_state["models_loaded"] = True
+                    self.app_state["loaded_model_type"] = "longform"
                     safe_print("Models reloaded successfully.", "success")
                     logging.info("Model reload sequence completed")
 
