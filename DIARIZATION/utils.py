@@ -4,55 +4,25 @@ Utility functions for the diarization module.
 
 Provides helper functions for time segment operations, format conversions,
 and safe console output.
+
+NOTE: This module imports shared utilities from SCRIPT.shared for consistency.
+The DiarizationSegment class here is specific to the diarization pipeline
+and includes additional methods like to_rttm() and merge_with().
 """
 
 import json
 import logging
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
-from rich.console import Console
-from rich.text import Text
+# Add SCRIPT directory to path for shared imports
+_script_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _script_path not in sys.path:
+    sys.path.insert(0, _script_path)
 
-# Initialize Rich console for pretty output
-console = Console(stderr=True)
-
-
-def safe_print(message: str, level: str = "info") -> None:
-    """
-    Print a message with color based on level.
-
-    Args:
-        message: The message to print
-        level: The level of the message (info, success, warning, error)
-    """
-    colors = {
-        "info": "blue",
-        "success": "green",
-        "warning": "yellow",
-        "error": "red",
-    }
-    color = colors.get(level, "white")
-
-    text = Text(message)
-    text.stylize(color)
-    console.print(text)
-
-
-def format_timestamp(seconds: float) -> str:
-    """
-    Convert seconds to a formatted timestamp string (HH:MM:SS.mmm).
-
-    Args:
-        seconds: Time in seconds
-
-    Returns:
-        Formatted timestamp string
-    """
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
+# Import shared utilities - use these instead of duplicating
+from SCRIPT.shared.utils import safe_print, format_timestamp
 
 
 def parse_timestamp(timestamp: str) -> float:

@@ -19,10 +19,12 @@ class Dependency:
 DEPENDENCIES: Tuple[Dependency, ...] = (
     Dependency("torch", "torch", metadata_name="torch"),
     Dependency("faster-whisper", "faster_whisper", metadata_name="faster-whisper"),
-    Dependency("RealtimeSTT", "RealtimeSTT", metadata_name="RealtimeSTT"),
+    # RealtimeSTT has been vendored as SCRIPT/stt_engine.py - no longer a separate package
     Dependency("PyAudio", "pyaudio", metadata_name="PyAudio"),
     Dependency("PyQt6", "PyQt6", metadata_name="PyQt6"),
-    Dependency("Pillow", "PIL", metadata_name="Pillow"),
+    Dependency(
+        "Pillow", "PIL", required=False, metadata_name="Pillow"
+    ),  # Not actively used
     Dependency("rich", "rich", required=False, metadata_name="rich"),
     Dependency("webrtcvad", "webrtcvad", required=False, metadata_name="webrtcvad"),
     Dependency("pyperclip", "pyperclip", metadata_name="pyperclip"),

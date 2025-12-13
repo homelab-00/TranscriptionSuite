@@ -11,7 +11,6 @@ This module:
 """
 
 import contextlib
-import gc
 import importlib.util
 import logging
 import os
@@ -27,7 +26,7 @@ from platform_utils import (
     torch,
 )
 from recorder import LongFormRecorder
-from utils import safe_print
+from shared.utils import safe_print, clear_gpu_cache
 
 
 # Typed structure for audio device metadata
@@ -280,14 +279,6 @@ class ModelManager:
         Properly clean up models. This is now handled by the recorder's own
         clean_up method, but we can add extra cleanup here if needed.
         """
-        # Final garbage collection
-        try:
-            gc.collect()
-            gc.collect()
-
-            if HAS_TORCH and torch is not None and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except (AttributeError, ImportError):
-            pass
-
+        # Use shared GPU cache clearing utility
+        clear_gpu_cache()
         logging.info("All models cleaned up")

@@ -14,7 +14,7 @@ import time
 from typing import Any, Dict
 
 from platform_utils import PlatformManager
-from utils import safe_print
+from shared.utils import safe_print
 
 # Import optional dependencies at module level
 try:

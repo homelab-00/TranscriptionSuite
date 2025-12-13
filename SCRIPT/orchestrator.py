@@ -74,7 +74,7 @@ from model_manager import ModelManager
 from platform_utils import get_platform_manager
 from recorder import LongFormRecorder
 from static_transcriber import StaticFileTranscriber
-from utils import safe_print
+from shared.utils import safe_print, clear_gpu_cache
 
 # Import viewer storage functions from the backend database module
 _backend_path = Path(__file__).parent.parent / "AUDIO_NOTEBOOK" / "backend"
@@ -753,6 +753,13 @@ class STTOrchestrator:
         This is a blocking call that waits until all models are unloaded.
         Used before switching between different transcription modes to ensure
         only one model is loaded at a time.
+
+        NOTE: Model reload between longform and static modes is currently required
+        because they use different loading mechanisms:
+        - Longform: Model runs in a subprocess via AudioToTextRecorder (real-time VAD)
+        - Static: Model loaded directly via get_cached_whisper_model (batch processing)
+        Both use the same main_transcriber config, but the subprocess architecture
+        of the realtime engine prevents direct model sharing.
         """
         logging.info("Synchronous model unload starting...")
 
@@ -790,16 +797,8 @@ class STTOrchestrator:
         except Exception as e:
             logging.error(f"Error in model manager cleanup: {e}", exc_info=True)
 
-        # Force GPU cache clear
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                logging.info("GPU cache cleared")
-        except Exception as e:
-            logging.debug(f"Could not clear GPU cache: {e}")
+        # Force GPU cache clear using shared utility
+        clear_gpu_cache()
 
         self.app_state["models_loaded"] = False
         logging.info("Synchronous model unload completed")
@@ -980,15 +979,20 @@ class STTOrchestrator:
     def _start_audio_notebook(self):
         """Start the Audio Notebook server in a background thread.
 
-        Uses lazy model loading: the static Whisper model is NOT loaded on startup.
-        Instead, it will be loaded on-demand when a transcription is requested,
-        and unloaded immediately after completion to free VRAM for LLM usage.
+        INTENTIONAL MODEL UNLOADING:
+        The Whisper model is unloaded when starting Audio Notebook to free VRAM
+        for the LLM (loaded via LM Studio). This is BY DESIGN, not inefficiency:
+        - RTX 3060 12GB cannot fit both Whisper Large V3 (~3GB) and a decent LLM
+        - Audio Notebook uses lazy loading: Whisper loads on-demand for transcription
+        - After transcription, Whisper is immediately unloaded to restore LLM VRAM
+
+        This trade-off prioritizes LLM chat functionality while in Audio Notebook mode.
         """
         if self.audio_notebook_thread and self.audio_notebook_thread.is_alive():
             safe_print("Audio Notebook is already running.", "warning")
             return
 
-        # Handle model unloading - we DON'T load static model here anymore (lazy loading)
+        # Unload Whisper model to free VRAM for LLM (see docstring for rationale)
         current_model_type = self.app_state.get("loaded_model_type")
 
         if current_model_type is not None:

@@ -16,7 +16,7 @@ import time
 from collections import deque
 from typing import Any, Optional, cast
 
-from utils import safe_print
+from shared.utils import safe_print
 
 # Import Rich for better terminal display
 try:
