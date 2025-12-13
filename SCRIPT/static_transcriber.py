@@ -53,7 +53,8 @@ except ImportError as e:
     logging.debug(f"Diarization service not available: {e}")
 
 
-from utils import safe_print
+# Import from shared utilities
+from shared.utils import safe_print, clear_gpu_cache
 
 # Module-level cache for the Whisper model (word timestamps transcription)
 # This avoids reloading the model for each static transcription
@@ -81,8 +82,7 @@ def get_cached_whisper_model(
             logging.info("Unloading previous cached Whisper model...")
             del _cached_whisper_model
             _cached_whisper_model = None
-            if HAS_TORCH and torch and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            clear_gpu_cache()
 
         logging.info(
             f"Loading Whisper model '{model_path}' on {device} for word timestamps..."
@@ -111,8 +111,7 @@ def unload_cached_whisper_model() -> None:
         del _cached_whisper_model
         _cached_whisper_model = None
         _cached_model_config = None
-        if HAS_TORCH and torch and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_gpu_cache()
         logging.info("Cached Whisper model unloaded.")
 
 
