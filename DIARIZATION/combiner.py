@@ -9,24 +9,32 @@ to produce speaker-labeled transcriptions.
 import json
 import logging
 import math
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# Add SCRIPT directory to path for utils import
+# Add SCRIPT directory to path for shared imports
 _script_path = Path(__file__).parent.parent / "SCRIPT"
 if str(_script_path) not in sys.path:
     sys.path.insert(0, str(_script_path))
 
-from utils import format_timestamp
+# Import from shared utilities
+from shared.utils import format_timestamp
 
 from .utils import DiarizationSegment
 
 
 @dataclass
 class TranscriptionSegment:
-    """Represents a transcription segment with timing information."""
+    """
+    Represents a transcription segment with timing information.
+
+    NOTE: This is the combiner's local segment type, used for intermediate
+    processing. The shared TranscriptSegment in SCRIPT.shared.types is the
+    canonical output format.
+    """
 
     text: str
     start: float
