@@ -219,12 +219,14 @@ def run_transcription(
     )
 
     try:
-        # Check orchestrator health
+        # Check orchestrator health - just verify it's running
+        # Note: models_loaded may be False with lazy loading enabled,
+        # the model will load on-demand when transcription is requested
         try:
             with httpx.Client(timeout=2.0) as client:
                 health = client.get(f"{ORCHESTRATOR_API_URL}/health").json()
-                if not health.get("models_loaded"):
-                    raise RuntimeError("Orchestrator models not loaded yet")
+                if health.get("status") != "ok":
+                    raise RuntimeError("Orchestrator not ready")
         except httpx.ConnectError:
             raise RuntimeError(
                 "Orchestrator API not running. Start with: python orchestrator.py --mode audio-notebook"

@@ -1,6 +1,6 @@
 # TranscriptionSuite
 
-Speech-to-text transcription suite for Linux with speaker diarization. Uses `faster-whisper` for transcription and `pyannote-audio` for speaker identification.
+A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing the `faster_whisper` library with `CUDA 12.6` acceleration. Integrates diarization using `PyAnnote`. Implements full web GUI (built with React TS) allowing the user to create a notebook containing their audio notes and relevant transcriptions. GUI fully integrates with local LM Studio server allowing the user to converse with an LLM about their notes.
 
 **Features:**
 
@@ -25,12 +25,11 @@ Speech-to-text transcription suite for Linux with speaker diarization. Uses `fas
 - [Output Format](#output-format)
 - [How It Works](#how-it-works)
 - [Module Architecture](#module-architecture)
-- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ## Project Architecture
 
-```
+```bash
 TranscriptionSuite/
 ├── config.yaml                   # Configuration file
 ├── pyproject.toml                # Dependencies
@@ -320,7 +319,7 @@ Web-based UI for managing and searching transcriptions. Launch from the system t
 
 ### Starting
 
-**From tray:** Right-click → "Start Audio Notebook" → Opens at http://localhost:8000
+**From tray:** Right-click → "Start Audio Notebook" → Opens at [http://localhost:8000](http://localhost:8000)
 
 **Development:**
 
@@ -331,7 +330,7 @@ npm run build  # For production
 npm run dev  # Hot reload on port 1420
 ```
 
-API docs: http://localhost:8000/docs
+API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
@@ -370,6 +369,7 @@ The orchestrator keeps one model type loaded at a time to manage GPU memory:
 ### Dual Transcriber Mode
 
 When `enable_preview_transcriber: true`:
+
 - **Preview** (base model): handles mic, VAD, live preview
 - **Main** (large model): receives audio feed, produces final transcription
 
@@ -383,6 +383,7 @@ When `enable_preview_transcriber: true`:
 ### Speaker Assignment
 
 Each word assigned to speaker by:
+
 1. Calculate word midpoint: `(start + end) / 2`
 2. Find diarization segment containing midpoint
 3. Use that segment's speaker label
@@ -431,18 +432,6 @@ Each word assigned to speaker by:
 | `utils.py` | Utilities |
 
 ---
-
-## Troubleshooting
-
-**Diarization not available:** Run `hf auth login` and accept model terms.
-
-**CUDA out of memory:** Use "Unload All Models" menu, close other GPU apps, or set `device: "cpu"`.
-
-**ctranslate2/CUDA errors:** Ensure CUDA 12.6 is installed at `/opt/cuda-12.6`. See [CUDA Setup](#cuda-setup).
-
-**Audio device issues:** Run `uv run python list_audio_devices.py` and update `config.yaml`.
-
-**Audio Notebook not opening:** Check if port 8000 is in use, check `webapp.log`.
 
 ## License
 
