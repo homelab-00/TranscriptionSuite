@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import signal
+import ssl
 import sys
 import threading
 import time
@@ -86,6 +87,9 @@ class RemoteTranscriptionServer:
         self.auth_manager = AuthManager(secret_key)
         self.auth_timeout = self.config.get("auth_timeout", 10.0)
 
+        # TLS configuration
+        self._ssl_context = self._create_ssl_context()
+
         # Callbacks
         self._transcribe_callback = transcribe_callback
         self._realtime_callback = realtime_callback
@@ -113,10 +117,61 @@ class RemoteTranscriptionServer:
         # Event loop reference
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
+        tls_status = "TLS enabled" if self._ssl_context else "TLS disabled"
         logger.info(
             f"RemoteTranscriptionServer initialized "
-            f"(control:{self.control_port}, data:{self.data_port})"
+            f"(control:{self.control_port}, data:{self.data_port}, {tls_status})"
         )
+
+    def _create_ssl_context(self) -> Optional[ssl.SSLContext]:
+        """
+        Create SSL context if TLS is configured.
+
+        Returns:
+            SSLContext if TLS enabled, None otherwise
+        """
+        tls_config = self.config.get("tls", {})
+
+        if not tls_config.get("enabled", False):
+            return None
+
+        cert_file = tls_config.get("cert_file")
+        key_file = tls_config.get("key_file")
+
+        if not cert_file or not key_file:
+            logger.warning(
+                "TLS enabled but cert_file or key_file not specified. "
+                "Running without TLS."
+            )
+            return None
+
+        # Check files exist
+        if not os.path.exists(cert_file):
+            logger.error(f"TLS cert_file not found: {cert_file}")
+            return None
+        if not os.path.exists(key_file):
+            logger.error(f"TLS key_file not found: {key_file}")
+            return None
+
+        try:
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(
+                certfile=cert_file,
+                keyfile=key_file,
+            )
+
+            # Optional: set minimum TLS version for security
+            ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+            logger.info(f"TLS enabled with cert: {cert_file}")
+            return ssl_context
+
+        except ssl.SSLError as e:
+            logger.error(f"Failed to load TLS certificates: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error creating SSL context: {e}")
+            return None
 
     def generate_token(
         self, client_id: str = "default", expiry_seconds: int = 3600
@@ -439,21 +494,27 @@ class RemoteTranscriptionServer:
 
     async def _run_servers(self) -> None:
         """Run both WebSocket servers."""
+        tls_status = "with TLS" if self._ssl_context else "without TLS"
         logger.info(
             f"Starting servers on {self.host} "
-            f"(control:{self.control_port}, data:{self.data_port})"
+            f"(control:{self.control_port}, data:{self.data_port}) {tls_status}"
         )
+
+        # Determine WebSocket scheme for logging
+        ws_scheme = "wss" if self._ssl_context else "ws"
 
         async with (
             websockets.serve(
                 self._handle_control,
                 self.host,
                 self.control_port,
+                ssl=self._ssl_context,
             ) as control_server,
             websockets.serve(
                 self._handle_data,
                 self.host,
                 self.data_port,
+                ssl=self._ssl_context,
             ) as data_server,
         ):
             self._control_server = control_server
@@ -461,8 +522,10 @@ class RemoteTranscriptionServer:
             self._is_running = True
 
             logger.info("Remote transcription server started")
-            logger.info(f"  Control channel: ws://{self.host}:{self.control_port}")
-            logger.info(f"  Data channel: ws://{self.host}:{self.data_port}")
+            logger.info(
+                f"  Control channel: {ws_scheme}://{self.host}:{self.control_port}"
+            )
+            logger.info(f"  Data channel: {ws_scheme}://{self.host}:{self.data_port}")
 
             # Wait until shutdown
             stop_event = asyncio.Event()
