@@ -53,15 +53,18 @@ _script_path = _project_root / "SCRIPT"
 if str(_script_path) not in sys.path:
     sys.path.insert(0, str(_script_path))
 
-# Add REMOTE_SERVER to path for imports
-_remote_server_path = Path(__file__).parent
-if str(_remote_server_path) not in sys.path:
-    sys.path.insert(0, str(_remote_server_path))
+# Add project root and SCRIPT to path for imports
+_project_root = Path(__file__).parent.parent
+_script_path = _project_root / "SCRIPT"
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+if str(_script_path) not in sys.path:
+    sys.path.insert(0, str(_script_path))
 
-from config_manager import ConfigManager
-from logging_setup import setup_logging
+from SCRIPT.config_manager import ConfigManager
+from SCRIPT.logging_setup import setup_logging
 
-# Import from REMOTE_SERVER using absolute imports (since we added to sys.path)
+# Import from REMOTE_SERVER using absolute imports
 from REMOTE_SERVER.server import RemoteTranscriptionServer
 from REMOTE_SERVER.transcription_engine import create_transcription_callbacks
 
@@ -185,15 +188,15 @@ Examples:
     )
     ws_scheme = "wss" if tls_enabled else "ws"
 
-    print(f"\nListening on:")
+    print("\nListening on:")
     print(f"  Control: {ws_scheme}://{host}:{control_port}")
     print(f"  Data:    {ws_scheme}://{host}:{data_port}")
     if tls_enabled:
-        print(f"\n  TLS: ENABLED")
+        print("\n  TLS: ENABLED")
         print(f"  Cert: {tls_config.get('cert_file')}")
     else:
-        print(f"\n  TLS: disabled (configure in config.yaml for secure connections)")
-    print(f"\nGenerate client tokens with: --generate-token")
+        print("\n  TLS: disabled (configure in config.yaml for secure connections)")
+    print("\nGenerate client tokens with: --generate-token")
     print("\nPress Ctrl+C to stop")
     print("=" * 60 + "\n")
 

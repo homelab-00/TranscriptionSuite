@@ -27,14 +27,11 @@ import json
 import logging
 import queue
 import struct
-import sys
 import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Union
-
-import numpy as np
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +111,10 @@ class AudioRecorder:
         """Detect the current platform."""
         try:
             # Check for Android
-            import android  # type: ignore
+            import importlib.util
 
-            return "android"
+            if importlib.util.find_spec("android") is not None:
+                return "android"
         except ImportError:
             pass
 
@@ -646,12 +644,13 @@ class RemoteTranscriptionClient:
             if not future.result(timeout=10.0):
                 return False
         else:
-            self._loop = asyncio.new_event_loop()
+            loop = asyncio.new_event_loop()
+            self._loop = loop
 
             def run_loop():
-                asyncio.set_event_loop(self._loop)
-                self._loop.run_until_complete(start())
-                self._loop.run_forever()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(start())
+                loop.run_forever()
 
             self._async_thread = threading.Thread(target=run_loop)
             self._async_thread.daemon = True
@@ -710,14 +709,17 @@ class RemoteTranscriptionClient:
             self._recorder.cleanup()
             self._recorder = None
 
-        async def close():
-            if self._control_ws:
-                await self._control_ws.close()
-            if self._data_ws:
-                await self._data_ws.close()
+        control_ws = self._control_ws
+        data_ws = self._data_ws
+
+        async def _close_ws() -> None:
+            if control_ws:
+                await control_ws.close()
+            if data_ws:
+                await data_ws.close()
 
         if self._loop:
-            asyncio.run_coroutine_threadsafe(close(), self._loop)
+            asyncio.run_coroutine_threadsafe(_close_ws(), self._loop)
             self._loop.call_soon_threadsafe(self._loop.stop)
 
         self._control_ws = None

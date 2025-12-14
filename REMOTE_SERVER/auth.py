@@ -8,7 +8,6 @@ Tokens are time-limited and verified on both WebSocket channels.
 import hashlib
 import hmac
 import logging
-import os
 import secrets
 import time
 from dataclasses import dataclass
