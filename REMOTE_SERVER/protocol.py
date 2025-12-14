@@ -339,7 +339,8 @@ class AudioProtocol:
             num_samples = int(
                 len(audio_float) * self.target_sample_rate / chunk.sample_rate
             )
-            audio_float = resample(audio_float, num_samples).astype(np.float32)
+            resampled = resample(audio_float, num_samples)
+            audio_float = np.asarray(resampled, dtype=np.float32)
 
         return audio_float
 

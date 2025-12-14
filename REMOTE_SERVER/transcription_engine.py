@@ -7,24 +7,21 @@ to the actual faster-whisper transcription functionality.
 
 import logging
 import sys
-import tempfile
-import wave
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 
-# Add SCRIPT path for imports
+# Add project root to path for imports
 _project_root = Path(__file__).parent.parent
-_script_path = _project_root / "SCRIPT"
-if str(_script_path) not in sys.path:
-    sys.path.insert(0, str(_script_path))
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
-from static_transcriber import (
+from SCRIPT.static_transcriber import (  # noqa: E402
     get_cached_whisper_model,
     unload_cached_whisper_model,
 )
-from shared.utils import clear_gpu_cache
+from SCRIPT.shared.utils import clear_gpu_cache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +178,8 @@ class TranscriptionEngine:
 def create_transcription_callbacks(
     config: Dict[str, Any],
 ) -> tuple[
-    callable,  # transcribe_callback
-    callable,  # realtime_callback
+    Callable[[np.ndarray, Optional[str]], Dict[str, Any]],  # transcribe_callback
+    Callable[[np.ndarray], Optional[str]],  # realtime_callback
     TranscriptionEngine,  # engine instance for cleanup
 ]:
     """

@@ -13,15 +13,11 @@ Features:
 """
 
 import asyncio
-import json
 import logging
 import os
 import signal
 import ssl
-import sys
 import threading
-import time
-from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import numpy as np
