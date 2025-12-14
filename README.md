@@ -12,6 +12,7 @@ A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing 
 - Word-level timestamps
 - Full-text search (SQLite FTS5)
 - Audio Notebook web app for browsing and searching recordings
+- **Remote transcription server** (WebSocket-based, works with Linux/Android clients)
 
 📌 *Half an hour of audio transcribed in under a minute (RTX 3060)*
 
@@ -22,6 +23,7 @@ A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing 
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Audio Notebook Web App](#audio-notebook-web-app)
+- [Remote Transcription Server](#remote-transcription-server)
 - [Output Format](#output-format)
 - [How It Works](#how-it-works)
 - [Module Architecture](#module-architecture)
@@ -60,6 +62,13 @@ TranscriptionSuite/
 │   ├── service.py                # Service wrapper
 │   ├── combiner.py               # Merges transcription + speakers
 │   └── utils.py                  # Utilities
+├── REMOTE_SERVER/                # Remote transcription server
+│   ├── run_server.py             # Server entry point
+│   ├── server.py                 # WebSocket server
+│   ├── client.py                 # Python client (Linux/Android)
+│   ├── auth.py                   # Token authentication
+│   ├── protocol.py               # Audio/control protocols
+│   └── transcription_engine.py   # Integration with Whisper
 └── list_audio_devices.py         # Audio device utility
 ```
 
@@ -334,6 +343,89 @@ API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
+## Remote Transcription Server
+
+WebSocket-based server allowing remote clients (Linux, Android) to send audio for transcription over the network.
+
+**Features:**
+- Dual WebSocket channels (control + data)
+- Token-based authentication
+- Single-user mode (rejects concurrent connections)
+- Client records at 16kHz (native Whisper format, reduced bandwidth)
+- Cross-platform Python client
+
+### Starting the Server
+
+```bash
+# Start the remote transcription server
+uv run python REMOTE_SERVER/run_server.py
+
+# Generate an authentication token for a client
+uv run python REMOTE_SERVER/run_server.py --generate-token --client-id my-phone
+
+# Custom ports
+uv run python REMOTE_SERVER/run_server.py --control-port 9011 --data-port 9012
+```
+
+### Client Usage (Python)
+
+The client works on both Linux (PyAudio) and Android (via pyjnius):
+
+```python
+from REMOTE_SERVER import RemoteTranscriptionClient
+
+client = RemoteTranscriptionClient(
+    server_host="192.168.1.100",  # Your server's IP
+    token="your_generated_token"
+)
+
+# Start recording
+client.start_recording(language="en")  # Optional language hint
+
+# ... speak ...
+
+# Stop and get transcription
+result = client.stop_and_transcribe()
+print(result.text)
+print(result.words)  # Word-level timestamps
+
+client.disconnect()
+```
+
+Or use the simple CLI:
+
+```bash
+# Record for 10 seconds and transcribe
+uv run python REMOTE_SERVER/client.py \
+    --host 192.168.1.100 \
+    --token "your_token" \
+    --duration 10
+```
+
+### Configuration
+
+In `config.yaml`:
+
+```yaml
+remote_server:
+    enabled: false
+    host: "0.0.0.0"           # Listen on all interfaces
+    control_port: 8011        # Commands, auth, results
+    data_port: 8012           # Audio streaming
+    secret_key: null          # Set for persistent tokens
+    auth_timeout: 10.0
+    token_expiry: 3600        # 1 hour
+```
+
+### Security Notes
+
+- Always use tokens - the server rejects unauthenticated connections
+- For internet exposure, set up nginx with TLS (wss://)
+- Tokens expire after `token_expiry` seconds
+- Only one user can connect at a time - others get "session_busy" error
+
+---
+
 ## Output Format
 
 ```json
@@ -430,6 +522,17 @@ Each word assigned to speaker by:
 | `service.py` | Service wrapper |
 | `combiner.py` | Merge transcription + speakers |
 | `utils.py` | Utilities |
+
+### REMOTE_SERVER/
+
+| Module | Purpose |
+|--------|---------|
+| `run_server.py` | Server entry point |
+| `server.py` | WebSocket server (dual-channel) |
+| `client.py` | Python client for Linux/Android |
+| `auth.py` | Token authentication & session lock |
+| `protocol.py` | Audio/control message formats |
+| `transcription_engine.py` | Integration with Whisper |
 
 ---
 
