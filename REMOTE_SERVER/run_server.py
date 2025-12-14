@@ -176,9 +176,23 @@ Examples:
     control_port = remote_config.get("control_port", 8011)
     data_port = remote_config.get("data_port", 8012)
 
+    # Check TLS status
+    tls_config = remote_config.get("tls", {})
+    tls_enabled = (
+        tls_config.get("enabled", False)
+        and tls_config.get("cert_file")
+        and tls_config.get("key_file")
+    )
+    ws_scheme = "wss" if tls_enabled else "ws"
+
     print(f"\nListening on:")
-    print(f"  Control: ws://{host}:{control_port}")
-    print(f"  Data:    ws://{host}:{data_port}")
+    print(f"  Control: {ws_scheme}://{host}:{control_port}")
+    print(f"  Data:    {ws_scheme}://{host}:{data_port}")
+    if tls_enabled:
+        print(f"\n  TLS: ENABLED")
+        print(f"  Cert: {tls_config.get('cert_file')}")
+    else:
+        print(f"\n  TLS: disabled (configure in config.yaml for secure connections)")
     print(f"\nGenerate client tokens with: --generate-token")
     print("\nPress Ctrl+C to stop")
     print("=" * 60 + "\n")

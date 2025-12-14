@@ -12,7 +12,7 @@ A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing 
 - Word-level timestamps
 - Full-text search (SQLite FTS5)
 - Audio Notebook web app for browsing and searching recordings
-- **Remote transcription server** (WebSocket-based, works with Linux/Android clients)
+- Remote transcription server (WebSocket-based, works with Linux/Android clients)
 
 📌 *Half an hour of audio transcribed in under a minute (RTX 3060)*
 
@@ -26,7 +26,7 @@ A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing 
 - [Remote Transcription Server](#remote-transcription-server)
 - [Output Format](#output-format)
 - [How It Works](#how-it-works)
-- [Module Architecture](#module-architecture)
+- [Scripts overview](#scripts-overview)
 - [License](#license)
 
 ## Project Architecture
@@ -484,9 +484,9 @@ Each word assigned to speaker by:
 
 ---
 
-## Module Architecture
+## Scripts overview
 
-### SCRIPT/
+**SCRIPT/**
 
 | Module | Purpose |
 |--------|---------|
@@ -504,7 +504,7 @@ Each word assigned to speaker by:
 | `diagnostics.py` | Hardware info |
 | `utils.py` | Utilities |
 
-### AUDIO_NOTEBOOK/backend/
+**AUDIO_NOTEBOOK/backend/**
 
 | Module | Purpose |
 |--------|---------|
@@ -514,7 +514,7 @@ Each word assigned to speaker by:
 | `routers/transcribe.py` | Import/transcription |
 | `routers/llm.py` | LM Studio integration |
 
-### DIARIZATION/
+**DIARIZATION/**
 
 | Module | Purpose |
 |--------|---------|
@@ -523,7 +523,7 @@ Each word assigned to speaker by:
 | `combiner.py` | Merge transcription + speakers |
 | `utils.py` | Utilities |
 
-### REMOTE_SERVER/
+**REMOTE_SERVER/**
 
 | Module | Purpose |
 |--------|---------|
