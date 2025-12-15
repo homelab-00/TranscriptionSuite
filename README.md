@@ -270,7 +270,7 @@ display:
 |------|----------|
 | Database | `AUDIO_NOTEBOOK/backend/data/transcriptions.db` |
 | Audio Files | `AUDIO_NOTEBOOK/backend/data/audio/` |
-| Logs | `transcription_suite.log`, `audio_notebook_webapp.log`, `server_mode.log` (project root, wiped on start) |
+| Logs | `transcription_suite.log`, `audio_notebook_webapp.log` (project root, wiped on start) |
 | Models | `~/.cache/huggingface/` |
 | Temp Files | `/tmp/transcription-suite/` |
 | Server Data | `REMOTE_SERVER/data/` (tokens, TLS certs) |
@@ -289,13 +289,14 @@ uv run SCRIPT/orchestrator.py
 | Middle-click | Stop & transcribe |
 | Right-click | Context menu |
 
-**Icon Colors:** Grey (loading), Green (ready), Yellow (recording), Orange (transcribing longform), Mauve (static transcription), Aquamarine (web server running), Red (error)
+**Icon Colors:** Grey (loading), Green (ready), Yellow (recording), Orange (transcribing longform), Mauve (static transcription), Aquamarine (Audio Notebook), Purple (Server Mode), Red (error)
 
 ### Context Menu
 
 - Start/Stop Recording
 - Transcribe Audio File...
 - Start/Stop Audio Notebook
+- Start/Stop Server Mode
 - Unload/Reload All Models
 - Quit
 
@@ -363,18 +364,25 @@ Web-based server allowing remote clients to transcribe audio via a browser inter
 - File upload transcription support
 - Tailscale VPN integration for secure remote access
 
-### Starting the Server
+### Starting Server Mode
+
+Server Mode can be started in two ways:
+
+**From system tray (recommended):**
+Right-click the tray icon → "Start Server Mode"
+
+This integrates with the orchestrator, shares the main log file (`transcription_suite.log`), and properly manages model loading/unloading.
+
+**Standalone (for development/testing):**
 
 ```bash
-# Start the remote transcription server
 uv run python REMOTE_SERVER/run_server.py
-
-# Access the web UI at:
-# https://localhost:8443 (or your Tailscale IP)
 
 # Custom ports
 uv run python REMOTE_SERVER/run_server.py --https-port 9443 --wss-port 9444
 ```
+
+Access the web UI at: `https://localhost:8443` (or your Tailscale IP)
 
 On first run, an admin token is generated and printed to the console. Save this token to access the admin panel.
 
