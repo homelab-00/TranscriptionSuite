@@ -38,6 +38,12 @@ from .transcription_engine import (
     create_transcription_callbacks,
     create_file_transcription_callback,
 )
+from .server_logging import (
+    setup_server_logging,
+    get_server_logger,
+    get_websocket_logger,
+    get_api_logger,
+)
 from .client import RemoteTranscriptionClient, AudioRecorder, transcribe_audio
 
 __all__ = [
@@ -59,6 +65,11 @@ __all__ = [
     "TranscriptionEngine",
     "create_transcription_callbacks",
     "create_file_transcription_callback",
+    # Logging
+    "setup_server_logging",
+    "get_server_logger",
+    "get_websocket_logger",
+    "get_api_logger",
     # Client
     "RemoteTranscriptionClient",
     "AudioRecorder",

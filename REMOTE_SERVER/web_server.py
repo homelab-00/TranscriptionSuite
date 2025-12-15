@@ -10,25 +10,24 @@ Provides:
 
 import asyncio
 import json
-import logging
 import mimetypes
-import os
 import signal
 import ssl
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, cast
 
 import numpy as np
 from aiohttp import web
-import aiohttp
-from websockets.asyncio.server import Server, ServerConnection
+from aiohttp.multipart import BodyPartReader
+from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
 import websockets
 
-from .auth import AuthManager, AuthSession
+from .auth import AuthManager
 from .token_store import StoredToken
+from .server_logging import get_server_logger, get_websocket_logger, get_api_logger
 from .protocol import (
     AudioChunk,
     AudioProtocol,
@@ -38,7 +37,10 @@ from .protocol import (
     SAMPLE_RATE,
 )
 
-logger = logging.getLogger(__name__)
+# Initialize logger from server_logging (writes to server_mode.log)
+logger = get_server_logger()
+ws_logger = get_websocket_logger()
+api_logger = get_api_logger()
 
 # Default ports
 DEFAULT_HTTPS_PORT = 8443
@@ -157,7 +159,7 @@ class WebTranscriptionServer:
         key_path = Path(key_file)
 
         if not cert_path.exists() or not key_path.exists():
-            logger.error(f"TLS cert or key file not found")
+            logger.error("TLS cert or key file not found")
             return None
 
         try:
@@ -353,22 +355,24 @@ class WebTranscriptionServer:
             # Read multipart form data
             reader = await request.multipart()
 
-            audio_file = None
-            language = None
+            audio_file: Optional[Path] = None
+            language: Optional[str] = None
 
             async for field in reader:
-                if field.name == "file":
+                # Cast field to BodyPartReader (aiohttp's multipart field type)
+                part = cast(BodyPartReader, field)
+                if part.name == "file":
                     # Save to temp file
-                    suffix = Path(field.filename or "audio").suffix or ".wav"
+                    suffix = Path(part.filename or "audio").suffix or ".wav"
                     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                         while True:
-                            chunk = await field.read_chunk()
+                            chunk = await part.read_chunk()
                             if not chunk:
                                 break
                             tmp.write(chunk)
                         audio_file = Path(tmp.name)
-                elif field.name == "language":
-                    language = (await field.read()).decode()
+                elif part.name == "language":
+                    language = (await part.read()).decode()
 
             if audio_file is None:
                 return web.json_response({"error": "No file uploaded"}, status=400)
@@ -432,7 +436,7 @@ class WebTranscriptionServer:
         if content_type is None:
             content_type = "application/octet-stream"
 
-        return web.FileResponse(file_path, headers={"Content-Type": content_type})
+        return web.FileResponse(file_path, headers={"Content-Type": content_type})  # type: ignore[return-value]
 
     # =========================================================================
     # WebSocket Handler
@@ -441,7 +445,7 @@ class WebTranscriptionServer:
     async def _handle_websocket(self, websocket: ServerConnection) -> None:
         """Handle WebSocket connection for audio streaming."""
         client_addr = websocket.remote_address
-        logger.info(f"WebSocket connection from {client_addr}")
+        ws_logger.info(f"WebSocket connection established from {client_addr}")
 
         token: Optional[str] = None
         stored_token: Optional[StoredToken] = None
@@ -449,20 +453,33 @@ class WebTranscriptionServer:
         try:
             # Wait for authentication
             try:
+                ws_logger.debug(f"Waiting for auth message from {client_addr}...")
                 auth_message = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+                ws_logger.debug(
+                    f"Received message: {auth_message[:100]}..."
+                )  # Log first 100 chars
+
                 msg = ControlMessage.from_json(auth_message)  # type: ignore
+                ws_logger.debug(f"Parsed message type: {msg.type}")
 
                 if msg.type != MessageType.AUTH:
+                    ws_logger.warning(f"Expected AUTH, got {msg.type}")
                     response = ControlProtocol.create_auth_response(
                         False, "Expected authentication message"
                     )
                     await websocket.send(response.to_json())
                     return
 
-                token = msg.data.get("token", "")
+                token_value = msg.data.get("token")
+                token = token_value if isinstance(token_value, str) else ""
+                if token:
+                    ws_logger.debug(
+                        f"Validating token: {token[:16]}..."
+                    )  # Log first 16 chars
                 stored_token = self.auth_manager.validate_token(token)
 
                 if stored_token is None:
+                    ws_logger.warning(f"Token validation failed for {client_addr}")
                     response = ControlProtocol.create_auth_response(
                         False, "Invalid or revoked token"
                     )
@@ -470,8 +487,12 @@ class WebTranscriptionServer:
                     return
 
                 # Try to acquire session
+                ws_logger.debug(
+                    f"Attempting to acquire session for {stored_token.client_name}"
+                )
                 if not self.auth_manager.acquire_session(stored_token):
                     active_user = self.auth_manager.get_active_client_name() or "unknown"
+                    ws_logger.warning(f"Session denied: {active_user} is already active")
                     response = ControlProtocol.create_session_busy_response(active_user)
                     await websocket.send(response.to_json())
                     return
@@ -490,10 +511,10 @@ class WebTranscriptionServer:
                     },
                 )
                 await websocket.send(response.to_json())
-                logger.info(f"WebSocket authenticated: {stored_token.client_name}")
+                ws_logger.info(f"WebSocket authenticated: {stored_token.client_name}")
 
             except asyncio.TimeoutError:
-                logger.warning(f"WebSocket auth timeout from {client_addr}")
+                ws_logger.warning(f"WebSocket auth timeout from {client_addr}")
                 response = ControlProtocol.create_auth_response(False, "Auth timeout")
                 await websocket.send(response.to_json())
                 return
@@ -502,13 +523,13 @@ class WebTranscriptionServer:
             async for message in websocket:
                 if isinstance(message, bytes):
                     await self._process_audio_data(message, websocket)
-                else:
+                elif isinstance(message, str):
                     await self._process_control_message(message, websocket)
 
-        except ConnectionClosed:
-            logger.info(f"WebSocket closed from {client_addr}")
+        except ConnectionClosed as e:
+            ws_logger.info(f"WebSocket closed from {client_addr}: {e.code} {e.reason}")
         except Exception as e:
-            logger.error(f"WebSocket error: {e}", exc_info=True)
+            ws_logger.error(f"WebSocket error from {client_addr}: {e}", exc_info=True)
         finally:
             # Cleanup
             if token and self._ws_token == token:
@@ -518,7 +539,7 @@ class WebTranscriptionServer:
                 self._is_transcribing = False
                 self.audio_protocol.clear_buffer()
                 self._audio_accumulator.clear()
-                logger.info(f"Session released")
+                ws_logger.info("Session released")
 
     async def _process_control_message(
         self, message: str, websocket: ServerConnection
@@ -702,7 +723,7 @@ class WebTranscriptionServer:
             self.host,
             self.wss_port,
             ssl=self._ssl_context,
-        ) as ws_server:
+        ):
             self._is_running = True
             logger.info("Servers started")
 

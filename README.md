@@ -64,11 +64,16 @@ TranscriptionSuite/
 │   └── utils.py                  # Utilities
 ├── REMOTE_SERVER/                # Remote transcription server
 │   ├── run_server.py             # Server entry point
-│   ├── server.py                 # WebSocket server
-│   ├── client.py                 # Python client (Linux/Android)
-│   ├── auth.py                   # Token authentication
+│   ├── web_server.py             # Combined HTTPS + WSS server (aiohttp)
+│   ├── server.py                 # Legacy WebSocket server
+│   ├── token_store.py            # Persistent JSON token storage
+│   ├── auth.py                   # Token authentication & session lock
 │   ├── protocol.py               # Audio/control protocols
-│   └── transcription_engine.py   # Integration with Whisper
+│   ├── transcription_engine.py   # Integration with Whisper
+│   ├── server_logging.py         # Server-mode logging
+│   ├── client.py                 # Python client (Linux/Android)
+│   ├── web/                      # React frontend (Vite + TS + Tailwind)
+│   └── data/                     # Tokens, TLS certs
 └── list_audio_devices.py         # Audio device utility
 ```
 
@@ -265,9 +270,10 @@ display:
 |------|----------|
 | Database | `AUDIO_NOTEBOOK/backend/data/transcriptions.db` |
 | Audio Files | `AUDIO_NOTEBOOK/backend/data/audio/` |
-| Logs | `transcription_suite.log`, `webapp.log` (project root, wiped on start) |
+| Logs | `transcription_suite.log`, `audio_notebook_webapp.log`, `server_mode.log` (project root, wiped on start) |
 | Models | `~/.cache/huggingface/` |
 | Temp Files | `/tmp/transcription-suite/` |
+| Server Data | `REMOTE_SERVER/data/` (tokens, TLS certs) |
 
 ## Usage
 
@@ -355,6 +361,7 @@ Web-based server allowing remote clients to transcribe audio via a browser inter
 - Admin panel for token management
 - Single-user mode (rejects concurrent connections)
 - File upload transcription support
+- Tailscale VPN integration for secure remote access
 
 ### Starting the Server
 
@@ -509,10 +516,11 @@ Each word assigned to speaker by:
 | Module | Purpose |
 |--------|---------|
 | `run_server.py` | Server entry point |
-| `web_server.py` | Combined HTTPS + WSS server |
+| `web_server.py` | Combined HTTPS + WSS server (aiohttp) |
 | `server.py` | Legacy WebSocket server |
-| `token_store.py` | Persistent token storage |
+| `token_store.py` | Persistent JSON token storage (file-locked) |
 | `auth.py` | Token authentication & session lock |
+| `server_logging.py` | Server-mode logging (`server_mode.log`) |
 | `protocol.py` | Audio/control message formats |
 | `transcription_engine.py` | Integration with Whisper |
 | `client.py` | Python client for Linux/Android |

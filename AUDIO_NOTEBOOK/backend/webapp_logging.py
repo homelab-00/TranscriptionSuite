@@ -1,7 +1,7 @@
 """
 Logging setup for the Audio Notebook webapp.
 
-Creates webapp.log in project root, wiped on each startup.
+Creates audio_notebook_webapp.log in project root, wiped on each startup.
 Also logs LLM interactions.
 """
 
@@ -18,7 +18,7 @@ def setup_webapp_logging() -> logging.Logger:
     """
     Initialize webapp logging.
 
-    Creates webapp.log in project root with mode='w' to wipe on each start.
+    Creates audio_notebook_webapp.log in project root with mode='w' to wipe on each start.
     Returns the webapp logger.
     """
     global _webapp_logging_configured, _webapp_logger
@@ -30,7 +30,7 @@ def setup_webapp_logging() -> logging.Logger:
     backend_dir = Path(__file__).resolve().parent
     project_root = backend_dir.parent.parent
 
-    log_path = project_root / "webapp.log"
+    log_path = project_root / "audio_notebook_webapp.log"
 
     # Create webapp logger
     logger = logging.getLogger("webapp")
