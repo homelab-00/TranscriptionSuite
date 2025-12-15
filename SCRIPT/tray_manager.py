@@ -50,6 +50,7 @@ class TrayIconManager:
         static_transcribe_callback: Optional[Callable[[], None]] = None,
         toggle_models_callback: Optional[Callable[[], None]] = None,
         audio_notebook_callback: Optional[Callable[[], None]] = None,
+        server_mode_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize the TrayIconManager.
@@ -62,6 +63,7 @@ class TrayIconManager:
             static_transcribe_callback: Function to call for static transcription.
             toggle_models_callback: Function to call to toggle models loaded state.
             audio_notebook_callback: Function to call to start the audio notebook webapp.
+            server_mode_callback: Function to call to toggle server mode.
         """
         if not HAS_PYQT:
             raise ImportError(
@@ -90,9 +92,12 @@ class TrayIconManager:
         self.static_transcribe_callback = static_transcribe_callback
         self.toggle_models_callback = toggle_models_callback
         self.audio_notebook_callback = audio_notebook_callback
+        self.server_mode_callback = server_mode_callback
 
         # Reference to the models menu item for dynamic updates
         self.models_action: Optional[QAction] = None
+        # Reference to server mode menu item for dynamic updates
+        self.server_mode_action: Optional[QAction] = None
         # Reference to audio notebook menu item for enabling/disabling
         self.audio_notebook_action: Optional[QAction] = None
         # References to start/stop recording actions for enabling/disabling
@@ -119,6 +124,7 @@ class TrayIconManager:
             ),  # Pastel mauve - static file transcription
             "error": (255, 0, 0),  # Red
             "audio_notebook": (102, 178, 178),  # Muted aquamarine/teal
+            "server_mode": (147, 112, 219),  # Medium purple - server mode
         }
 
     def _setup_context_menu(self) -> None:
@@ -149,6 +155,14 @@ class TrayIconManager:
             menu.addAction(self.audio_notebook_action)  # type: ignore[call-overload]
             cast(Any, self.audio_notebook_action.triggered).connect(
                 self._on_audio_notebook_triggered
+            )
+
+        # Add Server Mode menu item
+        if self.server_mode_callback:
+            self.server_mode_action = QAction("Start Server Mode", menu)
+            menu.addAction(self.server_mode_action)  # type: ignore[call-overload]
+            cast(Any, self.server_mode_action.triggered).connect(
+                self._on_server_mode_triggered
             )
 
         # Add models unload/reload menu item
@@ -231,6 +245,10 @@ class TrayIconManager:
         if self.audio_notebook_callback:
             self.audio_notebook_callback()
 
+    def _on_server_mode_triggered(self, checked: bool) -> None:
+        if self.server_mode_callback:
+            self.server_mode_callback()
+
     def _on_stop_triggered(self, checked: bool) -> None:
         if self.stop_callback:
             self.stop_callback()
@@ -263,11 +281,32 @@ class TrayIconManager:
             # Qt object may have been deleted during shutdown
             pass
 
+    def update_server_mode_menu_item(self, is_running: bool) -> None:
+        """Update the server mode menu item based on whether it's running."""
+        try:
+            if self.server_mode_action:
+                if is_running:
+                    self.server_mode_action.setText("Stop Server Mode")
+                else:
+                    self.server_mode_action.setText("Start Server Mode")
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
+
     def set_audio_notebook_enabled(self, enabled: bool) -> None:
         """Enable or disable the audio notebook menu item."""
         try:
             if self.audio_notebook_action:
                 self.audio_notebook_action.setEnabled(enabled)
+        except RuntimeError:
+            # Qt object may have been deleted during shutdown
+            pass
+
+    def set_server_mode_enabled(self, enabled: bool) -> None:
+        """Enable or disable the server mode menu item."""
+        try:
+            if self.server_mode_action:
+                self.server_mode_action.setEnabled(enabled)
         except RuntimeError:
             # Qt object may have been deleted during shutdown
             pass
