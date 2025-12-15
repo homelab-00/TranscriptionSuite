@@ -345,14 +345,16 @@ API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## Remote Transcription Server
 
-WebSocket-based server allowing remote clients (Linux, Android) to send audio for transcription over the network.
+Web-based server allowing remote clients to transcribe audio via a browser interface, accessible over Tailscale VPN or local network.
 
 **Features:**
-- Dual WebSocket channels (control + data)
-- Token-based authentication
+
+- Web UI with React frontend (record, file upload, admin panel)
+- HTTPS + WebSocket Secure (WSS) with self-signed certificates
+- Token-based authentication (no expiry, manual revocation)
+- Admin panel for token management
 - Single-user mode (rejects concurrent connections)
-- Client records at 16kHz (native Whisper format, reduced bandwidth)
-- Cross-platform Python client
+- File upload transcription support
 
 ### Starting the Server
 
@@ -360,69 +362,48 @@ WebSocket-based server allowing remote clients (Linux, Android) to send audio fo
 # Start the remote transcription server
 uv run python REMOTE_SERVER/run_server.py
 
-# Generate an authentication token for a client
-uv run python REMOTE_SERVER/run_server.py --generate-token --client-id my-phone
+# Access the web UI at:
+# https://localhost:8443 (or your Tailscale IP)
 
 # Custom ports
-uv run python REMOTE_SERVER/run_server.py --control-port 9011 --data-port 9012
+uv run python REMOTE_SERVER/run_server.py --https-port 9443 --wss-port 9444
 ```
 
-### Client Usage (Python)
+On first run, an admin token is generated and printed to the console. Save this token to access the admin panel.
 
-The client works on both Linux (PyAudio) and Android (via pyjnius):
+### Web UI Features
 
-```python
-from REMOTE_SERVER import RemoteTranscriptionClient
+1. **Login**: Enter your token to authenticate
+2. **Record Tab**: Hold button to record, release to transcribe
+3. **Upload Tab**: Drag & drop audio/video files for transcription
+4. **Admin Tab** (admin only): Create and revoke tokens
 
-client = RemoteTranscriptionClient(
-    server_host="192.168.1.100",  # Your server's IP
-    token="your_generated_token"
-)
-
-# Start recording
-client.start_recording(language="en")  # Optional language hint
-
-# ... speak ...
-
-# Stop and get transcription
-result = client.stop_and_transcribe()
-print(result.text)
-print(result.words)  # Word-level timestamps
-
-client.disconnect()
-```
-
-Or use the simple CLI:
-
-```bash
-# Record for 10 seconds and transcribe
-uv run python REMOTE_SERVER/client.py \
-    --host 192.168.1.100 \
-    --token "your_token" \
-    --duration 10
-```
-
-### Configuration
+### Server Configuration
 
 In `config.yaml`:
 
 ```yaml
 remote_server:
-    enabled: false
+    enabled: true
     host: "0.0.0.0"           # Listen on all interfaces
-    control_port: 8011        # Commands, auth, results
-    data_port: 8012           # Audio streaming
-    secret_key: null          # Set for persistent tokens
-    auth_timeout: 10.0
-    token_expiry: 3600        # 1 hour
+    https_port: 8443          # HTTPS (web UI + REST API)
+    wss_port: 8444            # WebSocket Secure (audio streaming)
+    token_store: "REMOTE_SERVER/data/tokens.json"
+    
+    tls:
+        enabled: true
+        cert_file: "REMOTE_SERVER/data/cert.pem"
+        key_file: "REMOTE_SERVER/data/key.pem"
+        auto_generate: true   # Generate self-signed if missing
 ```
 
 ### Security Notes
 
-- Always use tokens - the server rejects unauthenticated connections
-- For internet exposure, set up nginx with TLS (wss://)
-- Tokens expire after `token_expiry` seconds
-- Only one user can connect at a time - others get "session_busy" error
+- Tokens never expire - revoke them manually when needed
+- Self-signed certificates auto-generated on first run
+- Browser will warn about self-signed cert (accept once)
+- Only one user can record at a time
+- Designed for use over Tailscale VPN (encrypted tunnel)
 
 ---
 
@@ -486,7 +467,7 @@ Each word assigned to speaker by:
 
 ## Scripts overview
 
-**SCRIPT/**
+### SCRIPT/
 
 | Module | Purpose |
 |--------|---------|
@@ -504,7 +485,7 @@ Each word assigned to speaker by:
 | `diagnostics.py` | Hardware info |
 | `utils.py` | Utilities |
 
-**AUDIO_NOTEBOOK/backend/**
+### AUDIO_NOTEBOOK/backend/
 
 | Module | Purpose |
 |--------|---------|
@@ -514,7 +495,7 @@ Each word assigned to speaker by:
 | `routers/transcribe.py` | Import/transcription |
 | `routers/llm.py` | LM Studio integration |
 
-**DIARIZATION/**
+### DIARIZATION/
 
 | Module | Purpose |
 |--------|---------|
@@ -523,16 +504,19 @@ Each word assigned to speaker by:
 | `combiner.py` | Merge transcription + speakers |
 | `utils.py` | Utilities |
 
-**REMOTE_SERVER/**
+### REMOTE_SERVER/
 
 | Module | Purpose |
 |--------|---------|
 | `run_server.py` | Server entry point |
-| `server.py` | WebSocket server (dual-channel) |
-| `client.py` | Python client for Linux/Android |
+| `web_server.py` | Combined HTTPS + WSS server |
+| `server.py` | Legacy WebSocket server |
+| `token_store.py` | Persistent token storage |
 | `auth.py` | Token authentication & session lock |
 | `protocol.py` | Audio/control message formats |
 | `transcription_engine.py` | Integration with Whisper |
+| `client.py` | Python client for Linux/Android |
+| `web/` | React frontend (Vite + TypeScript + Tailwind) |
 
 ---
 

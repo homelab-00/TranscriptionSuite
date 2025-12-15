@@ -1,55 +1,64 @@
 """
-REMOTE_SERVER - WebSocket-based remote transcription server module.
+REMOTE_SERVER - Web-based remote transcription server module.
 
 This module provides:
-- Secure WebSocket server for remote audio transcription
-- Dual-channel architecture (control + data)
-- Token-based authentication
-- Single-user busy lock (rejects concurrent connections)
-- Integration with the existing transcription engine
-- Cross-platform client (Linux/Android)
+- HTTPS web server with React UI for remote transcription
+- WebSocket Secure (WSS) for real-time audio streaming
+- Token-based authentication with persistent storage
+- Admin panel for token management
+- Single-user mode (rejects concurrent connections)
+- File upload transcription support
 
 Architecture:
-- Control WebSocket (port 8011): Commands, configuration, status
-- Data WebSocket (port 8012): Audio streaming, transcription results
+- HTTPS (port 8443): React web UI + REST API
+- WSS (port 8444): WebSocket for audio streaming
 
 Server Usage:
     # Start the server
     uv run python REMOTE_SERVER/run_server.py
 
-    # Generate auth token
-    uv run python REMOTE_SERVER/run_server.py --generate-token
+    # Access the web UI at https://localhost:8443
+    # Admin token is printed on first run
 
-Client Usage:
-    from REMOTE_SERVER import RemoteTranscriptionClient
-
-    client = RemoteTranscriptionClient(
-        server_host="192.168.1.100",
-        token="your_token_here"
-    )
-    client.start_recording()
-    # ... speak ...
-    result = client.stop_and_transcribe()
-    print(result.text)
+Web UI Features:
+    - Login with persistent token
+    - Long-form recording (hold to record)
+    - File upload for transcription
+    - Session history
+    - Admin panel for token management
 """
 
 from .server import RemoteTranscriptionServer
-from .auth import AuthManager, generate_auth_token
+from .web_server import WebTranscriptionServer
+from .auth import AuthManager, AuthSession
+from .token_store import TokenStore, StoredToken
 from .protocol import AudioProtocol, ControlProtocol, AudioChunk, ControlMessage
-from .transcription_engine import TranscriptionEngine, create_transcription_callbacks
+from .transcription_engine import (
+    TranscriptionEngine,
+    create_transcription_callbacks,
+    create_file_transcription_callback,
+)
 from .client import RemoteTranscriptionClient, AudioRecorder, transcribe_audio
 
 __all__ = [
-    # Server
+    # Web Server (new)
+    "WebTranscriptionServer",
+    # Legacy Server
     "RemoteTranscriptionServer",
+    # Auth
     "AuthManager",
-    "generate_auth_token",
+    "AuthSession",
+    "TokenStore",
+    "StoredToken",
+    # Protocol
     "AudioProtocol",
     "ControlProtocol",
     "AudioChunk",
     "ControlMessage",
+    # Transcription
     "TranscriptionEngine",
     "create_transcription_callbacks",
+    "create_file_transcription_callback",
     # Client
     "RemoteTranscriptionClient",
     "AudioRecorder",

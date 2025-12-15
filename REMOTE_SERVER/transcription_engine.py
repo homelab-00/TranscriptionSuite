@@ -202,3 +202,69 @@ def create_transcription_callbacks(
         return engine.transcribe_realtime(audio_chunk)
 
     return transcribe_callback, realtime_callback, engine
+
+
+def create_file_transcription_callback(
+    config: Dict[str, Any],
+    engine: TranscriptionEngine,
+) -> Callable[[Path, Optional[str]], Dict[str, Any]]:
+    """
+    Create a callback for transcribing audio files.
+
+    Args:
+        config: Full application config dict
+        engine: Existing TranscriptionEngine instance
+
+    Returns:
+        Callback function for file transcription
+    """
+    import subprocess
+    import tempfile
+    import soundfile as sf
+
+    def file_transcribe_callback(
+        file_path: Path, language: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Transcribe an audio file using the engine's model."""
+        logger.info(f"Transcribing file: {file_path}")
+
+        # Convert to WAV using ffmpeg
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            wav_path = Path(tmp.name)
+
+        try:
+            # Convert to 16kHz mono WAV
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(file_path),
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(wav_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            # Read audio
+            audio_data, sample_rate = sf.read(wav_path, dtype="float32")
+
+            # Transcribe using the engine
+            result = engine.transcribe(audio_data, language)
+            return result
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg conversion failed: {e.stderr.decode()}")
+            raise RuntimeError(f"Audio conversion failed: {e.stderr.decode()}")
+        finally:
+            # Cleanup
+            if wav_path.exists():
+                wav_path.unlink()
+
+    return file_transcribe_callback
