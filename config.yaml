@@ -46,7 +46,7 @@ longform_recording:
 # Settings for transcribing audio/video files (not live recording).
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
-    # Requires PyAnnote models to be downloaded (huggingface-cli login).
+    # Requires PyAnnote models to be downloaded.
     enable_diarization: false
 
     # Enable word-level timestamps in the transcription output.
@@ -250,7 +250,7 @@ remote_server:
     # Network interface to bind to.
     # Use "0.0.0.0" to accept connections from any interface.
     # Use "127.0.0.1" for local-only connections.
-    host: "0.0.0.0"
+    host: "127.0.0.1"
 
     # Port for HTTPS (web UI + REST API)
     https_port: 8443

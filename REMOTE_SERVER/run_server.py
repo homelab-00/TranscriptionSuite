@@ -40,7 +40,6 @@ if os.environ.get(_ENV_MARKER) != "1":
 # ruff: noqa: E402
 
 import argparse
-import logging
 from pathlib import Path
 
 # Add project root to path
@@ -54,14 +53,14 @@ if str(_script_path) not in sys.path:
     sys.path.insert(0, str(_script_path))
 
 from SCRIPT.config_manager import ConfigManager
-from SCRIPT.logging_setup import setup_logging
 
-# Import scripts from within the REMOTE_SERVER package
-from .web_server import WebTranscriptionServer
-from .transcription_engine import (
+# Import from REMOTE_SERVER package
+from REMOTE_SERVER.web_server import WebTranscriptionServer
+from REMOTE_SERVER.transcription_engine import (
     create_transcription_callbacks,
     create_file_transcription_callback,
 )
+from REMOTE_SERVER.server_logging import get_server_logger
 
 
 def main():
@@ -112,9 +111,12 @@ Examples:
     config_manager = ConfigManager(args.config)
     config = config_manager.load_or_create_config()
 
-    # Initialize logging
-    setup_logging(config)
-    logger = logging.getLogger(__name__)
+    # Initialize logging (uses server_mode.log)
+    logger = get_server_logger()
+
+    # Log file location
+    log_file = _project_root / "server_mode.log"
+    print(f"\nLog file: {log_file}")
 
     # Apply command-line overrides
     remote_config = config.setdefault("remote_server", {})
@@ -167,6 +169,8 @@ Examples:
 
     print("\nTokens are stored in: REMOTE_SERVER/data/tokens.json")
     print("Admin token is printed on first run. Use web UI to manage tokens.")
+    print(f"\nLogs are written to: {log_file}")
+    print("  Use 'tail -f' to watch logs in real-time")
     print("\nPress Ctrl+C to stop")
     print("=" * 70 + "\n")
 
