@@ -240,46 +240,34 @@ local_llm:
 # ----------------------------------------------------------------------------
 # Remote Transcription Server
 # ----------------------------------------------------------------------------
-# Settings for the WebSocket-based remote transcription server.
-# This allows clients on other devices (Linux, Android) to send audio
-# for transcription over the network.
+# Settings for the web-based remote transcription server.
+# This allows clients on other devices to transcribe audio via a web browser
+# interface over a Tailscale VPN or local network.
 remote_server:
     # Enable the remote server mode
-    enabled: false
+    enabled: true
 
     # Network interface to bind to.
     # Use "0.0.0.0" to accept connections from any interface.
     # Use "127.0.0.1" for local-only connections.
     host: "0.0.0.0"
 
-    # Port for the control WebSocket channel.
-    # Used for authentication, commands, status, and transcription results.
-    control_port: 8011
+    # Port for HTTPS (web UI + REST API)
+    https_port: 8443
 
-    # Port for the data WebSocket channel.
-    # Used for streaming audio data.
-    data_port: 8012
+    # Port for WebSocket Secure (audio streaming)
+    wss_port: 8444
 
-    # Secret key for token signing.
-    # If not set, a random key is generated on each startup.
-    # Set this to a fixed value if you want tokens to persist across restarts.
-    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
-    secret_key: null
+    # Path to token storage file (relative to project root)
+    token_store: "REMOTE_SERVER/data/tokens.json"
 
-    # Authentication timeout in seconds.
-    # Clients must authenticate within this time after connecting.
-    auth_timeout: 10.0
-
-    # Token expiry time in seconds (default: 1 hour).
-    # Clients need to re-authenticate after this time.
-    token_expiry: 3600
-
-    # TLS/SSL configuration (recommended for internet exposure).
-    # Set both cert_file and key_file to enable TLS.
+    # TLS/SSL configuration
+    # Self-signed certificates are auto-generated on first run
     tls:
-        enabled: false
-        cert_file: null  # Path to SSL certificate file
-        key_file: null   # Path to SSL private key file
+        enabled: true
+        cert_file: "REMOTE_SERVER/data/cert.pem"
+        key_file: "REMOTE_SERVER/data/key.pem"
+        auto_generate: true  # Generate self-signed cert if missing
 
 
 # ----------------------------------------------------------------------------

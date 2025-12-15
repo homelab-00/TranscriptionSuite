@@ -1,6 +1,6 @@
 [project]
 name = "transcriptionsuite"
-version = "0.2.2"
+version = "0.2.3"
 description = "Speech-to-Text Transcription Suite"
 requires-python = ">=3.11,<3.12"
 dependencies = [
@@ -24,6 +24,8 @@ dependencies = [
     "pydantic>=2.0",
     "httpx>=0.26.0",
     "websockets>=15.0",  # For remote transcription server
+    "aiohttp>=3.9.0",    # For HTTPS REST API server
+    "filelock>=3.13.0",  # For token store file locking
     
     # Desktop / UI
     "pyqt6>=6.10.0",

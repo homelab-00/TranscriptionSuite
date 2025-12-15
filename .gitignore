@@ -8,34 +8,23 @@ deps/
 .idea/
 .github/
 
-# Cache directories
-.cache/
-
+# AUDIO_NOTEBOOK web app
 # Database files (user data, should not be synced)
 AUDIO_NOTEBOOK/backend/data/transcriptions.db
 AUDIO_NOTEBOOK/backend/data/transcriptions.db-journal
 AUDIO_NOTEBOOK/backend/data/transcriptions.db-wal
 AUDIO_NOTEBOOK/backend/data/transcriptions.db-shm
-
 # Node.js / npm dependencies and build outputs
 AUDIO_NOTEBOOK/node_modules/
-AUDIO_NOTEBOOK/.venv/
 AUDIO_NOTEBOOK/dist/
 AUDIO_NOTEBOOK/build/
-AUDIO_NOTEBOOK/.env
-AUDIO_NOTEBOOK/.env.local
-
 # Vite cache
 AUDIO_NOTEBOOK/.vite/
 
-# IDE / Editor files
-AUDIO_NOTEBOOK/.vscode/
-AUDIO_NOTEBOOK/.idea/
-
-# OS files
-AUDIO_NOTEBOOK/.DS_Store
-AUDIO_NOTEBOOK/Thumbs.db
-
-# Python virtual environments (if present)
-AUDIO_NOTEBOOK/.python-version
-AUDIO_NOTEBOOK/__pycache__/
+# REMOTE_SERVER web app
+# Node.js / npm dependencies and build outputs
+REMOTE_SERVER/web/node_modules/
+REMOTE_SERVER/web/dist/
+REMOTE_SERVER/web/build/
+# Vite cache
+REMOTE_SERVER/web/.vite/

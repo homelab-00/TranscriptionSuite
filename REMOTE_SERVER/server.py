@@ -25,7 +25,8 @@ import websockets
 from websockets.asyncio.server import Server, ServerConnection
 from websockets.exceptions import ConnectionClosed
 
-from .auth import AuthManager, AuthToken
+from .auth import AuthManager
+from .token_store import StoredToken
 from .protocol import (
     AudioChunk,
     AudioProtocol,
@@ -96,7 +97,7 @@ class RemoteTranscriptionServer:
         # Session state
         self._is_running = False
         self._is_transcribing = False
-        self._current_session: Optional[AuthToken] = None
+        self._current_session: Optional[StoredToken] = None
         self._session_config: Dict[str, Any] = {}
 
         # WebSocket connections
@@ -182,14 +183,16 @@ class RemoteTranscriptionServer:
         Returns:
             Token string for client authentication
         """
-        return self.auth_manager.generate_token(client_id, expiry_seconds)
+        # Note: expiry_seconds is kept for backward compatibility but ignored.
+        stored = self.auth_manager.generate_token(client_id, is_admin=False)
+        return stored.token
 
     async def _handle_control(self, websocket: ServerConnection) -> None:
         """Handle control channel connection."""
         client_addr = websocket.remote_address
         logger.info(f"Control connection from {client_addr}")
 
-        token: Optional[AuthToken] = None
+        token: Optional[StoredToken] = None
 
         try:
             # Wait for authentication
@@ -219,11 +222,13 @@ class RemoteTranscriptionServer:
 
                 # Try to acquire session (single-user enforcement)
                 if not self.auth_manager.acquire_session(token):
-                    active_client = self.auth_manager.get_active_client_id() or "unknown"
+                    active_client = (
+                        self.auth_manager.get_active_client_name() or "unknown"
+                    )
                     response = ControlProtocol.create_session_busy_response(active_client)
                     await websocket.send(response.to_json())
                     logger.warning(
-                        f"Session denied for {token.client_id}: "
+                        f"Session denied for {token.client_name}: "
                         f"another user ({active_client}) is active"
                     )
                     return
@@ -232,10 +237,10 @@ class RemoteTranscriptionServer:
                 self._current_session = token
                 self._control_connection = websocket
                 response = ControlProtocol.create_auth_response(
-                    True, f"Welcome, {token.client_id}"
+                    True, f"Welcome, {token.client_name}"
                 )
                 await websocket.send(response.to_json())
-                logger.info(f"Client authenticated: {token.client_id}")
+                logger.info(f"Client authenticated: {token.client_name}")
 
             except asyncio.TimeoutError:
                 logger.warning(f"Authentication timeout from {client_addr}")
@@ -261,13 +266,13 @@ class RemoteTranscriptionServer:
         finally:
             # Cleanup
             if token and self._current_session == token:
-                self.auth_manager.release_session(token)
+                self.auth_manager.release_session(token.token)
                 self._current_session = None
                 self._control_connection = None
                 self._is_transcribing = False
                 self.audio_protocol.clear_buffer()
                 self._audio_accumulator.clear()
-                logger.info(f"Session released for {token.client_id}")
+                logger.info(f"Session released for {token.client_name}")
 
     async def _process_control_message(
         self, msg: ControlMessage, websocket: ServerConnection
@@ -335,7 +340,7 @@ class RemoteTranscriptionServer:
         client_addr = websocket.remote_address
         logger.info(f"Data connection from {client_addr}")
 
-        token: Optional[AuthToken] = None
+        token: Optional[StoredToken] = None
 
         try:
             # Wait for authentication (same process as control)
@@ -367,7 +372,7 @@ class RemoteTranscriptionServer:
                 # Verify this token matches the active session
                 if (
                     self._current_session is None
-                    or self._current_session.token_id != token.token_id
+                    or self._current_session.token != token.token
                 ):
                     response = ControlProtocol.create_auth_response(
                         False, "No matching control session"
@@ -380,7 +385,7 @@ class RemoteTranscriptionServer:
                     True, "Data channel connected"
                 )
                 await websocket.send(response.to_json())
-                logger.info(f"Data channel authenticated for {token.client_id}")
+                logger.info(f"Data channel authenticated for {token.client_name}")
 
             except asyncio.TimeoutError:
                 logger.warning(f"Data channel auth timeout from {client_addr}")
@@ -586,7 +591,7 @@ class RemoteTranscriptionServer:
         return {
             "is_running": self._is_running,
             "is_transcribing": self._is_transcribing,
-            "active_client": self.auth_manager.get_active_client_id(),
+            "active_client": self.auth_manager.get_active_client_name(),
             "control_port": self.control_port,
             "data_port": self.data_port,
         }
