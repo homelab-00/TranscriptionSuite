@@ -250,7 +250,7 @@ remote_server:
     # Network interface to bind to.
     # Use "0.0.0.0" to accept connections from any interface.
     # Use "127.0.0.1" for local-only connections.
-    host: "127.0.0.1"
+    host: "0.0.0.0"
 
     # Port for HTTPS (web UI + REST API)
     https_port: 8443
