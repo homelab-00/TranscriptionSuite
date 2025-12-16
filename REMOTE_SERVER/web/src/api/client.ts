@@ -1,4 +1,4 @@
-import { User, TokenInfo, TranscriptionResult, ServerStatus } from '../types';
+import { User, TokenInfo, NewTokenInfo, TranscriptionResult, ServerStatus } from '../types';
 
 // Get base URL - use current origin in production, proxy in dev
 const getBaseUrl = () => {
@@ -92,15 +92,24 @@ class ApiClient {
     return this.request('/api/auth/tokens');
   }
 
-  async createToken(clientName: string, isAdmin: boolean = false): Promise<{ success: boolean; token: TokenInfo }> {
+  async createToken(
+    clientName: string,
+    isAdmin: boolean = false,
+    expiryDays?: number
+  ): Promise<{ success: boolean; message: string; token: NewTokenInfo }> {
     return this.request('/api/auth/tokens', {
       method: 'POST',
-      body: JSON.stringify({ client_name: clientName, is_admin: isAdmin }),
+      body: JSON.stringify({ 
+        client_name: clientName, 
+        is_admin: isAdmin,
+        expiry_days: expiryDays,
+      }),
     });
   }
 
-  async revokeToken(token: string): Promise<{ success: boolean }> {
-    return this.request(`/api/auth/tokens/${encodeURIComponent(token)}`, {
+  async revokeToken(tokenId: string): Promise<{ success: boolean }> {
+    // Now uses token_id instead of full token
+    return this.request(`/api/auth/tokens/${encodeURIComponent(tokenId)}`, {
       method: 'DELETE',
     });
   }

@@ -3,16 +3,29 @@ export interface User {
   name: string;
   is_admin: boolean;
   created_at: string;
+  expires_at?: string | null;  // Token expiration time
 }
 
-// Token information (for admin panel)
+// Token information (for admin panel listing)
 export interface TokenInfo {
+  token_id: string;    // Non-secret ID for operations (revoke, etc.)
   token: string;       // Masked token for display
-  full_token: string;  // Full token for copy
   client_name: string;
   created_at: string;
+  expires_at?: string | null;
   is_admin: boolean;
   is_revoked: boolean;
+  is_expired: boolean;
+}
+
+// Newly created token (full token shown only at creation)
+export interface NewTokenInfo {
+  token_id: string;    // ID for future operations
+  token: string;       // Full token - only shown at creation time
+  client_name: string;
+  created_at: string;
+  expires_at?: string | null;
+  is_admin: boolean;
 }
 
 // Transcription result
