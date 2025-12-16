@@ -3,7 +3,7 @@ Combined HTTPS + WebSocket server for remote transcription.
 
 Provides:
 - HTTPS server for REST API and static file serving (React frontend)
-- WSS server for real-time audio streaming
+- WSS server for real-time audio streaming (on same port as HTTPS)
 - Token-based authentication (no expiry, manual revocation)
 - Admin panel for token management
 """
@@ -19,11 +19,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, cast
 
 import numpy as np
-from aiohttp import web
+from aiohttp import web, WSMsgType
 from aiohttp.multipart import BodyPartReader
-from websockets.asyncio.server import ServerConnection
-from websockets.exceptions import ConnectionClosed
-import websockets
 
 from .auth import AuthManager
 from .token_store import StoredToken
@@ -42,9 +39,8 @@ logger = get_server_logger()
 ws_logger = get_websocket_logger()
 api_logger = get_api_logger()
 
-# Default ports
+# Default port (single port for both HTTPS and WSS)
 DEFAULT_HTTPS_PORT = 8443
-DEFAULT_WSS_PORT = 8444
 
 # Static files directory
 WEB_DIST_DIR = Path(__file__).parent / "web" / "dist"
@@ -58,8 +54,7 @@ class WebTranscriptionServer:
     Combined HTTPS + WebSocket server for remote transcription.
 
     Architecture:
-    - Port 8443 (HTTPS): React web UI, REST API for auth/tokens/file upload
-    - Port 8444 (WSS): WebSocket for streaming audio transcription
+    - Port 8443: Both HTTPS (React web UI, REST API) and WSS (streaming audio)
     """
 
     def __init__(
@@ -87,7 +82,6 @@ class WebTranscriptionServer:
         # Network configuration
         self.host = self.config.get("host", "0.0.0.0")
         self.https_port = self.config.get("https_port", DEFAULT_HTTPS_PORT)
-        self.wss_port = self.config.get("wss_port", DEFAULT_WSS_PORT)
 
         # Token store path
         token_store_path = self.config.get("token_store")
@@ -112,9 +106,10 @@ class WebTranscriptionServer:
         self._is_running = False
         self._is_transcribing = False
         self._session_config: Dict[str, Any] = {}
+        self._stop_event: Optional[asyncio.Event] = None
 
         # WebSocket connection (only one at a time)
-        self._ws_connection: Optional[ServerConnection] = None
+        self._ws_connection: Optional[web.WebSocketResponse] = None
         self._ws_token: Optional[str] = None
 
         # Audio accumulator
@@ -127,7 +122,7 @@ class WebTranscriptionServer:
         tls_status = "TLS enabled" if self._ssl_context else "TLS disabled"
         logger.info(
             f"WebTranscriptionServer initialized "
-            f"(https:{self.https_port}, wss:{self.wss_port}, {tls_status})"
+            f"(https/wss:{self.https_port}, {tls_status})"
         )
 
     def _create_ssl_context(self) -> Optional[ssl.SSLContext]:
@@ -399,13 +394,17 @@ class WebTranscriptionServer:
 
     async def _handle_server_status(self, request: web.Request) -> web.Response:
         """GET /api/status - Get server status."""
+        # Determine the scheme based on whether TLS is enabled
+        scheme = "wss" if self._ssl_context else "ws"
+        host = request.host.split(":")[0]
+
         return web.json_response(
             {
                 "running": self._is_running,
                 "transcribing": self._is_transcribing,
                 "active_user": self.auth_manager.get_active_client_name(),
                 "https_port": self.https_port,
-                "wss_port": self.wss_port,
+                "wss_url": f"{scheme}://{host}:{self.https_port}/ws",
             }
         )
 
@@ -439,12 +438,15 @@ class WebTranscriptionServer:
         return web.FileResponse(file_path, headers={"Content-Type": content_type})  # type: ignore[return-value]
 
     # =========================================================================
-    # WebSocket Handler
+    # WebSocket Handler (aiohttp)
     # =========================================================================
 
-    async def _handle_websocket(self, websocket: ServerConnection) -> None:
-        """Handle WebSocket connection for audio streaming."""
-        client_addr = websocket.remote_address
+    async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
+        """Handle WebSocket connection for audio streaming (aiohttp route)."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        client_addr = request.remote
         ws_logger.info(f"WebSocket connection established from {client_addr}")
 
         token: Optional[str] = None
@@ -454,80 +456,90 @@ class WebTranscriptionServer:
             # Wait for authentication
             try:
                 ws_logger.debug(f"Waiting for auth message from {client_addr}...")
-                auth_message = await asyncio.wait_for(websocket.recv(), timeout=10.0)
-                ws_logger.debug(
-                    f"Received message: {auth_message[:100]}..."
-                )  # Log first 100 chars
+                msg = await asyncio.wait_for(ws.receive(), timeout=10.0)
 
-                msg = ControlMessage.from_json(auth_message)  # type: ignore
-                ws_logger.debug(f"Parsed message type: {msg.type}")
+                if msg.type == WSMsgType.TEXT:
+                    auth_message = msg.data
+                    ws_logger.debug(f"Received message: {auth_message[:100]}...")
 
-                if msg.type != MessageType.AUTH:
-                    ws_logger.warning(f"Expected AUTH, got {msg.type}")
-                    response = ControlProtocol.create_auth_response(
-                        False, "Expected authentication message"
-                    )
-                    await websocket.send(response.to_json())
-                    return
+                    ctrl_msg = ControlMessage.from_json(auth_message)
+                    ws_logger.debug(f"Parsed message type: {ctrl_msg.type}")
 
-                token_value = msg.data.get("token")
-                token = token_value if isinstance(token_value, str) else ""
-                if token:
+                    if ctrl_msg.type != MessageType.AUTH:
+                        ws_logger.warning(f"Expected AUTH, got {ctrl_msg.type}")
+                        response = ControlProtocol.create_auth_response(
+                            False, "Expected authentication message"
+                        )
+                        await ws.send_str(response.to_json())
+                        return ws
+
+                    token_value = ctrl_msg.data.get("token")
+                    token = token_value if isinstance(token_value, str) else ""
+                    if token:
+                        ws_logger.debug(f"Validating token: {token[:16]}...")
+                    stored_token = self.auth_manager.validate_token(token)
+
+                    if stored_token is None:
+                        ws_logger.warning(f"Token validation failed for {client_addr}")
+                        response = ControlProtocol.create_auth_response(
+                            False, "Invalid or revoked token"
+                        )
+                        await ws.send_str(response.to_json())
+                        return ws
+
+                    # Try to acquire session
                     ws_logger.debug(
-                        f"Validating token: {token[:16]}..."
-                    )  # Log first 16 chars
-                stored_token = self.auth_manager.validate_token(token)
-
-                if stored_token is None:
-                    ws_logger.warning(f"Token validation failed for {client_addr}")
-                    response = ControlProtocol.create_auth_response(
-                        False, "Invalid or revoked token"
+                        f"Attempting to acquire session for {stored_token.client_name}"
                     )
-                    await websocket.send(response.to_json())
-                    return
+                    if not self.auth_manager.acquire_session(stored_token):
+                        active_user = (
+                            self.auth_manager.get_active_client_name() or "unknown"
+                        )
+                        ws_logger.warning(
+                            f"Session denied: {active_user} is already active"
+                        )
+                        response = ControlProtocol.create_session_busy_response(
+                            active_user
+                        )
+                        await ws.send_str(response.to_json())
+                        return ws
 
-                # Try to acquire session
-                ws_logger.debug(
-                    f"Attempting to acquire session for {stored_token.client_name}"
-                )
-                if not self.auth_manager.acquire_session(stored_token):
-                    active_user = self.auth_manager.get_active_client_name() or "unknown"
-                    ws_logger.warning(f"Session denied: {active_user} is already active")
-                    response = ControlProtocol.create_session_busy_response(active_user)
-                    await websocket.send(response.to_json())
-                    return
+                    # Success
+                    self._ws_connection = ws
+                    self._ws_token = token
 
-                # Success
-                self._ws_connection = websocket
-                self._ws_token = token
+                    response = ControlMessage(
+                        type=MessageType.AUTH_OK,
+                        data={
+                            "user": {
+                                "name": stored_token.client_name,
+                                "is_admin": stored_token.is_admin,
+                            }
+                        },
+                    )
+                    await ws.send_str(response.to_json())
+                    ws_logger.info(f"WebSocket authenticated: {stored_token.client_name}")
 
-                response = ControlMessage(
-                    type=MessageType.AUTH_OK,
-                    data={
-                        "user": {
-                            "name": stored_token.client_name,
-                            "is_admin": stored_token.is_admin,
-                        }
-                    },
-                )
-                await websocket.send(response.to_json())
-                ws_logger.info(f"WebSocket authenticated: {stored_token.client_name}")
+                elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
+                    ws_logger.warning(f"WebSocket closed during auth from {client_addr}")
+                    return ws
 
             except asyncio.TimeoutError:
                 ws_logger.warning(f"WebSocket auth timeout from {client_addr}")
                 response = ControlProtocol.create_auth_response(False, "Auth timeout")
-                await websocket.send(response.to_json())
-                return
+                await ws.send_str(response.to_json())
+                return ws
 
             # Main message loop
-            async for message in websocket:
-                if isinstance(message, bytes):
-                    await self._process_audio_data(message, websocket)
-                elif isinstance(message, str):
-                    await self._process_control_message(message, websocket)
+            async for msg in ws:
+                if msg.type == WSMsgType.BINARY:
+                    await self._process_audio_data_aiohttp(msg.data, ws)
+                elif msg.type == WSMsgType.TEXT:
+                    await self._process_control_message_aiohttp(msg.data, ws)
+                elif msg.type == WSMsgType.ERROR:
+                    ws_logger.error(f"WebSocket error: {ws.exception()}")
+                    break
 
-        except ConnectionClosed as e:
-            ws_logger.info(f"WebSocket closed from {client_addr}: {e.code} {e.reason}")
         except Exception as e:
             ws_logger.error(f"WebSocket error from {client_addr}: {e}", exc_info=True)
         finally:
@@ -541,28 +553,30 @@ class WebTranscriptionServer:
                 self._audio_accumulator.clear()
                 ws_logger.info("Session released")
 
-    async def _process_control_message(
-        self, message: str, websocket: ServerConnection
+        return ws
+
+    async def _process_control_message_aiohttp(
+        self, message: str, ws: web.WebSocketResponse
     ) -> None:
-        """Process a control message from WebSocket."""
+        """Process a control message from aiohttp WebSocket."""
         try:
             msg = ControlMessage.from_json(message)
         except ValueError as e:
             error = ControlProtocol.create_error(str(e), "parse_error")
-            await websocket.send(error.to_json())
+            await ws.send_str(error.to_json())
             return
 
         logger.debug(f"Control message: {msg.type}")
 
         if msg.type == MessageType.PING:
-            await websocket.send(ControlProtocol.create_pong().to_json())
+            await ws.send_str(ControlProtocol.create_pong().to_json())
 
         elif msg.type == MessageType.START:
             if self._is_transcribing:
                 error = ControlProtocol.create_error(
                     "Transcription already in progress", "already_started"
                 )
-                await websocket.send(error.to_json())
+                await ws.send_str(error.to_json())
                 return
 
             self._session_config = {
@@ -577,7 +591,7 @@ class WebTranscriptionServer:
             response = ControlMessage(
                 type=MessageType.SESSION_STARTED, data={"config": self._session_config}
             )
-            await websocket.send(response.to_json())
+            await ws.send_str(response.to_json())
             logger.info("Recording session started")
 
         elif msg.type == MessageType.STOP:
@@ -585,19 +599,21 @@ class WebTranscriptionServer:
                 error = ControlProtocol.create_error(
                     "No active recording session", "not_started"
                 )
-                await websocket.send(error.to_json())
+                await ws.send_str(error.to_json())
                 return
 
-            await self._finalize_transcription(websocket)
+            await self._finalize_transcription_aiohttp(ws)
 
         else:
             error = ControlProtocol.create_error(
                 f"Unknown message type: {msg.type}", "unknown_type"
             )
-            await websocket.send(error.to_json())
+            await ws.send_str(error.to_json())
 
-    async def _process_audio_data(self, data: bytes, websocket: ServerConnection) -> None:
-        """Process incoming audio data."""
+    async def _process_audio_data_aiohttp(
+        self, data: bytes, ws: web.WebSocketResponse
+    ) -> None:
+        """Process incoming audio data from aiohttp WebSocket."""
         if not self._is_transcribing:
             logger.debug("Received audio but not recording, ignoring")
             return
@@ -618,20 +634,20 @@ class WebTranscriptionServer:
                         type=MessageType.REALTIME,
                         data={"text": partial, "is_final": False},
                     )
-                    await websocket.send(result.to_json())
+                    await ws.send_str(result.to_json())
 
         except Exception as e:
             logger.error(f"Error processing audio: {e}", exc_info=True)
 
-    async def _finalize_transcription(self, websocket: ServerConnection) -> None:
-        """Finalize recording and send transcription result."""
+    async def _finalize_transcription_aiohttp(self, ws: web.WebSocketResponse) -> None:
+        """Finalize recording and send transcription result (aiohttp)."""
         self._is_transcribing = False
 
         if not self._audio_accumulator:
             response = ControlMessage(
                 type=MessageType.SESSION_STOPPED, data={"message": "No audio received"}
             )
-            await websocket.send(response.to_json())
+            await ws.send_str(response.to_json())
             return
 
         # Combine audio
@@ -653,7 +669,7 @@ class WebTranscriptionServer:
                         "is_final": True,
                     },
                 )
-                await websocket.send(final_msg.to_json())
+                await ws.send_str(final_msg.to_json())
                 logger.info("Transcription completed")
 
             except Exception as e:
@@ -661,7 +677,7 @@ class WebTranscriptionServer:
                 error = ControlProtocol.create_error(
                     f"Transcription failed: {e}", "transcription_error"
                 )
-                await websocket.send(error.to_json())
+                await ws.send_str(error.to_json())
         else:
             response = ControlMessage(
                 type=MessageType.SESSION_STOPPED,
@@ -670,7 +686,7 @@ class WebTranscriptionServer:
                     "duration": len(combined_audio) / SAMPLE_RATE,
                 },
             )
-            await websocket.send(response.to_json())
+            await ws.send_str(response.to_json())
 
     # =========================================================================
     # Server Lifecycle
@@ -688,19 +704,22 @@ class WebTranscriptionServer:
         app.router.add_post("/api/transcribe/file", self._handle_transcribe_file)
         app.router.add_get("/api/status", self._handle_server_status)
 
-        # Static files (SPA)
+        # WebSocket route (same port as HTTPS)
+        app.router.add_get("/ws", self._handle_websocket)
+
+        # Static files (SPA) - must be last
         app.router.add_get("/{path:.*}", self._handle_static)
 
         return app
 
     async def _run_servers(self) -> None:
-        """Run both HTTPS and WSS servers."""
+        """Run the HTTPS server (with WebSocket on same port)."""
         scheme = "https" if self._ssl_context else "http"
         ws_scheme = "wss" if self._ssl_context else "ws"
 
-        logger.info(f"Starting servers on {self.host}")
-        logger.info(f"  HTTPS: {scheme}://{self.host}:{self.https_port}")
-        logger.info(f"  WSS:   {ws_scheme}://{self.host}:{self.wss_port}")
+        logger.info(f"Starting server on {self.host}:{self.https_port}")
+        logger.info(f"  Web UI: {scheme}://{self.host}:{self.https_port}")
+        logger.info(f"  WebSocket: {ws_scheme}://{self.host}:{self.https_port}/ws")
 
         # Set up aiohttp app
         self._app = self._setup_routes()
@@ -714,38 +733,34 @@ class WebTranscriptionServer:
             ssl_context=self._ssl_context,
         )
 
-        # Start HTTPS server
+        # Start server
         await site.start()
+        self._is_running = True
+        logger.info("Server started")
 
-        # Start WebSocket server
-        async with websockets.serve(
-            self._handle_websocket,
-            self.host,
-            self.wss_port,
-            ssl=self._ssl_context,
-        ):
-            self._is_running = True
-            logger.info("Servers started")
+        # Wait for shutdown
+        stop_event = asyncio.Event()
+        self._stop_event = stop_event
 
-            # Wait for shutdown
-            stop_event = asyncio.Event()
+        def signal_handler():
+            stop_event.set()
 
-            def signal_handler():
-                stop_event.set()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, signal_handler)
+            except (NotImplementedError, RuntimeError):
+                # NotImplementedError: signal handlers not implemented on this platform
+                # RuntimeError: signal handlers only work in main thread
+                pass
 
-            loop = asyncio.get_running_loop()
-            for sig in (signal.SIGTERM, signal.SIGINT):
-                try:
-                    loop.add_signal_handler(sig, signal_handler)
-                except NotImplementedError:
-                    pass
-
-            await stop_event.wait()
+        await stop_event.wait()
+        self._stop_event = None
 
         # Cleanup
         await self._runner.cleanup()
         self._is_running = False
-        logger.info("Servers stopped")
+        logger.info("Server stopped")
 
     def start(self, blocking: bool = True) -> None:
         """Start the servers."""
@@ -761,6 +776,16 @@ class WebTranscriptionServer:
     def stop(self) -> None:
         """Stop the servers."""
         self._is_running = False
+        if self._stop_event:
+            # Trigger the stop event in a thread-safe way
+            try:
+                # Access the internal loop attribute (type: ignore because it's internal)
+                loop = getattr(self._stop_event, "_loop", None)  # type: ignore[attr-defined]
+                if loop:
+                    loop.call_soon_threadsafe(self._stop_event.set)
+            except (AttributeError, RuntimeError):
+                # Event loop may be closed or not running
+                pass
 
     @property
     def is_running(self) -> bool:
@@ -774,5 +799,4 @@ class WebTranscriptionServer:
             "transcribing": self._is_transcribing,
             "active_user": self.auth_manager.get_active_client_name(),
             "https_port": self.https_port,
-            "wss_port": self.wss_port,
         }

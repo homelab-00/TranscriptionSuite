@@ -8,13 +8,12 @@ const getBaseUrl = () => {
   return '';  // Same origin in production
 };
 
-// Get WebSocket URL
+// Get WebSocket URL (same port as HTTPS, /ws endpoint)
 export const getWsUrl = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.hostname;
-  // WSS port is HTTPS port + 1
-  const port = parseInt(window.location.port || '8443') + 1;
-  return `${protocol}//${host}:${port}`;
+  const port = window.location.port || '8443';
+  return `${protocol}//${host}:${port}/ws`;
 };
 
 // API client
