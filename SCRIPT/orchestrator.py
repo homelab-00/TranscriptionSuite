@@ -1258,8 +1258,12 @@ class STTOrchestrator:
         self.audio_notebook_thread = threading.Thread(target=server_worker, daemon=True)
         self.audio_notebook_thread.start()
 
-    def _stop_audio_notebook(self):
-        """Stop the Audio Notebook server, eject LLM model, and reload the main (longform) model."""
+    def _stop_audio_notebook(self, skip_model_reload: bool = False):
+        """Stop the Audio Notebook server, eject LLM model, and optionally reload the main model.
+
+        Args:
+            skip_model_reload: If True, skip reloading the longform model (used during quit).
+        """
         if self.audio_notebook_server:
             safe_print("Stopping Audio Notebook...", "info")
 
@@ -1296,6 +1300,11 @@ class STTOrchestrator:
             except Exception as e:
                 # Don't fail the whole operation if LM Studio isn't available
                 logging.debug(f"Could not eject LM Studio model: {e}")
+
+            # Skip model reload if we're quitting
+            if skip_model_reload:
+                safe_print("Skipping model reload (shutting down).", "info")
+                return
 
             # Switch from static to longform model automatically
             safe_print("Switching back to longform model...", "info")
@@ -1525,8 +1534,12 @@ class STTOrchestrator:
         self.server_mode_thread = threading.Thread(target=server_worker, daemon=True)
         self.server_mode_thread.start()
 
-    def _stop_server_mode(self):
-        """Stop the Server Mode and reload the longform model."""
+    def _stop_server_mode(self, skip_model_reload: bool = False):
+        """Stop the Server Mode and optionally reload the longform model.
+
+        Args:
+            skip_model_reload: If True, skip reloading the longform model (used during quit).
+        """
         if self.server_mode_server:
             safe_print("Stopping Server Mode...", "info")
 
@@ -1555,6 +1568,11 @@ class STTOrchestrator:
 
             if self.tray_manager:
                 self.tray_manager.update_server_mode_menu_item(False)
+
+            # Skip model reload if we're quitting
+            if skip_model_reload:
+                safe_print("Skipping model reload (shutting down).", "info")
+                return
 
             # Switch back to longform model
             safe_print("Switching back to longform model...", "info")
@@ -1593,10 +1611,10 @@ class STTOrchestrator:
         safe_print("Quit requested, shutting down...")
 
         def shutdown_worker():
-            # Stop audio notebook if running
-            self._stop_audio_notebook()
-            # Stop server mode if running
-            self._stop_server_mode()
+            # Stop audio notebook if running (skip model reload - we're quitting)
+            self._stop_audio_notebook(skip_model_reload=True)
+            # Stop server mode if running (skip model reload - we're quitting)
+            self._stop_server_mode(skip_model_reload=True)
             self.stop()
             # The application will now exit naturally when the tray_manager's
             # event loop is quit. os._exit(0) is no longer needed.

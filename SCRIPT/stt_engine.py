@@ -61,6 +61,9 @@ INIT_MIN_LENGTH_OF_RECORDING = 0.5
 INIT_MIN_GAP_BETWEEN_RECORDINGS = 0
 INIT_PRE_RECORDING_BUFFER_DURATION = 1.0
 ALLOWED_LATENCY_LIMIT = 100
+# Maximum continuous silence duration (seconds) before trimming begins.
+# Silences longer than this are not saved to avoid Whisper hallucinations.
+MAX_SILENCE_DURATION = 10.0
 
 TIME_SLEEP = 0.02
 SAMPLE_RATE = 16000
@@ -403,6 +406,12 @@ class AudioToTextRecorder:
         self.normalize_audio = normalize_audio
         self.awaiting_speech_end = False
         self.start_callback_in_new_thread = start_callback_in_new_thread
+
+        # Silence trimming state - tracks extended silences during recording
+        # to prevent Whisper hallucinations from long silent segments
+        self.extended_silence_start: float = 0.0  # When extended silence began
+        self.is_trimming_silence: bool = False  # Currently skipping frames due to silence
+        self.max_silence_duration = MAX_SILENCE_DURATION  # Configurable threshold
 
         # Initialize states and buffers
         self.state = "inactive"
@@ -1368,6 +1377,9 @@ class AudioToTextRecorder:
         self.recording_start_time = time.time()
         self.is_silero_speech_active = False
         self.is_webrtc_speech_active = False
+        # Reset extended silence trimming state
+        self.extended_silence_start = 0
+        self.is_trimming_silence = False
         self.stop_recording_event.clear()
         self.start_recording_event.set()
 
@@ -1742,6 +1754,22 @@ class AudioToTextRecorder:
                         if not is_speech:
                             if self.use_extended_logging:
                                 self.logger.debug("Debug: Handling voice deactivity")
+
+                            # Extended silence trimming: Track continuous silence
+                            # and trim when it exceeds max_silence_duration
+                            if self.extended_silence_start == 0:
+                                self.extended_silence_start = time.time()
+                            elif not self.is_trimming_silence:
+                                silence_duration = (
+                                    time.time() - self.extended_silence_start
+                                )
+                                if silence_duration >= self.max_silence_duration:
+                                    self.is_trimming_silence = True
+                                    self.logger.info(
+                                        f"Extended silence detected ({silence_duration:.1f}s) - "
+                                        "trimming to prevent Whisper hallucinations"
+                                    )
+
                             # Voice deactivity was detected, so we start
                             # measuring silence time before stopping recording
                             if self.speech_end_silence_start == 0 and (
@@ -1802,6 +1830,13 @@ class AudioToTextRecorder:
                             self.awaiting_speech_end = False
                             if self.use_extended_logging:
                                 self.logger.debug("Debug: Handling speech detection")
+
+                            # Reset extended silence trimming state when speech resumes
+                            if self.is_trimming_silence:
+                                self.logger.info("Speech resumed - ending silence trim")
+                            self.extended_silence_start = 0
+                            self.is_trimming_silence = False
+
                             if self.speech_end_silence_start:
                                 if self.use_extended_logging:
                                     self.logger.info(
@@ -1906,9 +1941,14 @@ class AudioToTextRecorder:
                         "Debug: Checking if recording and not failed stop attempt"
                     )
                 if self.is_recording and not failed_stop_attempt:
-                    if self.use_extended_logging:
-                        self.logger.debug("Debug: Appending data to frames")
-                    self.frames.append(data)
+                    # Skip appending frames during extended silence trimming
+                    # to prevent Whisper hallucinations from long silent segments
+                    if not self.is_trimming_silence:
+                        if self.use_extended_logging:
+                            self.logger.debug("Debug: Appending data to frames")
+                        self.frames.append(data)
+                    elif self.use_extended_logging:
+                        self.logger.debug("Debug: Skipping frame - trimming silence")
 
                 if self.use_extended_logging:
                     self.logger.debug(

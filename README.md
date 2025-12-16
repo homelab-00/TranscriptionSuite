@@ -142,65 +142,58 @@ uv sync
 hf auth login
 ```
 
-### 6. Install Frontend Dependencies (Optional)
-
-Only needed if you want to modify the Audio Notebook web interface:
+### 6. Build Web Frontend (Audio Notebook)
 
 ```bash
-cd AUDIO_NOTEBOOK && npm install && cd ..
+cd AUDIO_NOTEBOOK
+npm install
+npm run build
+cd ..
 ```
 
-### 7. Verify Installation
+### 7. Build Remote Server Frontend
 
 ```bash
-uv run python -c "from DIARIZATION import DiarizationManager; print('Diarization OK')"
-uv run python -c "import faster_whisper; print('Faster Whisper OK')"
+cd REMOTE_SERVER/web
+npm install
+npm run build
+cd ../..
 ```
 
-### 8. Run
+### 8. Run the Application
 
 ```bash
-uv run SCRIPT/orchestrator.py
+uv run python SCRIPT/orchestrator.py
 ```
+
+The system tray icon appears — right-click for options.
+
+---
 
 ## Configuration
 
-All settings are in `config.yaml` at the project root.
-
-### Key Sections
+Edit `config.yaml`:
 
 ```yaml
 transcription_options:
-    language: null               # "en", "el", etc. or null for auto-detect
-    enable_preview_transcriber: true
-
-static_transcription:
-    enable_diarization: false
-    word_timestamps: true
-    max_segment_chars: 500
+    language: null              # null = auto-detect, or "en", "el", etc.
+    enable_preview_transcriber: false  # Live preview uses more GPU VRAM
 
 longform_recording:
-    include_in_viewer: true      # Save to Audio Notebook
-    word_timestamps: true
-    enable_diarization: false
+    include_in_viewer: false    # Save recordings to Audio Notebook
+    word_timestamps: false      # Enable for click-to-seek
+    enable_diarization: false   # Usually not needed for dictation
 
-diarization:
-    model: "pyannote/speaker-diarization-3.1"
-    device: "cuda"
-    min_speakers: null           # null = auto-detect
-    max_speakers: null
+static_transcription:
+    enable_diarization: false   # Speaker labels
+    word_timestamps: false      # Required for searchable transcriptions
+    max_segment_chars: 500      # Split long segments
 
 main_transcriber:
     model: "Systran/faster-whisper-large-v3"
-    device: "cuda"
-    compute_type: "default"
-    beam_size: 5
-    initial_prompt: null
-    faster_whisper_vad_filter: true
 
 preview_transcriber:
     model: "Systran/faster-whisper-base"
-    device: "cuda"
 
 storage:
     audio_dir: "data/audio"
@@ -277,51 +270,22 @@ display:
 
 ## Usage
 
-```bash
-uv run SCRIPT/orchestrator.py
-```
+### Longform Recording
 
-### System Tray
+1. **Start:** Tray → Start Recording (or press configured hotkey)
+2. **Speak:** Live preview shows in terminal (if enabled)
+3. **Stop:** Tray → Stop Recording
+4. **Result:** Final transcription displayed, copied to clipboard
 
-| Action | Effect |
-|--------|--------|
-| Left-click | Start recording |
-| Middle-click | Stop & transcribe |
-| Right-click | Context menu |
+Extended silences (>10 seconds) are automatically trimmed during recording to prevent Whisper hallucinations.
 
-**Icon Colors:** Grey (loading), Green (ready), Yellow (recording), Orange (transcribing longform), Mauve (static transcription), Aquamarine (Audio Notebook), Purple (Server Mode), Red (error)
+### Static File Transcription
 
-### Context Menu
-
-- Start/Stop Recording
-- Transcribe Audio File...
-- Start/Stop Audio Notebook
-- Start/Stop Server Mode
-- Unload/Reload All Models
-- Quit
-
-### Longform Dictation
-
-1. Left-click tray to start
-2. Speak (live preview in terminal if enabled)
-3. Middle-click to stop
-4. Text copied to clipboard
-
-When `include_in_viewer: true`, recordings are saved to Audio Notebook with word timestamps.
-
-### Static Transcription
-
-1. Right-click → "Transcribe Audio File..."
-2. Select file (WAV, MP3, FLAC, OGG, OPUS, M4A, MP4, MKV, etc.)
+1. **Tray → Transcribe File**
+2. Select audio/video file
 3. JSON saved as `{filename}_transcription.json`
 
 Enable `enable_diarization: true` for speaker labels.
-
-### CLI Mode
-
-```bash
-uv run python SCRIPT/orchestrator.py --static /path/to/audio.mp3
-```
 
 ---
 
@@ -352,7 +316,7 @@ API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## Remote Transcription Server
 
-Web-based server allowing remote clients to transcribe audio via a browser interface, accessible over Tailscale VPN or local network.
+Web-based server allowing remote clients to transcribe audio via a browser interface. Designed for secure remote access over Tailscale VPN.
 
 **Features:**
 
@@ -412,13 +376,22 @@ remote_server:
         auto_generate: true   # Generate self-signed if missing
 ```
 
+### Using with Tailscale
+
+The server is designed for use over Tailscale VPN:
+
+1. Install Tailscale on both server and client machines
+2. Start the server on your home machine
+3. Access from anywhere via Tailscale IP (e.g., `https://100.x.x.x:8443`)
+4. Traffic is encrypted end-to-end through Tailscale's WireGuard tunnel
+
 ### Security Notes
 
 - Tokens never expire - revoke them manually when needed
 - Self-signed certificates auto-generated on first run
 - Browser will warn about self-signed cert (accept once)
 - Only one user can record at a time
-- Designed for use over Tailscale VPN (encrypted tunnel)
+- Use over Tailscale VPN for encrypted tunnel access
 
 ---
 
@@ -468,6 +441,15 @@ When `enable_preview_transcriber: true`:
 3. Faster Whisper transcribes with word timestamps
 4. If diarization enabled: PyAnnote identifies speakers, combiner merges results
 
+### Extended Silence Trimming (Longform)
+
+During longform recording, a dual-stage VAD (WebRTC + Silero) monitors audio in real-time:
+
+- Silences under 10 seconds: frames saved normally
+- Silences over 10 seconds: frames discarded until speech resumes
+- Prevents Whisper hallucinations from extended pauses
+- Trimming happens on-the-fly (silent frames never buffered)
+
 ### Speaker Assignment
 
 Each word assigned to speaker by:
@@ -489,7 +471,7 @@ Each word assigned to speaker by:
 | `orchestrator.py` | Main controller, state management, API server |
 | `model_manager.py` | AI model lifecycle |
 | `recorder.py` | Recording sessions |
-| `stt_engine.py` | Transcription engine, VAD, audio |
+| `stt_engine.py` | Transcription engine, VAD, audio, silence trimming |
 | `static_transcriber.py` | Static file processing |
 | `tray_manager.py` | System tray (PyQt6) |
 | `console_display.py` | Terminal UI (Rich) |
