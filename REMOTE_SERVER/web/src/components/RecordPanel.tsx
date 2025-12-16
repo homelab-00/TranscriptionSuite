@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useAudioRecorder } from '../hooks/useAudioRecorder';
+import { useRawAudioRecorder } from '../hooks/useRawAudioRecorder';
 import { TranscriptionResult, HistoryEntry } from '../types';
 import { TranscriptionDisplay } from './TranscriptionDisplay';
 import { SessionHistory } from './SessionHistory';
@@ -53,10 +53,9 @@ export function RecordPanel() {
     error: recorderError,
     startRecording,
     stopRecording,
-  } = useAudioRecorder({
-    onDataAvailable: async (blob) => {
-      // Convert blob to ArrayBuffer and send
-      const buffer = await blob.arrayBuffer();
+  } = useRawAudioRecorder({
+    onAudioData: (buffer) => {
+      // Send raw PCM data to server
       sendAudioData(buffer);
     },
   });

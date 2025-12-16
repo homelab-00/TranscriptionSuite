@@ -572,6 +572,7 @@ class WebTranscriptionServer:
             await ws.send_str(ControlProtocol.create_pong().to_json())
 
         elif msg.type == MessageType.START:
+            ws_logger.info(f"START command received, language={msg.data.get('language')}")
             if self._is_transcribing:
                 error = ControlProtocol.create_error(
                     "Transcription already in progress", "already_started"
@@ -592,10 +593,12 @@ class WebTranscriptionServer:
                 type=MessageType.SESSION_STARTED, data={"config": self._session_config}
             )
             await ws.send_str(response.to_json())
-            logger.info("Recording session started")
+            ws_logger.info("Recording session started, waiting for audio...")
 
         elif msg.type == MessageType.STOP:
+            ws_logger.info("STOP command received")
             if not self._is_transcribing:
+                ws_logger.warning("STOP received but no active recording session")
                 error = ControlProtocol.create_error(
                     "No active recording session", "not_started"
                 )
@@ -623,6 +626,14 @@ class WebTranscriptionServer:
             audio_float = self.audio_protocol.process_incoming_audio(chunk)
             self._audio_accumulator.append(audio_float)
 
+            # Log audio chunk reception periodically
+            total_samples = sum(len(a) for a in self._audio_accumulator)
+            if len(self._audio_accumulator) % 10 == 1:  # Log every 10 chunks
+                duration_secs = total_samples / 16000
+                ws_logger.debug(
+                    f"Audio received: {len(self._audio_accumulator)} chunks, {duration_secs:.1f}s total"
+                )
+
             # Real-time preview if enabled
             if (
                 self._session_config.get("enable_realtime", False)
@@ -637,13 +648,20 @@ class WebTranscriptionServer:
                     await ws.send_str(result.to_json())
 
         except Exception as e:
-            logger.error(f"Error processing audio: {e}", exc_info=True)
+            logger.error(
+                f"Error processing audio chunk ({len(data)} bytes): {e}", exc_info=True
+            )
 
     async def _finalize_transcription_aiohttp(self, ws: web.WebSocketResponse) -> None:
         """Finalize recording and send transcription result (aiohttp)."""
         self._is_transcribing = False
 
+        ws_logger.info(
+            f"Finalizing transcription with {len(self._audio_accumulator)} audio chunks"
+        )
+
         if not self._audio_accumulator:
+            ws_logger.warning("No audio data accumulated - sending session_stopped")
             response = ControlMessage(
                 type=MessageType.SESSION_STOPPED, data={"message": "No audio received"}
             )
