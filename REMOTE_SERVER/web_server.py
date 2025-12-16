@@ -4,7 +4,8 @@ Combined HTTPS + WebSocket server for remote transcription.
 Provides:
 - HTTPS server for REST API and static file serving (React frontend)
 - WSS server for real-time audio streaming (on same port as HTTPS)
-- Token-based authentication (no expiry, manual revocation)
+- Token-based authentication with expiration
+- Rate limiting on authentication endpoints
 - Admin panel for token management
 """
 
@@ -15,6 +16,8 @@ import signal
 import ssl
 import subprocess
 import tempfile
+import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, cast
 
@@ -47,6 +50,88 @@ WEB_DIST_DIR = Path(__file__).parent / "web" / "dist"
 
 # Maximum file upload size (500MB)
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
+
+# Rate limiting settings
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_ATTEMPTS = 5  # max failed attempts per window
+RATE_LIMIT_LOCKOUT_TIME = 300  # 5 minutes lockout after exceeding limit
+
+
+class RateLimiter:
+    """
+    Simple in-memory rate limiter for authentication attempts.
+
+    Tracks failed login attempts per IP address and temporarily blocks
+    IPs that exceed the limit.
+    """
+
+    def __init__(
+        self,
+        window: int = RATE_LIMIT_WINDOW,
+        max_attempts: int = RATE_LIMIT_MAX_ATTEMPTS,
+        lockout_time: int = RATE_LIMIT_LOCKOUT_TIME,
+    ):
+        self.window = window
+        self.max_attempts = max_attempts
+        self.lockout_time = lockout_time
+        # {ip: [timestamp1, timestamp2, ...]}
+        self._attempts: Dict[str, list[float]] = defaultdict(list)
+        # {ip: lockout_until_timestamp}
+        self._lockouts: Dict[str, float] = {}
+
+    def _cleanup_old_attempts(self, ip: str) -> None:
+        """Remove attempts older than the window."""
+        cutoff = time.time() - self.window
+        self._attempts[ip] = [t for t in self._attempts[ip] if t > cutoff]
+
+    def is_blocked(self, ip: str) -> tuple[bool, Optional[int]]:
+        """
+        Check if an IP is blocked.
+
+        Returns:
+            (is_blocked, seconds_remaining) - seconds_remaining is None if not blocked
+        """
+        if ip in self._lockouts:
+            remaining = self._lockouts[ip] - time.time()
+            if remaining > 0:
+                return True, int(remaining)
+            else:
+                # Lockout expired
+                del self._lockouts[ip]
+                self._attempts.pop(ip, None)
+
+        return False, None
+
+    def record_attempt(self, ip: str, success: bool) -> None:
+        """
+        Record a login attempt.
+
+        Args:
+            ip: Client IP address
+            success: Whether the login was successful
+        """
+        if success:
+            # Successful login clears the attempts
+            self._attempts.pop(ip, None)
+            self._lockouts.pop(ip, None)
+            return
+
+        # Record failed attempt
+        self._cleanup_old_attempts(ip)
+        self._attempts[ip].append(time.time())
+
+        # Check if we should lock out this IP
+        if len(self._attempts[ip]) >= self.max_attempts:
+            self._lockouts[ip] = time.time() + self.lockout_time
+            logger.warning(
+                f"Rate limit exceeded for {ip}: {len(self._attempts[ip])} failed attempts. "
+                f"Locked out for {self.lockout_time} seconds."
+            )
+
+    def get_remaining_attempts(self, ip: str) -> int:
+        """Get the number of remaining attempts for an IP."""
+        self._cleanup_old_attempts(ip)
+        return max(0, self.max_attempts - len(self._attempts[ip]))
 
 
 class WebTranscriptionServer:
@@ -90,6 +175,9 @@ class WebTranscriptionServer:
 
         # Authentication
         self.auth_manager = AuthManager(token_store_path)
+
+        # Rate limiter for auth endpoints
+        self._rate_limiter = RateLimiter()
 
         # TLS configuration
         self._ssl_context = self._create_ssl_context()
@@ -219,15 +307,47 @@ class WebTranscriptionServer:
 
     async def _handle_login(self, request: web.Request) -> web.Response:
         """POST /api/auth/login - Validate token and return user info."""
+        # Get client IP for rate limiting
+        client_ip = request.remote or "unknown"
+
+        # Check if IP is rate limited
+        is_blocked, remaining_seconds = self._rate_limiter.is_blocked(client_ip)
+        if is_blocked:
+            api_logger.warning(f"Rate limited login attempt from {client_ip}")
+            return web.json_response(
+                {
+                    "success": False,
+                    "message": f"Too many failed attempts. Try again in {remaining_seconds} seconds.",
+                    "retry_after": remaining_seconds,
+                },
+                status=429,
+            )
+
         try:
             data = await request.json()
             token = data.get("token", "")
 
             stored_token = self.auth_manager.validate_token(token)
             if stored_token is None:
-                return web.json_response(
-                    {"success": False, "message": "Invalid or revoked token"}, status=401
+                # Record failed attempt
+                self._rate_limiter.record_attempt(client_ip, success=False)
+                remaining = self._rate_limiter.get_remaining_attempts(client_ip)
+
+                api_logger.warning(
+                    f"Failed login attempt from {client_ip} ({remaining} attempts remaining)"
                 )
+
+                return web.json_response(
+                    {
+                        "success": False,
+                        "message": "Invalid, revoked, or expired token",
+                        "remaining_attempts": remaining,
+                    },
+                    status=401,
+                )
+
+            # Successful login - clear rate limit tracking
+            self._rate_limiter.record_attempt(client_ip, success=True)
 
             return web.json_response(
                 {
@@ -236,6 +356,7 @@ class WebTranscriptionServer:
                         "name": stored_token.client_name,
                         "is_admin": stored_token.is_admin,
                         "created_at": stored_token.created_at,
+                        "expires_at": stored_token.expires_at,
                     },
                 }
             )
@@ -260,12 +381,17 @@ class WebTranscriptionServer:
             {
                 "tokens": [
                     {
-                        "token": t.token[:8] + "..." + t.token[-4:],  # Masked
-                        "full_token": t.token,  # Full token for copy
+                        "token_id": t.token_id,  # Non-secret ID for operations
+                        "token": t.token[:8]
+                        + "..."
+                        + t.token[-4:],  # Masked for security
+                        # Note: full_token removed for security - tokens only shown at creation
                         "client_name": t.client_name,
                         "created_at": t.created_at,
+                        "expires_at": t.expires_at,
                         "is_admin": t.is_admin,
                         "is_revoked": t.is_revoked,
+                        "is_expired": t.is_expired(),
                     }
                     for t in tokens
                 ]
@@ -287,16 +413,23 @@ class WebTranscriptionServer:
             data = await request.json()
             client_name = data.get("client_name", "unnamed")
             is_admin = data.get("is_admin", False)
+            expiry_days = data.get("expiry_days")  # Optional: custom expiry
 
-            new_token = self.auth_manager.generate_token(client_name, is_admin)
+            new_token = self.auth_manager.generate_token(
+                client_name, is_admin, expiry_days
+            )
 
+            # Full token shown ONLY at creation time - this is the only chance to copy it
             return web.json_response(
                 {
                     "success": True,
+                    "message": "Save this token now! It will only be shown once.",
                     "token": {
-                        "token": new_token.token,
+                        "token_id": new_token.token_id,  # ID for future operations
+                        "token": new_token.token,  # Full token - only shown at creation
                         "client_name": new_token.client_name,
                         "created_at": new_token.created_at,
+                        "expires_at": new_token.expires_at,
                         "is_admin": new_token.is_admin,
                     },
                 }
@@ -305,7 +438,7 @@ class WebTranscriptionServer:
             return web.json_response({"error": "Invalid JSON"}, status=400)
 
     async def _handle_revoke_token(self, request: web.Request) -> web.Response:
-        """DELETE /api/auth/tokens/{token} - Revoke a token (admin only)."""
+        """DELETE /api/auth/tokens/{token_id} - Revoke a token by ID (admin only)."""
         # Check authorization
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
@@ -315,9 +448,9 @@ class WebTranscriptionServer:
         if not self.auth_manager.is_admin(admin_token):
             return web.json_response({"error": "Admin required"}, status=403)
 
-        token_to_revoke = request.match_info.get("token", "")
+        token_id = request.match_info.get("token", "")
 
-        if self.auth_manager.revoke_token(token_to_revoke):
+        if self.auth_manager.revoke_token_by_id(token_id):
             return web.json_response({"success": True})
         else:
             return web.json_response(
@@ -710,9 +843,38 @@ class WebTranscriptionServer:
     # Server Lifecycle
     # =========================================================================
 
+    @web.middleware
+    async def _security_headers_middleware(
+        self, request: web.Request, handler: Any
+    ) -> web.Response:
+        """Add security headers to all responses."""
+        response = await handler(request)
+
+        # Security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Content Security Policy - allow self and WebSocket connections
+        # Note: 'unsafe-inline' needed for Vite's dev mode, consider removing in production
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self' wss: ws:; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'"
+        )
+
+        return response
+
     def _setup_routes(self) -> web.Application:
         """Set up aiohttp routes."""
-        app = web.Application(client_max_size=MAX_UPLOAD_SIZE)
+        app = web.Application(
+            client_max_size=MAX_UPLOAD_SIZE,
+            middlewares=[self._security_headers_middleware],
+        )
 
         # API routes
         app.router.add_post("/api/auth/login", self._handle_login)

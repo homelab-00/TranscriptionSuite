@@ -1,20 +1,18 @@
 # TranscriptionSuite
 
-A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing the `faster_whisper` library with `CUDA 12.6` acceleration. Integrates diarization using `PyAnnote`. Implements full web GUI (built with React TS) allowing the user to create a notebook containing their audio notes and relevant transcriptions. GUI fully integrates with local LM Studio server allowing the user to converse with an LLM about their notes.
+A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python, utilizing`faster_whisper` library with `CUDA 12.6` acceleration. Inspired by [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) by [KoljaB](https://github.com/KoljaB).
 
 **Features:**
 
 - Truly multilingual, supports [90+ languages](https://whisper-api.com/docs/languages/)
 - CUDA 12.6 acceleration
 - Longform dictation (optional live preview)
-- Static file transcription (audio/video)
-- Speaker diarization
-- Word-level timestamps
-- Full-text search (SQLite FTS5)
-- Audio Notebook web app for browsing and searching recordings
-- Remote transcription server (WebSocket-based, works with Linux/Android clients)
+- Static file transcription
+- Diarization using `PyAnnote`
+- **Server mode**: Turn your desktop into a server that can be accessed securely from anywhere on the internet. Get audio transcriptions to your smartphone remotely while your desktop at home is doing all the work! Implementation using [Tailscale](https://tailscale.com/). Works with Linux/Android. Web GUI frontend built using React Typescript and Tailwind CSS.
+- **Audio Notebook mode**: Open a calendar view where you can create audio notebook entries. Chat about your notes with your favorite clanker via LM Studio integration! Includes web GUI, full-text search (SQLite FTS5), word-level timestamps, diarization. Frontend built using React Typescript and Tailwind CSS.
 
-📌 *Half an hour of audio transcribed in under a minute (RTX 3060)*
+📌 *Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
 ## Table of Contents
 

@@ -3,15 +3,17 @@ Persistent token storage for the remote transcription server.
 
 Stores tokens in a JSON file with support for:
 - Admin and regular user roles
-- Manual revocation (tokens never expire automatically)
+- Token expiration (30 days default for regular users, never for admins)
+- Manual revocation
 - Persistent secret key
+- Non-secret token IDs for admin operations
 """
 
 import json
 import logging
 import secrets
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from dataclasses import dataclass, asdict, field
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, List
 from filelock import FileLock
@@ -19,6 +21,10 @@ from filelock import FileLock
 logger = logging.getLogger(__name__)
 
 DEFAULT_TOKEN_STORE_PATH = Path(__file__).parent / "data" / "tokens.json"
+
+
+# Default token expiration (30 days)
+DEFAULT_TOKEN_EXPIRY_DAYS = 30
 
 
 @dataclass
@@ -30,17 +36,59 @@ class StoredToken:
     created_at: str  # ISO format
     is_admin: bool
     is_revoked: bool
+    expires_at: Optional[str] = None  # ISO format, None = never expires (for admin)
+    token_id: Optional[str] = None  # Short ID for UI operations (non-secret)
 
     @classmethod
-    def create(cls, client_name: str, is_admin: bool = False) -> "StoredToken":
-        """Create a new token."""
+    def create(
+        cls,
+        client_name: str,
+        is_admin: bool = False,
+        expiry_days: Optional[int] = None,
+    ) -> "StoredToken":
+        """Create a new token.
+
+        Args:
+            client_name: Name/identifier for the client
+            is_admin: Whether this token has admin privileges
+            expiry_days: Days until expiration. None uses default (30 days).
+                        Admin tokens don't expire by default.
+        """
+        now = datetime.now(timezone.utc)
+
+        # Admin tokens don't expire by default, regular tokens expire in 30 days
+        if expiry_days is None:
+            if is_admin:
+                expires_at = None  # Admin tokens never expire
+            else:
+                expires_at = (now + timedelta(days=DEFAULT_TOKEN_EXPIRY_DAYS)).isoformat()
+        elif expiry_days <= 0:
+            expires_at = None  # Explicit no expiry
+        else:
+            expires_at = (now + timedelta(days=expiry_days)).isoformat()
+
+        # Generate a short, non-secret ID for UI operations
+        token_id = secrets.token_hex(8)  # 16 chars, enough for uniqueness
+
         return cls(
             token=secrets.token_hex(32),
             client_name=client_name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now.isoformat(),
             is_admin=is_admin,
             is_revoked=False,
+            expires_at=expires_at,
+            token_id=token_id,
         )
+
+    def is_expired(self) -> bool:
+        """Check if the token has expired."""
+        if self.expires_at is None:
+            return False
+        try:
+            expiry = datetime.fromisoformat(self.expires_at)
+            return datetime.now(timezone.utc) > expiry
+        except (ValueError, TypeError):
+            return False
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -55,6 +103,8 @@ class StoredToken:
             created_at=data["created_at"],
             is_admin=data.get("is_admin", False),
             is_revoked=data.get("is_revoked", False),
+            expires_at=data.get("expires_at"),
+            token_id=data.get("token_id"),
         )
 
 
@@ -63,8 +113,9 @@ class TokenStore:
     Persistent token storage with file-based JSON backend.
 
     Features:
-    - Tokens never expire automatically
+    - Token expiration (30 days for regular users, never for admins)
     - Admin tokens can manage other tokens
+    - Non-secret token IDs for UI operations (revoke, etc.)
     - Thread-safe file operations with file locking
     """
 
@@ -132,7 +183,7 @@ class TokenStore:
             token: The token string to validate
 
         Returns:
-            StoredToken if valid and not revoked, None otherwise
+            StoredToken if valid, not revoked, and not expired, None otherwise
         """
         data = self._read_store()
 
@@ -141,6 +192,9 @@ class TokenStore:
                 stored_token = StoredToken.from_dict(token_data)
                 if stored_token.is_revoked:
                     logger.warning(f"Token for '{stored_token.client_name}' is revoked")
+                    return None
+                if stored_token.is_expired():
+                    logger.warning(f"Token for '{stored_token.client_name}' has expired")
                     return None
                 logger.debug(f"Token validated for client: {stored_token.client_name}")
                 return stored_token
@@ -153,30 +207,43 @@ class TokenStore:
         stored_token = self.validate_token(token)
         return stored_token is not None and stored_token.is_admin
 
-    def generate_token(self, client_name: str, is_admin: bool = False) -> StoredToken:
+    def generate_token(
+        self,
+        client_name: str,
+        is_admin: bool = False,
+        expiry_days: Optional[int] = None,
+    ) -> StoredToken:
         """
         Generate a new token.
 
         Args:
             client_name: Name/identifier for the client
             is_admin: Whether this token has admin privileges
+            expiry_days: Days until expiration. None uses default (30 days for users).
 
         Returns:
             The newly created StoredToken
         """
         data = self._read_store()
 
-        new_token = StoredToken.create(client_name, is_admin)
+        new_token = StoredToken.create(client_name, is_admin, expiry_days)
         data["tokens"].append(new_token.to_dict())
 
         self._write_store(data)
-        logger.info(f"Generated new token for client: {client_name} (admin={is_admin})")
+        expiry_info = (
+            f", expires_at={new_token.expires_at}"
+            if new_token.expires_at
+            else ", never expires"
+        )
+        logger.info(
+            f"Generated new token for client: {client_name} (admin={is_admin}{expiry_info})"
+        )
 
         return new_token
 
     def revoke_token(self, token: str) -> bool:
         """
-        Revoke a token.
+        Revoke a token by token string.
 
         Args:
             token: The token string to revoke
@@ -195,6 +262,48 @@ class TokenStore:
 
         logger.warning("Cannot revoke token: not found")
         return False
+
+    def revoke_token_by_id(self, token_id: str) -> bool:
+        """
+        Revoke a token by its ID (non-secret identifier).
+
+        Args:
+            token_id: The token ID to revoke
+
+        Returns:
+            True if revoked, False if token not found
+        """
+        data = self._read_store()
+
+        for token_data in data["tokens"]:
+            if token_data.get("token_id") == token_id:
+                token_data["is_revoked"] = True
+                self._write_store(data)
+                logger.info(
+                    f"Token revoked by ID for client: {token_data['client_name']}"
+                )
+                return True
+
+        logger.warning(f"Cannot revoke token: ID {token_id} not found")
+        return False
+
+    def get_token_by_id(self, token_id: str) -> Optional[StoredToken]:
+        """
+        Get a token by its ID.
+
+        Args:
+            token_id: The token ID to look up
+
+        Returns:
+            StoredToken if found, None otherwise
+        """
+        data = self._read_store()
+
+        for token_data in data["tokens"]:
+            if token_data.get("token_id") == token_id:
+                return StoredToken.from_dict(token_data)
+
+        return None
 
     def delete_token(self, token: str) -> bool:
         """

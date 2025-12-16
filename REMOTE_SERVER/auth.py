@@ -2,7 +2,9 @@
 Authentication module for the remote transcription server.
 
 Provides token-based authentication with:
-- Persistent token storage (no expiry, manual revocation only)
+- Persistent token storage with configurable expiration
+- Admin tokens (never expire) and regular tokens (30-day default)
+- Rate limiting on authentication endpoints
 - Admin and regular user roles
 - Single-user session enforcement
 """
@@ -77,22 +79,28 @@ class AuthManager:
         """Check if a token has admin privileges."""
         return self.token_store.is_admin(token)
 
-    def generate_token(self, client_name: str, is_admin: bool = False) -> StoredToken:
+    def generate_token(
+        self,
+        client_name: str,
+        is_admin: bool = False,
+        expiry_days: Optional[int] = None,
+    ) -> StoredToken:
         """
         Generate a new authentication token.
 
         Args:
             client_name: Name/identifier for the client
             is_admin: Whether this token should have admin privileges
+            expiry_days: Days until expiration. None uses default (30 days for users).
 
         Returns:
             The newly created StoredToken
         """
-        return self.token_store.generate_token(client_name, is_admin)
+        return self.token_store.generate_token(client_name, is_admin, expiry_days)
 
     def revoke_token(self, token: str) -> bool:
         """
-        Revoke a token.
+        Revoke a token by token string.
 
         Args:
             token: The token string to revoke
@@ -105,6 +113,24 @@ class AuthManager:
             logger.warning("Cannot revoke token of active session")
             return False
         return self.token_store.revoke_token(token)
+
+    def revoke_token_by_id(self, token_id: str) -> bool:
+        """
+        Revoke a token by its ID.
+
+        Args:
+            token_id: The token ID to revoke
+
+        Returns:
+            True if revoked, False if not found
+        """
+        # Check if this is the active session's token
+        stored_token = self.token_store.get_token_by_id(token_id)
+        if stored_token and self._active_session:
+            if self._active_session.token == stored_token.token:
+                logger.warning("Cannot revoke token of active session")
+                return False
+        return self.token_store.revoke_token_by_id(token_id)
 
     def list_tokens(self):
         """List all tokens (admin operation)."""
