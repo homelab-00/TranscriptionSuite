@@ -25,11 +25,14 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  // Store options in ref to avoid recreating callbacks on every render
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const updateStatus = useCallback((newStatus: WebSocketStatus) => {
     setStatus(newStatus);
-    options.onStatusChange?.(newStatus);
-  }, [options]);
+    optionsRef.current.onStatusChange?.(newStatus);
+  }, []);
 
   const connect = useCallback(() => {
     const token = api.getToken();
@@ -39,7 +42,9 @@ export function useWebSocket(options: WebSocketOptions = {}) {
       return;
     }
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Prevent duplicate connections
+    if (wsRef.current?.readyState === WebSocket.OPEN || 
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
@@ -71,13 +76,13 @@ export function useWebSocket(options: WebSocketOptions = {}) {
       ws.onerror = () => {
         setError('WebSocket connection error');
         updateStatus('error');
+        optionsRef.current.onError?.('WebSocket connection error');
       };
 
       ws.onclose = () => {
         wsRef.current = null;
-        if (status !== 'error') {
-          updateStatus('disconnected');
-        }
+        // Only set disconnected if not already in error state
+        setStatus(prev => prev === 'error' ? 'error' : 'disconnected');
       };
 
       wsRef.current = ws;
@@ -86,7 +91,7 @@ export function useWebSocket(options: WebSocketOptions = {}) {
       setError(err instanceof Error ? err.message : 'Connection failed');
       updateStatus('error');
     }
-  }, [status, updateStatus, options]);
+  }, [updateStatus]);
 
   const handleMessage = useCallback((msg: WSMessage) => {
     switch (msg.type) {
@@ -116,14 +121,14 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       case 'realtime':
         if (msg.data?.text) {
-          options.onRealtimeText?.(msg.data.text as string);
+          optionsRef.current.onRealtimeText?.(msg.data.text as string);
         }
         break;
 
       case 'final':
         updateStatus('ready');
         if (msg.data) {
-          options.onFinalResult?.({
+          optionsRef.current.onFinalResult?.({
             text: msg.data.text as string || '',
             words: msg.data.words as TranscriptionResult['words'],
             duration: msg.data.duration as number || 0,
@@ -135,7 +140,7 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       case 'error':
         setError(msg.data?.message as string || 'Server error');
-        options.onError?.(msg.data?.message as string || 'Server error');
+        optionsRef.current.onError?.(msg.data?.message as string || 'Server error');
         break;
 
       case 'pong':
@@ -145,7 +150,7 @@ export function useWebSocket(options: WebSocketOptions = {}) {
       default:
         console.log('Unknown message type:', msg.type);
     }
-  }, [updateStatus, options]);
+  }, [updateStatus]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

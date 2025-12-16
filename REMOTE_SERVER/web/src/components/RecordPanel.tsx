@@ -61,11 +61,12 @@ export function RecordPanel() {
     },
   });
 
-  // Connect WebSocket when component mounts
+  // Connect WebSocket when component mounts (empty deps = run once)
   useEffect(() => {
     connect();
     return () => disconnect();
-  }, [connect, disconnect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStartRecording = useCallback(async () => {
     if (!isReady) {
