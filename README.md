@@ -1,6 +1,6 @@
 # TranscriptionSuite
 
-A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python, utilizing`faster_whisper` library with `CUDA 12.6` acceleration. Inspired by [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) by [KoljaB](https://github.com/KoljaB).
+A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python, utilizing`faster_whisper` w/ `CUDA 12.6` acceleration. Inspired from [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) written by [KoljaB](https://github.com/KoljaB).
 
 **Features:**
 
@@ -9,8 +9,8 @@ A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python,
 - Longform dictation (optional live preview)
 - Static file transcription
 - Diarization using `PyAnnote`
-- **Server mode**: Turn your desktop into a server that can be accessed securely from anywhere on the internet. Get audio transcriptions to your smartphone remotely while your desktop at home is doing all the work! Implementation using [Tailscale](https://tailscale.com/). Works with Linux/Android. Web GUI frontend built using React Typescript and Tailwind CSS.
-- **Audio Notebook mode**: Open a calendar view where you can create audio notebook entries. Chat about your notes with your favorite clanker via LM Studio integration! Includes web GUI, full-text search (SQLite FTS5), word-level timestamps, diarization. Frontend built using React Typescript and Tailwind CSS.
+- **Server mode**: Turn your desktop into a server that can be accessed securely from anywhere on the internet. Get audio transcriptions to your smartphone remotely while your desktop at home is doing all the work! Implementation using [Tailscale](https://tailscale.com/). Works with Linux/Android. Web GUI frontend built using React TypeScript and Tailwind CSS.
+- **Audio Notebook mode**: Open a calendar view where you can create audio notebook entries. Chat about your notes with your favorite clanker via LM Studio integration! Includes web GUI, full-text search (SQLite FTS5), word-level timestamps, diarization. Frontend built using React TypeScript and Tailwind CSS.
 
 📌 *Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
@@ -24,12 +24,13 @@ A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python,
 - [Remote Transcription Server](#remote-transcription-server)
 - [Output Format](#output-format)
 - [How It Works](#how-it-works)
-- [Scripts overview](#scripts-overview)
+- [Scripts Overview](#scripts-overview)
 - [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ## Project Architecture
 
-```bash
+```txt
 TranscriptionSuite/
 ├── config.yaml                   # Configuration file
 ├── pyproject.toml                # Dependencies
@@ -75,19 +76,23 @@ TranscriptionSuite/
 └── .list_audio_devices.py        # Audio device utility
 ```
 
-Everything runs in a single Python 3.11 environment. One `uv sync` installs all dependencies.
+Everything runs in a single Python 3.11 environment.
+
+---
 
 ## Installation
 
 ### Prerequisites
 
-- Arch Linux (or compatible)
-- NVIDIA GPU with CUDA
+- Linux (tested on Arch)
 - Python 3.11
+- NVIDIA GPU with CUDA 12.x support
 - `uv` package manager
-- Node.js 18+ and npm (for web frontend)
+- Node.js 18+ and npm
+- FFmpeg
+- PortAudio
 
-### 1. Clone the Repository
+### 1. Clone Repository
 
 ```bash
 git clone https://github.com/homelab-00/TranscriptionSuite.git
@@ -97,7 +102,7 @@ cd TranscriptionSuite
 ### 2. Install System Dependencies
 
 ```bash
-sudo pacman -S --needed cuda cudnn uv base-devel git openblas ffmpeg nodejs npm
+sudo pacman -S --needed python cuda cudnn uv base-devel git openblas ffmpeg nodejs npm portaudio
 
 # Optional: for waveform display during recording
 sudo pacman -S --needed cava
@@ -124,7 +129,6 @@ After this you'll have `/opt/cuda` (13.0 from pacman) and `/opt/cuda-12.6` (from
 
 ```bash
 uv venv --python 3.11
-source .venv/bin/activate
 uv sync
 ```
 
@@ -266,6 +270,8 @@ display:
 | Temp Files | `/tmp/transcription-suite/` |
 | Server Data | `REMOTE_SERVER/data/` (tokens, TLS certs) |
 
+---
+
 ## Usage
 
 ### Longform Recording
@@ -319,7 +325,7 @@ Web-based server allowing remote clients to transcribe audio via a browser inter
 **Features:**
 
 - Web UI with React frontend (record, file upload, admin panel)
-- HTTPS + WebSocket Secure (WSS) with self-signed certificates
+- HTTPS + WebSocket Secure (WSS)
 - Token-based authentication (no expiry, manual revocation)
 - Admin panel for token management
 - Single-user mode (rejects concurrent connections)
@@ -344,8 +350,6 @@ uv run python REMOTE_SERVER/run_server.py
 uv run python REMOTE_SERVER/run_server.py --https-port 9443 --wss-port 9444
 ```
 
-Access the web UI at: `https://localhost:8443` (or your Tailscale IP)
-
 On first run, an admin token is generated and printed to the console. Save this token to access the admin panel.
 
 ### Web UI Features
@@ -369,9 +373,9 @@ remote_server:
     
     tls:
         enabled: true
-        cert_file: "REMOTE_SERVER/data/cert.pem"
-        key_file: "REMOTE_SERVER/data/key.pem"
-        auto_generate: true   # Generate self-signed if missing
+        cert_file: "REMOTE_SERVER/data/my-machine.crt"
+        key_file: "REMOTE_SERVER/data/my-machine.key"
+        auto_generate: false  # Set to true for self-signed certs
 ```
 
 **Production Mode:**
@@ -385,12 +389,108 @@ uv run python REMOTE_SERVER/run_server.py
 
 ### Using with Tailscale
 
-The server is designed for use over Tailscale VPN:
+The server is designed for use over [Tailscale](https://tailscale.com/) VPN, providing secure remote access from anywhere.
 
-1. Install Tailscale on both server and client machines
-2. Start the server on your home machine
-3. Access from anywhere via Tailscale IP (e.g., `https://100.x.x.x:8443`)
-4. Traffic is encrypted end-to-end through Tailscale's WireGuard tunnel
+#### Quick Start (Self-Signed Certificates)
+
+For local network or testing:
+
+1. Set `auto_generate: true` in `config.yaml`
+2. Start the server — self-signed certificates are generated automatically
+3. Access via `https://localhost:8443` or `https://<tailscale-ip>:8443`
+4. Accept the browser security warning (self-signed cert)
+
+#### Tailscale HTTPS with Valid Certificates (Recommended)
+
+For browser-trusted HTTPS without security warnings, use Tailscale's built-in Let's Encrypt certificate provisioning.
+
+**Prerequisites:**
+
+- [Tailscale](https://tailscale.com/download) installed and running on your server
+- MagicDNS enabled in your tailnet
+- HTTPS Certificates enabled in the [Tailscale admin console](https://login.tailscale.com/admin/dns) (under DNS → HTTPS Certificates)
+
+##### Step 1: Find your machine's Tailscale hostname
+
+```bash
+tailscale status
+```
+
+This will show the Tailscale IP of all machines that have been verified with your Tailscale account. You want to note the machine name and IP of the device you want to use as the server.
+
+##### Step 2: Generate the Tailscale certificate
+
+```bash
+cd /path/to/TranscriptionSuite/REMOTE_SERVER/data
+sudo tailscale cert <your-machine>.<your-tailnet>.ts.net
+```
+
+This creates two files:
+
+- `<your-machine>.<your-tailnet>.ts.net.crt`
+- `<your-machine>.<your-tailnet>.ts.net.key`
+
+##### Step 3: Rename the certificate files (optional but recommended)
+
+```bash
+mv <your-machine>.<your-tailnet>.ts.net.crt my-machine.crt
+mv <your-machine>.<your-tailnet>.ts.net.key my-machine.key
+```
+
+##### Step 4: Fix file permissions
+
+The certificate files are created with root ownership. The server needs read access:
+
+```bash
+sudo chown $USER:$USER my-machine.crt my-machine.key
+```
+
+##### Step 5: Update `config.yaml`
+
+```yaml
+remote_server:
+    tls:
+        enabled: true
+        cert_file: "REMOTE_SERVER/data/my-machine.crt"
+        key_file: "REMOTE_SERVER/data/my-machine.key"
+        auto_generate: false  # Important: don't overwrite with self-signed
+```
+
+##### Step 6: Start the server and access via Tailscale hostname
+
+```bash
+uv run python MAIN/orchestrator.py
+# Then: Tray → Start Server Mode
+```
+
+Access from any device on your tailnet:
+
+```bash
+https://<your-machine>.<your-tailnet>.ts.net:8443
+```
+
+The certificate is only valid for the `*.ts.net` hostname. Accessing via IP address or `localhost` will still show certificate warnings.
+
+**Certificate Renewal:**
+
+Tailscale certificates from Let's Encrypt expire after 90 days. To renew:
+
+```bash
+cd /path/to/TranscriptionSuite/REMOTE_SERVER/data
+sudo tailscale cert <your-machine>.<your-tailnet>.ts.net
+sudo chown $USER:$USER <your-machine>.<your-tailnet>.ts.net.*
+# Rename if needed, then restart the server
+```
+
+#### Troubleshooting Tailscale HTTPS
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| `SSL_ERROR_RX_RECORD_TOO_LONG` | Server running HTTP instead of HTTPS | Check `tls.enabled: true` and certificate file paths |
+| `MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT` | Using self-signed instead of Tailscale cert | Follow the Tailscale certificate setup above |
+| "Secure Site Not Available" | Accessing via wrong hostname | Use the exact `*.ts.net` hostname, not IP |
+| Permission denied on cert files | Root ownership | Run `sudo chown $USER:$USER` on cert files |
+| Certificate not found | Wrong path in config | Verify paths are relative to project root |
 
 ### Security Features
 
@@ -404,7 +504,7 @@ The server is designed for use over Tailscale VPN:
 
 **Network Security:**
 
-- HTTPS with TLS 1.2+ (self-signed certificates auto-generated on first run)
+- HTTPS with TLS 1.2+ required
 - HSTS header enforces HTTPS for 1 year
 - WebSocket origin validation prevents unauthorized connections
 - Content Security Policy (CSP) headers:
@@ -425,8 +525,8 @@ The server is designed for use over Tailscale VPN:
 
 **Best Practices:**
 
-- Use over Tailscale VPN for encrypted tunnel access
-- Browser will warn about self-signed cert (accept once, or use custom CA)
+- Use over Tailscale VPN for end-to-end encrypted tunnel access
+- Use Tailscale certificates for browser-trusted HTTPS
 - Revoke compromised tokens immediately via admin panel
 - Regenerate tokens after 30 days for regular users
 
@@ -499,7 +599,7 @@ Each word assigned to speaker by:
 
 ---
 
-## Scripts overview
+## Scripts Overview
 
 ### MAIN/
 
@@ -559,6 +659,8 @@ Each word assigned to speaker by:
 
 MIT License — See [LICENSE](LICENSE).
 
+---
+
 ## Acknowledgments
 
 - [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) — Core transcription engine adapted from this library
@@ -566,3 +668,4 @@ MIT License — See [LICENSE](LICENSE).
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [CTranslate2](https://github.com/OpenNMT/CTranslate2)
+- [Tailscale](https://tailscale.com/) — Secure networking for remote access
