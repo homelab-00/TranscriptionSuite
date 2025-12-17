@@ -49,6 +49,28 @@ DEFAULT_HTTPS_PORT = 8443
 # Static files directory
 WEB_DIST_DIR = Path(__file__).parent / "web" / "dist"
 
+
+def _safe_static_file(base_dir: Path, requested_path: str) -> Optional[Path]:
+    """Safely resolve a static file path, preventing directory traversal.
+
+    Returns the resolved path if it's safe and exists, None otherwise.
+    This function acts as a sanitizer for CodeQL path-injection analysis.
+    """
+    if not requested_path:
+        requested_path = "index.html"
+    # Reject obviously malicious patterns early
+    if ".." in requested_path or requested_path.startswith("/"):
+        return None
+    try:
+        base_resolved = base_dir.resolve(strict=True)
+        candidate = (base_dir / requested_path).resolve()
+        if candidate.is_relative_to(base_resolved) and candidate.is_file():
+            return candidate
+    except (ValueError, RuntimeError, OSError):
+        pass
+    return None
+
+
 # Maximum file upload size (500MB)
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
 
@@ -595,32 +617,23 @@ class WebTranscriptionServer:
 
     async def _handle_static(self, request: web.Request) -> web.Response:
         """Serve static files from web/dist."""
-        path = request.match_info.get("path", "")
+        requested_path = request.match_info.get("path", "") or "index.html"
 
-        if not path or path == "/":
-            path = "index.html"
+        # Use sanitizer function to get safe path
+        safe_path = _safe_static_file(WEB_DIST_DIR, requested_path)
 
-        file_path = WEB_DIST_DIR / path
-
-        # Security: prevent directory traversal
-        try:
-            file_path = file_path.resolve()
-            if not str(file_path).startswith(str(WEB_DIST_DIR.resolve())):
-                return web.Response(status=403)
-        except (ValueError, RuntimeError):
-            return web.Response(status=403)
-
-        if not file_path.exists():
+        if safe_path is None:
             # SPA fallback - serve index.html for client-side routing
-            file_path = WEB_DIST_DIR / "index.html"
-            if not file_path.exists():
+            index_path = WEB_DIST_DIR / "index.html"
+            if not index_path.exists():
                 return web.Response(status=404, text="Not Found")
+            safe_path = index_path
 
-        content_type, _ = mimetypes.guess_type(str(file_path))
+        content_type, _ = mimetypes.guess_type(str(safe_path))
         if content_type is None:
             content_type = "application/octet-stream"
 
-        return web.FileResponse(file_path, headers={"Content-Type": content_type})  # type: ignore[return-value]
+        return web.FileResponse(safe_path, headers={"Content-Type": content_type})  # type: ignore[return-value]
 
     # =========================================================================
     # WebSocket Handler (aiohttp)
