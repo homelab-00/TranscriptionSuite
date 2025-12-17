@@ -1,19 +1,18 @@
 # TranscriptionSuite
 
-A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing the `faster_whisper` library with `CUDA 12.6` acceleration. Integrates diarization using `PyAnnote`. Implements full web GUI (built with React TS) allowing the user to create a notebook containing their audio notes and relevant transcriptions. GUI fully integrates with local LM Studio server allowing the user to converse with an LLM about their notes.
+A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python, utilizing`faster_whisper` library with `CUDA 12.6` acceleration. Inspired by [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) by [KoljaB](https://github.com/KoljaB).
 
 **Features:**
 
 - Truly multilingual, supports [90+ languages](https://whisper-api.com/docs/languages/)
 - CUDA 12.6 acceleration
 - Longform dictation (optional live preview)
-- Static file transcription (audio/video)
-- Speaker diarization
-- Word-level timestamps
-- Full-text search (SQLite FTS5)
-- Audio Notebook web app for browsing and searching recordings
+- Static file transcription
+- Diarization using `PyAnnote`
+- **Server mode**: Turn your desktop into a server that can be accessed securely from anywhere on the internet. Get audio transcriptions to your smartphone remotely while your desktop at home is doing all the work! Implementation using [Tailscale](https://tailscale.com/). Works with Linux/Android. Web GUI frontend built using React Typescript and Tailwind CSS.
+- **Audio Notebook mode**: Open a calendar view where you can create audio notebook entries. Chat about your notes with your favorite clanker via LM Studio integration! Includes web GUI, full-text search (SQLite FTS5), word-level timestamps, diarization. Frontend built using React Typescript and Tailwind CSS.
 
-📌 *Half an hour of audio transcribed in under a minute (RTX 3060)*
+📌 *Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
 ## Table of Contents
 
@@ -22,9 +21,10 @@ A Speech-to-Text Transcription Suite for Linux. Written in Python and utilizing 
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Audio Notebook Web App](#audio-notebook-web-app)
+- [Remote Transcription Server](#remote-transcription-server)
 - [Output Format](#output-format)
 - [How It Works](#how-it-works)
-- [Module Architecture](#module-architecture)
+- [Scripts overview](#scripts-overview)
 - [License](#license)
 
 ## Project Architecture
@@ -60,6 +60,18 @@ TranscriptionSuite/
 │   ├── service.py                # Service wrapper
 │   ├── combiner.py               # Merges transcription + speakers
 │   └── utils.py                  # Utilities
+├── REMOTE_SERVER/                # Remote transcription server
+│   ├── run_server.py             # Server entry point
+│   ├── web_server.py             # Combined HTTPS + WSS server (aiohttp)
+│   ├── server.py                 # Legacy WebSocket server
+│   ├── token_store.py            # Persistent JSON token storage
+│   ├── auth.py                   # Token authentication & session lock
+│   ├── protocol.py               # Audio/control protocols
+│   ├── transcription_engine.py   # Integration with Whisper
+│   ├── server_logging.py         # Server-mode logging
+│   ├── client.py                 # Python client (Linux/Android)
+│   ├── web/                      # React frontend (Vite + TS + Tailwind)
+│   └── data/                     # Tokens, TLS certs
 └── list_audio_devices.py         # Audio device utility
 ```
 
@@ -128,65 +140,58 @@ uv sync
 hf auth login
 ```
 
-### 6. Install Frontend Dependencies (Optional)
-
-Only needed if you want to modify the Audio Notebook web interface:
+### 6. Build Web Frontend (Audio Notebook)
 
 ```bash
-cd AUDIO_NOTEBOOK && npm install && cd ..
+cd AUDIO_NOTEBOOK
+npm install
+npm run build
+cd ..
 ```
 
-### 7. Verify Installation
+### 7. Build Remote Server Frontend
 
 ```bash
-uv run python -c "from DIARIZATION import DiarizationManager; print('Diarization OK')"
-uv run python -c "import faster_whisper; print('Faster Whisper OK')"
+cd REMOTE_SERVER/web
+npm install
+npm run build
+cd ../..
 ```
 
-### 8. Run
+### 8. Run the Application
 
 ```bash
-uv run SCRIPT/orchestrator.py
+uv run python SCRIPT/orchestrator.py
 ```
+
+The system tray icon appears — right-click for options.
+
+---
 
 ## Configuration
 
-All settings are in `config.yaml` at the project root.
-
-### Key Sections
+Edit `config.yaml`:
 
 ```yaml
 transcription_options:
-    language: null               # "en", "el", etc. or null for auto-detect
-    enable_preview_transcriber: true
-
-static_transcription:
-    enable_diarization: false
-    word_timestamps: true
-    max_segment_chars: 500
+    language: null              # null = auto-detect, or "en", "el", etc.
+    enable_preview_transcriber: false  # Live preview uses more GPU VRAM
 
 longform_recording:
-    include_in_viewer: true      # Save to Audio Notebook
-    word_timestamps: true
-    enable_diarization: false
+    include_in_viewer: false    # Save recordings to Audio Notebook
+    word_timestamps: false      # Enable for click-to-seek
+    enable_diarization: false   # Usually not needed for dictation
 
-diarization:
-    model: "pyannote/speaker-diarization-3.1"
-    device: "cuda"
-    min_speakers: null           # null = auto-detect
-    max_speakers: null
+static_transcription:
+    enable_diarization: false   # Speaker labels
+    word_timestamps: false      # Required for searchable transcriptions
+    max_segment_chars: 500      # Split long segments
 
 main_transcriber:
     model: "Systran/faster-whisper-large-v3"
-    device: "cuda"
-    compute_type: "default"
-    beam_size: 5
-    initial_prompt: null
-    faster_whisper_vad_filter: true
 
 preview_transcriber:
     model: "Systran/faster-whisper-base"
-    device: "cuda"
 
 storage:
     audio_dir: "data/audio"
@@ -256,56 +261,29 @@ display:
 |------|----------|
 | Database | `AUDIO_NOTEBOOK/backend/data/transcriptions.db` |
 | Audio Files | `AUDIO_NOTEBOOK/backend/data/audio/` |
-| Logs | `transcription_suite.log`, `webapp.log` (project root, wiped on start) |
+| Logs | `transcription_suite.log`, `audio_notebook_webapp.log` (project root, wiped on start) |
 | Models | `~/.cache/huggingface/` |
 | Temp Files | `/tmp/transcription-suite/` |
+| Server Data | `REMOTE_SERVER/data/` (tokens, TLS certs) |
 
 ## Usage
 
-```bash
-uv run SCRIPT/orchestrator.py
-```
+### Longform Recording
 
-### System Tray
+1. **Start:** Tray → Start Recording (or press configured hotkey)
+2. **Speak:** Live preview shows in terminal (if enabled)
+3. **Stop:** Tray → Stop Recording
+4. **Result:** Final transcription displayed, copied to clipboard
 
-| Action | Effect |
-|--------|--------|
-| Left-click | Start recording |
-| Middle-click | Stop & transcribe |
-| Right-click | Context menu |
+Extended silences (>10 seconds) are automatically trimmed during recording to prevent Whisper hallucinations.
 
-**Icon Colors:** Grey (loading), Green (ready), Yellow (recording), Orange (transcribing longform), Mauve (static transcription), Aquamarine (web server running), Red (error)
+### Static File Transcription
 
-### Context Menu
-
-- Start/Stop Recording
-- Transcribe Audio File...
-- Start/Stop Audio Notebook
-- Unload/Reload All Models
-- Quit
-
-### Longform Dictation
-
-1. Left-click tray to start
-2. Speak (live preview in terminal if enabled)
-3. Middle-click to stop
-4. Text copied to clipboard
-
-When `include_in_viewer: true`, recordings are saved to Audio Notebook with word timestamps.
-
-### Static Transcription
-
-1. Right-click → "Transcribe Audio File..."
-2. Select file (WAV, MP3, FLAC, OGG, OPUS, M4A, MP4, MKV, etc.)
+1. **Tray → Transcribe File**
+2. Select audio/video file
 3. JSON saved as `{filename}_transcription.json`
 
 Enable `enable_diarization: true` for speaker labels.
-
-### CLI Mode
-
-```bash
-uv run python SCRIPT/orchestrator.py --static /path/to/audio.mp3
-```
 
 ---
 
@@ -331,6 +309,126 @@ npm run dev  # Hot reload on port 1420
 ```
 
 API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## Remote Transcription Server
+
+Web-based server allowing remote clients to transcribe audio via a browser interface. Designed for secure remote access over Tailscale VPN.
+
+**Features:**
+
+- Web UI with React frontend (record, file upload, admin panel)
+- HTTPS + WebSocket Secure (WSS) with self-signed certificates
+- Token-based authentication (no expiry, manual revocation)
+- Admin panel for token management
+- Single-user mode (rejects concurrent connections)
+- File upload transcription support
+- Tailscale VPN integration for secure remote access
+
+### Starting Server Mode
+
+Server Mode can be started in two ways:
+
+**From system tray (recommended):**
+Right-click the tray icon → "Start Server Mode"
+
+This integrates with the orchestrator, shares the main log file (`transcription_suite.log`), and properly manages model loading/unloading.
+
+**Standalone (for development/testing):**
+
+```bash
+uv run python REMOTE_SERVER/run_server.py
+
+# Custom ports
+uv run python REMOTE_SERVER/run_server.py --https-port 9443 --wss-port 9444
+```
+
+Access the web UI at: `https://localhost:8443` (or your Tailscale IP)
+
+On first run, an admin token is generated and printed to the console. Save this token to access the admin panel.
+
+### Web UI Features
+
+1. **Login**: Enter your token to authenticate
+2. **Record Tab**: Hold button to record, release to transcribe
+3. **Upload Tab**: Drag & drop audio/video files for transcription
+4. **Admin Tab** (admin only): Create and revoke tokens
+
+### Server Configuration
+
+In `config.yaml`:
+
+```yaml
+remote_server:
+    enabled: true
+    host: "0.0.0.0"           # Listen on all interfaces
+    https_port: 8443          # HTTPS (web UI + REST API)
+    wss_port: 8444            # WebSocket Secure (audio streaming)
+    token_store: "REMOTE_SERVER/data/tokens.json"
+    
+    tls:
+        enabled: true
+        cert_file: "REMOTE_SERVER/data/cert.pem"
+        key_file: "REMOTE_SERVER/data/key.pem"
+        auto_generate: true   # Generate self-signed if missing
+```
+
+**Production Mode:**
+
+For stricter security headers (CSP without `unsafe-inline`):
+
+```bash
+export ENVIRONMENT=production
+uv run python REMOTE_SERVER/run_server.py
+```
+
+### Using with Tailscale
+
+The server is designed for use over Tailscale VPN:
+
+1. Install Tailscale on both server and client machines
+2. Start the server on your home machine
+3. Access from anywhere via Tailscale IP (e.g., `https://100.x.x.x:8443`)
+4. Traffic is encrypted end-to-end through Tailscale's WireGuard tunnel
+
+### Security Features
+
+**Authentication & Tokens:**
+
+- Tokens are SHA-256 hashed before storage (plaintext shown only at creation)
+- Regular user tokens expire after 30 days (admin tokens never expire)
+- Token IDs are 128-bit for sufficient entropy
+- Rate limiting: 5 failed auth attempts per IP triggers 5-minute lockout
+- Automatic migration from plaintext to hashed storage (regenerates tokens)
+
+**Network Security:**
+
+- HTTPS with TLS 1.2+ (self-signed certificates auto-generated on first run)
+- HSTS header enforces HTTPS for 1 year
+- WebSocket origin validation prevents unauthorized connections
+- Content Security Policy (CSP) headers:
+  - Development: allows `unsafe-inline` for Vite hot reload
+  - Production: strict CSP (set `ENVIRONMENT=production`)
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`
+
+**Access Control:**
+
+- Single-user mode: only one client can record at a time
+- Session lock validates both token hash and token_id
+- Admin-only endpoints for token management
+
+**Data Validation:**
+
+- File uploads validated by magic bytes (WAV, FLAC, OGG, MP3)
+- Generic error messages sent to clients (verbose logging server-side only)
+
+**Best Practices:**
+
+- Use over Tailscale VPN for encrypted tunnel access
+- Browser will warn about self-signed cert (accept once, or use custom CA)
+- Revoke compromised tokens immediately via admin panel
+- Regenerate tokens after 30 days for regular users
 
 ---
 
@@ -380,6 +478,15 @@ When `enable_preview_transcriber: true`:
 3. Faster Whisper transcribes with word timestamps
 4. If diarization enabled: PyAnnote identifies speakers, combiner merges results
 
+### Extended Silence Trimming (Longform)
+
+During longform recording, a dual-stage VAD (WebRTC + Silero) monitors audio in real-time:
+
+- Silences under 10 seconds: frames saved normally
+- Silences over 10 seconds: frames discarded until speech resumes
+- Prevents Whisper hallucinations from extended pauses
+- Trimming happens on-the-fly (silent frames never buffered)
+
 ### Speaker Assignment
 
 Each word assigned to speaker by:
@@ -392,7 +499,7 @@ Each word assigned to speaker by:
 
 ---
 
-## Module Architecture
+## Scripts overview
 
 ### SCRIPT/
 
@@ -401,7 +508,7 @@ Each word assigned to speaker by:
 | `orchestrator.py` | Main controller, state management, API server |
 | `model_manager.py` | AI model lifecycle |
 | `recorder.py` | Recording sessions |
-| `stt_engine.py` | Transcription engine, VAD, audio |
+| `stt_engine.py` | Transcription engine, VAD, audio, silence trimming |
 | `static_transcriber.py` | Static file processing |
 | `tray_manager.py` | System tray (PyQt6) |
 | `console_display.py` | Terminal UI (Rich) |
@@ -430,6 +537,21 @@ Each word assigned to speaker by:
 | `service.py` | Service wrapper |
 | `combiner.py` | Merge transcription + speakers |
 | `utils.py` | Utilities |
+
+### REMOTE_SERVER/
+
+| Module | Purpose |
+|--------|---------|
+| `run_server.py` | Server entry point |
+| `web_server.py` | Combined HTTPS + WSS server (aiohttp) |
+| `server.py` | Legacy WebSocket server |
+| `token_store.py` | Persistent JSON token storage (file-locked) |
+| `auth.py` | Token authentication & session lock |
+| `server_logging.py` | Server-mode logging (`server_mode.log`) |
+| `protocol.py` | Audio/control message formats |
+| `transcription_engine.py` | Integration with Whisper |
+| `client.py` | Python client for Linux/Android |
+| `web/` | React frontend (Vite + TypeScript + Tailwind) |
 
 ---
 

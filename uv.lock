@@ -2048,12 +2048,14 @@ wheels = [
 
 [[package]]
 name = "transcriptionsuite"
-version = "0.2.1"
+version = "0.2.3"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "ctranslate2" },
     { name = "fastapi" },
     { name = "faster-whisper" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "psutil" },
     { name = "pyannote-audio" },
@@ -2071,6 +2073,7 @@ dependencies = [
     { name = "torchaudio", version = "2.9.1+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" }, marker = "platform_machine != 'aarch64' or platform_python_implementation != 'CPython' or sys_platform != 'linux'" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "webrtcvad" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -2085,11 +2088,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.3.0" },
     { name = "ctranslate2", specifier = ">=4.6.0,<5.0" },
     { name = "cython", marker = "extra == 'dev'", specifier = ">=3.2.0" },
     { name = "fastapi", specifier = ">=0.109.0" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "filelock", specifier = ">=3.13.0" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "psutil", specifier = ">=7.1.0" },
     { name = "pyannote-audio", specifier = ">=3.4.0" },
@@ -2109,6 +2114,7 @@ requires-dist = [
     { name = "torchaudio", specifier = ">=2.9.1", index = "https://download.pytorch.org/whl/cu126" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
     { name = "webrtcvad", specifier = ">=2.0.10" },
+    { name = "websockets", specifier = ">=15.0" },
     { name = "wheel", marker = "extra == 'dev'", specifier = ">=0.45.0" },
 ]
 provides-extras = ["dev"]

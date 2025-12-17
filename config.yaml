@@ -46,7 +46,7 @@ longform_recording:
 # Settings for transcribing audio/video files (not live recording).
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
-    # Requires PyAnnote models to be downloaded (huggingface-cli login).
+    # Requires PyAnnote models to be downloaded.
     enable_diarization: false
 
     # Enable word-level timestamps in the transcription output.
@@ -235,6 +235,39 @@ local_llm:
         highlighting the main points, key topics discussed, and any 
         action items if applicable. Respond in the same language as 
         the transcription.
+
+
+# ----------------------------------------------------------------------------
+# Remote Transcription Server
+# ----------------------------------------------------------------------------
+# Settings for the web-based remote transcription server.
+# This allows clients on other devices to transcribe audio via a web browser
+# interface over a Tailscale VPN or local network.
+remote_server:
+    # Enable the remote server mode
+    enabled: true
+
+    # Network interface to bind to.
+    # Use "0.0.0.0" to accept connections from any interface.
+    # Use "127.0.0.1" for local-only connections.
+    host: "0.0.0.0"
+
+    # Port for HTTPS (web UI + REST API)
+    https_port: 8443
+
+    # Port for WebSocket Secure (audio streaming)
+    wss_port: 8444
+
+    # Path to token storage file (relative to project root)
+    token_store: "REMOTE_SERVER/data/tokens.json"
+
+    # TLS/SSL configuration
+    # Self-signed certificates are auto-generated on first run
+    tls:
+        enabled: true
+        cert_file: "REMOTE_SERVER/data/cert.pem"
+        key_file: "REMOTE_SERVER/data/key.pem"
+        auto_generate: true  # Generate self-signed cert if missing
 
 
 # ----------------------------------------------------------------------------
