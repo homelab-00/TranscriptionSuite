@@ -82,6 +82,11 @@ if str(_backend_path) not in sys.path:
     sys.path.insert(0, str(_backend_path))
 from database import save_longform_recording, get_word_timestamps_from_audio  # type: ignore[import-not-found]
 
+# Import remote server modules
+_remote_server_path = Path(__file__).parent.parent / "REMOTE_SERVER"
+if str(_remote_server_path) not in sys.path:
+    sys.path.insert(0, str(_remote_server_path))
+
 if not TYPE_CHECKING:
     # Try to import the tray manager at runtime
     try:
@@ -171,6 +176,12 @@ class STTOrchestrator:
         self.audio_notebook_thread = None
         self._audio_notebook_stop_handled = False  # Flag to coordinate shutdown
 
+        # Server mode state
+        self.server_mode_server = None
+        self.server_mode_thread = None
+        self.server_mode_engine = None
+        self._server_mode_stop_handled = False  # Flag to coordinate shutdown
+
         # Initialize Tray Icon Manager only for tray mode
         if mode == "tray" and HAS_TRAY:
             self.tray_manager = TrayIconManager(  # type: ignore[assignment]
@@ -181,6 +192,7 @@ class STTOrchestrator:
                 static_transcribe_callback=self._start_static_transcription,
                 toggle_models_callback=self._toggle_models_loaded,
                 audio_notebook_callback=self._toggle_audio_notebook,
+                server_mode_callback=self._toggle_server_mode,
             )
         elif mode == "tray" and not HAS_TRAY:
             safe_print(
@@ -969,6 +981,15 @@ class STTOrchestrator:
             )
             return
 
+        # Check if server mode is running
+        if self.server_mode_server is not None:
+            safe_print(
+                "Cannot start Audio Notebook while Server Mode is running. "
+                "Please stop Server Mode first.",
+                "warning",
+            )
+            return
+
         if self.audio_notebook_server is not None:
             # Stop the audio notebook
             self._stop_audio_notebook()
@@ -1000,6 +1021,7 @@ class STTOrchestrator:
             if self.tray_manager:
                 self.tray_manager.set_state("loading")
                 self.tray_manager.set_recording_actions_enabled(False)
+                self.tray_manager.set_server_mode_enabled(False)
 
             safe_print(
                 f"Unloading {current_model_type} model for Audio Notebook (lazy loading enabled)...",
@@ -1164,6 +1186,7 @@ class STTOrchestrator:
                 self.tray_manager.set_state("audio_notebook")
                 self.tray_manager.set_recording_actions_enabled(False)
                 self.tray_manager.set_static_transcription_enabled(False)
+                self.tray_manager.set_server_mode_enabled(False)
 
             safe_print(
                 f"Audio Notebook started on http://localhost:{self.api_port}", "success"
@@ -1217,6 +1240,7 @@ class STTOrchestrator:
                     self.tray_manager.set_state("standby")
                     self.tray_manager.set_recording_actions_enabled(True)
                     self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_server_mode_enabled(True)
 
                 safe_print("Longform model loaded. Ready for recording.", "success")
             except Exception as e:
@@ -1229,12 +1253,17 @@ class STTOrchestrator:
                     self.tray_manager.set_state("unloaded")
                     self.tray_manager.set_recording_actions_enabled(True)
                     self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_server_mode_enabled(True)
 
         self.audio_notebook_thread = threading.Thread(target=server_worker, daemon=True)
         self.audio_notebook_thread.start()
 
-    def _stop_audio_notebook(self):
-        """Stop the Audio Notebook server, eject LLM model, and reload the main (longform) model."""
+    def _stop_audio_notebook(self, skip_model_reload: bool = False):
+        """Stop the Audio Notebook server, eject LLM model, and optionally reload the main model.
+
+        Args:
+            skip_model_reload: If True, skip reloading the longform model (used during quit).
+        """
         if self.audio_notebook_server:
             safe_print("Stopping Audio Notebook...", "info")
 
@@ -1272,6 +1301,11 @@ class STTOrchestrator:
                 # Don't fail the whole operation if LM Studio isn't available
                 logging.debug(f"Could not eject LM Studio model: {e}")
 
+            # Skip model reload if we're quitting
+            if skip_model_reload:
+                safe_print("Skipping model reload (shutting down).", "info")
+                return
+
             # Switch from static to longform model automatically
             safe_print("Switching back to longform model...", "info")
             if self.tray_manager:
@@ -1289,6 +1323,7 @@ class STTOrchestrator:
                     self.tray_manager.set_state("standby")
                     self.tray_manager.set_recording_actions_enabled(True)
                     self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_server_mode_enabled(True)
 
                 safe_print("Longform model loaded. Ready for recording.", "success")
             except Exception as e:
@@ -1301,6 +1336,272 @@ class STTOrchestrator:
                     self.tray_manager.set_state("unloaded")
                     self.tray_manager.set_recording_actions_enabled(True)
                     self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_server_mode_enabled(True)
+
+    def _toggle_server_mode(self):
+        """Toggle Server Mode on/off from tray menu."""
+        # Check if we're in an active mode
+        if self.app_state["current_mode"] is not None:
+            safe_print(
+                f"Cannot start Server Mode while {self.app_state['current_mode']} mode is active.",
+                "warning",
+            )
+            return
+
+        # Check if audio notebook is running
+        if self.audio_notebook_server is not None:
+            safe_print(
+                "Cannot start Server Mode while Audio Notebook is running. "
+                "Please stop the Audio Notebook first.",
+                "warning",
+            )
+            return
+
+        if self.server_mode_server is not None:
+            # Stop server mode
+            self._stop_server_mode()
+        else:
+            # Start server mode
+            self._start_server_mode()
+
+    def _start_server_mode(self):
+        """Start the Remote Transcription Server in a background thread.
+
+        This loads the transcription model and starts the HTTPS + WebSocket server
+        for remote audio transcription. While server mode is active, local recording
+        and static transcription are disabled.
+        """
+        if self.server_mode_thread and self.server_mode_thread.is_alive():
+            safe_print("Server Mode is already running.", "warning")
+            return
+
+        # Unload any currently loaded model to free VRAM, then load for server use
+        current_model_type = self.app_state.get("loaded_model_type")
+
+        if current_model_type is not None:
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+                self.tray_manager.set_recording_actions_enabled(False)
+                self.tray_manager.set_static_transcription_enabled(False)
+                self.tray_manager.set_audio_notebook_enabled(False)
+
+            safe_print(
+                f"Unloading {current_model_type} model for Server Mode...",
+                "info",
+            )
+            self._unload_all_models_sync()
+            self.app_state["loaded_model_type"] = None
+            self.app_state["models_loaded"] = False
+
+        def server_worker():
+            try:
+                from REMOTE_SERVER.web_server import WebTranscriptionServer
+                from REMOTE_SERVER.transcription_engine import (
+                    create_transcription_callbacks,
+                    create_file_transcription_callback,
+                )
+                from REMOTE_SERVER.server_logging import setup_server_logging
+            except ImportError as e:
+                safe_print(f"Failed to import remote server modules: {e}", "error")
+                logging.error(f"Remote server import error: {e}", exc_info=True)
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_audio_notebook_enabled(True)
+                return
+
+            try:
+                # Initialize server logging to use main log file
+                setup_server_logging(use_main_log=True)
+
+                # Get remote server configuration
+                remote_config = self.config.get("remote_server", {})
+
+                # Create transcription callbacks using the server's engine
+                transcribe_cb, realtime_cb, engine = create_transcription_callbacks(
+                    self.config
+                )
+                file_transcribe_cb = create_file_transcription_callback(
+                    self.config, engine
+                )
+
+                # Store engine reference for cleanup
+                self.server_mode_engine = engine
+
+                # Pre-load the transcription model
+                if self.tray_manager:
+                    self.tray_manager.set_state("loading")
+
+                safe_print("Loading transcription model for Server Mode...", "info")
+                logging.info("Pre-loading transcription model for Server Mode...")
+                engine.load_model()
+                logging.info("Model loaded for Server Mode")
+
+                # Create server instance
+                server = WebTranscriptionServer(
+                    config=self.config,
+                    transcribe_callback=transcribe_cb,
+                    transcribe_file_callback=file_transcribe_cb,
+                    realtime_callback=realtime_cb,
+                )
+                self.server_mode_server = server
+
+                # Get configuration for display
+                host = remote_config.get("host", "0.0.0.0")
+                https_port = remote_config.get("https_port", 8443)
+                wss_port = remote_config.get("wss_port", 8444)
+                tls_config = remote_config.get("tls", {})
+                tls_enabled = tls_config.get("enabled", True)
+                http_scheme = "https" if tls_enabled else "http"
+
+                # Update tray menu and icon state
+                if self.tray_manager:
+                    self.tray_manager.update_server_mode_menu_item(True)
+                    self.tray_manager.set_state("server_mode")
+                    self.tray_manager.set_recording_actions_enabled(False)
+                    self.tray_manager.set_static_transcription_enabled(False)
+                    self.tray_manager.set_audio_notebook_enabled(False)
+
+                safe_print(
+                    f"Server Mode started on {http_scheme}://{host}:{https_port}",
+                    "success",
+                )
+                safe_print(f"  WebSocket port: {wss_port}", "info")
+                if tls_enabled:
+                    safe_print("  TLS: enabled (accept browser warning)", "info")
+
+                self.app_state["models_loaded"] = True
+                self.app_state["loaded_model_type"] = "server"
+
+                # Run the server (blocks until stopped)
+                server.start(blocking=True)
+
+                # Cleanup after server stops
+                if getattr(self, "_server_mode_stop_handled", False):
+                    self._server_mode_stop_handled = False
+                    self.server_mode_server = None
+                    logging.info(
+                        "Server stopped - model reload handled by _stop_server_mode"
+                    )
+                    return
+
+                # Server stopped on its own - handle cleanup
+                self.server_mode_server = None
+                self.server_mode_engine = None
+                if self.tray_manager:
+                    self.tray_manager.update_server_mode_menu_item(False)
+                    self.tray_manager.set_state("loading")
+
+                safe_print("Server Mode stopped. Switching to longform model...", "info")
+
+                try:
+                    self._unload_all_models_sync()
+                    self._load_longform_models_sync()
+                    self.app_state["loaded_model_type"] = "longform"
+
+                    if self.tray_manager:
+                        self.tray_manager.set_state("standby")
+                        self.tray_manager.set_recording_actions_enabled(True)
+                        self.tray_manager.set_static_transcription_enabled(True)
+                        self.tray_manager.set_audio_notebook_enabled(True)
+
+                    safe_print("Longform model loaded. Ready for recording.", "success")
+                except Exception as e:
+                    logging.error(
+                        f"Failed to load longform models after Server Mode: {e}",
+                        exc_info=True,
+                    )
+                    safe_print(f"Error loading longform model: {e}", "error")
+                    if self.tray_manager:
+                        self.tray_manager.set_state("unloaded")
+                        self.tray_manager.set_recording_actions_enabled(True)
+                        self.tray_manager.set_static_transcription_enabled(True)
+                        self.tray_manager.set_audio_notebook_enabled(True)
+
+            except Exception as e:
+                logging.error(f"Server Mode error: {e}", exc_info=True)
+                safe_print(f"Server Mode error: {e}", "error")
+                self.server_mode_server = None
+                self.server_mode_engine = None
+                if self.tray_manager:
+                    self.tray_manager.set_state("error")
+                    self.tray_manager.update_server_mode_menu_item(False)
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_audio_notebook_enabled(True)
+
+        self.server_mode_thread = threading.Thread(target=server_worker, daemon=True)
+        self.server_mode_thread.start()
+
+    def _stop_server_mode(self, skip_model_reload: bool = False):
+        """Stop the Server Mode and optionally reload the longform model.
+
+        Args:
+            skip_model_reload: If True, skip reloading the longform model (used during quit).
+        """
+        if self.server_mode_server:
+            safe_print("Stopping Server Mode...", "info")
+
+            self._server_mode_stop_handled = True
+
+            # Stop the server
+            self.server_mode_server.stop()
+
+            # Unload server's transcription model
+            if self.server_mode_engine:
+                try:
+                    self.server_mode_engine.unload_model()
+                except Exception as e:
+                    logging.debug(f"Error unloading server engine model: {e}")
+                self.server_mode_engine = None
+
+            self.server_mode_server = None
+
+            # Reset server logging state for next start
+            try:
+                from REMOTE_SERVER.server_logging import reset_server_logging
+
+                reset_server_logging()
+            except ImportError:
+                pass
+
+            if self.tray_manager:
+                self.tray_manager.update_server_mode_menu_item(False)
+
+            # Skip model reload if we're quitting
+            if skip_model_reload:
+                safe_print("Skipping model reload (shutting down).", "info")
+                return
+
+            # Switch back to longform model
+            safe_print("Switching back to longform model...", "info")
+            if self.tray_manager:
+                self.tray_manager.set_state("loading")
+
+            try:
+                self._unload_all_models_sync()
+                self._load_longform_models_sync()
+                self.app_state["loaded_model_type"] = "longform"
+
+                if self.tray_manager:
+                    self.tray_manager.set_state("standby")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_audio_notebook_enabled(True)
+
+                safe_print("Longform model loaded. Ready for recording.", "success")
+            except Exception as e:
+                logging.error(
+                    f"Failed to load longform models after stopping Server Mode: {e}",
+                    exc_info=True,
+                )
+                safe_print(f"Error loading longform model: {e}", "error")
+                if self.tray_manager:
+                    self.tray_manager.set_state("unloaded")
+                    self.tray_manager.set_recording_actions_enabled(True)
+                    self.tray_manager.set_static_transcription_enabled(True)
+                    self.tray_manager.set_audio_notebook_enabled(True)
 
     def _quit(self):
         """Signals the application to stop and exit gracefully."""
@@ -1310,8 +1611,10 @@ class STTOrchestrator:
         safe_print("Quit requested, shutting down...")
 
         def shutdown_worker():
-            # Stop audio notebook if running
-            self._stop_audio_notebook()
+            # Stop audio notebook if running (skip model reload - we're quitting)
+            self._stop_audio_notebook(skip_model_reload=True)
+            # Stop server mode if running (skip model reload - we're quitting)
+            self._stop_server_mode(skip_model_reload=True)
             self.stop()
             # The application will now exit naturally when the tray_manager's
             # event loop is quit. os._exit(0) is no longer needed.
