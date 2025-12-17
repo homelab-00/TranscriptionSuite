@@ -265,9 +265,9 @@ remote_server:
     # Self-signed certificates are auto-generated on first run
     tls:
         enabled: true
-        cert_file: "REMOTE_SERVER/data/cert.pem"
-        key_file: "REMOTE_SERVER/data/key.pem"
-        auto_generate: true  # Generate self-signed cert if missing
+        cert_file: "REMOTE_SERVER/data/my-machine.crt"
+        key_file: "REMOTE_SERVER/data/my-machine.key"
+        auto_generate: false # Don't generate self-signed cert if missing
 
 
 # ----------------------------------------------------------------------------
