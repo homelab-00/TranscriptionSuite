@@ -5,9 +5,10 @@ HTTP/WebSocket client for communicating with the container.
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 import aiohttp
 
@@ -22,7 +23,8 @@ class ServerConfig:
     audio_notebook_port: int = 8000
     remote_server_port: int = 8443
     use_https: bool = False
-    timeout: int = 30
+    timeout: int = 30  # Connection/health check timeout
+    transcription_timeout: int = 300  # 5 min for transcription (model may need to load)
     auto_reconnect: bool = True
     reconnect_interval: int = 5
 
@@ -47,10 +49,10 @@ class ServerConnection:
 
     def __init__(self, config: ServerConfig):
         self.config = config
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
+        self.session: aiohttp.ClientSession | None = None
+        self.ws: aiohttp.ClientWebSocketResponse | None = None
         self.connected = False
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_task: asyncio.Task | None = None
 
     async def connect(self) -> bool:
         """Establish connection to the container."""
@@ -73,7 +75,7 @@ class ServerConnection:
         except aiohttp.ClientError as e:
             logger.error(f"Failed to connect: {e}")
             return False
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Connection timeout")
             return False
 
@@ -94,7 +96,7 @@ class ServerConnection:
         self.connected = False
         logger.info("Disconnected from container")
 
-    async def get_status(self) -> Dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         """Get server status."""
         if not self.session:
             return {"status": "disconnected"}
@@ -127,10 +129,10 @@ class ServerConnection:
     async def transcribe_file(
         self,
         file_path: Path,
-        language: Optional[str] = None,
+        language: str | None = None,
         enable_diarization: bool = False,
-        progress_callback: Optional[Callable[[str], None]] = None,
-    ) -> Dict[str, Any]:
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         """Upload and transcribe an audio file."""
         if not self.session:
             raise RuntimeError("Not connected to server")
@@ -158,8 +160,15 @@ class ServerConnection:
         if progress_callback:
             progress_callback("Transcribing...")
 
+        # Use longer timeout for transcription (model may need to load)
+        transcribe_timeout = aiohttp.ClientTimeout(
+            total=self.config.transcription_timeout
+        )
+
         try:
-            async with self.session.post(url, data=data, params=params) as resp:
+            async with self.session.post(
+                url, data=data, params=params, timeout=transcribe_timeout
+            ) as resp:
                 if resp.status != 200:
                     error = await resp.text()
                     raise RuntimeError(f"Transcription failed: {error}")
@@ -173,14 +182,14 @@ class ServerConnection:
 
         except aiohttp.ClientError as e:
             logger.error(f"Transcription request failed: {e}")
-            raise RuntimeError(f"Network error: {e}")
+            raise RuntimeError(f"Network error: {e}") from e
 
     async def transcribe_audio_data(
         self,
         audio_data: bytes,
-        language: Optional[str] = None,
-        progress_callback: Optional[Callable[[str], None]] = None,
-    ) -> Dict[str, Any]:
+        language: str | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         """Transcribe raw audio data (WAV format)."""
         if not self.session:
             raise RuntimeError("Not connected to server")
@@ -202,8 +211,15 @@ class ServerConnection:
         if progress_callback:
             progress_callback("Transcribing...")
 
+        # Use longer timeout for transcription (model may need to load)
+        transcribe_timeout = aiohttp.ClientTimeout(
+            total=self.config.transcription_timeout
+        )
+
         try:
-            async with self.session.post(url, data=data, params=params) as resp:
+            async with self.session.post(
+                url, data=data, params=params, timeout=transcribe_timeout
+            ) as resp:
                 if resp.status != 200:
                     error = await resp.text()
                     raise RuntimeError(f"Transcription failed: {error}")
@@ -217,13 +233,13 @@ class ServerConnection:
 
         except aiohttp.ClientError as e:
             logger.error(f"Transcription request failed: {e}")
-            raise RuntimeError(f"Network error: {e}")
+            raise RuntimeError(f"Network error: {e}") from e
 
     async def stream_transcription(
         self,
         audio_generator,
         on_realtime: Callable[[str], None],
-        on_final: Callable[[Dict[str, Any]], None],
+        on_final: Callable[[dict[str, Any]], None],
     ) -> None:
         """Stream audio for real-time transcription via WebSocket."""
         if not self.session:
@@ -245,7 +261,7 @@ class ServerConnection:
                             on_realtime(data.get("text", ""))
                         elif data.get("type") == "final":
                             on_final(data)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
             # Signal end of audio

@@ -15,10 +15,10 @@ import time
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 import pyperclip
-from platform_utils import ensure_platform_init
 
 # Import our vendored STT engine
-from stt_engine import AudioToTextRecorder
+from MAIN.platform_utils import ensure_platform_init
+from MAIN.stt_engine import AudioToTextRecorder
 
 # For type-checking
 if TYPE_CHECKING:

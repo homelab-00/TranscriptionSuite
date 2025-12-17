@@ -9,7 +9,6 @@ import asyncio
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -18,12 +17,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Add MAIN to path for config access
-SCRIPT_DIR = Path(__file__).parent.parent.parent.parent / "MAIN"
-sys.path.insert(0, str(SCRIPT_DIR))
-
 # Use webapp logging
-from webapp_logging import get_llm_logger
+from AUDIO_NOTEBOOK.backend.webapp_logging import get_llm_logger
 
 router = APIRouter()
 logger = get_llm_logger()
@@ -410,7 +405,7 @@ async def summarize_recording(
     custom_prompt: Optional[str] = None,
 ):
     """Convenience endpoint: fetch transcription and summarize it (non-streaming)"""
-    from database import get_recording, get_transcription
+    from AUDIO_NOTEBOOK.backend.database import get_recording, get_transcription
 
     # Fetch the recording
     recording = get_recording(recording_id)
@@ -869,7 +864,10 @@ class ChatRequest(BaseModel):
 @router.get("/conversations/{recording_id}")
 async def get_conversations(recording_id: int):
     """Get all conversations for a recording."""
-    from database import get_conversations_for_recording, get_recording
+    from AUDIO_NOTEBOOK.backend.database import (
+        get_conversations_for_recording,
+        get_recording,
+    )
 
     # Verify recording exists
     recording = get_recording(recording_id)
@@ -883,7 +881,10 @@ async def get_conversations(recording_id: int):
 @router.post("/conversations")
 async def create_conversation(request: ConversationCreate):
     """Create a new conversation for a recording."""
-    from database import create_conversation as db_create_conversation, get_recording
+    from AUDIO_NOTEBOOK.backend.database import (
+        create_conversation as db_create_conversation,
+    )
+    from AUDIO_NOTEBOOK.backend.database import get_recording
 
     # Verify recording exists
     recording = get_recording(request.recording_id)
@@ -901,7 +902,7 @@ async def create_conversation(request: ConversationCreate):
 @router.get("/conversation/{conversation_id}")
 async def get_conversation_detail(conversation_id: int):
     """Get a conversation with all its messages."""
-    from database import get_conversation_with_messages
+    from AUDIO_NOTEBOOK.backend.database import get_conversation_with_messages
 
     conversation = get_conversation_with_messages(conversation_id)
     if not conversation:
@@ -913,7 +914,10 @@ async def get_conversation_detail(conversation_id: int):
 @router.patch("/conversation/{conversation_id}")
 async def update_conversation(conversation_id: int, request: ConversationUpdate):
     """Update a conversation's title."""
-    from database import update_conversation_title, get_conversation
+    from AUDIO_NOTEBOOK.backend.database import (
+        get_conversation,
+        update_conversation_title,
+    )
 
     # Verify conversation exists
     if not get_conversation(conversation_id):
@@ -929,7 +933,7 @@ async def update_conversation(conversation_id: int, request: ConversationUpdate)
 @router.delete("/conversation/{conversation_id}")
 async def delete_conversation_endpoint(conversation_id: int):
     """Delete a conversation and all its messages."""
-    from database import delete_conversation, get_conversation
+    from AUDIO_NOTEBOOK.backend.database import delete_conversation, get_conversation
 
     # Verify conversation exists
     if not get_conversation(conversation_id):
@@ -945,7 +949,7 @@ async def delete_conversation_endpoint(conversation_id: int):
 @router.post("/conversation/{conversation_id}/message")
 async def add_message_to_conversation(conversation_id: int, request: MessageCreate):
     """Add a message to a conversation (manual, not from LLM)."""
-    from database import add_message, get_conversation
+    from AUDIO_NOTEBOOK.backend.database import add_message, get_conversation
 
     # Verify conversation exists
     if not get_conversation(conversation_id):
@@ -975,11 +979,11 @@ async def chat_with_llm(request: ChatRequest):
     3. Sends to LLM and streams the response
     4. Saves the assistant response to the conversation
     """
-    from database import (
+    from AUDIO_NOTEBOOK.backend.database import (
+        add_message,
         get_conversation_with_messages,
         get_recording,
         get_transcription,
-        add_message,
     )
 
     # Get conversation and verify it exists

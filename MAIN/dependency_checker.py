@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, TypedDict
 
-from platform_utils import PlatformManager, get_platform_manager
+from MAIN.platform_utils import PlatformManager, get_platform_manager
 
 
 # Type aliases for better code readability

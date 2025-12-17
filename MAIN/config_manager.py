@@ -19,8 +19,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Mapping, MutableMapping, cast
 
-from platform_utils import get_platform_manager
-from shared.utils import safe_print
+from MAIN.platform_utils import get_platform_manager
+from MAIN.shared.utils import safe_print
 
 
 class ConfigManager:

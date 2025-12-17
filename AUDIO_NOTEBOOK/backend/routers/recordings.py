@@ -11,19 +11,19 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from database import (
-    get_recording,
-    get_all_recordings,
-    get_recordings_by_date_range,
-    get_recordings_for_month,
-    get_recordings_for_hour,
-    get_transcription,
+from AUDIO_NOTEBOOK.backend.database import (
     delete_recording,
+    get_all_recordings,
+    get_recording,
+    get_recording_summary,
+    get_recordings_by_date_range,
+    get_recordings_for_hour,
+    get_recordings_for_month,
+    get_transcription,
     update_recording_date,
     update_recording_summary,
-    get_recording_summary,
 )
-from webapp_logging import get_api_logger
+from AUDIO_NOTEBOOK.backend.webapp_logging import get_api_logger
 
 router = APIRouter()
 logger = get_api_logger()

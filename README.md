@@ -147,8 +147,10 @@ After this you'll have `/opt/cuda` (13.0 from pacman) and `/opt/cuda-12.6` (from
 
 ```bash
 uv venv --python 3.11
-uv sync
+uv sync --extra desktop
 ```
+
+The `desktop` extra includes PyQt6 (system tray) and PyAudio (microphone recording) for local use.
 
 ### 5. Configure HuggingFace Access (Required for Diarization)
 
