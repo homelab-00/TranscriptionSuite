@@ -391,10 +391,10 @@ async def process_with_llm_stream(request: LLMRequest):
             yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
         except Exception as e:
             logger.error(f"Streaming error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'error': 'An internal error occurred during streaming'})}\n\n"
 
     return StreamingResponse(
-        generate_stream(),
+        generate_stream(),  # lgtm[py/stack-trace-exposure] exceptions caught in generator
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1106,10 +1106,10 @@ async def chat_with_llm(request: ChatRequest):
             yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
         except Exception as e:
             logger.error(f"Chat error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'error': 'An internal error occurred during chat'})}\n\n"
 
     return StreamingResponse(
-        generate_stream(),
+        generate_stream(),  # lgtm[py/stack-trace-exposure] exceptions caught in generator
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -1159,9 +1159,18 @@ class STTOrchestrator:
                     # Don't intercept API routes or docs
                     if full_path.startswith(("api/", "docs", "openapi.json")):
                         return None
-                    file_path = os.path.join(frontend_dist, full_path)
-                    if os.path.exists(file_path) and os.path.isfile(file_path):
-                        return FileResponse(file_path)
+                    # Security: prevent directory traversal by validating against base
+                    # Reject obviously malicious patterns
+                    if ".." in full_path or full_path.startswith("/"):
+                        return FileResponse(os.path.join(frontend_dist, "index.html"))
+                    # Construct path using known-safe base directory
+                    base_path = os.path.realpath(frontend_dist)
+                    requested_file = os.path.realpath(os.path.join(base_path, full_path))
+                    # Verify the resolved path is still under base directory
+                    if requested_file.startswith(base_path + os.sep) and os.path.isfile(
+                        requested_file
+                    ):
+                        return FileResponse(requested_file)
                     # Return index.html for SPA routes
                     return FileResponse(os.path.join(frontend_dist, "index.html"))
             else:
