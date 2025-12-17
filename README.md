@@ -238,6 +238,30 @@ The container exposes:
 - **Port 8000**: Audio Notebook (HTTP)
 - **Port 8443**: Remote Server (HTTPS/WSS)
 
+### First Run: Admin Token
+
+On first startup, the container generates an admin token and prints it to the logs:
+
+```bash
+docker logs transcription-suite
+```
+
+Look for:
+
+```text
+======================================================================
+INITIAL ADMIN TOKEN GENERATED
+======================================================================
+
+Admin Token: YOUR-ADMIN-TOKEN-WILL-APPEAR-HERE
+
+Save this token! It's required to access the admin panel.
+This message will only appear once.
+======================================================================
+```
+
+**Save this token** — it's required for Remote Server admin access and won't be shown again.
+
 ### Container Management
 
 ```bash
@@ -272,7 +296,23 @@ Your `config.yaml` is mounted read-only into the container.
 | `HF_TOKEN` | - | HuggingFace token (required for diarization) |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
-Example with HuggingFace token:
+**Using a `.env` file (recommended):**
+
+Create a `.env` file in the project root:
+
+```bash
+# .env
+HF_TOKEN=hf_your_actual_token_here
+LOG_LEVEL=INFO
+```
+
+Then start the container normally:
+
+```bash
+docker compose up -d
+```
+
+**Alternative: Pass via command line:**
 
 ```bash
 HF_TOKEN=hf_xxxxx docker compose up -d
@@ -285,6 +325,25 @@ The container includes a health check endpoint:
 ```bash
 curl http://localhost:8000/health
 ```
+
+### Quick Start: Docker + Native Client
+
+To get the full experience (container for transcription, native client for recording):
+
+```bash
+# 1. Start the container
+docker compose up -d --build
+
+# 2. Set up the native client (first time only)
+cd NATIVE_CLIENT && uv venv --python 3.11 && cd ..
+uv pip install --python NATIVE_CLIENT/.venv/bin/python -e NATIVE_CLIENT
+uv pip install --python NATIVE_CLIENT/.venv/bin/python PyQt6 pyaudio
+
+# 3. Run the native client
+NATIVE_CLIENT/.venv/bin/python -m NATIVE_CLIENT
+```
+
+The tray icon appears. Left-click to start recording, middle-click to stop and transcribe.
 
 ---
 
@@ -302,42 +361,73 @@ The Native Client is a lightweight tray application that connects to the Docker 
 
 ### Client Installation
 
+The Native Client has its own virtual environment, separate from the main project.
+
 From the project root:
 
 ```bash
+# Create the NATIVE_CLIENT virtual environment
 cd NATIVE_CLIENT
-
-# Create virtual environment
 uv venv --python 3.11
-source .venv/bin/activate
+cd ..
 
-# Install with PyQt6 (KDE/Windows)
-uv pip install -e ".[qt,audio]"
+# Install base dependencies
+uv pip install --python NATIVE_CLIENT/.venv/bin/python -e NATIVE_CLIENT
 
-# Or for GNOME (uses system GTK)
-uv pip install -e ".[audio]"
+# Install PyQt6 for KDE/Windows
+uv pip install --python NATIVE_CLIENT/.venv/bin/python PyQt6 pyaudio
+
+# Or for GNOME (uses system GTK + pyaudio only)
+uv pip install --python NATIVE_CLIENT/.venv/bin/python pyaudio
 sudo pacman -S python-gobject gtk3 libappindicator-gtk3  # Arch
+```
+
+Alternatively, from within the NATIVE_CLIENT directory with its venv activated:
+
+```bash
+cd NATIVE_CLIENT
+source .venv/bin/activate
+uv pip install -e ".[qt,audio]"  # KDE/Windows
+# or
+uv pip install -e ".[audio]"     # GNOME
 ```
 
 ### Running
 
+Run from the project root using the NATIVE_CLIENT's Python environment:
+
 ```bash
 # Connect to localhost (default)
-python -m NATIVE_CLIENT
+NATIVE_CLIENT/.venv/bin/python -m NATIVE_CLIENT
 
 # Connect to remote server
-python -m NATIVE_CLIENT --host 192.168.1.100
+NATIVE_CLIENT/.venv/bin/python -m NATIVE_CLIENT --host 192.168.1.100
 
 # Use HTTPS
-python -m NATIVE_CLIENT --host myserver.local --https
+NATIVE_CLIENT/.venv/bin/python -m NATIVE_CLIENT --host myserver.local --https
 
 # List audio devices
-python -m NATIVE_CLIENT --list-devices
+NATIVE_CLIENT/.venv/bin/python -m NATIVE_CLIENT --list-devices
 ```
 
-### Tray Menu
+Or with the venv activated:
 
-Right-click the tray icon for:
+```bash
+source NATIVE_CLIENT/.venv/bin/activate
+python -m NATIVE_CLIENT
+```
+
+### Tray Icon Controls
+
+**Click Actions:**
+
+| Click | Action |
+|-------|--------|
+| Left-click | Start recording (when in standby) |
+| Middle-click | Stop recording and transcribe |
+| Right-click | Open context menu |
+
+**Context Menu (right-click):**
 
 - **Start Recording** — Begin microphone capture
 - **Stop Recording** — Stop and transcribe (result copied to clipboard)
@@ -370,6 +460,7 @@ server:
   remote_server_port: 8443
   use_https: false
   timeout: 30
+  transcription_timeout: 300  # 5 min for transcription (allows model loading)
 
 recording:
   sample_rate: 16000
@@ -378,6 +469,8 @@ recording:
 clipboard:
   auto_copy: true
 ```
+
+**Note:** The `transcription_timeout` is set to 5 minutes by default to accommodate the initial model loading time on the server. Subsequent transcriptions are much faster once the model is cached.
 
 ### GNOME Setup
 
