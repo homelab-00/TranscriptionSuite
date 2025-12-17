@@ -9,8 +9,8 @@ A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python,
 - Longform dictation (optional live preview)
 - Static file transcription
 - Diarization using `PyAnnote`
-- **Server mode**: Turn your desktop into a server that can be accessed securely from anywhere on the internet. Get audio transcriptions to your smartphone remotely while your desktop at home is doing all the work! Implementation using [Tailscale](https://tailscale.com/). Works with Linux/Android. Web GUI frontend built using React TypeScript and Tailwind CSS.
-- **Audio Notebook mode**: Open a calendar view where you can create audio notebook entries. Chat about your notes with your favorite clanker via LM Studio integration! Includes web GUI, full-text search (SQLite FTS5), word-level timestamps, diarization. Frontend built using React TypeScript and Tailwind CSS.
+- **Server mode**: Turn your desktop into a server that can be accessed securely from anywhere on the internet. Get audio transcriptions to your smartphone remotely while your desktop at home is doing all the work! Implementation using [Tailscale](https://tailscale.com/). Works with Linux/Android. Web GUI frontend built using React TypeScript and Tailwind CSS. Dual security layer (belt and suspenders): Tailscale identity authentication + HTTPS authentication.
+- **Audio Notebook mode**: Open a calendar view where you can create audio notebook entries. Chat about your notes with your favorite clanker via LM Studio integration! Includes web GUI, full-text search (SQLite FTS5), word-level timestamps, diarization. Web GUI frontend built using React TypeScript and Tailwind CSS.
 
 📌 *Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
@@ -18,6 +18,8 @@ A comprehensive Speech-to-Text Transcription Suite for Linux. Written in Python,
 
 - [Project Architecture](#project-architecture)
 - [Installation](#installation)
+- [Docker Deployment](#docker-deployment)
+- [Native Client](#native-client)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Audio Notebook Web App](#audio-notebook-web-app)
@@ -73,6 +75,22 @@ TranscriptionSuite/
 │   ├── client.py                 # Python client (Linux/Android)
 │   ├── web/                      # React frontend (Vite + TS + Tailwind)
 │   └── data/                     # Tokens, TLS certs
+├── DOCKER/                       # Docker container support
+│   ├── entrypoint.py             # Container entrypoint
+│   └── container_services.py     # Service manager (FastAPI + aiohttp)
+├── NATIVE_CLIENT/                # Cross-platform tray client
+│   ├── __main__.py               # CLI entry point
+│   ├── client_orchestrator.py    # Main controller
+│   ├── server_connection.py      # HTTP/WebSocket client
+│   ├── audio_recorder.py         # PyAudio recording
+│   ├── config.py                 # Client configuration
+│   └── tray/                     # Platform-specific tray implementations
+│       ├── base.py               # Abstract tray interface
+│       ├── qt6_tray.py           # PyQt6 (KDE/Windows)
+│       ├── gtk4_tray.py          # GTK+AppIndicator (GNOME)
+│       └── factory.py            # Platform detection
+├── Dockerfile                    # Multi-stage container build
+├── docker-compose.yml            # Container orchestration
 └── .list_audio_devices.py        # Audio device utility
 ```
 
@@ -169,6 +187,210 @@ uv run python MAIN/orchestrator.py
 ```
 
 The system tray icon appears — right-click for options.
+
+---
+
+## Docker Deployment
+
+For headless servers or simplified deployment, TranscriptionSuite can run entirely in a Docker container with GPU passthrough. The container bundles both the Audio Notebook and Remote Server, while a lightweight native client handles microphone recording and clipboard operations on your local machine.
+
+### Docker Prerequisites
+
+- Docker with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- NVIDIA GPU with CUDA support
+- Docker Compose V2 (included with Docker Desktop, or install `docker-compose-plugin`)
+
+Verify GPU support:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+```
+
+### Building the Image
+
+Build the container image from the project root:
+
+```bash
+docker compose build
+```
+
+This runs a multi-stage build:
+
+1. **Stage 1**: Builds React frontends (Audio Notebook + Remote Server)
+2. **Stage 2**: Sets up Python runtime with CUDA 12.6, installs dependencies, copies source and built frontends
+
+### Starting the Container
+
+```bash
+docker compose up -d
+```
+
+Or build and start in one command:
+
+```bash
+docker compose up -d --build
+```
+
+The container exposes:
+
+- **Port 8000**: Audio Notebook (HTTP)
+- **Port 8443**: Remote Server (HTTPS/WSS)
+
+### Container Management
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop container
+docker compose down
+
+# Stop and remove volumes (clears data)
+docker compose down -v
+
+# Rebuild after code changes
+docker compose up -d --build
+```
+
+### Data Persistence
+
+A named volume `transcription-data` stores:
+
+- SQLite database
+- Audio recordings
+- TLS certificates
+- Authentication tokens
+
+Your `config.yaml` is mounted read-only into the container.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HF_TOKEN` | - | HuggingFace token (required for diarization) |
+| `LOG_LEVEL` | `INFO` | Logging verbosity |
+
+Example with HuggingFace token:
+
+```bash
+HF_TOKEN=hf_xxxxx docker compose up -d
+```
+
+### Health Check
+
+The container includes a health check endpoint:
+
+```bash
+curl http://localhost:8000/health
+```
+
+---
+
+## Native Client
+
+The Native Client is a lightweight tray application that connects to the Docker container (or any TranscriptionSuite server) for audio recording and transcription. It runs natively on your desktop to access the microphone and clipboard—features unavailable inside containers.
+
+### Supported Platforms
+
+| Platform | Tray Implementation | Notes |
+|----------|---------------------|-------|
+| Linux KDE (Wayland/X11) | PyQt6 | Native integration |
+| Linux GNOME | GTK3 + AppIndicator | Requires AppIndicator extension |
+| Windows 11 | PyQt6 | Full support |
+
+### Client Installation
+
+From the project root:
+
+```bash
+cd NATIVE_CLIENT
+
+# Create virtual environment
+uv venv --python 3.11
+source .venv/bin/activate
+
+# Install with PyQt6 (KDE/Windows)
+uv pip install -e ".[qt,audio]"
+
+# Or for GNOME (uses system GTK)
+uv pip install -e ".[audio]"
+sudo pacman -S python-gobject gtk3 libappindicator-gtk3  # Arch
+```
+
+### Running
+
+```bash
+# Connect to localhost (default)
+python -m NATIVE_CLIENT
+
+# Connect to remote server
+python -m NATIVE_CLIENT --host 192.168.1.100
+
+# Use HTTPS
+python -m NATIVE_CLIENT --host myserver.local --https
+
+# List audio devices
+python -m NATIVE_CLIENT --list-devices
+```
+
+### Tray Menu
+
+Right-click the tray icon for:
+
+- **Start Recording** — Begin microphone capture
+- **Stop Recording** — Stop and transcribe (result copied to clipboard)
+- **Transcribe File...** — Select an audio/video file
+- **Open Audio Notebook** — Launch web UI in browser
+- **Open Remote Server** — Launch remote UI in browser
+- **Settings** — Configure connection and audio
+- **Quit** — Exit the client
+
+### Tray Icon States
+
+| Color | State |
+|-------|-------|
+| Grey | Disconnected from server |
+| Orange | Connecting... |
+| Green | Ready (standby) |
+| Yellow | Recording |
+| Blue | Uploading audio |
+| Orange | Transcribing |
+| Red | Error |
+
+### Configuration File
+
+The client stores settings in `~/.config/transcription-suite/client.yaml`:
+
+```yaml
+server:
+  host: localhost
+  audio_notebook_port: 8000
+  remote_server_port: 8443
+  use_https: false
+  timeout: 30
+
+recording:
+  sample_rate: 16000
+  device_index: null  # null = default device
+
+clipboard:
+  auto_copy: true
+```
+
+### GNOME Setup
+
+GNOME doesn't natively support system trays. Install the AppIndicator extension:
+
+1. Install extension: [AppIndicator Support](https://extensions.gnome.org/extension/615/appindicator-support/)
+2. Install system packages:
+
+```bash
+# Fedora
+sudo dnf install gtk3 libappindicator-gtk3
+
+# Arch
+sudo pacman -S gtk3 libappindicator-gtk3
+```
 
 ---
 

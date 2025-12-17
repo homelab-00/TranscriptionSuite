@@ -1,6 +1,6 @@
 [project]
 name = "transcriptionsuite"
-version = "0.2.3"
+version = "0.2.4"
 description = "Speech-to-Text Transcription Suite"
 requires-python = ">=3.11,<3.12"
 dependencies = [

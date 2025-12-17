@@ -1,0 +1,80 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+*.egg-info
+.eggs
+dist
+build
+*.egg
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.log
+*.db
+*.sqlite
+transcription_suite.log
+audio_notebook_webapp.log
+server_mode.log
+
+# Data directories (mounted as volumes)
+AUDIO_NOTEBOOK/backend/data/
+REMOTE_SERVER/data/tokens.json
+REMOTE_SERVER/data/*.crt
+REMOTE_SERVER/data/*.key
+
+# Node modules (built in container)
+node_modules
+AUDIO_NOTEBOOK/node_modules
+REMOTE_SERVER/web/node_modules
+
+# Frontend dist (built in container)
+AUDIO_NOTEBOOK/dist
+REMOTE_SERVER/web/dist
+
+# Native client (not needed in container)
+NATIVE_CLIENT/
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Tests
+tests/
+*_test.py
+test_*.py
+pytest.ini
+.pytest_cache
+
+# Docker files (not needed inside container)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Misc
+*.bak
+*.tmp
+.env
+.env.*
