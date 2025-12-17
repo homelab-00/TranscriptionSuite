@@ -43,7 +43,7 @@ def setup_logging(config: Dict[str, Any] | None = None) -> logging.Logger:
         return root_logger
 
     script_dir = Path(__file__).resolve().parent
-    project_root = script_dir.parent  # SCRIPT -> TranscriptionSuite
+    project_root = script_dir.parent  # MAIN -> TranscriptionSuite
 
     logging_defaults: Dict[str, Any] = {
         "level": "INFO",

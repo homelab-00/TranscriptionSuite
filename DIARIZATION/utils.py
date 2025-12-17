@@ -5,7 +5,7 @@ Utility functions for the diarization module.
 Provides helper functions for time segment operations, format conversions,
 and safe console output.
 
-NOTE: This module imports shared utilities from SCRIPT.shared for consistency.
+NOTE: This module imports shared utilities from MAIN.shared for consistency.
 The DiarizationSegment class here is specific to the diarization pipeline
 and includes additional methods like to_rttm() and merge_with().
 """
@@ -16,13 +16,13 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
-# Add SCRIPT directory to path for shared imports
+# Add MAIN directory to path for shared imports
 _script_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _script_path not in sys.path:
     sys.path.insert(0, _script_path)
 
 # Import shared utilities - use these instead of duplicating
-from SCRIPT.shared.utils import safe_print, format_timestamp
+from MAIN.shared.utils import safe_print, format_timestamp
 
 
 def parse_timestamp(timestamp: str) -> float:

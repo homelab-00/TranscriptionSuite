@@ -17,7 +17,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 try:
-    from SCRIPT.utils import safe_print
+    from MAIN.utils import safe_print
 except ImportError:
     # Fallback if utils not available
     def safe_print(msg, style=None):

@@ -1,7 +1,7 @@
 """
 SQLite database with FTS5 for full-text search of transcriptions.
 
-Also includes utilities for saving longform recordings from the SCRIPT module.
+Also includes utilities for saving longform recordings from the MAIN module.
 """
 
 import logging

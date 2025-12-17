@@ -10,8 +10,8 @@ and AUDIO_NOTEBOOK packages, including:
 - Shared data types for transcription segments
 
 Usage:
-    from SCRIPT.shared import safe_print, clear_gpu_cache, format_timestamp
-    from SCRIPT.shared.types import TranscriptSegment, WordSegment
+    from MAIN.shared import safe_print, clear_gpu_cache, format_timestamp
+    from MAIN.shared.types import TranscriptSegment, WordSegment
 """
 
 from .utils import (
