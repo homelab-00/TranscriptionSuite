@@ -18,15 +18,13 @@ import sys
 from types import ModuleType
 from typing import Any, Callable, Dict, Optional, TypedDict, Union
 
-from platform_utils import (
+from MAIN.platform_utils import (
     HAS_PYAUDIO,
-    HAS_TORCH,
     get_platform_manager,
     pyaudio,
-    torch,
 )
-from recorder import LongFormRecorder
-from shared.utils import safe_print, clear_gpu_cache
+from MAIN.recorder import LongFormRecorder
+from MAIN.shared.utils import clear_gpu_cache, safe_print
 
 
 # Typed structure for audio device metadata

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Import centralized optional dependencies from platform_utils
-from platform_utils import (
+from MAIN.platform_utils import (
     HAS_FASTER_WHISPER,
     HAS_SOUNDFILE,
     HAS_TORCH,
@@ -54,7 +54,7 @@ except ImportError as e:
 
 
 # Import from shared utilities
-from shared.utils import safe_print, clear_gpu_cache
+from MAIN.shared.utils import clear_gpu_cache, safe_print
 
 # Module-level cache for the Whisper model (word timestamps transcription)
 # This avoids reloading the model for each static transcription

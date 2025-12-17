@@ -62,25 +62,23 @@ import logging
 import sys
 import threading
 import time
-import sys
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from config_manager import ConfigManager
-from console_display import ConsoleDisplay
-from dependency_checker import DependencyChecker
-from diagnostics import SystemDiagnostics
-from logging_setup import setup_logging
-from model_manager import ModelManager
-from platform_utils import get_platform_manager
-from recorder import LongFormRecorder
-from static_transcriber import StaticFileTranscriber
-from shared.utils import safe_print, clear_gpu_cache
-
 # Import viewer storage functions from the backend database module
-_backend_path = Path(__file__).parent.parent / "AUDIO_NOTEBOOK" / "backend"
-if str(_backend_path) not in sys.path:
-    sys.path.insert(0, str(_backend_path))
-from database import save_longform_recording, get_word_timestamps_from_audio  # type: ignore[import-not-found]
+from AUDIO_NOTEBOOK.backend.database import (
+    get_word_timestamps_from_audio,
+    save_longform_recording,
+)
+from MAIN.config_manager import ConfigManager
+from MAIN.console_display import ConsoleDisplay
+from MAIN.dependency_checker import DependencyChecker
+from MAIN.diagnostics import SystemDiagnostics
+from MAIN.logging_setup import setup_logging
+from MAIN.model_manager import ModelManager
+from MAIN.platform_utils import get_platform_manager
+from MAIN.recorder import LongFormRecorder
+from MAIN.shared.utils import clear_gpu_cache, safe_print
+from MAIN.static_transcriber import StaticFileTranscriber
 
 # Import remote server modules
 _remote_server_path = Path(__file__).parent.parent / "REMOTE_SERVER"
@@ -687,6 +685,7 @@ class STTOrchestrator:
         """
         import tempfile
         import wave
+
         import numpy as np
 
         try:
@@ -1038,12 +1037,12 @@ class STTOrchestrator:
 
         def server_worker():
             try:
+                import uvicorn
                 from fastapi import FastAPI
                 from fastapi.middleware.cors import CORSMiddleware
-                from fastapi.staticfiles import StaticFiles
                 from fastapi.responses import FileResponse
+                from fastapi.staticfiles import StaticFiles
                 from pydantic import BaseModel
-                import uvicorn
             except ImportError as e:
                 safe_print(f"FastAPI or uvicorn not installed: {e}", "error")
                 return
@@ -1059,8 +1058,15 @@ class STTOrchestrator:
 
             try:
                 from database import init_db  # type: ignore[import-not-found]
-                from routers import recordings, search, transcribe, llm  # type: ignore[import-not-found]
-                from webapp_logging import setup_webapp_logging  # type: ignore[import-not-found]
+                from routers import (  # type: ignore[import-not-found]
+                    llm,
+                    recordings,
+                    search,
+                    transcribe,
+                )
+                from webapp_logging import (
+                    setup_webapp_logging,  # type: ignore[import-not-found]
+                )
             except ImportError as e:
                 safe_print(
                     f"Failed to import AUDIO_NOTEBOOK/backend modules: {e}", "error"
@@ -1404,12 +1410,12 @@ class STTOrchestrator:
 
         def server_worker():
             try:
-                from REMOTE_SERVER.web_server import WebTranscriptionServer
-                from REMOTE_SERVER.transcription_engine import (
-                    create_transcription_callbacks,
-                    create_file_transcription_callback,
-                )
                 from REMOTE_SERVER.server_logging import setup_server_logging
+                from REMOTE_SERVER.transcription_engine import (
+                    create_file_transcription_callback,
+                    create_transcription_callbacks,
+                )
+                from REMOTE_SERVER.web_server import WebTranscriptionServer
             except ImportError as e:
                 safe_print(f"Failed to import remote server modules: {e}", "error")
                 logging.error(f"Remote server import error: {e}", exc_info=True)
@@ -1769,8 +1775,8 @@ class STTOrchestrator:
         This uses the StaticFileTranscriber which handles model loading internally
         via get_cached_whisper_model(). No pre-loaded models are required.
         """
-        from pathlib import Path
         import asyncio
+        from pathlib import Path
 
         wav_file = Path(wav_path)
         if not wav_file.exists():
@@ -1803,7 +1809,7 @@ class STTOrchestrator:
     ) -> dict:
         """Perform the actual transcription (blocking)."""
         import soundfile as sf
-        from static_transcriber import StaticFileTranscriber, HAS_DIARIZATION
+        from static_transcriber import HAS_DIARIZATION, StaticFileTranscriber
 
         # Set tray icon to pastel mauve during transcription
         if self.tray_manager:

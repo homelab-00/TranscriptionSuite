@@ -13,8 +13,8 @@ import sys
 import time
 from typing import Any, Dict
 
-from platform_utils import PlatformManager
-from shared.utils import safe_print
+from MAIN.platform_utils import PlatformManager
+from MAIN.shared.utils import safe_print
 
 # Import optional dependencies at module level
 try:

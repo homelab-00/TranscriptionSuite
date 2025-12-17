@@ -1497,7 +1497,7 @@ class AudioToTextRecorder:
         Safely shuts down the audio recording by stopping the
         recording worker and closing the audio stream.
         """
-        from shared.utils import safe_print
+        from MAIN.shared.utils import safe_print
 
         with self.shutdown_lock:
             if self.is_shut_down:

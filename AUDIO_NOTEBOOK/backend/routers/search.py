@@ -7,8 +7,8 @@ from typing import Optional
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from database import search_words
-from webapp_logging import get_api_logger
+from AUDIO_NOTEBOOK.backend.database import search_words
+from AUDIO_NOTEBOOK.backend.webapp_logging import get_api_logger
 
 router = APIRouter()
 logger = get_api_logger()

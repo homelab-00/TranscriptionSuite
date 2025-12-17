@@ -2048,7 +2048,7 @@ wheels = [
 
 [[package]]
 name = "transcriptionsuite"
-version = "0.2.3"
+version = "0.2.4"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -2059,10 +2059,8 @@ dependencies = [
     { name = "httpx" },
     { name = "psutil" },
     { name = "pyannote-audio" },
-    { name = "pyaudio" },
     { name = "pydantic" },
     { name = "pyperclip" },
-    { name = "pyqt6" },
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -2077,6 +2075,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+desktop = [
+    { name = "pyaudio" },
+    { name = "pyqt6" },
+]
 dev = [
     { name = "build" },
     { name = "cython" },
@@ -2098,11 +2100,11 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "psutil", specifier = ">=7.1.0" },
     { name = "pyannote-audio", specifier = ">=3.4.0" },
-    { name = "pyaudio", specifier = ">=0.2.14" },
+    { name = "pyaudio", marker = "extra == 'desktop'", specifier = ">=0.2.14" },
     { name = "pybind11", marker = "extra == 'dev'", specifier = ">=2.11.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyperclip", specifier = ">=1.11.0" },
-    { name = "pyqt6", specifier = ">=6.10.0" },
+    { name = "pyqt6", marker = "extra == 'desktop'", specifier = ">=6.10.0" },
     { name = "python-multipart", specifier = ">=0.0.6" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=14.2.0" },
@@ -2117,7 +2119,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=15.0" },
     { name = "wheel", marker = "extra == 'dev'", specifier = ">=0.45.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["desktop", "dev"]
 
 [[package]]
 name = "triton"

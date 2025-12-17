@@ -8,7 +8,6 @@ import logging
 import threading
 import webbrowser
 from pathlib import Path
-from typing import Optional
 
 try:
     import pyperclip
@@ -38,7 +37,7 @@ class ClientOrchestrator:
 
     def __init__(
         self,
-        server_config: Optional[ServerConfig] = None,
+        server_config: ServerConfig | None = None,
         auto_connect: bool = True,
         auto_copy_clipboard: bool = True,
     ):
@@ -46,15 +45,16 @@ class ClientOrchestrator:
         self.auto_connect = auto_connect
         self.auto_copy_clipboard = auto_copy_clipboard
 
-        self.tray: Optional[AbstractTray] = None
-        self.connection: Optional[ServerConnection] = None
-        self.recorder: Optional[AudioRecorder] = None
-        self.event_loop: Optional[asyncio.AbstractEventLoop] = None
-        self.async_thread: Optional[threading.Thread] = None
+        self.tray: AbstractTray | None = None
+        self.connection: ServerConnection | None = None
+        self.recorder: AudioRecorder | None = None
+        self.event_loop: asyncio.AbstractEventLoop | None = None
+        self.async_thread: threading.Thread | None = None
+        self._loop_ready = threading.Event()  # Signals when event loop is ready
 
         # State
         self.is_recording = False
-        self.last_transcription: Optional[str] = None
+        self.last_transcription: str | None = None
 
     def start(self) -> None:
         """Start the native client."""
@@ -78,6 +78,9 @@ class ClientOrchestrator:
         self.async_thread = threading.Thread(target=self._run_async_loop, daemon=True)
         self.async_thread.start()
 
+        # Wait for event loop to be ready
+        self._loop_ready.wait(timeout=5.0)
+
         # Connect to server if auto_connect is enabled
         if self.auto_connect:
             self._schedule_async(self._connect_to_server())
@@ -89,6 +92,7 @@ class ClientOrchestrator:
         """Run the asyncio event loop in a background thread."""
         self.event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.event_loop)
+        self._loop_ready.set()  # Signal that loop is ready
         self.event_loop.run_forever()
 
     def _schedule_async(self, coro) -> None:

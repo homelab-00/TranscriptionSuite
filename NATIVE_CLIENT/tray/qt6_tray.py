@@ -3,13 +3,20 @@ PyQt6-based system tray for KDE Wayland and Windows.
 """
 
 import sys
-from typing import Optional, cast
+from typing import cast
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 
 from .base import AbstractTray, TrayAction, TrayState
+
+
+class TraySignals(QObject):
+    """Signals for thread-safe tray updates."""
+
+    state_changed = pyqtSignal(object)  # TrayState
+    notification_requested = pyqtSignal(str, str)  # title, message
 
 
 class Qt6Tray(AbstractTray):
@@ -36,19 +43,32 @@ class Qt6Tray(AbstractTray):
         self.app = cast(QApplication, self.app)
         self.app.setQuitOnLastWindowClosed(False)
 
+        # Check system tray availability
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            raise RuntimeError(
+                "System tray is not available. On KDE Wayland, ensure the system tray "
+                "plasmoid is added to your panel."
+            )
+
         # Create tray icon
         self.tray = QSystemTrayIcon()
         self.tray.setToolTip(app_name)
 
         # Menu actions (stored for state updates)
-        self.start_action: Optional[QAction] = None
-        self.stop_action: Optional[QAction] = None
+        self.start_action: QAction | None = None
+        self.stop_action: QAction | None = None
 
-        # Setup menu
+        # Thread-safe signals for GUI updates from async thread
+        self._signals = TraySignals()
+        self._signals.state_changed.connect(self._do_set_state)
+        self._signals.notification_requested.connect(self._do_show_notification)
+
+        # Setup menu and click handlers
         self._setup_menu()
+        self._setup_click_handlers()
 
         # Set initial state
-        self.set_state(TrayState.DISCONNECTED)
+        self._do_set_state(TrayState.DISCONNECTED)
 
     def _setup_menu(self) -> None:
         """Create the context menu."""
@@ -107,6 +127,21 @@ class Qt6Tray(AbstractTray):
 
         self.tray.setContextMenu(menu)
 
+    def _setup_click_handlers(self) -> None:
+        """Setup click handlers for tray icon."""
+        self.tray.activated.connect(self._on_tray_activated)
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """Handle tray icon clicks."""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            # Left-click: Start recording (if in standby)
+            if self.state == TrayState.STANDBY:
+                self._trigger_callback(TrayAction.START_RECORDING)
+        elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
+            # Middle-click: Stop recording and transcribe (if recording)
+            if self.state == TrayState.RECORDING:
+                self._trigger_callback(TrayAction.STOP_RECORDING)
+
     def _create_icon(self, color: tuple[int, int, int]) -> QIcon:
         """Create a colored circle icon."""
         size = 64
@@ -123,7 +158,12 @@ class Qt6Tray(AbstractTray):
         return QIcon(pixmap)
 
     def set_state(self, state: TrayState) -> None:
-        """Update tray icon color based on state."""
+        """Update tray icon color based on state (thread-safe)."""
+        # Emit signal to update on main thread
+        self._signals.state_changed.emit(state)
+
+    def _do_set_state(self, state: TrayState) -> None:
+        """Actually update the tray state (must be called on main thread)."""
         self.state = state
         color = self.COLORS.get(state, (128, 128, 128))
         self.tray.setIcon(self._create_icon(color))
@@ -150,7 +190,12 @@ class Qt6Tray(AbstractTray):
                 self.stop_action.setEnabled(False)
 
     def show_notification(self, title: str, message: str) -> None:
-        """Show a system notification."""
+        """Show a system notification (thread-safe)."""
+        # Emit signal to show on main thread
+        self._signals.notification_requested.emit(title, message)
+
+    def _do_show_notification(self, title: str, message: str) -> None:
+        """Actually show the notification (must be called on main thread)."""
         self.tray.showMessage(
             title, message, QSystemTrayIcon.MessageIcon.Information, 3000
         )
@@ -168,7 +213,7 @@ class Qt6Tray(AbstractTray):
 
     def open_file_dialog(
         self, title: str, filetypes: list[tuple[str, str]]
-    ) -> Optional[str]:
+    ) -> str | None:
         """Open a file selection dialog."""
         filter_str = ";;".join(f"{name} ({ext})" for name, ext in filetypes)
         path, _ = QFileDialog.getOpenFileName(None, title, "", filter_str)

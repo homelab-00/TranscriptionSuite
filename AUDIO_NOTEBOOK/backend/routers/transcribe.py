@@ -15,17 +15,17 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Form
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from database import (
+from AUDIO_NOTEBOOK.backend.database import (
     get_recording,
     insert_recording,
     insert_segment,
     insert_words_batch,
     update_recording_word_count,
 )
-from webapp_logging import get_api_logger
+from AUDIO_NOTEBOOK.backend.webapp_logging import get_api_logger
 
 router = APIRouter()
 
