@@ -178,14 +178,17 @@ class RemoteTranscriptionServer:
 
         Args:
             client_id: Identifier for the client
-            expiry_seconds: Token validity duration
+            expiry_seconds: Token validity duration (kept for backward compatibility)
 
         Returns:
-            Token string for client authentication
+            Plaintext token string for client authentication
         """
         # Note: expiry_seconds is kept for backward compatibility but ignored.
-        stored = self.auth_manager.generate_token(client_id, is_admin=False)
-        return stored.token
+        # generate_token returns (StoredToken with hash, plaintext token)
+        _stored, plaintext_token = self.auth_manager.generate_token(
+            client_id, is_admin=False
+        )
+        return plaintext_token
 
     async def _handle_control(self, websocket: ServerConnection) -> None:
         """Handle control channel connection."""
