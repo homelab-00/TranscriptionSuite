@@ -12,6 +12,7 @@ Provides:
 import asyncio
 import json
 import mimetypes
+import os
 import signal
 import ssl
 import subprocess
@@ -252,7 +253,7 @@ class WebTranscriptionServer:
             logger.info(f"TLS enabled with cert: {cert_path}")
             return ssl_context
         except Exception as e:
-            logger.error(f"Failed to create SSL context: {e}")
+            logger.error(f"Failed to create SSL context: {e}", exc_info=True)
             return None
 
     def _generate_self_signed_cert(self) -> tuple[Path, Path]:
@@ -415,7 +416,8 @@ class WebTranscriptionServer:
             is_admin = data.get("is_admin", False)
             expiry_days = data.get("expiry_days")  # Optional: custom expiry
 
-            new_token = self.auth_manager.generate_token(
+            # generate_token returns (StoredToken with hash, plaintext token)
+            stored_token, plaintext_token = self.auth_manager.generate_token(
                 client_name, is_admin, expiry_days
             )
 
@@ -425,12 +427,12 @@ class WebTranscriptionServer:
                     "success": True,
                     "message": "Save this token now! It will only be shown once.",
                     "token": {
-                        "token_id": new_token.token_id,  # ID for future operations
-                        "token": new_token.token,  # Full token - only shown at creation
-                        "client_name": new_token.client_name,
-                        "created_at": new_token.created_at,
-                        "expires_at": new_token.expires_at,
-                        "is_admin": new_token.is_admin,
+                        "token_id": stored_token.token_id,  # ID for future operations
+                        "token": plaintext_token,  # Plaintext token - only shown at creation
+                        "client_name": stored_token.client_name,
+                        "created_at": stored_token.created_at,
+                        "expires_at": stored_token.expires_at,
+                        "is_admin": stored_token.is_admin,
                     },
                 }
             )
@@ -456,6 +458,36 @@ class WebTranscriptionServer:
             return web.json_response(
                 {"error": "Token not found or is active session"}, status=404
             )
+
+    # Audio file magic bytes for validation
+    AUDIO_MAGIC_BYTES = {
+        b"ID3": "mp3",  # MP3 with ID3 tag
+        b"\xff\xfb": "mp3",  # MP3 frame sync
+        b"\xff\xfa": "mp3",  # MP3 frame sync
+        b"\xff\xf3": "mp3",  # MP3 frame sync
+        b"\xff\xf2": "mp3",  # MP3 frame sync
+        b"RIFF": "wav",  # WAV
+        b"fLaC": "flac",  # FLAC
+        b"OggS": "ogg",  # OGG/Vorbis/Opus
+        b"\x1aE\xdf\xa3": "webm",  # WebM/Matroska
+        b"\x00\x00\x00": "mp4",  # MP4/M4A (ftyp follows)
+    }
+
+    def _validate_audio_magic(self, header: bytes) -> bool:
+        """Validate file header against known audio magic bytes."""
+        # Check 4-byte signatures first
+        if header[:4] in (b"RIFF", b"fLaC", b"OggS", b"\x1aE\xdf\xa3"):
+            return True
+        # Check 3-byte signatures
+        if header[:3] == b"ID3":
+            return True
+        # Check 2-byte signatures (MP3 frame sync)
+        if header[:2] in (b"\xff\xfb", b"\xff\xfa", b"\xff\xf3", b"\xff\xf2"):
+            return True
+        # Check for MP4/M4A (starts with size bytes, then 'ftyp')
+        if header[:3] == b"\x00\x00\x00" or header[4:8] == b"ftyp":
+            return True
+        return False
 
     async def _handle_transcribe_file(self, request: web.Request) -> web.Response:
         """POST /api/transcribe/file - Upload and transcribe audio file."""
@@ -493,6 +525,26 @@ class WebTranscriptionServer:
                     # Save to temp file
                     suffix = Path(part.filename or "audio").suffix or ".wav"
                     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        # Read first chunk to validate magic bytes
+                        first_chunk = await part.read_chunk()
+                        if not first_chunk:
+                            return web.json_response({"error": "Empty file"}, status=400)
+
+                        # Validate audio file magic bytes (need at least 8 bytes)
+                        header = (
+                            first_chunk[:12] if len(first_chunk) >= 12 else first_chunk
+                        )
+                        if not self._validate_audio_magic(header):
+                            api_logger.warning(
+                                f"File upload rejected: invalid audio format "
+                                f"(header: {header[:8].hex()})"
+                            )
+                            return web.json_response(
+                                {"error": "Invalid audio file format"}, status=400
+                            )
+
+                        # Write first chunk and continue
+                        tmp.write(first_chunk)
                         while True:
                             chunk = await part.read_chunk()
                             if not chunk:
@@ -574,8 +626,42 @@ class WebTranscriptionServer:
     # WebSocket Handler (aiohttp)
     # =========================================================================
 
+    def _is_valid_origin(self, origin: Optional[str], request: web.Request) -> bool:
+        """Validate WebSocket origin to prevent CSWSH attacks."""
+        if not origin:
+            # Allow connections without Origin header (non-browser clients)
+            return True
+
+        # Get the host from the request
+        host = request.host.split(":")[0] if request.host else "localhost"
+        port = self.https_port
+        scheme = "https" if self._ssl_context else "http"
+
+        # Build list of allowed origins
+        allowed_origins = [
+            f"{scheme}://{host}:{port}",
+            f"{scheme}://{host}",
+            f"{scheme}://localhost:{port}",
+            f"{scheme}://localhost",
+            f"{scheme}://127.0.0.1:{port}",
+            f"{scheme}://127.0.0.1",
+        ]
+
+        # Also allow Tailscale IPs (100.x.x.x range)
+        if host.startswith("100."):
+            allowed_origins.append(f"{scheme}://{host}:{port}")
+            allowed_origins.append(f"{scheme}://{host}")
+
+        return origin in allowed_origins
+
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """Handle WebSocket connection for audio streaming (aiohttp route)."""
+        # Validate Origin header to prevent Cross-Site WebSocket Hijacking
+        origin = request.headers.get("Origin")
+        if not self._is_valid_origin(origin, request):
+            ws_logger.warning(f"WebSocket connection rejected: invalid origin '{origin}'")
+            return web.Response(status=403, text="Origin not allowed")  # type: ignore[return-value]
+
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
@@ -674,7 +760,17 @@ class WebTranscriptionServer:
                     break
 
         except Exception as e:
-            ws_logger.error(f"WebSocket error from {client_addr}: {e}", exc_info=True)
+            ws_logger.error(
+                f"WebSocket error from {client_addr}: {type(e).__name__}", exc_info=True
+            )
+            # Send generic error to client, log details server-side only
+            try:
+                error = ControlProtocol.create_error(
+                    "An internal error occurred", "server_error"
+                )
+                await ws.send_str(error.to_json())
+            except Exception:
+                pass  # Connection may be closed
         finally:
             # Cleanup
             if token and self._ws_token == token:
@@ -782,8 +878,10 @@ class WebTranscriptionServer:
 
         except Exception as e:
             logger.error(
-                f"Error processing audio chunk ({len(data)} bytes): {e}", exc_info=True
+                f"Error processing audio chunk ({len(data)} bytes): {type(e).__name__}",
+                exc_info=True,
             )
+            # Don't send error to client during streaming, just log it
 
     async def _finalize_transcription_aiohttp(self, ws: web.WebSocketResponse) -> None:
         """Finalize recording and send transcription result (aiohttp)."""
@@ -824,9 +922,10 @@ class WebTranscriptionServer:
                 logger.info("Transcription completed")
 
             except Exception as e:
-                logger.error(f"Transcription error: {e}", exc_info=True)
+                logger.error(f"Transcription error: {type(e).__name__}", exc_info=True)
+                # Send generic error to client, details logged server-side
                 error = ControlProtocol.create_error(
-                    f"Transcription failed: {e}", "transcription_error"
+                    "Transcription failed", "transcription_error"
                 )
                 await ws.send_str(error.to_json())
         else:
@@ -856,16 +955,33 @@ class WebTranscriptionServer:
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-        # Content Security Policy - allow self and WebSocket connections
-        # Note: 'unsafe-inline' needed for Vite's dev mode, consider removing in production
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "connect-src 'self' wss: ws:; "
-            "img-src 'self' data:; "
-            "frame-ancestors 'none'"
+        # HSTS - enforce HTTPS for 1 year
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
         )
+
+        # Content Security Policy - stricter in production
+        is_production = os.getenv("ENVIRONMENT", "development") == "production"
+        if is_production:
+            # Production: no unsafe-inline (requires built assets with nonces)
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self'; "
+                "connect-src 'self' wss:; "
+                "img-src 'self' data:; "
+                "frame-ancestors 'none'"
+            )
+        else:
+            # Development: allow unsafe-inline for Vite dev mode
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self' wss: ws:; "
+                "img-src 'self' data:; "
+                "frame-ancestors 'none'"
+            )
 
         return response
 

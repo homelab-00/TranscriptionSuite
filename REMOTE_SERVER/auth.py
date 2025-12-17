@@ -3,6 +3,7 @@ Authentication module for the remote transcription server.
 
 Provides token-based authentication with:
 - Persistent token storage with configurable expiration
+- Token hashing (SHA-256) for secure storage
 - Admin tokens (never expire) and regular tokens (30-day default)
 - Rate limiting on authentication endpoints
 - Admin and regular user roles
@@ -13,7 +14,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from .token_store import TokenStore, StoredToken
 
@@ -84,7 +85,7 @@ class AuthManager:
         client_name: str,
         is_admin: bool = False,
         expiry_days: Optional[int] = None,
-    ) -> StoredToken:
+    ) -> Tuple[StoredToken, str]:
         """
         Generate a new authentication token.
 
@@ -94,7 +95,7 @@ class AuthManager:
             expiry_days: Days until expiration. None uses default (30 days for users).
 
         Returns:
-            The newly created StoredToken
+            Tuple of (StoredToken with hashed token, plaintext token for user)
         """
         return self.token_store.generate_token(client_name, is_admin, expiry_days)
 
@@ -148,8 +149,12 @@ class AuthManager:
         """
         # Check if there's an active session
         if self._active_session is not None:
-            # Allow same client to reconnect
-            if self._active_session.token == stored_token.token:
+            # Allow same client to reconnect - compare token hashes AND token_id
+            # This prevents bypassing the lock by using someone else's token
+            if (
+                self._active_session.token == stored_token.token
+                and self._active_session.token_id == stored_token.token_id
+            ):
                 logger.debug("Session reacquired by same client")
                 self._active_session.connected_at = time.time()
                 return True

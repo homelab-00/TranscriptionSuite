@@ -4,18 +4,20 @@ Persistent token storage for the remote transcription server.
 Stores tokens in a JSON file with support for:
 - Admin and regular user roles
 - Token expiration (30 days default for regular users, never for admins)
+- Token hashing (SHA-256) for secure storage
 - Manual revocation
 - Persistent secret key
 - Non-secret token IDs for admin operations
 """
 
+import hashlib
 import json
 import logging
 import secrets
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from filelock import FileLock
 
 logger = logging.getLogger(__name__)
@@ -26,12 +28,20 @@ DEFAULT_TOKEN_STORE_PATH = Path(__file__).parent / "data" / "tokens.json"
 # Default token expiration (30 days)
 DEFAULT_TOKEN_EXPIRY_DAYS = 30
 
+# Token store version for migration tracking
+CURRENT_STORE_VERSION = 2  # v2 = hashed tokens
+
+
+def hash_token(token: str) -> str:
+    """Hash a token using SHA-256 for secure storage."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
 
 @dataclass
 class StoredToken:
     """Represents a token stored in the token store."""
 
-    token: str
+    token: str  # This is the HASH of the token, not the plaintext
     client_name: str
     created_at: str  # ISO format
     is_admin: bool
@@ -45,7 +55,7 @@ class StoredToken:
         client_name: str,
         is_admin: bool = False,
         expiry_days: Optional[int] = None,
-    ) -> "StoredToken":
+    ) -> Tuple["StoredToken", str]:
         """Create a new token.
 
         Args:
@@ -53,6 +63,9 @@ class StoredToken:
             is_admin: Whether this token has admin privileges
             expiry_days: Days until expiration. None uses default (30 days).
                         Admin tokens don't expire by default.
+
+        Returns:
+            Tuple of (StoredToken with hashed token, plaintext token for user)
         """
         now = datetime.now(timezone.utc)
 
@@ -67,11 +80,15 @@ class StoredToken:
         else:
             expires_at = (now + timedelta(days=expiry_days)).isoformat()
 
-        # Generate a short, non-secret ID for UI operations
-        token_id = secrets.token_hex(8)  # 16 chars, enough for uniqueness
+        # Generate a non-secret ID for UI operations (128 bits)
+        token_id = secrets.token_hex(16)  # 32 chars, sufficient entropy
 
-        return cls(
-            token=secrets.token_hex(32),
+        # Generate plaintext token and its hash
+        plaintext_token = secrets.token_hex(32)
+        hashed_token = hash_token(plaintext_token)
+
+        stored_token = cls(
+            token=hashed_token,  # Store only the hash
             client_name=client_name,
             created_at=now.isoformat(),
             is_admin=is_admin,
@@ -79,6 +96,11 @@ class StoredToken:
             expires_at=expires_at,
             token_id=token_id,
         )
+
+        return (
+            stored_token,
+            plaintext_token,
+        )  # Return hash for storage, plaintext for user
 
     def is_expired(self) -> bool:
         """Check if the token has expired."""
@@ -136,13 +158,72 @@ class TokenStore:
 
         if not self.store_path.exists():
             self._initialize_store()
+        else:
+            self._migrate_store_if_needed()
+
+    def _migrate_store_if_needed(self) -> None:
+        """Migrate store to current version if needed.
+
+        v1 -> v2: Tokens stored in plaintext become hashed.
+        WARNING: After migration, existing plaintext tokens become INVALID.
+        New tokens must be generated for all users.
+        """
+        data = self._read_store()
+        store_version = data.get("version", 1)
+
+        if store_version >= CURRENT_STORE_VERSION:
+            return  # Already up to date
+
+        logger.warning("=" * 70)
+        logger.warning("TOKEN STORE MIGRATION REQUIRED")
+        logger.warning("=" * 70)
+
+        if store_version < 2:
+            # v1 -> v2: Mark that tokens are now expected to be hashed
+            # Old plaintext tokens will no longer validate
+            # We DON'T hash existing tokens because we'd lose the ability
+            # to validate them (can't hash a hash and match plaintext input)
+            logger.warning(
+                "Migrating to v2 (hashed tokens). ALL EXISTING TOKENS ARE NOW INVALID!"
+            )
+            logger.warning(
+                "You must regenerate tokens for all users via the admin panel."
+            )
+
+            # Clear all existing tokens since they can't be used anymore
+            # Keep only the structure, user will need to create new admin token
+            old_token_count = len(data.get("tokens", []))
+            data["tokens"] = []
+            data["version"] = CURRENT_STORE_VERSION
+
+            # Generate a new admin token
+            admin_token, plaintext_token = StoredToken.create("admin", is_admin=True)
+            data["tokens"].append(admin_token.to_dict())
+
+            self._write_store(data)
+
+            logger.warning(f"Cleared {old_token_count} old tokens.")
+            print("\n" + "=" * 70)
+            print("TOKEN STORE MIGRATED TO HASHED STORAGE (v2)")
+            print("=" * 70)
+            print(f"\nCleared {old_token_count} old (plaintext) tokens.")
+            print("\nNEW ADMIN TOKEN GENERATED:")
+            print(f"\nAdmin Token: {plaintext_token}")
+            print("\nSave this token! It's required to access the admin panel.")
+            print("This message will only appear once.")
+            print("Generate new tokens for other users via the admin panel.")
+            print("=" * 70 + "\n")
 
     def _initialize_store(self) -> None:
         """Initialize a new token store with an admin token."""
         secret_key = secrets.token_hex(32)
-        admin_token = StoredToken.create("admin", is_admin=True)
+        admin_token, plaintext_token = StoredToken.create("admin", is_admin=True)
 
-        data = {"secret_key": secret_key, "tokens": [admin_token.to_dict()]}
+        data = {
+            "version": CURRENT_STORE_VERSION,
+            "secret_key": secret_key,
+            "tokens": [admin_token.to_dict()],
+        }
 
         self._write_store(data)
 
@@ -150,9 +231,10 @@ class TokenStore:
         print("\n" + "=" * 70)
         print("INITIAL ADMIN TOKEN GENERATED")
         print("=" * 70)
-        print(f"\nAdmin Token: {admin_token.token}")
+        print(f"\nAdmin Token: {plaintext_token}")
         print("\nSave this token! It's required to access the admin panel.")
         print("This message will only appear once.")
+        print("(Token is stored securely as a hash)")
         print("=" * 70 + "\n")
 
     def _read_store(self) -> dict:
@@ -180,15 +262,19 @@ class TokenStore:
         Validate a token string.
 
         Args:
-            token: The token string to validate
+            token: The plaintext token string to validate
 
         Returns:
             StoredToken if valid, not revoked, and not expired, None otherwise
         """
         data = self._read_store()
 
+        # Hash the input token for comparison
+        token_hash = hash_token(token)
+
         for token_data in data["tokens"]:
-            if token_data["token"] == token:
+            # Compare hashes (stored tokens are hashed)
+            if token_data["token"] == token_hash:
                 stored_token = StoredToken.from_dict(token_data)
                 if stored_token.is_revoked:
                     logger.warning(f"Token for '{stored_token.client_name}' is revoked")
@@ -212,7 +298,7 @@ class TokenStore:
         client_name: str,
         is_admin: bool = False,
         expiry_days: Optional[int] = None,
-    ) -> StoredToken:
+    ) -> Tuple[StoredToken, str]:
         """
         Generate a new token.
 
@@ -222,11 +308,13 @@ class TokenStore:
             expiry_days: Days until expiration. None uses default (30 days for users).
 
         Returns:
-            The newly created StoredToken
+            Tuple of (StoredToken with hashed token, plaintext token for user)
         """
         data = self._read_store()
 
-        new_token = StoredToken.create(client_name, is_admin, expiry_days)
+        new_token, plaintext_token = StoredToken.create(
+            client_name, is_admin, expiry_days
+        )
         data["tokens"].append(new_token.to_dict())
 
         self._write_store(data)
@@ -239,22 +327,25 @@ class TokenStore:
             f"Generated new token for client: {client_name} (admin={is_admin}{expiry_info})"
         )
 
-        return new_token
+        return new_token, plaintext_token
 
     def revoke_token(self, token: str) -> bool:
         """
         Revoke a token by token string.
 
         Args:
-            token: The token string to revoke
+            token: The plaintext token string to revoke
 
         Returns:
             True if revoked, False if token not found
         """
         data = self._read_store()
 
+        # Hash the input token for comparison
+        token_hash = hash_token(token)
+
         for token_data in data["tokens"]:
-            if token_data["token"] == token:
+            if token_data["token"] == token_hash:
                 token_data["is_revoked"] = True
                 self._write_store(data)
                 logger.info(f"Token revoked for client: {token_data['client_name']}")
