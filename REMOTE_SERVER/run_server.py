@@ -47,12 +47,12 @@ _project_root = Path(__file__).parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-# Add SCRIPT to path for imports
-_script_path = _project_root / "SCRIPT"
+# Add MAIN to path for imports
+_script_path = _project_root / "MAIN"
 if str(_script_path) not in sys.path:
     sys.path.insert(0, str(_script_path))
 
-from SCRIPT.config_manager import ConfigManager
+from MAIN.config_manager import ConfigManager
 
 # Import from REMOTE_SERVER package
 from REMOTE_SERVER.web_server import WebTranscriptionServer

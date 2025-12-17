@@ -331,7 +331,7 @@ class AudioToTextRecorder:
         model.
 
         For a detailed description of all parameters, please refer to the
-        `SCRIPT/STT_ENGINE_OPTIONS.md` file.
+        `MAIN/STT_ENGINE_OPTIONS.md` file.
         """
 
         self.instance_name = instance_name

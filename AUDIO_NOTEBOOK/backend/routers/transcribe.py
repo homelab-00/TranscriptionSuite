@@ -5,7 +5,7 @@ This module is part of AUDIO_NOTEBOOK/backend, which runs inside the
 orchestrator process. The orchestrator exposes a transcription endpoint
 that this router calls for actual transcription work.
 
-Start with: python SCRIPT/orchestrator.py
+Start with: python MAIN/orchestrator.py
 """
 
 import os

@@ -18,8 +18,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Add SCRIPT to path for config access
-SCRIPT_DIR = Path(__file__).parent.parent.parent.parent / "SCRIPT"
+# Add MAIN to path for config access
+SCRIPT_DIR = Path(__file__).parent.parent.parent.parent / "MAIN"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 # Use webapp logging

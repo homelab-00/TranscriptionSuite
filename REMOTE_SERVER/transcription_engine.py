@@ -17,11 +17,11 @@ _project_root = Path(__file__).parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from SCRIPT.static_transcriber import (  # noqa: E402
+from MAIN.static_transcriber import (  # noqa: E402
     get_cached_whisper_model,
     unload_cached_whisper_model,
 )
-from SCRIPT.shared.utils import clear_gpu_cache  # noqa: E402
+from MAIN.shared.utils import clear_gpu_cache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

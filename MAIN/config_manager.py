@@ -36,7 +36,7 @@ class ConfigManager:
     def load_or_create_config(self) -> Dict[str, Any]:
         """Load configuration from file or create it if it doesn't exist."""
         script_dir = Path(__file__).resolve().parent
-        project_root = script_dir.parent  # SCRIPT -> TranscriptionSuite
+        project_root = script_dir.parent  # MAIN -> TranscriptionSuite
         # Define default configuration
         default_config: Dict[str, Any] = {
             "transcription_options": {

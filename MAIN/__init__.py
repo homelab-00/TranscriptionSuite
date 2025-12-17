@@ -15,8 +15,8 @@ This package contains the core transcription engine components:
 
 Note: This package uses absolute imports. When importing from within
 the package, use the full module path:
-    from SCRIPT.shared import safe_print
-    from SCRIPT.config_manager import ConfigManager
+    from MAIN.shared import safe_print
+    from MAIN.config_manager import ConfigManager
 """
 
 # Re-export commonly used items from shared for convenience

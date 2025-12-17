@@ -2,8 +2,8 @@
 """
 General-purpose helper functions for TranscriptionSuite.
 
-NOTE: This module re-exports utilities from SCRIPT.shared for backward
-compatibility. New code should import directly from SCRIPT.shared.
+NOTE: This module re-exports utilities from MAIN.shared for backward
+compatibility. New code should import directly from MAIN.shared.
 """
 
 # Re-export everything from shared.utils for backward compatibility

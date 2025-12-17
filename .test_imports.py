@@ -19,7 +19,7 @@ class Dependency:
 DEPENDENCIES: Tuple[Dependency, ...] = (
     Dependency("torch", "torch", metadata_name="torch"),
     Dependency("faster-whisper", "faster_whisper", metadata_name="faster-whisper"),
-    # RealtimeSTT has been vendored as SCRIPT/stt_engine.py - no longer a separate package
+    # RealtimeSTT has been vendored as MAIN/stt_engine.py - no longer a separate package
     Dependency("PyAudio", "pyaudio", metadata_name="PyAudio"),
     Dependency("PyQt6", "PyQt6", metadata_name="PyQt6"),
     Dependency(

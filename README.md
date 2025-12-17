@@ -34,7 +34,7 @@ TranscriptionSuite/
 ├── config.yaml                   # Configuration file
 ├── pyproject.toml                # Dependencies
 ├── .venv/                        # Python 3.11 virtual environment
-├── SCRIPT/                       # Application source
+├── MAIN/                         # Application source
 │   ├── orchestrator.py           # Main entry point
 │   ├── recorder.py               # Recording wrapper
 │   ├── static_transcriber.py     # Static file transcription
@@ -72,7 +72,7 @@ TranscriptionSuite/
 │   ├── client.py                 # Python client (Linux/Android)
 │   ├── web/                      # React frontend (Vite + TS + Tailwind)
 │   └── data/                     # Tokens, TLS certs
-└── list_audio_devices.py         # Audio device utility
+└── .list_audio_devices.py        # Audio device utility
 ```
 
 Everything runs in a single Python 3.11 environment. One `uv sync` installs all dependencies.
@@ -161,7 +161,7 @@ cd ../..
 ### 8. Run the Application
 
 ```bash
-uv run python SCRIPT/orchestrator.py
+uv run python MAIN/orchestrator.py
 ```
 
 The system tray icon appears — right-click for options.
@@ -222,7 +222,7 @@ When using LM Studio:
 ### Audio Device
 
 ```bash
-uv run python list_audio_devices.py
+uv run python .list_audio_devices.py
 ```
 
 Update `config.yaml`:
@@ -240,7 +240,7 @@ sudo pacman -S cava
 pw-cli list-objects Node  # Find your audio source
 ```
 
-Edit `SCRIPT/cava.config`:
+Edit `MAIN/cava.config`:
 
 ```ini
 [input]
@@ -501,7 +501,7 @@ Each word assigned to speaker by:
 
 ## Scripts overview
 
-### SCRIPT/
+### MAIN/
 
 | Module | Purpose |
 |--------|---------|
