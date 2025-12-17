@@ -374,6 +374,15 @@ remote_server:
         auto_generate: true   # Generate self-signed if missing
 ```
 
+**Production Mode:**
+
+For stricter security headers (CSP without `unsafe-inline`):
+
+```bash
+export ENVIRONMENT=production
+uv run python REMOTE_SERVER/run_server.py
+```
+
 ### Using with Tailscale
 
 The server is designed for use over Tailscale VPN:
@@ -383,13 +392,43 @@ The server is designed for use over Tailscale VPN:
 3. Access from anywhere via Tailscale IP (e.g., `https://100.x.x.x:8443`)
 4. Traffic is encrypted end-to-end through Tailscale's WireGuard tunnel
 
-### Security Notes
+### Security Features
 
-- Tokens never expire - revoke them manually when needed
-- Self-signed certificates auto-generated on first run
-- Browser will warn about self-signed cert (accept once)
-- Only one user can record at a time
+**Authentication & Tokens:**
+
+- Tokens are SHA-256 hashed before storage (plaintext shown only at creation)
+- Regular user tokens expire after 30 days (admin tokens never expire)
+- Token IDs are 128-bit for sufficient entropy
+- Rate limiting: 5 failed auth attempts per IP triggers 5-minute lockout
+- Automatic migration from plaintext to hashed storage (regenerates tokens)
+
+**Network Security:**
+
+- HTTPS with TLS 1.2+ (self-signed certificates auto-generated on first run)
+- HSTS header enforces HTTPS for 1 year
+- WebSocket origin validation prevents unauthorized connections
+- Content Security Policy (CSP) headers:
+  - Development: allows `unsafe-inline` for Vite hot reload
+  - Production: strict CSP (set `ENVIRONMENT=production`)
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`
+
+**Access Control:**
+
+- Single-user mode: only one client can record at a time
+- Session lock validates both token hash and token_id
+- Admin-only endpoints for token management
+
+**Data Validation:**
+
+- File uploads validated by magic bytes (WAV, FLAC, OGG, MP3)
+- Generic error messages sent to clients (verbose logging server-side only)
+
+**Best Practices:**
+
 - Use over Tailscale VPN for encrypted tunnel access
+- Browser will warn about self-signed cert (accept once, or use custom CA)
+- Revoke compromised tokens immediately via admin panel
+- Regenerate tokens after 30 days for regular users
 
 ---
 
