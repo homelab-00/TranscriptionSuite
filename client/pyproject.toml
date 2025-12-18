@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "transcription-suite-client"
+version = "2.0.0"
+description = "TranscriptionSuite native client for desktop integration"
+readme = "../README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "homelab-00" }
+]
+keywords = ["transcription", "tray", "desktop", "client"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Topic :: Desktop Environment",
+]
+
+dependencies = [
+    "aiohttp>=3.9.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+qt = [
+    "PyQt6>=6.5.0",
+]
+audio = [
+    "pyaudio>=0.2.13",
+]
+kde = [
+    "PyQt6>=6.5.0",
+    "pyaudio>=0.2.13",
+]
+gnome = [
+    "pyaudio>=0.2.13",
+    # Note: GTK and AppIndicator are system packages on Linux
+]
+windows = [
+    "PyQt6>=6.5.0",
+    "pyaudio>=0.2.13",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+transcription-client = "client.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["client"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501"]

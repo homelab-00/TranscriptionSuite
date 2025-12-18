@@ -1,0 +1,61 @@
+# TranscriptionSuite Docker Compose Configuration
+# Remote/Tailscale deployment with HTTPS support
+
+version: "3.8"
+
+services:
+  transcription-suite:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: transcription-suite:latest
+    container_name: transcription-suite
+    
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Port mappings
+    ports:
+      - "8000:8000"   # HTTP API
+      - "8443:8443"   # HTTPS (when TLS enabled)
+    
+    # Environment variables
+    environment:
+      - DATA_DIR=/data
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HF_TOKEN=${HF_TOKEN:-}
+      # Remote access settings
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - TLS_CERT_FILE=/data/certs/server.crt
+      - TLS_KEY_FILE=/data/certs/server.key
+    
+    # Volume mounts
+    volumes:
+      - transcription-data:/data
+      - ../config.yaml:/app/config.yaml:ro
+      # Mount TLS certificates if using Tailscale HTTPS
+      - ${TLS_CERT_PATH:-/dev/null}:/data/certs/server.crt:ro
+      - ${TLS_KEY_PATH:-/dev/null}:/data/certs/server.key:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  transcription-data:
+    name: transcription-data

@@ -1,0 +1,30 @@
+# TranscriptionSuite Native Client Configuration
+# Copy this file to ~/.config/transcription-suite/client.yaml
+
+server:
+  host: "localhost"
+  port: 8000
+  use_https: false
+  token: ""  # Will be stored after first authentication
+
+  # For remote access via Tailscale
+  remote_host: ""  # e.g., "desktop.mynet.ts.net"
+  use_remote: false
+
+  timeout: 30
+  transcription_timeout: 300  # 5 minutes for model loading
+
+recording:
+  sample_rate: 16000
+  device_index: null  # null = default device
+
+clipboard:
+  auto_copy: true  # Automatically copy transcription to clipboard
+
+ui:
+  notifications: true
+  start_minimized: false
+  
+  # Tray icon click actions
+  left_click: "start_recording"  # "start_recording", "toggle_recording", "menu"
+  middle_click: "stop_transcribe"  # "stop_transcribe", "cancel", "menu"

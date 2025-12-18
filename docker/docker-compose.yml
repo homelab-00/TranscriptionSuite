@@ -1,0 +1,53 @@
+# TranscriptionSuite Docker Compose Configuration
+# Local deployment with GPU support
+
+version: "3.8"
+
+services:
+  transcription-suite:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: transcription-suite:latest
+    container_name: transcription-suite
+    
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Port mappings
+    ports:
+      - "8000:8000"  # Unified API
+    
+    # Environment variables
+    environment:
+      - DATA_DIR=/data
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - HF_TOKEN=${HF_TOKEN:-}
+    
+    # Volume mounts
+    volumes:
+      - transcription-data:/data
+      - ../config.yaml:/app/config.yaml:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  transcription-data:
+    name: transcription-data

@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "transcription-suite-server"
+version = "2.0.0"
+description = "TranscriptionSuite unified server for transcription services"
+readme = "../README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "homelab-00" }
+]
+keywords = ["transcription", "whisper", "speech-to-text", "diarization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "aiohttp>=3.9.0",
+    "pydantic>=2.5.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "soundfile>=0.12.0",
+    "pyyaml>=6.0",
+    "faster-whisper>=1.0.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+diarization = [
+    "pyannote.audio>=3.1.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.25.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+transcription-server = "server.api.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

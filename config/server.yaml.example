@@ -1,0 +1,58 @@
+# TranscriptionSuite Server Configuration
+# Copy this file to config.yaml and customize as needed
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1  # Single worker for GPU model sharing
+
+  tls:
+    enabled: false
+    cert_file: "/data/certs/server.crt"
+    key_file: "/data/certs/server.key"
+    auto_generate: true  # Generate self-signed if missing
+
+  remote:
+    enabled: false
+    tailscale_hostname: ""  # e.g., "desktop.mynet.ts.net"
+
+transcription:
+  model: "Systran/faster-whisper-large-v3"
+  device: "cuda"  # "cuda" or "cpu"
+  compute_type: "float16"  # "float16", "int8", "float32"
+  language: null  # null = auto-detect, or "en", "el", etc.
+  beam_size: 5
+  batch_size: 16
+
+  vad:
+    enabled: true
+    silero_sensitivity: 0.4
+
+  diarization:
+    enabled: false
+    hf_token: ""  # HuggingFace token for PyAnnote models
+
+audio_notebook:
+  database_path: "/data/database/notebook.db"
+  audio_storage: "/data/audio"
+  audio_format: "mp3"
+  audio_bitrate: 160
+
+llm:
+  enabled: true
+  base_url: "http://host.docker.internal:1234"  # LM Studio
+  model: ""  # Empty = use model loaded in LM Studio
+  max_tokens: 4096
+  temperature: 0.7
+
+logging:
+  level: "INFO"
+  directory: "/data/logs"
+  max_size_mb: 10
+  backup_count: 5
+  structured: true  # JSON format
+  console_output: true
+
+auth:
+  token_store: "/data/tokens/tokens.json"
+  token_expiry_days: 30  # 0 = never expire

@@ -7,6 +7,7 @@ __pycache__/
 .directory
 .idea/
 .github/
+.windsurf/
 
 # AUDIO_NOTEBOOK web app
 # Database files (user data, should not be synced)
