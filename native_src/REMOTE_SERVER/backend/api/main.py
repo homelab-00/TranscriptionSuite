@@ -42,9 +42,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
     logger.info("Database initialized")
 
-    # Initialize model manager (lazy loading)
+    # Initialize model manager
     manager = get_model_manager(config.config)
     logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
+
+    # Preload transcription model at startup
+    logger.info("Preloading transcription model...")
+    manager.load_transcription_model()
 
     # Store config in app state
     app.state.config = config

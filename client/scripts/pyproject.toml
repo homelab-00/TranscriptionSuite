@@ -7,15 +7,14 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-# Development tools for code quality
+# Development and build tools
 dev = [
+    # Code quality
     "ruff>=0.1.0",
     "pyright>=1.1.350",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
-]
-# Build tools for creating executables
-build = [
+    # Build/packaging
     "pyinstaller>=6.0.0",
     "build>=1.0.0",
     "hatchling>=1.18.0",

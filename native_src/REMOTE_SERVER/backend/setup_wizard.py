@@ -252,20 +252,24 @@ def get_config() -> dict[str, Any]:
     if sys.stdin.isatty():
         return run_setup_wizard()
     else:
-        # Non-interactive mode without config
+        # Non-interactive mode: generate minimum required config so the
+        # container can start under `docker compose up`.
+        saved_config = load_secrets()
+        saved_config.update(env_config)
+
+        if not saved_config.get("admin_token"):
+            saved_config["admin_token"] = generate_admin_token()
+
+        save_secrets(saved_config)
+        SETUP_COMPLETE_FILE.touch()
+
         print("=" * 60)
-        print("ERROR: First-run setup required but no TTY available.")
+        print("First-run setup completed automatically (no TTY available).")
+        print("Configuration saved to:", SECRETS_FILE)
         print("=" * 60)
         print()
-        print("Provide configuration via environment variables:")
-        print("  ADMIN_TOKEN=<token>           # Required")
-        print("  HUGGINGFACE_TOKEN=<token>     # Optional, for diarization")
-        print("  LM_STUDIO_URL=<url>           # Optional")
-        print()
-        print("Or run the container interactively:")
-        print("  docker run -it transcriptionsuite --setup")
-        print()
-        sys.exit(1)
+
+        return saved_config
 
 
 if __name__ == "__main__":

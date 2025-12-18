@@ -26,8 +26,11 @@ CUDA 12.6 acceleration. Inspired by RealtimeSTT by KoljaB.
 
 ### Prerequisites
 
-- Docker with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- NVIDIA GPU with CUDA support
+- Docker
+- NVIDIA GPU with CUDA support (recommended)
+- If you want GPU acceleration inside Docker:
+  - Linux: Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+  - Windows: Use Docker Desktop with the WSL2 backend and install the NVIDIA GPU driver with WSL support.
 
 Verify GPU support:
 
@@ -66,6 +69,8 @@ The setup wizard will ask for:
 
 Get your HuggingFace token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
+If you run `docker compose up -d` without a TTY (default), the container will automatically generate the minimum required configuration on first run (including an `ADMIN_TOKEN`) and persist it to the Docker volume under `/data/config/secrets.json`.
+
 ### Alternative: Skip Interactive Setup
 
 Provide environment variables instead:
@@ -84,11 +89,18 @@ ADMIN_TOKEN=your_secret_token
 LOG_LEVEL=INFO
 ```
 
+To view the generated config inside the running container:
+
+```bash
+docker compose exec transcription-suite cat /data/config/secrets.json
+```
+
 ---
 
 ## Native Client
 
 The Native Client is a lightweight tray application for recording audio and sending it to the server for transcription.
+It does not require Docker or NVIDIA Container Toolkit.
 
 ### Download
 

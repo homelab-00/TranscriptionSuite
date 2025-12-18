@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "transcription-suite-server"
 version = "2.0.0"
 description = "TranscriptionSuite unified server for transcription services"
-readme = "../README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
