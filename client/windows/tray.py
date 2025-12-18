@@ -2,18 +2,15 @@
 Windows 11 system tray implementation using PyQt6.
 
 Provides native system tray integration for Windows desktop.
+Uses the same Qt6Tray implementation as KDE since PyQt6 works on both.
 """
 
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from client.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
 
-def run_tray(config: "ClientConfig") -> int:
+def run_tray(config) -> int:
     """
     Run the Windows tray application.
 
@@ -23,9 +20,20 @@ def run_tray(config: "ClientConfig") -> int:
     Returns:
         Exit code
     """
+    # Windows uses the same PyQt6 implementation as KDE
+    from client.common.orchestrator import ClientOrchestrator
+    from client.kde.tray import Qt6Tray
+
     try:
-        from PyQt6.QtGui import QAction, QIcon
-        from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+        tray = Qt6Tray()
+        orchestrator = ClientOrchestrator(
+            config=config,
+            auto_connect=True,
+            auto_copy_clipboard=config.get("clipboard", "auto_copy", default=True),
+        )
+        orchestrator.start(tray)
+        return 0
+
     except ImportError as e:
         logger.error(f"PyQt6 not available: {e}")
         print(
@@ -33,63 +41,11 @@ def run_tray(config: "ClientConfig") -> int:
         )
         return 1
 
-    import sys
-
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-
-    # Check system tray availability
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        logger.error("System tray not available")
-        print("Error: System tray is not available on this system")
+    except RuntimeError as e:
+        logger.error(f"Tray initialization failed: {e}")
+        print(f"Error: {e}")
         return 1
 
-    # Create tray icon
-    tray = QSystemTrayIcon()
-    tray.setToolTip("TranscriptionSuite")
-
-    # Create context menu
-    menu = QMenu()
-
-    start_action = QAction("Start Recording")
-    start_action.triggered.connect(lambda: logger.info("Start recording clicked"))
-    menu.addAction(start_action)
-
-    stop_action = QAction("Stop Recording")
-    stop_action.triggered.connect(lambda: logger.info("Stop recording clicked"))
-    menu.addAction(stop_action)
-
-    menu.addSeparator()
-
-    transcribe_action = QAction("Transcribe File...")
-    transcribe_action.triggered.connect(lambda: logger.info("Transcribe file clicked"))
-    menu.addAction(transcribe_action)
-
-    menu.addSeparator()
-
-    notebook_action = QAction("Open Audio Notebook")
-    notebook_action.triggered.connect(lambda: _open_url(config, "/"))
-    menu.addAction(notebook_action)
-
-    menu.addSeparator()
-
-    quit_action = QAction("Quit")
-    quit_action.triggered.connect(app.quit)
-    menu.addAction(quit_action)
-
-    tray.setContextMenu(menu)
-    tray.show()
-
-    logger.info("Windows tray started")
-    print("Tray icon is now running. Right-click for menu.")
-
-    return app.exec()
-
-
-def _open_url(config: "ClientConfig", path: str) -> None:
-    """Open a URL in the default browser."""
-    import webbrowser
-
-    scheme = "https" if config.use_https else "http"
-    url = f"{scheme}://{config.server_host}:{config.server_port}{path}"
-    webbrowser.open(url)
+    except Exception as e:
+        logger.exception(f"Fatal error: {e}")
+        return 1

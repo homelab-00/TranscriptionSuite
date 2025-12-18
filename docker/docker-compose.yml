@@ -1,17 +1,24 @@
 # TranscriptionSuite Docker Compose Configuration
 # Local deployment with GPU support
-
-version: "3.8"
+#
+# First run (interactive setup):
+#   docker compose run --rm transcription-suite --setup
+#
+# Normal run:
+#   docker compose up -d
+#
+# Or provide config via environment:
+#   ADMIN_TOKEN=xxx HUGGINGFACE_TOKEN=xxx docker compose up -d
 
 services:
   transcription-suite:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: transcription-suite:latest
+    image: transcriptionsuite/server:latest
     container_name: transcription-suite
     
-    # GPU support
+    # GPU support (NVIDIA)
     deploy:
       resources:
         reservations:
@@ -25,17 +32,24 @@ services:
       - "8000:8000"  # Unified API
     
     # Environment variables
+    # Required on first run (or use --setup for interactive wizard)
     environment:
       - DATA_DIR=/data
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - HF_TOKEN=${HF_TOKEN:-}
+      # Optional: provide these to skip interactive setup
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
     
-    # Volume mounts
+    # Volume mounts for persistent data
     volumes:
-      - transcription-data:/data
-      - ../config.yaml:/app/config.yaml:ro
+      - transcription-data:/data  # Database, audio files, config, logs
+    
+    # Allow access to host LM Studio
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     
     # Restart policy
     restart: unless-stopped
@@ -50,4 +64,4 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-data
+    name: transcription-suite-data

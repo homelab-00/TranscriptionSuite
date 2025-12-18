@@ -7,8 +7,11 @@ Runs the unified FastAPI server with all services:
 - Transcription API
 - Search API
 - Admin API
+
+On first run, prompts for configuration (HuggingFace token, admin token).
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -17,6 +20,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import uvicorn
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="TranscriptionSuite Server")
+    parser.add_argument(
+        "--setup", action="store_true", help="Run interactive setup wizard"
+    )
+    parser.add_argument(
+        "--force-setup",
+        action="store_true",
+        help="Force re-run setup wizard even if already configured",
+    )
+    return parser.parse_args()
 
 
 def setup_directories() -> Path:
@@ -51,12 +68,38 @@ def print_banner(data_dir: Path, port: int) -> None:
 
 def main() -> None:
     """Main entrypoint."""
+    args = parse_args()
+
     # Setup directories
     data_dir = setup_directories()
 
     # Set working directory to app root
     app_root = Path(__file__).parent.parent
     os.chdir(app_root)
+
+    # Set DATA_DIR env var for setup wizard
+    os.environ["DATA_DIR"] = str(data_dir)
+
+    # Run setup wizard if requested or on first run
+    from server.setup_wizard import get_config, run_setup_wizard
+
+    if args.setup or args.force_setup:
+        run_setup_wizard(force=args.force_setup)
+        if args.setup:
+            # If only --setup was passed, exit after setup
+            print("\nSetup complete. Run without --setup to start the server.")
+            return
+
+    # Get configuration (will run wizard interactively if first run)
+    config = get_config()
+
+    # Export config to environment for the app to use
+    if config.get("huggingface_token"):
+        os.environ["HF_TOKEN"] = config["huggingface_token"]
+    if config.get("admin_token"):
+        os.environ["ADMIN_TOKEN"] = config["admin_token"]
+    if config.get("lm_studio_url"):
+        os.environ["LM_STUDIO_URL"] = config["lm_studio_url"]
 
     # Configuration
     host = os.environ.get("SERVER_HOST", "0.0.0.0")

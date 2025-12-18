@@ -1,17 +1,25 @@
 # TranscriptionSuite Docker Compose Configuration
 # Remote/Tailscale deployment with HTTPS support
-
-version: "3.8"
+#
+# For Tailscale HTTPS:
+#   1. Get your Tailscale certs: tailscale cert your-machine.tailnet-name.ts.net
+#   2. Set environment variables:
+#      export TLS_CERT_PATH=/path/to/your-machine.tailnet-name.ts.net.crt
+#      export TLS_KEY_PATH=/path/to/your-machine.tailnet-name.ts.net.key
+#   3. Run: docker compose -f docker-compose.remote.yml up -d
+#
+# First run (interactive setup):
+#   docker compose -f docker-compose.remote.yml run --rm transcription-suite --setup
 
 services:
   transcription-suite:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: transcription-suite:latest
-    container_name: transcription-suite
+    image: transcriptionsuite/server:latest
+    container_name: transcription-suite-remote
     
-    # GPU support
+    # GPU support (NVIDIA)
     deploy:
       resources:
         reservations:
@@ -22,8 +30,8 @@ services:
     
     # Port mappings
     ports:
-      - "8000:8000"   # HTTP API
-      - "8443:8443"   # HTTPS (when TLS enabled)
+      - "8000:8000"   # HTTP API (internal/Tailscale)
+      - "8443:8443"   # HTTPS (optional, for TLS termination)
     
     # Environment variables
     environment:
@@ -31,8 +39,11 @@ services:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - HF_TOKEN=${HF_TOKEN:-}
-      # Remote access settings
+      # Auth config (or use --setup for interactive wizard)
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
+      # TLS settings for remote access
       - TLS_ENABLED=${TLS_ENABLED:-false}
       - TLS_CERT_FILE=/data/certs/server.crt
       - TLS_KEY_FILE=/data/certs/server.key
@@ -40,10 +51,13 @@ services:
     # Volume mounts
     volumes:
       - transcription-data:/data
-      - ../config.yaml:/app/config.yaml:ro
-      # Mount TLS certificates if using Tailscale HTTPS
+      # Mount TLS certificates for Tailscale HTTPS
       - ${TLS_CERT_PATH:-/dev/null}:/data/certs/server.crt:ro
       - ${TLS_KEY_PATH:-/dev/null}:/data/certs/server.key:ro
+    
+    # Allow access to host services
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     
     # Restart policy
     restart: unless-stopped
@@ -58,4 +72,4 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-data
+    name: transcription-suite-data

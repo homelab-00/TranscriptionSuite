@@ -9,9 +9,9 @@ Provides a single API serving:
 - Health and status endpoints
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -143,3 +143,12 @@ def mount_frontend(app: FastAPI, frontend_path: Path, mount_path: str = "/") -> 
 
 # Create default app instance
 app = create_app()
+
+# Mount frontend in Docker environment
+# Frontend is built and copied to /app/static/ during Docker build
+_static_dir = Path("/app/static")
+if _static_dir.exists():
+    _audio_notebook_dir = _static_dir / "audio_notebook"
+    if _audio_notebook_dir.exists():
+        mount_frontend(app, _audio_notebook_dir, "/")
+        logger.info(f"Audio Notebook frontend mounted from {_audio_notebook_dir}")
