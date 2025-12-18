@@ -1,5 +1,8 @@
 # TranscriptionSuite Unified Server Dockerfile
 # Multi-stage build for optimized image size
+#
+# Build: docker build -t transcriptionsuite/server -f docker/Dockerfile .
+# Run:   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 transcriptionsuite/server
 
 # =============================================================================
 # Stage 1: Frontend Builder
@@ -9,20 +12,20 @@ FROM node:20-slim AS frontend-builder
 WORKDIR /build
 
 # Build Audio Notebook frontend
-COPY AUDIO_NOTEBOOK/package*.json ./audio_notebook/
+COPY native_src/AUDIO_NOTEBOOK/package*.json ./audio_notebook/
 WORKDIR /build/audio_notebook
 RUN npm ci --omit=dev
 
-COPY AUDIO_NOTEBOOK/ ./
+COPY native_src/AUDIO_NOTEBOOK/ ./
 RUN npm run build
 
-# Build Remote Server frontend (for backward compatibility)
+# Build Remote Server frontend
 WORKDIR /build
-COPY REMOTE_SERVER/web/package*.json ./remote_server/
+COPY native_src/REMOTE_SERVER_WEB/package*.json ./remote_server/
 WORKDIR /build/remote_server
 RUN npm ci --omit=dev
 
-COPY REMOTE_SERVER/web/ ./
+COPY native_src/REMOTE_SERVER_WEB/ ./
 RUN npm run build
 
 # =============================================================================
@@ -39,10 +42,15 @@ ENV PYTHONDONTWRITEBYTECODE=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
+    python3.11-dev \
     python3-pip \
     ffmpeg \
     libsndfile1 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash appuser
 
 # Create app directory
 WORKDIR /app
@@ -50,30 +58,28 @@ WORKDIR /app
 # Create virtual environment
 RUN python3.11 -m venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
 
-# Install Python dependencies
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e . && \
-    pip install --no-cache-dir uvicorn[standard]
+# Install Python dependencies from server/pyproject.toml
+# Copy only dependency files first for better layer caching
+COPY server/pyproject.toml ./server/
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir ./server[diarization]
 
-# Copy application source
+# Copy server application code
 COPY server/ ./server/
-COPY docker/ ./docker/
-COPY config.yaml ./
+COPY docker/entrypoint.py ./docker/
 
-# Copy legacy modules (for backward compatibility during migration)
-COPY MAIN/ ./MAIN/
-COPY DIARIZATION/ ./DIARIZATION/
-COPY REMOTE_SERVER/ ./REMOTE_SERVER/
-COPY AUDIO_NOTEBOOK/backend/ ./AUDIO_NOTEBOOK/backend/
+# Copy built frontends to static serving location
+COPY --from=frontend-builder /build/audio_notebook/dist ./static/audio_notebook
+COPY --from=frontend-builder /build/remote_server/dist ./static/remote_ui
 
-# Copy built frontends
-COPY --from=frontend-builder /build/audio_notebook/dist ./AUDIO_NOTEBOOK/dist
-COPY --from=frontend-builder /build/remote_server/dist ./REMOTE_SERVER/web/dist
+# Copy configuration template
+COPY config/server.yaml.example ./config/server.yaml.example
 
-# Create data directories
-RUN mkdir -p /data/database /data/audio /data/logs /data/certs /data/tokens
+# Create data directories with correct permissions
+RUN mkdir -p /data/database /data/audio /data/logs /data/certs /data/config && \
+    chown -R appuser:appuser /data /app
 
 # Environment variables
 ENV DATA_DIR=/data
@@ -88,5 +94,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the server
-CMD ["python", "docker/entrypoint.py"]
+# Switch to non-root user
+USER appuser
+
+# Entrypoint with first-run setup support
+# Use --setup for interactive configuration, or provide env vars
+ENTRYPOINT ["python", "docker/entrypoint.py"]
+CMD []

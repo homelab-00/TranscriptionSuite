@@ -3,30 +3,22 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "transcription-suite-server"
+name = "transcription-suite-native"
 version = "2.0.0"
-description = "TranscriptionSuite unified server for transcription services"
+description = "TranscriptionSuite native development environment"
 readme = "../README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
     { name = "homelab-00" }
 ]
-keywords = ["transcription", "whisper", "speech-to-text", "diarization"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: POSIX :: Linux",
-    "Topic :: Multimedia :: Sound/Audio :: Speech",
-]
 
+# Same dependencies as server + desktop extras for native development
 dependencies = [
     # Web / API
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
-    "python-multipart>=0.0.6",  # File uploads
+    "python-multipart>=0.0.6",
     "pydantic>=2.5.0",
     "aiohttp>=3.9.0",
     "httpx>=0.25.0",
@@ -36,7 +28,7 @@ dependencies = [
     "faster-whisper>=1.0.0",
     "ctranslate2>=4.0.0",
     "torch>=2.0.0",
-    "torchaudio>=2.0.0",  # Required by Silero VAD
+    "torchaudio>=2.0.0",
     
     # Audio Processing
     "numpy>=1.24.0",
@@ -56,21 +48,32 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Speaker diarization
 diarization = [
     "pyannote.audio>=3.1.0",
 ]
+
+# Desktop/native development (system tray, audio recording)
+desktop = [
+    "PyQt6>=6.5.0",
+    "pyaudio>=0.2.13",
+    "pyperclip>=1.8.0",
+]
+
+# Full native development setup
+full = [
+    "pyannote.audio>=3.1.0",
+    "PyQt6>=6.5.0",
+    "pyaudio>=0.2.13",
+    "pyperclip>=1.8.0",
+]
+
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
-    "httpx>=0.25.0",
     "ruff>=0.1.0",
+    "pyright>=1.1.0",
 ]
-
-[project.scripts]
-transcription-server = "server.api.main:main"
-
-[tool.hatch.build.targets.wheel]
-packages = ["server"]
 
 [tool.ruff]
 line-length = 100
@@ -79,7 +82,3 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
 ignore = ["E501"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]

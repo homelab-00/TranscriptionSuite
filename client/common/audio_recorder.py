@@ -4,25 +4,37 @@ Cross-platform audio recording for TranscriptionSuite client.
 Handles microphone recording with:
 - PyAudio for audio capture
 - Configurable sample rate and device
-- Callback-based audio streaming
+- WAV output for server transcription
 """
 
+import io
 import logging
 import threading
-from typing import Callable, Optional
+import wave
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Try to import PyAudio
-try:
-    import pyaudio
+# Audio constants
+SAMPLE_RATE = 16000
+CHANNELS = 1
+CHUNK_SIZE = 1024
+SAMPLE_WIDTH = 2  # 16-bit audio
 
-    HAS_PYAUDIO = True
-except ImportError:
-    pyaudio = None  # type: ignore
-    HAS_PYAUDIO = False
+# Try to import PyAudio
+HAS_PYAUDIO = False
+if TYPE_CHECKING:
+    import pyaudio
+else:
+    try:
+        import pyaudio
+
+        HAS_PYAUDIO = True
+    except ImportError:
+        pyaudio = None
 
 
 class AudioRecorder:
@@ -35,8 +47,8 @@ class AudioRecorder:
         sample_rate: int = 16000,
         channels: int = 1,
         chunk_size: int = 1024,
-        device_index: Optional[int] = None,
-        on_audio_chunk: Optional[Callable[[bytes], None]] = None,
+        device_index: int | None = None,
+        on_audio_chunk: Callable[[bytes], None] | None = None,
     ):
         """
         Initialize the audio recorder.
@@ -57,13 +69,13 @@ class AudioRecorder:
         self.device_index = device_index
         self.on_audio_chunk = on_audio_chunk
 
-        self._audio: Optional[pyaudio.PyAudio] = None
-        self._stream: Optional[pyaudio.Stream] = None
+        self._audio: Any = None
+        self._stream: Any = None
         self._recording = False
-        self._thread: Optional[threading.Thread] = None
-        self._frames: list = []
+        self._thread: threading.Thread | None = None
+        self._frames: list[bytes] = []
 
-    def _get_device_index(self) -> Optional[int]:
+    def _get_device_index(self) -> int | None:
         """Get the audio device index to use."""
         if self.device_index is not None:
             return self.device_index
@@ -129,10 +141,10 @@ class AudioRecorder:
 
     def stop(self) -> bytes:
         """
-        Stop recording and return the recorded audio.
+        Stop recording and return the recorded audio as WAV bytes.
 
         Returns:
-            Raw audio bytes (int16, mono, sample_rate Hz)
+            WAV file content as bytes (16kHz, mono, 16-bit)
         """
         self._recording = False
 
@@ -140,13 +152,40 @@ class AudioRecorder:
             self._thread.join(timeout=1.0)
             self._thread = None
 
-        audio_data = b"".join(self._frames)
+        frames = self._frames.copy()
         self._frames = []
 
         self._cleanup()
 
-        logger.info(f"Recording stopped: {len(audio_data)} bytes")
-        return audio_data
+        if not frames:
+            logger.warning("No audio recorded")
+            return self._create_empty_wav()
+
+        # Create WAV file in memory
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, "wb") as wav_file:
+            wav_file.setnchannels(self.channels)
+            wav_file.setsampwidth(SAMPLE_WIDTH)
+            wav_file.setframerate(self.sample_rate)
+            wav_file.writeframes(b"".join(frames))
+
+        wav_bytes = wav_buffer.getvalue()
+        duration = len(b"".join(frames)) / (
+            self.sample_rate * SAMPLE_WIDTH * self.channels
+        )
+        logger.info(f"Recording stopped: {duration:.1f}s")
+
+        return wav_bytes
+
+    def _create_empty_wav(self) -> bytes:
+        """Create an empty WAV file."""
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, "wb") as wav_file:
+            wav_file.setnchannels(self.channels)
+            wav_file.setsampwidth(SAMPLE_WIDTH)
+            wav_file.setframerate(self.sample_rate)
+            wav_file.writeframes(b"")
+        return wav_buffer.getvalue()
 
     def cancel(self) -> None:
         """Cancel recording and discard audio."""

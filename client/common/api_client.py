@@ -11,12 +11,18 @@ Handles:
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+# Audio constants
+SAMPLE_RATE = 16000
+CHANNELS = 1
+SAMPLE_WIDTH = 2  # 16-bit audio
 
 
 class APIClient:
@@ -29,7 +35,7 @@ class APIClient:
         host: str = "localhost",
         port: int = 8000,
         use_https: bool = False,
-        token: Optional[str] = None,
+        token: str | None = None,
         timeout: int = 30,
         transcription_timeout: int = 300,
     ):
@@ -51,7 +57,7 @@ class APIClient:
         self.timeout = timeout
         self.transcription_timeout = transcription_timeout
 
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._connected = False
 
     @property
@@ -66,7 +72,7 @@ class APIClient:
         scheme = "wss" if self.use_https else "ws"
         return f"{scheme}://{self.host}:{self.port}"
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         """Get request headers including auth token."""
         headers = {"Content-Type": "application/json"}
         if self.token:
@@ -100,7 +106,7 @@ class APIClient:
             self._connected = False
             return False
 
-    async def get_status(self) -> Dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         """Get server status."""
         session = await self._get_session()
         async with session.get(
@@ -113,11 +119,11 @@ class APIClient:
     async def transcribe_file(
         self,
         file_path: Path,
-        language: Optional[str] = None,
+        language: str | None = None,
         word_timestamps: bool = True,
         diarization: bool = False,
-        on_progress: Optional[Callable[[str], None]] = None,
-    ) -> Dict[str, Any]:
+        on_progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         """
         Transcribe an audio file.
 
@@ -174,8 +180,8 @@ class APIClient:
 
     async def get_recordings(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> list:
         """Get recordings from Audio Notebook."""
         session = await self._get_session()
@@ -199,7 +205,7 @@ class APIClient:
         query: str,
         search_type: str = "all",
         limit: int = 50,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Search transcriptions."""
         session = await self._get_session()
 
@@ -210,6 +216,85 @@ class APIClient:
         ) as resp:
             resp.raise_for_status()
             return await resp.json()
+
+    async def transcribe_audio_data(
+        self,
+        audio_data: bytes,
+        language: str | None = None,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Transcribe raw audio data (WAV format).
+
+        Args:
+            audio_data: WAV audio bytes
+            language: Language code (None for auto-detect)
+            on_progress: Optional callback for progress updates
+
+        Returns:
+            Transcription result dict
+        """
+        session = await self._get_session()
+
+        if on_progress:
+            on_progress("Uploading audio...")
+
+        # Prepare form data
+        data = aiohttp.FormData()
+        data.add_field(
+            "file",
+            audio_data,
+            filename="recording.wav",
+            content_type="audio/wav",
+        )
+        if language:
+            data.add_field("language", language)
+        data.add_field("word_timestamps", "true")
+
+        # Use longer timeout for transcription
+        timeout = aiohttp.ClientTimeout(total=self.transcription_timeout)
+
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        if on_progress:
+            on_progress("Transcribing...")
+
+        try:
+            async with session.post(
+                f"{self.base_url}/api/transcribe/audio",
+                data=data,
+                headers=headers,
+                timeout=timeout,
+            ) as resp:
+                if resp.status != 200:
+                    error = await resp.text()
+                    raise RuntimeError(f"Transcription failed: {error}")
+
+                result = await resp.json()
+
+                if on_progress:
+                    on_progress("Complete")
+
+                return result
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Transcription request failed: {e}")
+            raise RuntimeError(f"Network error: {e}") from e
+
+    async def preload_model(self) -> bool:
+        """Request server to preload the transcription model."""
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/api/admin/models/load",
+                headers=self._get_headers(),
+            ) as resp:
+                return resp.status == 200
+        except Exception as e:
+            logger.error(f"Model preload failed: {e}")
+            return False
 
     @property
     def is_connected(self) -> bool:
@@ -225,9 +310,9 @@ class StreamingClient:
     def __init__(
         self,
         api_client: APIClient,
-        on_preview: Optional[Callable[[str], None]] = None,
-        on_final: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_error: Optional[Callable[[str], None]] = None,
+        on_preview: Callable[[str], None] | None = None,
+        on_final: Callable[[dict[str, Any]], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
     ):
         """
         Initialize streaming client.
@@ -243,7 +328,7 @@ class StreamingClient:
         self.on_final = on_final
         self.on_error = on_error
 
-        self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._running = False
 
     async def connect(self) -> bool:
