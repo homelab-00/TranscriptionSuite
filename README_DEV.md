@@ -47,47 +47,33 @@ TranscriptionSuite uses a **client-server architecture**:
 
 ```txt
 TranscriptionSuite/
-├── server/                       # Server code (runs in Docker)
-│   ├── api/                      # FastAPI application
-│   │   ├── main.py               # App factory, lifespan, static mounting
-│   │   └── routes/               # API endpoints
-│   │       ├── health.py         # /health endpoint
-│   │       ├── transcription.py  # /api/transcribe/* endpoints
-│   │       ├── notebook.py       # /api/notebook/* endpoints
-│   │       ├── search.py         # /api/search endpoint
-│   │       └── admin.py          # /api/admin/* endpoints
-│   ├── core/                     # ML engines
-│   │   ├── transcription_engine.py  # Unified Whisper wrapper
-│   │   ├── diarization_engine.py    # PyAnnote wrapper
-│   │   ├── model_manager.py         # Model lifecycle management
-│   │   └── audio_utils.py           # Audio processing utilities
-│   ├── database/                 # SQLite + FTS5
-│   │   └── database.py           # Schema, CRUD operations
-│   ├── logging/                  # Centralized logging
-│   │   └── setup.py              # Structured JSON logging
-│   ├── setup_wizard.py           # First-run configuration wizard
-│   ├── config.py                 # Server configuration loader
-│   └── pyproject.toml            # Server dependencies
-│
 ├── client/                       # Native client (runs locally)
-│   ├── common/                   # Shared client code
-│   │   ├── api_client.py         # HTTP client for server communication
-│   │   ├── audio_recorder.py     # PyAudio recording wrapper
-│   │   ├── orchestrator.py       # Main controller, state machine
-│   │   ├── tray_base.py          # Abstract tray interface
-│   │   ├── config.py             # Client configuration
-│   │   └── models.py             # Shared data models
-│   ├── kde/                      # KDE Plasma (PyQt6)
-│   │   └── tray.py               # Qt6 system tray implementation
-│   ├── gnome/                    # GNOME (GTK + AppIndicator)
-│   │   └── tray.py               # GTK/AppIndicator implementation
-│   ├── windows/                  # Windows (PyQt6)
-│   │   └── tray.py               # Windows tray (same as KDE)
-│   ├── build/                    # Build configurations
-│   │   ├── pyinstaller-kde.spec
-│   │   └── pyinstaller-windows.spec
-│   ├── __main__.py               # CLI entry point
-│   └── pyproject.toml            # Client dependencies
+│   ├── src/client/               # Python package source
+│   │   ├── common/               # Shared client code
+│   │   │   ├── api_client.py     # HTTP client for server communication
+│   │   │   ├── audio_recorder.py # PyAudio recording wrapper
+│   │   │   ├── orchestrator.py   # Main controller, state machine
+│   │   │   ├── tray_base.py      # Abstract tray interface
+│   │   │   ├── config.py         # Client configuration
+│   │   │   └── models.py         # Shared data models
+│   │   ├── kde/                  # KDE Plasma (PyQt6)
+│   │   │   └── tray.py           # Qt6 system tray implementation
+│   │   ├── gnome/                # GNOME (GTK + AppIndicator)
+│   │   │   └── tray.py           # GTK/AppIndicator implementation
+│   │   ├── windows/              # Windows (PyQt6)
+│   │   │   └── tray.py           # Windows tray (same as KDE)
+│   │   ├── build/                # Build configurations
+│   │   │   ├── pyinstaller-kde.spec
+│   │   │   └── pyinstaller-windows.spec
+│   │   └── __main__.py           # CLI entry point
+│   ├── scripts/                  # Build and setup scripts
+│   │   ├── build-appimage-kde.sh     # Build KDE AppImage
+│   │   ├── build-appimage-gnome.sh   # Build GNOME AppImage
+│   │   ├── setup-client-kde.sh       # Setup KDE dev environment
+│   │   ├── setup-client-gnome.sh     # Setup GNOME dev environment
+│   │   ├── setup-client-windows.ps1  # Setup Windows dev environment
+│   │   └── pyproject.toml            # Dev/build tools (separate venv)
+│   └── pyproject.toml            # Client package + dependencies
 │
 ├── docker/                       # Docker infrastructure
 │   ├── Dockerfile                # Multi-stage build (frontend + Python)
@@ -99,24 +85,38 @@ TranscriptionSuite/
 ├── native_src/                   # Python source for local development
 │   ├── MAIN/                     # Legacy: Core transcription logic
 │   ├── DIARIZATION/              # Legacy: Speaker diarization
-│   ├── AUDIO_NOTEBOOK/           # Frontend + backend source
-│   ├── REMOTE_SERVER_WEB/        # Remote UI frontend source
-│   ├── config.yaml               # Local configuration file
+│   ├── AUDIO_NOTEBOOK/           # Audio Notebook frontend + backend source
+│   ├── REMOTE_SERVER/            # Remote server components
+│   │   ├── backend/              # Server code (runs in Docker)
+│   │   │   ├── api/              # FastAPI application
+│   │   │   │   ├── main.py       # App factory, lifespan, static mounting
+│   │   │   │   └── routes/       # API endpoints
+│   │   │   ├── core/             # ML engines
+│   │   │   │   ├── transcription_engine.py  # Unified Whisper wrapper
+│   │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
+│   │   │   │   ├── model_manager.py         # Model lifecycle management
+│   │   │   │   └── audio_utils.py           # Audio processing utilities
+│   │   │   ├── database/         # SQLite + FTS5
+│   │   │   ├── logging/          # Centralized logging
+│   │   │   ├── setup_wizard.py   # First-run configuration wizard
+│   │   │   ├── config.py         # Server configuration loader
+│   │   │   └── pyproject.toml    # Server dependencies
+│   │   └── frontend/             # Remote UI frontend source (React)
+│   ├── config.yaml               # Local configuration file (also serves as template)
 │   ├── .env                      # Local environment variables
-│   └── pyproject.toml            # Dependencies (mirrors Docker)
-│
-├── config/                       # Configuration templates
-│   ├── server.yaml.example       # Server config template
-│   └── client.yaml.example       # Client config template
-│
-└── build_scripts/                # Build and setup scripts
-    ├── build-appimage-kde.sh     # Build KDE AppImage
-    ├── build-appimage-gnome.sh   # Build GNOME AppImage
-    ├── setup-client-kde.sh       # Setup KDE dev environment
-    ├── setup-client-gnome.sh     # Setup GNOME dev environment
-    ├── setup-client-windows.ps1  # Setup Windows dev environment
-    └── pyproject.toml            # Dev tools (ruff, pyright)
+│   └── pyproject.toml            # Native dev environment (mirrors Docker)
 ```
+
+### pyproject.toml Files
+
+The project has multiple `pyproject.toml` files, each serving a different purpose:
+
+| File | Purpose |
+|------|------|
+| `client/pyproject.toml` | Native client package definition. Defines runtime deps and platform extras (`kde`, `gnome`, `windows`). Provides the `transcription-client` entrypoint. |
+| `client/scripts/pyproject.toml` | Dev/build tools environment (separate from client runtime). Contains `dev` extra with linting, testing, and packaging tools. |
+| `native_src/REMOTE_SERVER/backend/pyproject.toml` | Server/backend package definition. Defines server deps (FastAPI, faster-whisper, torch, etc.) used by Docker builds. |
+| `native_src/pyproject.toml` | Native development sandbox. Mirrors server deps + desktop extras for running legacy/native workflows without Docker. |
 
 ---
 
@@ -152,7 +152,19 @@ For working on the Python source (without Docker):
 cd native_src
 uv venv --python 3.11
 uv sync --extra full      # All dependencies including diarization
-source .venv/bin/activate
+```
+
+**Running the native application:**
+
+```bash
+# Run with system tray (default mode - longform dictation + static transcription + web viewer)
+uv run python MAIN/orchestrator.py
+
+# Transcribe a single file and exit
+uv run python MAIN/orchestrator.py --static /path/to/recording.wav
+
+# Specify custom port for the web viewer backend (default: 8000)
+uv run python MAIN/orchestrator.py --port 8080
 ```
 
 ### Docker Development
@@ -160,7 +172,90 @@ source .venv/bin/activate
 ```bash
 cd docker
 docker compose build
-docker compose up
+docker compose up -d
+```
+
+#### Image Variants
+
+Two image variants are available to balance features vs. size:
+
+| Variant | Image Tag | Size | Description |
+|---------|-----------|------|-------------|
+| **Full** | `transcriptionsuite/server:latest` | ~19GB | All features including speaker diarization |
+| **Lite** | `transcriptionsuite/server:lite` | ~13GB | Without diarization (~6GB smaller) |
+
+**Build commands:**
+
+```bash
+cd docker
+
+# Build full image with diarization (default)
+docker compose build
+
+# Build lite image without diarization
+docker compose -f docker-compose.nodiarization.yml build
+
+# Build both variants
+docker compose build && docker compose -f docker-compose.nodiarization.yml build
+```
+
+**Run the lite variant:**
+
+```bash
+docker compose -f docker-compose.nodiarization.yml up -d
+```
+
+**First-time startup**: The server takes ~30 seconds to initialize on first run (loading ML models into GPU memory). Wait before attempting client connections.
+
+On first run, if the container is started without a TTY (common with `docker compose up -d`), the server will generate the minimum required configuration automatically (including an `ADMIN_TOKEN`) and persist it in the Docker volume at `/data/config/secrets.json`.
+
+**Recommended workflow during development:**
+
+```bash
+# Stop container (preserves volumes and container state)
+docker compose stop
+
+# Restart existing container (fast - no model reloading)
+docker compose start
+
+# Rebuild after code changes
+docker compose build
+docker compose up -d
+
+# Only use 'down' when you need to recreate the container
+# (This removes containers but keeps volumes)
+docker compose down
+docker compose up -d
+```
+
+Use `docker compose stop`/`start` instead of `down`/`up` to avoid container recreation overhead—the server initialization and model loading takes significant time.
+
+#### Docker Build & Runtime Notes
+
+##### Config templates
+
+- **Docker image template**: the Docker build copies `native_src/config.yaml` into the image as `config/config.yaml.example`.
+
+##### Frontend build behavior
+
+- The Docker image **builds both web frontends during `docker compose build`** in the `frontend-builder` stage.
+- Steps used for each frontend:
+  - `npm ci --omit=dev`
+  - `npm run build`
+- Docker layer caching may reuse these layers if `package*.json` and frontend sources are unchanged. Use `--no-cache` to force rebuilding.
+- The Docker build **does not run `npm audit`**.
+
+##### Auditing the web frontends
+
+- Run audits in the source folders under `native_src/`:
+  - `native_src/AUDIO_NOTEBOOK/`
+  - `native_src/REMOTE_SERVER/frontend/`
+
+Example:
+
+```bash
+npm ci
+npm audit
 ```
 
 ### Client Development
@@ -168,23 +263,35 @@ docker compose up
 ```bash
 cd client
 uv venv --python 3.11
-uv pip install -e ".[kde]"  # or [gnome] or [windows]
-python -m client --host localhost --port 8000
+uv sync --extra kde  # or --extra gnome / --extra windows
+
+# Run using the installed entry point script
+.venv/bin/transcription-client --host localhost --port 8000
+
+# Or with uv run (activates venv automatically)
+uv run transcription-client --host localhost --port 8000
 ```
 
-### Dev Tools
+### Dev & Build Tools
+
+A single environment for linting, type-checking, testing, and packaging:
 
 ```bash
-cd build_scripts
-uv sync --extra dev
+cd client/scripts
+uv venv --python 3.11
+uv sync --extra dev  # ruff, pyright, pytest, pyinstaller, etc.
 
-# Linting (from project root)
-ruff check .
-ruff format .
+# Linting (run from project root, using the tools venv)
+cd ../..
+./client/scripts/.venv/bin/ruff check .
+./client/scripts/.venv/bin/ruff format .
 
-# Type checking
-pyright
+# Type checking (run from project root, using the tools venv)
+./client/scripts/.venv/bin/pyright
 ```
+
+This keeps dev/build tooling isolated from client runtime dependencies.
+Note: running `uv sync` (without `--extra dev`) in `client/scripts` will remove these tools because the base dependencies for that project are empty.
 
 ---
 
@@ -193,7 +300,7 @@ pyright
 ### KDE AppImage
 
 ```bash
-./build_scripts/build-appimage-kde.sh
+./client/scripts/build-appimage-kde.sh
 # Output: dist/TranscriptionSuite-KDE-x86_64.AppImage
 ```
 
@@ -203,7 +310,7 @@ pyright
 # Requires system GTK3 and AppIndicator
 sudo pacman -S gtk3 libappindicator-gtk3 python-gobject
 
-./build_scripts/build-appimage-gnome.sh
+./client/scripts/build-appimage-gnome.sh
 # Output: dist/TranscriptionSuite-GNOME-x86_64.AppImage
 ```
 
@@ -345,6 +452,11 @@ clipboard:
 
 ### Docker GPU Access
 
+GPU passthrough requirements depend on host OS:
+
+- Linux: requires the NVIDIA driver + NVIDIA Container Toolkit on the host
+- Windows: requires Docker Desktop (WSL2 backend) + NVIDIA driver with WSL support (the GPU is exposed to the Linux environment via WSL2)
+
 ```bash
 # Verify GPU is accessible
 docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
@@ -353,9 +465,28 @@ docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 docker compose logs -f
 ```
 
+### Docker Logs
+
+There are two primary places to read server logs:
+
+- **Container stdout/stderr** (Uvicorn + app console logs)
+  - `docker compose logs -f transcription-suite`
+  - `docker logs -f transcription-suite`
+- **Persistent log files** (rotating)
+  - Stored in the Docker volume under `/data/logs/`
+  - Main file: `/data/logs/server.log`
+  - View from host:
+
+```bash
+docker compose exec transcription-suite ls -la /data/logs
+docker compose exec transcription-suite tail -n 200 -f /data/logs/server.log
+```
+
 ### Model Loading
 
-First transcription may take 30-60 seconds as models are downloaded and loaded into GPU memory.
+**First container startup**: On initial boot, the server needs ~30 seconds to load ML models into GPU memory. The container may report as "healthy" before model loading completes. Wait before attempting transcriptions or client connections.
+
+**First transcription of a new model**: Additional time may be needed if Whisper models are being downloaded from HuggingFace (varies by model size and network speed).
 
 ### GNOME Tray Not Showing
 

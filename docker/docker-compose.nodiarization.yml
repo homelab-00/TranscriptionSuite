@@ -1,33 +1,24 @@
-# TranscriptionSuite Docker Compose Configuration
-# Local deployment with GPU support
+# TranscriptionSuite Docker Compose - No Diarization Variant
+# Builds a smaller image (~13GB) without speaker diarization support
 #
-# Build with diarization (default, ~19GB):
-#   docker compose build
+# Build standalone:
+#   docker compose -f docker-compose.nodiarization.yml build
 #
-# Build without diarization (~13GB):
-#   docker compose build --build-arg INSTALL_DIARIZATION=false
-#
-# Build both image variants:
+# Build both variants at once:
 #   docker compose -f docker-compose.yml -f docker-compose.nodiarization.yml build
 #
-# First run (interactive setup):
-#   docker compose run --rm transcription-suite --setup
-#
-# Normal run:
-#   docker compose up -d
-#
-# Or provide config via environment:
-#   ADMIN_TOKEN=xxx HUGGINGFACE_TOKEN=xxx docker compose up -d
+# Run:
+#   docker compose -f docker-compose.nodiarization.yml up -d
 
 services:
-  transcription-suite:
+  transcription-suite-lite:
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        INSTALL_DIARIZATION: "true"
-    image: transcriptionsuite/server:latest
-    container_name: transcription-suite
+        INSTALL_DIARIZATION: "false"
+    image: transcriptionsuite/server:lite
+    container_name: transcription-suite-lite
     
     # GPU support (NVIDIA)
     deploy:
@@ -43,20 +34,18 @@ services:
       - "8000:8000"  # Unified API
     
     # Environment variables
-    # Required on first run (or use --setup for interactive wizard)
     environment:
       - DATA_DIR=/data
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # Optional: provide these to skip interactive setup
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
     
     # Volume mounts for persistent data
     volumes:
-      - transcription-data:/data  # Database, audio files, config, logs
+      - transcription-data-lite:/data
     
     # Allow access to host LM Studio
     extra_hosts:
@@ -74,5 +63,5 @@ services:
       start_period: 60s
 
 volumes:
-  transcription-data:
-    name: transcription-suite-data
+  transcription-data-lite:
+    name: transcription-suite-data-lite

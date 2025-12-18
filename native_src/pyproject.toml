@@ -75,6 +75,9 @@ dev = [
     "pyright>=1.1.0",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["MAIN", "DIARIZATION"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

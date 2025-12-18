@@ -20,8 +20,8 @@ native_src/AUDIO_NOTEBOOK/build/
 
 # REMOTE_SERVER web app
 # Node.js / npm dependencies and build outputs
-native_src/REMOTE_SERVER_WEB/node_modules/
-native_src/REMOTE_SERVER_WEB/dist/
-native_src/REMOTE_SERVER_WEB/build/
+native_src/REMOTE_SERVER/frontend/node_modules/
+native_src/REMOTE_SERVER/frontend/dist/
+native_src/REMOTE_SERVER/frontend/build/
 # Server files (user data, should not be synced)
 native_src/REMOTE_SERVER/data/

@@ -58,7 +58,7 @@ dev = [
 transcription-client = "client.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["client"]
+packages = ["src/client"]
 
 [tool.ruff]
 line-length = 100
