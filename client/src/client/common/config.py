@@ -9,7 +9,7 @@ Handles loading and saving client configuration from:
 import os
 import platform
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import yaml
 
@@ -28,15 +28,15 @@ def get_config_dir() -> Path:
     else:  # Linux and others
         xdg_config = os.environ.get("XDG_CONFIG_HOME")
         if xdg_config:
-            config_dir = Path(xdg_config) / "transcription-suite"
+            config_dir = Path(xdg_config) / "TranscriptionSuite"
         else:
-            config_dir = Path.home() / ".config" / "transcription-suite"
+            config_dir = Path.home() / ".config" / "TranscriptionSuite"
 
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
 
-def get_default_config() -> Dict[str, Any]:
+def get_default_config() -> dict[str, Any]:
     """Get default client configuration."""
     return {
         "server": {
@@ -68,7 +68,7 @@ def get_default_config() -> Dict[str, Any]:
 class ClientConfig:
     """Client configuration manager."""
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         """
         Initialize client configuration.
 
@@ -87,13 +87,13 @@ class ClientConfig:
         """Load configuration from file."""
         if self.config_path.exists():
             try:
-                with open(self.config_path, "r") as f:
+                with open(self.config_path) as f:
                     loaded = yaml.safe_load(f) or {}
                 self._deep_merge(self.config, loaded)
             except Exception as e:
                 print(f"Warning: Could not load config: {e}")
 
-    def _deep_merge(self, base: Dict, override: Dict) -> None:
+    def _deep_merge(self, base: dict, override: dict) -> None:
         """Deep merge override into base dict."""
         for key, value in override.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):

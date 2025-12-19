@@ -4,6 +4,7 @@
 
 # Python
 __pycache__
+**/__pycache__
 *.pyc
 *.pyo
 *.pyd
@@ -11,11 +12,16 @@ __pycache__
 *.egg-info
 .eggs
 *.egg
+# Virtual environments (recursive)
 .venv
+**/.venv
 venv
+**/venv
 env
 .env
 *.env.local
+# uv lock files not needed in container
+**/uv.lock
 
 # IDE
 .vscode

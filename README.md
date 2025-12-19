@@ -145,7 +145,7 @@ docker compose run --rm transcription-suite --setup
 
 ### Client Configuration
 
-The client stores settings in `~/.config/transcription-suite/client.yaml`:
+The client stores settings in `~/.config/TranscriptionSuite/client.yaml`:
 
 ```yaml
 server:
@@ -183,16 +183,16 @@ Move and rename the generated files to a standard location:
 
 | Platform | Directory | Files |
 |----------|-----------|-------|
-| **Linux** | `~/.config/.tailscale/` | `my-machine.crt`, `my-machine.key` |
+| **Linux** | `~/.config/Tailscale/` | `my-machine.crt`, `my-machine.key` |
 | **Windows** | `Documents\Tailscale\` | `my-machine.crt`, `my-machine.key` |
 
 **Linux:**
 
 ```bash
-mkdir -p ~/.config/.tailscale
-mv your-machine.tailnet-name.ts.net.crt ~/.config/.tailscale/my-machine.crt
-mv your-machine.tailnet-name.ts.net.key ~/.config/.tailscale/my-machine.key
-chmod 600 ~/.config/.tailscale/my-machine.key
+mkdir -p ~/.config/Tailscale
+mv your-machine.tailnet-name.ts.net.crt ~/.config/Tailscale/my-machine.crt
+mv your-machine.tailnet-name.ts.net.key ~/.config/Tailscale/my-machine.key
+chmod 600 ~/.config/Tailscale/my-machine.key
 ```
 
 **Windows (PowerShell):**
@@ -209,8 +209,8 @@ mv your-machine.tailnet-name.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my
 
 ```bash
 TLS_ENABLED=true \
-TLS_CERT_PATH=~/.config/.tailscale/my-machine.crt \
-TLS_KEY_PATH=~/.config/.tailscale/my-machine.key \
+TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
+TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 ```
 

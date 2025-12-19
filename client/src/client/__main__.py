@@ -9,6 +9,7 @@ Options:
     --host HOST          Server hostname (default: localhost)
     --port PORT          Server port (default: 8000)
     --https              Use HTTPS
+    --verbose, -v        Enable verbose debug logging
     --list-devices       List available audio devices and exit
     --help               Show this help message
 """
@@ -16,6 +17,8 @@ Options:
 import argparse
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig, get_config_dir
@@ -54,9 +57,15 @@ def parse_args() -> argparse.Namespace:
         help="Path to configuration file",
     )
     parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose debug logging with detailed connection info",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debug logging",
+        help="Alias for --verbose (deprecated, use --verbose instead)",
     )
 
     return parser.parse_args()
@@ -82,26 +91,100 @@ def list_audio_devices() -> None:
     print()
 
 
-def setup_logging(debug: bool = False) -> None:
-    """Set up logging configuration."""
-    level = logging.DEBUG if debug else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+def get_log_dir() -> Path:
+    """Get platform-specific log directory."""
+    log_dir = get_config_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
+
+
+def setup_logging(verbose: bool = False) -> None:
+    """
+    Set up logging configuration with file and console handlers.
+
+    Args:
+        verbose: Enable verbose debug logging
+    """
+    level = logging.DEBUG if verbose else logging.INFO
+
+    # Create formatters
+    verbose_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
     )
+    console_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Clear existing handlers
+    root_logger.handlers.clear()
+
+    # Console handler (always present)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler (persistent logs)
+    try:
+        log_dir = get_log_dir()
+        log_file = log_dir / "client.log"
+
+        # Rotating file handler: 5MB per file, keep 3 backups
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=5 * 1024 * 1024,  # 5MB
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(logging.DEBUG)  # Always log DEBUG to file
+        file_handler.setFormatter(verbose_formatter)
+        root_logger.addHandler(file_handler)
+
+        print(f"Logs written to: {log_file}")
+
+    except Exception as e:
+        print(f"Warning: Could not set up file logging: {e}")
+
+    # Set up verbose logging for key modules
+    if verbose:
+        # Enable detailed aiohttp logging for connection debugging
+        logging.getLogger("aiohttp").setLevel(logging.DEBUG)
+        logging.getLogger("aiohttp.client").setLevel(logging.DEBUG)
+
+        # Log initial verbose mode notification
+        logger = logging.getLogger(__name__)
+        logger.info("=" * 60)
+        logger.info("VERBOSE MODE ENABLED - Detailed connection diagnostics active")
+        logger.info("=" * 60)
 
 
 def main() -> int:
     """Main entry point."""
-    args = parse_args()
+    try:
+        args = parse_args()
+    except Exception as e:
+        print(f"FATAL: Failed to parse arguments: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
 
     # Handle --list-devices
     if args.list_devices:
         list_audio_devices()
         return 0
 
-    # Set up logging
-    setup_logging(args.debug)
+    # Set up logging (verbose mode or legacy debug flag)
+    verbose = args.verbose or args.debug
+    try:
+        setup_logging(verbose)
+    except Exception as e:
+        print(f"WARNING: Failed to set up logging: {e}", file=sys.stderr)
+        # Continue anyway - we can still run without file logging
 
     # Load configuration
     config = ClientConfig()

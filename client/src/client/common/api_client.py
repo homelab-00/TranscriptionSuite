@@ -11,6 +11,8 @@ Handles:
 import asyncio
 import json
 import logging
+import socket
+import ssl
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -60,6 +62,11 @@ class APIClient:
         self._session: aiohttp.ClientSession | None = None
         self._connected = False
 
+        # Log initialization with connection details
+        logger.info(f"API Client initialized: {self.base_url}")
+        if use_https:
+            logger.debug(f"HTTPS mode enabled for host: {host}")
+
     @property
     def base_url(self) -> str:
         """Get the base URL for API requests."""
@@ -80,10 +87,34 @@ class APIClient:
         return headers
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session."""
+        """Get or create the aiohttp session with SSL configuration."""
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+
+            # Configure SSL context for HTTPS connections
+            ssl_context = None
+            if self.use_https:
+                ssl_context = ssl.create_default_context()
+                # For Tailscale HTTPS certs, enable hostname validation
+                ssl_context.check_hostname = True
+                ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+                logger.debug("SSL context created with hostname verification")
+                logger.debug(f"SSL version: {ssl.OPENSSL_VERSION}")
+
+            connector = aiohttp.TCPConnector(
+                ssl=ssl_context,
+                force_close=False,
+                enable_cleanup_closed=True,
+            )
+
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+            )
+
+            logger.debug(f"New aiohttp session created (HTTPS: {self.use_https})")
+
         return self._session
 
     async def close(self) -> None:
@@ -93,18 +124,81 @@ class APIClient:
             self._session = None
 
     async def health_check(self) -> bool:
-        """Check if server is healthy."""
+        """Check if server is healthy with detailed diagnostics."""
+        url = f"{self.base_url}/health"
+        logger.debug(f"Health check: {url}")
+
         try:
+            # Pre-connection DNS/network check
+            await self._diagnose_connection()
+
             session = await self._get_session()
-            async with session.get(f"{self.base_url}/health") as resp:
+            async with session.get(url) as resp:
+                logger.debug(f"Health check response: {resp.status}")
+
                 if resp.status == 200:
                     self._connected = True
+                    logger.info(f"Server connection successful: {self.base_url}")
                     return True
-                return False
-        except Exception as e:
-            logger.debug(f"Health check failed: {e}")
+                else:
+                    logger.warning(f"Health check failed with status {resp.status}")
+                    return False
+
+        except aiohttp.ClientSSLError as e:
+            logger.error(f"SSL/TLS error connecting to {self.base_url}")
+            logger.error(f"SSL error details: {type(e).__name__}: {e}")
+            if self.use_https:
+                logger.error("HTTPS connection failed. Check:")
+                logger.error("  1. Server certificate is valid for this hostname")
+                logger.error("  2. Tailscale HTTPS is properly configured")
+                logger.error("  3. Certificate files are readable")
             self._connected = False
             return False
+
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"Connection error to {self.base_url}")
+            logger.error(f"Connector error: {type(e).__name__}: {e}")
+            logger.error("Possible causes:")
+            logger.error("  1. Server is not running")
+            logger.error("  2. Wrong host/port combination")
+            logger.error("  3. Firewall blocking connection")
+            logger.error("  4. Tailscale network issue")
+            self._connected = False
+            return False
+
+        except TimeoutError:
+            logger.error(f"Connection timeout to {self.base_url}")
+            logger.error(f"Timeout after {self.timeout} seconds")
+            self._connected = False
+            return False
+
+        except Exception as e:
+            logger.error(f"Health check failed: {type(e).__name__}: {e}")
+            logger.debug("Full traceback:", exc_info=True)
+            self._connected = False
+            return False
+
+    async def _diagnose_connection(self) -> None:
+        """Perform pre-connection diagnostics for troubleshooting."""
+        try:
+            # DNS resolution check
+            logger.debug(f"Resolving hostname: {self.host}")
+            try:
+                addr_info = socket.getaddrinfo(
+                    self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM
+                )
+                for _, _, _, _, sockaddr in addr_info:
+                    logger.debug(f"  Resolved to: {sockaddr[0]}:{sockaddr[1]}")
+            except socket.gaierror as e:
+                logger.error(f"DNS resolution failed for {self.host}: {e}")
+                logger.error("Check: 1. Hostname is correct, 2. DNS/Tailscale is working")
+
+            # SSL certificate check (only for HTTPS)
+            if self.use_https:
+                logger.debug(f"HTTPS mode - will verify SSL certificate for {self.host}")
+
+        except Exception as e:
+            logger.debug(f"Connection diagnostics failed: {e}")
 
     async def get_status(self) -> dict[str, Any]:
         """Get server status."""
@@ -262,14 +356,21 @@ class APIClient:
             on_progress("Transcribing...")
 
         try:
+            logger.debug(
+                f"Sending transcription request to {self.base_url}/api/transcribe/audio"
+            )
+
             async with session.post(
                 f"{self.base_url}/api/transcribe/audio",
                 data=data,
                 headers=headers,
                 timeout=timeout,
             ) as resp:
+                logger.debug(f"Transcription response status: {resp.status}")
+
                 if resp.status != 200:
                     error = await resp.text()
+                    logger.error(f"Transcription failed (HTTP {resp.status}): {error}")
                     raise RuntimeError(f"Transcription failed: {error}")
 
                 result = await resp.json()
@@ -279,8 +380,17 @@ class APIClient:
 
                 return result
 
+        except aiohttp.ClientSSLError as e:
+            logger.error(f"SSL error during transcription: {e}")
+            raise RuntimeError(f"SSL/TLS error: {e}") from e
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"Connection error during transcription: {e}")
+            raise RuntimeError(f"Connection error: {e}") from e
+        except TimeoutError as e:
+            logger.error(f"Transcription timeout after {self.transcription_timeout}s")
+            raise RuntimeError("Request timeout") from e
         except aiohttp.ClientError as e:
-            logger.error(f"Transcription request failed: {e}")
+            logger.error(f"Transcription request failed: {type(e).__name__}: {e}")
             raise RuntimeError(f"Network error: {e}") from e
 
     async def preload_model(self) -> bool:

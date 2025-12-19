@@ -31,19 +31,25 @@ else
     APPIMAGETOOL="appimagetool"
 fi
 
-# Build with PyInstaller first
+# Ensure build dependencies are installed
+echo "→ Syncing build dependencies..."
+cd "$SCRIPT_DIR"
+if [[ ! -d ".venv" ]]; then
+    echo "Creating build virtual environment..."
+    uv venv
+fi
+uv sync
+
+# Build with PyInstaller
 echo "→ Building with PyInstaller..."
 cd "$PROJECT_ROOT"
 
-# Activate venv if exists
-if [[ -f "client/.venv/bin/activate" ]]; then
-    source "client/.venv/bin/activate"
-fi
+# Use PyInstaller from build venv
+PYINSTALLER="$SCRIPT_DIR/.venv/bin/pyinstaller"
 
-pyinstaller --clean --distpath "$BUILD_DIR/AppDir/usr/bin" \
+"$PYINSTALLER" --clean --distpath "$BUILD_DIR/AppDir/usr/bin" \
     --workpath "$BUILD_DIR/work" \
-    --specpath "$BUILD_DIR" \
-    client/build/pyinstaller-kde.spec
+    client/src/client/build/pyinstaller-kde.spec
 
 # Create .desktop file
 cat > "$BUILD_DIR/AppDir/transcriptionsuite-kde.desktop" << EOF

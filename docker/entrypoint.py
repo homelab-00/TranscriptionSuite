@@ -48,13 +48,17 @@ def setup_directories() -> Path:
     return data_dir
 
 
-def print_banner(data_dir: Path, port: int) -> None:
+def print_banner(data_dir: Path, port: int, tls_enabled: bool = False) -> None:
     """Print startup banner."""
+    scheme = "https" if tls_enabled else "http"
+    actual_port = 8443 if tls_enabled else port
+
     print("=" * 60)
     print("TranscriptionSuite Unified Server")
     print("=" * 60)
     print(f"Data directory: {data_dir}")
-    print(f"Server URL:     http://0.0.0.0:{port}")
+    print(f"Server URL:     {scheme}://0.0.0.0:{actual_port}")
+    print(f"TLS:            {'Enabled' if tls_enabled else 'Disabled'}")
     print("")
     print("Endpoints:")
     print("  - Health:      /health")
@@ -106,8 +110,13 @@ def main() -> None:
     port = int(os.environ.get("SERVER_PORT", "8000"))
     log_level = os.environ.get("LOG_LEVEL", "info").lower()
 
+    # TLS configuration
+    tls_enabled = os.environ.get("TLS_ENABLED", "false").lower() == "true"
+    tls_cert = os.environ.get("TLS_CERT_FILE", "/data/certs/my-machine.crt")
+    tls_key = os.environ.get("TLS_KEY_FILE", "/data/certs/my-machine.key")
+
     # Print banner
-    print_banner(data_dir, port)
+    print_banner(data_dir, port, tls_enabled)
 
     # Initialize database
     from server.database.database import init_db, set_data_directory
@@ -115,15 +124,36 @@ def main() -> None:
     set_data_directory(data_dir)
     init_db()
 
+    # Prepare uvicorn config
+    uvicorn_config = {
+        "app": "server.api.main:app",
+        "host": host,
+        "log_level": log_level,
+        "access_log": True,
+        "reload": False,
+    }
+
+    # Enable TLS if configured
+    if tls_enabled:
+        if not Path(tls_cert).exists():
+            print(f"ERROR: TLS_ENABLED=true but cert not found: {tls_cert}")
+            print("Mount your certificate with TLS_CERT_PATH environment variable")
+            sys.exit(1)
+        if not Path(tls_key).exists():
+            print(f"ERROR: TLS_ENABLED=true but key not found: {tls_key}")
+            print("Mount your key with TLS_KEY_PATH environment variable")
+            sys.exit(1)
+
+        uvicorn_config["port"] = 8443
+        uvicorn_config["ssl_certfile"] = tls_cert
+        uvicorn_config["ssl_keyfile"] = tls_key
+        print(f"TLS enabled - listening on https://{host}:8443")
+    else:
+        uvicorn_config["port"] = port
+        print(f"TLS disabled - listening on http://{host}:{port}")
+
     # Run uvicorn
-    uvicorn.run(
-        "server.api.main:app",
-        host=host,
-        port=port,
-        log_level=log_level,
-        access_log=True,
-        reload=False,
-    )
+    uvicorn.run(**uvicorn_config)
 
 
 if __name__ == "__main__":

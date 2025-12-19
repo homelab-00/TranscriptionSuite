@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "transcription-suite-client"
 version = "2.0.0"
 description = "TranscriptionSuite native client for desktop integration"
-readme = "../README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
@@ -24,29 +23,29 @@ classifiers = [
 ]
 
 dependencies = [
-    "aiohttp>=3.9.0",
-    "numpy>=1.24.0",
-    "pyyaml>=6.0",
+    "aiohttp>=3.13.2",
+    "numpy>=2.3.5",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
 qt = [
-    "PyQt6>=6.5.0",
+    "PyQt6>=6.10.1",
 ]
 audio = [
-    "pyaudio>=0.2.13",
+    "pyaudio>=0.2.14",
 ]
 kde = [
-    "PyQt6>=6.5.0",
-    "pyaudio>=0.2.13",
+    "PyQt6>=6.10.1",
+    "pyaudio>=0.2.14",
 ]
 gnome = [
-    "pyaudio>=0.2.13",
+    "pyaudio>=0.2.14",
     # Note: GTK and AppIndicator are system packages on Linux
 ]
 windows = [
-    "PyQt6>=6.5.0",
-    "pyaudio>=0.2.13",
+    "PyQt6>=6.10.1",
+    "pyaudio>=0.2.14",
 ]
 dev = [
     "pytest>=7.0.0",
