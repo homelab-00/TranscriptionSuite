@@ -13,12 +13,19 @@
 # Remote/Tailscale with HTTPS:
 #   1. Generate certs: tailscale cert your-machine.tailnet-name.ts.net
 #   2. Move and rename to standard location:
-#      Linux:   ~/.config/.tailscale/my-machine.crt, my-machine.key
+#      Linux:   ~/.config/Tailscale/my-machine.crt, my-machine.key
 #      Windows: Documents\Tailscale\my-machine.crt, my-machine.key
+#      macOS:   ~/Library/Application Support/Tailscale/my-machine.crt, my-machine.key
 #   3. Set env vars and start:
 #      TLS_ENABLED=true \
-#      TLS_CERT_PATH=~/.config/.tailscale/my-machine.crt \
-#      TLS_KEY_PATH=~/.config/.tailscale/my-machine.key \
+#      TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
+#      TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
+#   Windows example:
+#      TLS_CERT_PATH="C:\Users\YourUser\Documents\Tailscale\my-machine.crt" \
+#      TLS_KEY_PATH="C:\Users\YourUser\Documents\Tailscale\my-machine.key" \
+#   macOS example:
+#      TLS_CERT_PATH=~/Library/Application\ Support/Tailscale/my-machine.crt \
+#      TLS_KEY_PATH=~/Library/Application\ Support/Tailscale/my-machine.key \
 #      docker compose up -d
 #
 # Switch modes at runtime (no rebuild/recreate needed):
@@ -33,8 +40,6 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      args:
-        INSTALL_DIARIZATION: "true"
     image: transcriptionsuite/server:latest
     container_name: transcription-suite
     
@@ -65,15 +70,15 @@ services:
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
       # TLS settings for remote access (optional)
       - TLS_ENABLED=${TLS_ENABLED:-false}
-      - TLS_CERT_FILE=/data/certs/server.crt
-      - TLS_KEY_FILE=/data/certs/server.key
+      - TLS_CERT_FILE=/data/certs/my-machine.crt
+      - TLS_KEY_FILE=/data/certs/my-machine.key
     
     # Volume mounts for persistent data
     volumes:
       - transcription-data:/data  # Database, audio files, config, logs
       # TLS certificates (mounted when TLS_CERT_PATH/TLS_KEY_PATH are set)
-      - ${TLS_CERT_PATH:-/dev/null}:/data/certs/server.crt:ro
-      - ${TLS_KEY_PATH:-/dev/null}:/data/certs/server.key:ro
+      - ${TLS_CERT_PATH:-/dev/null}:/data/certs/my-machine.crt:ro
+      - ${TLS_KEY_PATH:-/dev/null}:/data/certs/my-machine.key:ro
     
     # Allow access to host LM Studio
     extra_hosts:
@@ -82,9 +87,9 @@ services:
     # Restart policy
     restart: unless-stopped
     
-    # Health check
+    # Health check - works with both HTTP and HTTPS modes
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "sh", "-c", "if [ \"$${TLS_ENABLED:-false}\" = \"true\" ]; then curl -f -k https://localhost:8443/health; else curl -f http://localhost:8000/health; fi"]
       interval: 30s
       timeout: 10s
       retries: 3

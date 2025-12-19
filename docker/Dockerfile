@@ -1,11 +1,8 @@
 # TranscriptionSuite Unified Server Dockerfile
 # Multi-stage build for optimized image size
 #
-# Build (with diarization, default):
+# Build:
 #   docker build -t transcriptionsuite/server -f docker/Dockerfile .
-#
-# Build (without diarization, ~6GB smaller):
-#   docker build --build-arg INSTALL_DIARIZATION=false -t transcriptionsuite/server -f docker/Dockerfile .
 #
 # Run:
 #   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 transcriptionsuite/server
@@ -20,7 +17,7 @@ WORKDIR /build
 # Build Audio Notebook frontend
 COPY native_src/AUDIO_NOTEBOOK/package*.json ./audio_notebook/
 WORKDIR /build/audio_notebook
-RUN npm ci --omit=dev
+RUN npm ci
 
 COPY native_src/AUDIO_NOTEBOOK/ ./
 RUN npm run build
@@ -29,7 +26,7 @@ RUN npm run build
 WORKDIR /build
 COPY native_src/REMOTE_SERVER/frontend/package*.json ./remote_server/
 WORKDIR /build/remote_server
-RUN npm ci --omit=dev
+RUN npm ci
 
 COPY native_src/REMOTE_SERVER/frontend/ ./
 RUN npm run build
@@ -37,12 +34,9 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Python Runtime
 # =============================================================================
-# Using base image instead of cudnn-runtime saves ~1.7GB
-# PyTorch packages bundle their own CUDA/cuDNN libraries
-FROM nvidia/cuda:12.6.0-base-ubuntu22.04 AS runtime
-
-# Build argument for optional diarization (adds ~6GB for PyAnnote + dependencies)
-ARG INSTALL_DIARIZATION=true
+# CTranslate2 (used by faster-whisper) requires system cuDNN libraries
+# The cudnn-runtime image adds ~1.7GB but is necessary for GPU transcription
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 AS runtime
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -82,11 +76,7 @@ COPY README.md ./
 COPY native_src/REMOTE_SERVER/backend/pyproject.toml ./server/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd server && \
-    if [ "$INSTALL_DIARIZATION" = "true" ]; then \
-        uv sync --extra diarization; \
-    else \
-        uv sync; \
-    fi
+    uv sync
 
 # Copy server application code
 COPY native_src/REMOTE_SERVER/backend/ ./server/

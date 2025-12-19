@@ -157,18 +157,18 @@ class PlatformManager:
         # Follow XDG Base Directory Specification
         xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
         if xdg_config_home:
-            config_dir = Path(xdg_config_home) / "transcriptionsuite"
+            config_dir = Path(xdg_config_home) / "TranscriptionSuite"
         else:
-            config_dir = Path.home() / ".config" / "transcriptionsuite"
+            config_dir = Path.home() / ".config" / "TranscriptionSuite"
         return config_dir
 
     def get_cache_dir(self) -> Path:
         """Get the appropriate cache directory for Linux (XDG spec)."""
         xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
         if xdg_cache_home:
-            cache_dir = Path(xdg_cache_home) / "transcriptionsuite"
+            cache_dir = Path(xdg_cache_home) / "TranscriptionSuite"
         else:
-            cache_dir = Path.home() / ".cache" / "transcriptionsuite"
+            cache_dir = Path.home() / ".cache" / "TranscriptionSuite"
         return cache_dir
 
     def get_temp_dir(self) -> Path:
@@ -183,7 +183,7 @@ class PlatformManager:
             # Fallback for empty or relative paths
             temp_dir_str = "/tmp"
 
-        app_temp_dir = Path(temp_dir_str) / "transcriptionsuite"
+        app_temp_dir = Path(temp_dir_str) / "TranscriptionSuite"
         app_temp_dir.mkdir(parents=True, exist_ok=True)  # Proactively create it
         return app_temp_dir
 

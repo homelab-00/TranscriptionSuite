@@ -3,21 +3,23 @@ name = "transcriptionsuite-dev"
 version = "2.0.0"
 description = "TranscriptionSuite - Development Tools Only"
 requires-python = ">=3.11"
-# No runtime dependencies - app runs in Docker, client builds via PyInstaller
-dependencies = []
 
-[project.optional-dependencies]
-# Development and build tools
-dev = [
+dependencies = [
     # Code quality
-    "ruff>=0.1.0",
-    "pyright>=1.1.350",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
+    "ruff>=0.14.10",
+    "pyright>=1.1.407",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
     # Build/packaging
-    "pyinstaller>=6.0.0",
-    "build>=1.0.0",
-    "hatchling>=1.18.0",
+    "pyinstaller>=6.17.0",
+    "build>=1.3.0",
+    "hatchling>=1.28.0",
+    # Client dependencies for AppImage builds
+    "PyQt6>=6.6.0",
+    "pyaudio>=0.2.13",
+    "aiohttp>=3.9.0",
+    "pyyaml>=6.0",
+    "numpy>=1.26.0",
 ]
 
 [tool.ruff]

@@ -36,6 +36,7 @@ dependencies = [
     "ctranslate2>=4.0.0",
     "torch>=2.0.0",
     "torchaudio>=2.0.0",  # Required by Silero VAD
+    "pyannote.audio>=3.1.0",  # Speaker diarization
     
     # Audio Processing
     "numpy>=1.24.0",
@@ -55,9 +56,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-diarization = [
-    "pyannote.audio>=3.1.0",
-]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

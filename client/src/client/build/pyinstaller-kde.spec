@@ -11,19 +11,19 @@ Output: dist/TranscriptionSuite-KDE (Linux) or dist/TranscriptionSuite-KDE.exe (
 import sys
 from pathlib import Path
 
-# Project root
-project_root = Path(SPECPATH).parent.parent.parent
-client_dir = project_root / "client"
+# Resolve repo root dynamically (look for README.md)
+spec_path = Path(SPECPATH).resolve()
+repo_root = next(p for p in spec_path.parents if (p / "README.md").exists())
+client_dir = repo_root / "client" / "src" / "client"
 
 block_cipher = None
 
 a = Analysis(
     [str(client_dir / "__main__.py")],
-    pathex=[str(project_root)],
+    pathex=[str(repo_root / "client" / "src")],
     binaries=[],
     datas=[
-        # Include any data files needed
-        (str(project_root / "config" / "client.yaml.example"), "config"),
+        # No config file needed - client creates default config at runtime
     ],
     hiddenimports=[
         "client.common",
@@ -75,7 +75,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window
+    console=True,  # Enable console for debugging startup issues
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

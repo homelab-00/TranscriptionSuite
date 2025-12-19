@@ -10,7 +10,13 @@ __pycache__/
 .windsurf/
 .vscode/
 
-# AUDIO_NOTEBOOK web app (frontend only)
+# Internal build outputs
+dist/
+build/appimage-kde/
+build/appimage-gnome/
+build/appimage-windows/
+
+# AUDIO_NOTEBOOK web app
 # Node.js / npm dependencies and build outputs
 native_src/AUDIO_NOTEBOOK/node_modules/
 native_src/AUDIO_NOTEBOOK/dist/
@@ -21,5 +27,3 @@ native_src/AUDIO_NOTEBOOK/build/
 native_src/REMOTE_SERVER/frontend/node_modules/
 native_src/REMOTE_SERVER/frontend/dist/
 native_src/REMOTE_SERVER/frontend/build/
-# Server files (user data, should not be synced)
-native_src/REMOTE_SERVER/data/
