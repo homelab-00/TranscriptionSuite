@@ -64,8 +64,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-# Import viewer storage functions from the backend database module
-from AUDIO_NOTEBOOK.backend.database import (
+# Import viewer storage functions from the unified backend database module
+from REMOTE_SERVER.backend.database.database import (
     get_word_timestamps_from_audio,
     save_longform_recording,
 )
@@ -1047,34 +1047,29 @@ class STTOrchestrator:
                 safe_print(f"FastAPI or uvicorn not installed: {e}", "error")
                 return
 
-            # Import the AUDIO_NOTEBOOK/backend modules
+            # Import the REMOTE_SERVER/backend modules (unified backend)
             import sys
 
             backend_path = os.path.join(
-                self.script_dir, "..", "AUDIO_NOTEBOOK", "backend"
+                self.script_dir, "..", "REMOTE_SERVER", "backend"
             )
             if backend_path not in sys.path:
                 sys.path.insert(0, backend_path)
 
             try:
-                from database import init_db  # type: ignore[import-not-found]
-                from routers import (  # type: ignore[import-not-found]
-                    llm,
-                    recordings,
+                from database.database import init_db  # type: ignore[import-not-found]
+                from api.routes import (  # type: ignore[import-not-found]
+                    notebook as recordings,
                     search,
-                    transcribe,
+                    llm,
                 )
-                from webapp_logging import (
-                    setup_webapp_logging,  # type: ignore[import-not-found]
-                )
+                from logging import getLogger
+                webapp_logger = getLogger("transcription_suite.webapp")
             except ImportError as e:
                 safe_print(
-                    f"Failed to import AUDIO_NOTEBOOK/backend modules: {e}", "error"
+                    f"Failed to import REMOTE_SERVER/backend modules: {e}", "error"
                 )
                 return
-
-            # Initialize webapp logging (creates webapp.log in project root, wiped on each start)
-            webapp_logger = setup_webapp_logging()
 
             # Initialize database
             webapp_logger.info("Initializing database...")
@@ -1101,14 +1096,11 @@ class STTOrchestrator:
                 allow_headers=["*"],
             )
 
-            # Include routers from AUDIO_NOTEBOOK/backend
+            # Include routers from REMOTE_SERVER/backend
             app.include_router(
-                recordings.router, prefix="/api/recordings", tags=["recordings"]
+                recordings.router, prefix="/api/notebook", tags=["notebook"]
             )
             app.include_router(search.router, prefix="/api/search", tags=["search"])
-            app.include_router(
-                transcribe.router, prefix="/api/transcribe", tags=["transcribe"]
-            )
             app.include_router(llm.router, prefix="/api/llm", tags=["llm"])
 
             # Transcription API endpoint (uses loaded model)

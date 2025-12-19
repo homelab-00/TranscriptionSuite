@@ -10,9 +10,7 @@ __pycache__/
 .windsurf/
 .vscode/
 
-# AUDIO_NOTEBOOK web app
-# Database files (user data, should not be synced)
-native_src/AUDIO_NOTEBOOK/backend/data/
+# AUDIO_NOTEBOOK web app (frontend only)
 # Node.js / npm dependencies and build outputs
 native_src/AUDIO_NOTEBOOK/node_modules/
 native_src/AUDIO_NOTEBOOK/dist/

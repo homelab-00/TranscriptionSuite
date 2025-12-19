@@ -1,20 +1,26 @@
 # TranscriptionSuite Docker Compose Configuration
-# Local deployment with GPU support
+# Unified local + remote deployment with GPU support
 #
-# Build with diarization (default, ~19GB):
+# Build:
 #   docker compose build
-#
-# Build without diarization (~13GB):
-#   docker compose build --build-arg INSTALL_DIARIZATION=false
-#
-# Build both image variants:
-#   docker compose -f docker-compose.yml -f docker-compose.nodiarization.yml build
 #
 # First run (interactive setup):
 #   docker compose run --rm transcription-suite --setup
 #
-# Normal run:
+# Normal run (local):
 #   docker compose up -d
+#
+# Remote/Tailscale with HTTPS:
+#   1. Generate certs: tailscale cert your-machine.tailnet-name.ts.net
+#   2. Set env vars and start:
+#      TLS_ENABLED=true \
+#      TLS_CERT_PATH=/path/to/cert.crt \
+#      TLS_KEY_PATH=/path/to/cert.key \
+#      docker compose up -d
+#
+# Switch modes at runtime (no rebuild/recreate needed):
+#   - Local:  set TLS_ENABLED=false (or unset), restart container
+#   - Remote: set TLS_ENABLED=true + cert paths, restart container
 #
 # Or provide config via environment:
 #   ADMIN_TOKEN=xxx HUGGINGFACE_TOKEN=xxx docker compose up -d
@@ -40,7 +46,8 @@ services:
     
     # Port mappings
     ports:
-      - "8000:8000"  # Unified API
+      - "8000:8000"  # HTTP API
+      - "8443:8443"  # HTTPS (when TLS_ENABLED=true)
     
     # Environment variables
     # Required on first run (or use --setup for interactive wizard)
@@ -53,10 +60,17 @@ services:
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
       - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
+      # TLS settings for remote access (optional)
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - TLS_CERT_FILE=/data/certs/server.crt
+      - TLS_KEY_FILE=/data/certs/server.key
     
     # Volume mounts for persistent data
     volumes:
       - transcription-data:/data  # Database, audio files, config, logs
+      # TLS certificates (mounted when TLS_CERT_PATH/TLS_KEY_PATH are set)
+      - ${TLS_CERT_PATH:-/dev/null}:/data/certs/server.crt:ro
+      - ${TLS_KEY_PATH:-/dev/null}:/data/certs/server.key:ro
     
     # Allow access to host LM Studio
     extra_hosts:

@@ -62,7 +62,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --install-dir /usr/local/bin
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
 
 # Create non-root user for security
 RUN useradd -m -u 1000 -s /bin/bash appuser
@@ -83,9 +83,9 @@ COPY native_src/REMOTE_SERVER/backend/pyproject.toml ./server/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd server && \
     if [ "$INSTALL_DIARIZATION" = "true" ]; then \
-        uv sync --frozen=false --extra diarization; \
+        uv sync --extra diarization; \
     else \
-        uv sync --frozen=false; \
+        uv sync; \
     fi
 
 # Copy server application code
