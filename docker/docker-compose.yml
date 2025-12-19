@@ -12,10 +12,13 @@
 #
 # Remote/Tailscale with HTTPS:
 #   1. Generate certs: tailscale cert your-machine.tailnet-name.ts.net
-#   2. Set env vars and start:
+#   2. Move and rename to standard location:
+#      Linux:   ~/.config/.tailscale/my-machine.crt, my-machine.key
+#      Windows: Documents\Tailscale\my-machine.crt, my-machine.key
+#   3. Set env vars and start:
 #      TLS_ENABLED=true \
-#      TLS_CERT_PATH=/path/to/cert.crt \
-#      TLS_KEY_PATH=/path/to/cert.key \
+#      TLS_CERT_PATH=~/.config/.tailscale/my-machine.crt \
+#      TLS_KEY_PATH=~/.config/.tailscale/my-machine.key \
 #      docker compose up -d
 #
 # Switch modes at runtime (no rebuild/recreate needed):

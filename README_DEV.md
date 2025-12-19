@@ -252,32 +252,91 @@ The unified compose file supports both local and remote (Tailscale/HTTPS) deploy
 docker compose up -d
 ```
 
-**Remote mode with HTTPS:**
+**Remote mode with HTTPS (Tailscale):**
+
+##### Step 1: Set up Tailscale (one-time)
+
+1. Install Tailscale on your host machine: [tailscale.com/download](https://tailscale.com/download)
+2. Authenticate: `sudo tailscale up`
+   Tailscale will open a browser window to authenticate. Follow the instructions.
+   Verify with `tailscale status` - you should see your machine's Tailscale IP address, device name, username, OS and activity status (e.g. `100.78.16.89 desktop github-account@ linux -`).
+3. Go to [https://login.tailscale.com/admin](https://login.tailscale.com/admin) and log in with the same account you used to authenticate Tailscale.
+4. Look for the 'DNS' tab at the top and switch to it. Note the Tailnet DNS name at the top. You can change it to something more memorable but only once. Let's call it `tail1234.ts.net`.
+5. Go all the way to the bottom of the 'DNS' tab and enable 'HTTPS Certificates'. 
+
+##### Step 2: Generate and store certificates
+
+Generate a certificate for your machine:
 
 ```bash
-# Generate Tailscale certificate (creates files in current directory)
-cd ~/certs  # or any directory you want to store certs
-tailscale cert your-machine.tailnet-name.ts.net
-# This creates:
-#   your-machine.tailnet-name.ts.net.crt
-#   your-machine.tailnet-name.ts.net.key
+tailscale cert <YOUR_DEVICE_NAME>.<YOUR_TAILNET_DNS_NAME>
+```
 
-# Start with TLS enabled (provide absolute paths to the cert files)
+So continuing with the example this would be:
+```bash
+tailscale cert desktop.tail1234.ts.net
+```
+
+This creates two files in the current directory:
+- `desktop.tail1234.ts.net.crt`
+- `desktop.tail1234.ts.net.key`
+
+**Move and rename** these files to a standard location:
+
+| Platform | Certificate directory | Files |
+|----------|----------------------|-------|
+| **Linux** | `~/.config/.tailscale/` | `my-machine.crt`, `my-machine.key` |
+| **Windows** | `Documents\Tailscale\` | `my-machine.crt`, `my-machine.key` |
+
+**Linux example:**
+
+```bash
+mkdir -p ~/.config/.tailscale
+mv desktop.tail1234.ts.net.crt ~/.config/.tailscale/my-machine.crt
+mv desktop.tail1234.ts.net.key ~/.config/.tailscale/my-machine.key
+chmod 600 ~/.config/.tailscale/my-machine.key
+```
+
+**Windows example (PowerShell):**
+
+```powershell
+mkdir "$env:USERPROFILE\Documents\Tailscale" -Force
+mv desktop.tail1234.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
+mv desktop.tail1234.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
+```
+
+> **Note:** Renaming the certificate files doesn't affect their validity—the certificate content is what matters, not the filename.
+
+##### Step 3: Start with TLS enabled
+
+**Linux:**
+
+```bash
 cd /path/to/TranscriptionSuite/docker
 TLS_ENABLED=true \
-TLS_CERT_PATH=~/certs/your-machine.tailnet-name.ts.net.crt \
-TLS_KEY_PATH=~/certs/your-machine.tailnet-name.ts.net.key \
+TLS_CERT_PATH=~/.config/.tailscale/my-machine.crt \
+TLS_KEY_PATH=~/.config/.tailscale/my-machine.key \
+docker compose up -d
+```
+
+**Windows (PowerShell):**
+
+```powershell
+cd C:\path\to\TranscriptionSuite\docker
+$env:TLS_ENABLED="true"
+$env:TLS_CERT_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
+$env:TLS_KEY_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.key"
 docker compose up -d
 ```
 
 **Switching modes at runtime:**
 
 ```bash
-# Switch to remote mode
+# Switch to remote mode (Linux)
 docker compose stop
 TLS_ENABLED=true \
-TLS_CERT_PATH=~/certs/your-machine.tailnet-name.ts.net.crt \
-TLS_KEY_PATH=~/certs/your-machine.tailnet-name.ts.net.key \
+TLS_CERT_PATH=~/.config/.tailscale/my-machine.crt \
+TLS_KEY_PATH=~/.config/.tailscale/my-machine.key \
 docker compose start
 
 # Switch back to local mode
