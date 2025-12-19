@@ -163,27 +163,67 @@ clipboard:
 
 ---
 
-## Remote Access
+## Remote Access (Tailscale + HTTPS)
 
-Access the server from other devices using Tailscale with HTTPS:
+Access the server securely from other devices on your Tailscale network.
+
+### 1. Set up Tailscale
+
+1. Install Tailscale on your host: [tailscale.com/download](https://tailscale.com/download)
+2. Authenticate: `tailscale up`
+3. Note your Tailscale hostname (e.g., `my-desktop.tail1234.ts.net`)
+
+### 2. Generate and store certificates
 
 ```bash
-# Generate Tailscale certificate (creates files in current directory)
-cd ~/certs  # or any directory you want to store certs
 tailscale cert your-machine.tailnet-name.ts.net
-# This creates:
-#   your-machine.tailnet-name.ts.net.crt
-#   your-machine.tailnet-name.ts.net.key
+```
 
-# Start with TLS enabled
-cd /path/to/TranscriptionSuite/docker
+Move and rename the generated files to a standard location:
+
+| Platform | Directory | Files |
+|----------|-----------|-------|
+| **Linux** | `~/.config/.tailscale/` | `my-machine.crt`, `my-machine.key` |
+| **Windows** | `Documents\Tailscale\` | `my-machine.crt`, `my-machine.key` |
+
+**Linux:**
+
+```bash
+mkdir -p ~/.config/.tailscale
+mv your-machine.tailnet-name.ts.net.crt ~/.config/.tailscale/my-machine.crt
+mv your-machine.tailnet-name.ts.net.key ~/.config/.tailscale/my-machine.key
+chmod 600 ~/.config/.tailscale/my-machine.key
+```
+
+**Windows (PowerShell):**
+
+```powershell
+mkdir "$env:USERPROFILE\Documents\Tailscale" -Force
+mv your-machine.tailnet-name.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
+mv your-machine.tailnet-name.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
+```
+
+### 3. Start with TLS enabled
+
+**Linux:**
+
+```bash
 TLS_ENABLED=true \
-TLS_CERT_PATH=~/certs/your-machine.tailnet-name.ts.net.crt \
-TLS_KEY_PATH=~/certs/your-machine.tailnet-name.ts.net.key \
+TLS_CERT_PATH=~/.config/.tailscale/my-machine.crt \
+TLS_KEY_PATH=~/.config/.tailscale/my-machine.key \
 docker compose up -d
 ```
 
-Switch back to local mode anytime:
+**Windows (PowerShell):**
+
+```powershell
+$env:TLS_ENABLED="true"
+$env:TLS_CERT_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
+$env:TLS_KEY_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.key"
+docker compose up -d
+```
+
+### Switch back to local mode
 
 ```bash
 docker compose stop
