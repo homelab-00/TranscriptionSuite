@@ -165,24 +165,29 @@ clipboard:
 
 ## Remote Access
 
-Access the server from other devices using Tailscale:
+Access the server from other devices using Tailscale with HTTPS:
 
 ```bash
-cd docker
-docker compose -f docker-compose.remote.yml up -d
+# Generate Tailscale certificate (creates files in current directory)
+cd ~/certs  # or any directory you want to store certs
+tailscale cert your-machine.tailnet-name.ts.net
+# This creates:
+#   your-machine.tailnet-name.ts.net.crt
+#   your-machine.tailnet-name.ts.net.key
+
+# Start with TLS enabled
+cd /path/to/TranscriptionSuite/docker
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/certs/your-machine.tailnet-name.ts.net.crt \
+TLS_KEY_PATH=~/certs/your-machine.tailnet-name.ts.net.key \
+docker compose up -d
 ```
 
-For HTTPS with Tailscale certificates:
+Switch back to local mode anytime:
 
 ```bash
-# Generate Tailscale certificate
-tailscale cert your-machine.tailnet-name.ts.net
-
-# Configure and start
-export TLS_CERT_PATH=/path/to/cert.crt
-export TLS_KEY_PATH=/path/to/cert.key
-export TLS_ENABLED=true
-docker compose -f docker-compose.remote.yml up -d
+docker compose stop
+docker compose start  # TLS disabled by default
 ```
 
 ---

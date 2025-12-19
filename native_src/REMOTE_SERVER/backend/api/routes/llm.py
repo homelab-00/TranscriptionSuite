@@ -17,11 +17,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Use webapp logging
-from AUDIO_NOTEBOOK.backend.webapp_logging import get_llm_logger
+# Use standard logging
+import logging
 
 router = APIRouter()
-logger = get_llm_logger()
+logger = logging.getLogger(__name__)
 
 
 # --- Pydantic Models ---

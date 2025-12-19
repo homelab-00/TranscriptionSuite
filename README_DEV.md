@@ -2,6 +2,49 @@
 
 This document contains technical details, architecture decisions, and development notes for TranscriptionSuite.
 
+## Table of Contents
+
+- [Architecture Overview](#architecture-overview)
+  - [Design Decisions](#design-decisions)
+- [Project Structure](#project-structure)
+  - [pyproject.toml Files](#pyprojecttoml-files)
+- [API Reference](#api-reference)
+  - [Endpoints](#endpoints)
+  - [Swagger UI](#swagger-ui)
+- [Development Setup](#development-setup)
+  - [Local Python Development](#local-python-development)
+  - [Docker Development](#docker-development)
+    - [Local vs Remote Mode](#local-vs-remote-mode)
+    - [Docker Build & Runtime Notes](#docker-build--runtime-notes)
+      - [Config templates](#config-templates)
+      - [Frontend build behavior](#frontend-build-behavior)
+      - [Auditing the web frontends](#auditing-the-web-frontends)
+  - [Client Development](#client-development)
+  - [Dev & Build Tools](#dev--build-tools)
+- [Building Executables](#building-executables)
+  - [KDE AppImage](#kde-appimage)
+  - [GNOME AppImage](#gnome-appimage)
+  - [Windows Executable](#windows-executable)
+- [Data Storage](#data-storage)
+  - [Docker Volume Structure](#docker-volume-structure)
+  - [Database Schema](#database-schema)
+- [Architectural Refactoring History](#architectural-refactoring-history)
+  - [Original Architecture (Pre-Docker)](#original-architecture-pre-docker)
+  - [New Architecture (Docker-first)](#new-architecture-docker-first)
+- [Configuration Reference](#configuration-reference)
+  - [Server Configuration (Docker)](#server-configuration-docker)
+  - [Client Configuration](#client-configuration)
+  - [Native Development Configuration](#native-development-configuration)
+- [Troubleshooting](#troubleshooting)
+  - [Docker GPU Access](#docker-gpu-access)
+  - [Docker Logs](#docker-logs)
+  - [Model Loading](#model-loading)
+  - [GNOME Tray Not Showing](#gnome-tray-not-showing)
+  - [Permission Errors](#permission-errors)
+- [Dependencies](#dependencies)
+  - [Server (Docker)](#server-docker)
+  - [Client](#client)
+
 ---
 
 ## Architecture Overview
@@ -10,7 +53,7 @@ TranscriptionSuite uses a **client-server architecture**:
 
 ```txt
 ┌─────────────────────────────────────────────────────────────┐
-│                     Docker Container                         │
+│                     Docker Container                        │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  TranscriptionSuite Server                          │    │
 │  │  - FastAPI REST API                                 │    │
@@ -19,18 +62,18 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  - Audio Notebook (React frontend)                  │    │
 │  │  - SQLite + FTS5 search                             │    │
 │  └─────────────────────────────────────────────────────┘    │
-│                          ↕ HTTP/WebSocket                    │
+│                          ↕ HTTP/WebSocket                   │
 └─────────────────────────────────────────────────────────────┘
                            ↕
 ┌─────────────────────────────────────────────────────────────┐
-│                     Native Clients                           │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐               │
+│                     Native Clients                          │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐                │
 │  │ KDE Tray  │  │GNOME Tray │  │Windows Tray│               │
-│  │ (PyQt6)   │  │(GTK+AppInd)│ │ (PyQt6)   │               │
-│  └───────────┘  └───────────┘  └───────────┘               │
-│  - Microphone recording                                      │
-│  - Clipboard integration                                     │
-│  - System notifications                                      │
+│  │ (PyQt6)   │  │(GTK+AppInd)│ │ (PyQt6)   │                │
+│  └───────────┘  └───────────┘  └───────────┘                │
+│  - Microphone recording                                     │
+│  - Clipboard integration                                    │
+│  - System notifications                                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,17 +120,16 @@ TranscriptionSuite/
 │
 ├── docker/                       # Docker infrastructure
 │   ├── Dockerfile                # Multi-stage build (frontend + Python)
-│   ├── docker-compose.yml        # Local deployment
-│   ├── docker-compose.remote.yml # Remote/Tailscale deployment
+│   ├── docker-compose.yml        # Unified local + remote deployment
 │   ├── entrypoint.py             # Container entrypoint with setup wizard
 │   └── .dockerignore             # Build context exclusions
 │
 ├── native_src/                   # Python source for local development
 │   ├── MAIN/                     # Legacy: Core transcription logic
 │   ├── DIARIZATION/              # Legacy: Speaker diarization
-│   ├── AUDIO_NOTEBOOK/           # Audio Notebook frontend + backend source
-│   ├── REMOTE_SERVER/            # Remote server components
-│   │   ├── backend/              # Server code (runs in Docker)
+│   ├── AUDIO_NOTEBOOK/           # Audio Notebook frontend (React)
+│   ├── REMOTE_SERVER/            # Unified server components
+│   │   ├── backend/              # Unified backend (runs in Docker + native)
 │   │   │   ├── api/              # FastAPI application
 │   │   │   │   ├── main.py       # App factory, lifespan, static mounting
 │   │   │   │   └── routes/       # API endpoints
@@ -175,36 +217,6 @@ docker compose build
 docker compose up -d
 ```
 
-#### Image Variants
-
-Two image variants are available to balance features vs. size:
-
-| Variant | Image Tag | Size | Description |
-|---------|-----------|------|-------------|
-| **Full** | `transcriptionsuite/server:latest` | ~19GB | All features including speaker diarization |
-| **Lite** | `transcriptionsuite/server:lite` | ~13GB | Without diarization (~6GB smaller) |
-
-**Build commands:**
-
-```bash
-cd docker
-
-# Build full image with diarization (default)
-docker compose build
-
-# Build lite image without diarization
-docker compose -f docker-compose.nodiarization.yml build
-
-# Build both variants
-docker compose build && docker compose -f docker-compose.nodiarization.yml build
-```
-
-**Run the lite variant:**
-
-```bash
-docker compose -f docker-compose.nodiarization.yml up -d
-```
-
 **First-time startup**: The server takes ~30 seconds to initialize on first run (loading ML models into GPU memory). Wait before attempting client connections.
 
 On first run, if the container is started without a TTY (common with `docker compose up -d`), the server will generate the minimum required configuration automatically (including an `ADMIN_TOKEN`) and persist it in the Docker volume at `/data/config/secrets.json`.
@@ -229,6 +241,53 @@ docker compose up -d
 ```
 
 Use `docker compose stop`/`start` instead of `down`/`up` to avoid container recreation overhead—the server initialization and model loading takes significant time.
+
+#### Local vs Remote Mode
+
+The unified compose file supports both local and remote (Tailscale/HTTPS) deployment. Switch modes at runtime via environment variables—no rebuild or container recreation needed.
+
+**Local mode (default):**
+
+```bash
+docker compose up -d
+```
+
+**Remote mode with HTTPS:**
+
+```bash
+# Generate Tailscale certificate (creates files in current directory)
+cd ~/certs  # or any directory you want to store certs
+tailscale cert your-machine.tailnet-name.ts.net
+# This creates:
+#   your-machine.tailnet-name.ts.net.crt
+#   your-machine.tailnet-name.ts.net.key
+
+# Start with TLS enabled (provide absolute paths to the cert files)
+cd /path/to/TranscriptionSuite/docker
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/certs/your-machine.tailnet-name.ts.net.crt \
+TLS_KEY_PATH=~/certs/your-machine.tailnet-name.ts.net.key \
+docker compose up -d
+```
+
+**Switching modes at runtime:**
+
+```bash
+# Switch to remote mode
+docker compose stop
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/certs/your-machine.tailnet-name.ts.net.crt \
+TLS_KEY_PATH=~/certs/your-machine.tailnet-name.ts.net.key \
+docker compose start
+
+# Switch back to local mode
+docker compose stop
+docker compose start  # TLS_ENABLED defaults to false
+```
+
+**Ports:**
+- `8000` — HTTP API (always available)
+- `8443` — HTTPS (only serves when `TLS_ENABLED=true`)
 
 #### Docker Build & Runtime Notes
 
