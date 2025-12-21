@@ -41,6 +41,7 @@ class TranscriptionResponse(BaseModel):
 
 
 @router.post("/audio", response_model=TranscriptionResponse)
+@router.post("/file", response_model=TranscriptionResponse, include_in_schema=False)
 async def transcribe_audio(
     request: Request,
     file: UploadFile = File(...),
