@@ -37,6 +37,35 @@ else
     APPIMAGETOOL="appimagetool"
 fi
 
+# Install Python dependencies using uv
+echo "→ Installing Python dependencies..."
+cd "$PROJECT_ROOT/client"
+uv sync --frozen --extra gnome
+
+# Copy all site-packages from venv to AppImage, excluding binary packages
+# that must be provided by the target system (packages with compiled .so files
+# that are ABI-specific and won't work across different Python versions/systems)
+SITE_PACKAGES=$(find "$PROJECT_ROOT/client/.venv/lib" -type d -name "site-packages" | head -1)
+if [[ -d "$SITE_PACKAGES" ]]; then
+    echo "→ Copying dependencies from $SITE_PACKAGES (excluding packages with compiled extensions)"
+    for item in "$SITE_PACKAGES"/*; do
+        basename=$(basename "$item")
+        # Skip packages with compiled extensions (must be system-provided)
+        if [[ "$basename" == numpy* ]] || \
+           [[ "$basename" == aiohttp* ]] || \
+           [[ "$basename" == multidict* ]] || \
+           [[ "$basename" == yarl* ]] || \
+           [[ "$basename" == frozenlist* ]]; then
+            echo "  Skipping $basename (system package required)"
+            continue
+        fi
+        cp -r "$item" "$BUILD_DIR/AppDir/usr/lib/python3/dist-packages/"
+    done
+else
+    echo "ERROR: Could not find site-packages directory in venv"
+    exit 1
+fi
+
 # Copy client code
 echo "→ Copying client code..."
 cp -r "$PROJECT_ROOT/client" "$BUILD_DIR/AppDir/usr/lib/python3/dist-packages/"
@@ -63,8 +92,31 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-export PYTHONPATH="${APP_DIR}:${PYTHONPATH}"
-exec python3 -m client --platform gnome "$@"
+# Check for packages with compiled extensions (required, can't be bundled)
+python3 -c "import numpy" 2>/dev/null
+if [[ $? -ne 0 ]]; then
+    echo "Error: Missing numpy."
+    echo ""
+    echo "Install with:"
+    echo "  Arch Linux: sudo pacman -S python-numpy"
+    echo "  Ubuntu/Debian: sudo apt install python3-numpy"
+    echo "  Fedora: sudo dnf install python3-numpy"
+    exit 1
+fi
+
+python3 -c "import aiohttp" 2>/dev/null
+if [[ $? -ne 0 ]]; then
+    echo "Error: Missing aiohttp."
+    echo ""
+    echo "Install with:"
+    echo "  Arch Linux: sudo pacman -S python-aiohttp"
+    echo "  Ubuntu/Debian: sudo apt install python3-aiohttp"
+    echo "  Fedora: sudo dnf install python3-aiohttp"
+    exit 1
+fi
+
+export PYTHONPATH="${APP_DIR}/client/src:${PYTHONPATH}"
+exec python3 -m client "$@"
 EOF
 chmod +x "$BUILD_DIR/AppDir/usr/bin/transcriptionsuite-gnome"
 
@@ -113,6 +165,9 @@ echo ""
 echo "=================================================="
 echo "✓ AppImage created: $DIST_DIR/TranscriptionSuite-GNOME-x86_64.AppImage"
 echo ""
-echo "NOTE: This AppImage requires system GTK3 and AppIndicator3."
+echo "NOTE: This AppImage requires system packages:"
+echo "  - GTK3 and AppIndicator3 (for UI)"
+echo "  - python3-numpy (for audio processing)"
+echo "  - python3-aiohttp (for HTTP client)"
 echo "It is NOT fully standalone like the KDE version."
 echo "=================================================="

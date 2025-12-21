@@ -504,7 +504,7 @@ PyInstaller cannot reliably bundle these, and attempts usually result in broken 
 
 **Requirements:**
 - Build system: Linux with `appimagetool`
-- Target system: Python 3.11+, GTK3, libappindicator-gtk3, python-gobject
+- Target system: Python 3.11+, GTK3, libappindicator-gtk3, python-gobject, python-numpy, python-aiohttp
 
 **Build:**
 
@@ -518,13 +518,13 @@ PyInstaller cannot reliably bundle these, and attempts usually result in broken 
 
 ```bash
 # Arch Linux
-sudo pacman -S python gtk3 libappindicator-gtk3 python-gobject
+sudo pacman -S python gtk3 libappindicator-gtk3 python-gobject python-numpy python-aiohttp
 
 # Ubuntu/Debian
-sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio
+sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio python3-numpy python3-aiohttp
 
 # Fedora
-sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject
+sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy python3-aiohttp
 ```
 
 ### Windows Executable
@@ -583,9 +583,11 @@ cd build && uv sync
 - Rebuild after spec changes
 
 **GNOME AppImage fails on target system**
-- Verify GTK3 and AppIndicator3 are installed
+- Verify GTK3, AppIndicator3, numpy, and aiohttp are installed
 - Check Python version: `python3 --version` (must be 3.11+)
 - Test imports: `python3 -c "import gi; gi.require_version('Gtk', '3.0')"`
+- Test numpy: `python3 -c "import numpy"`
+- Test aiohttp: `python3 -c "import aiohttp"`
 
 ---
 
