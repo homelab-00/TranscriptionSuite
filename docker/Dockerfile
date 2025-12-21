@@ -90,14 +90,15 @@ COPY --from=frontend-builder /build/remote_server/dist ./static/remote_ui
 COPY native_src/config.yaml ./config/config.yaml.example
 
 # Create data directories with correct permissions
-RUN mkdir -p /data/database /data/audio /data/logs /data/certs /data/config && \
-    chown -R appuser:appuser /data /app
+RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /models && \
+    chown -R appuser:appuser /data /app /models
 
 # Environment variables
 ENV DATA_DIR=/data
 ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=8000
 ENV LOG_LEVEL=INFO
+ENV HF_HOME=/models
 
 # Expose port
 EXPOSE 8000

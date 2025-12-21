@@ -14,7 +14,7 @@ CUDA 12.6 acceleration. Inspired by RealtimeSTT by KoljaB.
 - **Long-form Dictation**: Real-time transcription with optional live preview
 - **File Transcription**: Transcribe audio/video files
 - **Speaker Diarization**: PyAnnote-based speaker identification
-- **Audio Notebook**: Calendar-based audio notes with full-text search, LLM chat via LM Studio
+- **Audio Notebook**: Calendar-based audio notes with full-text search, LLM chat via LM Studio integration
 - **Remote Access**: Secure access via Tailscale from anywhere
 - **Cross-Platform Clients**: Native system tray apps for KDE, GNOME, and Windows
 

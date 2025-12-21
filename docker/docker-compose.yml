@@ -4,36 +4,24 @@
 # Build:
 #   docker compose build
 #
-# First run (interactive setup):
-#   docker compose run --rm transcription-suite --setup
-#
-# Normal run (local):
+# Run (local HTTP):
 #   docker compose up -d
 #
-# Remote/Tailscale with HTTPS:
+# Run (remote HTTPS with Tailscale):
 #   1. Generate certs: tailscale cert your-machine.tailnet-name.ts.net
-#   2. Move and rename to standard location:
-#      Linux:   ~/.config/Tailscale/my-machine.crt, my-machine.key
-#      Windows: Documents\Tailscale\my-machine.crt, my-machine.key
-#      macOS:   ~/Library/Application Support/Tailscale/my-machine.crt, my-machine.key
-#   3. Set env vars and start:
+#   2. Start with env vars:
 #      TLS_ENABLED=true \
 #      TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 #      TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-#   Windows example:
-#      TLS_CERT_PATH="C:\Users\YourUser\Documents\Tailscale\my-machine.crt" \
-#      TLS_KEY_PATH="C:\Users\YourUser\Documents\Tailscale\my-machine.key" \
-#   macOS example:
-#      TLS_CERT_PATH=~/Library/Application\ Support/Tailscale/my-machine.crt \
-#      TLS_KEY_PATH=~/Library/Application\ Support/Tailscale/my-machine.key \
 #      docker compose up -d
 #
-# Switch modes at runtime (no rebuild/recreate needed):
-#   - Local:  set TLS_ENABLED=false (or unset), restart container
-#   - Remote: set TLS_ENABLED=true + cert paths, restart container
+# Switch between modes:
+#   NOTE: Use "docker compose up -d" (not "start") to apply env var changes!
+#   - Local:  docker compose up -d
+#   - Remote: TLS_ENABLED=true TLS_CERT_PATH=... TLS_KEY_PATH=... docker compose up -d
 #
-# Or provide config via environment:
-#   ADMIN_TOKEN=xxx HUGGINGFACE_TOKEN=xxx docker compose up -d
+# Optional environment variables:
+#   HUGGINGFACE_TOKEN=xxx  # For downloading diarization models
 
 services:
   transcription-suite:
@@ -58,27 +46,28 @@ services:
       - "8443:8443"  # HTTPS (when TLS_ENABLED=true)
     
     # Environment variables
-    # Required on first run (or use --setup for interactive wizard)
     environment:
       - DATA_DIR=/data
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # Optional: provide these to skip interactive setup
-      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
-      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN:-}
+      # HuggingFace token for downloading models (optional)
+      - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - HF_HOME=/models
+      # LM Studio URL for chat features
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
       # TLS settings for remote access (optional)
       - TLS_ENABLED=${TLS_ENABLED:-false}
-      - TLS_CERT_FILE=/data/certs/my-machine.crt
-      - TLS_KEY_FILE=/data/certs/my-machine.key
+      - TLS_CERT_FILE=/certs/cert.crt
+      - TLS_KEY_FILE=/certs/cert.key
     
     # Volume mounts for persistent data
     volumes:
-      - transcription-data:/data  # Database, audio files, config, logs
-      # TLS certificates (mounted when TLS_CERT_PATH/TLS_KEY_PATH are set)
-      - ${TLS_CERT_PATH:-/dev/null}:/data/certs/my-machine.crt:ro
-      - ${TLS_KEY_PATH:-/dev/null}:/data/certs/my-machine.key:ro
+      - transcription-data:/data  # Database, audio files, tokens, logs
+      - huggingface-models:/models  # Whisper and diarization models cache
+      # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
+      - ${TLS_CERT_PATH:-/dev/null}:/certs/cert.crt:ro
+      - ${TLS_KEY_PATH:-/dev/null}:/certs/cert.key:ro
     
     # Allow access to host LM Studio
     extra_hosts:
@@ -98,3 +87,5 @@ services:
 volumes:
   transcription-data:
     name: transcription-suite-data
+  huggingface-models:
+    name: transcription-suite-models

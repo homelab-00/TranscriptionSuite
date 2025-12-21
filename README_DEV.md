@@ -114,8 +114,8 @@ uv run transcription-client --host localhost --port 8000
 | **Build Docker image** | `cd docker && docker compose build` |
 | **Start server (local)** | `cd docker && docker compose up -d` |
 | **Start server (HTTPS)** | `TLS_ENABLED=true TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt TLS_KEY_PATH=~/.config/Tailscale/my-machine.key docker compose up -d` |
-| **Stop server (keep state)** | `docker compose stop` |
-| **Restart server (fast)** | `docker compose start` |
+| **Stop server** | `docker compose down` |
+| **Switch modes** | Use `docker compose up -d` with env vars (not `start`) |
 | **Rebuild after code changes** | `docker compose build && docker compose up -d` |
 | **View server logs** | `docker compose logs -f` |
 | **Run client (local)** | `cd client && uv run transcription-client --host localhost --port 8000` |
@@ -199,7 +199,7 @@ TranscriptionSuite/
 ├── docker/                       # Docker infrastructure
 │   ├── Dockerfile                # Multi-stage build (frontend + Python)
 │   ├── docker-compose.yml        # Unified local + remote deployment
-│   ├── entrypoint.py             # Container entrypoint with setup wizard
+│   ├── entrypoint.py             # Container entrypoint
 │   └── .dockerignore             # Build context exclusions
 │
 ├── native_src/                   # Python source for local development
@@ -218,7 +218,6 @@ TranscriptionSuite/
 │   │   │   │   └── audio_utils.py           # Audio processing utilities
 │   │   │   ├── database/         # SQLite + FTS5
 │   │   │   ├── logging/          # Centralized logging
-│   │   │   ├── setup_wizard.py   # First-run configuration wizard
 │   │   │   ├── config.py         # Server configuration loader
 │   │   │   └── pyproject.toml    # Server dependencies
 │   │   └── frontend/             # Remote UI frontend source (React)
@@ -239,19 +238,64 @@ The project has ***three*** `pyproject.toml` files, each serving a different pur
 
 ## API Reference
 
+### Web Frontends
+
+The server serves two web frontends:
+
+| URL Path | Frontend | Description |
+|----------|----------|-------------|
+| `/` | Audio Notebook | Personal transcription archive with calendar view and search |
+| `/ui` | Remote UI | Web client for file upload, token-based auth, admin panel |
+
+**Remote UI Features:**
+- Token-based authentication (login with admin or user token)
+- File upload transcription
+- Admin panel for token management (admin users only)
+- Works on Android browsers (no app needed)
+
+**Authentication:** On first run, an admin token is automatically generated and printed to the console logs. Save this token to login at `/ui` and access the admin panel for token management.
+
 ### Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check (no auth) |
 | `/api/status` | GET | Server status, GPU info |
+| `/api/auth/login` | POST | Authenticate with token |
+| `/api/auth/tokens` | GET/POST | Token management (admin only) |
+| `/api/auth/tokens/{id}` | DELETE | Revoke token (admin only) |
 | `/api/transcribe/audio` | POST | Transcribe uploaded audio file |
+| `/api/transcribe/file` | POST | Alias for /audio (Remote UI compatibility) |
+| `/ws` | WebSocket | Real-time audio streaming and transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET | Get recording details |
 | `/api/notebook/recordings/{id}` | DELETE | Delete recording |
 | `/api/notebook/calendar` | GET | Calendar view data |
 | `/api/search` | GET | Full-text search |
-| `/api/admin/tokens` | GET/POST | Token management (admin only) |
+| `/api/admin/status` | GET | Admin status info |
+
+### WebSocket Protocol
+
+The `/ws` endpoint supports real-time audio streaming for long-form transcription:
+
+**Connection Flow:**
+1. Client connects to WebSocket
+2. Client sends auth message: `{"type": "auth", "data": {"token": "<token>"}, "timestamp": <unix_time>}`
+3. Server responds with `{"type": "auth_ok"}` or `{"type": "auth_fail"}`
+4. Client sends start message: `{"type": "start", "data": {"language": "en"}, "timestamp": <unix_time>}`
+5. Client streams binary audio data (16kHz PCM Int16 with metadata header)
+6. Client sends stop message: `{"type": "stop", "data": {}, "timestamp": <unix_time>}`
+7. Server processes and returns: `{"type": "final", "data": {"text": "...", "words": [...], "duration": 10.5}}`
+
+**Audio Format:**
+- Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
+- Sample rate: 16kHz
+- Format: Int16 PCM (little-endian)
+- Metadata: `{"sample_rate": 16000, "timestamp_ns": <nanoseconds>, "sequence": <number>}`
+
+**Session Management:**
+- Only one active session allowed at a time
+- Server sends `{"type": "session_busy"}` if another user is active
 
 ### Swagger UI
 
@@ -341,7 +385,7 @@ docker compose up -d
 
 **First-time startup notes:**
 - Server takes ~30 seconds to load ML models into GPU memory (you can verify by monitoring your GPU VRAM usage, you'll see a jump ~3GB)
-- On first run without TTY, server auto-generates `ADMIN_TOKEN` and saves to `/data/config/secrets.json`
+- On first run, an admin token is auto-generated and printed to the console logs - **save this token!**
 - Check logs: `docker compose logs -f` (or just use `lazydocker`)
 
 #### 3.2 Run the Client
@@ -356,22 +400,18 @@ The client connects via HTTP to the local Docker server.
 #### 3.3 Managing the Server
 
 ```bash
-# Stop (preserves state, fast restart)
-docker compose stop
+# Stop server
+docker compose down
 
-# Restart (fast - no model reloading)
-docker compose start
+# Restart with same config
+docker compose up -d
 
 # Rebuild after code changes
 docker compose build
 docker compose up -d
-
-# Full recreate (only when needed)
-docker compose down
-docker compose up -d
 ```
 
-**Tip:** Use `stop`/`start` instead of `down`/`up` to avoid model reloading overhead.
+**Note:** Models are cached in a persistent volume (`transcription-suite-models`), so they don't need to be re-downloaded on container recreation. Use `docker compose up -d` to ensure environment variables and volume mounts are applied correctly.
 
 ### Step 4: Run Client Remotely (Tailscale)
 
@@ -610,7 +650,7 @@ cd build && uv sync
 
 ### Local vs Remote Mode
 
-The unified compose file supports both local and remote (Tailscale/HTTPS) deployment. Switch modes at runtime via environment variables—no rebuild or container recreation needed.
+The unified compose file supports both local and remote (Tailscale/HTTPS) deployment. Switch modes via environment variables—no rebuild needed, but container recreation is required.
 
 **Local mode (default):**
 
@@ -629,19 +669,19 @@ TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 ```
 
-**Switching modes at runtime:**
+**Switching modes:**
+
+> **Important:** Use `docker compose up -d`, NOT `docker compose start`. The `start` command only restarts a stopped container without re-reading environment variables or volume mounts. Certificate bind mounts are configured at container creation time.
 
 ```bash
-# Switch to remote mode (Linux)
-docker compose stop
+# Switch to remote mode
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-docker compose start
+docker compose up -d
 
 # Switch back to local mode
-docker compose stop
-docker compose start    # TLS_ENABLED defaults to false
+docker compose up -d    # TLS_ENABLED defaults to false
 ```
 
 **Ports:**
@@ -728,52 +768,71 @@ $env:TLS_KEY_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.key"
 docker compose up -d
 ```
 
+#### Step 4: Access the Remote Web UI
+
+From any device on your Tailscale network, open a web browser and navigate to:
+
+```
+https://desktop.tail1234.ts.net:8443/ui
+```
+
+Replace `desktop.tail1234.ts.net` with your actual Tailscale hostname (from `tailscale status`).
+
+**Login:** Use the admin token printed in the server logs on first startup, or create additional tokens via the admin panel.
+
 ### Docker Volume Structure
 
-The `transcription-suite-data` Docker volume provides persistent storage. It's mounted to `/data` inside the container:
+Two Docker volumes provide persistent storage:
+
+**1. `transcription-suite-data`** - Application data (mounted to `/data`):
 
 | Path | Description |
 |------|-------------|
 | `/data/database/` | SQLite database files for transcription records, metadata, and application state |
 | `/data/audio/` | Audio files uploaded for transcription and processed audio data |
 | `/data/logs/` | Application logs with automatic rotation |
-| `/data/certs/` | TLS certificates (bind-mounted from host, NOT persisted in volume) |
-| `/data/config/` | Runtime configuration files including `secrets.json` |
+| `/data/tokens/` | Token store for authentication (`tokens.json`) |
+
+**2. `transcription-suite-models`** - ML models cache (mounted to `/models`):
+
+| Path | Description |
+|------|-------------|
+| `/models/` | HuggingFace models cache (Whisper, pyannote diarization) |
 
 #### Volume Persistence
 
-- **Data persistence**: The volume ensures all data survives container restarts, updates, and recreation
-- **Configuration template**: `config.yaml.example` is copied from the image; actual runtime config lives in `/data/config`
-- **Primary storage**: Audio files and database are the main storage consumers
+- **Data persistence**: Both volumes ensure data survives container restarts, updates, and recreation
+- **Model cache**: Models are downloaded once and reused across rebuilds (~3GB saved per rebuild)
+- **Primary storage**: Audio files, database, and ML models are the main storage consumers
 - **Log retention**: Logs rotate automatically but remain in the volume
 
 #### Host Access
 
-The volume is accessible from the host system:
+Volumes are accessible from the host system:
 
 ```bash
 /var/lib/docker/volumes/transcription-suite-data/_data
+/var/lib/docker/volumes/transcription-suite-models/_data
 ```
 
 #### Complete Volume Structure
 
 ```
 /data/
-├── config/
-│   ├── secrets.json          # HuggingFace token, admin token, LM Studio URL
-│   └── .setup_complete       # Marker file
 ├── database/
 │   └── notebook.db           # SQLite database
 ├── audio/                    # Recorded audio files
 ├── logs/                     # Server logs
-├── certs/                    # TLS certificates (bind-mounted, NOT in volume)
-│   ├── my-machine.crt        # Only present when TLS_CERT_PATH is mounted
-│   └── my-machine.key        # Only present when TLS_KEY_PATH is mounted
 └── tokens/
-    └── tokens.json           # API tokens (if using token management)
-```
+    ├── tokens.json           # Authentication tokens
+    └── tokens.lock           # Lock file for token store
 
-> **Critical:** The `certs/` directory exists in the volume structure, but the actual certificate files are **bind-mounted from the host** and are **not persisted in the volume**. They only appear when you start the container with `TLS_CERT_PATH` and `TLS_KEY_PATH` environment variables.
+/models/
+└── hub/                      # HuggingFace models cache
+    ├── models--Systran--faster-whisper-large-v3/
+    ├── models--pyannote--speaker-diarization/
+    └── ...                   # Other downloaded models
+```
 
 ---
 
@@ -795,21 +854,22 @@ REMOTE_SERVER/backend/
 │   │   ├── transcription.py          # POST /api/transcribe/audio
 │   │   ├── notebook.py               # Audio Notebook CRUD
 │   │   ├── search.py                 # Full-text search
-│   │   ├── admin.py                  # Token management
+│   │   ├── admin.py                  # Admin endpoints
+│   │   ├── auth.py                   # Token authentication (login, token CRUD)
 │   │   ├── health.py                 # Health checks
+│   │   ├── websocket.py              # Real-time audio streaming transcription
 │   │   └── llm.py                    # LLM chat endpoints
-│   └── websocket/                    # WebSocket handlers (future)
 ├── core/                             # ML and audio processing
 │   ├── transcription_engine.py       # faster-whisper wrapper
 │   ├── diarization_engine.py         # PyAnnote wrapper
 │   ├── model_manager.py              # Model lifecycle & GPU management
+│   ├── token_store.py                # Token authentication and management
 │   └── audio_utils.py                # Audio preprocessing utilities
 ├── database/                         # Data persistence
 │   └── database.py                   # SQLite + FTS5 operations
 ├── logging/                          # Centralized logging
 │   └── setup.py                      # Structured logging configuration
 ├── config.py                         # Configuration management
-├── setup_wizard.py                   # First-run interactive setup
 └── pyproject.toml                    # Package definition & dependencies
 ```
 
@@ -972,14 +1032,15 @@ Database operations for Audio Notebook:
 - `recordings_fts` - FTS5 virtual table for search
 - `conversations` + `messages` - Chat history
 
-##### `setup_wizard.py` - Interactive Configuration
+##### `token_store.py` - Authentication Management
 
-First-run wizard for Docker deployments:
+Token-based authentication system:
 
-- Detects TTY availability
-- Interactive prompts for HuggingFace token, admin token, etc.
-- Non-interactive mode generates secure defaults
-- Persists configuration to `/data/config/secrets.json`
+- Generates secure admin token on first startup
+- Hashes tokens with SHA-256 for secure storage
+- Supports token creation, validation, revocation
+- Thread-safe with file locking (`tokens.lock`)
+- Persists tokens to `/data/tokens/tokens.json`
 
 #### Frontend Development (React UI)
 
@@ -1233,114 +1294,94 @@ This section tracks when and where sensitive configuration data is collected, st
 
 **Key Behavior:**
 ```bash
-# First run with TLS - certificates are bind-mounted
+# Start with TLS - certificates are bind-mounted
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 
-# Subsequent runs - you MUST provide paths again
-# This WON'T work (certificates not available):
-docker compose start
-
-# This WILL work:
-TLS_ENABLED=true \
-TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
-TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-docker compose start
+# Switch back to local mode
+docker compose up -d    # TLS_ENABLED defaults to false
 ```
 
-The difference: `docker compose up` applies volume mounts from the compose file, while `docker compose start` uses existing container configuration. Since bind mounts are set at container creation, you need `up` (not `start`) to apply new mount paths.
+> **Important:** Always use `docker compose up -d` (not `docker compose start`) when switching modes. The `start` command only restarts a stopped container without re-reading environment variables or volume mounts. Certificate bind mounts are configured at container creation time.
 
 #### 2. HuggingFace Token
 
 **When Collected:**
 
 **Docker Mode:**
-1. Interactive setup: Prompted during first-run wizard (`docker compose run --rm transcription-suite --setup`)
-2. Environment variable: Can be provided via `HUGGINGFACE_TOKEN` env var
-3. Non-interactive: Skipped if not provided (diarization will be disabled)
+1. Environment variable: Provided via `HUGGINGFACE_TOKEN` env var at startup
+2. Optional: If not provided, diarization will be disabled (transcription still works)
 
 **Native Development:**
 - Set via `HF_TOKEN` environment variable
 - Or cached from `huggingface-cli login`
 
-**Storage Locations:**
+**How to Provide:**
 
 **Docker:**
-- File: `/data/config/secrets.json` inside the container
-- Docker volume: `transcription-suite-data` volume at `/data/config/secrets.json`
-- Permissions: `0o600` (read/write for owner only)
-- Persistence: Survives container recreation, stored in named volume
-
-Structure:
-```json
-{
-  "huggingface_token": "hf_...",
-  "admin_token": "...",
-  "lm_studio_url": "..."
-}
+```bash
+HUGGINGFACE_TOKEN=hf_your_token_here docker compose up -d
 ```
 
+The token is passed to the container as `HF_TOKEN` environment variable and cached by the HuggingFace library in the `/models` volume.
+
+**Native Development:**
+- Set via `HF_TOKEN` environment variable
+- Or cached from `huggingface-cli login`
+
 **Native/AppImage:**
-- Not stored by the client: Clients don't use HuggingFace tokens
+- Not applicable: Clients don't use HuggingFace tokens
 - Only the server (Docker or native backend) needs this token for diarization
 
 #### 3. LM Studio Address
 
-**When Collected:**
+**When Configured:**
 
 **Docker Mode:**
-1. Interactive setup: Prompted during setup wizard
-2. Environment variable: `LM_STUDIO_URL` env var
-3. Default: `http://host.docker.internal:1234` (allows container to reach host's LM Studio)
+- Environment variable: `LM_STUDIO_URL` env var
+- Default: `http://host.docker.internal:1234` (allows container to reach host's LM Studio)
 
 **Native Development:**
 - Configured in `native_src/config.yaml`
 - Default: `http://127.0.0.1:1234`
-
-**Storage Locations:**
-
-**Docker:**
-- File: `/data/config/secrets.json` inside the container (same file as HuggingFace token)
-- Docker volume: `transcription-suite-data` volume
-- Key: `"lm_studio_url"`
-
-**Native Development:**
-- File: `native_src/config.yaml` (not sensitive, just a URL)
 - Section: `local_llm.base_url`
 
 **Native/AppImage Client:**
 - Not applicable: Clients don't connect to LM Studio
 - Only the server backend uses LM Studio for chat features
 
-#### 4. Admin Token (Generated at Server Creation)
+#### 4. Admin Token (TokenStore System)
 
-**When Collected:**
+The server uses a unified token-based authentication system managed by `TokenStore`. An admin token is automatically generated on first startup and printed to the console logs.
 
-**Docker Mode:**
-1. Interactive setup: Auto-generated or user-provided during setup wizard
-2. Non-interactive first run: Auto-generated using `secrets.token_urlsafe(32)`
-3. Environment variable: Can be provided via `ADMIN_TOKEN` env var
-4. **Important**: When auto-generated, it's shown **only once** during first run
+**When Generated:**
+- On first server startup, when `/data/tokens/tokens.json` doesn't exist
+- The token is printed to stdout with clear formatting for easy copying
+- **Important**: Save this token immediately - it's only printed once!
 
 **If you miss the token:**
 ```bash
-# View the generated token
-docker compose exec transcription-suite cat /data/config/secrets.json
+# Check the Docker logs for the admin token
+docker logs transcription-suite 2>&1 | grep -A 5 "ADMIN TOKEN"
 
-# Or re-run setup
-docker compose run --rm transcription-suite --force-setup
+# Or view the token store directly (tokens are hashed, but you can see metadata)
+docker compose exec transcription-suite cat /data/tokens/tokens.json
 ```
 
-**Storage Locations:**
+**Note:** The tokens in `tokens.json` are hashed (SHA-256) for security. You cannot recover the plaintext token from this file - you must use the token printed at first startup.
 
-**Docker:**
-- File: `/data/config/secrets.json` inside the container
-- Docker volume: `transcription-suite-data` volume at `/data/config/secrets.json`
-- Permissions: `0o600` (read/write for owner only)
-- Key: `"admin_token"`
-- Persistence: Survives container recreation
+**Storage Location:**
+- File: `/data/tokens/tokens.json` inside the container
+- Docker volume: `transcription-suite-data`
+- Format: JSON with hashed tokens, client names, expiration, admin flag
+- Lock file: `/data/tokens/tokens.lock` (for thread-safe access)
+
+**Token Management:**
+- Create new tokens via the Admin Panel at `/ui` (requires admin login)
+- Or via API: `POST /api/auth/tokens` with admin token in header
+- Revoke tokens: `DELETE /api/auth/tokens/{id}`
 
 **Native/AppImage Client:**
 - File: Platform-specific config file
@@ -1359,27 +1400,29 @@ server:
   token: "<admin_token_here>"
 ```
 
-#### Complete Docker Volume Structure
+#### Understanding Docker Volume Paths
 
-The `transcription-suite-data` volume contains:
+**Why `/data` inside the container but `_data` on the host?**
+
+These are the same files accessed from different perspectives:
+
+| Path | Where | Description |
+|------|-------|-------------|
+| `/data/` | **Inside container** | Mount point specified in docker-compose.yml |
+| `_data/` | **On host filesystem** | Docker's internal storage directory for volumes |
+
+Docker named volumes are stored at `/var/lib/docker/volumes/<volume-name>/_data/`. The `_data` directory is Docker's convention for the actual data storage location. When you mount a volume to `/data` in the container, Docker maps the contents of the `_data` directory to that mount point.
 
 ```
-/data/
-├── config/
-│   ├── secrets.json          # HuggingFace token, admin token, LM Studio URL
-│   └── .setup_complete       # Marker file
-├── database/
-│   └── notebook.db           # SQLite database
-├── audio/                    # Recorded audio files
-├── logs/                     # Server logs
-├── certs/                    # TLS certificates (bind-mounted, NOT in volume)
-│   ├── my-machine.crt        # Only present when TLS_CERT_PATH is mounted
-│   └── my-machine.key        # Only present when TLS_KEY_PATH is mounted
-└── tokens/
-    └── tokens.json           # API tokens (if using token management)
+Host filesystem:                                    Container filesystem:
+/var/lib/docker/volumes/                           /
+└── transcription-suite-data/                      ├── data/          <- Volume mounted here
+    └── _data/              ════════════════════>  │   ├── database/
+        ├── database/                              │   ├── audio/
+        ├── audio/                                 │   ├── logs/
+        ├── logs/                                  │   └── tokens/
+        └── tokens/                                └── ...
 ```
-
-**Critical Note**: The `certs/` directory exists in the volume structure, but the actual certificate files are **bind-mounted from the host** and are **not persisted in the volume**. They only appear when you start the container with `TLS_CERT_PATH` and `TLS_KEY_PATH` environment variables.
 
 ---
 
