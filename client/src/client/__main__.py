@@ -79,7 +79,10 @@ def list_audio_devices() -> None:
     devices = AudioRecorder.list_devices()
     if not devices:
         print("No audio input devices found.")
-        print("Make sure PyAudio is installed: pip install pyaudio")
+        print("Install PyAudio:")
+        print("  Arch: sudo pacman -S python-pyaudio")
+        print("  Ubuntu/Debian: sudo apt install python3-pyaudio")
+        print("  Fedora: sudo dnf install python3-pyaudio")
         return
 
     for device in devices:
@@ -245,8 +248,14 @@ def main() -> int:
     except ImportError as e:
         print(f"\nError: Missing dependency - {e}")
         print("\nInstall dependencies for your platform:")
-        print("  KDE/Windows: pip install PyQt6 pyaudio")
-        print("  GNOME: pip install pyaudio (GTK from system packages)")
+        print("\n  Arch Linux:")
+        print("    sudo pacman -S python-pyaudio python-pyqt6")
+        print("\n  Ubuntu/Debian:")
+        print("    sudo apt install python3-pyaudio python3-pyqt6")
+        print("\n  Fedora:")
+        print("    sudo dnf install python3-pyaudio python3-pyqt6")
+        print("\n  GNOME AppImage (requires system packages):")
+        print("    sudo apt install python3-pyaudio python3-numpy python3-aiohttp")
         return 1
     except Exception as e:
         logging.exception(f"Fatal error: {e}")
