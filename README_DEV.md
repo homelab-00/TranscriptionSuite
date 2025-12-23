@@ -244,16 +244,35 @@ The server serves two web frontends:
 
 | URL Path | Frontend | Description |
 |----------|----------|-------------|
-| `/` | Audio Notebook | Personal transcription archive with calendar view and search |
-| `/ui` | Remote UI | Web client for file upload, token-based auth, admin panel |
+| `/` | Redirect | Redirects to `/record` |
+| `/auth` | Auth Page | Authentication page (required in TLS mode) |
+| `/record` | Record UI | Web client for file upload, recording, admin panel |
+| `/notebook` | Audio Notebook | Personal transcription archive with calendar view and search |
 
-**Remote UI Features:**
+**Security Model (Belt and Suspenders):**
+
+The server uses a layered security approach:
+1. **Tailscale Network**: Only users on your Tailscale network can reach the server
+2. **TLS/HTTPS**: Encrypted connection with Tailscale certificates
+3. **Token Authentication**: In TLS mode, all routes require valid token authentication
+
+**TLS Mode Authentication:**
+
+When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
+- Unauthenticated browser requests are redirected to `/auth`
+- API requests without valid token receive 401 Unauthorized
+- Tokens can be provided via:
+  - `Authorization: Bearer <token>` header (API clients)
+  - `auth_token` cookie (web browsers)
+
+**Record UI Features:**
 - Token-based authentication (login with admin or user token)
 - File upload transcription
+- Real-time microphone recording
 - Admin panel for token management (admin users only)
 - Works on Android browsers (no app needed)
 
-**Authentication:** On first run, an admin token is automatically generated and printed to the console logs. Save this token to login at `/ui` and access the admin panel for token management.
+**Authentication:** On first run, an admin token is automatically generated and printed to the console logs. Save this token to login at `/auth` (or `/record` which will redirect to `/auth`) and access the admin panel for token management.
 
 ### Endpoints
 
@@ -773,7 +792,7 @@ docker compose up -d
 From any device on your Tailscale network, open a web browser and navigate to:
 
 ```
-https://desktop.tail1234.ts.net:8443/ui
+https://desktop.tail1234.ts.net:8443/record
 ```
 
 Replace `desktop.tail1234.ts.net` with your actual Tailscale hostname (from `tailscale status`).
@@ -1379,9 +1398,17 @@ docker compose exec transcription-suite cat /data/tokens/tokens.json
 - Lock file: `/data/tokens/tokens.lock` (for thread-safe access)
 
 **Token Management:**
-- Create new tokens via the Admin Panel at `/ui` (requires admin login)
+- Create new tokens via the Admin Panel at `/record` (requires admin login)
 - Or via API: `POST /api/auth/tokens` with admin token in header
 - Revoke tokens: `DELETE /api/auth/tokens/{id}`
+
+**Token Storage Locations:**
+
+**Web Browser:**
+- Storage: `auth_token` HTTP cookie
+- Scope: Path `/`, expires in 30 days
+- Set automatically after successful login at `/auth`
+- Sent with every request for server-side authentication
 
 **Native/AppImage Client:**
 - File: Platform-specific config file
@@ -1390,6 +1417,7 @@ docker compose exec transcription-suite cat /data/tokens/tokens.json
   - macOS: `~/Library/Application Support/TranscriptionSuite/client.yaml`
 - Key: `server.token`
 - When stored: After first successful connection or when provided via CLI flag
+- Used in `Authorization: Bearer <token>` header for API requests
 
 Structure:
 ```yaml

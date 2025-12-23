@@ -8,13 +8,17 @@ Handles:
 """
 
 import logging
+import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from server.config import get_config
 from server.database.database import (
     delete_recording,
     get_all_recordings,
@@ -22,6 +26,7 @@ from server.database.database import (
     get_recordings_by_date_range,
     get_segments,
     get_words,
+    save_longform_to_database,
     update_recording_summary,
 )
 
@@ -162,6 +167,104 @@ async def get_audio_file(recording_id: int) -> FileResponse:
         media_type=media_type,
         filename=recording["filename"],
     )
+
+
+class UploadResponse(BaseModel):
+    """Response model for file upload."""
+    recording_id: int
+    message: str
+
+
+@router.post("/transcribe/upload", response_model=UploadResponse)
+async def upload_and_transcribe(
+    request: Request,
+    file: UploadFile = File(...),
+    enable_diarization: bool = Form(False),
+    enable_word_timestamps: bool = Form(True),
+    file_created_at: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    """
+    Upload an audio file, transcribe it, and save to the notebook database.
+    
+    Returns the recording_id for status tracking.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    # Save uploaded file to temp location
+    suffix = Path(file.filename).suffix or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        # Get transcription engine
+        model_manager = request.app.state.model_manager
+        engine = model_manager.transcription_engine
+
+        # Transcribe
+        logger.info(f"Transcribing uploaded file for notebook: {file.filename}")
+        result = engine.transcribe_file(
+            str(tmp_path),
+            language=None,
+            word_timestamps=enable_word_timestamps,
+        )
+
+        # Determine recorded_at timestamp
+        recorded_at = None
+        if file_created_at:
+            try:
+                recorded_at = datetime.fromisoformat(file_created_at.replace('Z', '+00:00'))
+            except ValueError:
+                logger.warning(f"Invalid file_created_at format: {file_created_at}")
+
+        # Copy audio file to permanent storage
+        config = get_config()
+        audio_dir = Path(config.get("audio_notebook", "audio_dir", default="/data/audio"))
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest_filename = f"{timestamp}_{file.filename}"
+        dest_path = audio_dir / dest_filename
+        shutil.copy2(tmp_path, dest_path)
+
+        # Extract word timestamps from segments
+        word_timestamps_list = None
+        if enable_word_timestamps:
+            word_timestamps_list = []
+            for seg in result.segments:
+                word_timestamps_list.extend([w.to_dict() for w in seg.words])
+
+        # Save to database
+        recording_id = save_longform_to_database(
+            audio_path=dest_path,
+            duration_seconds=result.duration,
+            transcription_text=result.text,
+            word_timestamps=word_timestamps_list,
+            diarization_segments=None,  # TODO: Add diarization support
+            recorded_at=recorded_at,
+        )
+
+        if not recording_id:
+            raise HTTPException(status_code=500, detail="Failed to save recording to database")
+
+        return {
+            "recording_id": recording_id,
+            "message": f"Successfully transcribed and saved: {file.filename}",
+        }
+
+    except Exception as e:
+        logger.error(f"Upload transcription failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        # Cleanup temp file
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
 
 
 @router.get("/calendar")

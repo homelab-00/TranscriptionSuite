@@ -45,10 +45,17 @@ def print_banner(data_dir: Path, port: int, tls_enabled: bool = False) -> None:
     print("Endpoints:")
     print("  - Health:      /health")
     print("  - API Docs:    /docs")
+    print("  - Auth:        /auth")
+    print("  - Record UI:   /record")
+    print("  - Admin Panel: /admin")
+    print("  - Notebook UI: /notebook")
     print("  - Transcribe:  /api/transcribe/*")
     print("  - Notebook:    /api/notebook/*")
     print("  - Search:      /api/search/*")
     print("  - Admin:       /api/admin/*")
+    if tls_enabled:
+        print("")
+        print("NOTE: TLS mode enabled - authentication required for all routes")
     print("=" * 60)
 
 

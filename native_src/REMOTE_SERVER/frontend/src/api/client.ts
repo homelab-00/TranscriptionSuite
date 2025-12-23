@@ -31,8 +31,12 @@ class ApiClient {
     this.token = token;
     if (token) {
       localStorage.setItem('auth_token', token);
+      // Also set cookie for server-side auth middleware
+      document.cookie = `auth_token=${token}; path=/; max-age=${30*24*60*60}; SameSite=Strict; Secure`;
     } else {
       localStorage.removeItem('auth_token');
+      // Clear auth cookie
+      document.cookie = 'auth_token=; path=/; max-age=0; SameSite=Strict; Secure';
     }
   }
 

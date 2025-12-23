@@ -7,9 +7,20 @@ export function useAuth() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check for existing token on mount
+  // Check for existing token on mount (localStorage or cookie)
   useEffect(() => {
-    const token = api.getToken();
+    let token = api.getToken();
+    
+    // If no localStorage token, check for auth_token cookie (set by /auth page)
+    if (!token) {
+      const cookieMatch = document.cookie.match(/auth_token=([^;]+)/);
+      if (cookieMatch) {
+        token = cookieMatch[1];
+        // Sync cookie token to localStorage and api client
+        api.setToken(token);
+      }
+    }
+    
     if (token) {
       validateToken(token);
     } else {

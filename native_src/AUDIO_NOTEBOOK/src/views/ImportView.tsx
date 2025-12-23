@@ -17,53 +17,6 @@ export default function ImportView() {
     fileInputRef.current?.click();
   };
 
-  const pollJobStatus = async (recordingId: number) => {
-    const maxAttempts = 120; // 10 minutes at 5 second intervals
-    let attempts = 0;
-
-    const poll = async () => {
-      if (attempts >= maxAttempts) {
-        updateJobStatus(recordingId, 'failed', undefined, 'Transcription timed out');
-        return;
-      }
-
-      try {
-        const status = await api.getTranscriptionStatus(recordingId);
-        
-        updateJobStatus(
-          recordingId,
-          status.status as ImportJob['status'],
-          status.progress,
-          status.message
-        );
-
-        if (status.status === 'transcribing' || status.status === 'pending') {
-          attempts++;
-          setTimeout(poll, 5000);
-        }
-      } catch (err) {
-        updateJobStatus(recordingId, 'failed', undefined, 'Failed to check status');
-      }
-    };
-
-    poll();
-  };
-
-  const updateJobStatus = (
-    id: number,
-    status: ImportJob['status'],
-    progress?: number,
-    message?: string
-  ) => {
-    setJobs(prev =>
-      prev.map(job =>
-        job.id === id
-          ? { ...job, status, progress, message }
-          : job
-      )
-    );
-  };
-
   const getStatusIcon = (status: ImportJob['status']) => {
     switch (status) {
       case 'completed':
@@ -103,22 +56,34 @@ export default function ImportView() {
     setError(null);
 
     for (const file of Array.from(files)) {
+      // Add job as 'transcribing' immediately for UI feedback
+      const tempId = Date.now() + Math.random();
+      const pendingJob: ImportJob = {
+        id: tempId,
+        filename: file.name,
+        status: 'transcribing',
+        message: 'Uploading and transcribing...',
+      };
+      setJobs(prev => [pendingJob, ...prev]);
+
       try {
+        // Upload is synchronous - when it returns, transcription is complete
         const response = await api.uploadFile(file, enableDiarization, enableWordTimestamps);
         
-        const newJob: ImportJob = {
-          id: response.recording_id,
-          filename: file.name,
-          status: 'transcribing',
-          message: response.message,
-        };
-        
-        setJobs(prev => [newJob, ...prev]);
-        
-        // Start polling for status
-        pollJobStatus(newJob.id);
+        // Update job to completed (replace temp job with real recording_id)
+        setJobs(prev => prev.map(job => 
+          job.id === tempId 
+            ? { ...job, id: response.recording_id, status: 'completed', message: response.message }
+            : job
+        ));
         
       } catch (err: any) {
+        // Update job to failed
+        setJobs(prev => prev.map(job =>
+          job.id === tempId
+            ? { ...job, status: 'failed', message: err.response?.data?.detail || err.message }
+            : job
+        ));
         setError(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
       }
     }

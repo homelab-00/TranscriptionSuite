@@ -6,7 +6,10 @@ import { RecordPanel } from './components/RecordPanel';
 import { FileUploadPanel } from './components/FileUploadPanel';
 import { AdminPanel } from './components/AdminPanel';
 
-type Tab = 'record' | 'upload' | 'admin';
+type Tab = 'record' | 'upload';
+
+// Check if we're on the admin page
+const isAdminPage = window.location.pathname.startsWith('/admin');
 
 function App() {
   const { user, isLoading, error, isAuthenticated, login, logout } = useAuth();
@@ -32,7 +35,55 @@ function App() {
     return <LoginForm onLogin={login} isLoading={isLoading} error={error} />;
   }
 
-  // Render main app
+  // Admin page - show only admin panel for admin users
+  if (isAdminPage) {
+    if (!user.is_admin) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-900">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-red-400 mb-2">Access Denied</h1>
+            <p className="text-slate-400 mb-4">You need admin privileges to access this page.</p>
+            <a href="/record" className="text-primary-400 hover:text-primary-300">
+              Go to Record UI →
+            </a>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-900">
+        <header className="bg-slate-800 border-b border-slate-700 px-6 py-4">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h1 className="text-xl font-bold text-white">Admin Panel</h1>
+              <span className="px-2 py-1 text-xs bg-primary-900/50 text-primary-300 rounded">
+                {user.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <a href="/record" className="text-sm text-slate-400 hover:text-white transition-colors">
+                ← Back to Record
+              </a>
+              <button
+                onClick={logout}
+                className="px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 p-6">
+          <div className="max-w-6xl mx-auto">
+            <AdminPanel />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Record page - show record/upload tabs (no admin tab)
   return (
     <div className="min-h-screen flex flex-col bg-slate-900">
       <Header 
@@ -46,7 +97,6 @@ function App() {
         <div className="max-w-6xl mx-auto h-full">
           {activeTab === 'record' && <RecordPanel />}
           {activeTab === 'upload' && <FileUploadPanel />}
-          {activeTab === 'admin' && user.is_admin && <AdminPanel />}
         </div>
       </main>
     </div>

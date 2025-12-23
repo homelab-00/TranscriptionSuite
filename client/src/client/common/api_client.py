@@ -406,6 +406,34 @@ class APIClient:
             logger.error(f"Model preload failed: {e}")
             return False
 
+    async def validate_token(self) -> tuple[bool, str | None]:
+        """
+        Validate the current token with the server.
+        
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not self.token:
+            return False, "No authentication token configured"
+        
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/api/auth/login",
+                headers={"Content-Type": "application/json"},
+                json={"token": self.token},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("success"):
+                        logger.info(f"Token validated for user: {data.get('user', {}).get('name', 'unknown')}")
+                        return True, None
+                    return False, data.get("message", "Invalid token")
+                return False, f"Authentication failed (HTTP {resp.status})"
+        except Exception as e:
+            logger.error(f"Token validation failed: {e}")
+            return False, str(e)
+
     @property
     def is_connected(self) -> bool:
         """Check if client is connected to server."""
