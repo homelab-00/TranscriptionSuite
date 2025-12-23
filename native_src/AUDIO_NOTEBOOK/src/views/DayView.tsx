@@ -494,44 +494,14 @@ export default function DayView() {
     setLlmLoading(false);
   };
 
-  const pollJobStatus = async (recordingId: number) => {
-    const maxAttempts = 120;
-    let attempts = 0;
-
-    const poll = async () => {
-      if (attempts >= maxAttempts) {
-        setImportError('Transcription timed out');
-        setImportLoading(false);
-        return;
-      }
-
-      try {
-        const status = await api.getTranscriptionStatus(recordingId);
-        setImportProgress(status.message || `Status: ${status.status}`);
-
-        if (status.status === 'completed') {
-          setImportLoading(false);
-          setImportProgress(null);
-          setDialogOpen(false);
-          setNewEntryFilePath('');
-          setNewEntryFile(null);
-          await loadRecordingsForDay();
-        } else if (status.status === 'failed') {
-          setImportError(status.message || 'Transcription failed');
-          setImportLoading(false);
-          setImportProgress(null);
-        } else {
-          attempts++;
-          setTimeout(poll, 5000);
-        }
-      } catch (err) {
-        setImportError('Failed to check transcription status');
-        setImportLoading(false);
-        setImportProgress(null);
-      }
-    };
-
-    poll();
+  // Upload is synchronous - when it completes, handle success directly
+  const handleUploadComplete = async () => {
+    setImportLoading(false);
+    setImportProgress(null);
+    setDialogOpen(false);
+    setNewEntryFilePath('');
+    setNewEntryFile(null);
+    await loadRecordingsForDay();
   };
 
   const handleCreateEntry = async () => {
@@ -545,8 +515,6 @@ export default function DayView() {
     setImportProgress('Starting transcription...');
 
     try {
-      let response;
-      
       let nextMinute = 1;
       let nextSecond = 0;
       if (newEntryHour !== null) {
@@ -568,12 +536,13 @@ export default function DayView() {
         ? currentDate.hour(newEntryHour).minute(nextMinute).second(nextSecond).format('YYYY-MM-DDTHH:mm:ss')
         : currentDate.format('YYYY-MM-DDTHH:mm:ss');
       
+      // Upload is synchronous - when it completes, transcription is done
       if (newEntryFile) {
-        response = await api.uploadFile(newEntryFile, enableDiarization, enableWordTimestamps, recordedAt);
+        await api.uploadFile(newEntryFile, enableDiarization, enableWordTimestamps, recordedAt);
       } else {
-        response = await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
+        await api.importFile(newEntryFilePath, true, enableDiarization, enableWordTimestamps);
       }
-      pollJobStatus(response.recording_id);
+      await handleUploadComplete();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
       setImportError(error.response?.data?.detail || 'Failed to import file');

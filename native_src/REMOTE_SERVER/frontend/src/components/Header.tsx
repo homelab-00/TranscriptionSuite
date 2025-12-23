@@ -2,8 +2,8 @@ import { User } from '../types';
 
 interface HeaderProps {
   user: User;
-  activeTab: 'record' | 'upload' | 'admin';
-  onTabChange: (tab: 'record' | 'upload' | 'admin') => void;
+  activeTab: 'record' | 'upload';
+  onTabChange: (tab: 'record' | 'upload') => void;
   onLogout: () => void;
 }
 
@@ -11,7 +11,6 @@ export function Header({ user, activeTab, onTabChange, onLogout }: HeaderProps) 
   const tabs = [
     { id: 'record' as const, label: 'Record', icon: '🎤' },
     { id: 'upload' as const, label: 'Upload File', icon: '📁' },
-    ...(user.is_admin ? [{ id: 'admin' as const, label: 'Admin', icon: '⚙️' }] : []),
   ];
 
   return (
@@ -31,6 +30,16 @@ export function Header({ user, activeTab, onTabChange, onLogout }: HeaderProps) 
 
           {/* User info & Logout */}
           <div className="flex items-center gap-4">
+            {user.is_admin && (
+              <a
+                href="/admin"
+                className="px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 
+                         rounded-lg transition-colors flex items-center gap-1"
+              >
+                <span>⚙️</span>
+                Admin
+              </a>
+            )}
             <div className="text-right">
               <div className="text-sm font-medium text-white">{user.name}</div>
               {user.is_admin && (

@@ -17,13 +17,29 @@ import {
   ChatRequest,
 } from '../types';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+// Use dynamic base URL - same origin in production, localhost in development
+const API_BASE_URL = import.meta.env.DEV 
+  ? 'http://localhost:8000/api' 
+  : `${window.location.origin}/api`;
+
+// Notebook API routes are prefixed with /notebook
+const NOTEBOOK_API = `${API_BASE_URL}/notebook`;
 
 const client = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,  // Include cookies for authentication
+});
+
+// Client for notebook-specific routes
+const notebookClient = axios.create({
+  baseURL: NOTEBOOK_API,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: true,  // Include cookies for authentication
 });
 
 interface TranscribeResponse {
@@ -32,57 +48,68 @@ interface TranscribeResponse {
 }
 
 export const api = {
-  // Recordings
+  // Recordings (use notebookClient for /notebook/* routes)
   async getRecordings(): Promise<Recording[]> {
-    const response = await client.get('/recordings');
+    const response = await notebookClient.get('/recordings');
     return response.data;
   },
 
   async getRecording(id: number): Promise<Recording> {
-    const response = await client.get(`/recordings/${id}`);
+    const response = await notebookClient.get(`/recordings/${id}`);
     return response.data;
   },
 
   async getRecordingsByMonth(year: number, month: number): Promise<Recording[]> {
-    const response = await client.get('/recordings', {
+    const response = await notebookClient.get('/recordings', {
       params: { year, month },
     });
     return response.data;
   },
 
   async getRecordingsByDateRange(fromDate: string, toDate: string): Promise<RecordingsByDate> {
-    const response = await client.get('/recordings', {
+    const response = await notebookClient.get('/recordings', {
       params: { start_date: fromDate, end_date: toDate },
     });
-    return response.data;
+    // Backend returns flat list, frontend expects grouped by date
+    const recordings: Recording[] = response.data;
+    const grouped: RecordingsByDate = {};
+    for (const rec of recordings) {
+      // Extract date part from recorded_at (ISO format: YYYY-MM-DDTHH:mm:ss)
+      const dateKey = rec.recorded_at.split('T')[0];
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(rec);
+    }
+    return grouped;
   },
 
   async deleteRecording(id: number): Promise<void> {
-    await client.delete(`/recordings/${id}`);
+    await notebookClient.delete(`/recordings/${id}`);
   },
 
   async updateRecordingDate(id: number, recordedAt: string): Promise<void> {
-    await client.patch(`/recordings/${id}/date`, { recorded_at: recordedAt });
+    await notebookClient.patch(`/recordings/${id}/date`, { recorded_at: recordedAt });
   },
 
   async getNextAvailableMinute(date: string, hour: number): Promise<{next_minute: number, next_second: number}> {
-    const response = await client.get(`/recordings/next-minute/${date}/${hour}`);
+    const response = await notebookClient.get(`/recordings/next-minute/${date}/${hour}`);
     return response.data;
   },
 
   // Summary
   async updateSummary(recordingId: number, summary: string | null): Promise<void> {
-    await client.patch(`/recordings/${recordingId}/summary`, { summary });
+    await notebookClient.patch(`/recordings/${recordingId}/summary`, { summary });
   },
 
   async getSummary(recordingId: number): Promise<string | null> {
-    const response = await client.get(`/recordings/${recordingId}/summary`);
+    const response = await notebookClient.get(`/recordings/${recordingId}/summary`);
     return response.data.summary;
   },
 
   // Transcriptions
   async getTranscription(recordingId: number): Promise<Transcription> {
-    const response = await client.get(`/recordings/${recordingId}/transcription`);
+    const response = await notebookClient.get(`/recordings/${recordingId}/transcription`);
     return response.data;
   },
 
@@ -112,7 +139,8 @@ export const api = {
       formData.append('file_created_at', localTime);
     }
     
-    const response = await client.post('/transcribe/upload', formData, {
+    // Use notebook-specific upload endpoint that saves to database and returns recording_id
+    const response = await notebookClient.post('/transcribe/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -131,7 +159,7 @@ export const api = {
     };
   },
 
-  // Search
+  // Search (uses /search endpoint)
   async search(params: SearchParams): Promise<SearchResult[]> {
     // Transform frontend params to backend expected params
     const apiParams = {
@@ -173,9 +201,9 @@ export const api = {
     }));
   },
 
-  // Audio
+  // Audio (uses notebook API for audio files)
   getAudioUrl(recordingId: number): string {
-    return `${API_BASE_URL}/recordings/${recordingId}/audio`;
+    return `${NOTEBOOK_API}/recordings/${recordingId}/audio`;
   },
 
   // LLM endpoints
@@ -206,6 +234,7 @@ export const api = {
         },
         body: JSON.stringify(request),
         signal: controller.signal,
+        credentials: 'include',  // Include cookies for authentication
       });
 
       if (!response.ok) {
@@ -370,6 +399,7 @@ export const api = {
         },
         body: JSON.stringify(request),
         signal: controller.signal,
+        credentials: 'include',  // Include cookies for authentication
       });
 
       if (!response.ok) {

@@ -163,6 +163,20 @@ class ClientOrchestrator:
 
         # Test connection
         if await self.api_client.health_check():
+            # In HTTPS mode, validate token before proceeding
+            if self.config.use_https:
+                is_valid, error_msg = await self.api_client.validate_token()
+                if not is_valid:
+                    logger.error(f"Authentication failed: {error_msg}")
+                    if self.tray:
+                        self.tray.set_state(TrayState.DISCONNECTED)
+                        self.tray.show_notification(
+                            "Authentication Failed",
+                            error_msg or "Invalid or missing token",
+                        )
+                    return
+                logger.info("Token authentication successful")
+
             if self.tray:
                 self.tray.set_state(TrayState.STANDBY)
                 self.tray.show_notification(
@@ -420,7 +434,7 @@ class ClientOrchestrator:
     def _on_open_notebook(self) -> None:
         """Open Audio Notebook in browser."""
         scheme = "https" if self.config.use_https else "http"
-        url = f"{scheme}://{self.config.server_host}:{self.config.server_port}"
+        url = f"{scheme}://{self.config.server_host}:{self.config.server_port}/notebook"
         logger.info(f"Opening Audio Notebook: {url}")
         webbrowser.open(url)
 
