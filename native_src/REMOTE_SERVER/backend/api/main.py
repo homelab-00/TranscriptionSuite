@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from server.core.token_store import get_token_store
-from server.api.routes import admin, auth, health, notebook, search, transcription, websocket
+from server.api.routes import admin, auth, health, llm, notebook, search, transcription, websocket
 from server.config import get_config
 from server.core.model_manager import cleanup_models, get_model_manager
 from server.database.database import init_db
@@ -185,6 +185,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     )
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
+    app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(websocket.router, tags=["WebSocket"])
 

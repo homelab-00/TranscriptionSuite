@@ -1358,9 +1358,11 @@ The token is passed to the container as `HF_TOKEN` environment variable and cach
 
 **When Configured:**
 
-**Docker Mode:**
+**Docker Mode (Host Network):**
+- The Docker container runs with `network_mode: "host"`, sharing the host's network stack
 - Environment variable: `LM_STUDIO_URL` env var
-- Default: `http://host.docker.internal:1234` (allows container to reach host's LM Studio)
+- Default: `http://127.0.0.1:1234` (localhost works directly with host network mode)
+- LM Studio can stay bound to `127.0.0.1` (no need to expose to network)
 
 **Native Development:**
 - Configured in `native_src/config.yaml`
@@ -1370,6 +1372,12 @@ The token is passed to the container as `HF_TOKEN` environment variable and cach
 **Native/AppImage Client:**
 - Not applicable: Clients don't connect to LM Studio
 - Only the server backend uses LM Studio for chat features
+
+**LM Studio Setup:**
+1. Start LM Studio on the host machine
+2. Enable server mode (default port 1234)
+3. Load a model in LM Studio
+4. The "Start LLM" button in the notebook will detect the running server
 
 #### 4. Admin Token (TokenStore System)
 

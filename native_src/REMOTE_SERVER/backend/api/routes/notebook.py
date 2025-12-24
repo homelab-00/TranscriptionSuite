@@ -8,7 +8,6 @@ Handles:
 """
 
 import logging
-import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from server.config import get_config
+from server.core.audio_utils import convert_to_mp3
 from server.database.database import (
     delete_recording,
     get_all_recordings,
@@ -169,6 +169,49 @@ async def get_audio_file(recording_id: int) -> FileResponse:
     )
 
 
+@router.get("/recordings/{recording_id}/transcription")
+async def get_transcription(recording_id: int) -> Dict[str, Any]:
+    """
+    Get the transcription for a recording (segments with words).
+    """
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    segments = get_segments(recording_id)
+    words = get_words(recording_id)
+
+    # Group words by segment_id
+    words_by_segment: Dict[int, List[Dict[str, Any]]] = {}
+    for word in words:
+        seg_id = word.get("segment_id")
+        if seg_id not in words_by_segment:
+            words_by_segment[seg_id] = []
+        words_by_segment[seg_id].append({
+            "word": word.get("word", ""),
+            "start": word.get("start_time", 0),
+            "end": word.get("end_time", 0),
+            "confidence": word.get("confidence"),
+        })
+
+    # Build segments with embedded words
+    result_segments = []
+    for seg in segments:
+        seg_id = seg.get("id")
+        result_segments.append({
+            "text": seg.get("text", ""),
+            "start": seg.get("start_time", 0),
+            "end": seg.get("end_time", 0),
+            "speaker": seg.get("speaker"),
+            "words": words_by_segment.get(seg_id, []),
+        })
+
+    return {
+        "recording_id": recording_id,
+        "segments": result_segments,
+    }
+
+
 class UploadResponse(BaseModel):
     """Response model for file upload."""
     recording_id: int
@@ -219,16 +262,25 @@ async def upload_and_transcribe(
             except ValueError:
                 logger.warning(f"Invalid file_created_at format: {file_created_at}")
 
-        # Copy audio file to permanent storage
+        # Convert audio to MP3 and save to permanent storage
         config = get_config()
         audio_dir = Path(config.get("audio_notebook", "audio_dir", default="/data/audio"))
         audio_dir.mkdir(parents=True, exist_ok=True)
         
-        # Generate unique filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest_filename = f"{timestamp}_{file.filename}"
+        # Keep original filename, convert to .mp3 extension
+        original_stem = Path(file.filename or "audio").stem
+        dest_filename = f"{original_stem}.mp3"
         dest_path = audio_dir / dest_filename
-        shutil.copy2(tmp_path, dest_path)
+        
+        # Handle duplicates by adding -2, -3, etc. suffix
+        counter = 2
+        while dest_path.exists():
+            dest_filename = f"{original_stem}-{counter}.mp3"
+            dest_path = audio_dir / dest_filename
+            counter += 1
+        
+        # Convert to MP3 for storage efficiency
+        convert_to_mp3(str(tmp_path), str(dest_path))
 
         # Extract word timestamps from segments
         word_timestamps_list = None
