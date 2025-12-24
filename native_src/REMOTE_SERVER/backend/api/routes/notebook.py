@@ -56,6 +56,12 @@ class RecordingDetailResponse(RecordingResponse):
     words: List[Dict[str, Any]] = []
 
 
+class SummaryUpdate(BaseModel):
+    """Request body for updating a recording's summary."""
+
+    summary: str
+
+
 @router.get("/recordings", response_model=List[RecordingResponse])
 async def list_recordings(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -122,18 +128,35 @@ async def remove_recording(recording_id: int) -> Dict[str, str]:
 
 
 @router.put("/recordings/{recording_id}/summary")
-async def update_summary(
+async def update_summary_put(
     recording_id: int,
     summary: str,
 ) -> Dict[str, Any]:
     """
-    Update the summary for a recording.
+    Update the summary for a recording (PUT with query param).
     """
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
     if update_recording_summary(recording_id, summary):
         return {"status": "updated", "id": recording_id, "summary": summary}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update summary")
+
+
+@router.patch("/recordings/{recording_id}/summary")
+async def update_summary_patch(
+    recording_id: int,
+    body: SummaryUpdate,
+) -> Dict[str, Any]:
+    """
+    Update the summary for a recording (PATCH with JSON body).
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    if update_recording_summary(recording_id, body.summary):
+        return {"status": "updated", "id": recording_id, "summary": body.summary}
     else:
         raise HTTPException(status_code=500, detail="Failed to update summary")
 

@@ -437,49 +437,17 @@ AUTH_PAGE_HTML = """
 # Frontends are built and copied to /app/static/ during Docker build
 _static_dir = Path("/app/static")
 if _static_dir.exists():
-    # Mount Remote UI at /record (renamed from /ui)
-    _remote_ui_dir = _static_dir / "remote_ui"
-    if _remote_ui_dir.exists():
-        # Mount Remote UI assets
-        _remote_assets = _remote_ui_dir / "assets"
-        if _remote_assets.exists():
-            app.mount("/record/assets", StaticFiles(directory=str(_remote_assets)), name="record_assets")
-        
-        # Serve Remote UI index.html for /record routes
-        @app.get("/record", include_in_schema=False)
-        @app.get("/record/{path:path}", include_in_schema=False)
-        async def serve_record_ui(path: str = "") -> FileResponse:
-            file_path = _remote_ui_dir / path
-            if file_path.is_file() and not path.startswith("assets"):
-                return FileResponse(file_path)
-            return FileResponse(_remote_ui_dir / "index.html")
-        
-        logger.info(f"Remote UI frontend mounted at /record from {_remote_ui_dir}")
-    
-    # Mount Admin Panel at /admin (same frontend, different route)
-    if _remote_ui_dir.exists():
-        # Mount admin assets
-        if _remote_assets.exists():
-            app.mount("/admin/assets", StaticFiles(directory=str(_remote_assets)), name="admin_assets")
-        
-        # Serve admin UI
-        @app.get("/admin", include_in_schema=False)
-        @app.get("/admin/{path:path}", include_in_schema=False)
-        async def serve_admin_ui(path: str = "") -> FileResponse:
-            file_path = _remote_ui_dir / path
-            if file_path.is_file() and not path.startswith("assets"):
-                return FileResponse(file_path)
-            return FileResponse(_remote_ui_dir / "index.html")
-        
-        logger.info(f"Admin UI frontend mounted at /admin from {_remote_ui_dir}")
-    
-    # Mount Audio Notebook at /notebook
+    # Mount unified Audio Notebook frontend for all UI routes
+    # The Audio Notebook now contains Record and Admin views with a unified sidebar
     _audio_notebook_dir = _static_dir / "audio_notebook"
     if _audio_notebook_dir.exists():
-        # Mount Audio Notebook assets
+        # Mount Audio Notebook assets for all routes
         _notebook_assets = _audio_notebook_dir / "assets"
         if _notebook_assets.exists():
             app.mount("/notebook/assets", StaticFiles(directory=str(_notebook_assets)), name="notebook_assets")
+            # Also mount for /record and /admin routes (SPA uses same assets)
+            app.mount("/record/assets", StaticFiles(directory=str(_notebook_assets)), name="record_assets")
+            app.mount("/admin/assets", StaticFiles(directory=str(_notebook_assets)), name="admin_assets")
         
         # Serve Audio Notebook for /notebook routes
         @app.get("/notebook", include_in_schema=False)
@@ -490,7 +458,25 @@ if _static_dir.exists():
                 return FileResponse(file_path)
             return FileResponse(_audio_notebook_dir / "index.html")
         
-        logger.info(f"Audio Notebook frontend mounted at /notebook from {_audio_notebook_dir}")
+        # Serve Audio Notebook for /record routes (unified UI)
+        @app.get("/record", include_in_schema=False)
+        @app.get("/record/{path:path}", include_in_schema=False)
+        async def serve_record_ui(path: str = "") -> FileResponse:
+            file_path = _audio_notebook_dir / path
+            if file_path.is_file() and not path.startswith("assets"):
+                return FileResponse(file_path)
+            return FileResponse(_audio_notebook_dir / "index.html")
+        
+        # Serve Audio Notebook for /admin routes (unified UI)
+        @app.get("/admin", include_in_schema=False)
+        @app.get("/admin/{path:path}", include_in_schema=False)
+        async def serve_admin_ui(path: str = "") -> FileResponse:
+            file_path = _audio_notebook_dir / path
+            if file_path.is_file() and not path.startswith("assets"):
+                return FileResponse(file_path)
+            return FileResponse(_audio_notebook_dir / "index.html")
+        
+        logger.info(f"Unified UI frontend mounted at /notebook, /record, /admin from {_audio_notebook_dir}")
 
 
 # Auth page route (served for all modes, but only required in TLS mode)

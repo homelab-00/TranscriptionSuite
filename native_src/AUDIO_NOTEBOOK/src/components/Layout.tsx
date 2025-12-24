@@ -1,15 +1,39 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Calendar, Search, Upload, Menu, X, Mic } from 'lucide-react';
+import { Calendar, Search, Upload, Menu, X, Mic, Settings } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
-const menuItems = [
-  { text: 'Calendar', icon: Calendar, path: '/' },
-  { text: 'Search', icon: Search, path: '/search' },
-  { text: 'Import', icon: Upload, path: '/import' },
+interface MenuItem {
+  text: string;
+  icon: typeof Calendar;
+  path: string;
+}
+
+interface MenuSection {
+  items: MenuItem[];
+}
+
+const menuSections: MenuSection[] = [
+  {
+    items: [
+      { text: 'Calendar', icon: Calendar, path: '/' },
+      { text: 'Search', icon: Search, path: '/search' },
+      { text: 'Import', icon: Upload, path: '/import' },
+    ],
+  },
+  {
+    items: [
+      { text: 'Record', icon: Mic, path: '/record' },
+    ],
+  },
+  {
+    items: [
+      { text: 'Admin', icon: Settings, path: '/admin' },
+    ],
+  },
 ];
 
 export default function Layout({ children }: LayoutProps) {
@@ -26,7 +50,8 @@ export default function Layout({ children }: LayoutProps) {
     setMobileOpen(false);
   };
 
-  const currentPage = menuItems.find((item) => item.path === location.pathname)?.text || 'Recording';
+  const allItems = menuSections.flatMap(s => s.items);
+  const currentPage = allItems.find((item) => item.path === location.pathname)?.text || 'Recording';
 
   return (
     <>
@@ -78,27 +103,35 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Navigation items */}
         <div className="py-4 px-3">
-          {menuItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.text}
-                onClick={() => handleNavigation(item.path)}
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-1
-                  transition-all duration-200
-                  ${isActive
-                    ? 'bg-primary/20 text-primary'
-                    : 'text-gray-400 hover:text-white hover:bg-surface-light'
-                  }
-                `}
-              >
-                <Icon size={20} />
-                {item.text}
-              </button>
-            );
-          })}
+          {menuSections.map((section, sectionIndex) => (
+            <div key={sectionIndex}>
+              {/* Divider between sections */}
+              {sectionIndex > 0 && (
+                <div className="my-3 border-t border-gray-700" />
+              )}
+              {section.items.map((item) => {
+                const isActive = location.pathname === item.path;
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.text}
+                    onClick={() => handleNavigation(item.path)}
+                    className={`
+                      w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-1
+                      transition-all duration-200
+                      ${isActive
+                        ? 'bg-primary/20 text-primary'
+                        : 'text-gray-400 hover:text-white hover:bg-surface-light'
+                      }
+                    `}
+                  >
+                    <Icon size={20} />
+                    {item.text}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </nav>
 
