@@ -75,40 +75,47 @@ class ModelLoadRequest(BaseModel):
 
 
 def get_llm_config() -> dict:
-    """Load LLM configuration from config.yaml"""
+    """Load LLM configuration from config.yaml and environment variables."""
+    import os
+    
+    # Get LM Studio URL from environment (Docker sets this to host.docker.internal)
+    # Fall back to localhost for non-Docker environments
+    default_base_url = os.environ.get("LM_STUDIO_URL", "http://127.0.0.1:1234")
+    
     try:
-        # Find config.yaml at project root
-        # llm.py is at AUDIO_NOTEBOOK/backend/routers/llm.py
-        # So we need to go up 3 levels to reach TranscriptionSuite/
-        project_root = Path(__file__).parent.parent.parent.parent
-        config_path = project_root / "config.yaml"
+        # Find config.yaml at project root or /app/config
+        config_paths = [
+            Path("/app/config/config.yaml"),  # Docker path
+            Path(__file__).parent.parent.parent.parent / "config.yaml",  # Dev path
+        ]
+        
+        for config_path in config_paths:
+            if config_path.exists():
+                import yaml
 
-        if config_path.exists():
-            import yaml
+                with open(config_path) as f:
+                    config_data = yaml.safe_load(f)
 
-            with open(config_path) as f:
-                config_data = yaml.safe_load(f)
-
-            llm_config = config_data.get("local_llm", {})
-            return {
-                "enabled": llm_config.get("enabled", False),
-                "base_url": llm_config.get("base_url", "http://127.0.0.1:1234"),
-                "model": llm_config.get("model", ""),
-                "gpu_offload": llm_config.get("gpu_offload", 1.0),
-                "context_length": llm_config.get("context_length"),
-                "max_tokens": llm_config.get("max_tokens", 2048),
-                "temperature": llm_config.get("temperature", 0.7),
-                "default_system_prompt": llm_config.get(
-                    "default_system_prompt", "Summarize this transcription concisely."
-                ),
-            }
+                llm_config = config_data.get("local_llm", {})
+                return {
+                    "enabled": llm_config.get("enabled", True),
+                    "base_url": llm_config.get("base_url", default_base_url),
+                    "model": llm_config.get("model", ""),
+                    "gpu_offload": llm_config.get("gpu_offload", 1.0),
+                    "context_length": llm_config.get("context_length"),
+                    "max_tokens": llm_config.get("max_tokens", 2048),
+                    "temperature": llm_config.get("temperature", 0.7),
+                    "default_system_prompt": llm_config.get(
+                        "default_system_prompt", "Summarize this transcription concisely."
+                    ),
+                }
     except Exception as e:
         logger.warning(f"Could not load LLM config: {e}")
 
-    # Fallback defaults
+    # Fallback defaults - use environment variable for base_url
     return {
         "enabled": True,
-        "base_url": "http://127.0.0.1:1234",
+        "base_url": default_base_url,
         "model": "",
         "gpu_offload": 1.0,
         "context_length": None,
@@ -405,7 +412,7 @@ async def summarize_recording(
     custom_prompt: Optional[str] = None,
 ):
     """Convenience endpoint: fetch transcription and summarize it (non-streaming)"""
-    from AUDIO_NOTEBOOK.backend.database import get_recording, get_transcription
+    from server.database.database import get_recording, get_transcription
 
     # Fetch the recording
     recording = get_recording(recording_id)
@@ -476,159 +483,99 @@ def _run_lms_command(args: list[str], timeout: int = 30) -> tuple[bool, str]:
 @router.post("/server/start", response_model=ServerControlResponse)
 async def start_lm_studio_server():
     """
-    Start the LM Studio server and load the configured model.
+    Check LM Studio server status and load the configured model.
 
-    This starts the server AND automatically loads the model specified
-    in config.yaml (local_llm.model).
+    NOTE: When running in Docker, LM Studio must be started manually on the host.
+    This endpoint will check if LM Studio is running and load a model if needed.
     """
-    logger.info("Starting LM Studio server...")
+    logger.info("Checking LM Studio server status...")
 
-    # Check if server is already running
     config = get_llm_config()
-    server_already_running = False
+    base_url = config["base_url"]
+
+    # Check if server is running
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            response = await client.get(f"{config['base_url']}/v1/models")
-            if response.status_code == 200:
-                server_already_running = True
-    except Exception:
-        pass  # Server not running, proceed to start
-
-    # If server is already running, check if we need to load a model
-    if server_already_running:
-        model_id = config.get("model")
-        if model_id:
-            # Check if the model is already loaded
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(f"{config['base_url']}/api/v0/models")
-                    if response.status_code == 200:
-                        models = response.json().get("data", [])
-                        loaded_models = [m for m in models if m.get("state") == "loaded"]
-
-                        # Check if our model is already loaded
-                        model_loaded = any(m.get("id") == model_id for m in loaded_models)
-
-                        if model_loaded:
-                            return ServerControlResponse(
-                                success=True,
-                                message=f"Server running with model '{model_id}' already loaded",
-                            )
-                        else:
-                            # Load the configured model
-                            logger.info(
-                                f"Server running but model not loaded. Loading: {model_id}"
-                            )
-                            load_result = await load_model(
-                                ModelLoadRequest(
-                                    model_id=model_id,
-                                    gpu_offload=config.get("gpu_offload", 1.0),
-                                    context_length=config.get("context_length"),
-                                )
-                            )
-
-                            if load_result.success:
-                                return ServerControlResponse(
-                                    success=True,
-                                    message=f"Model '{model_id}' loaded",
-                                    detail=load_result.detail,
-                                )
-                            else:
-                                return ServerControlResponse(
-                                    success=True,
-                                    message=f"Server running but model load failed: {load_result.message}",
-                                    detail=load_result.detail,
-                                )
-            except Exception as e:
-                logger.warning(f"Could not check model state: {e}")
-
-        return ServerControlResponse(
-            success=True,
-            message="Server is already running",
-        )
-
-    # Run in thread pool to avoid blocking
-    loop = asyncio.get_event_loop()
-    success, output = await loop.run_in_executor(
-        None,
-        _run_lms_command,
-        ["server", "start"],
-        60,  # Allow more time for server startup
-    )
-
-    if success:
-        # Wait a bit for server to be ready
-        await asyncio.sleep(2)
-        logger.info("LM Studio server started successfully")
-
-        # Auto-load the configured model
-        config = get_llm_config()
-        model_id = config.get("model")
-
-        if model_id:
-            logger.info(f"Auto-loading configured model: {model_id}")
-            load_result = await load_model(
-                ModelLoadRequest(
-                    model_id=model_id,
-                    gpu_offload=config.get("gpu_offload", 1.0),
-                    context_length=config.get("context_length"),
-                )
-            )
-
-            if load_result.success:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{base_url}/v1/models")
+            if response.status_code != 200:
                 return ServerControlResponse(
-                    success=True,
-                    message=f"Server started and model '{model_id}' loaded",
-                    detail=f"Server: {output}\nModel: {load_result.detail}",
+                    success=False,
+                    message="LM Studio is not running",
+                    detail=f"Please start LM Studio manually on the host machine and enable server mode (port 1234). URL: {base_url}",
                 )
-            else:
-                return ServerControlResponse(
-                    success=True,
-                    message=f"Server started but model load failed: {load_result.message}",
-                    detail=f"Server: {output}\nModel error: {load_result.detail}",
-                )
-        else:
-            return ServerControlResponse(
-                success=True,
-                message="Server started (no model configured - set local_llm.model in config.yaml)",
-                detail=output,
-            )
-    else:
-        logger.error(f"Failed to start LM Studio server: {output}")
+    except (httpx.ConnectError, httpx.ConnectTimeout):
         return ServerControlResponse(
             success=False,
-            message="Failed to start server",
-            detail=output,
+            message="Cannot connect to LM Studio",
+            detail=f"Please start LM Studio manually on the host machine and enable server mode. Expected URL: {base_url}",
         )
+    except Exception as e:
+        return ServerControlResponse(
+            success=False,
+            message="Error connecting to LM Studio",
+            detail=str(e),
+        )
+
+    # Server is running - check if we need to load a model
+    model_id = config.get("model")
+    if model_id:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{base_url}/api/v0/models")
+                if response.status_code == 200:
+                    models = response.json().get("data", [])
+                    loaded_models = [m for m in models if m.get("state") == "loaded"]
+
+                    # Check if our model is already loaded
+                    model_loaded = any(m.get("id") == model_id for m in loaded_models)
+
+                    if model_loaded:
+                        return ServerControlResponse(
+                            success=True,
+                            message=f"LM Studio running with model '{model_id}' loaded",
+                        )
+                    elif loaded_models:
+                        # A different model is loaded
+                        current_model = loaded_models[0].get("id", "unknown")
+                        return ServerControlResponse(
+                            success=True,
+                            message=f"LM Studio running with model '{current_model}' loaded",
+                            detail=f"Configured model '{model_id}' is not loaded. Load it via LM Studio UI or use the /api/llm/model/load endpoint.",
+                        )
+                    else:
+                        # No model loaded - try to load the configured one
+                        logger.info(f"No model loaded. Attempting to load: {model_id}")
+                        load_result = await load_model(
+                            ModelLoadRequest(
+                                model_id=model_id,
+                                gpu_offload=config.get("gpu_offload", 1.0),
+                                context_length=config.get("context_length"),
+                            )
+                        )
+                        return load_result
+        except Exception as e:
+            logger.warning(f"Could not check model state: {e}")
+
+    return ServerControlResponse(
+        success=True,
+        message="LM Studio server is running",
+        detail="No model configured in config.yaml. Load a model via LM Studio UI.",
+    )
 
 
 @router.post("/server/stop", response_model=ServerControlResponse)
 async def stop_lm_studio_server():
-    """Stop the LM Studio server using the lms CLI."""
-    logger.info("Stopping LM Studio server...")
+    """
+    Stop the LM Studio server.
 
-    loop = asyncio.get_event_loop()
-    success, output = await loop.run_in_executor(
-        None,
-        _run_lms_command,
-        ["server", "stop"],
-        30,
+    NOTE: When running in Docker, LM Studio runs on the host and cannot be
+    stopped from inside the container. Use LM Studio UI to stop the server.
+    """
+    return ServerControlResponse(
+        success=False,
+        message="Cannot stop LM Studio from server",
+        detail="LM Studio runs on the host machine. Please stop it manually via the LM Studio application.",
     )
-
-    if success:
-        logger.info("LM Studio server stopped successfully")
-        return ServerControlResponse(
-            success=True,
-            message="Server stopped successfully",
-            detail=output,
-        )
-    else:
-        logger.error(f"Failed to stop LM Studio server: {output}")
-        return ServerControlResponse(
-            success=False,
-            message="Failed to stop server",
-            detail=output,
-        )
 
 
 @router.get("/models/available")
@@ -678,6 +625,11 @@ async def list_available_models():
         raise HTTPException(
             status_code=503,
             detail="Cannot connect to LM Studio. Is the server running?",
+        )
+    except httpx.ConnectTimeout:
+        raise HTTPException(
+            status_code=503,
+            detail="Connection to LM Studio timed out. Is the server running?",
         )
 
 
@@ -862,10 +814,10 @@ class ChatRequest(BaseModel):
 
 
 @router.get("/conversations/{recording_id}")
-async def get_conversations(recording_id: int):
+async def get_conversations_endpoint(recording_id: int):
     """Get all conversations for a recording."""
-    from AUDIO_NOTEBOOK.backend.database import (
-        get_conversations_for_recording,
+    from server.database.database import (
+        get_conversations,
         get_recording,
     )
 
@@ -874,17 +826,17 @@ async def get_conversations(recording_id: int):
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    conversations = get_conversations_for_recording(recording_id)
+    conversations = get_conversations(recording_id)
     return {"conversations": conversations}
 
 
 @router.post("/conversations")
 async def create_conversation(request: ConversationCreate):
     """Create a new conversation for a recording."""
-    from AUDIO_NOTEBOOK.backend.database import (
+    from server.database.database import (
         create_conversation as db_create_conversation,
     )
-    from AUDIO_NOTEBOOK.backend.database import get_recording
+    from server.database.database import get_recording
 
     # Verify recording exists
     recording = get_recording(request.recording_id)
@@ -902,7 +854,7 @@ async def create_conversation(request: ConversationCreate):
 @router.get("/conversation/{conversation_id}")
 async def get_conversation_detail(conversation_id: int):
     """Get a conversation with all its messages."""
-    from AUDIO_NOTEBOOK.backend.database import get_conversation_with_messages
+    from server.database.database import get_conversation_with_messages
 
     conversation = get_conversation_with_messages(conversation_id)
     if not conversation:
@@ -914,7 +866,7 @@ async def get_conversation_detail(conversation_id: int):
 @router.patch("/conversation/{conversation_id}")
 async def update_conversation(conversation_id: int, request: ConversationUpdate):
     """Update a conversation's title."""
-    from AUDIO_NOTEBOOK.backend.database import (
+    from server.database.database import (
         get_conversation,
         update_conversation_title,
     )
@@ -933,7 +885,7 @@ async def update_conversation(conversation_id: int, request: ConversationUpdate)
 @router.delete("/conversation/{conversation_id}")
 async def delete_conversation_endpoint(conversation_id: int):
     """Delete a conversation and all its messages."""
-    from AUDIO_NOTEBOOK.backend.database import delete_conversation, get_conversation
+    from server.database.database import delete_conversation, get_conversation
 
     # Verify conversation exists
     if not get_conversation(conversation_id):
@@ -949,7 +901,7 @@ async def delete_conversation_endpoint(conversation_id: int):
 @router.post("/conversation/{conversation_id}/message")
 async def add_message_to_conversation(conversation_id: int, request: MessageCreate):
     """Add a message to a conversation (manual, not from LLM)."""
-    from AUDIO_NOTEBOOK.backend.database import add_message, get_conversation
+    from server.database.database import add_message, get_conversation
 
     # Verify conversation exists
     if not get_conversation(conversation_id):
@@ -979,7 +931,7 @@ async def chat_with_llm(request: ChatRequest):
     3. Sends to LLM and streams the response
     4. Saves the assistant response to the conversation
     """
-    from AUDIO_NOTEBOOK.backend.database import (
+    from server.database.database import (
         add_message,
         get_conversation_with_messages,
         get_recording,

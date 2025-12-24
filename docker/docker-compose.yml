@@ -31,6 +31,10 @@ services:
     image: transcriptionsuite/server:latest
     container_name: transcription-suite
     
+    # Use host network mode for direct access to host services (LM Studio)
+    # Note: Ports are exposed directly on host (no port mapping needed)
+    network_mode: "host"
+    
     # GPU support (NVIDIA)
     deploy:
       resources:
@@ -39,11 +43,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    
-    # Port mappings
-    ports:
-      - "8000:8000"  # HTTP API
-      - "8443:8443"  # HTTPS (when TLS_ENABLED=true)
     
     # Environment variables
     environment:
@@ -54,8 +53,8 @@ services:
       # HuggingFace token for downloading models (optional)
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
-      # LM Studio URL for chat features
-      - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
+      # LM Studio URL for chat features (localhost works with host network mode)
+      - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
       # TLS settings for remote access (optional)
       - TLS_ENABLED=${TLS_ENABLED:-false}
       - TLS_CERT_FILE=/certs/cert.crt
@@ -68,10 +67,6 @@ services:
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
       - ${TLS_CERT_PATH:-/dev/null}:/certs/cert.crt:ro
       - ${TLS_KEY_PATH:-/dev/null}:/certs/cert.key:ro
-    
-    # Allow access to host LM Studio
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     
     # Restart policy
     restart: unless-stopped

@@ -17,7 +17,6 @@ Options:
 import argparse
 import logging
 import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from client.common.audio_recorder import AudioRecorder
@@ -94,11 +93,11 @@ def list_audio_devices() -> None:
     print()
 
 
-def get_log_dir() -> Path:
-    """Get platform-specific log directory."""
-    log_dir = get_config_dir() / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    return log_dir
+def get_log_file() -> Path:
+    """Get platform-specific log file path."""
+    config_dir = get_config_dir()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "client.log"
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -131,16 +130,18 @@ def setup_logging(verbose: bool = False) -> None:
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
-    # File handler (persistent logs)
+    # File handler (logs wiped on each startup for clean debugging)
     try:
-        log_dir = get_log_dir()
-        log_file = log_dir / "client.log"
+        log_file = get_log_file()
 
-        # Rotating file handler: 5MB per file, keep 3 backups
-        file_handler = RotatingFileHandler(
+        # Wipe log file on startup for clean logs each session
+        if log_file.exists():
+            log_file.unlink()
+
+        # Simple file handler (no rotation - wiped each startup)
+        file_handler = logging.FileHandler(
             log_file,
-            maxBytes=5 * 1024 * 1024,  # 5MB
-            backupCount=3,
+            mode="w",  # Write mode - start fresh
             encoding="utf-8",
         )
         file_handler.setLevel(logging.DEBUG)  # Always log DEBUG to file

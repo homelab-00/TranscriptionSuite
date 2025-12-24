@@ -139,6 +139,55 @@ def convert_to_wav(
         raise RuntimeError(f"Audio conversion failed: {e.stderr}")
 
 
+def convert_to_mp3(
+    input_path: str,
+    output_path: Optional[str] = None,
+    bitrate: str = "192k",
+) -> Optional[str]:
+    """
+    Convert any audio file to MP3 format using FFmpeg.
+
+    Args:
+        input_path: Path to the input audio file
+        output_path: Path for the output MP3 file (auto-generated if None)
+        bitrate: MP3 bitrate (default 192k for good quality/size balance)
+
+    Returns:
+        Path to the converted MP3 file, or None if conversion failed
+    """
+    if not shutil.which("ffmpeg"):
+        logger.error("FFmpeg executable not found")
+        raise RuntimeError("ffmpeg is not installed or not in PATH")
+
+    if output_path is None:
+        output_path = tempfile.mkstemp(suffix=".mp3")[1]
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                input_path,
+                "-y",  # Overwrite output file
+                "-vn",  # No video
+                "-acodec",
+                "libmp3lame",
+                "-b:a",
+                bitrate,
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logger.info(f"Converted {input_path} to MP3")
+        return output_path
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg MP3 conversion failed: {e.stderr}")
+        raise RuntimeError(f"MP3 conversion failed: {e.stderr}")
+
+
 def load_audio(
     file_path: str,
     target_sample_rate: int = 16000,
