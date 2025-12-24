@@ -120,6 +120,10 @@ export const api = {
     await notebookClient.patch(`/recordings/${id}/date`, { recorded_at: recordedAt });
   },
 
+  async updateRecordingTitle(id: number, title: string): Promise<void> {
+    await notebookClient.patch(`/recordings/${id}/title`, { title });
+  },
+
   async getNextAvailableMinute(date: string, hour: number): Promise<{next_minute: number, next_second: number}> {
     const response = await notebookClient.get(`/recordings/next-minute/${date}/${hour}`);
     return response.data;
@@ -205,6 +209,7 @@ export const api = {
       start_time: number;
       end_time: number;
       filename: string;
+      title?: string;
       recorded_at: string;
       speaker: string | null;
       context: string;
@@ -214,6 +219,7 @@ export const api = {
       recording: {
         id: r.recording_id,
         filename: r.filename,
+        title: r.title,
         filepath: '',
         recorded_at: r.recorded_at,
         imported_at: r.recorded_at,

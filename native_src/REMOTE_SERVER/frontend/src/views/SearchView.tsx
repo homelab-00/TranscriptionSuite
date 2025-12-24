@@ -166,7 +166,7 @@ export default function SearchView() {
                       </span>
                     )}
                     <span className="font-medium text-white truncate">
-                      {result.recording.filename}
+                      {result.recording.title || result.recording.filename}
                     </span>
                     <span className="text-xs text-gray-500 flex items-center gap-1">
                       <CalendarIcon size={12} />

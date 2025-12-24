@@ -7,6 +7,7 @@ with the unified transcription engine.
 
 import logging
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -134,9 +135,13 @@ class DiarizationEngine:
         logger.info("Loading PyAnnote diarization pipeline...")
 
         try:
+            if HAS_TORCH and torch is not None:
+                torch.backends.cuda.matmul.allow_tf32 = False
+                torch.backends.cudnn.allow_tf32 = False
+
             self._pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-                use_auth_token=self.hf_token,
+                "pyannote/speaker-diarization-community-1",
+                token=self.hf_token,
             )
 
             # Move to device
@@ -205,18 +210,40 @@ class DiarizationEngine:
         try:
             n_speakers = num_speakers or self.num_speakers
 
-            diarization = self._pipeline(
-                audio_input,
-                num_speakers=n_speakers,
-                min_speakers=self.min_speakers,
-                max_speakers=self.max_speakers,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"std\(\): degrees of freedom is <= 0\..*",
+                    category=UserWarning,
+                )
+
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"TensorFloat-32 \(TF32\) has been disabled.*",
+                    category=UserWarning,
+                )
+
+                diarization = self._pipeline(
+                    audio_input,
+                    num_speakers=n_speakers,
+                    min_speakers=self.min_speakers,
+                    max_speakers=self.max_speakers,
+                )
 
             # Convert to segments
             segments: List[DiarizationSegment] = []
             speakers = set()
 
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
+            annotation = diarization
+            if hasattr(diarization, "speaker_diarization"):
+                annotation = diarization.speaker_diarization
+
+            if not hasattr(annotation, "itertracks"):
+                raise RuntimeError(
+                    f"Unexpected diarization output type: {type(diarization)!r}"
+                )
+
+            for turn, _, speaker in annotation.itertracks(yield_label=True):
                 segments.append(
                     DiarizationSegment(
                         start=turn.start,

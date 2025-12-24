@@ -143,7 +143,7 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Main content */}
       <main className="min-h-screen pt-14 md:pt-0 md:pl-60">
-        <div className="h-[calc(100vh-3.5rem)] md:h-screen overflow-hidden p-4 md:p-8 flex flex-col">
+        <div className="h-[calc(100vh-3.5rem)] md:h-screen overflow-y-auto overflow-x-hidden p-4 md:p-8 flex flex-col">
           {children}
         </div>
       </main>

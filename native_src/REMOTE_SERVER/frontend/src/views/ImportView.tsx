@@ -1,15 +1,23 @@
 import { useState, useRef } from 'react';
-import { Upload, FileAudio, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Upload, FileAudio, CheckCircle, XCircle, Loader2, Play, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { ImportJob } from '../types';
 import { Toggle, Alert, ProgressBar } from '../components/ui';
 
+interface QueuedFile {
+  id: number;
+  file: File;
+  filename: string;
+}
+
 export default function ImportView() {
   const [enableDiarization, setEnableDiarization] = useState(false);
   const [enableWordTimestamps, setEnableWordTimestamps] = useState(true);
+  const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Open HTML file picker
@@ -41,38 +49,62 @@ export default function ImportView() {
     }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      await handleFiles(files);
+      addFilesToQueue(files);
     }
   };
 
-  const handleFiles = async (files: FileList) => {
+  const addFilesToQueue = (files: FileList) => {
+    setError(null);
+    const newFiles: QueuedFile[] = Array.from(files).map((file) => ({
+      id: Date.now() + Math.random(),
+      file,
+      filename: file.name,
+    }));
+    setQueuedFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const removeFromQueue = (id: number) => {
+    setQueuedFiles(prev => prev.filter(f => f.id !== id));
+  };
+
+  const clearQueue = () => {
+    setQueuedFiles([]);
+  };
+
+  const processQueue = async () => {
+    if (queuedFiles.length === 0 || isProcessing) return;
+    
+    setIsProcessing(true);
     setError(null);
 
-    for (const file of Array.from(files)) {
-      // Add job as 'transcribing' immediately for UI feedback
-      const tempId = Date.now() + Math.random();
+    // Process files one at a time
+    for (const queuedFile of queuedFiles) {
+      // Add job as 'transcribing'
       const pendingJob: ImportJob = {
-        id: tempId,
-        filename: file.name,
+        id: queuedFile.id,
+        filename: queuedFile.filename,
         status: 'transcribing',
         message: 'Uploading and transcribing...',
       };
       setJobs(prev => [pendingJob, ...prev]);
+      
+      // Remove from queue
+      setQueuedFiles(prev => prev.filter(f => f.id !== queuedFile.id));
 
       try {
-        // Upload is synchronous - when it returns, transcription is complete
-        const response = await api.uploadFile(file, enableDiarization, enableWordTimestamps);
+        // Upload and transcribe
+        const response = await api.uploadFile(queuedFile.file, enableDiarization, enableWordTimestamps);
         
-        // Update job to completed (replace temp job with real recording_id)
+        // Update job to completed
         setJobs(prev => prev.map(job => 
-          job.id === tempId 
+          job.id === queuedFile.id 
             ? { ...job, id: response.recording_id, status: 'completed', message: response.message }
             : job
         ));
@@ -80,13 +112,15 @@ export default function ImportView() {
       } catch (err: any) {
         // Update job to failed
         setJobs(prev => prev.map(job =>
-          job.id === tempId
+          job.id === queuedFile.id
             ? { ...job, status: 'failed', message: err.response?.data?.detail || err.message }
             : job
         ));
-        setError(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
+        setError(`Failed to upload ${queuedFile.filename}: ${err.response?.data?.detail || err.message}`);
       }
     }
+
+    setIsProcessing(false);
   };
 
   return (
@@ -129,9 +163,65 @@ export default function ImportView() {
           multiple
           accept="audio/*,.mp3,.wav,.opus,.ogg,.flac,.m4a,.wma,.aac"
           className="hidden"
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
+          onChange={(e) => {
+            if (e.target.files) addFilesToQueue(e.target.files);
+            e.target.value = '';  // Reset to allow re-selecting same file
+          }}
         />
       </div>
+
+      {/* File Queue */}
+      {queuedFiles.length > 0 && (
+        <div className="card p-4 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-medium text-white">Files to Import ({queuedFiles.length})</h2>
+            <button
+              onClick={clearQueue}
+              className="text-sm text-gray-400 hover:text-red-400 transition-colors"
+              disabled={isProcessing}
+            >
+              Clear All
+            </button>
+          </div>
+          
+          <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+            {queuedFiles.map((qf) => (
+              <div 
+                key={qf.id}
+                className="flex items-center gap-3 p-2 bg-surface-light rounded-lg"
+              >
+                <FileAudio className="text-gray-400 flex-shrink-0" size={18} />
+                <span className="text-sm text-white truncate flex-1">{qf.filename}</span>
+                <button
+                  onClick={() => removeFromQueue(qf.id)}
+                  className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                  disabled={isProcessing}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+          
+          <button
+            onClick={processQueue}
+            disabled={isProcessing}
+            className="btn-primary w-full flex items-center justify-center gap-2"
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="animate-spin" size={18} />
+                Processing...
+              </>
+            ) : (
+              <>
+                <Play size={18} />
+                Transcribe All Files
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Options */}
       <div className="card p-4 mb-6">
@@ -141,11 +231,13 @@ export default function ImportView() {
             checked={enableWordTimestamps}
             onChange={setEnableWordTimestamps}
             label="Enable word-level timestamps (clickable words in transcript)"
+            disabled={isProcessing}
           />
           <Toggle
             checked={enableDiarization}
             onChange={setEnableDiarization}
             label="Enable speaker diarization (identify who spoke when)"
+            disabled={isProcessing}
           />
         </div>
       </div>

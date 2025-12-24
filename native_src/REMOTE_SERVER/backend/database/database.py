@@ -102,6 +102,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL,
                 filepath TEXT NOT NULL UNIQUE,
+                title TEXT,
                 duration_seconds REAL NOT NULL,
                 recorded_at TIMESTAMP NOT NULL,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -189,6 +190,27 @@ def init_db() -> None:
         if "summary" not in columns:
             cursor.execute("ALTER TABLE recordings ADD COLUMN summary TEXT")
 
+        if "title" not in columns:
+            cursor.execute("ALTER TABLE recordings ADD COLUMN title TEXT")
+            cursor.execute("UPDATE recordings SET title = filename WHERE title IS NULL")
+
+        cursor.execute(
+            """
+            UPDATE segments
+            SET text = (
+                SELECT TRIM(GROUP_CONCAT(TRIM(word), ' '))
+                FROM (
+                    SELECT word
+                    FROM words
+                    WHERE words.segment_id = segments.id
+                    ORDER BY start_time
+                )
+            )
+            WHERE (text IS NULL OR text = '')
+              AND EXISTS (SELECT 1 FROM words WHERE words.segment_id = segments.id)
+            """
+        )
+
         # Conversations table - each recording can have multiple conversations
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
@@ -238,6 +260,7 @@ class Recording:
         self.id = data.get("id")
         self.filename = data.get("filename")
         self.filepath = data.get("filepath")
+        self.title = data.get("title")
         self.duration_seconds = data.get("duration_seconds")
         self.recorded_at = data.get("recorded_at")
         self.imported_at = data.get("imported_at")
@@ -250,6 +273,7 @@ class Recording:
             "id": self.id,
             "filename": self.filename,
             "filepath": self.filepath,
+            "title": self.title,
             "duration_seconds": self.duration_seconds,
             "recorded_at": self.recorded_at,
             "imported_at": self.imported_at,
@@ -265,16 +289,18 @@ def insert_recording(
     duration_seconds: float,
     recorded_at: str,
     has_diarization: bool = False,
+    title: Optional[str] = None,
 ) -> int:
     """Insert a new recording and return its ID."""
     with get_connection() as conn:
         cursor = conn.cursor()
+        recording_title = title or filename
         cursor.execute(
             """
-            INSERT INTO recordings (filename, filepath, duration_seconds, recorded_at, has_diarization)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO recordings (filename, filepath, title, duration_seconds, recorded_at, has_diarization)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (filename, filepath, duration_seconds, recorded_at, int(has_diarization)),
+            (filename, filepath, recording_title, duration_seconds, recorded_at, int(has_diarization)),
         )
         conn.commit()
         return cursor.lastrowid or 0
@@ -328,6 +354,18 @@ def update_recording_summary(recording_id: int, summary: str) -> bool:
         cursor.execute(
             "UPDATE recordings SET summary = ? WHERE id = ?",
             (summary, recording_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_recording_title(recording_id: int, title: str) -> bool:
+    """Update the title for a recording."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE recordings SET title = ? WHERE id = ?",
+            (title, recording_id),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -453,10 +491,12 @@ def search_words(query: str, limit: int = 100) -> List[Dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT w.*, r.filename, r.recorded_at
+            SELECT w.*, r.filename, r.title, r.recorded_at,
+                   s.speaker, s.text AS context
             FROM words w
             JOIN words_fts ON w.id = words_fts.rowid
             JOIN recordings r ON w.recording_id = r.id
+            LEFT JOIN segments s ON w.segment_id = s.id
             WHERE words_fts MATCH ?
             ORDER BY r.recorded_at DESC
             LIMIT ?
@@ -464,6 +504,78 @@ def search_words(query: str, limit: int = 100) -> List[Dict[str, Any]]:
             (query, limit),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+
+def search_words_by_date_range(
+    query: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Search words using FTS5, optionally filtered by recording date."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT w.*, r.filename, r.title, r.recorded_at,
+                   s.speaker, s.text AS context
+            FROM words w
+            JOIN words_fts ON w.id = words_fts.rowid
+            JOIN recordings r ON w.recording_id = r.id
+            LEFT JOIN segments s ON w.segment_id = s.id
+            WHERE words_fts MATCH ?
+              AND (? IS NULL OR date(r.recorded_at) >= date(?))
+              AND (? IS NULL OR date(r.recorded_at) <= date(?))
+            ORDER BY r.recorded_at DESC
+            LIMIT ?
+            """,
+            (query, start_date, start_date, end_date, end_date, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def search_recording_metadata(
+    query: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Search recordings by filename/title/summary."""
+    like_query = f"%{query}%"
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id AS recording_id, filename, title, recorded_at
+            FROM recordings
+            WHERE (filename LIKE ? OR title LIKE ?)
+              AND (? IS NULL OR date(recorded_at) >= date(?))
+              AND (? IS NULL OR date(recorded_at) <= date(?))
+            ORDER BY recorded_at DESC
+            LIMIT ?
+            """,
+            (like_query, like_query, start_date, start_date, end_date, end_date, limit),
+        )
+        filename_matches = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute(
+            """
+            SELECT id AS recording_id, filename, title, recorded_at, summary
+            FROM recordings
+            WHERE summary IS NOT NULL
+              AND summary != ''
+              AND summary LIKE ?
+              AND (? IS NULL OR date(recorded_at) >= date(?))
+              AND (? IS NULL OR date(recorded_at) <= date(?))
+            ORDER BY recorded_at DESC
+            LIMIT ?
+            """,
+            (like_query, start_date, start_date, end_date, end_date, limit),
+        )
+        summary_matches = [dict(row) for row in cursor.fetchall()]
+
+    return filename_matches + summary_matches
 
 
 def search_recordings(query: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -1053,6 +1165,8 @@ def _insert_diarization_segments_with_words(
     """Insert diarization segments with optional word timestamps (internal helper)."""
     word_map: List[Dict[str, Any]] = word_timestamps or []
 
+    inserted_segments: List[Dict[str, Any]] = []
+
     for seg_idx, segment in enumerate(diarization_segments):
         speaker = segment.get("speaker")
         text = segment.get("text", "")
@@ -1069,33 +1183,103 @@ def _insert_diarization_segments_with_words(
         )
         segment_id = cursor.lastrowid
 
-        if word_map:
-            segment_words = [
-                w
-                for w in word_map
-                if w.get("start", 0) >= start - 0.1 and w.get("end", 0) <= end + 0.1
+        inserted_segments.append(
+            {
+                "segment_id": segment_id,
+                "start": float(start or 0.0),
+                "end": float(end or 0.0),
+            }
+        )
+
+    if word_map and inserted_segments:
+        words_by_segment_id: Dict[int, List[Dict[str, Any]]] = {
+            int(seg["segment_id"]): [] for seg in inserted_segments
+        }
+
+        for w in word_map:
+            w_start = float(w.get("start", w.get("start_time", 0.0)) or 0.0)
+            w_end = float(w.get("end", w.get("end_time", w_start)) or w_start)
+            w_mid = (w_start + w_end) / 2.0
+
+            best_segment_id: Optional[int] = None
+            best_overlap: float = 0.0
+            best_distance: Optional[float] = None
+
+            for seg in inserted_segments:
+                seg_start = float(seg.get("start", 0.0))
+                seg_end = float(seg.get("end", 0.0))
+
+                overlap = max(0.0, min(w_end, seg_end) - max(w_start, seg_start))
+                if overlap > 0.0:
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_segment_id = int(seg["segment_id"])
+                    continue
+
+                if best_overlap > 0.0:
+                    continue
+
+                if seg_start <= w_mid <= seg_end:
+                    distance = 0.0
+                elif w_mid < seg_start:
+                    distance = seg_start - w_mid
+                else:
+                    distance = w_mid - seg_end
+
+                if best_distance is None or distance < best_distance:
+                    best_distance = distance
+                    best_segment_id = int(seg["segment_id"])
+
+            if best_segment_id is not None:
+                words_by_segment_id[best_segment_id].append(w)
+
+        for segment_id, segment_words in words_by_segment_id.items():
+            if not segment_words:
+                continue
+
+            segment_words_sorted = sorted(
+                segment_words,
+                key=lambda x: float(x.get("start", x.get("start_time", 0.0)) or 0.0),
+            )
+
+            words_batch = [
+                {
+                    "recording_id": recording_id,
+                    "segment_id": segment_id,
+                    "word_index": i,
+                    "word": w.get("word", ""),
+                    "start_time": float(w.get("start", w.get("start_time", 0.0)) or 0.0),
+                    "end_time": float(
+                        w.get(
+                            "end",
+                            w.get(
+                                "end_time",
+                                w.get("start", w.get("start_time", 0.0)),
+                            ),
+                        )
+                        or 0.0
+                    ),
+                    "confidence": w.get("confidence"),
+                }
+                for i, w in enumerate(segment_words_sorted)
             ]
-            if segment_words:
-                words_batch = [
-                    {
-                        "recording_id": recording_id,
-                        "segment_id": segment_id,
-                        "word_index": i,
-                        "word": w.get("word", ""),
-                        "start_time": w.get("start", 0.0),
-                        "end_time": w.get("end", 0.0),
-                        "confidence": w.get("confidence"),
-                    }
-                    for i, w in enumerate(segment_words)
-                ]
-                cursor.executemany(
-                    """
-                    INSERT INTO words 
-                    (recording_id, segment_id, word_index, word, start_time, end_time, confidence)
-                    VALUES (:recording_id, :segment_id, :word_index, :word, :start_time, :end_time, :confidence)
-                    """,
-                    words_batch,
-                )
+
+            cursor.executemany(
+                """
+                INSERT INTO words 
+                (recording_id, segment_id, word_index, word, start_time, end_time, confidence)
+                VALUES (:recording_id, :segment_id, :word_index, :word, :start_time, :end_time, :confidence)
+                """,
+                words_batch,
+            )
+
+            segment_text = " ".join(
+                [str(w.get("word", "")).strip() for w in segment_words_sorted]
+            ).strip()
+            cursor.execute(
+                "UPDATE segments SET text = ? WHERE id = ?",
+                (segment_text, segment_id),
+            )
     cursor.connection.commit()
 
 
@@ -1140,12 +1324,13 @@ def save_longform_to_database(
         cursor.execute(
             """
             INSERT INTO recordings 
-            (filename, filepath, duration_seconds, recorded_at, has_diarization)
-            VALUES (?, ?, ?, ?, ?)
+            (filename, filepath, title, duration_seconds, recorded_at, has_diarization)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 audio_path.name,
                 str(audio_path),
+                audio_path.stem,
                 duration_seconds,
                 recorded_at.isoformat(),
                 int(has_diarization),

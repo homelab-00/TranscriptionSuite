@@ -28,6 +28,12 @@ export default function RecordingView() {
   const [recording, setRecording] = useState<Recording | null>(null);
   const [transcription, setTranscription] = useState<Transcription | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Title editing state
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -91,6 +97,7 @@ export default function RecordingView() {
         api.getTranscription(recordingId),
       ]);
       setRecording(rec);
+      setTitleDraft(rec.title || rec.filename);
       setTranscription(trans);
       // Load existing summary if available
       setLlmSummary(rec.summary || '');
@@ -119,6 +126,43 @@ export default function RecordingView() {
       console.error('Failed to load recording:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveTitle = async (newTitle: string) => {
+    if (!recording) return;
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      setTitleDraft(recording.title || recording.filename);
+      return;
+    }
+
+    if (trimmed === (recording.title || recording.filename)) return;
+
+    try {
+      await api.updateRecordingTitle(recording.id, trimmed);
+      setRecording(prev => prev ? { ...prev, title: trimmed } : null);
+    } catch (error) {
+      console.error('Failed to save title:', error);
+      setTitleDraft(recording.title || recording.filename);
+    }
+  };
+
+  const handleTitleBlur = async () => {
+    setIsEditingTitle(false);
+    await saveTitle(titleDraft);
+  };
+
+  const handleTitleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      await handleTitleBlur();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setTitleDraft(recording?.title || recording?.filename || '');
+      setIsEditingTitle(false);
     }
   };
 
@@ -343,7 +387,28 @@ export default function RecordingView() {
 
       {/* Recording info */}
       <div className="card p-4 mb-4">
-        <h1 className="text-xl font-semibold text-white mb-3">{recording.filename}</h1>
+        {isEditingTitle ? (
+          <input
+            ref={titleInputRef}
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={handleTitleBlur}
+            onKeyDown={handleTitleKeyDown}
+            className="w-full bg-transparent text-white text-xl font-semibold outline-none border border-gray-700 rounded px-2 py-1 mb-3"
+            autoFocus
+          />
+        ) : (
+          <h1
+            className="text-xl font-semibold text-white mb-3 cursor-text"
+            onClick={() => {
+              setIsEditingTitle(true);
+              setTimeout(() => titleInputRef.current?.focus(), 0);
+            }}
+            title="Click to edit title"
+          >
+            {recording.title || recording.filename}
+          </h1>
+        )}
         <div className="flex flex-wrap gap-4 text-sm text-gray-400">
           <span className="flex items-center gap-1.5">
             <CalendarIcon size={16} />

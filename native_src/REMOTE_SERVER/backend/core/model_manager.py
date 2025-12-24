@@ -20,6 +20,10 @@ from server.core.transcription_engine import (
     TranscriptionEngine,
     create_transcription_engine,
 )
+from server.core.diarization_engine import (
+    DiarizationEngine,
+    create_diarization_engine,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,22 +77,20 @@ class ModelManager:
         if self._transcription_engine is not None:
             self._transcription_engine.unload_model()
 
+    @property
+    def diarization_engine(self) -> DiarizationEngine:
+        """Get or create the diarization engine."""
+        if self._diarization_engine is None:
+            self._diarization_engine = create_diarization_engine(self.config)
+        return self._diarization_engine
+
     def load_diarization_model(self) -> None:
         """Load the speaker diarization model."""
-        if self._diarization_engine is not None:
-            logger.debug("Diarization model already loaded")
-            return
-
-        # Import and load diarization engine
-        try:
-            from server.core.diarization_engine import create_diarization_engine
-
-            self._diarization_engine = create_diarization_engine(self.config)
-            logger.info("Diarization model loaded")
-        except ImportError as e:
-            logger.warning(f"Diarization not available: {e}")
-        except Exception as e:
-            logger.error(f"Failed to load diarization model: {e}")
+        engine = self.diarization_engine
+        if not engine.is_loaded():
+            logger.info("Loading diarization model...")
+            engine.load()
+            logger.info("Diarization model ready")
 
     def unload_diarization_model(self) -> None:
         """Unload the diarization model."""
