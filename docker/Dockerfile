@@ -14,21 +14,13 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /build
 
-# Build Audio Notebook frontend
+# Build Audio Notebook frontend (unified UI for all routes)
+# Contains Calendar, Search, Import, Record, and Admin views
 COPY native_src/AUDIO_NOTEBOOK/package*.json ./audio_notebook/
 WORKDIR /build/audio_notebook
 RUN npm ci
 
 COPY native_src/AUDIO_NOTEBOOK/ ./
-RUN npm run build
-
-# Build Remote Server frontend
-WORKDIR /build
-COPY native_src/REMOTE_SERVER/frontend/package*.json ./remote_server/
-WORKDIR /build/remote_server
-RUN npm ci
-
-COPY native_src/REMOTE_SERVER/frontend/ ./
 RUN npm run build
 
 # =============================================================================
@@ -82,9 +74,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY native_src/REMOTE_SERVER/backend/ ./server/
 COPY docker/entrypoint.py ./docker/
 
-# Copy built frontends to static serving location
+# Copy built frontend to static serving location (unified UI)
 COPY --from=frontend-builder /build/audio_notebook/dist ./static/audio_notebook
-COPY --from=frontend-builder /build/remote_server/dist ./static/remote_ui
 
 # Copy configuration template
 COPY native_src/config.yaml ./config/config.yaml.example
