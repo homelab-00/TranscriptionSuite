@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from server.config import get_config
-from server.core.audio_utils import convert_to_mp3
+from server.core.audio_utils import convert_to_mp3, load_audio
 from server.database.database import (
     delete_recording,
     get_all_recordings,
@@ -27,6 +27,7 @@ from server.database.database import (
     get_segments,
     get_words,
     save_longform_to_database,
+    update_recording_title,
     update_recording_summary,
 )
 
@@ -41,6 +42,7 @@ class RecordingResponse(BaseModel):
     id: int
     filename: str
     filepath: str
+    title: Optional[str] = None
     duration_seconds: float
     recorded_at: str
     imported_at: Optional[str] = None
@@ -60,6 +62,12 @@ class SummaryUpdate(BaseModel):
     """Request body for updating a recording's summary."""
 
     summary: str
+
+
+class TitleUpdate(BaseModel):
+    """Request body for updating a recording's title."""
+
+    title: str
 
 
 @router.get("/recordings", response_model=List[RecordingResponse])
@@ -159,6 +167,25 @@ async def update_summary_patch(
         return {"status": "updated", "id": recording_id, "summary": body.summary}
     else:
         raise HTTPException(status_code=500, detail="Failed to update summary")
+
+
+@router.patch("/recordings/{recording_id}/title")
+async def update_title_patch(
+    recording_id: int,
+    body: TitleUpdate,
+) -> Dict[str, Any]:
+    """Update the title for a recording (PATCH with JSON body)."""
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+
+    if update_recording_title(recording_id, title):
+        return {"status": "updated", "id": recording_id, "title": title}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update title")
 
 
 @router.get("/recordings/{recording_id}/audio")
@@ -277,6 +304,29 @@ async def upload_and_transcribe(
             word_timestamps=enable_word_timestamps,
         )
 
+        # Run diarization if enabled
+        diarization_segments = None
+        if enable_diarization:
+            try:
+                logger.info(f"Running diarization for: {file.filename}")
+                model_manager.load_diarization_model()
+                diar_engine = model_manager.diarization_engine
+                
+                # Load audio for diarization
+                audio_data, sample_rate = load_audio(str(tmp_path), target_sample_rate=16000)
+                diar_result = diar_engine.diarize_audio(audio_data, sample_rate)
+                
+                # Convert to list of dicts for database
+                diarization_segments = [seg.to_dict() for seg in diar_result.segments]
+                logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
+            except ValueError as e:
+                # HF_TOKEN missing - log helpful message
+                logger.error(f"Diarization requires HuggingFace token: {e}")
+                logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
+            except Exception as e:
+                logger.error(f"Diarization failed (continuing without): {e}")
+                # Don't fail the whole upload if diarization fails
+
         # Determine recorded_at timestamp
         recorded_at = None
         if file_created_at:
@@ -318,7 +368,7 @@ async def upload_and_transcribe(
             duration_seconds=result.duration,
             transcription_text=result.text,
             word_timestamps=word_timestamps_list,
-            diarization_segments=None,  # TODO: Add diarization support
+            diarization_segments=diarization_segments,
             recorded_at=recorded_at,
         )
 

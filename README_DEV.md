@@ -267,10 +267,20 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
 
 **Record UI Features:**
 - Token-based authentication (login with admin or user token)
-- File upload transcription
-- Real-time microphone recording
+- File upload transcription (with optional diarization and word timestamps)
+- Real-time microphone recording via WebSocket
 - Admin panel for token management (admin users only)
 - Works on Android browsers (no app needed)
+
+**Notebook UI Features:**
+- Calendar view of all recordings by date
+- Day view with timeline of recordings
+- Full-text search across all transcriptions
+- Inline title editing (click to edit)
+- Speaker diarization visualization (when enabled)
+- Word-level timestamps (clickable words to jump to audio position)
+- LLM chat integration for summarization and Q&A
+- Audio playback with waveform visualization
 
 **Authentication:** On first run, an admin token is automatically generated and printed to the console logs. Save this token to login at `/auth` (or `/record` which will redirect to `/auth`) and access the admin panel for token management.
 
@@ -289,9 +299,16 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET | Get recording details |
 | `/api/notebook/recordings/{id}` | DELETE | Delete recording |
+| `/api/notebook/recordings/{id}/title` | PATCH | Update recording title |
+| `/api/notebook/recordings/{id}/summary` | PATCH | Update recording summary |
+| `/api/notebook/recordings/{id}/transcription` | GET | Get full transcription with segments |
+| `/api/notebook/recordings/{id}/audio` | GET | Download audio file |
+| `/api/notebook/transcribe/upload` | POST | Upload and transcribe audio file (with diarization support) |
 | `/api/notebook/calendar` | GET | Calendar view data |
 | `/api/search` | GET | Full-text search |
 | `/api/admin/status` | GET | Admin status info |
+| `/api/llm/status` | GET | LM Studio connection status |
+| `/api/llm/chat` | POST | Send chat message to LLM |
 
 ### WebSocket Protocol
 
@@ -816,7 +833,16 @@ Two Docker volumes provide persistent storage:
 
 | Path | Description |
 |------|-------------|
-| `/models/` | HuggingFace models cache (Whisper, pyannote diarization) |
+| `/models/hub/` | HuggingFace models cache (Whisper, PyAnnote diarization) |
+| `/models/hub/models--Systran--faster-whisper-large-v3/` | Whisper model files (~3GB) |
+| `/models/hub/models--pyannote--speaker-diarization-community-1/` | PyAnnote diarization model files (~1-2GB) |
+
+**Model Download Behavior:**
+- Models are downloaded on first use (not during Docker build)
+- Whisper model: Downloads when first transcription is requested
+- PyAnnote model: Downloads when first diarization is requested (requires `HUGGINGFACE_TOKEN`)
+- Models persist across container rebuilds via the volume
+- Total storage: ~4-5GB for both models
 
 #### Volume Persistence
 
@@ -1049,7 +1075,34 @@ Database operations for Audio Notebook:
 - `segments` - Transcription segments with timestamps
 - `words` - Word-level timing and confidence
 - `recordings_fts` - FTS5 virtual table for search
+
+**Notes:**
+
+- Recordings now support an editable `title` field (stored in `recordings.title`).
+  - Frontend allows inline editing by clicking the title in the DayView modal
+  - Title updates are saved via `PATCH /api/notebook/recordings/{id}/title`
+- For diarized recordings, word timestamps are assigned to speaker segments using overlap/nearest-segment matching to avoid dropping boundary words (e.g. the first word of an utterance).
+  - **Bug Fix (Dec 2024)**: Fixed a critical issue where the first word of each speaker utterance was being dropped in diarized transcriptions. The root cause was in `_insert_diarization_segments_with_words()` which was using `word['start'] >= seg_start` instead of `word['start'] > seg_start`, causing boundary words to be skipped when their start time exactly matched the segment start time. Changed to use `>` for end boundary and `>=` for start boundary to ensure all words are captured.
 - `conversations` + `messages` - Chat history
+
+**Speaker Diarization:**
+
+The server uses PyAnnote Audio for speaker diarization (identifying "who spoke when"):
+
+- **Model**: `pyannote/speaker-diarization-community-1` (improved over 3.1)
+- **Requirements**: HuggingFace token with accepted model license
+- **Features**:
+  - Automatic speaker detection (typically 2-3 speakers)
+  - Segment-level speaker labels
+  - Word-level speaker assignment via overlap matching
+- **Configuration**: Enable via `enable_diarization=true` parameter in upload endpoint
+- **Storage**: Diarization segments stored in `diarization_segments` table with speaker labels
+- **Display**: DayView shows speaker chips for each segment when diarization data is available
+- **Warning Suppression**: PyAnnote generates several benign warnings that are now filtered:
+  - TensorFloat-32 (TF32) reproducibility warnings (see [pyannote/pyannote-audio#1370](https://github.com/pyannote/pyannote-audio/issues/1370))
+  - Pooling `std()` degrees of freedom warnings during inference
+  - TF32 is explicitly disabled before pipeline loading to prevent accuracy issues
+  - Warnings are filtered in `diarization_engine.py` using `warnings.catch_warnings()`
 
 ##### `token_store.py` - Authentication Management
 
@@ -1071,6 +1124,13 @@ The REMOTE_SERVER includes a React frontend for remote web access:
 - React 18 + TypeScript
 - Vite (build tool)
 - TailwindCSS (styling)
+- Lucide React (icons)
+- Howler.js (audio playback)
+
+**UI Features:**
+- **Inline Title Editing**: Click any recording title in DayView modal to edit it inline. Press Enter to save or Escape to cancel. Changes persist via `PATCH /api/notebook/recordings/{id}/title`.
+- **Vertical Scrolling**: Layout component (`Layout.tsx`) uses `overflow-y-auto` on main content area to allow scrolling on long pages (e.g., Import view with many files).
+- **Favicon Handling**: Uses relative path `vite.svg` in `index.html` to work correctly when served under `/notebook`, `/record`, or `/admin` base paths. The favicon is served from `/app/static/frontend/vite.svg` in Docker.
 
 **Development workflow:**
 
@@ -1313,14 +1373,18 @@ This section tracks when and where sensitive configuration data is collected, st
 
 **Key Behavior:**
 ```bash
-# Start with TLS - certificates are bind-mounted
+# Start with TLS and diarization support
+HUGGINGFACE_TOKEN=hf_your_token_here \
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 
-# Switch back to local mode
+# Switch back to local mode (without diarization)
 docker compose up -d    # TLS_ENABLED defaults to false
+
+# Local mode with diarization
+HUGGINGFACE_TOKEN=hf_your_token_here docker compose up -d
 ```
 
 > **Important:** Always use `docker compose up -d` (not `docker compose start`) when switching modes. The `start` command only restarts a stopped container without re-reading environment variables or volume mounts. Certificate bind mounts are configured at container creation time.
@@ -1331,7 +1395,8 @@ docker compose up -d    # TLS_ENABLED defaults to false
 
 **Docker Mode:**
 1. Environment variable: Provided via `HUGGINGFACE_TOKEN` env var at startup
-2. Optional: If not provided, diarization will be disabled (transcription still works)
+2. **Required for diarization**: PyAnnote models require authentication
+3. Optional: If not provided, diarization will be disabled (transcription still works)
 
 **Native Development:**
 - Set via `HF_TOKEN` environment variable
@@ -1345,6 +1410,12 @@ HUGGINGFACE_TOKEN=hf_your_token_here docker compose up -d
 ```
 
 The token is passed to the container as `HF_TOKEN` environment variable and cached by the HuggingFace library in the `/models` volume.
+
+**Getting a HuggingFace Token:**
+1. Create a free account at [huggingface.co](https://huggingface.co)
+2. Go to Settings → Access Tokens
+3. Create a new token with "Read" permissions
+4. Accept the PyAnnote model license at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
 
 **Native Development:**
 - Set via `HF_TOKEN` environment variable
@@ -1578,6 +1649,35 @@ The container health check automatically adapts to your TLS configuration:
 
 **First transcription of a new model**: Additional time may be needed if Whisper models are being downloaded from HuggingFace (varies by model size and network speed).
 
+### FastAPI Startup Errors
+
+**Server Bootloop with FastAPIError:**
+
+If the server crashes on startup with an error like:
+
+```
+fastapi.exceptions.FastAPIError: Invalid args for response field! 
+Hint: check that starlette.responses.FileResponse | starlette.responses.JSONResponse is a valid Pydantic field type.
+```
+
+**Cause**: FastAPI inspects route handler return type annotations to generate response models. Union types like `FileResponse | JSONResponse` are not valid Pydantic field types and cause import-time crashes.
+
+**Solution**: Remove the return type annotation from the problematic route handler:
+
+```python
+# Bad - causes bootloop
+@app.get("/favicon.ico")
+async def favicon() -> FileResponse | JSONResponse:
+    ...
+
+# Good - no type annotation
+@app.get("/favicon.ico")
+async def favicon():
+    ...
+```
+
+Alternatively, use `response_model=None` in the decorator to disable response model generation.
+
 ### cuDNN Library Errors
 
 If you see errors like:
@@ -1589,7 +1689,7 @@ Invalid handle. Cannot load symbol cudnnCreateTensorDescriptor
 
 This means the Docker image is missing cuDNN libraries. The `faster-whisper` library uses CTranslate2 which requires **system cuDNN libraries** (unlike PyTorch which bundles its own).
 
-**Solution**: The Dockerfile must use `nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04` as the base image, not `cuda:12.6.0-base`. This adds ~1.7GB to the image size but is necessary for GPU transcription.
+**Solution**: The Dockerfile must use a CUDA base image with cuDNN runtime (e.g., `nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04`). This adds ~1.7GB to the image size but is necessary for GPU transcription.
 
 If you encounter this after a Docker update or base image change, rebuild the container:
 
@@ -1598,6 +1698,73 @@ cd docker
 docker compose build --no-cache
 docker compose up -d
 ```
+
+#### cuDNN Version Mismatch
+
+If you see errors like:
+
+```
+cuDNN version incompatibility: PyTorch was compiled against (9, 8, 0) but found runtime version (9, 7, 0)
+```
+
+This occurs when PyTorch expects a newer cuDNN version than what's provided by the CUDA base image. PyTorch bundles its own cuDNN libraries, but the system cuDNN may take precedence.
+
+**Root Cause**: The `LD_LIBRARY_PATH` environment variable determines library search order. If the system cuDNN path comes before PyTorch's bundled cuDNN, the incompatible system version is loaded.
+
+**Solution**: Set `LD_LIBRARY_PATH` in the Dockerfile to prioritize PyTorch's bundled cuDNN:
+
+```dockerfile
+# Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+```
+
+**Key Points**:
+- PyTorch 2.8.0+ bundles cuDNN 9.8.0
+- CUDA 12.8 base image includes cuDNN 9.7.0
+- The path must match your actual virtual environment location (check `UV_PROJECT_ENVIRONMENT` in Dockerfile)
+- Both `nvidia/cudnn/lib` and `torch/lib` should be included for compatibility
+
+After updating the Dockerfile:
+
+```bash
+cd docker
+docker compose build --no-cache
+docker compose up -d
+```
+
+### Favicon 404 Errors
+
+**Problem**: Browser requests `/vite.svg` or `/favicon.ico` resulting in 404 errors or auth redirects in TLS mode.
+
+**Root Cause**: 
+- Absolute favicon path (`href="/vite.svg"`) doesn't work when frontend is served under base paths like `/notebook`
+- Missing `/favicon.ico` route causes browsers to hit auth middleware in TLS mode
+
+**Solution**:
+1. **Frontend**: Change `index.html` favicon to relative path:
+   ```html
+   <link rel="icon" type="image/svg+xml" href="vite.svg" />
+   ```
+
+2. **Backend**: Add `/favicon.ico` route and mark as public:
+   ```python
+   PUBLIC_ROUTES = {
+       "/health",
+       "/api/auth/login",
+       "/auth",
+       "/auth/",
+       "/favicon.ico",  # Add this
+   }
+   
+   @app.get("/favicon.ico", include_in_schema=False)
+   async def favicon():
+       icon_path = Path("/app/static/frontend/vite.svg")
+       if icon_path.exists():
+           return FileResponse(icon_path)
+       return JSONResponse(status_code=204, content=None)
+   ```
+
+3. **Static Asset**: Ensure `vite.svg` exists in `frontend/public/` directory so Vite copies it to build output.
 
 ### GNOME Tray Not Showing
 
@@ -1666,9 +1833,16 @@ ls -la ~/.config/TranscriptionSuite/logs/
 - Python 3.11
 - FastAPI + Uvicorn
 - faster-whisper (CTranslate2 backend)
-- PyAnnote Audio (optional, for diarization)
-- PyTorch + TorchAudio
+- PyAnnote Audio 4.0.3+ (for speaker diarization)
+- PyTorch 2.8.0 + TorchAudio 2.8.0
 - SQLite with FTS5
+- CUDA 12.8 with cuDNN 9.x runtime
+
+**Key Version Constraints:**
+- PyTorch 2.8.0 is pinned for compatibility with PyAnnote Audio 4.0.3
+- CUDA 12.8 base image provides cuDNN 9.7.0 (system)
+- PyTorch bundles cuDNN 9.8.0 (prioritized via `LD_LIBRARY_PATH`)
+- TorchAudio is being deprecated but still required by PyAnnote and Silero VAD
 
 ### Client
 

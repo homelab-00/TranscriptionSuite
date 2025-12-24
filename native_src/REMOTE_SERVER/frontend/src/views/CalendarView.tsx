@@ -88,7 +88,7 @@ export default function CalendarView() {
               {recordings.slice(0, 2).map((rec) => (
                 <div key={rec.id} className="flex items-center text-xs text-gray-300 truncate bg-gray-900/50 rounded px-1 py-0.5">
                   <Mic size={10} className="mr-1 text-primary shrink-0" />
-                  <span className="truncate">{rec.filename}</span>
+                  <span className="truncate">{rec.title || rec.filename}</span>
                 </div>
               ))}
               {recordings.length > 2 && (

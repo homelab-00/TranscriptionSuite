@@ -21,6 +21,7 @@ export interface Recording {
   id: number;
   filename: string;
   filepath: string;
+  title?: string;
   recorded_at: string;
   imported_at: string;
   duration_seconds: number;

@@ -46,6 +46,11 @@ export default function DayView() {
   const [selectedRecording, setSelectedRecording] = useState<RecordingWithTranscription | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newEntryHour, setNewEntryHour] = useState<number | null>(null);
+
+  // Title editing state (modal)
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   
   // Audio player state
   const [playing, setPlaying] = useState(false);
@@ -119,6 +124,44 @@ export default function DayView() {
     };
   }, [currentDate]);
 
+  const saveTitle = async (newTitle: string) => {
+    if (!selectedRecording) return;
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      setTitleDraft(selectedRecording.title || selectedRecording.filename);
+      return;
+    }
+
+    if (trimmed === (selectedRecording.title || selectedRecording.filename)) return;
+
+    try {
+      await api.updateRecordingTitle(selectedRecording.id, trimmed);
+      setSelectedRecording(prev => prev ? { ...prev, title: trimmed } : null);
+      setRecordings(prev => prev.map(r => (r.id === selectedRecording.id ? { ...r, title: trimmed } : r)));
+    } catch (error) {
+      console.error('Failed to save title:', error);
+      setTitleDraft(selectedRecording.title || selectedRecording.filename);
+    }
+  };
+
+  const handleTitleBlur = async () => {
+    setIsEditingTitle(false);
+    await saveTitle(titleDraft);
+  };
+
+  const handleTitleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      await handleTitleBlur();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setTitleDraft(selectedRecording?.title || selectedRecording?.filename || '');
+      setIsEditingTitle(false);
+    }
+  };
+
   useEffect(() => {
     if (date) {
       setCurrentDate(dayjs(date));
@@ -155,6 +198,8 @@ export default function DayView() {
         const rec = recordingsWithTranscriptions.find(r => r.id === recordingId);
         if (rec) {
           setSelectedRecording(rec);
+          setIsEditingTitle(false);
+          setTitleDraft(rec.title || rec.filename);
           setLlmSummary(rec.summary || '');
           setLlmError(null);
           loadAudioWithSeek(rec.id, timeParam ? parseFloat(timeParam) : null);
@@ -553,6 +598,8 @@ export default function DayView() {
 
   const handleCloseRecording = () => {
     setSelectedRecording(null);
+    setIsEditingTitle(false);
+    setTitleDraft('');
     setChatPanelOpen(false);
     if (soundRef.current) {
       soundRef.current.unload();
@@ -653,6 +700,8 @@ export default function DayView() {
   const handleRecordingClick = (rec: RecordingWithTranscription, event: React.MouseEvent) => {
     event.stopPropagation();
     setSelectedRecording(rec);
+    setIsEditingTitle(false);
+    setTitleDraft(rec.title || rec.filename);
     // Load existing summary if available
     setLlmSummary(rec.summary || '');
     setLlmError(null);
@@ -702,7 +751,7 @@ export default function DayView() {
               >
                 <div className="flex items-center justify-between mb-1 min-w-0">
                   <span className="font-medium text-white text-sm group-hover:text-primary truncate mr-1">
-                    {rec.filename}
+                    {rec.title || rec.filename}
                   </span>
                 </div>
                 <div className="flex items-center justify-between mt-auto">
@@ -794,11 +843,40 @@ export default function DayView() {
       <Modal
         open={!!selectedRecording}
         onClose={handleCloseRecording}
-        title={selectedRecording?.filename}
         maxWidth="5xl"
       >
         {selectedRecording && (
           <div>
+            {/* Editable Title */}
+            <div className="mb-3">
+              {isEditingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={handleTitleBlur}
+                  onKeyDown={handleTitleKeyDown}
+                  className="w-full bg-transparent text-white text-lg font-semibold outline-none border border-gray-700 rounded px-2 py-1"
+                  autoFocus
+                />
+              ) : (
+                <div
+                  className="text-lg font-semibold text-white cursor-text"
+                  onClick={() => {
+                    setIsEditingTitle(true);
+                    setTitleDraft(selectedRecording.title || selectedRecording.filename);
+                    setTimeout(() => titleInputRef.current?.focus(), 0);
+                  }}
+                  title="Click to edit title"
+                >
+                  {selectedRecording.title || selectedRecording.filename}
+                </div>
+              )}
+              {!isEditingTitle && (
+                <p className="text-xs text-gray-500 mt-1">Click to edit</p>
+              )}
+            </div>
+
             <p className="text-sm text-gray-400 mb-4">
               Recorded: {new Date(selectedRecording.recorded_at).toLocaleString()} | 
               Duration: {formatTime(selectedRecording.duration_seconds)} | 

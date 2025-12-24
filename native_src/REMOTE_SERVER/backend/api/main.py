@@ -38,6 +38,7 @@ PUBLIC_ROUTES = {
     "/api/auth/login",
     "/auth",
     "/auth/",
+    "/favicon.ico",
 }
 
 # Route prefixes that don't require authentication
@@ -486,6 +487,14 @@ async def serve_auth_page(path: str = "") -> HTMLResponse:
 
 
 # Root redirect - send to notebook calendar by default
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    icon_path = Path("/app/static/frontend/vite.svg")
+    if icon_path.exists():
+        return FileResponse(icon_path)
+    return JSONResponse(status_code=204, content=None)
+
+
 @app.get("/", include_in_schema=False)
 async def root_redirect() -> RedirectResponse:
     """Redirect root to /notebook/calendar."""

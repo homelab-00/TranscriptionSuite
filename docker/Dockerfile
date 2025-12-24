@@ -26,8 +26,8 @@ RUN npm run build
 # Stage 2: Python Runtime
 # =============================================================================
 # CTranslate2 (used by faster-whisper) requires system cuDNN libraries
-# The cudnn-runtime image adds ~1.7GB but is necessary for GPU transcription
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04 AS runtime
+# CUDA 12.8 with cuDNN 9.x is compatible with PyTorch 2.8.0
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 AS runtime
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -89,6 +89,8 @@ ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=8000
 ENV LOG_LEVEL=INFO
 ENV HF_HOME=/models
+# Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
 
 # Expose port
 EXPOSE 8000

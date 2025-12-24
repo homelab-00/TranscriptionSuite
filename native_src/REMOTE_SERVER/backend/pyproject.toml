@@ -34,9 +34,9 @@ dependencies = [
     # Core ML / Transcription
     "faster-whisper>=1.0.0",
     "ctranslate2>=4.0.0",
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",  # Required by Silero VAD
-    "pyannote.audio>=3.1.0",  # Speaker diarization
+    "torch==2.8.0",
+    "torchaudio==2.8.0", # Required by Silero VAD & PyAnnote
+    "pyannote.audio==4.0.3",  # Speaker diarization
     
     # Audio Processing
     "numpy>=1.24.0",
