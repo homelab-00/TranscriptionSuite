@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { api, getWsUrl } from '../api/client';
 import { WSMessage, TranscriptionResult } from '../types';
 
 interface WebSocketOptions {
@@ -19,13 +18,32 @@ export type WebSocketStatus =
   | 'busy'
   | 'error';
 
+// Get WebSocket URL (same port as current page, /ws endpoint)
+const getWsUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname;
+  const port = window.location.port || '8443';
+  return `${protocol}//${host}:${port}/ws`;
+};
+
+// Get auth token from cookie
+const getAuthToken = (): string | null => {
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === 'auth_token') {
+      return value;
+    }
+  }
+  return null;
+};
+
 export function useWebSocket(options: WebSocketOptions = {}) {
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
-  // Store options in ref to avoid recreating callbacks on every render
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -35,14 +53,13 @@ export function useWebSocket(options: WebSocketOptions = {}) {
   }, []);
 
   const connect = useCallback(() => {
-    const token = api.getToken();
+    const token = getAuthToken();
     if (!token) {
       setError('Not authenticated');
       updateStatus('error');
       return;
     }
 
-    // Prevent duplicate connections
     if (wsRef.current?.readyState === WebSocket.OPEN || 
         wsRef.current?.readyState === WebSocket.CONNECTING) {
       return;
@@ -56,7 +73,6 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       ws.onopen = () => {
         updateStatus('authenticating');
-        // Send auth message
         ws.send(JSON.stringify({
           type: 'auth',
           data: { token },
@@ -81,7 +97,6 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       ws.onclose = () => {
         wsRef.current = null;
-        // Only set disconnected if not already in error state
         setStatus(prev => prev === 'error' ? 'error' : 'disconnected');
       };
 
@@ -144,7 +159,6 @@ export function useWebSocket(options: WebSocketOptions = {}) {
         break;
 
       case 'pong':
-        // Heartbeat response
         break;
 
       default:
@@ -205,7 +219,6 @@ export function useWebSocket(options: WebSocketOptions = {}) {
     return true;
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       disconnect();

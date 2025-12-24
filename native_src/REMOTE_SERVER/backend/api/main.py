@@ -390,7 +390,7 @@ AUTH_PAGE_HTML = """
         
         // Get redirect URL from query params
         const urlParams = new URLSearchParams(window.location.search);
-        const redirectUrl = urlParams.get('redirect') || '/record';
+        const redirectUrl = urlParams.get('redirect') || '/notebook/calendar';
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -437,46 +437,44 @@ AUTH_PAGE_HTML = """
 # Frontends are built and copied to /app/static/ during Docker build
 _static_dir = Path("/app/static")
 if _static_dir.exists():
-    # Mount unified Audio Notebook frontend for all UI routes
-    # The Audio Notebook now contains Record and Admin views with a unified sidebar
-    _audio_notebook_dir = _static_dir / "audio_notebook"
-    if _audio_notebook_dir.exists():
-        # Mount Audio Notebook assets for all routes
-        _notebook_assets = _audio_notebook_dir / "assets"
-        if _notebook_assets.exists():
-            app.mount("/notebook/assets", StaticFiles(directory=str(_notebook_assets)), name="notebook_assets")
-            # Also mount for /record and /admin routes (SPA uses same assets)
-            app.mount("/record/assets", StaticFiles(directory=str(_notebook_assets)), name="record_assets")
-            app.mount("/admin/assets", StaticFiles(directory=str(_notebook_assets)), name="admin_assets")
+    # Mount unified frontend for all UI routes
+    _frontend_dir = _static_dir / "frontend"
+    if _frontend_dir.exists():
+        # Mount frontend assets for all routes
+        _frontend_assets = _frontend_dir / "assets"
+        if _frontend_assets.exists():
+            app.mount("/notebook/assets", StaticFiles(directory=str(_frontend_assets)), name="notebook_assets")
+            app.mount("/record/assets", StaticFiles(directory=str(_frontend_assets)), name="record_assets")
+            app.mount("/admin/assets", StaticFiles(directory=str(_frontend_assets)), name="admin_assets")
         
-        # Serve Audio Notebook for /notebook routes
+        # Serve frontend for /notebook routes
         @app.get("/notebook", include_in_schema=False)
         @app.get("/notebook/{path:path}", include_in_schema=False)
         async def serve_notebook_ui(path: str = "") -> FileResponse:
-            file_path = _audio_notebook_dir / path
+            file_path = _frontend_dir / path
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
-            return FileResponse(_audio_notebook_dir / "index.html")
+            return FileResponse(_frontend_dir / "index.html")
         
-        # Serve Audio Notebook for /record routes (unified UI)
+        # Serve frontend for /record routes
         @app.get("/record", include_in_schema=False)
         @app.get("/record/{path:path}", include_in_schema=False)
         async def serve_record_ui(path: str = "") -> FileResponse:
-            file_path = _audio_notebook_dir / path
+            file_path = _frontend_dir / path
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
-            return FileResponse(_audio_notebook_dir / "index.html")
+            return FileResponse(_frontend_dir / "index.html")
         
-        # Serve Audio Notebook for /admin routes (unified UI)
+        # Serve frontend for /admin routes
         @app.get("/admin", include_in_schema=False)
         @app.get("/admin/{path:path}", include_in_schema=False)
         async def serve_admin_ui(path: str = "") -> FileResponse:
-            file_path = _audio_notebook_dir / path
+            file_path = _frontend_dir / path
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
-            return FileResponse(_audio_notebook_dir / "index.html")
+            return FileResponse(_frontend_dir / "index.html")
         
-        logger.info(f"Unified UI frontend mounted at /notebook, /record, /admin from {_audio_notebook_dir}")
+        logger.info(f"Unified UI frontend mounted at /notebook, /record, /admin from {_frontend_dir}")
 
 
 # Auth page route (served for all modes, but only required in TLS mode)
@@ -487,8 +485,8 @@ async def serve_auth_page(path: str = "") -> HTMLResponse:
     return HTMLResponse(content=AUTH_PAGE_HTML)
 
 
-# Root redirect - send to /record by default
+# Root redirect - send to notebook calendar by default
 @app.get("/", include_in_schema=False)
 async def root_redirect() -> RedirectResponse:
-    """Redirect root to /record."""
-    return RedirectResponse(url="/record", status_code=302)
+    """Redirect root to /notebook/calendar."""
+    return RedirectResponse(url="/notebook/calendar", status_code=302)
