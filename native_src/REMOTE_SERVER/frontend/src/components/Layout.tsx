@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import { Calendar, Search, Upload, Menu, X, Mic, Settings } from 'lucide-react';
 
 interface LayoutProps {
@@ -9,49 +8,56 @@ interface LayoutProps {
 interface MenuItem {
   text: string;
   icon: typeof Calendar;
-  path: string;
+  href: string;  // Full URL path for navigation
 }
 
 interface MenuSection {
   items: MenuItem[];
 }
 
+// Use full paths since we need to navigate across different basenames
 const menuSections: MenuSection[] = [
   {
     items: [
-      { text: 'Calendar', icon: Calendar, path: '/' },
-      { text: 'Search', icon: Search, path: '/search' },
-      { text: 'Import', icon: Upload, path: '/import' },
+      { text: 'Calendar', icon: Calendar, href: '/notebook/calendar' },
+      { text: 'Search', icon: Search, href: '/notebook/search' },
+      { text: 'Import', icon: Upload, href: '/notebook/import' },
     ],
   },
   {
     items: [
-      { text: 'Record', icon: Mic, path: '/record' },
+      { text: 'Record', icon: Mic, href: '/record' },
     ],
   },
   {
     items: [
-      { text: 'Admin', icon: Settings, path: '/admin' },
+      { text: 'Admin', icon: Settings, href: '/admin' },
     ],
   },
 ];
 
 export default function Layout({ children }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
 
-  const handleNavigation = (path: string) => {
-    navigate(path);
-    setMobileOpen(false);
+  // Use window.location for cross-section navigation (different basenames)
+  const handleNavigation = (href: string) => {
+    window.location.href = href;
+  };
+
+  // Check if current path matches menu item
+  const isActive = (href: string): boolean => {
+    const currentPath = window.location.pathname;
+    // Exact match or starts with (for nested routes)
+    if (href === '/notebook/calendar' && (currentPath === '/notebook' || currentPath === '/notebook/')) return true;
+    return currentPath === href || currentPath.startsWith(href + '/');
   };
 
   const allItems = menuSections.flatMap(s => s.items);
-  const currentPage = allItems.find((item) => item.path === location.pathname)?.text || 'Recording';
+  const currentPage = allItems.find((item) => isActive(item.href))?.text || 'Calendar';
 
   return (
     <>
@@ -89,8 +95,8 @@ export default function Layout({ children }: LayoutProps) {
             <Mic size={20} className="text-primary" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-white leading-tight">Audio</h1>
-            <h1 className="text-base font-semibold text-white leading-tight">Notebook</h1>
+            <h1 className="text-sm font-semibold text-white leading-tight">Transcription Suite</h1>
+            <h1 className="text-xs text-gray-400 leading-tight">Web UI</h1>
           </div>
           {/* Mobile close button */}
           <button
@@ -110,16 +116,16 @@ export default function Layout({ children }: LayoutProps) {
                 <div className="my-3 border-t border-gray-700" />
               )}
               {section.items.map((item) => {
-                const isActive = location.pathname === item.path;
+                const active = isActive(item.href);
                 const Icon = item.icon;
                 return (
                   <button
                     key={item.text}
-                    onClick={() => handleNavigation(item.path)}
+                    onClick={() => handleNavigation(item.href)}
                     className={`
                       w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mb-1
                       transition-all duration-200
-                      ${isActive
+                      ${active
                         ? 'bg-primary/20 text-primary'
                         : 'text-gray-400 hover:text-white hover:bg-surface-light'
                       }

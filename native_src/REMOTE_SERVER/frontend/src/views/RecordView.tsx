@@ -1,14 +1,25 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Mic, Square, Loader2 } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Mic, Square, Loader2, Upload, FileAudio } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useRawAudioRecorder } from '../hooks/useRawAudioRecorder';
 import { TranscriptionResult, HistoryEntry } from '../types';
+
+// API base URL
+const API_BASE_URL = import.meta.env.DEV 
+  ? 'http://localhost:8000/api' 
+  : `${window.location.origin}/api`;
 
 export default function RecordView() {
   const [realtimeText, setRealtimeText] = useState('');
   const [currentResult, setCurrentResult] = useState<TranscriptionResult | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [language, setLanguage] = useState<string>('');
+  
+  // File upload state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploadTranscribing, setIsUploadTranscribing] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFinalResult = useCallback((result: TranscriptionResult) => {
     setCurrentResult(result);
@@ -81,7 +92,73 @@ export default function RecordView() {
     wsStopRecording();
   }, [stopRecording, wsStopRecording]);
 
-  const error = wsError || recorderError;
+  // File upload handlers
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setUploadError(null);
+    }
+  }, []);
+
+  const handleFileTranscribe = useCallback(async () => {
+    if (!selectedFile) return;
+    
+    setIsUploadTranscribing(true);
+    setUploadError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      if (language) {
+        formData.append('language', language);
+      }
+      
+      const response = await fetch(`${API_BASE_URL}/transcribe/quick`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Transcription failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Create result from response
+      const result: TranscriptionResult = {
+        text: data.text || '',
+        duration: data.duration || 0,
+        language: data.language,
+        is_final: true,
+      };
+      
+      setCurrentResult(result);
+      
+      // Add to history
+      setHistory(prev => [{
+        id: crypto.randomUUID(),
+        text: result.text,
+        duration: result.duration,
+        timestamp: new Date(),
+        type: 'file',
+      }, ...prev]);
+      
+      // Clear file selection
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Transcription failed');
+    } finally {
+      setIsUploadTranscribing(false);
+    }
+  }, [selectedFile, language]);
+
+  const error = wsError || recorderError || uploadError;
   const showRecording = isRecording || wsRecording;
 
   const formatTime = (date: Date) => {
@@ -152,38 +229,115 @@ export default function RecordView() {
           </select>
         </div>
 
-        {/* Record button */}
-        <div className="flex-1 flex flex-col items-center justify-center">
-          <button
-            onClick={showRecording ? handleStopRecording : handleStartRecording}
-            disabled={!isConnected || isTranscribing}
-            className={`w-32 h-32 rounded-full flex items-center justify-center transition-all
-              ${showRecording 
-                ? 'bg-error hover:bg-red-700' 
-                : 'bg-primary hover:bg-primary-dark'}
-              ${(!isConnected || isTranscribing) && 'opacity-50 cursor-not-allowed'}
-            `}
-          >
-            {showRecording ? (
-              <Square size={48} className="text-white" />
-            ) : (
-              <Mic size={48} className="text-gray-900" />
-            )}
-          </button>
+        {/* Main content area with two columns */}
+        <div className="flex-1 flex gap-8">
+          {/* Live Recording Section */}
+          <div className="flex-1 flex flex-col items-center justify-center border-r border-gray-800 pr-8">
+            <h2 className="text-lg font-medium text-gray-400 mb-6">Live Recording</h2>
+            <button
+              onClick={showRecording ? handleStopRecording : handleStartRecording}
+              disabled={!isConnected || isTranscribing || isUploadTranscribing}
+              className={`w-28 h-28 rounded-full flex items-center justify-center transition-all
+                ${showRecording 
+                  ? 'bg-error hover:bg-red-700' 
+                  : 'bg-primary hover:bg-primary-dark'}
+                ${(!isConnected || isTranscribing || isUploadTranscribing) && 'opacity-50 cursor-not-allowed'}
+              `}
+            >
+              {showRecording ? (
+                <Square size={40} className="text-white" />
+              ) : (
+                <Mic size={40} className="text-gray-900" />
+              )}
+            </button>
 
-          <div className="mt-4 text-center">
-            {showRecording ? (
-              <div className="text-2xl font-mono text-error">{formattedDuration}</div>
-            ) : isTranscribing ? (
-              <div className="flex items-center gap-2 text-primary">
-                <Loader2 className="animate-spin" size={20} />
-                Transcribing...
-              </div>
+            <div className="mt-4 text-center">
+              {showRecording ? (
+                <div className="text-2xl font-mono text-error">{formattedDuration}</div>
+              ) : isTranscribing ? (
+                <div className="flex items-center gap-2 text-primary">
+                  <Loader2 className="animate-spin" size={20} />
+                  Transcribing...
+                </div>
+              ) : (
+                <div className="text-gray-400 text-sm">
+                  {isReady ? 'Click to start recording' : 'Connecting...'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* File Upload Section */}
+          <div className="flex-1 flex flex-col items-center justify-center pl-8">
+            <h2 className="text-lg font-medium text-gray-400 mb-6">Transcribe File</h2>
+            
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,video/*"
+              onChange={handleFileSelect}
+              className="hidden"
+              disabled={isUploadTranscribing || showRecording}
+            />
+            
+            {!selectedFile ? (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadTranscribing || showRecording}
+                className={`w-28 h-28 rounded-full flex flex-col items-center justify-center transition-all
+                  bg-surface-light hover:bg-gray-700 border-2 border-dashed border-gray-600
+                  ${(isUploadTranscribing || showRecording) && 'opacity-50 cursor-not-allowed'}
+                `}
+              >
+                <Upload size={32} className="text-gray-400" />
+              </button>
             ) : (
-              <div className="text-gray-400">
-                {isReady ? 'Click to start recording' : 'Connecting...'}
-              </div>
+              <button
+                onClick={handleFileTranscribe}
+                disabled={isUploadTranscribing}
+                className={`w-28 h-28 rounded-full flex flex-col items-center justify-center transition-all
+                  bg-primary hover:bg-primary-dark
+                  ${isUploadTranscribing && 'opacity-50 cursor-not-allowed'}
+                `}
+              >
+                {isUploadTranscribing ? (
+                  <Loader2 size={32} className="text-gray-900 animate-spin" />
+                ) : (
+                  <FileAudio size={32} className="text-gray-900" />
+                )}
+              </button>
             )}
+
+            <div className="mt-4 text-center">
+              {isUploadTranscribing ? (
+                <div className="flex items-center gap-2 text-primary">
+                  <Loader2 className="animate-spin" size={16} />
+                  Transcribing...
+                </div>
+              ) : selectedFile ? (
+                <div className="space-y-2">
+                  <div className="text-sm text-gray-300 truncate max-w-[200px]">
+                    {selectedFile.name}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Click to transcribe or{' '}
+                    <button
+                      onClick={() => {
+                        setSelectedFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      className="text-primary hover:underline"
+                    >
+                      choose another
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-gray-400 text-sm">
+                  Click to select a file
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

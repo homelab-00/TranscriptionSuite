@@ -751,7 +751,7 @@ export default function DayView() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8 w-full">
         <div className="flex items-center space-x-4">
-          <button onClick={() => navigate('/')} className="text-sm text-gray-400 hover:text-white">
+          <button onClick={() => navigate('/calendar')} className="text-sm text-gray-400 hover:text-white">
             ← Month
           </button>
           <h1 className="text-2xl sm:text-3xl font-bold text-white">

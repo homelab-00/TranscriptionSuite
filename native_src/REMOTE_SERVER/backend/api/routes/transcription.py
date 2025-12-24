@@ -104,6 +104,54 @@ async def transcribe_audio(
             pass
 
 
+@router.post("/quick", response_model=TranscriptionResponse)
+async def transcribe_quick(
+    request: Request,
+    file: UploadFile = File(...),
+    language: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    """
+    Quick transcription for Record view - text only, no word timestamps or diarization.
+    
+    Optimized for speed - returns just the transcription text and basic metadata.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    # Save uploaded file to temp location
+    suffix = Path(file.filename).suffix or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        # Get transcription engine
+        model_manager = request.app.state.model_manager
+        engine = model_manager.transcription_engine
+
+        # Transcribe without word timestamps for speed
+        logger.info(f"Quick transcription for: {file.filename}")
+        result = engine.transcribe_file(
+            tmp_path,
+            language=language,
+            word_timestamps=False,  # No word timestamps for speed
+        )
+
+        return result.to_dict()
+
+    except Exception as e:
+        logger.error(f"Quick transcription failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        # Cleanup temp file
+        try:
+            Path(tmp_path).unlink()
+        except Exception:
+            pass
+
+
 @router.get("/languages")
 async def get_supported_languages() -> Dict[str, Any]:
     """Get list of supported languages."""
