@@ -38,7 +38,7 @@ dist/
 # Node modules (will be rebuilt in container)
 node_modules/
 native_src/AUDIO_NOTEBOOK/node_modules/
-native_src/REMOTE_SERVER/frontend/node_modules/
+native_src/frontend/node_modules/
 
 # Test files
 tests/

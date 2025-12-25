@@ -1,0 +1,359 @@
+"""
+Model lifecycle management for TranscriptionSuite server.
+
+Handles:
+- Model loading and caching
+- GPU memory management
+- Model switching between modes
+- Real-time and preview transcription engines
+- Client-aware model loading (preview for standalone clients)
+- Graceful cleanup
+"""
+
+import logging
+from typing import Any, Callable, Dict, Optional
+
+from server.core.audio_utils import (
+    check_cuda_available,
+    clear_gpu_cache,
+    get_gpu_memory_info,
+)
+from server.core.transcription_engine import (
+    TranscriptionEngine,
+    create_transcription_engine,
+)
+from server.core.diarization_engine import (
+    DiarizationEngine,
+    create_diarization_engine,
+)
+from server.core.realtime_engine import (
+    RealtimeTranscriptionEngine,
+    create_realtime_engine,
+)
+from server.core.preview_engine import (
+    PreviewTranscriptionEngine,
+    PreviewConfig,
+)
+from server.core.client_detector import ClientType
+
+logger = logging.getLogger(__name__)
+
+
+class ModelManager:
+    """
+    Manages AI model lifecycle for the transcription server.
+
+    Keeps one model loaded at a time to manage GPU memory efficiently.
+    Handles model caching and switching between different configurations.
+
+    Supports:
+    - File-based transcription (TranscriptionEngine)
+    - Real-time transcription with VAD (RealtimeTranscriptionEngine)
+    - Preview transcription for standalone clients (PreviewTranscriptionEngine)
+    - Speaker diarization (DiarizationEngine)
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize the model manager.
+
+        Args:
+            config: Full application configuration dict
+        """
+        self.config = config
+        self._transcription_engine: Optional[TranscriptionEngine] = None
+        self._diarization_engine: Optional[Any] = None  # Will be DiarizationEngine
+        self._preview_engine: Optional[PreviewTranscriptionEngine] = None
+        self._realtime_engines: Dict[str, RealtimeTranscriptionEngine] = {}
+
+        # Track connected standalone clients
+        self._standalone_client_count = 0
+
+        # Check GPU availability
+        self.gpu_available = check_cuda_available()
+        if self.gpu_available:
+            gpu_info = get_gpu_memory_info()
+            logger.info(
+                f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory"
+            )
+        else:
+            logger.warning("No GPU available, using CPU for transcription")
+
+        # Check if preview is enabled in config
+        self._preview_config = PreviewConfig.from_dict(config)
+        if self._preview_config.enabled:
+            logger.info(
+                f"Preview transcriber configured with model: {self._preview_config.model}"
+            )
+
+    @property
+    def transcription_engine(self) -> TranscriptionEngine:
+        """Get or create the transcription engine."""
+        if self._transcription_engine is None:
+            self._transcription_engine = create_transcription_engine(self.config)
+        return self._transcription_engine
+
+    def load_transcription_model(self) -> None:
+        """Explicitly load the transcription model."""
+        engine = self.transcription_engine
+        if not engine.is_loaded():
+            logger.info("Loading transcription model...")
+            engine.load_model()
+            logger.info("Transcription model ready")
+
+    def unload_transcription_model(self) -> None:
+        """Unload the transcription model to free memory."""
+        if self._transcription_engine is not None:
+            self._transcription_engine.unload_model()
+
+    @property
+    def diarization_engine(self) -> DiarizationEngine:
+        """Get or create the diarization engine."""
+        if self._diarization_engine is None:
+            self._diarization_engine = create_diarization_engine(self.config)
+        return self._diarization_engine
+
+    def load_diarization_model(self) -> None:
+        """Load the speaker diarization model."""
+        engine = self.diarization_engine
+        if not engine.is_loaded():
+            logger.info("Loading diarization model...")
+            engine.load()
+            logger.info("Diarization model ready")
+
+    def unload_diarization_model(self) -> None:
+        """Unload the diarization model."""
+        if self._diarization_engine is not None:
+            try:
+                self._diarization_engine.unload()
+            except AttributeError:
+                pass
+            self._diarization_engine = None
+            clear_gpu_cache()
+            logger.info("Diarization model unloaded")
+
+    # =========================================================================
+    # Real-time Transcription Engine
+    # =========================================================================
+
+    def get_realtime_engine(
+        self,
+        session_id: str,
+        client_type: ClientType = ClientType.WEB,
+        language: Optional[str] = None,
+        **callbacks: Callable,
+    ) -> RealtimeTranscriptionEngine:
+        """
+        Get or create a real-time transcription engine for a session.
+
+        Args:
+            session_id: Unique session identifier
+            client_type: Type of client (standalone or web)
+            language: Target language code
+            **callbacks: Optional callback functions
+
+        Returns:
+            RealtimeTranscriptionEngine for the session
+        """
+        # Check if engine already exists for this session
+        if session_id in self._realtime_engines:
+            return self._realtime_engines[session_id]
+
+        # Determine if preview should be enabled
+        enable_preview = (
+            client_type == ClientType.STANDALONE and self._preview_config.enabled
+        )
+
+        if enable_preview:
+            logger.info(f"Creating realtime engine with preview for session {session_id}")
+        else:
+            logger.info(f"Creating realtime engine for session {session_id}")
+
+        # Create the engine
+        engine = create_realtime_engine(
+            config=self.config,
+            enable_preview=enable_preview,
+            **callbacks,
+        )
+
+        # Initialize with language
+        engine.initialize(language)
+
+        # Store for cleanup
+        self._realtime_engines[session_id] = engine
+
+        return engine
+
+    def release_realtime_engine(self, session_id: str) -> None:
+        """
+        Release a real-time transcription engine.
+
+        Args:
+            session_id: Session identifier to release
+        """
+        if session_id in self._realtime_engines:
+            engine = self._realtime_engines.pop(session_id)
+            try:
+                engine.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down realtime engine: {e}")
+            logger.info(f"Released realtime engine for session {session_id}")
+
+    def release_all_realtime_engines(self) -> None:
+        """Release all real-time transcription engines."""
+        session_ids = list(self._realtime_engines.keys())
+        for session_id in session_ids:
+            self.release_realtime_engine(session_id)
+
+    # =========================================================================
+    # Preview Engine
+    # =========================================================================
+
+    @property
+    def preview_engine(self) -> Optional[PreviewTranscriptionEngine]:
+        """Get the preview engine if available."""
+        return self._preview_engine
+
+    def load_preview_engine(self, language: Optional[str] = None) -> bool:
+        """
+        Load the preview transcription engine.
+
+        Only loads if preview is enabled in config.
+
+        Args:
+            language: Target language code
+
+        Returns:
+            True if loaded successfully
+        """
+        if not self._preview_config.enabled:
+            logger.debug("Preview engine disabled in config")
+            return False
+
+        if self._preview_engine is None:
+            self._preview_engine = PreviewTranscriptionEngine(self.config)
+
+        return self._preview_engine.load(language)
+
+    def unload_preview_engine(self) -> None:
+        """Unload the preview engine to free memory."""
+        if self._preview_engine is not None:
+            self._preview_engine.unload()
+            self._preview_engine = None
+            logger.info("Preview engine unloaded")
+
+    # =========================================================================
+    # Client Connection Management
+    # =========================================================================
+
+    def on_standalone_client_connected(self) -> None:
+        """
+        Called when a standalone client connects.
+
+        Loads preview transcriber if enabled and this is the first
+        standalone client.
+        """
+        self._standalone_client_count += 1
+
+        if self._standalone_client_count == 1 and self._preview_config.enabled:
+            logger.info("First standalone client connected - loading preview engine")
+            self.load_preview_engine()
+
+    def on_standalone_client_disconnected(self) -> None:
+        """
+        Called when a standalone client disconnects.
+
+        Unloads preview transcriber if no standalone clients remain.
+        """
+        self._standalone_client_count = max(0, self._standalone_client_count - 1)
+
+        if self._standalone_client_count == 0 and self._preview_engine is not None:
+            logger.info("No standalone clients remaining - unloading preview engine")
+            self.unload_preview_engine()
+
+    @property
+    def has_standalone_clients(self) -> bool:
+        """Check if any standalone clients are connected."""
+        return self._standalone_client_count > 0
+
+    # =========================================================================
+    # General Management
+    # =========================================================================
+
+    def unload_all(self) -> None:
+        """Unload all models and free GPU memory."""
+        logger.info("Unloading all models...")
+        self.unload_transcription_model()
+        self.unload_diarization_model()
+        self.unload_preview_engine()
+        self.release_all_realtime_engines()
+        clear_gpu_cache()
+        logger.info("All models unloaded")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get status information about loaded models."""
+        status = {
+            "gpu_available": self.gpu_available,
+            "gpu_memory": get_gpu_memory_info() if self.gpu_available else None,
+            "transcription": {
+                "loaded": self._transcription_engine is not None
+                and self._transcription_engine.is_loaded(),
+                "config": self._transcription_engine.get_status()
+                if self._transcription_engine
+                else None,
+            },
+            "diarization": {
+                "loaded": self._diarization_engine is not None,
+            },
+            "preview": {
+                "enabled": self._preview_config.enabled,
+                "loaded": self._preview_engine is not None
+                and self._preview_engine.is_loaded,
+                "model": self._preview_config.model if self._preview_config.enabled else None,
+            },
+            "realtime": {
+                "active_sessions": len(self._realtime_engines),
+                "session_ids": list(self._realtime_engines.keys()),
+            },
+            "standalone_clients": self._standalone_client_count,
+        }
+        return status
+
+    def reload_config(self, new_config: Dict[str, Any]) -> None:
+        """
+        Reload with new configuration.
+
+        Unloads current models if configuration has changed.
+        """
+        old_trans_config = self.config.get("transcription", {})
+        new_trans_config = new_config.get("transcription", {})
+
+        # Check if transcription config changed
+        if old_trans_config.get("model") != new_trans_config.get("model"):
+            logger.info("Transcription model changed, reloading...")
+            self.unload_transcription_model()
+            self._transcription_engine = None
+
+        self.config = new_config
+
+
+# Global model manager instance
+_manager: Optional[ModelManager] = None
+
+
+def get_model_manager(config: Optional[Dict[str, Any]] = None) -> ModelManager:
+    """Get or create the global model manager instance."""
+    global _manager
+    if _manager is None:
+        if config is None:
+            raise RuntimeError("Model manager not initialized and no config provided")
+        _manager = ModelManager(config)
+    return _manager
+
+
+def cleanup_models() -> None:
+    """Clean up all loaded models."""
+    global _manager
+    if _manager is not None:
+        _manager.unload_all()
+        _manager = None

@@ -1,8 +1,20 @@
 [project]
-name = "transcriptionsuite-dev"
-version = "2.0.0"
-description = "TranscriptionSuite - Development Tools Only"
+name = "transcription-suite-build"
+version = "0.3.0"
+description = "TranscriptionSuite build env for the standalone client"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "homelab-00" }
+]
+keywords = ["transcription", "tray", "desktop", "client"]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Topic :: Build Environment",
+]
 
 dependencies = [
     # Code quality

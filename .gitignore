@@ -16,14 +16,8 @@ build/appimage-kde/
 build/appimage-gnome/
 build/appimage-windows/
 
-# AUDIO_NOTEBOOK web app
+# Frontend web app
 # Node.js / npm dependencies and build outputs
-native_src/AUDIO_NOTEBOOK/node_modules/
-native_src/AUDIO_NOTEBOOK/dist/
-native_src/AUDIO_NOTEBOOK/build/
-
-# REMOTE_SERVER web app
-# Node.js / npm dependencies and build outputs
-native_src/REMOTE_SERVER/frontend/node_modules/
-native_src/REMOTE_SERVER/frontend/dist/
-native_src/REMOTE_SERVER/frontend/build/
+native_src/frontend/node_modules/
+native_src/frontend/dist/
+native_src/frontend/build/

@@ -86,9 +86,7 @@ def list_audio_devices() -> None:
 
     for device in devices:
         print(f"  [{device['index']}] {device['name']}")
-        print(
-            f"      Channels: {device['channels']}, Sample Rate: {device['sample_rate']}"
-        )
+        print(f"      Channels: {device['channels']}, Sample Rate: {device['sample_rate']}")
 
     print()
 
@@ -113,9 +111,7 @@ def setup_logging(verbose: bool = False) -> None:
     verbose_formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
     )
-    console_formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    console_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     # Configure root logger
     root_logger = logging.getLogger()
@@ -202,7 +198,7 @@ def main() -> int:
         config.set("server", "use_https", value=True)
 
     # Print startup info
-    print("\nTranscriptionSuite Native Client v2.0.0")
+    print("\nTranscriptionSuite Native Client v0.3.0")
     print(f"Config directory: {get_config_dir()}")
     print(f"Server: {config.server_host}:{config.server_port}")
     print(f"HTTPS: {config.use_https}")

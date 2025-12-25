@@ -98,7 +98,15 @@ main_transcriber:
 # Preview Transcriber Configuration
 # ----------------------------------------------------------------------------
 # The fast transcriber used for live preview during recording.
+# Only loaded when:
+#   1. enabled: true (below)
+#   2. A standalone client connects (not web browser)
 preview_transcriber:
+    # Enable/disable preview transcription.
+    # When enabled AND a standalone client connects, the preview model is loaded.
+    # Web browser clients never use preview to save GPU resources.
+    enabled: false
+
     # A smaller, faster model is recommended for preview.
     model: "Systran/faster-whisper-medium"
     compute_type: "default"
@@ -112,6 +120,9 @@ preview_transcriber:
     silero_use_onnx: false
     post_speech_silence_duration: 0.5
     min_length_of_recording: 1.0
+
+    # Trigger early transcription during silence (seconds, 0 = disabled)
+    early_transcription_on_silence: 0.5
 
     no_log_file: true
 
@@ -151,15 +162,6 @@ audio:
     # If true, automatically use the default system microphone.
     # If false, use the device specified by input_device_index.
     use_default_input: true
-
-
-# ----------------------------------------------------------------------------
-# Console Display Settings
-# ----------------------------------------------------------------------------
-display:
-    # Show live audio waveform during recording.
-    # Requires 'cava' to be installed. Disabling saves CPU resources.
-    show_waveform: false
 
 
 # ----------------------------------------------------------------------------
@@ -259,14 +261,14 @@ remote_server:
     wss_port: 8444
 
     # Path to token storage file (relative to project root)
-    token_store: "REMOTE_SERVER/data/tokens.json"
+    token_store: "data/tokens.json"
 
     # TLS/SSL configuration
     # Self-signed certificates are auto-generated on first run
     tls:
         enabled: true
-        cert_file: "REMOTE_SERVER/data/my-machine.crt"
-        key_file: "REMOTE_SERVER/data/my-machine.key"
+        cert_file: "data/my-machine.crt"
+        key_file: "data/my-machine.key"
         auto_generate: false # Don't generate self-signed cert if missing
 
 

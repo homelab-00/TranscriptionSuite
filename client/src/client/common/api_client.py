@@ -6,11 +6,13 @@ Handles:
 - WebSocket connections for real-time streaming
 - Authentication with tokens
 - Connection state management
+- Client type identification for server-side feature detection
 """
 
 import asyncio
 import json
 import logging
+import platform
 import socket
 import ssl
 from collections.abc import Callable
@@ -20,6 +22,10 @@ from typing import Any
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+# Client identification
+CLIENT_VERSION = "2.0.0"
+CLIENT_TYPE = "standalone"  # Identifies this as the native desktop client
 
 # Audio constants
 SAMPLE_RATE = 16000
@@ -80,8 +86,12 @@ class APIClient:
         return f"{scheme}://{self.host}:{self.port}"
 
     def _get_headers(self) -> dict[str, str]:
-        """Get request headers including auth token."""
-        headers = {"Content-Type": "application/json"}
+        """Get request headers including auth token and client identification."""
+        headers = {
+            "Content-Type": "application/json",
+            "X-Client-Type": CLIENT_TYPE,
+            "User-Agent": f"TranscriptionSuite-Client/{CLIENT_VERSION} ({platform.system()})",
+        }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
@@ -475,7 +485,11 @@ class StreamingClient:
             session = await self.api_client._get_session()
             url = f"{self.api_client.ws_url}/api/transcribe/stream"
 
-            headers = {}
+            # Include client identification headers
+            headers = {
+                "X-Client-Type": CLIENT_TYPE,
+                "User-Agent": f"TranscriptionSuite-Client/{CLIENT_VERSION} ({platform.system()})",
+            }
             if self.api_client.token:
                 headers["Authorization"] = f"Bearer {self.api_client.token}"
 
