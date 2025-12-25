@@ -4,15 +4,17 @@ WebSocket endpoint for real-time audio transcription.
 Handles:
 - Token-based authentication
 - Audio streaming (16kHz PCM Int16)
-- Long-form transcription
+- Long-form transcription with VAD
+- Client type detection (standalone vs web)
+- Preview transcription for standalone clients
 - Session management (single active session)
 """
 
 import asyncio
-import io
 import json
 import struct
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,6 +25,11 @@ from starlette.websockets import WebSocketState
 
 from server.core.model_manager import get_model_manager
 from server.core.token_store import get_token_store
+from server.core.client_detector import (
+    ClientType,
+    ClientDetector,
+    get_client_capabilities,
+)
 from server.logging import get_logger
 
 logger = get_logger(__name__)
@@ -35,19 +42,45 @@ _session_lock = asyncio.Lock()
 
 
 class TranscriptionSession:
-    """Manages a single transcription session."""
+    """
+    Manages a single transcription session.
 
-    def __init__(self, websocket: WebSocket, client_name: str, is_admin: bool):
+    Supports both file-based transcription (web clients) and
+    real-time VAD-based transcription (standalone clients).
+    """
+
+    def __init__(
+        self,
+        websocket: WebSocket,
+        client_name: str,
+        is_admin: bool,
+        client_type: ClientType,
+        session_id: str,
+    ):
         self.websocket = websocket
         self.client_name = client_name
         self.is_admin = is_admin
+        self.client_type = client_type
+        self.session_id = session_id
+
         self.is_recording = False
         self.language: Optional[str] = None
         self.audio_chunks: list[bytes] = []
         self.sample_rate = 16000
         self.temp_file: Optional[Path] = None
 
-    async def send_message(self, msg_type: str, data: Optional[Dict[str, Any]] = None):
+        # Real-time engine (for standalone clients with VAD)
+        self._realtime_engine: Optional[Any] = None
+        self._use_realtime_engine = False
+
+        # Get client capabilities
+        self.capabilities = get_client_capabilities(
+            {"x-client-type": client_type.value}, {}
+        )
+
+    async def send_message(
+        self, msg_type: str, data: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Send a JSON message to the client."""
         if self.websocket.client_state != WebSocketState.CONNECTED:
             return
@@ -62,11 +95,15 @@ class TranscriptionSession:
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
 
-    def add_audio_chunk(self, pcm_data: bytes):
+    def add_audio_chunk(self, pcm_data: bytes) -> None:
         """Add a chunk of PCM audio data."""
         self.audio_chunks.append(pcm_data)
 
-    async def process_transcription(self):
+        # Also feed to realtime engine if using VAD
+        if self._use_realtime_engine and self._realtime_engine:
+            self._realtime_engine.feed_audio(pcm_data, self.sample_rate)
+
+    async def process_transcription(self) -> None:
         """Process accumulated audio and return transcription."""
         if not self.audio_chunks:
             await self.send_message("error", {"message": "No audio data received"})
@@ -75,10 +112,10 @@ class TranscriptionSession:
         try:
             # Combine all audio chunks
             combined_audio = b"".join(self.audio_chunks)
-            
+
             # Convert bytes to numpy array (Int16 PCM)
             audio_array = np.frombuffer(combined_audio, dtype=np.int16)
-            
+
             # Convert to float32 [-1.0, 1.0]
             audio_float = audio_array.astype(np.float32) / 32768.0
 
@@ -107,12 +144,14 @@ class TranscriptionSession:
             all_words = []
             for segment in result.segments:
                 for w in segment.words:
-                    all_words.append({
-                        "word": w.word,
-                        "start": w.start,
-                        "end": w.end,
-                        "probability": w.probability,
-                    })
+                    all_words.append(
+                        {
+                            "word": w.word,
+                            "start": w.start,
+                            "end": w.end,
+                            "probability": w.probability,
+                        }
+                    )
 
             # Send final result
             await self.send_message(
@@ -141,15 +180,70 @@ class TranscriptionSession:
             self.temp_file = None
             self.audio_chunks = []
 
-    async def start_recording(self, language: Optional[str] = None):
-        """Start a recording session."""
+    async def start_recording(
+        self,
+        language: Optional[str] = None,
+        use_vad: bool = False,
+    ) -> None:
+        """
+        Start a recording session.
+
+        Args:
+            language: Target language code
+            use_vad: Use VAD for automatic start/stop detection
+        """
         self.is_recording = True
         self.language = language
         self.audio_chunks = []
-        await self.send_message("session_started")
-        logger.info(f"Recording started for {self.client_name}")
+        self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
 
-    async def stop_recording(self):
+        if self._use_realtime_engine:
+            # Initialize realtime engine for VAD-based recording
+            model_manager = get_model_manager()
+            self._realtime_engine = model_manager.get_realtime_engine(
+                session_id=self.session_id,
+                client_type=self.client_type,
+                language=language,
+                on_recording_start=lambda: asyncio.create_task(
+                    self._on_vad_recording_start()
+                ),
+                on_recording_stop=lambda: asyncio.create_task(
+                    self._on_vad_recording_stop()
+                ),
+                on_vad_start=lambda: asyncio.create_task(self._on_vad_start()),
+                on_vad_stop=lambda: asyncio.create_task(self._on_vad_stop()),
+            )
+            self._realtime_engine.start_recording(language)
+            logger.info(f"Recording started with VAD for {self.client_name}")
+        else:
+            logger.info(f"Recording started for {self.client_name}")
+
+        await self.send_message(
+            "session_started",
+            {
+                "vad_enabled": self._use_realtime_engine,
+                "preview_enabled": self.capabilities.supports_preview
+                and self._use_realtime_engine,
+            },
+        )
+
+    async def _on_vad_recording_start(self) -> None:
+        """Called when VAD detects speech start."""
+        await self.send_message("vad_recording_start")
+
+    async def _on_vad_recording_stop(self) -> None:
+        """Called when VAD detects speech stop."""
+        await self.send_message("vad_recording_stop")
+
+    async def _on_vad_start(self) -> None:
+        """Called when VAD detects voice activity."""
+        await self.send_message("vad_start")
+
+    async def _on_vad_stop(self) -> None:
+        """Called when VAD detects voice inactivity."""
+        await self.send_message("vad_stop")
+
+    async def stop_recording(self) -> None:
         """Stop recording and process transcription."""
         if not self.is_recording:
             return
@@ -158,17 +252,36 @@ class TranscriptionSession:
         await self.send_message("session_stopped")
         logger.info(f"Recording stopped for {self.client_name}")
 
+        # Stop realtime engine if using VAD
+        if self._realtime_engine:
+            self._realtime_engine.stop_recording()
+
         # Process the transcription
         await self.process_transcription()
 
+    async def cleanup(self) -> None:
+        """Clean up session resources."""
+        if self._realtime_engine:
+            model_manager = get_model_manager()
+            model_manager.release_realtime_engine(self.session_id)
+            self._realtime_engine = None
 
-async def handle_client_message(session: TranscriptionSession, message: Dict[str, Any]):
+        # Notify model manager about client disconnect
+        if self.client_type == ClientType.STANDALONE:
+            model_manager = get_model_manager()
+            model_manager.on_standalone_client_disconnected()
+
+
+async def handle_client_message(
+    session: TranscriptionSession, message: Dict[str, Any]
+) -> None:
     """Handle a JSON message from the client."""
     msg_type = message.get("type")
 
     if msg_type == "start":
         language = message.get("data", {}).get("language")
-        await session.start_recording(language)
+        use_vad = message.get("data", {}).get("use_vad", False)
+        await session.start_recording(language, use_vad)
 
     elif msg_type == "stop":
         await session.stop_recording()
@@ -176,11 +289,14 @@ async def handle_client_message(session: TranscriptionSession, message: Dict[str
     elif msg_type == "ping":
         await session.send_message("pong")
 
+    elif msg_type == "get_capabilities":
+        await session.send_message("capabilities", session.capabilities.to_dict())
+
     else:
         logger.warning(f"Unknown message type: {msg_type}")
 
 
-async def handle_binary_message(session: TranscriptionSession, data: bytes):
+async def handle_binary_message(session: TranscriptionSession, data: bytes) -> None:
     """Handle binary audio data from the client."""
     if not session.is_recording:
         logger.warning("Received audio data but not recording")
@@ -194,7 +310,7 @@ async def handle_binary_message(session: TranscriptionSession, data: bytes):
 
         # Read metadata length
         metadata_len = struct.unpack("<I", data[:4])[0]
-        
+
         if len(data) < 4 + metadata_len:
             logger.warning("Invalid binary message format")
             return
@@ -219,13 +335,33 @@ async def handle_binary_message(session: TranscriptionSession, data: bytes):
         logger.error(f"Error processing binary message: {e}")
 
 
+def _get_websocket_headers(websocket: WebSocket) -> Dict[str, str]:
+    """Extract headers from WebSocket connection."""
+    headers = {}
+    for key, value in websocket.headers.items():
+        headers[key.lower()] = value
+    return headers
+
+
+def _get_websocket_query_params(websocket: WebSocket) -> Dict[str, str]:
+    """Extract query parameters from WebSocket connection."""
+    return dict(websocket.query_params)
+
+
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time transcription."""
     global _active_session
 
     await websocket.accept()
     session: Optional[TranscriptionSession] = None
+
+    # Detect client type from headers/query params
+    headers = _get_websocket_headers(websocket)
+    query_params = _get_websocket_query_params(websocket)
+    client_type = ClientDetector.detect(headers, query_params)
+
+    logger.debug(f"WebSocket connection from client type: {client_type.value}")
 
     try:
         # Wait for authentication message
@@ -269,6 +405,9 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close()
             return
 
+        # Generate unique session ID
+        session_id = str(uuid.uuid4())
+
         # Check for active session
         async with _session_lock:
             if _active_session is not None:
@@ -285,16 +424,36 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # Create new session
             session = TranscriptionSession(
-                websocket, stored_token.client_name, stored_token.is_admin
+                websocket=websocket,
+                client_name=stored_token.client_name,
+                is_admin=stored_token.is_admin,
+                client_type=client_type,
+                session_id=session_id,
             )
             _active_session = {
                 "client_name": stored_token.client_name,
                 "session": session,
+                "session_id": session_id,
             }
 
-        # Send auth success
-        await session.send_message("auth_ok", {"client_name": stored_token.client_name})
-        logger.info(f"WebSocket session started for {stored_token.client_name}")
+        # Notify model manager about standalone client
+        if client_type == ClientType.STANDALONE:
+            model_manager = get_model_manager()
+            model_manager.on_standalone_client_connected()
+
+        # Send auth success with capabilities
+        await session.send_message(
+            "auth_ok",
+            {
+                "client_name": stored_token.client_name,
+                "client_type": client_type.value,
+                "capabilities": session.capabilities.to_dict(),
+            },
+        )
+        logger.info(
+            f"WebSocket session started for {stored_token.client_name} "
+            f"(type: {client_type.value}, id: {session_id})"
+        )
 
         # Message loop
         while True:
@@ -337,5 +496,6 @@ async def websocket_endpoint(websocket: WebSocket):
         async with _session_lock:
             if _active_session and session:
                 if _active_session.get("session") == session:
+                    await session.cleanup()
                     _active_session = None
                     logger.info(f"WebSocket session ended for {session.client_name}")

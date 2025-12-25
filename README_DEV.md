@@ -77,9 +77,8 @@ This section provides a streamlined overview of the most common development task
 cd client && uv venv --python 3.11 && uv sync --extra kde && cd ..
 cd build && uv venv --python 3.11 && uv sync && cd ..
 
-# 2. Audit NPM packages (both frontends)
-cd native_src/AUDIO_NOTEBOOK && npm ci && npm audit && cd ../..
-cd native_src/REMOTE_SERVER/frontend && npm ci && npm audit && cd ../../..
+# 2. Audit NPM packages (frontend)
+cd native_src/frontend && npm ci && npm audit && cd ../..
 
 # 3. Build and run Docker server
 cd docker
@@ -135,10 +134,11 @@ TranscriptionSuite uses a **client-server architecture**:
 │                     Docker Container                    │
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  TranscriptionSuite Server                        │  │
-│  │  - FastAPI REST API                               │  │
+│  │  - FastAPI REST API + WebSocket                   │  │
 │  │  - faster-whisper transcription                   │  │
+│  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
-│  │  - Audio Notebook (React frontend)                │  │
+│  │  - Web UI (React frontend)                        │  │
 │  │  - SQLite + FTS5 search                           │  │
 │  └───────────────────────────────────────────────────┘  │
 │           HTTP/WebSocket ↕                              │
@@ -153,6 +153,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │     - Microphone recording                              │
 │     - Clipboard integration                             │
 │     - System notifications                              │
+│     - Preview transcription (optional)                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -162,6 +163,8 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Native clients**: System tray, microphone, clipboard require native access (can't be containerized)
 - **Single port**: Server exposes everything on port 8000 (API, WebSocket, static files)
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
+- **Client detection**: Server detects client type (standalone vs web) to enable features like preview transcription only for standalone clients, saving GPU memory for web users
+- **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD for robust speech detection
 
 ---
 
@@ -196,32 +199,36 @@ TranscriptionSuite/
 │   ├── build-appimage-kde.sh     # Build KDE AppImage
 │   ├── build-appimage-gnome.sh   # Build GNOME AppImage
 │   └── pyproject.toml            # Dev/build tools (separate venv)
+│
 ├── docker/                       # Docker infrastructure
 │   ├── Dockerfile                # Multi-stage build (frontend + Python)
 │   ├── docker-compose.yml        # Unified local + remote deployment
 │   ├── entrypoint.py             # Container entrypoint
 │   └── .dockerignore             # Build context exclusions
 │
-├── native_src/                   # Python source for local development
-│   ├── MAIN/                     # Legacy: Core transcription logic
-│   ├── DIARIZATION/              # Legacy: Speaker diarization
-│   ├── AUDIO_NOTEBOOK/           # Audio Notebook frontend (React)
-│   ├── REMOTE_SERVER/            # Unified server components
-│   │   ├── backend/              # Unified backend (runs in Docker + native)
-│   │   │   ├── api/              # FastAPI application
-│   │   │   │   ├── main.py       # App factory, lifespan, static mounting
-│   │   │   │   └── routes/       # API endpoints
-│   │   │   ├── core/             # ML engines
-│   │   │   │   ├── transcription_engine.py  # Unified Whisper wrapper
-│   │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
-│   │   │   │   ├── model_manager.py         # Model lifecycle management
-│   │   │   │   └── audio_utils.py           # Audio processing utilities
-│   │   │   ├── database/         # SQLite + FTS5
-│   │   │   ├── logging/          # Centralized logging
-│   │   │   ├── config.py         # Server configuration loader
-│   │   │   └── pyproject.toml    # Server dependencies
-│   │   └── frontend/             # Remote UI frontend source (React)
-│   └── config.yaml               # Local configuration file (also serves as template)
+├── native_src/                   # Server source code
+│   ├── backend/                  # Unified backend (runs in Docker + native)
+│   │   ├── api/                  # FastAPI application
+│   │   │   ├── main.py           # App factory, lifespan, static mounting
+│   │   │   └── routes/           # API endpoints
+│   │   ├── core/                 # ML engines
+│   │   │   ├── transcription_engine.py  # Unified Whisper wrapper
+│   │   │   ├── diarization_engine.py    # PyAnnote wrapper
+│   │   │   ├── model_manager.py         # Model lifecycle management
+│   │   │   ├── stt/              # Real-time speech-to-text engine
+│   │   │   │   ├── engine.py     # AudioToTextRecorder (VAD-based)
+│   │   │   │   ├── vad.py        # Dual VAD (Silero + WebRTC)
+│   │   │   │   └── constants.py  # STT configuration constants
+│   │   │   ├── realtime_engine.py       # Async wrapper for real-time STT
+│   │   │   ├── preview_engine.py        # Preview transcription for clients
+│   │   │   ├── client_detector.py       # Client type detection
+│   │   │   └── audio_utils.py           # Audio processing utilities
+│   │   ├── database/             # SQLite + FTS5
+│   │   ├── logging/              # Centralized logging
+│   │   ├── config.py             # Server configuration loader
+│   │   └── pyproject.toml        # Server dependencies
+│   ├── frontend/                 # Web UI frontend (React)
+│   └── config.yaml               # Configuration file (also serves as template)
 ```
 
 ### pyproject.toml Files
@@ -232,22 +239,22 @@ The project has ***three*** `pyproject.toml` files, each serving a different pur
 |------|------|
 | `client/pyproject.toml` | Native client package definition. Defines runtime deps and platform extras (`kde`, `gnome`, `windows`). Provides the `transcription-client` entrypoint. |
 | `build/pyproject.toml` | Dev/build tools environment (separate from client runtime). Contains linting, testing, and packaging tools. |
-| `native_src/REMOTE_SERVER/backend/pyproject.toml` | Server/backend package definition. Defines server deps (FastAPI, faster-whisper, torch, pyannote.audio, etc.) used by Docker builds and native development. |
+| `native_src/backend/pyproject.toml` | Server/backend package definition. Defines server deps (FastAPI, faster-whisper, torch, pyannote.audio, etc.) used by Docker builds and native development. |
 
 ---
 
 ## API Reference
 
-### Web Frontends
+### Web UI
 
-The server serves two web frontends:
+The server serves a unified web frontend with multiple views:
 
-| URL Path | Frontend | Description |
-|----------|----------|-------------|
+| URL Path | View | Description |
+|----------|------|-------------|
 | `/` | Redirect | Redirects to `/record` |
 | `/auth` | Auth Page | Authentication page (required in TLS mode) |
-| `/record` | Record UI | Web client for file upload, recording, admin panel |
-| `/notebook` | Audio Notebook | Personal transcription archive with calendar view and search |
+| `/record` | Record | Web client for file upload, recording, admin panel |
+| `/notebook` | Notebook | Personal transcription archive with calendar view and search |
 
 **Security Model (Belt and Suspenders):**
 
@@ -265,14 +272,14 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
   - `Authorization: Bearer <token>` header (API clients)
   - `auth_token` cookie (web browsers)
 
-**Record UI Features:**
+**Record View Features:**
 - Token-based authentication (login with admin or user token)
 - File upload transcription (with optional diarization and word timestamps)
 - Real-time microphone recording via WebSocket
 - Admin panel for token management (admin users only)
 - Works on Android browsers (no app needed)
 
-**Notebook UI Features:**
+**Notebook View Features:**
 - Calendar view of all recordings by date
 - Day view with timeline of recordings
 - Full-text search across all transcriptions
@@ -315,19 +322,30 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
 The `/ws` endpoint supports real-time audio streaming for long-form transcription:
 
 **Connection Flow:**
-1. Client connects to WebSocket
+1. Client connects to WebSocket (with `X-Client-Type` header for standalone clients)
 2. Client sends auth message: `{"type": "auth", "data": {"token": "<token>"}, "timestamp": <unix_time>}`
-3. Server responds with `{"type": "auth_ok"}` or `{"type": "auth_fail"}`
-4. Client sends start message: `{"type": "start", "data": {"language": "en"}, "timestamp": <unix_time>}`
+3. Server responds with `{"type": "auth_ok", "data": {"client_type": "standalone|web", "capabilities": {...}}}`
+4. Client sends start message: `{"type": "start", "data": {"language": "en", "use_vad": true}, "timestamp": <unix_time>}`
 5. Client streams binary audio data (16kHz PCM Int16 with metadata header)
 6. Client sends stop message: `{"type": "stop", "data": {}, "timestamp": <unix_time>}`
 7. Server processes and returns: `{"type": "final", "data": {"text": "...", "words": [...], "duration": 10.5}}`
+
+**Client Type Detection:**
+- Server detects client type via `X-Client-Type` header or User-Agent
+- Standalone clients get additional features (VAD events, preview transcription)
+- Web clients use simplified mode to save GPU memory
 
 **Audio Format:**
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
 - Sample rate: 16kHz
 - Format: Int16 PCM (little-endian)
 - Metadata: `{"sample_rate": 16000, "timestamp_ns": <nanoseconds>, "sequence": <number>}`
+
+**VAD Events (Standalone Clients):**
+- `{"type": "vad_start"}` - Voice activity detected
+- `{"type": "vad_stop"}` - Voice activity ended
+- `{"type": "vad_recording_start"}` - Recording started after VAD trigger
+- `{"type": "vad_recording_stop"}` - Recording stopped after silence
 
 **Session Management:**
 - Only one active session allowed at a time
@@ -369,27 +387,20 @@ cd ..
 
 #### 1.3 NPM Package Audit
 
-Audit both web frontends for security vulnerabilities:
+Audit the web frontend for security vulnerabilities:
 
 ```bash
-# Audio Notebook frontend
-cd native_src/AUDIO_NOTEBOOK
+cd native_src/frontend
 npm ci
 npm audit
 cd ../..
-
-# Remote Server frontend
-cd native_src/REMOTE_SERVER/frontend
-npm ci
-npm audit
-cd ../../..
 ```
 
 > **Note:** The Docker build runs `npm ci` but does **not** run `npm audit`. Always audit locally before building.
 
 ### Step 2: Build Docker Image
 
-Build the Docker image containing the server, ML models support, and both web frontends:
+Build the Docker image containing the server, ML models support, and the web frontend:
 
 ```bash
 cd docker
@@ -397,9 +408,9 @@ docker compose build
 ```
 
 **What happens during build:**
-1. **Frontend builder stage**: Builds both React frontends (`AUDIO_NOTEBOOK` and `REMOTE_SERVER/frontend`)
-2. **Python runtime stage**: Installs all server dependencies from `native_src/REMOTE_SERVER/backend/pyproject.toml`
-3. **Static files**: Copies built frontends to `/app/static/`
+1. **Frontend builder stage**: Builds the React frontend (`native_src/frontend`)
+2. **Python runtime stage**: Installs all server dependencies from `native_src/backend/pyproject.toml`
+3. **Static files**: Copies built frontend to `/app/static/frontend`
 4. **Config template**: Copies `native_src/config.yaml` as `config/config.yaml.example`
 
 **Force rebuild** (if layer caching causes issues):
@@ -677,8 +688,8 @@ cd build && uv sync
 
 #### Frontend Build Behavior
 
-- The Docker image **builds both web frontends during `docker compose build`** in the `frontend-builder` stage.
-- Steps used for each frontend:
+- The Docker image **builds the web frontend during `docker compose build`** in the `frontend-builder` stage.
+- Steps used:
   - `npm ci` (not `--omit=dev` to ensure build tools are available)
   - `npm run build`
 - Docker layer caching may reuse these layers if `package*.json` and frontend sources are unchanged. Use `--no-cache` to force rebuilding.
@@ -883,7 +894,7 @@ Volumes are accessible from the host system:
 
 ## Backend Development
 
-The REMOTE_SERVER backend is the unified server component that powers TranscriptionSuite. It runs inside Docker for production but can be developed natively for faster iteration.
+The backend is the unified server component that powers TranscriptionSuite. It runs inside Docker for production but can be developed natively for faster iteration.
 
 > **Note:** The primary development workflow uses Docker (see [Development Workflow](#development-workflow)). This section is for developers who need to work directly on the backend code with faster iteration cycles.
 
@@ -892,7 +903,7 @@ The REMOTE_SERVER backend is the unified server component that powers Transcript
 The backend is organized into focused modules:
 
 ```txt
-REMOTE_SERVER/backend/
+native_src/backend/
 ├── api/                              # FastAPI application
 │   ├── main.py                       # App factory, lifespan, routing
 │   ├── routes/                       # API endpoint modules
@@ -905,15 +916,22 @@ REMOTE_SERVER/backend/
 │   │   ├── websocket.py              # Real-time audio streaming transcription
 │   │   └── llm.py                    # LLM chat endpoints
 ├── core/                             # ML and audio processing
-│   ├── transcription_engine.py       # faster-whisper wrapper
+│   ├── transcription_engine.py       # faster-whisper wrapper (file-based)
 │   ├── diarization_engine.py         # PyAnnote wrapper
 │   ├── model_manager.py              # Model lifecycle & GPU management
 │   ├── token_store.py                # Token authentication and management
-│   └── audio_utils.py                # Audio preprocessing utilities
+│   ├── realtime_engine.py            # Async wrapper for real-time STT
+│   ├── preview_engine.py             # Preview transcription for standalone clients
+│   ├── client_detector.py            # Detect client type (standalone vs web)
+│   ├── audio_utils.py                # Audio preprocessing utilities
+│   └── stt/                          # Real-time speech-to-text engine
+│       ├── engine.py                 # AudioToTextRecorder with VAD
+│       ├── vad.py                    # Dual VAD (Silero + WebRTC)
+│       └── constants.py              # STT configuration constants
 ├── database/                         # Data persistence
 │   └── database.py                   # SQLite + FTS5 operations
 ├── logging/                          # Centralized logging
-│   └── setup.py                      # Structured logging configuration
+│   └── __init__.py                   # Structured logging configuration
 ├── config.py                         # Configuration management
 └── pyproject.toml                    # Package definition & dependencies
 ```
@@ -922,13 +940,13 @@ REMOTE_SERVER/backend/
 
 **Prerequisites:**
 - Python 3.11+
-- CUDA 12.6+ (for GPU acceleration)
+- CUDA 12.8 (for GPU acceleration)
 - `uv` package manager
 
 **Steps:**
 
 ```bash
-cd native_src/REMOTE_SERVER/backend
+cd native_src/backend
 uv venv --python 3.11
 uv sync                    # Install all dependencies including diarization
 ```
@@ -942,7 +960,7 @@ The backend uses the package name `server` internally (defined in `pyproject.tom
 **Development mode with auto-reload:**
 
 ```bash
-cd native_src/REMOTE_SERVER/backend
+cd native_src/backend
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -998,12 +1016,13 @@ log_level = config.logging["level"]            # Property accessor
 
 **Main configuration sections:**
 
-- `server` - Host, port, TLS settings, Tailscale config
-- `transcription` - Whisper model, device, VAD, diarization
-- `audio_notebook` - Database path, audio storage, format
-- `llm` - LM Studio integration for chat features
+- `main_transcriber` - Primary Whisper model, device, batch settings
+- `preview_transcriber` - Optional preview model for standalone clients (smaller, faster)
+- `diarization` - PyAnnote model and speaker detection settings
+- `remote_server` - Host, port, TLS settings
+- `storage` - Database path, audio storage, format
+- `local_llm` - LM Studio integration for chat features
 - `logging` - Log level, directory, rotation settings
-- `auth` - Token storage and expiry
 
 #### Key Modules Explained
 
@@ -1019,7 +1038,7 @@ The core FastAPI application:
   - Configures CORS middleware
   - Registers all route modules
   - Sets up global exception handler
-- **`mount_frontend()`** - Serves React frontends as static SPAs
+- **`mount_frontend()`** - Serves React frontend as static SPA
 
 ##### `core/model_manager.py` - ML Model Lifecycle
 
@@ -1033,6 +1052,14 @@ manager = get_model_manager(config)
 # Load models (lazy loading)
 transcription_model = manager.load_transcription_model()
 diarization_pipeline = manager.load_diarization_pipeline()
+
+# Preview engine (for standalone clients only)
+manager.on_standalone_client_connected()  # Loads preview model if enabled
+manager.on_standalone_client_disconnected()  # Unloads when no clients
+
+# Real-time engine (per session)
+realtime_engine = manager.get_realtime_engine(session_id, client_type, language)
+manager.release_realtime_engine(session_id)
 
 # Check GPU availability
 if manager.gpu_available:
@@ -1060,6 +1087,41 @@ result = engine.transcribe(
 for segment in result["segments"]:
     print(f"{segment['start']:.2f}s: {segment['text']}")
 ```
+
+##### `core/stt/` - Real-Time Speech-to-Text Engine
+
+Server-side VAD-based audio processing for real-time transcription:
+
+- **`engine.py`** - `AudioToTextRecorder` class with dual VAD (Silero + WebRTC)
+- **`vad.py`** - `VoiceActivityDetector` for robust speech detection
+- **`constants.py`** - Configuration constants (thresholds, timing, model defaults)
+
+The STT engine handles silence trimming to prevent Whisper hallucinations and provides callbacks for VAD state changes.
+
+##### `core/realtime_engine.py` - Async Real-Time Wrapper
+
+Async wrapper around the STT engine for WebSocket integration:
+
+- Session-based engine management
+- Callbacks for VAD events (`on_vad_start`, `on_vad_stop`, etc.)
+- Thread-safe audio buffer management
+
+##### `core/preview_engine.py` - Preview Transcription
+
+Secondary transcription engine for live preview (standalone clients only):
+
+- Uses a smaller, faster model (e.g., `faster-whisper-medium`)
+- Only loaded when `preview_transcriber.enabled = true` in config AND a standalone client connects
+- Automatically unloaded when no standalone clients are connected
+- Saves GPU memory for web-only usage
+
+##### `core/client_detector.py` - Client Type Detection
+
+Detects client type (standalone vs web) from request headers:
+
+- Checks `X-Client-Type` header (set by native clients)
+- Falls back to User-Agent pattern matching
+- Returns `ClientCapabilities` with feature flags (VAD events, preview support)
 
 ##### `database/database.py` - SQLite + FTS5
 
@@ -1116,9 +1178,9 @@ Token-based authentication system:
 
 #### Frontend Development (React UI)
 
-The REMOTE_SERVER includes a React frontend for remote web access:
+The server includes a React frontend for web access:
 
-**Location:** `native_src/REMOTE_SERVER/frontend/`
+**Location:** `native_src/frontend/`
 
 **Tech stack:**
 - React 18 + TypeScript
@@ -1135,7 +1197,7 @@ The REMOTE_SERVER includes a React frontend for remote web access:
 **Development workflow:**
 
 ```bash
-cd native_src/REMOTE_SERVER/frontend
+cd native_src/frontend
 npm install
 npm run dev  # Starts dev server on http://localhost:1421
 ```
@@ -1154,14 +1216,14 @@ The frontend expects the backend API at `http://localhost:8000` by default. Duri
 npm run build  # Output: dist/
 ```
 
-The Docker build process automatically builds both frontends (Audio Notebook + Remote UI) and serves them as static files.
+The Docker build process automatically builds the frontend and serves it as static files.
 
 #### Testing
 
 **Running tests:**
 
 ```bash
-cd native_src/REMOTE_SERVER/backend
+cd native_src/backend
 uv sync --extra dev  # Install test dependencies
 uv run pytest
 ```
@@ -1583,7 +1645,7 @@ GPU passthrough requirements depend on host OS:
 
 ```bash
 # Verify GPU is accessible
-docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 nvidia-smi
 
 # Check container logs
 docker compose logs -f
