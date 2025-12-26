@@ -4,7 +4,7 @@
 
 <pre>A comprehensive Speech-to-Text Transcription Suite with Docker-first
 architecture. Written in Python, utilizing faster_whisper with
-CUDA 12.6 acceleration. Inspired by RealtimeSTT by KoljaB.
+CUDA 12.8 acceleration.
 </pre>
 
 ## Features
@@ -254,7 +254,7 @@ MIT License — See [LICENSE](LICENSE).
 
 - [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
-- [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [CTranslate2](https://github.com/OpenNMT/CTranslate2)
+- [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [Tailscale](https://tailscale.com/)

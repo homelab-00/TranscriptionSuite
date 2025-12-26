@@ -2,23 +2,26 @@
 Core transcription and AI components.
 
 This module contains:
-- transcription_engine: Unified Whisper transcription (file-based)
+- stt: Unified transcription engine (AudioToTextRecorder) for streaming and file-based
 - diarization_engine: PyAnnote speaker diarization
 - model_manager: AI model lifecycle management
 - realtime_engine: Real-time transcription with VAD
 - preview_engine: Preview transcription for standalone clients
 - client_detector: Client type detection (standalone vs web)
 - audio_utils: Audio processing utilities
-- stt: Server-side speech-to-text engine
 """
 
 
 # Lazy imports to avoid circular dependencies
 def __getattr__(name: str):
-    if name == "TranscriptionEngine":
-        from server.core.transcription_engine import TranscriptionEngine
+    if name == "AudioToTextRecorder":
+        from server.core.stt.engine import AudioToTextRecorder
 
-        return TranscriptionEngine
+        return AudioToTextRecorder
+    elif name == "TranscriptionResult":
+        from server.core.stt.engine import TranscriptionResult
+
+        return TranscriptionResult
     elif name == "ModelManager":
         from server.core.model_manager import ModelManager
 
@@ -47,7 +50,8 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    "TranscriptionEngine",
+    "AudioToTextRecorder",
+    "TranscriptionResult",
     "ModelManager",
     "DiarizationEngine",
     "RealtimeTranscriptionEngine",

@@ -31,31 +31,32 @@ longform_recording:
     # If false, only static file transcriptions appear in the app.
     include_in_viewer: false
 
-    # Enable word-level timestamps for longform recordings.
-    # Note: This requires more processing at the end of recording.
-    word_timestamps: false
-
-    # Enable speaker diarization for longform recordings.
-    # Usually not needed since longform is typically single-speaker dictation.
-    enable_diarization: false
-
 
 # ----------------------------------------------------------------------------
 # Static File Transcription
 # ----------------------------------------------------------------------------
 # Settings for transcribing audio/video files (not live recording).
+# These settings are used as defaults for standalone client file transcriptions.
 static_transcription:
     # Enable speaker diarization (identifies "who spoke when").
     # Requires PyAnnote models to be downloaded.
+    # Used as default for standalone client file transcriptions.
     enable_diarization: false
 
     # Enable word-level timestamps in the transcription output.
-    # Required for searchable transcriptions and click-to-seek in the viewer app.
+    # Used as default for standalone client file transcriptions.
     word_timestamps: false
 
     # Maximum characters per segment in the output (when longer we create a new line)
     # Segments are split when speaker changes or this limit is reached.
     max_segment_chars: 500
+
+    # WebRTC VAD preprocessing removes silence before transcription.
+    # Stage 1 of two-stage VAD (Stage 2 is faster_whisper_vad_filter).
+    webrtc_vad_preprocessing: true
+
+    # WebRTC VAD aggressiveness (0-3, higher = more aggressive).
+    webrtc_vad_aggressiveness: 3
 
 
 # ----------------------------------------------------------------------------
@@ -134,8 +135,8 @@ preview_transcriber:
 # Requires a HuggingFace token with access to PyAnnote models.
 diarization:
     # PyAnnote model for speaker diarization.
-    # Default: "pyannote/speaker-diarization-3.1"
-    model: "pyannote/speaker-diarization-3.1"
+    # Default: "pyannote/speaker-diarization-community-1"
+    model: "pyannote/speaker-diarization-community-1"
 
     # HuggingFace token for accessing PyAnnote models.
     # You must accept the model license on HuggingFace first.

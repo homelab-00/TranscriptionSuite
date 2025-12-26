@@ -18,10 +18,7 @@ from server.core.audio_utils import (
     clear_gpu_cache,
     get_gpu_memory_info,
 )
-from server.core.transcription_engine import (
-    TranscriptionEngine,
-    create_transcription_engine,
-)
+from server.core.stt.engine import AudioToTextRecorder
 from server.core.diarization_engine import (
     DiarizationEngine,
     create_diarization_engine,
@@ -47,7 +44,7 @@ class ModelManager:
     Handles model caching and switching between different configurations.
 
     Supports:
-    - File-based transcription (TranscriptionEngine)
+    - File-based and streaming transcription (AudioToTextRecorder - unified engine)
     - Real-time transcription with VAD (RealtimeTranscriptionEngine)
     - Preview transcription for standalone clients (PreviewTranscriptionEngine)
     - Speaker diarization (DiarizationEngine)
@@ -61,7 +58,7 @@ class ModelManager:
             config: Full application configuration dict
         """
         self.config = config
-        self._transcription_engine: Optional[TranscriptionEngine] = None
+        self._transcription_engine: Optional[AudioToTextRecorder] = None
         self._diarization_engine: Optional[Any] = None  # Will be DiarizationEngine
         self._preview_engine: Optional[PreviewTranscriptionEngine] = None
         self._realtime_engines: Dict[str, RealtimeTranscriptionEngine] = {}
@@ -87,11 +84,28 @@ class ModelManager:
             )
 
     @property
-    def transcription_engine(self) -> TranscriptionEngine:
-        """Get or create the transcription engine."""
+    def transcription_engine(self) -> AudioToTextRecorder:
+        """Get or create the unified transcription engine."""
         if self._transcription_engine is None:
-            self._transcription_engine = create_transcription_engine(self.config)
+            self._transcription_engine = self._create_transcription_engine()
         return self._transcription_engine
+
+    def _create_transcription_engine(self) -> AudioToTextRecorder:
+        """Create the unified transcription engine from config."""
+        main_cfg = self.config.get("main_transcriber", {})
+        trans_opts = self.config.get("transcription_options", {})
+
+        return AudioToTextRecorder(
+            instance_name="file_transcriber",
+            model=main_cfg.get("model", "Systran/faster-whisper-large-v3"),
+            device=main_cfg.get("device", "cuda"),
+            compute_type=main_cfg.get("compute_type", "default"),
+            beam_size=main_cfg.get("beam_size", 5),
+            batch_size=main_cfg.get("batch_size", 16),
+            language=trans_opts.get("language", ""),
+            faster_whisper_vad_filter=main_cfg.get("faster_whisper_vad_filter", True),
+            initial_prompt=main_cfg.get("initial_prompt"),
+        )
 
     def load_transcription_model(self) -> None:
         """Explicitly load the transcription model."""

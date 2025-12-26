@@ -45,6 +45,8 @@ This document contains technical details, architecture decisions, and developmen
   - [Verbose Logging](#verbose-logging)
   - [Troubleshooting Tailscale HTTPS](#troubleshooting-tailscale-https)
 - [Configuration Reference](#configuration-reference)
+  - [Voice Activity Detection (VAD) Configuration](#voice-activity-detection-vad-configuration)
+  - [Static File Transcription Configuration](#static-file-transcription-configuration)
   - [Server Configuration (Docker)](#server-configuration-docker)
   - [Client Configuration](#client-configuration)
   - [Native Development Configuration](#native-development-configuration)
@@ -1703,6 +1705,126 @@ To customize the server configuration:
 - You typically only need to change settings like model names, transcription options, or LLM settings
 - Don't change storage paths unless you understand the Docker volume structure
 - Changes require a container restart: `docker compose restart`
+
+### Voice Activity Detection (VAD) Configuration
+
+TranscriptionSuite uses Voice Activity Detection to remove silence and improve transcription quality. The VAD approach differs based on the transcription method.
+
+#### VAD by Transcription Method
+
+| Method | VAD Stage 1 | VAD Stage 2 | Purpose |
+|--------|-------------|-------------|---------|
+| **Static file transcription** | WebRTC preprocessing | faster_whisper VAD filter (Silero) | Remove silence from existing audio files |
+| **Longform recording** | Dual VAD (WebRTC + Silero) | faster_whisper VAD filter (Silero) | Control when to record based on voice activity |
+| **Real-time preview** | Dual VAD (WebRTC + Silero) | faster_whisper VAD filter (Silero) | Control when to record based on voice activity |
+
+#### Static File Transcription VAD
+
+**Two-stage approach:**
+1. **Stage 1 - WebRTC preprocessing**: Processes the entire audio file upfront, physically removes silence frames, creates shorter audio
+2. **Stage 2 - faster_whisper VAD filter**: Silero VAD during Whisper transcription as additional safety net
+
+**Configuration:**
+
+```yaml
+static_transcription:
+  # Stage 1: WebRTC preprocessing removes silence before transcription
+  webrtc_vad_preprocessing: true
+  webrtc_vad_aggressiveness: 3  # 0-3, higher = more aggressive silence removal
+```
+
+**How it works:**
+- WebRTC VAD processes 30ms audio frames
+- Keeps only frames detected as speech
+- Logs duration removed (e.g., "Removed 5.2s of silence (60.0s -> 54.8s)")
+- Whisper receives shorter audio with silence already removed
+
+#### Longform & Real-Time Preview VAD
+
+**Two-stage approach:**
+1. **Stage 1 - Dual VAD for recording control**: WebRTC + Silero work together to decide when to start/stop recording
+2. **Stage 2 - faster_whisper VAD filter**: Silero VAD during Whisper transcription
+
+**Configuration:**
+
+```yaml
+stt:
+  # WebRTC VAD for fast initial screening
+  webrtc_sensitivity: 3  # 0-3, higher = less sensitive to noise
+
+  # Use Silero for end-of-speech detection (more accurate but uses more GPU)
+  silero_deactivity_detection: false
+
+  # Recording timing
+  post_speech_silence_duration: 0.6  # Silence duration before stopping recording
+  min_length_of_recording: 0.5       # Minimum recording length
+  pre_recording_buffer_duration: 1.0 # Pre-roll buffer to capture speech onset
+
+preview_transcriber:
+  # Silero sensitivity for preview (different from main transcriber)
+  silero_sensitivity: 0.4  # 0.0-1.0, higher = more sensitive
+```
+
+**How it works:**
+- WebRTC VAD performs fast initial screening of live audio
+- Silero VAD confirms with higher accuracy (both must agree for voice to be "active")
+- When voice detected: start recording
+- When silence detected for `post_speech_silence_duration`: stop recording
+- Silence is never recorded in the first place, so the final audio naturally contains only voiced segments
+
+#### Functional Equivalence
+
+While the implementation differs, **all methods achieve the same goal: transcribing audio with silence removed**.
+
+- **Static files**: Silence is removed from existing audio before transcription (preprocessing)
+- **Live recording**: Silence is prevented from being recorded in the first place (recording control)
+
+Both then use **Stage 2** (faster_whisper VAD filter with Silero) during transcription as an additional safety net.
+
+**Why this matters:**
+- Reduces transcription time (less audio to process)
+- Improves accuracy (Whisper performs better without long silence)
+- Prevents hallucinations (long silence can cause Whisper to generate phantom text)
+
+#### Technical Note: Two Audio Processing Paradigms
+
+The `AudioToTextRecorder` class serves two distinct use cases with different VAD workflows:
+
+**1. Streaming/Live Recording Workflow:**
+- Audio arrives in real-time via WebSocket (`feed_audio()`)
+- VAD controls the recording state machine: `inactive → listening → recording → transcribing`
+- Dual VAD (WebRTC + Silero) decides **when to start/stop recording**
+- Silence is never recorded in the first place
+- Entry points: `feed_audio()` → `listen()` → `wait_audio()` → `transcribe()`
+
+**2. Static File Transcription Workflow:**
+- Audio already exists as a complete file
+- No recording state machine needed (audio is already captured)
+- VAD removes silence from existing audio via preprocessing
+- Entry points: `transcribe_file()` → `transcribe_audio()`
+
+Both workflows apply VAD, but differently:
+- **Streaming**: VAD controls recording (preventive - silence never recorded)
+- **Static files**: VAD removes silence (corrective - silence removed from existing audio)
+
+The methods `transcribe_file()` and `transcribe_audio()` "bypass the streaming recording workflow" (not VAD itself). They skip the real-time state machine and directly transcribe audio data, applying WebRTC preprocessing (Stage 1) and faster_whisper VAD filter (Stage 2) as appropriate.
+
+### Static File Transcription Configuration
+
+There are four methods of static file transcription, each with different configuration behavior:
+
+| Method | Endpoint | Config Source | word_timestamps | diarization |
+|--------|----------|---------------|-----------------|-------------|
+| **Standalone client** | `/api/transcribe/audio` | `static_transcription` section | From config | From config |
+| **Recorder web UI** | `/api/transcribe/audio` | Main transcriber defaults | Always `false` | Always `false` |
+| **Notebook import** | `/api/notebook/transcribe/upload` | UI form parameters | From UI toggle | From UI toggle |
+| **Notebook day view** | `/api/notebook/transcribe/upload` | UI form parameters | From UI toggle | From UI toggle |
+
+**Client Detection:**
+- The server detects standalone clients via the `X-Client-Type: standalone` header
+- Standalone clients use defaults from `config.yaml` → `static_transcription` section
+- Web UI clients (Recorder page) always disable word_timestamps and diarization for speed
+- Audio Notebook UI provides toggles that override any defaults
 
 ### Server Configuration (Docker)
 

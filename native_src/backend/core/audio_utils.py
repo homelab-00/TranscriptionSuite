@@ -38,6 +38,14 @@ except ImportError:
     sf = None  # type: ignore
     HAS_SOUNDFILE = False
 
+try:
+    import webrtcvad
+
+    HAS_WEBRTCVAD = True
+except ImportError:
+    webrtcvad = None  # type: ignore
+    HAS_WEBRTCVAD = False
+
 
 def clear_gpu_cache() -> None:
     """
@@ -311,3 +319,77 @@ def format_timestamp(seconds: float) -> str:
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
     return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
+
+
+def apply_webrtc_vad(
+    audio_data: np.ndarray,
+    sample_rate: int = 16000,
+    aggressiveness: int = 3,
+) -> np.ndarray:
+    """
+    Apply WebRTC VAD preprocessing to remove silence from audio.
+
+    This is Stage 1 of two-stage VAD: physically removes silence before
+    transcription. Stage 2 is faster_whisper_vad_filter during transcription.
+
+    Args:
+        audio_data: Audio samples as float32 numpy array (16kHz, mono)
+        sample_rate: Sample rate (must be 16000 for WebRTC VAD)
+        aggressiveness: VAD aggressiveness level (0-3, higher = more aggressive)
+
+    Returns:
+        Audio with silence removed as float32 numpy array
+    """
+    if not HAS_WEBRTCVAD or webrtcvad is None:
+        logger.debug("webrtcvad not installed, skipping VAD preprocessing")
+        return audio_data
+
+    if len(audio_data) == 0:
+        return audio_data
+
+    original_duration = len(audio_data) / sample_rate
+
+    try:
+        vad = webrtcvad.Vad(aggressiveness)
+
+        # Convert float32 [-1, 1] to int16 PCM for WebRTC VAD
+        audio_int16 = (audio_data * 32767).astype(np.int16)
+
+        # Process 30ms frames (480 samples at 16kHz)
+        frame_duration_ms = 30
+        frame_size = int(sample_rate * frame_duration_ms / 1000)
+
+        voiced_frames = []
+        for i in range(0, len(audio_int16) - frame_size + 1, frame_size):
+            frame = audio_int16[i : i + frame_size]
+            frame_bytes = frame.tobytes()
+
+            try:
+                if vad.is_speech(frame_bytes, sample_rate):
+                    voiced_frames.append(frame)
+            except Exception:
+                # Frame processing error, keep the frame
+                voiced_frames.append(frame)
+
+        if not voiced_frames:
+            logger.warning("WebRTC VAD found no speech, returning original audio")
+            return audio_data
+
+        # Concatenate voiced frames and convert back to float32
+        voiced_audio_int16 = np.concatenate(voiced_frames)
+        voiced_audio = voiced_audio_int16.astype(np.float32) / 32767.0
+
+        new_duration = len(voiced_audio) / sample_rate
+        removed_duration = original_duration - new_duration
+
+        if removed_duration > 0.1:  # Only log if significant silence removed
+            logger.info(
+                f"VAD preprocessing: removed {removed_duration:.1f}s of silence "
+                f"({original_duration:.1f}s -> {new_duration:.1f}s)"
+            )
+
+        return voiced_audio
+
+    except Exception as e:
+        logger.warning(f"WebRTC VAD preprocessing failed: {e}, using original audio")
+        return audio_data
