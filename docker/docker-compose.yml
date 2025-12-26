@@ -22,6 +22,20 @@
 #
 # Optional environment variables:
 #   HUGGINGFACE_TOKEN=xxx  # For downloading diarization models
+#
+# User Configuration & Logs:
+#   The server looks for custom config and writes logs to a user config directory.
+#   Mount your local config directory to enable custom settings and persistent logs:
+#
+#   Linux:
+#     USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d
+#
+#   Windows (PowerShell):
+#     $env:USER_CONFIG_DIR="$env:USERPROFILE\Documents\TranscriptionSuite"
+#     docker compose up -d
+#
+#   To customize settings, copy config.yaml from the repo to your USER_CONFIG_DIR
+#   and edit as needed. The server will use your custom config instead of defaults.
 
 services:
   transcription-suite:
@@ -64,6 +78,11 @@ services:
     volumes:
       - transcription-data:/data  # Database, audio files, tokens, logs
       - huggingface-models:/models  # Whisper and diarization models cache
+      # User config directory (optional - for custom config.yaml and logs)
+      # Set USER_CONFIG_DIR to mount your local config directory:
+      #   Linux: USER_CONFIG_DIR=~/.config/TranscriptionSuite
+      #   Windows: USER_CONFIG_DIR=$HOME/Documents/TranscriptionSuite
+      - ${USER_CONFIG_DIR:-/dev/null}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
       - ${TLS_CERT_PATH:-/dev/null}:/certs/cert.crt:ro
       - ${TLS_KEY_PATH:-/dev/null}:/certs/cert.key:ro

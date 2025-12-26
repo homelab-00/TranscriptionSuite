@@ -19,14 +19,10 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import numpy as np
 
-from server.core.stt.constants import (
-    DEFAULT_COMPUTE_TYPE,
-    DEFAULT_DEVICE,
-    DEFAULT_PREVIEW_MODEL,
-    DEFAULT_SILERO_SENSITIVITY,
-    DEFAULT_WEBRTC_SENSITIVITY,
-    SAMPLE_RATE,
-)
+from server.config import get_config
+
+# Target sample rate for Whisper (technical requirement, not configurable)
+SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
@@ -36,25 +32,32 @@ class PreviewConfig:
     """Configuration for preview transcription."""
 
     enabled: bool = False
-    model: str = DEFAULT_PREVIEW_MODEL
-    device: str = DEFAULT_DEVICE
-    compute_type: str = DEFAULT_COMPUTE_TYPE
+    model: str = "Systran/faster-whisper-base"
+    device: str = "cuda"
+    compute_type: str = "default"
     batch_size: int = 8
     beam_size: int = 3
     post_speech_silence_duration: float = 0.3
     early_transcription_on_silence: float = 0.5
-    silero_sensitivity: float = DEFAULT_SILERO_SENSITIVITY
-    webrtc_sensitivity: int = DEFAULT_WEBRTC_SENSITIVITY
+    silero_sensitivity: float = 0.4
+    webrtc_sensitivity: int = 3
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "PreviewConfig":
         """Create PreviewConfig from configuration dict."""
-        preview_config = config.get("transcription", {}).get("preview_transcriber", {})
+        # Support both raw dict and nested dict format
+        preview_config = config.get("preview_transcriber", {})
+        if not preview_config:
+            preview_config = config.get("transcription", {}).get("preview_transcriber", {})
+
+        # Get stt config for webrtc_sensitivity
+        stt_config = config.get("stt", {})
+
         return cls(
             enabled=preview_config.get("enabled", False),
-            model=preview_config.get("model", DEFAULT_PREVIEW_MODEL),
-            device=preview_config.get("device", DEFAULT_DEVICE),
-            compute_type=preview_config.get("compute_type", DEFAULT_COMPUTE_TYPE),
+            model=preview_config.get("model", "Systran/faster-whisper-base"),
+            device=preview_config.get("device", "cuda"),
+            compute_type=preview_config.get("compute_type", "default"),
             batch_size=preview_config.get("batch_size", 8),
             beam_size=preview_config.get("beam_size", 3),
             post_speech_silence_duration=preview_config.get(
@@ -63,12 +66,32 @@ class PreviewConfig:
             early_transcription_on_silence=preview_config.get(
                 "early_transcription_on_silence", 0.5
             ),
-            silero_sensitivity=preview_config.get(
-                "silero_sensitivity", DEFAULT_SILERO_SENSITIVITY
+            silero_sensitivity=preview_config.get("silero_sensitivity", 0.4),
+            webrtc_sensitivity=stt_config.get("webrtc_sensitivity", 3),
+        )
+
+    @classmethod
+    def from_server_config(cls) -> "PreviewConfig":
+        """Create PreviewConfig from the global server configuration."""
+        cfg = get_config()
+        preview_config = cfg.get("preview_transcriber", default={})
+        stt_config = cfg.stt
+
+        return cls(
+            enabled=preview_config.get("enabled", False),
+            model=preview_config.get("model", "Systran/faster-whisper-base"),
+            device=preview_config.get("device", "cuda"),
+            compute_type=preview_config.get("compute_type", "default"),
+            batch_size=preview_config.get("batch_size", 8),
+            beam_size=preview_config.get("beam_size", 3),
+            post_speech_silence_duration=preview_config.get(
+                "post_speech_silence_duration", 0.3
             ),
-            webrtc_sensitivity=preview_config.get(
-                "webrtc_sensitivity", DEFAULT_WEBRTC_SENSITIVITY
+            early_transcription_on_silence=preview_config.get(
+                "early_transcription_on_silence", 0.5
             ),
+            silero_sensitivity=preview_config.get("silero_sensitivity", 0.4),
+            webrtc_sensitivity=stt_config.get("webrtc_sensitivity", 3),
         )
 
 

@@ -53,7 +53,7 @@ static_transcription:
     # Required for searchable transcriptions and click-to-seek in the viewer app.
     word_timestamps: false
 
-    # Maximum characters per segment in the output.
+    # Maximum characters per segment in the output (when longer we create a new line)
     # Segments are split when speaker changes or this limit is reached.
     max_segment_chars: 500
 
@@ -131,23 +131,42 @@ preview_transcriber:
 # Speaker Diarization (PyAnnote)
 # ----------------------------------------------------------------------------
 # Settings for the speaker diarization module.
+# Requires a HuggingFace token with access to PyAnnote models.
 diarization:
     # PyAnnote model for speaker diarization.
+    # Default: "pyannote/speaker-diarization-3.1"
     model: "pyannote/speaker-diarization-3.1"
 
+    # HuggingFace token for accessing PyAnnote models.
+    # You must accept the model license on HuggingFace first.
+    # Can also be set via HF_TOKEN environment variable.
+    # Default: null (uses HF_TOKEN env var)
+    hf_token: null
+
     # Device for diarization: "cuda" or "cpu"
+    # Default: "cuda"
     device: "cuda"
 
     # Speaker count hints (null for auto-detection).
+    # If you know exactly how many speakers, set both to the same value.
+    # Default: null (auto-detect)
     min_speakers: null
     max_speakers: null
 
-    # Advanced settings
-    min_duration_on: 0.0   # Minimum speech segment duration (seconds)
-    min_duration_off: 0.0  # Minimum silence duration (seconds)
+    # Minimum speech segment duration (seconds).
+    # Segments shorter than this are discarded.
+    # Default: 0.0
+    min_duration_on: 0.0
 
-    # Output settings
-    merge_gap_threshold: 0.5  # Merge segments from same speaker if gap < this
+    # Minimum silence duration (seconds) between speech segments.
+    # Shorter silences within a speaker's turn are ignored.
+    # Default: 0.0
+    min_duration_off: 0.0
+
+    # Merge segments from same speaker if gap is less than this (seconds).
+    # Helps create cleaner segment boundaries.
+    # Default: 0.5
+    merge_gap_threshold: 0.5
 
 
 # ----------------------------------------------------------------------------
@@ -168,13 +187,14 @@ audio:
 # Storage Settings
 # ----------------------------------------------------------------------------
 # Configuration for where the viewer app stores files.
+# These paths are Docker container paths by default.
+# For local development, override via your own config.yaml.
 storage:
-    # Directory for storing audio files (relative to AUDIO_NOTEBOOK/backend/).
-    # Audio files imported via the viewer app are stored here.
-    audio_dir: "data/audio"
+    # Directory for storing audio files.
+    audio_dir: "/data/audio"
 
     # Directory for the SQLite database.
-    database_dir: "data"
+    database_dir: "/data/database"
 
     # Audio storage format for imported files.
     # Source files are converted to MP3 for efficient storage.
@@ -222,10 +242,10 @@ local_llm:
     gpu_offload: 1.0
 
     # Context length override (optional, leave as null to use model default)
-    context_length: null
+    context_length: 4096
 
     # Maximum tokens for the response
-    max_tokens: 4096
+    max_tokens: null
 
     # Temperature for generation (0.0 = deterministic, 1.0 = creative)
     temperature: 0.7
@@ -245,6 +265,7 @@ local_llm:
 # Settings for the web-based remote transcription server.
 # This allows clients on other devices to transcribe audio via a web browser
 # interface over a Tailscale VPN or local network.
+# These paths are Docker container paths by default.
 remote_server:
     # Enable the remote server mode
     enabled: true
@@ -260,30 +281,153 @@ remote_server:
     # Port for WebSocket Secure (audio streaming)
     wss_port: 8444
 
-    # Path to token storage file (relative to project root)
-    token_store: "data/tokens.json"
+    # Path to token storage file
+    token_store: "/data/tokens/tokens.json"
 
     # TLS/SSL configuration
-    # Self-signed certificates are auto-generated on first run
+    # Certificates are mounted from host when TLS_ENABLED=true
     tls:
-        enabled: true
-        cert_file: "data/my-machine.crt"
-        key_file: "data/my-machine.key"
-        auto_generate: false # Don't generate self-signed cert if missing
+        enabled: false  # Controlled via TLS_ENABLED env var in Docker
+        cert_file: "/certs/cert.crt"
+        key_file: "/certs/cert.key"
+        auto_generate: false
 
 
 # ----------------------------------------------------------------------------
 # Logging Configuration
 # ----------------------------------------------------------------------------
+# Note: In Docker, the log directory is set via the LOG_DIR environment variable.
+# If USER_CONFIG_DIR is mounted, logs go there; otherwise to /data/logs.
 logging:
     # Logging level: "DEBUG", "INFO", "WARNING", "ERROR"
     level: "INFO"
 
     # Print log messages to console (useful for debugging).
-    console_output: false
+    console_output: true
 
-    # Log file name for the core transcription engine.
-    file_name: "transcription_suite.log"
+    # Log file name for the server.
+    file_name: "server.log"
 
-    # Directory for log files (relative to project root).
-    directory: "."
+    # Directory for log files.
+    # In Docker: Overridden by LOG_DIR env var (user config dir or /data/logs)
+    # For local dev: Set to your preferred path
+    directory: "/data/logs"
+
+    # Maximum log file size in MB before rotation
+    max_size_mb: 10
+
+    # Number of backup log files to keep
+    backup_count: 5
+
+
+# ============================================================================
+# Real-time STT Engine Configuration
+# ============================================================================
+# Settings for the real-time speech-to-text engine used for live transcription.
+# This controls voice activity detection, audio buffering, and transcription behavior.
+stt:
+    # --------------------------------------------------------------------------
+    # Voice Activity Detection (VAD)
+    # --------------------------------------------------------------------------
+    # The STT engine uses a dual VAD approach: WebRTC for fast initial screening,
+    # Silero for accurate confirmation. Voice is active only when BOTH agree.
+
+    # WebRTC VAD sensitivity.
+    # Range: 0 (most sensitive/aggressive) to 3 (least sensitive/aggressive).
+    # Higher values = less likely to detect speech, more resistant to noise.
+    # Default: 3
+    webrtc_sensitivity: 3
+
+    # Use Silero VAD for end-of-speech detection instead of WebRTC.
+    # More robust against noise but uses more GPU resources.
+    # Default: false
+    silero_deactivity_detection: false
+
+    # --------------------------------------------------------------------------
+    # Recording Timing Parameters
+    # --------------------------------------------------------------------------
+
+    # Duration of silence (seconds) that must follow speech before recording stops.
+    # Shorter = faster response, but may cut off speech. Longer = more complete but slower.
+    # Default: 0.6
+    post_speech_silence_duration: 0.6
+
+    # Minimum recording length (seconds) before the recording can be stopped.
+    # Prevents very short accidental recordings.
+    # Default: 0.5
+    min_length_of_recording: 0.5
+
+    # Minimum time interval (seconds) between the end of one recording and start of next.
+    # Prevents rapid successive recordings.
+    # Default: 0.0
+    min_gap_between_recordings: 0.0
+
+    # Duration (seconds) of audio to keep in a pre-roll buffer.
+    # Compensates for VAD detection latency by capturing audio before speech is detected.
+    # Default: 1.0
+    pre_recording_buffer_duration: 1.0
+
+    # Maximum continuous silence duration (seconds) before trimming audio.
+    # Long silence in recordings can cause Whisper hallucinations.
+    # Default: 10.0
+    max_silence_duration: 10.0
+
+    # --------------------------------------------------------------------------
+    # Early Transcription
+    # --------------------------------------------------------------------------
+
+    # Trigger speculative transcription after this period of silence (seconds).
+    # Set to 0 to disable. Enabling can result in faster final transcriptions
+    # but increases GPU load due to multiple transcription attempts.
+    # Default: 0.0 (disabled)
+    early_transcription_on_silence: 0.0
+
+    # --------------------------------------------------------------------------
+    # Audio Processing
+    # --------------------------------------------------------------------------
+
+    # Audio buffer size in samples per chunk.
+    # The Silero VAD model expects minimum 512 samples.
+    # Changing this may impact VAD performance.
+    # Default: 512
+    buffer_size: 512
+
+    # Normalize audio to -0.95 dBFS before transcription.
+    # Can improve transcription quality for quiet recordings.
+    # Default: false
+    normalize_audio: false
+
+    # --------------------------------------------------------------------------
+    # Performance Tuning
+    # --------------------------------------------------------------------------
+
+    # Maximum audio queue size before discarding old chunks.
+    # Prevents memory buildup if processing falls behind real-time.
+    # Default: 100
+    allowed_latency_limit: 100
+
+    # Sleep duration (seconds) between processing loop iterations.
+    # Lower = more responsive but higher CPU usage.
+    # Default: 0.02
+    time_sleep: 0.02
+
+    # --------------------------------------------------------------------------
+    # Output Formatting
+    # --------------------------------------------------------------------------
+
+    # Capitalize the first letter of transcribed sentences.
+    # Default: true
+    ensure_sentence_starting_uppercase: true
+
+    # Add a period at the end of sentences that lack punctuation.
+    # Default: true
+    ensure_sentence_ends_with_period: true
+
+    # --------------------------------------------------------------------------
+    # Advanced: Token Suppression
+    # --------------------------------------------------------------------------
+
+    # List of Whisper token IDs to suppress from transcription output.
+    # Token -1 means no suppression. See Whisper tokenizer for token IDs.
+    # Default: [-1]
+    suppress_tokens: [-1]

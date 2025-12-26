@@ -31,29 +31,14 @@ import torch
 from faster_whisper import BatchedInferencePipeline
 from scipy.signal import resample
 
-from server.core.stt.constants import (
-    ALLOWED_LATENCY_LIMIT,
-    BUFFER_SIZE,
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_BEAM_SIZE,
-    DEFAULT_COMPUTE_TYPE,
-    DEFAULT_DEVICE,
-    DEFAULT_EARLY_TRANSCRIPTION_ON_SILENCE,
-    DEFAULT_FASTER_WHISPER_VAD_FILTER,
-    DEFAULT_MIN_GAP_BETWEEN_RECORDINGS,
-    DEFAULT_MIN_LENGTH_OF_RECORDING,
-    DEFAULT_MODEL,
-    DEFAULT_NORMALIZE_AUDIO,
-    DEFAULT_POST_SPEECH_SILENCE_DURATION,
-    DEFAULT_PRE_RECORDING_BUFFER_DURATION,
-    DEFAULT_SILERO_SENSITIVITY,
-    DEFAULT_WEBRTC_SENSITIVITY,
-    INT16_MAX_ABS_VALUE,
-    MAX_SILENCE_DURATION,
-    SAMPLE_RATE,
-    TIME_SLEEP,
-)
+from server.config import get_config
 from server.core.stt.vad import VoiceActivityDetector
+
+# Mathematical constant for 16-bit audio normalization
+INT16_MAX_ABS_VALUE = 32768.0
+
+# Target sample rate for Whisper (not configurable - this is a technical requirement)
+SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
@@ -89,32 +74,32 @@ class AudioToTextRecorder:
     def __init__(
         self,
         instance_name: str = "server_recorder",
-        model: str = DEFAULT_MODEL,
+        model: Optional[str] = None,
         download_root: Optional[str] = None,
         language: str = "",
-        compute_type: str = DEFAULT_COMPUTE_TYPE,
+        compute_type: Optional[str] = None,
         gpu_device_index: Union[int, List[int]] = 0,
-        device: str = DEFAULT_DEVICE,
-        batch_size: int = DEFAULT_BATCH_SIZE,
-        beam_size: int = DEFAULT_BEAM_SIZE,
+        device: Optional[str] = None,
+        batch_size: Optional[int] = None,
+        beam_size: Optional[int] = None,
         # VAD parameters
-        silero_sensitivity: float = DEFAULT_SILERO_SENSITIVITY,
+        silero_sensitivity: Optional[float] = None,
         silero_use_onnx: bool = False,
         silero_deactivity_detection: bool = False,
-        webrtc_sensitivity: int = DEFAULT_WEBRTC_SENSITIVITY,
+        webrtc_sensitivity: Optional[int] = None,
         # Timing parameters
-        post_speech_silence_duration: float = DEFAULT_POST_SPEECH_SILENCE_DURATION,
-        min_length_of_recording: float = DEFAULT_MIN_LENGTH_OF_RECORDING,
-        min_gap_between_recordings: float = DEFAULT_MIN_GAP_BETWEEN_RECORDINGS,
-        pre_recording_buffer_duration: float = DEFAULT_PRE_RECORDING_BUFFER_DURATION,
+        post_speech_silence_duration: Optional[float] = None,
+        min_length_of_recording: Optional[float] = None,
+        min_gap_between_recordings: Optional[float] = None,
+        pre_recording_buffer_duration: Optional[float] = None,
         # Processing parameters
-        faster_whisper_vad_filter: bool = DEFAULT_FASTER_WHISPER_VAD_FILTER,
-        normalize_audio: bool = DEFAULT_NORMALIZE_AUDIO,
-        early_transcription_on_silence: int = DEFAULT_EARLY_TRANSCRIPTION_ON_SILENCE,
-        allowed_latency_limit: int = ALLOWED_LATENCY_LIMIT,
+        faster_whisper_vad_filter: Optional[bool] = None,
+        normalize_audio: Optional[bool] = None,
+        early_transcription_on_silence: Optional[int] = None,
+        allowed_latency_limit: Optional[int] = None,
         # Text processing
-        ensure_sentence_starting_uppercase: bool = True,
-        ensure_sentence_ends_with_period: bool = True,
+        ensure_sentence_starting_uppercase: Optional[bool] = None,
+        ensure_sentence_ends_with_period: Optional[bool] = None,
         # Callbacks
         on_recording_start: Optional[Callable[[], None]] = None,
         on_recording_stop: Optional[Callable[[], None]] = None,
@@ -161,30 +146,88 @@ class AudioToTextRecorder:
             initial_prompt: Initial prompt for transcription
             suppress_tokens: Token IDs to suppress
         """
+        # Load config for default values
+        cfg = get_config()
+        main_cfg = cfg.get("main_transcriber", default={})
+        preview_cfg = cfg.get("preview_transcriber", default={})
+        stt_cfg = cfg.stt
+
         self.instance_name = instance_name
-        self.model_name = model
+        self.model_name = model or main_cfg.get("model", "Systran/faster-whisper-large-v3")
         self.download_root = download_root
         self.language = language
-        self.compute_type = compute_type
+        self.compute_type = compute_type or main_cfg.get("compute_type", "default")
         self.gpu_device_index = gpu_device_index
-        self.batch_size = batch_size
-        self.beam_size = beam_size
+        self.batch_size = batch_size if batch_size is not None else main_cfg.get("batch_size", 16)
+        self.beam_size = beam_size if beam_size is not None else main_cfg.get("beam_size", 5)
 
-        # Timing parameters
-        self.post_speech_silence_duration = post_speech_silence_duration
-        self.min_length_of_recording = min_length_of_recording
-        self.min_gap_between_recordings = min_gap_between_recordings
-        self.pre_recording_buffer_duration = pre_recording_buffer_duration
+        # VAD parameters - resolve from config (stt section is primary, preview_transcriber for silero)
+        silero_sensitivity = (
+            silero_sensitivity
+            if silero_sensitivity is not None
+            else preview_cfg.get("silero_sensitivity", 0.4)
+        )
+        webrtc_sensitivity = (
+            webrtc_sensitivity
+            if webrtc_sensitivity is not None
+            else stt_cfg.get("webrtc_sensitivity", 3)
+        )
 
-        # Processing parameters
-        self.faster_whisper_vad_filter = faster_whisper_vad_filter
-        self.normalize_audio = normalize_audio
-        self.early_transcription_on_silence = early_transcription_on_silence
-        self.allowed_latency_limit = allowed_latency_limit
+        # Timing parameters - resolve from stt config section
+        self.post_speech_silence_duration = (
+            post_speech_silence_duration
+            if post_speech_silence_duration is not None
+            else stt_cfg.get("post_speech_silence_duration", 0.6)
+        )
+        self.min_length_of_recording = (
+            min_length_of_recording
+            if min_length_of_recording is not None
+            else stt_cfg.get("min_length_of_recording", 0.5)
+        )
+        self.min_gap_between_recordings = (
+            min_gap_between_recordings
+            if min_gap_between_recordings is not None
+            else stt_cfg.get("min_gap_between_recordings", 0.0)
+        )
+        self.pre_recording_buffer_duration = (
+            pre_recording_buffer_duration
+            if pre_recording_buffer_duration is not None
+            else stt_cfg.get("pre_recording_buffer_duration", 1.0)
+        )
 
-        # Text processing
-        self.ensure_sentence_starting_uppercase = ensure_sentence_starting_uppercase
-        self.ensure_sentence_ends_with_period = ensure_sentence_ends_with_period
+        # Processing parameters - resolve from config
+        self.faster_whisper_vad_filter = (
+            faster_whisper_vad_filter
+            if faster_whisper_vad_filter is not None
+            else main_cfg.get("faster_whisper_vad_filter", True)
+        )
+        self.normalize_audio = (
+            normalize_audio
+            if normalize_audio is not None
+            else stt_cfg.get("normalize_audio", False)
+        )
+        self.early_transcription_on_silence = (
+            early_transcription_on_silence
+            if early_transcription_on_silence is not None
+            else stt_cfg.get("early_transcription_on_silence", 0)
+        )
+        self.allowed_latency_limit = (
+            allowed_latency_limit
+            if allowed_latency_limit is not None
+            else stt_cfg.get("allowed_latency_limit", 100)
+        )
+
+        # Text processing - read from stt config
+        self.ensure_sentence_starting_uppercase = (
+            ensure_sentence_starting_uppercase
+            if ensure_sentence_starting_uppercase is not None
+            else stt_cfg.get("ensure_sentence_starting_uppercase", True)
+        )
+        self.ensure_sentence_ends_with_period = (
+            ensure_sentence_ends_with_period
+            if ensure_sentence_ends_with_period is not None
+            else stt_cfg.get("ensure_sentence_ends_with_period", True)
+        )
 
         # Callbacks
         self.on_recording_start = on_recording_start
@@ -193,14 +236,31 @@ class AudioToTextRecorder:
         self.on_vad_start = on_vad_start
         self.on_vad_stop = on_vad_stop
         self.on_recorded_chunk = on_recorded_chunk
-        self.initial_prompt = initial_prompt
-        self.suppress_tokens = suppress_tokens if suppress_tokens is not None else [-1]
+        self.initial_prompt = initial_prompt or main_cfg.get("initial_prompt")
 
-        # Set device
+        # Token suppression - from stt config
+        self.suppress_tokens = (
+            suppress_tokens
+            if suppress_tokens is not None
+            else stt_cfg.get("suppress_tokens", [-1])
+        )
+
+        # Silero deactivity detection from stt config
+        silero_deactivity_detection = (
+            silero_deactivity_detection
+            if silero_deactivity_detection
+            else stt_cfg.get("silero_deactivity_detection", False)
+        )
+
+        # Set device - resolve from config if not provided
+        device = device or main_cfg.get("device", "cuda")
         self.device = (
             "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
         )
         logger.info(f"Using device: {self.device}")
+
+        # Get buffer size from config
+        buffer_size = stt_cfg.get("buffer_size", 512)
 
         # Initialize state
         self.state = "inactive"
@@ -215,15 +275,16 @@ class AudioToTextRecorder:
         # Extended silence trimming state
         self.extended_silence_start = 0.0
         self.is_trimming_silence = False
-        self.max_silence_duration = MAX_SILENCE_DURATION
+        self.max_silence_duration = stt_cfg.get("max_silence_duration", 10.0)
 
         # Audio buffers
         self.audio_queue: queue.Queue[bytes] = queue.Queue()
         self.audio_buffer: collections.deque = collections.deque(
             maxlen=int(
-                (SAMPLE_RATE // BUFFER_SIZE) * self.pre_recording_buffer_duration
+                (SAMPLE_RATE // buffer_size) * self.pre_recording_buffer_duration
             )
         )
+        self._buffer_size = buffer_size
         self.frames: List[bytes] = []
         self.audio: Optional[np.ndarray] = None
         self._feed_buffer = bytearray()
@@ -342,7 +403,7 @@ class AudioToTextRecorder:
 
         # Append to buffer
         self._feed_buffer += chunk
-        buf_size = 2 * BUFFER_SIZE  # Silero requires minimum size
+        buf_size = 2 * self._buffer_size  # Silero requires minimum size
 
         # Process complete chunks
         while len(self._feed_buffer) >= buf_size:
