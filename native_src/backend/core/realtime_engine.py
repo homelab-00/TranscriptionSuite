@@ -16,18 +16,10 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 
-from server.core.stt.constants import (
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_BEAM_SIZE,
-    DEFAULT_COMPUTE_TYPE,
-    DEFAULT_DEVICE,
-    DEFAULT_MODEL,
-    DEFAULT_POST_SPEECH_SILENCE_DURATION,
-    DEFAULT_PRE_RECORDING_BUFFER_DURATION,
-    DEFAULT_SILERO_SENSITIVITY,
-    DEFAULT_WEBRTC_SENSITIVITY,
-    SAMPLE_RATE,
-)
+from server.config import get_config
+
+# Target sample rate for Whisper (technical requirement, not configurable)
+SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
@@ -106,35 +98,27 @@ class RealtimeTranscriptionEngine:
 
         self._language = language
 
-        # Get transcription config
+        # Get transcription config from passed dict or global config
         trans_config = self.config.get("transcription", {})
-        main_config = trans_config.get("main_transcriber", trans_config)
+        main_config = self.config.get("main_transcriber", trans_config.get("main_transcriber", {}))
 
         # Create main transcription engine
+        # AudioToTextRecorder resolves defaults from config internally,
+        # so we only pass values if they're explicitly configured
         self._engine = AudioToTextRecorder(
             instance_name="realtime_main",
-            model=main_config.get("model", DEFAULT_MODEL),
+            model=main_config.get("model"),
             language=language or "",
-            compute_type=main_config.get("compute_type", DEFAULT_COMPUTE_TYPE),
-            device=main_config.get("device", DEFAULT_DEVICE),
-            batch_size=main_config.get("batch_size", DEFAULT_BATCH_SIZE),
-            beam_size=main_config.get("beam_size", DEFAULT_BEAM_SIZE),
-            silero_sensitivity=main_config.get(
-                "silero_sensitivity", DEFAULT_SILERO_SENSITIVITY
-            ),
-            webrtc_sensitivity=main_config.get(
-                "webrtc_sensitivity", DEFAULT_WEBRTC_SENSITIVITY
-            ),
-            post_speech_silence_duration=main_config.get(
-                "post_speech_silence_duration", DEFAULT_POST_SPEECH_SILENCE_DURATION
-            ),
-            pre_recording_buffer_duration=main_config.get(
-                "pre_recording_buffer_duration", DEFAULT_PRE_RECORDING_BUFFER_DURATION
-            ),
-            faster_whisper_vad_filter=main_config.get(
-                "faster_whisper_vad_filter", True
-            ),
-            normalize_audio=main_config.get("normalize_audio", False),
+            compute_type=main_config.get("compute_type"),
+            device=main_config.get("device"),
+            batch_size=main_config.get("batch_size"),
+            beam_size=main_config.get("beam_size"),
+            silero_sensitivity=main_config.get("silero_sensitivity"),
+            webrtc_sensitivity=main_config.get("webrtc_sensitivity"),
+            post_speech_silence_duration=main_config.get("post_speech_silence_duration"),
+            pre_recording_buffer_duration=main_config.get("pre_recording_buffer_duration"),
+            faster_whisper_vad_filter=main_config.get("faster_whisper_vad_filter"),
+            normalize_audio=main_config.get("normalize_audio"),
             on_recording_start=self._handle_recording_start,
             on_recording_stop=self._handle_recording_stop,
             on_vad_start=self._handle_vad_start,
@@ -154,22 +138,24 @@ class RealtimeTranscriptionEngine:
     def _init_preview_engine(self) -> None:
         """Initialize the preview transcription engine."""
         from server.core.stt.engine import AudioToTextRecorder
-        from server.core.stt.constants import DEFAULT_PREVIEW_MODEL
 
-        preview_config = self.config.get("transcription", {}).get(
-            "preview_transcriber", {}
+        # Get preview config from passed dict or global config
+        trans_config = self.config.get("transcription", {})
+        preview_config = self.config.get(
+            "preview_transcriber", trans_config.get("preview_transcriber", {})
         )
 
         if not preview_config.get("enabled", True):
             logger.info("Preview transcriber disabled in config")
             return
 
+        # AudioToTextRecorder resolves defaults from config internally
         self._preview_engine = AudioToTextRecorder(
             instance_name="realtime_preview",
-            model=preview_config.get("model", DEFAULT_PREVIEW_MODEL),
+            model=preview_config.get("model"),
             language=self._language or "",
-            compute_type=preview_config.get("compute_type", DEFAULT_COMPUTE_TYPE),
-            device=preview_config.get("device", DEFAULT_DEVICE),
+            compute_type=preview_config.get("compute_type"),
+            device=preview_config.get("device"),
             batch_size=preview_config.get("batch_size", 8),
             beam_size=preview_config.get("beam_size", 3),
             # Faster response for preview

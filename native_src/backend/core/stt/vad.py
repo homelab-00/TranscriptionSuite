@@ -21,12 +21,13 @@ import torch
 import webrtcvad
 from scipy import signal as scipy_signal
 
-from server.core.stt.constants import (
-    DEFAULT_SILERO_SENSITIVITY,
-    DEFAULT_WEBRTC_SENSITIVITY,
-    INT16_MAX_ABS_VALUE,
-    SAMPLE_RATE,
-)
+from server.config import get_config
+
+# Mathematical constant for 16-bit audio normalization
+INT16_MAX_ABS_VALUE = 32768.0
+
+# Target sample rate for Whisper/Silero (not configurable - this is a technical requirement)
+SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ class VoiceActivityDetector:
 
     def __init__(
         self,
-        silero_sensitivity: float = DEFAULT_SILERO_SENSITIVITY,
-        webrtc_sensitivity: int = DEFAULT_WEBRTC_SENSITIVITY,
+        silero_sensitivity: Optional[float] = None,
+        webrtc_sensitivity: Optional[int] = None,
         silero_use_onnx: bool = False,
         use_silero_deactivity: bool = False,
     ):
@@ -53,13 +54,28 @@ class VoiceActivityDetector:
         Initialize the VAD.
 
         Args:
-            silero_sensitivity: Silero sensitivity (0.0-1.0), higher = more sensitive
-            webrtc_sensitivity: WebRTC sensitivity (0-3), higher = less sensitive
+            silero_sensitivity: Silero sensitivity (0.0-1.0), higher = more sensitive.
+                               If None, uses config default.
+            webrtc_sensitivity: WebRTC sensitivity (0-3), higher = less sensitive.
+                               If None, uses config default.
             silero_use_onnx: Use ONNX version of Silero for speed
             use_silero_deactivity: Use Silero for deactivation detection
         """
-        self.silero_sensitivity = silero_sensitivity
-        self.webrtc_sensitivity = webrtc_sensitivity
+        # Get defaults from config
+        cfg = get_config()
+        stt_cfg = cfg.stt
+        preview_cfg = cfg.get("preview_transcriber", default={})
+
+        self.silero_sensitivity = (
+            silero_sensitivity
+            if silero_sensitivity is not None
+            else preview_cfg.get("silero_sensitivity", 0.4)
+        )
+        self.webrtc_sensitivity = (
+            webrtc_sensitivity
+            if webrtc_sensitivity is not None
+            else stt_cfg.get("webrtc_sensitivity", 3)
+        )
         self.use_silero_deactivity = use_silero_deactivity
 
         # State tracking
@@ -254,8 +270,8 @@ class VoiceActivityDetector:
 
 
 def create_vad(
-    silero_sensitivity: float = DEFAULT_SILERO_SENSITIVITY,
-    webrtc_sensitivity: int = DEFAULT_WEBRTC_SENSITIVITY,
+    silero_sensitivity: Optional[float] = None,
+    webrtc_sensitivity: Optional[int] = None,
     silero_use_onnx: bool = False,
     use_silero_deactivity: bool = False,
 ) -> VoiceActivityDetector:
@@ -263,8 +279,8 @@ def create_vad(
     Factory function to create a VAD instance.
 
     Args:
-        silero_sensitivity: Silero sensitivity (0.0-1.0)
-        webrtc_sensitivity: WebRTC sensitivity (0-3)
+        silero_sensitivity: Silero sensitivity (0.0-1.0). If None, uses config default.
+        webrtc_sensitivity: WebRTC sensitivity (0-3). If None, uses config default.
         silero_use_onnx: Use ONNX version of Silero
         use_silero_deactivity: Use Silero for deactivation detection
 

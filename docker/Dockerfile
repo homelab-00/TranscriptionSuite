@@ -76,12 +76,13 @@ COPY docker/entrypoint.py ./docker/
 # Copy built frontend to static serving location (unified UI)
 COPY --from=frontend-builder /build/frontend/dist ./static/frontend
 
-# Copy configuration template
-COPY native_src/config.yaml ./config/config.yaml.example
+# Copy default configuration (users can override via mounted /user-config/config.yaml)
+COPY native_src/config.yaml ./config.yaml
 
 # Create data directories with correct permissions
-RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /models && \
-    chown -R appuser:appuser /data /app /models
+# /user-config is for user-mounted config and logs (optional)
+RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /models /user-config && \
+    chown -R appuser:appuser /data /app /models /user-config
 
 # Environment variables
 ENV DATA_DIR=/data

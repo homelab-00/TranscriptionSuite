@@ -7,6 +7,8 @@ Also provides endpoints for controlling LM Studio server and model loading.
 
 import asyncio
 import json
+import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,8 +19,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Use standard logging
-import logging
+from server.config import get_config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -75,40 +76,28 @@ class ModelLoadRequest(BaseModel):
 
 
 def get_llm_config() -> dict:
-    """Load LLM configuration from config.yaml and environment variables."""
-    import os
-    
+    """Load LLM configuration from centralized config and environment variables."""
     # Get LM Studio URL from environment (Docker sets this to host.docker.internal)
     # Fall back to localhost for non-Docker environments
     default_base_url = os.environ.get("LM_STUDIO_URL", "http://127.0.0.1:1234")
-    
+
     try:
-        # Find config.yaml at project root or /app/config
-        config_paths = [
-            Path("/app/config/config.yaml"),  # Docker path
-            Path(__file__).parent.parent.parent.parent / "config.yaml",  # Dev path
-        ]
-        
-        for config_path in config_paths:
-            if config_path.exists():
-                import yaml
+        # Use centralized config system
+        cfg = get_config()
+        llm_config = cfg.config.get("local_llm", {})
 
-                with open(config_path) as f:
-                    config_data = yaml.safe_load(f)
-
-                llm_config = config_data.get("local_llm", {})
-                return {
-                    "enabled": llm_config.get("enabled", True),
-                    "base_url": llm_config.get("base_url", default_base_url),
-                    "model": llm_config.get("model", ""),
-                    "gpu_offload": llm_config.get("gpu_offload", 1.0),
-                    "context_length": llm_config.get("context_length"),
-                    "max_tokens": llm_config.get("max_tokens", 2048),
-                    "temperature": llm_config.get("temperature", 0.7),
-                    "default_system_prompt": llm_config.get(
-                        "default_system_prompt", "Summarize this transcription concisely."
-                    ),
-                }
+        return {
+            "enabled": llm_config.get("enabled", True),
+            "base_url": llm_config.get("base_url", default_base_url),
+            "model": llm_config.get("model", ""),
+            "gpu_offload": llm_config.get("gpu_offload", 1.0),
+            "context_length": llm_config.get("context_length"),
+            "max_tokens": llm_config.get("max_tokens", 2048),
+            "temperature": llm_config.get("temperature", 0.7),
+            "default_system_prompt": llm_config.get(
+                "default_system_prompt", "Summarize this transcription concisely."
+            ),
+        }
     except Exception as e:
         logger.warning(f"Could not load LLM config: {e}")
 

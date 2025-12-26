@@ -112,11 +112,12 @@ uv run transcription-client --host localhost --port 8000
 |------|---------|
 | **Build Docker image** | `cd docker && docker compose build` |
 | **Start server (local)** | `cd docker && docker compose up -d` |
+| **Start server (custom config)** | `USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d` |
 | **Start server (HTTPS)** | `TLS_ENABLED=true TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt TLS_KEY_PATH=~/.config/Tailscale/my-machine.key docker compose up -d` |
 | **Stop server** | `docker compose down` |
 | **Switch modes** | Use `docker compose up -d` with env vars (not `start`) |
 | **Rebuild after code changes** | `docker compose build && docker compose up -d` |
-| **View server logs** | `docker compose logs -f` |
+| **View server logs** | `docker compose logs -f` or check `~/.config/TranscriptionSuite/server.log` |
 | **Run client (local)** | `cd client && uv run transcription-client --host localhost --port 8000` |
 | **Run client (remote)** | `cd client && uv run transcription-client --host <tailscale-hostname> --port 8443 --https` |
 | **Lint code** | `./build/.venv/bin/ruff check .` |
@@ -682,9 +683,11 @@ cd build && uv sync
 
 ### Docker Build & Runtime Notes
 
-#### Config Templates
+#### Default Configuration
 
-- **Docker image template**: The Docker build copies `native_src/config.yaml` into the image as `config/config.yaml.example`.
+- **Docker image default config**: The Docker build copies `native_src/config.yaml` into the image as `/app/config.yaml`.
+- This serves as the default configuration for the server.
+- Users can override settings by mounting a custom `config.yaml` via `USER_CONFIG_DIR` (see [Customizing Server Configuration](#customizing-server-configuration)).
 
 #### Frontend Build Behavior
 
@@ -829,7 +832,7 @@ Replace `desktop.tail1234.ts.net` with your actual Tailscale hostname (from `tai
 
 ### Docker Volume Structure
 
-Two Docker volumes provide persistent storage:
+Two named Docker volumes plus an optional user config bind mount:
 
 **1. `transcription-suite-data`** - Application data (mounted to `/data`):
 
@@ -837,10 +840,24 @@ Two Docker volumes provide persistent storage:
 |------|-------------|
 | `/data/database/` | SQLite database files for transcription records, metadata, and application state |
 | `/data/audio/` | Audio files uploaded for transcription and processed audio data |
-| `/data/logs/` | Application logs with automatic rotation |
+| `/data/logs/` | Application logs (fallback if user config not mounted) |
 | `/data/tokens/` | Token store for authentication (`tokens.json`) |
 
 **2. `transcription-suite-models`** - ML models cache (mounted to `/models`):
+
+**3. User config directory** (optional bind mount to `/user-config`):
+
+When `USER_CONFIG_DIR` is set, the specified host directory is mounted to `/user-config`:
+
+| Host Path | Container Path | Purpose |
+|-----------|----------------|---------|
+| `~/.config/TranscriptionSuite/` (Linux) | `/user-config/` | Custom config and logs |
+| `Documents\TranscriptionSuite\` (Windows) | `/user-config/` | Custom config and logs |
+
+| File | Description |
+|------|-------------|
+| `/user-config/config.yaml` | Custom configuration (overrides `/app/config.yaml` defaults) |
+| `/user-config/server.log` | Server logs (when user config is mounted) |
 
 | Path | Description |
 |------|-------------|
@@ -992,14 +1009,22 @@ The server respects these environment overrides:
 
 #### Configuration System
 
-The backend uses a hierarchical configuration system:
+The backend uses a **centralized configuration system** where all modules load settings via `get_config()` from `server.config`. This ensures consistent configuration across the entire application.
 
-1. **Default values** - Hardcoded in `config.py`
-2. **YAML file** - Loaded from:
-   - `/app/config.yaml` (Docker)
+**Important:** All backend scripts (`engine.py`, `vad.py`, `diarization_engine.py`, `llm.py`, etc.) use `from server.config import get_config` to access configuration. No scripts directly load `config.yaml` with `yaml.safe_load()` - only `config.py` handles YAML loading.
+
+The configuration file is loaded with the following search priority:
+
+1. **User config** (highest priority):
+   - Docker: `/user-config/config.yaml` (when `USER_CONFIG_DIR` is mounted)
+   - Linux: `~/.config/TranscriptionSuite/config.yaml`
+   - Windows: `Documents\TranscriptionSuite\config.yaml`
+2. **Default config**:
+   - `/app/config.yaml` (Docker container - baked into image)
    - `native_src/config.yaml` (native development)
-   - Path specified via `CONFIG_PATH` environment variable
-3. **Environment variables** - Highest priority, override YAML settings
+   - `./config.yaml` (current directory fallback)
+
+**Note:** A configuration file is required. The server will fail to start if no config file is found.
 
 **Configuration structure:**
 
@@ -1597,12 +1622,94 @@ Host filesystem:                                    Container filesystem:
 
 ## Configuration Reference
 
+### Configuration System Overview
+
+TranscriptionSuite uses a YAML configuration file with the following search priority:
+
+| Priority | Location | Purpose |
+|----------|----------|---------|
+| 1 (highest) | User config directory (see below) | Custom user settings |
+| 2 | `/app/config.yaml` | Docker container defaults (baked into image) |
+| 3 | `native_src/config.yaml` | Local development |
+| 4 | `./config.yaml` | Current directory fallback |
+
+**User Config Directory by Platform:**
+
+| Platform | Config Directory | Config File |
+|----------|-----------------|-------------|
+| **Linux** | `~/.config/TranscriptionSuite/` | `config.yaml` |
+| **Windows** | `Documents\TranscriptionSuite\` | `config.yaml` |
+| **Docker** | Mounted via `USER_CONFIG_DIR` env var | `/user-config/config.yaml` |
+
+### Customizing Server Configuration
+
+To customize the server configuration:
+
+1. **Create the config directory:**
+
+   **Linux:**
+   ```bash
+   mkdir -p ~/.config/TranscriptionSuite
+   ```
+
+   **Windows (PowerShell):**
+   ```powershell
+   mkdir "$env:USERPROFILE\Documents\TranscriptionSuite" -Force
+   ```
+
+2. **Download the default config file:**
+
+   Copy `native_src/config.yaml` from the repository to your config directory:
+
+   **Linux:**
+   ```bash
+   curl -o ~/.config/TranscriptionSuite/config.yaml \
+     https://raw.githubusercontent.com/your-repo/TranscriptionSuite/main/native_src/config.yaml
+   ```
+
+   Or manually copy from the repo if you have it cloned.
+
+3. **Edit the settings you want to change:**
+
+   ```bash
+   # Linux
+   nano ~/.config/TranscriptionSuite/config.yaml
+
+   # Windows - open in your preferred editor
+   notepad "$env:USERPROFILE\Documents\TranscriptionSuite\config.yaml"
+   ```
+
+4. **Start Docker with the user config directory mounted:**
+
+   **Linux:**
+   ```bash
+   USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d
+   ```
+
+   **Windows (PowerShell):**
+   ```powershell
+   $env:USER_CONFIG_DIR="$env:USERPROFILE\Documents\TranscriptionSuite"
+   docker compose up -d
+   ```
+
+**What happens:**
+- The server looks for `config.yaml` in your mounted user config directory first
+- If found, it uses your custom settings instead of the defaults baked into the Docker image
+- Server logs are also written to the user config directory as `server.log`
+- Your custom config persists across Docker container updates
+
+**Important Notes:**
+- The config file uses Docker container paths (e.g., `/data/audio`, `/data/logs`)
+- You typically only need to change settings like model names, transcription options, or LLM settings
+- Don't change storage paths unless you understand the Docker volume structure
+- Changes require a container restart: `docker compose restart`
+
 ### Server Configuration (Docker)
 
 Environment variables:
 
 - `HF_TOKEN` - HuggingFace token for PyAnnote models
-- `ADMIN_TOKEN` - Admin authentication token
+- `USER_CONFIG_DIR` - Path to user config directory (for custom config.yaml and logs)
 - `LOG_LEVEL` - Logging verbosity (DEBUG, INFO, WARNING, ERROR)
 - `LM_STUDIO_URL` - LM Studio API URL for chat features
 - `TLS_ENABLED` - Enable HTTPS (remote mode)

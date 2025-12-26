@@ -332,22 +332,24 @@ def create_transcription_engine(config: Dict[str, Any]) -> TranscriptionEngine:
     Create a TranscriptionEngine from configuration dict.
 
     Args:
-        config: Configuration with transcription settings
+        config: Configuration with transcription settings.
+                Expects 'main_transcriber' and 'transcription_options' keys
+                at the top level (matches config.yaml structure).
 
     Returns:
         Configured TranscriptionEngine instance
     """
-    trans_config = config.get("transcription", config.get("main_transcriber", {}))
+    # Read from top-level 'main_transcriber' section (matches config.yaml structure)
+    main_config = config.get("main_transcriber", {})
+    trans_options = config.get("transcription_options", {})
 
     return TranscriptionEngine(
-        model=trans_config.get("model", "Systran/faster-whisper-large-v3"),
-        device=trans_config.get("device", "cuda"),
-        compute_type=trans_config.get("compute_type", "float16"),
-        beam_size=trans_config.get("beam_size", 5),
-        vad_filter=trans_config.get(
-            "vad_filter", trans_config.get("faster_whisper_vad_filter", True)
-        ),
-        language=trans_config.get("language"),
+        model=main_config.get("model", "Systran/faster-whisper-large-v3"),
+        device=main_config.get("device", "cuda"),
+        compute_type=main_config.get("compute_type", "float16"),
+        beam_size=main_config.get("beam_size", 5),
+        vad_filter=main_config.get("faster_whisper_vad_filter", True),
+        language=trans_options.get("language"),
     )
 
 

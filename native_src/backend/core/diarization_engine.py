@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from server.config import get_config
 from server.core.audio_utils import clear_gpu_cache
 
 logger = logging.getLogger(__name__)
@@ -87,21 +88,29 @@ class DiarizationEngine:
 
     def __init__(
         self,
+        model: Optional[str] = None,
         hf_token: Optional[str] = None,
-        device: str = "cuda",
+        device: Optional[str] = None,
         num_speakers: Optional[int] = None,
         min_speakers: Optional[int] = None,
         max_speakers: Optional[int] = None,
+        min_duration_on: Optional[float] = None,
+        min_duration_off: Optional[float] = None,
     ):
         """
         Initialize the diarization engine.
 
+        All parameters default to values from config.yaml's 'diarization' section.
+
         Args:
-            hf_token: HuggingFace token for accessing PyAnnote models
-            device: Device to run on ("cuda" or "cpu")
+            model: PyAnnote model identifier. If None, uses config default.
+            hf_token: HuggingFace token. If None, uses config or HF_TOKEN env var.
+            device: Device to run on ("cuda" or "cpu"). If None, uses config default.
             num_speakers: Known number of speakers (if known)
             min_speakers: Minimum number of speakers
             max_speakers: Maximum number of speakers
+            min_duration_on: Minimum duration (seconds) of speech segments
+            min_duration_off: Minimum duration (seconds) of silence between segments
         """
         if not HAS_PYANNOTE:
             raise ImportError(
@@ -109,16 +118,27 @@ class DiarizationEngine:
                 "Install with: pip install pyannote.audio"
             )
 
-        self.hf_token = hf_token or os.environ.get("HF_TOKEN")
-        self.device = device
-        self.num_speakers = num_speakers
-        self.min_speakers = min_speakers
-        self.max_speakers = max_speakers
+        # Load defaults from config
+        cfg = get_config()
+        diar_cfg = cfg.config.get("diarization", {})
+
+        self.model = model or diar_cfg.get("model", "pyannote/speaker-diarization-3.1")
+        self.hf_token = hf_token or diar_cfg.get("hf_token") or os.environ.get("HF_TOKEN")
+        self.device = device or diar_cfg.get("device", "cuda")
+        self.num_speakers = num_speakers if num_speakers is not None else diar_cfg.get("num_speakers")
+        self.min_speakers = min_speakers if min_speakers is not None else diar_cfg.get("min_speakers")
+        self.max_speakers = max_speakers if max_speakers is not None else diar_cfg.get("max_speakers")
+        self.min_duration_on = (
+            min_duration_on if min_duration_on is not None else diar_cfg.get("min_duration_on", 0.0)
+        )
+        self.min_duration_off = (
+            min_duration_off if min_duration_off is not None else diar_cfg.get("min_duration_off", 0.0)
+        )
 
         self._pipeline: Optional[Any] = None
         self._loaded = False
 
-        logger.info(f"DiarizationEngine initialized: device={device}")
+        logger.info(f"DiarizationEngine initialized: model={model}, device={device}")
 
     def load(self) -> None:
         """Load the diarization pipeline."""
@@ -132,7 +152,7 @@ class DiarizationEngine:
                 "Set HF_TOKEN environment variable or pass hf_token parameter."
             )
 
-        logger.info("Loading PyAnnote diarization pipeline...")
+        logger.info(f"Loading PyAnnote diarization pipeline: {self.model}")
 
         try:
             if HAS_TORCH and torch is not None:
@@ -140,7 +160,7 @@ class DiarizationEngine:
                 torch.backends.cudnn.allow_tf32 = False
 
             self._pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-community-1",
+                self.model,
                 token=self.hf_token,
             )
 
@@ -152,7 +172,7 @@ class DiarizationEngine:
                     self._pipeline = self._pipeline.to(torch.device("cpu"))
 
             self._loaded = True
-            logger.info("Diarization pipeline loaded successfully")
+            logger.info(f"Diarization pipeline loaded successfully: {self.model}")
 
         except Exception as e:
             logger.error(f"Failed to load diarization pipeline: {e}")
@@ -297,18 +317,22 @@ def create_diarization_engine(config: Dict[str, Any]) -> DiarizationEngine:
     Create a DiarizationEngine from configuration.
 
     Args:
-        config: Configuration with diarization settings
+        config: Configuration with diarization settings.
+                Expects 'diarization' key at top level of config dict.
 
     Returns:
         Configured DiarizationEngine instance
     """
-    diar_config = config.get("transcription", {}).get("diarization", {})
-    trans_config = config.get("transcription", config.get("main_transcriber", {}))
+    # Read from top-level 'diarization' section (matches config.yaml structure)
+    diar_config = config.get("diarization", {})
 
     return DiarizationEngine(
+        model=diar_config.get("model", "pyannote/speaker-diarization-3.1"),
         hf_token=diar_config.get("hf_token") or os.environ.get("HF_TOKEN"),
-        device=trans_config.get("device", "cuda"),
+        device=diar_config.get("device", "cuda"),
         num_speakers=diar_config.get("num_speakers"),
         min_speakers=diar_config.get("min_speakers"),
         max_speakers=diar_config.get("max_speakers"),
+        min_duration_on=diar_config.get("min_duration_on", 0.0),
+        min_duration_off=diar_config.get("min_duration_off", 0.0),
     )

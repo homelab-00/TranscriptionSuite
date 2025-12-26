@@ -8,33 +8,19 @@ server-side use without local microphone dependencies.
 Key components:
 - AudioToTextRecorder: Core transcription engine with VAD
 - VAD utilities: Silero and WebRTC voice activity detection
-- TranscriptionWorker: Subprocess-based model isolation
+
+Configuration for the STT engine is loaded from config.yaml via
+the server.config module. See the 'stt', 'main_transcriber', and
+'preview_transcriber' sections in config.yaml.
 """
 
-from server.core.stt.constants import (
-    SAMPLE_RATE,
-    BUFFER_SIZE,
-    DEFAULT_MODEL,
-    DEFAULT_PREVIEW_MODEL,
-    DEFAULT_SILERO_SENSITIVITY,
-    DEFAULT_WEBRTC_SENSITIVITY,
-    DEFAULT_POST_SPEECH_SILENCE_DURATION,
-    DEFAULT_MIN_LENGTH_OF_RECORDING,
-    DEFAULT_PRE_RECORDING_BUFFER_DURATION,
-    MAX_SILENCE_DURATION,
-    INT16_MAX_ABS_VALUE,
-)
+# Mathematical constant for 16-bit audio normalization (not configurable)
+INT16_MAX_ABS_VALUE = 32768.0
+
+# Target sample rate for Whisper/Silero (technical requirement, not configurable)
+SAMPLE_RATE = 16000
 
 __all__ = [
-    "SAMPLE_RATE",
-    "BUFFER_SIZE",
-    "DEFAULT_MODEL",
-    "DEFAULT_PREVIEW_MODEL",
-    "DEFAULT_SILERO_SENSITIVITY",
-    "DEFAULT_WEBRTC_SENSITIVITY",
-    "DEFAULT_POST_SPEECH_SILENCE_DURATION",
-    "DEFAULT_MIN_LENGTH_OF_RECORDING",
-    "DEFAULT_PRE_RECORDING_BUFFER_DURATION",
-    "MAX_SILENCE_DURATION",
     "INT16_MAX_ABS_VALUE",
+    "SAMPLE_RATE",
 ]

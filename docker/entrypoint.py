@@ -18,8 +18,34 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import uvicorn
 
 
-def setup_directories() -> Path:
-    """Initialize required data directories."""
+def get_user_config_dir() -> Path | None:
+    """
+    Get the user config directory if it's mounted and writable.
+
+    Returns:
+        Path to /user-config if mounted, None otherwise.
+    """
+    user_config = Path("/user-config")
+    if user_config.exists() and user_config.is_dir():
+        # Check if it's actually mounted (not just an empty directory)
+        # by verifying it's writable
+        try:
+            test_file = user_config / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+            return user_config
+        except (OSError, PermissionError):
+            pass
+    return None
+
+
+def setup_directories() -> tuple[Path, Path]:
+    """
+    Initialize required data directories.
+
+    Returns:
+        Tuple of (data_dir, log_dir)
+    """
     data_dir = Path(os.environ.get("DATA_DIR", "/data"))
 
     # Create required subdirectories
@@ -27,10 +53,21 @@ def setup_directories() -> Path:
     for subdir in subdirs:
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-    return data_dir
+    # Determine log directory
+    # Prefer user config directory if mounted, otherwise use /data/logs
+    user_config = get_user_config_dir()
+    if user_config:
+        log_dir = user_config
+        print(f"User config directory mounted at: {user_config}")
+    else:
+        log_dir = data_dir / "logs"
+
+    return data_dir, log_dir
 
 
-def print_banner(data_dir: Path, port: int, tls_enabled: bool = False) -> None:
+def print_banner(
+    data_dir: Path, log_dir: Path, port: int, tls_enabled: bool = False
+) -> None:
     """Print startup banner."""
     scheme = "https" if tls_enabled else "http"
     actual_port = 8443 if tls_enabled else port
@@ -39,6 +76,7 @@ def print_banner(data_dir: Path, port: int, tls_enabled: bool = False) -> None:
     print("TranscriptionSuite Unified Server")
     print("=" * 60)
     print(f"Data directory: {data_dir}")
+    print(f"Log directory:  {log_dir}")
     print(f"Server URL:     {scheme}://0.0.0.0:{actual_port}")
     print(f"TLS:            {'Enabled' if tls_enabled else 'Disabled'}")
     print("")
@@ -62,14 +100,15 @@ def print_banner(data_dir: Path, port: int, tls_enabled: bool = False) -> None:
 def main() -> None:
     """Main entrypoint."""
     # Setup directories
-    data_dir = setup_directories()
+    data_dir, log_dir = setup_directories()
 
     # Set working directory to app root
     app_root = Path(__file__).parent.parent
     os.chdir(app_root)
 
-    # Set DATA_DIR env var
+    # Set environment variables for the server
     os.environ["DATA_DIR"] = str(data_dir)
+    os.environ["LOG_DIR"] = str(log_dir)
 
     # Configuration
     host = os.environ.get("SERVER_HOST", "0.0.0.0")
@@ -82,7 +121,7 @@ def main() -> None:
     tls_key = os.environ.get("TLS_KEY_FILE")
 
     # Print banner
-    print_banner(data_dir, port, tls_enabled)
+    print_banner(data_dir, log_dir, port, tls_enabled)
 
     # Initialize database
     from server.database.database import init_db, set_data_directory

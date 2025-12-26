@@ -1,23 +1,60 @@
 """
 Server configuration management for TranscriptionSuite.
 
-Handles loading configuration from YAML files and environment variables.
+Handles loading configuration from YAML files.
 Provides typed configuration access for all server components.
+
+Configuration Priority (highest to lowest):
+    1. User config: ~/.config/TranscriptionSuite/config.yaml (Linux)
+                    or Documents/TranscriptionSuite/config.yaml (Windows)
+                    or /user-config/config.yaml (Docker with mounted volume)
+    2. Default config: /app/config.yaml (Docker container)
+    3. Dev config: native_src/config.yaml (development)
+    4. Fallback: ./config.yaml (current directory)
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
 
 
+def get_user_config_dir() -> Path:
+    """
+    Get the user configuration directory based on platform.
+
+    Returns:
+        Path to user config directory:
+        - Linux: ~/.config/TranscriptionSuite/
+        - Windows: ~/Documents/TranscriptionSuite/
+        - Docker: /user-config/ (if exists and is mounted)
+    """
+    # In Docker, check for mounted user config directory first
+    docker_user_config = Path("/user-config")
+    if docker_user_config.exists() and docker_user_config.is_dir():
+        return docker_user_config
+
+    # Platform-specific user config directories
+    if sys.platform == "win32":
+        # Windows: Documents/TranscriptionSuite/
+        documents = Path.home() / "Documents"
+        return documents / "TranscriptionSuite"
+    else:
+        # Linux/macOS: ~/.config/TranscriptionSuite/
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            return Path(xdg_config) / "TranscriptionSuite"
+        return Path.home() / ".config" / "TranscriptionSuite"
+
+
 class ServerConfig:
     """
     Server configuration manager.
 
-    Loads configuration from YAML file and environment variables.
-    Environment variables take precedence over file settings.
+    Loads configuration from YAML file.
+    User config takes precedence over default config.
     """
 
     def __init__(self, config_path: Optional[Path] = None):
@@ -25,24 +62,34 @@ class ServerConfig:
         Initialize configuration.
 
         Args:
-            config_path: Path to config file. If None, looks for:
-                1. /app/config.yaml (in container)
-                2. config.yaml (in project root)
+            config_path: Path to config file. If None, searches in priority order.
         """
         self.config: Dict[str, Any] = {}
         self._config_path = config_path
+        self._loaded_from: Optional[Path] = None
         self._load_config()
 
     def _find_config_file(self) -> Optional[Path]:
-        """Find the configuration file."""
+        """
+        Find the configuration file in priority order.
+
+        Priority:
+            1. Explicitly provided path
+            2. User config directory (platform-specific or Docker mount)
+            3. /app/config.yaml (Docker container default)
+            4. native_src/config.yaml (development)
+            5. ./config.yaml (current directory fallback)
+        """
         if self._config_path and self._config_path.exists():
             return self._config_path
 
-        # Check common locations
+        # Build search paths in priority order
+        user_config_dir = get_user_config_dir()
         candidates = [
-            Path("/app/config.yaml"),  # Docker container
-            Path(__file__).parent.parent / "config.yaml",  # Project root
-            Path.cwd() / "config.yaml",  # Current directory
+            user_config_dir / "config.yaml",  # User custom config
+            Path("/app/config.yaml"),  # Docker container default
+            Path(__file__).parent.parent / "config.yaml",  # native_src/config.yaml
+            Path.cwd() / "config.yaml",  # Current directory fallback
         ]
 
         for path in candidates:
@@ -52,108 +99,32 @@ class ServerConfig:
         return None
 
     def _load_config(self) -> None:
-        """Load configuration from file and environment."""
-        # Start with defaults
-        self.config = self._get_defaults()
-
-        # Load from file
+        """Load configuration from file."""
         config_file = self._find_config_file()
+
         if config_file:
             try:
                 with config_file.open("r", encoding="utf-8") as f:
-                    file_config = yaml.safe_load(f) or {}
-                self._deep_merge(self.config, file_config)
+                    self.config = yaml.safe_load(f) or {}
+                self._loaded_from = config_file
+                print(f"Loaded configuration from: {config_file}")
             except (yaml.YAMLError, OSError) as e:
-                print(f"Warning: Could not load config file: {e}")
-
-        # Apply environment overrides
-        self._apply_env_overrides()
-
-    def _get_defaults(self) -> Dict[str, Any]:
-        """Get default configuration values."""
-        return {
-            "server": {
-                "host": "0.0.0.0",
-                "port": 8000,
-                "workers": 1,
-                "tls": {
-                    "enabled": False,
-                    "cert_file": "/data/certs/server.crt",
-                    "key_file": "/data/certs/server.key",
-                    "auto_generate": True,
-                },
-                "remote": {
-                    "enabled": False,
-                    "tailscale_hostname": "",
-                },
-            },
-            "transcription": {
-                "model": "Systran/faster-whisper-large-v3",
-                "device": "cuda",
-                "compute_type": "float16",
-                "language": None,  # Auto-detect
-                "beam_size": 5,
-                "batch_size": 16,
-                "vad": {
-                    "enabled": True,
-                    "silero_sensitivity": 0.4,
-                },
-                "diarization": {
-                    "enabled": False,
-                    "hf_token": "",
-                },
-            },
-            "audio_notebook": {
-                "database_path": "/data/database/notebook.db",
-                "audio_storage": "/data/audio",
-                "audio_format": "mp3",
-                "audio_bitrate": 160,
-            },
-            "llm": {
-                "enabled": True,
-                "base_url": "http://host.docker.internal:1234",
-                "model": "",
-                "max_tokens": 4096,
-                "temperature": 0.7,
-            },
-            "logging": {
-                "level": "INFO",
-                "directory": "/data/logs",
-                "max_size_mb": 10,
-                "backup_count": 5,
-                "structured": True,
-                "console_output": True,
-            },
-            "auth": {
-                "token_store": "/data/tokens/tokens.json",
-                "token_expiry_days": 30,
-            },
-        }
-
-    def _apply_env_overrides(self) -> None:
-        """Apply environment variable overrides."""
-        env_mappings = {
-            "LOG_LEVEL": ("logging", "level"),
-            "HF_TOKEN": ("transcription", "diarization", "hf_token"),
-            "SERVER_HOST": ("server", "host"),
-            "SERVER_PORT": ("server", "port"),
-            "DATA_DIR": None,  # Special handling
-        }
-
-        for env_var, config_path in env_mappings.items():
-            value = os.environ.get(env_var)
-            if value is not None and config_path is not None:
-                self._set_nested(self.config, config_path, value)
-
-        # Special handling for DATA_DIR
-        data_dir = os.environ.get("DATA_DIR")
-        if data_dir:
-            self.config["audio_notebook"]["database_path"] = (
-                f"{data_dir}/database/notebook.db"
+                print(f"ERROR: Could not load config file {config_file}: {e}")
+                raise RuntimeError(f"Failed to load configuration: {e}") from e
+        else:
+            raise RuntimeError(
+                "No configuration file found. "
+                "Expected one of:\n"
+                f"  - {get_user_config_dir() / 'config.yaml'} (user config)\n"
+                "  - /app/config.yaml (Docker default)\n"
+                "  - native_src/config.yaml (development)\n"
+                "  - ./config.yaml (current directory)"
             )
-            self.config["audio_notebook"]["audio_storage"] = f"{data_dir}/audio"
-            self.config["logging"]["directory"] = f"{data_dir}/logs"
-            self.config["auth"]["token_store"] = f"{data_dir}/tokens/tokens.json"
+
+    @property
+    def loaded_from(self) -> Optional[Path]:
+        """Return the path of the loaded configuration file."""
+        return self._loaded_from
 
     def _deep_merge(self, base: Dict, override: Dict) -> None:
         """Deep merge override into base dict."""
@@ -162,12 +133,6 @@ class ServerConfig:
                 self._deep_merge(base[key], value)
             else:
                 base[key] = value
-
-    def _set_nested(self, d: Dict, keys: tuple, value: Any) -> None:
-        """Set a nested dictionary value."""
-        for key in keys[:-1]:
-            d = d.setdefault(key, {})
-        d[keys[-1]] = value
 
     def get(self, *keys: str, default: Any = None) -> Any:
         """
@@ -216,6 +181,11 @@ class ServerConfig:
     def auth(self) -> Dict[str, Any]:
         """Get authentication configuration."""
         return self.config.get("auth", {})
+
+    @property
+    def stt(self) -> Dict[str, Any]:
+        """Get STT (speech-to-text) configuration."""
+        return self.config.get("stt", {})
 
 
 # Global config instance
