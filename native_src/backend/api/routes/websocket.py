@@ -140,25 +140,13 @@ class TranscriptionSession:
                 word_timestamps=True,
             )
 
-            # Collect all words from all segments
-            all_words = []
-            for segment in result.segments:
-                for w in segment.words:
-                    all_words.append(
-                        {
-                            "word": w.word,
-                            "start": w.start,
-                            "end": w.end,
-                            "probability": w.probability,
-                        }
-                    )
-
             # Send final result
+            # result.words is already a flat list of word dicts
             await self.send_message(
                 "final",
                 {
                     "text": result.text,
-                    "words": all_words,
+                    "words": result.words,
                     "language": result.language,
                     "duration": result.duration,
                 },

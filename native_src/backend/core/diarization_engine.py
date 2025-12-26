@@ -122,7 +122,7 @@ class DiarizationEngine:
         cfg = get_config()
         diar_cfg = cfg.config.get("diarization", {})
 
-        self.model = model or diar_cfg.get("model", "pyannote/speaker-diarization-3.1")
+        self.model = model or diar_cfg.get("model", "pyannote/speaker-diarization-community-1")
         self.hf_token = hf_token or diar_cfg.get("hf_token") or os.environ.get("HF_TOKEN")
         self.device = device or diar_cfg.get("device", "cuda")
         self.num_speakers = num_speakers if num_speakers is not None else diar_cfg.get("num_speakers")
@@ -327,7 +327,7 @@ def create_diarization_engine(config: Dict[str, Any]) -> DiarizationEngine:
     diar_config = config.get("diarization", {})
 
     return DiarizationEngine(
-        model=diar_config.get("model", "pyannote/speaker-diarization-3.1"),
+        model=diar_config.get("model", "pyannote/speaker-diarization-community-1"),
         hf_token=diar_config.get("hf_token") or os.environ.get("HF_TOKEN"),
         device=diar_config.get("device", "cuda"),
         num_speakers=diar_config.get("num_speakers"),

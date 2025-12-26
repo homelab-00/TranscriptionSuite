@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from server.config import get_config
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -46,8 +48,8 @@ async def transcribe_audio(
     request: Request,
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
-    word_timestamps: bool = Form(True),
-    diarization: bool = Form(False),
+    word_timestamps: Optional[bool] = Form(None),
+    diarization: Optional[bool] = Form(None),
 ) -> Dict[str, Any]:
     """
     Transcribe an uploaded audio file.
@@ -57,9 +59,36 @@ async def transcribe_audio(
     - Segments with timing
     - Word-level timestamps (optional)
     - Speaker labels (optional, if diarization enabled)
+
+    Client detection:
+    - Standalone client (X-Client-Type: standalone): Uses static_transcription config
+    - Web UI clients: Uses API defaults (word_timestamps=True, diarization=False)
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
+
+    # Detect standalone client via header
+    client_type = request.headers.get("X-Client-Type", "")
+
+    # Apply defaults based on client type
+    if client_type == "standalone":
+        # Use static_transcription config for standalone clients
+        config = get_config()
+        static_cfg = config.get("static_transcription", default={})
+        if word_timestamps is None:
+            word_timestamps = static_cfg.get("word_timestamps", False)
+        if diarization is None:
+            diarization = static_cfg.get("enable_diarization", False)
+        logger.debug(
+            f"Standalone client: word_timestamps={word_timestamps}, "
+            f"diarization={diarization}"
+        )
+    else:
+        # Recorder web UI: always disable word_timestamps and diarization
+        if word_timestamps is None:
+            word_timestamps = False
+        if diarization is None:
+            diarization = False
 
     # Save uploaded file to temp location
     suffix = Path(file.filename).suffix or ".wav"

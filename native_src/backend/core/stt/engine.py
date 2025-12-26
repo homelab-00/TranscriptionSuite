@@ -53,6 +53,21 @@ class TranscriptionResult:
     duration: float = 0.0
     segments: List[Dict[str, Any]] = field(default_factory=list)
     words: List[Dict[str, Any]] = field(default_factory=list)
+    num_speakers: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API responses."""
+        return {
+            "text": self.text,
+            "segments": self.segments,
+            "words": self.words,
+            "language": self.language,
+            "language_probability": round(self.language_probability, 3),
+            "duration": round(self.duration, 3),
+            "num_speakers": self.num_speakers,
+            "total_words": len(self.words),
+            "metadata": {"num_segments": len(self.segments)},
+        }
 
 
 class AudioToTextRecorder:
@@ -636,6 +651,164 @@ class AudioToTextRecorder:
                 self._set_state("inactive")
                 raise
 
+    def transcribe_file(
+        self,
+        file_path: str,
+        language: Optional[str] = None,
+        word_timestamps: bool = True,
+        apply_vad_preprocessing: bool = True,
+    ) -> TranscriptionResult:
+        """
+        Transcribe an audio/video file directly (bypasses streaming recording workflow).
+
+        This is the unified entry point for file-based transcription,
+        replacing the separate TranscriptionEngine. Applies two-stage VAD:
+        - Stage 1: WebRTC preprocessing to physically remove silence
+        - Stage 2: faster_whisper VAD filter during transcription
+
+        Args:
+            file_path: Path to the audio/video file
+            language: Language code (overrides instance language if provided)
+            word_timestamps: Whether to include word-level timestamps
+            apply_vad_preprocessing: Apply WebRTC VAD to remove silence (Stage 1)
+
+        Returns:
+            TranscriptionResult with full transcription data
+        """
+        from server.core.audio_utils import apply_webrtc_vad, load_audio
+
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        logger.info(f"Transcribing file: {file_path}")
+
+        # Load and convert audio to 16kHz float32
+        audio_data, _ = load_audio(str(path), target_sample_rate=SAMPLE_RATE)
+
+        # Apply WebRTC VAD preprocessing (Stage 1 of two-stage VAD)
+        if apply_vad_preprocessing:
+            cfg = get_config()
+            static_cfg = cfg.get("static_transcription", default={})
+            vad_enabled = static_cfg.get("webrtc_vad_preprocessing", True)
+            vad_aggressiveness = static_cfg.get("webrtc_vad_aggressiveness", 3)
+
+            if vad_enabled:
+                audio_data = apply_webrtc_vad(
+                    audio_data,
+                    sample_rate=SAMPLE_RATE,
+                    aggressiveness=vad_aggressiveness,
+                )
+
+        return self.transcribe_audio(
+            audio_data,
+            language=language,
+            word_timestamps=word_timestamps,
+        )
+
+    def transcribe_audio(
+        self,
+        audio_data: np.ndarray,
+        language: Optional[str] = None,
+        word_timestamps: bool = True,
+        initial_prompt: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """
+        Transcribe preprocessed audio data directly (bypasses streaming recording workflow).
+
+        This is the unified entry point for direct audio transcription,
+        replacing the separate TranscriptionEngine. Assumes audio is already
+        preprocessed (16kHz, mono, float32). Applies faster_whisper VAD filter
+        (Stage 2) during transcription.
+
+        Args:
+            audio_data: Audio samples as float32 numpy array (16kHz, mono)
+            language: Language code (overrides instance language if provided)
+            word_timestamps: Whether to include word-level timestamps
+            initial_prompt: Optional prompt for context
+
+        Returns:
+            TranscriptionResult with full transcription data
+        """
+        with self.transcription_lock:
+            if audio_data is None or len(audio_data) == 0:
+                logger.info("No audio data available for transcription")
+                return TranscriptionResult(text="")
+
+            try:
+                # Normalize audio if configured
+                if self.normalize_audio:
+                    peak = np.max(np.abs(audio_data))
+                    if peak > 0:
+                        audio_data = (audio_data / peak) * 0.95
+
+                # Use provided language or fall back to instance language
+                lang = language if language else (self.language if self.language else None)
+                prompt = initial_prompt if initial_prompt else self.initial_prompt
+
+                start_time = time.time()
+
+                # Transcribe
+                segments, info = self._model.transcribe(
+                    audio_data,
+                    language=lang,
+                    beam_size=self.beam_size,
+                    initial_prompt=prompt,
+                    suppress_tokens=self.suppress_tokens,
+                    vad_filter=self.faster_whisper_vad_filter,
+                    word_timestamps=word_timestamps,
+                )
+
+                # Collect results
+                all_segments = []
+                all_words = []
+                full_text_parts = []
+
+                for segment in segments:
+                    seg_dict = {
+                        "text": segment.text.strip(),
+                        "start": round(segment.start, 3),
+                        "end": round(segment.end, 3),
+                        "duration": round(segment.end - segment.start, 3),
+                    }
+
+                    if word_timestamps and hasattr(segment, "words") and segment.words:
+                        seg_dict["words"] = [
+                            {
+                                "word": w.word,
+                                "start": round(w.start, 3),
+                                "end": round(w.end, 3),
+                                "probability": round(w.probability, 3),
+                            }
+                            for w in segment.words
+                        ]
+                        all_words.extend(seg_dict["words"])
+
+                    all_segments.append(seg_dict)
+                    full_text_parts.append(segment.text.strip())
+
+                full_text = " ".join(full_text_parts)
+                full_text = self._preprocess_output(full_text)
+
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"Transcription completed in {elapsed:.2f}s: "
+                    f"{len(all_segments)} segments, language={info.language}"
+                )
+
+                return TranscriptionResult(
+                    text=full_text,
+                    segments=all_segments,
+                    words=all_words,
+                    language=info.language,
+                    language_probability=info.language_probability,
+                    duration=len(audio_data) / SAMPLE_RATE,
+                )
+
+            except Exception as e:
+                logger.exception(f"Transcription error: {e}")
+                raise
+
     def _recording_worker(self) -> None:
         """
         Main worker that monitors audio for voice activity
@@ -791,6 +964,50 @@ class AudioToTextRecorder:
         self._model_loaded = False
 
         logger.info("AudioToTextRecorder shutdown complete")
+
+    def load_model(self) -> None:
+        """Load the Whisper model (if not already loaded)."""
+        if self._model_loaded:
+            logger.debug("Model already loaded")
+            return
+        self._load_model()
+
+    def unload_model(self) -> None:
+        """Unload the model to free GPU memory."""
+        if not self._model_loaded:
+            return
+
+        logger.info("Unloading Whisper model")
+        self._model = None
+        self._model_loaded = False
+
+        # Clear GPU cache
+        try:
+            import gc
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except Exception as e:
+            logger.debug(f"Could not clear GPU cache: {e}")
+
+        logger.info("Model unloaded")
+
+    def is_loaded(self) -> bool:
+        """Check if the model is loaded."""
+        return self._model_loaded
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get engine status information."""
+        return {
+            "model": self.model_name,
+            "device": self.device,
+            "compute_type": self.compute_type,
+            "loaded": self._model_loaded,
+            "language": self.language if self.language else None,
+            "state": self.state,
+        }
 
     def __enter__(self) -> "AudioToTextRecorder":
         return self

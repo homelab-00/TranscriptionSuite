@@ -1,18 +1,20 @@
 """
-Speech-to-text (STT) engine module for real-time transcription.
+Speech-to-text (STT) engine module for transcription.
 
-This package provides real-time audio-to-text transcription capabilities
-ported from the MAIN folder's sophisticated STT engine, adapted for
-server-side use without local microphone dependencies.
+This package provides the unified transcription engine for TranscriptionSuite,
+supporting both real-time streaming (with VAD) and file-based transcription.
 
 Key components:
-- AudioToTextRecorder: Core transcription engine with VAD
+- AudioToTextRecorder: Unified transcription engine with VAD and file support
+- TranscriptionResult: Standard result format for all transcription operations
 - VAD utilities: Silero and WebRTC voice activity detection
 
 Configuration for the STT engine is loaded from config.yaml via
 the server.config module. See the 'stt', 'main_transcriber', and
 'preview_transcriber' sections in config.yaml.
 """
+
+from server.core.stt.engine import AudioToTextRecorder, TranscriptionResult
 
 # Mathematical constant for 16-bit audio normalization (not configurable)
 INT16_MAX_ABS_VALUE = 32768.0
@@ -21,6 +23,8 @@ INT16_MAX_ABS_VALUE = 32768.0
 SAMPLE_RATE = 16000
 
 __all__ = [
+    "AudioToTextRecorder",
+    "TranscriptionResult",
     "INT16_MAX_ABS_VALUE",
     "SAMPLE_RATE",
 ]
