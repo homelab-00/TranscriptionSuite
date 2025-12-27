@@ -7,6 +7,11 @@ This document contains technical details, architecture decisions, and developmen
 - [Quick Reference](#quick-reference)
 - [Architecture Overview](#architecture-overview)
   - [Design Decisions](#design-decisions)
+  - [Deployment Philosophy](#deployment-philosophy)
+- [End User Workflow](#end-user-workflow)
+  - [First-Time Setup](#first-time-setup)
+  - [Configuration](#configuration)
+  - [Daily Usage](#daily-usage)
 - [Project Structure](#project-structure)
   - [Directory Layout](#directory-layout)
   - [pyproject.toml Files](#pyprojecttoml-files)
@@ -112,14 +117,13 @@ uv run transcription-client --host localhost --port 8000
 
 | Task | Command |
 |------|---------|
+| **First-time setup** | `cd build/user-setup && ./setup.sh` (Linux) or `.\setup.ps1` (Windows) |
+| **Start server (local)** | `cd ~/.config/TranscriptionSuite && ./start-local.sh` |
+| **Start server (HTTPS)** | `cd ~/.config/TranscriptionSuite && ./start-remote.sh` |
+| **Stop server** | `cd ~/.config/TranscriptionSuite && ./stop.sh` |
 | **Build Docker image** | `cd docker && docker compose build` |
-| **Start server (local)** | `cd docker && docker compose up -d` |
-| **Start server (custom config)** | `USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d` |
-| **Start server (HTTPS)** | `TLS_ENABLED=true TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt TLS_KEY_PATH=~/.config/Tailscale/my-machine.key docker compose up -d` |
-| **Stop server** | `docker compose down` |
-| **Switch modes** | Use `docker compose up -d` with env vars (not `start`) |
 | **Rebuild after code changes** | `docker compose build && docker compose up -d` |
-| **View server logs** | `docker compose logs -f` or check `~/.config/TranscriptionSuite/server.log` |
+| **View server logs** | `docker compose logs -f` |
 | **Run client (local)** | `cd client && uv run transcription-client --host localhost --port 8000` |
 | **Run client (remote)** | `cd client && uv run transcription-client --host <tailscale-hostname> --port 8443 --https` |
 | **Lint code** | `./build/.venv/bin/ruff check .` |
@@ -168,6 +172,143 @@ TranscriptionSuite uses a **client-server architecture**:
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Client detection**: Server detects client type (standalone vs web) to enable features like preview transcription only for standalone clients, saving GPU memory for web users
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD for robust speech detection
+
+### Deployment Philosophy
+
+TranscriptionSuite is designed for **easy deployment by end users**, not just developers:
+
+- **Docker abstracts complexity**: All ML dependencies, GPU configuration, and model management are handled inside the container. Users don't need Python, CUDA, or any development tools installed.
+- **Binary clients**: End users download a single AppImage (Linux) or .exe (Windows) - no Python environment needed.
+- **One-time setup**: Run `setup.sh` (or `setup.ps1` on Windows) once to pull the Docker image and create the config directory.
+- **Simple scripts**: Use `start-local.sh` or `start-remote.sh` for daily usage instead of remembering Docker commands.
+- **Config file customization**: All settings are in `~/.config/TranscriptionSuite/config.yaml` - edit once, use forever.
+
+**Target user flow:**
+1. Install Docker
+2. Run setup script
+3. Edit config file (HuggingFace token, TLS paths if needed)
+4. Run start script
+5. Download and use the native client
+
+---
+
+## End User Workflow
+
+This section describes how **end users** (not developers) should set up and run TranscriptionSuite.
+
+### First-Time Setup
+
+Run the setup script once to initialize your environment:
+
+**Linux:**
+```bash
+cd build/user-setup
+./setup.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+cd build\user-setup
+.\setup.ps1
+```
+
+The setup script will:
+1. Check that Docker is installed and running
+2. Create the config directory with all necessary files:
+   - Linux: `~/.config/TranscriptionSuite/`
+   - Windows: `Documents\TranscriptionSuite\`
+3. Pull the Docker image from Docker Hub
+
+**Files created in your config directory:**
+- `config.yaml` - Server settings
+- `.env` - HuggingFace token (and log printouts) - **not tracked in git**
+- `docker-compose.yml` - Docker configuration
+- `start-local.sh/ps1` - Start server in HTTP mode
+- `start-remote.sh/ps1` - Start server in HTTPS mode
+- `stop.sh/ps1` - Stop the server
+
+### Configuration
+
+After setup, configure your HuggingFace Token and log settings:
+
+**1. Edit the `.env` file for HuggingFace Token (required for speaker diarization):**
+
+```bash
+# Linux
+nano ~/.config/TranscriptionSuite/.env
+
+# Windows
+notepad "$env:USERPROFILE\Documents\TranscriptionSuite\.env"
+```
+
+Set your HuggingFace token:
+```
+HUGGINGFACE_TOKEN=hf_your_token_here
+```
+
+Get a token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and accept the [PyAnnote model license](https://huggingface.co/pyannote/speaker-diarization-community-1).
+
+**2. (Optional) For remote/HTTPS access, edit `config.yaml`:**
+
+```yaml
+remote_server:
+  tls:
+    host_cert_path: "~/.config/Tailscale/my-machine.crt"
+    host_key_path: "~/.config/Tailscale/my-machine.key"
+```
+
+See [Tailscale HTTPS Setup](#tailscale-https-setup) for certificate generation.
+
+### Daily Usage
+
+All scripts are in your config directory. Navigate there first:
+
+```bash
+# Linux
+cd ~/.config/TranscriptionSuite
+
+# Windows
+cd "$env:USERPROFILE\Documents\TranscriptionSuite"
+```
+
+**Start the server:**
+
+```bash
+# Linux - Local mode (HTTP on port 8000)
+./start-local.sh
+
+# Linux - Remote mode (HTTPS on port 8443)
+./start-remote.sh
+
+# Windows
+.\start-local.ps1
+.\start-remote.ps1
+```
+
+**Stop the server:**
+
+```bash
+# Linux
+./stop.sh
+
+# Windows
+.\stop.ps1
+```
+
+**View logs:**
+
+```bash
+docker compose logs -f
+```
+
+### Script Reference
+
+| Script | Purpose |
+|--------|---------|
+| `setup.sh` / `setup.ps1` | First-time setup (run once from build/user-setup/ folder) |
+| `start-local.sh` / `start-local.ps1` | Start server in HTTP mode (port 8000) |
+| `start-remote.sh` / `start-remote.ps1` | Start server in HTTPS mode (port 8443) |
+| `stop.sh` / `stop.ps1` | Stop the server |
 
 ---
 
@@ -400,6 +541,28 @@ cd ../..
 ```
 
 > **Note:** The Docker build runs `npm ci` but does **not** run `npm audit`. Always audit locally before building.
+
+### Step 1.4: Development Configuration Files
+
+For development, the startup scripts (`start-local.sh`, `start-remote.sh`) automatically search for configuration files in the following priority order:
+
+**config.yaml:**
+1. `native_src/config.yaml` (development - highest priority)
+2. `~/.config/TranscriptionSuite/config.yaml` (user config)
+3. `docker/config.yaml` (fallback)
+
+**.env:**
+1. `native_src/.env` (development - alongside dev config, highest priority)
+2. `~/.config/TranscriptionSuite/.env` (user config)
+3. `docker/.env` (fallback)
+
+**For development**, you should:
+- Keep config in `native_src/config.yaml` (recommended - already exists)
+- Create `.env` at `native_src/.env` for secrets (HuggingFace token) - keeps dev config together
+
+The startup scripts work seamlessly for both:
+- **Development**: Run from `docker/` directory (finds config at `../native_src/`)
+- **End users**: Run from `~/.config/TranscriptionSuite/` (finds config in same directory)
 
 ### Step 2: Build Docker Image
 

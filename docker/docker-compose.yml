@@ -82,10 +82,10 @@ services:
       # Set USER_CONFIG_DIR to mount your local config directory:
       #   Linux: USER_CONFIG_DIR=~/.config/TranscriptionSuite
       #   Windows: USER_CONFIG_DIR=$HOME/Documents/TranscriptionSuite
-      - ${USER_CONFIG_DIR:-/dev/null}:/user-config
+      - ${USER_CONFIG_DIR:-./.empty}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
-      - ${TLS_CERT_PATH:-/dev/null}:/certs/cert.crt:ro
-      - ${TLS_KEY_PATH:-/dev/null}:/certs/cert.key:ro
+      - ${TLS_CERT_PATH:-./.empty}:/certs/cert.crt:ro
+      - ${TLS_KEY_PATH:-./.empty}:/certs/cert.key:ro
     
     # Restart policy
     restart: unless-stopped
