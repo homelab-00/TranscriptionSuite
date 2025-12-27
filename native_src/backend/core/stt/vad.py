@@ -14,12 +14,19 @@ Voice is considered active only when BOTH detectors agree.
 
 import logging
 import threading
+import warnings
 from typing import Optional, Union
 
 import numpy as np
 import torch
-import webrtcvad
+
+# Suppress pkg_resources deprecation warning from webrtcvad
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
+    import webrtcvad
+
 from scipy import signal as scipy_signal
+from silero_vad import load_silero_vad
 
 from server.config import get_config
 
@@ -103,14 +110,10 @@ class VoiceActivityDetector:
             raise
 
     def _init_silero_vad(self, use_onnx: bool = False) -> None:
-        """Initialize Silero VAD model."""
+        """Initialize Silero VAD model from PyPI package."""
         try:
-            self.silero_vad_model, _ = torch.hub.load(
-                repo_or_dir="snakers4/silero-vad",
-                model="silero_vad",
-                verbose=False,
-                onnx=use_onnx,
-            )
+            # Load Silero VAD model from installed package (no GitHub download needed)
+            self.silero_vad_model = load_silero_vad(onnx=use_onnx)
             logger.debug("Silero VAD initialized successfully")
         except Exception as e:
             logger.exception(f"Error initializing Silero VAD: {e}")

@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -39,7 +40,10 @@ except ImportError:
     HAS_SOUNDFILE = False
 
 try:
-    import webrtcvad
+    # Suppress pkg_resources deprecation warning from webrtcvad
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
+        import webrtcvad
 
     HAS_WEBRTCVAD = True
 except ImportError:

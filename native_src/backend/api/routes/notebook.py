@@ -360,7 +360,9 @@ async def upload_and_transcribe(
         if enable_word_timestamps:
             word_timestamps_list = []
             for seg in result.segments:
-                word_timestamps_list.extend([w.to_dict() for w in seg.words])
+                # seg is a dict, and words are already dicts (no need for .to_dict())
+                if "words" in seg:
+                    word_timestamps_list.extend(seg["words"])
 
         # Save to database
         recording_id = save_longform_to_database(

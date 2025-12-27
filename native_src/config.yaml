@@ -140,8 +140,14 @@ diarization:
 
     # HuggingFace token for accessing PyAnnote models.
     # You must accept the model license on HuggingFace first.
-    # Can also be set via HF_TOKEN environment variable.
-    # Default: null (uses HF_TOKEN env var)
+    #
+    # IMPORTANT: Do NOT put your token here! This file is baked into
+    # the Docker image. Instead, set HUGGINGFACE_TOKEN in docker/.env
+    # or pass it as an environment variable.
+    #
+    # The token is resolved in this order:
+    #   1. HF_TOKEN environment variable (from docker/.env)
+    #   2. This config value (not recommended for Docker deployments)
     hf_token: null
 
     # Device for diarization: "cuda" or "cpu"
@@ -289,9 +295,21 @@ remote_server:
     # Certificates are mounted from host when TLS_ENABLED=true
     tls:
         enabled: false  # Controlled via TLS_ENABLED env var in Docker
-        cert_file: "/certs/cert.crt"
-        key_file: "/certs/cert.key"
+        cert_file: "/certs/cert.crt"   # Container path (don't modify)
+        key_file: "/certs/cert.key"    # Container path (don't modify)
         auto_generate: false
+
+        # HOST paths for TLS certificates (used by startup scripts)
+        # These are paths on YOUR machine, not inside the Docker container.
+        # The startup scripts read these and mount them into the container.
+        # Supports ~ for home directory expansion.
+        # Note: Replace 'my-machine' with your actual Tailscale machine name
+        # To generate certificates:
+        #   tailscale cert <your-machine>.tail<xxxx>.ts.net
+        # Linux: ~/.config/Tailscale/my-machine.crt
+        # Windows: ~/Documents/Tailscale/my-machine.crt
+        host_cert_path: "~/.config/Tailscale/my-machine.crt"
+        host_key_path: "~/.config/Tailscale/my-machine.key"
 
 
 # ----------------------------------------------------------------------------

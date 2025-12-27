@@ -10,7 +10,15 @@ Runs the unified FastAPI server with all services:
 
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress pkg_resources deprecation warning from webrtcvad (global filter)
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated",
+    category=UserWarning,
+)
 
 # Add app root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
