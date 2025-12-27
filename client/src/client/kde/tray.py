@@ -7,10 +7,13 @@ Based on the architecture from NATIVE_CLIENT/tray/qt6_tray.py.
 
 import logging
 import sys
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from client.common.models import TrayAction, TrayState
 from client.common.tray_base import AbstractTray
+
+if TYPE_CHECKING:
+    from client.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +51,16 @@ class Qt6Tray(AbstractTray):
         TrayState.ERROR: (255, 0, 0),  # Red
     }
 
-    def __init__(self, app_name: str = "TranscriptionSuite"):
+    def __init__(
+        self, app_name: str = "TranscriptionSuite", config: "ClientConfig | None" = None
+    ):
         if not HAS_PYQT6:
             raise ImportError(
                 "PyQt6 is required for KDE tray. Install with: pip install PyQt6"
             )
 
         super().__init__(app_name)
+        self.config = config
 
         # Initialize Qt application
         self.app = QApplication.instance()
@@ -75,14 +81,17 @@ class Qt6Tray(AbstractTray):
         self.tray.setToolTip(app_name)
 
         # Menu actions (stored for state updates)
-        self.start_action: Optional[Any] = None
-        self.stop_action: Optional[Any] = None
-        self.reconnect_action: Optional[Any] = None
+        self.start_action: QAction | None = None
+        self.stop_action: QAction | None = None
+        self.reconnect_action: QAction | None = None
 
         # Thread-safe signals for GUI updates from async thread
         self._signals = TraySignals()
         self._signals.state_changed.connect(self._do_set_state)
         self._signals.notification_requested.connect(self._do_show_notification)
+
+        # Dialog instances (created lazily)
+        self._settings_dialog = None
 
         # Setup menu and click handlers
         self._setup_menu()
@@ -138,9 +147,7 @@ class Qt6Tray(AbstractTray):
 
         # Settings
         settings_action = QAction("Settings...", menu)
-        settings_action.triggered.connect(
-            lambda: self._trigger_callback(TrayAction.SETTINGS)
-        )
+        settings_action.triggered.connect(self.show_settings_dialog)
         menu.addAction(settings_action)
 
         menu.addSeparator()
@@ -226,6 +233,7 @@ class Qt6Tray(AbstractTray):
     def quit(self) -> None:
         """Exit the application."""
         self._trigger_callback(TrayAction.QUIT)
+        self.cleanup()
         self.tray.hide()
         self.app.quit()
 
@@ -241,6 +249,38 @@ class Qt6Tray(AbstractTray):
         """Update the tray icon tooltip."""
         self.tray.setToolTip(text)
 
+    def copy_to_clipboard(self, text: str) -> bool:
+        """Copy text to clipboard using Qt (Wayland-safe)."""
+        try:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            logger.debug("Copied to clipboard via Qt")
+            return True
+        except Exception as e:
+            logger.warning(f"Clipboard copy failed: {e}")
+            return False
+
+    def show_settings_dialog(self) -> None:
+        """Show the settings dialog."""
+        if self.config is None:
+            logger.warning("Cannot show settings dialog: no config available")
+            return
+
+        from client.kde.settings_dialog import SettingsDialog
+
+        if self._settings_dialog is None:
+            self._settings_dialog = SettingsDialog(self.config)
+
+        # Reload values in case config changed externally
+        self._settings_dialog._load_values()
+        self._settings_dialog.exec()
+
+    def cleanup(self) -> None:
+        """Clean up resources before quitting."""
+        if self._settings_dialog is not None:
+            self._settings_dialog.close()
+            self._settings_dialog = None
+
 
 def run_tray(config) -> int:
     """
@@ -255,7 +295,7 @@ def run_tray(config) -> int:
     from client.common.orchestrator import ClientOrchestrator
 
     try:
-        tray = Qt6Tray()
+        tray = Qt6Tray(config=config)
         orchestrator = ClientOrchestrator(
             config=config,
             auto_connect=True,

@@ -91,6 +91,20 @@ class AbstractTray(ABC):
         """
         pass
 
+    def copy_to_clipboard(self, text: str) -> bool:
+        """
+        Copy text to system clipboard.
+
+        Override with platform-specific implementation.
+
+        Args:
+            text: Text to copy
+
+        Returns:
+            True if successful, False otherwise
+        """
+        return False
+
     def get_state_tooltip(self, state: TrayState) -> str:
         """Get tooltip text for a state."""
         state_names = {
