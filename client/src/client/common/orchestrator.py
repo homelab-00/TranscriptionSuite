@@ -21,17 +21,6 @@ from client.common.models import TrayAction, TrayState
 if TYPE_CHECKING:
     from client.common.tray_base import AbstractTray
 
-# Try to import pyperclip for clipboard support
-HAS_PYPERCLIP = False
-pyperclip: Any = None
-try:
-    import pyperclip as _pyperclip
-
-    pyperclip = _pyperclip
-    HAS_PYPERCLIP = True
-except ImportError:
-    pass
-
 logger = logging.getLogger(__name__)
 
 
@@ -416,16 +405,12 @@ class ClientOrchestrator:
     # Clipboard
     # =========================================================================
 
-    def _copy_to_clipboard(self, text: str) -> None:
-        """Copy text to clipboard."""
-        if HAS_PYPERCLIP:
-            try:
-                pyperclip.copy(text)
-                logger.debug("Copied to clipboard")
-            except Exception as e:
-                logger.warning(f"Clipboard copy failed: {e}")
-        else:
-            logger.warning("pyperclip not available, clipboard disabled")
+    def _copy_to_clipboard(self, text: str) -> bool:
+        """Copy text to clipboard using the tray's platform-specific implementation."""
+        if self.tray:
+            return self.tray.copy_to_clipboard(text)
+        logger.warning("No tray available for clipboard operation")
+        return False
 
     # =========================================================================
     # Other Actions
@@ -440,12 +425,11 @@ class ClientOrchestrator:
 
     def _on_settings(self) -> None:
         """Handle settings action."""
-        # TODO: Implement settings dialog
-        if self.tray:
-            self.tray.show_notification(
-                "Settings",
-                "Settings dialog not yet implemented",
-            )
+        # Settings dialog is now handled directly by the tray implementation
+        if self.tray and hasattr(self.tray, "show_settings_dialog"):
+            self.tray.show_settings_dialog()
+        else:
+            logger.warning("Settings dialog not available for this tray implementation")
 
     def _on_reconnect(self) -> None:
         """Handle reconnect action."""

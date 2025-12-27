@@ -48,6 +48,8 @@ def get_default_config() -> dict[str, Any]:
             "use_remote": False,
             "timeout": 30,
             "transcription_timeout": 300,
+            "auto_reconnect": True,
+            "reconnect_interval": 10,
         },
         "recording": {
             "sample_rate": 16000,

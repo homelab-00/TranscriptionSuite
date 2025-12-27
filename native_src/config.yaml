@@ -301,12 +301,8 @@ remote_server:
 
         # HOST paths for TLS certificates (used by startup scripts)
         # These are paths on YOUR machine, not inside the Docker container.
-        # The startup scripts read these and mount them into the container.
-        # Supports ~ for home directory expansion.
-        # Note: Replace 'my-machine' with your actual Tailscale machine name
-        # To generate certificates:
-        #   tailscale cert <your-machine>.tail<xxxx>.ts.net
-        # Linux: ~/.config/Tailscale/my-machine.crt
+        # The docker server startup scripts read these and mount them into
+        # the container.
         # Windows: ~/Documents/Tailscale/my-machine.crt
         host_cert_path: "~/.config/Tailscale/my-machine.crt"
         host_key_path: "~/.config/Tailscale/my-machine.key"
