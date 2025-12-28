@@ -50,16 +50,16 @@ fi
 # Find Config and .env Files
 # ============================================================================
 # This script works in two scenarios:
-#   1. Development: Run from docker/ directory (finds config at ../native_src/)
+#   1. Development: Run from docker/ directory (finds config at ../server/)
 #   2. End user: Run from ~/.config/TranscriptionSuite/ (finds config in same dir)
 #
 # Priority order for config.yaml:
-#   1. ../native_src/config.yaml (development - when running from docker/ dir)
+#   1. ../server/config.yaml (development - when running from docker/ dir)
 #   2. $SCRIPT_DIR/config.yaml (end user - when running from ~/.config/TranscriptionSuite/)
 #   3. ~/.config/TranscriptionSuite/config.yaml (fallback)
 #
 # Priority order for .env:
-#   1. ../native_src/.env (development - alongside dev config)
+#   1. ../server/.env (development - alongside dev config)
 #   2. $SCRIPT_DIR/.env (end user running from ~/.config/TranscriptionSuite/)
 #   3. ~/.config/TranscriptionSuite/.env (fallback)
 
@@ -67,11 +67,11 @@ fi
 CONFIG_FILE=""
 USER_CONFIG_DIR=""
 
-# Check 1: Development location (../native_src/config.yaml relative to script dir)
-DEV_CONFIG="$SCRIPT_DIR/../native_src/config.yaml"
+# Check 1: Development location (../server/config.yaml relative to script dir)
+DEV_CONFIG="$SCRIPT_DIR/../server/config.yaml"
 if [[ -f "$DEV_CONFIG" ]]; then
     CONFIG_FILE="$DEV_CONFIG"
-    USER_CONFIG_DIR="$(cd "$SCRIPT_DIR/../native_src" && pwd)"
+    USER_CONFIG_DIR="$(cd "$SCRIPT_DIR/../server" && pwd)"
     print_info "Using development config: $CONFIG_FILE"
 # Check 2: Script directory (end user running from ~/.config/TranscriptionSuite/)
 elif [[ -f "$SCRIPT_DIR/config.yaml" ]]; then
@@ -95,8 +95,8 @@ export USER_CONFIG_DIR
 ENV_FILE=""
 ENV_FILE_ARG=""
 
-# Check 1: Development location (../native_src/.env - alongside dev config)
-DEV_ENV="$SCRIPT_DIR/../native_src/.env"
+# Check 1: Development location (../server/.env - alongside dev config)
+DEV_ENV="$SCRIPT_DIR/../server/.env"
 if [[ -f "$DEV_ENV" ]]; then
     ENV_FILE="$DEV_ENV"
     print_info "Using secrets from: $ENV_FILE"
@@ -117,6 +117,35 @@ else
 fi
 
 # ============================================================================
+# Check for Existing Container and Mode Conflicts
+# ============================================================================
+CONTAINER_NAME="transcription-suite"
+
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    print_info "Container already exists, checking mode..."
+
+    # Get current TLS_ENABLED value from running/stopped container
+    CURRENT_TLS=$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep "^TLS_ENABLED=" | cut -d'=' -f2 || echo "false")
+
+    # We're starting in local mode (TLS disabled)
+    if [[ "$CURRENT_TLS" == "true" ]]; then
+        print_info "Mode conflict: container is in remote/TLS mode, but starting in local mode"
+        print_info "Removing existing container..."
+        cd "$SCRIPT_DIR"
+        docker compose down 2>&1 | grep -v "No resource found to remove"
+    else
+        print_info "Container is already in local mode"
+    fi
+fi
+
+# Check if image exists
+if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^bvcsfd/transcription-suite:latest$"; then
+    print_info "Using existing image: bvcsfd/transcription-suite:latest"
+else
+    print_info "Image will be built on first run"
+fi
+
+# ============================================================================
 # Start Container
 # ============================================================================
 print_status "Starting TranscriptionSuite server (local mode)..."
@@ -125,7 +154,7 @@ cd "$SCRIPT_DIR"
 
 # TLS_ENABLED defaults to false in docker-compose.yml
 # shellcheck disable=SC2086
-docker compose $ENV_FILE_ARG up -d
+docker compose $ENV_FILE_ARG up -d 2>&1 | grep -v "WARN\[0000\] No services to build"
 
 echo ""
 echo "=========================================================="
@@ -135,6 +164,10 @@ echo ""
 echo "  Server URL:  http://localhost:8000"
 echo "  Web UI:      http://localhost:8000/record"
 echo "  Notebook:    http://localhost:8000/notebook"
+echo ""
+echo "  Note: On first run, an admin token will be generated."
+echo "        Wait ~10 seconds, then run:"
+echo "        docker compose logs | grep \"Admin Token:\""
 echo ""
 echo "  View logs:   docker compose logs -f"
 echo "  Stop:        ./stop.sh"

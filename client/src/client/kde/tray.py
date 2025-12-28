@@ -32,6 +32,7 @@ try:
         state_changed = pyqtSignal(object)  # TrayState
         notification_requested = pyqtSignal(str, str)  # title, message
         clipboard_requested = pyqtSignal(str)  # text to copy
+        settings_dialog_requested = pyqtSignal()  # show settings dialog
 
 except ImportError:
     # Provide stub for type checking only
@@ -91,6 +92,7 @@ class Qt6Tray(AbstractTray):
         self._signals.state_changed.connect(self._do_set_state)
         self._signals.notification_requested.connect(self._do_show_notification)
         self._signals.clipboard_requested.connect(self._do_copy_to_clipboard)
+        self._signals.settings_dialog_requested.connect(self._do_show_settings_dialog)
 
         # Dialog instances (created lazily)
         self._settings_dialog = None
@@ -266,7 +268,11 @@ class Qt6Tray(AbstractTray):
             logger.warning(f"Clipboard copy failed: {e}")
 
     def show_settings_dialog(self) -> None:
-        """Show the settings dialog."""
+        """Show the settings dialog (thread-safe)."""
+        self._signals.settings_dialog_requested.emit()
+
+    def _do_show_settings_dialog(self) -> None:
+        """Actually show the settings dialog (must be called on main thread)."""
         if self.config is None:
             logger.warning("Cannot show settings dialog: no config available")
             return

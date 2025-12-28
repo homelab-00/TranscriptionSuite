@@ -51,16 +51,16 @@ fi
 # Find Config and .env Files
 # ============================================================================
 # This script works in two scenarios:
-#   1. Development: Run from docker/ directory (finds config at ../native_src/)
+#   1. Development: Run from docker/ directory (finds config at ../server/)
 #   2. End user: Run from ~/.config/TranscriptionSuite/ (finds config in same dir)
 #
 # Priority order for config.yaml:
-#   1. ../native_src/config.yaml (development - when running from docker/ dir)
+#   1. ../server/config.yaml (development - when running from docker/ dir)
 #   2. $SCRIPT_DIR/config.yaml (end user - when running from ~/.config/TranscriptionSuite/)
 #   3. ~/.config/TranscriptionSuite/config.yaml (fallback)
 #
 # Priority order for .env:
-#   1. ../native_src/.env (development - alongside dev config)
+#   1. ../server/.env (development - alongside dev config)
 #   2. $SCRIPT_DIR/.env (end user running from ~/.config/TranscriptionSuite/)
 #   3. ~/.config/TranscriptionSuite/.env (fallback)
 
@@ -68,11 +68,11 @@ fi
 CONFIG_FILE=""
 CONFIG_DIR_TO_MOUNT=""
 
-# Check 1: Development location (../native_src/config.yaml relative to script dir)
-DEV_CONFIG="$SCRIPT_DIR/../native_src/config.yaml"
+# Check 1: Development location (../server/config.yaml relative to script dir)
+DEV_CONFIG="$SCRIPT_DIR/../server/config.yaml"
 if [[ -f "$DEV_CONFIG" ]]; then
     CONFIG_FILE="$DEV_CONFIG"
-    CONFIG_DIR_TO_MOUNT="$(cd "$SCRIPT_DIR/../native_src" && pwd)"
+    CONFIG_DIR_TO_MOUNT="$(cd "$SCRIPT_DIR/../server" && pwd)"
     print_info "Using development config: $CONFIG_FILE"
 # Check 2: Script directory (end user running from ~/.config/TranscriptionSuite/)
 elif [[ -f "$SCRIPT_DIR/config.yaml" ]]; then
@@ -93,7 +93,7 @@ else
     echo "  3. $HOME/.config/TranscriptionSuite/config.yaml (user config)"
     echo ""
     echo "For end users: Run setup.sh first to create the config file."
-    echo "For development: config.yaml should be in native_src/ directory."
+    echo "For development: config.yaml should be in server/ directory."
     exit 1
 fi
 
@@ -101,8 +101,8 @@ fi
 ENV_FILE=""
 ENV_FILE_ARG=""
 
-# Check 1: Development location (../native_src/.env - alongside dev config)
-DEV_ENV="$SCRIPT_DIR/../native_src/.env"
+# Check 1: Development location (../server/.env - alongside dev config)
+DEV_ENV="$SCRIPT_DIR/../server/.env"
 if [[ -f "$DEV_ENV" ]]; then
     ENV_FILE="$DEV_ENV"
 # Check 2: Script directory (end user running from ~/.config/TranscriptionSuite/)
@@ -179,6 +179,35 @@ else
 fi
 
 # ============================================================================
+# Check for Existing Container and Mode Conflicts
+# ============================================================================
+CONTAINER_NAME="transcription-suite"
+
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    print_info "Container already exists, checking mode..."
+
+    # Get current TLS_ENABLED value from running/stopped container
+    CURRENT_TLS=$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep "^TLS_ENABLED=" | cut -d'=' -f2 || echo "false")
+
+    # We're starting in remote mode (TLS enabled)
+    if [[ "$CURRENT_TLS" != "true" ]]; then
+        print_info "Mode conflict: container is in local mode, but starting in remote/TLS mode"
+        print_info "Removing existing container..."
+        cd "$SCRIPT_DIR"
+        docker compose down 2>&1 | grep -v "No resource found to remove"
+    else
+        print_info "Container is already in remote/TLS mode"
+    fi
+fi
+
+# Check if image exists
+if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^bvcsfd/transcription-suite:latest$"; then
+    print_info "Using existing image: bvcsfd/transcription-suite:latest"
+else
+    print_info "Image will be built on first run"
+fi
+
+# ============================================================================
 # Start Container with TLS
 # ============================================================================
 print_status "Starting TranscriptionSuite server (remote/TLS mode)..."
@@ -192,7 +221,7 @@ export TLS_KEY_PATH="$HOST_KEY_PATH"
 export USER_CONFIG_DIR="$CONFIG_DIR_TO_MOUNT"
 
 # shellcheck disable=SC2086
-docker compose $ENV_FILE_ARG up -d
+docker compose $ENV_FILE_ARG up -d 2>&1 | grep -v "WARN\[0000\] No services to build"
 
 echo ""
 echo "=========================================================="

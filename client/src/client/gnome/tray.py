@@ -8,9 +8,13 @@ Based on the architecture from NATIVE_CLIENT/tray/gtk4_tray.py.
 
 import logging
 import subprocess
+from typing import TYPE_CHECKING, Any, Optional
 
 from client.common.models import TrayAction, TrayState
 from client.common.tray_base import AbstractTray
+
+if TYPE_CHECKING:
+    from client.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +25,13 @@ try:
 
     gi.require_version("Gtk", "3.0")
     gi.require_version("AppIndicator3", "0.1")
-    from gi.repository import AppIndicator3, GLib, Gtk
+    from gi.repository import AppIndicator3, Gdk, GLib, Gtk
 
     HAS_GTK = True
 except (ImportError, ValueError):
     # Provide stubs for type checking
     AppIndicator3 = None  # type: ignore
+    Gdk = None  # type: ignore
     GLib = None  # type: ignore
     Gtk = None  # type: ignore
 
@@ -45,7 +50,9 @@ class GtkTray(AbstractTray):
         TrayState.ERROR: "dialog-error-symbolic",
     }
 
-    def __init__(self, app_name: str = "TranscriptionSuite"):
+    def __init__(
+        self, config: "ClientConfig | None" = None, app_name: str = "TranscriptionSuite"
+    ):
         if not HAS_GTK:
             raise ImportError(
                 "GTK3 and AppIndicator3 are required. "
@@ -53,6 +60,7 @@ class GtkTray(AbstractTray):
             )
 
         super().__init__(app_name)
+        self.config = config
 
         # Create AppIndicator
         self.indicator = AppIndicator3.Indicator.new(
@@ -213,6 +221,37 @@ class GtkTray(AbstractTray):
         dialog.destroy()
         return path
 
+    def show_settings_dialog(self) -> None:
+        """Show the settings dialog."""
+        if not self.config:
+            logger.warning("No config available for settings dialog")
+            return
+
+        # Import here to avoid circular imports
+        from client.gnome.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self.config)
+        GLib.idle_add(dialog.show)
+
+    def copy_to_clipboard(self, text: str) -> bool:
+        """
+        Copy text to the system clipboard.
+
+        Args:
+            text: Text to copy
+
+        Returns:
+            True if successful
+        """
+        try:
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_text(text, -1)
+            clipboard.store()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to copy to clipboard: {e}")
+            return False
+
 
 def run_tray(config) -> int:
     """
@@ -227,7 +266,7 @@ def run_tray(config) -> int:
     from client.common.orchestrator import ClientOrchestrator
 
     try:
-        tray = GtkTray()
+        tray = GtkTray(config=config)
         orchestrator = ClientOrchestrator(
             config=config,
             auto_connect=True,

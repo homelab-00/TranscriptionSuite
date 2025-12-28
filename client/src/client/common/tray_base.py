@@ -105,6 +105,14 @@ class AbstractTray(ABC):
         """
         return False
 
+    def show_settings_dialog(self) -> None:
+        """
+        Show the settings dialog.
+
+        Override with platform-specific implementation.
+        """
+        pass
+
     def get_state_tooltip(self, state: TrayState) -> str:
         """Get tooltip text for a state."""
         state_names = {

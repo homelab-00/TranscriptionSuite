@@ -85,7 +85,7 @@ cd client && uv venv --python 3.11 && uv sync --extra kde && cd ..
 cd build && uv venv --python 3.11 && uv sync && cd ..
 
 # 2. Audit NPM packages (frontend)
-cd native_src/frontend && npm ci && npm audit && cd ../..
+cd server/frontend && npm ci && npm audit && cd ../..
 
 # 3. Build and run Docker server
 cd docker
@@ -98,6 +98,8 @@ uv run transcription-client --host localhost --port 8000
 ```
 
 ### Build Workflow (TL;DR)
+
+Note: All three scripts are meant to be run from the project root.
 
 ```bash
 # KDE AppImage (Linux)
@@ -331,7 +333,8 @@ TranscriptionSuite/
 │   │   ├── kde/                  # KDE Plasma (PyQt6)
 │   │   │   └── tray.py           # Qt6 system tray implementation
 │   │   ├── gnome/                # GNOME (GTK + AppIndicator)
-│   │   │   └── tray.py           # GTK/AppIndicator implementation
+│   │   │   ├── tray.py           # GTK/AppIndicator implementation
+│   │   │   └── settings_dialog.py # GTK3 settings dialog
 │   │   ├── windows/              # Windows (PyQt6)
 │   │   │   └── tray.py           # Windows tray (same as KDE)
 │   │   ├── build/                # Build configurations
@@ -351,7 +354,7 @@ TranscriptionSuite/
 │   ├── entrypoint.py             # Container entrypoint
 │   └── .dockerignore             # Build context exclusions
 │
-├── native_src/                   # Server source code
+├── server/                   # Server source code
 │   ├── backend/                  # Unified backend (runs in Docker + native)
 │   │   ├── api/                  # FastAPI application
 │   │   │   ├── main.py           # App factory, lifespan, static mounting
@@ -382,9 +385,15 @@ The project has ***three*** `pyproject.toml` files, each serving a different pur
 
 | File | Purpose |
 |------|------|
-| `client/pyproject.toml` | Native client package definition. Defines runtime deps and platform extras (`kde`, `gnome`, `windows`). Provides the `transcription-client` entrypoint. |
-| `build/pyproject.toml` | Dev/build tools environment (separate from client runtime). Contains linting, testing, and packaging tools. |
-| `native_src/backend/pyproject.toml` | Server/backend package definition. Defines server deps (FastAPI, faster-whisper, torch, pyannote.audio, etc.) used by Docker builds and native development. |
+| `client/pyproject.toml` | Native client package definition. Defines runtime deps and platform extras (`kde`, `gnome`, `windows`). Provides the `transcription-client` entrypoint. **No dev dependencies** - use `build/.venv` for development tools. |
+| `build/pyproject.toml` | **All dev/build tools** (ruff, pyright, pytest, pyinstaller, httpx for testing). Use `build/.venv` for linting, type-checking, testing, and packaging. This is the single source of truth for all development tooling. |
+| `server/backend/pyproject.toml` | Server/backend package definition. Defines server deps (FastAPI, faster-whisper, torch, pyannote.audio, etc.) with **pinned versions** for reproducible Docker builds. **No dev dependencies** - use `build/.venv` for development tools. |
+
+**Dependency Management Philosophy:**
+- Runtime dependencies are pinned to exact versions in `server/backend/pyproject.toml` (e.g., `fastapi==0.128.0`, `torch==2.8.0`)
+- This ensures reproducible Docker builds and prevents version drift
+- Dev tools are consolidated in `build/pyproject.toml` to avoid duplication
+- Client runtime dependencies use minimum version constraints for flexibility across platforms
 
 ---
 
@@ -539,7 +548,7 @@ cd ..
 Audit the web frontend for security vulnerabilities:
 
 ```bash
-cd native_src/frontend
+cd server/frontend
 npm ci
 npm audit
 cd ../..
@@ -552,21 +561,21 @@ cd ../..
 For development, the startup scripts (`start-local.sh`, `start-remote.sh`) automatically search for configuration files in the following priority order:
 
 **config.yaml:**
-1. `native_src/config.yaml` (development - highest priority)
+1. `server/config.yaml` (development - highest priority)
 2. `~/.config/TranscriptionSuite/config.yaml` (user config)
 3. `docker/config.yaml` (fallback)
 
 **.env:**
-1. `native_src/.env` (development - alongside dev config, highest priority)
+1. `server/.env` (development - alongside dev config, highest priority)
 2. `~/.config/TranscriptionSuite/.env` (user config)
 3. `docker/.env` (fallback)
 
 **For development**, you should:
-- Keep config in `native_src/config.yaml` (recommended - already exists)
-- Create `.env` at `native_src/.env` for secrets (HuggingFace token) - keeps dev config together
+- Keep config in `server/config.yaml` (recommended - already exists)
+- Create `.env` at `server/.env` for secrets (HuggingFace token) - keeps dev config together
 
 The startup scripts work seamlessly for both:
-- **Development**: Run from `docker/` directory (finds config at `../native_src/`)
+- **Development**: Run from `docker/` directory (finds config at `../server/`)
 - **End users**: Run from `~/.config/TranscriptionSuite/` (finds config in same directory)
 
 ### Step 2: Build Docker Image
@@ -579,16 +588,49 @@ docker compose build
 ```
 
 **What happens during build:**
-1. **Frontend builder stage**: Builds the React frontend (`native_src/frontend`)
-2. **Python runtime stage**: Installs all server dependencies from `native_src/backend/pyproject.toml`
+1. **Frontend builder stage**: Builds the React frontend (`server/frontend`)
+2. **Python runtime stage**: Installs all server dependencies from `server/backend/pyproject.toml`
 3. **Static files**: Copies built frontend to `/app/static/frontend`
-4. **Config template**: Copies `native_src/config.yaml` as `config/config.yaml.example`
+4. **Config template**: Copies `server/config.yaml` as `config/config.yaml.example`
+
+**Development vs. Production Images:**
+When you run `docker compose build`, Docker uses the `build:` section in `docker-compose.yml` to create a local image tagged as `bvcsfd/transcription-suite:latest`. This local image will **always** take priority over the one on Docker Hub when you run `docker compose up`. Docker only attempts to pull from the registry if the image does not exist locally.
+
+**Startup Script Behavior:**
+The same priority applies when using the startup scripts (`start-local.sh`, `start-remote.sh`, etc.). These scripts run `docker compose up -d`, which follows the same logic:
+- If a local image with the tag `bvcsfd/transcription-suite:latest` exists (from a previous `docker compose build`), it will be used.
+- If no local image exists, Docker Compose will attempt to pull it from Docker Hub.
+- The scripts check if the image exists locally and inform you, but they do **not** force a pull if a local image is present.
+
+This means for development, you can freely build and test local changes without worrying about Docker Hub overwriting your work.
 
 **Force rebuild** (if layer caching causes issues):
 
 ```bash
 docker compose build --no-cache
 ```
+
+### Step 2.1: Pushing to Docker Hub
+
+To share your built image with others or deploy it to other machines, you can push it to Docker Hub:
+
+1. **Login to Docker Hub** (if not already):
+   ```bash
+   docker login
+   ```
+
+2. **Tag and Push**:
+   Since the image is already built with the correct tag (`bvcsfd/transcription-suite:latest`) by Docker Compose, you can push it directly:
+   ```bash
+   docker push bvcsfd/transcription-suite:latest
+   ```
+
+3. **Versioning (Recommended)**:
+   It is good practice to tag releases with version numbers instead of just using `latest`:
+   ```bash
+   docker tag bvcsfd/transcription-suite:latest bvcsfd/transcription-suite:v1.0.0
+   docker push bvcsfd/transcription-suite:v1.0.0
+   ```
 
 ### Step 3: Run Client Locally
 
@@ -754,6 +796,12 @@ chmod +x TranscriptionSuite-KDE-x86_64.AppImage
 3. Sets `PYTHONPATH` to include bundled source
 4. Packages into `.AppImage` for easier distribution
 
+**Features:**
+- GTK3-based settings dialog (Connection, Audio, Behavior tabs)
+- System clipboard integration
+- AppIndicator3 tray integration
+- Desktop notifications
+
 **Why not PyInstaller?**
 
 GTK and GObject Introspection rely heavily on:
@@ -888,7 +936,7 @@ cd build && uv sync
 
 #### Default Configuration
 
-- **Docker image default config**: The Docker build copies `native_src/config.yaml` into the image as `/app/config.yaml`.
+- **Docker image default config**: The Docker build copies `server/config.yaml` into the image as `/app/config.yaml`.
 - This serves as the default configuration for the server.
 - Users can override settings by mounting a custom `config.yaml` via `USER_CONFIG_DIR` (see [Customizing Server Configuration](#customizing-server-configuration)).
 
@@ -1125,7 +1173,7 @@ The backend is the unified server component that powers TranscriptionSuite. It r
 The backend is organized into focused modules:
 
 ```txt
-native_src/backend/
+server/backend/
 ├── api/                              # FastAPI application
 │   ├── main.py                       # App factory, lifespan, routing
 │   ├── routes/                       # API endpoint modules
@@ -1226,7 +1274,7 @@ The server includes optional timing instrumentation in `entrypoint.py` and `main
 **Steps:**
 
 ```bash
-cd native_src/backend
+cd server/backend
 uv venv --python 3.11
 uv sync                    # Install all dependencies including diarization
 ```
@@ -1240,7 +1288,7 @@ The backend uses the package name `server` internally (defined in `pyproject.tom
 **Development mode with auto-reload:**
 
 ```bash
-cd native_src/backend
+cd server/backend
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -1284,7 +1332,7 @@ The configuration file is loaded with the following search priority:
    - Windows: `Documents\TranscriptionSuite\config.yaml`
 2. **Default config**:
    - `/app/config.yaml` (Docker container - baked into image)
-   - `native_src/config.yaml` (native development)
+   - `server/config.yaml` (native development)
    - `./config.yaml` (current directory fallback)
 
 **Note:** A configuration file is required. The server will fail to start if no config file is found.
@@ -1486,7 +1534,7 @@ Token-based authentication system:
 
 The server includes a React frontend for web access:
 
-**Location:** `native_src/frontend/`
+**Location:** `server/frontend/`
 
 **Tech stack:**
 - React 18 + TypeScript
@@ -1503,7 +1551,7 @@ The server includes a React frontend for web access:
 **Development workflow:**
 
 ```bash
-cd native_src/frontend
+cd server/frontend
 npm install
 npm run dev  # Starts dev server on http://localhost:1421
 ```
@@ -1529,9 +1577,13 @@ The Docker build process automatically builds the frontend and serves it as stat
 **Running tests:**
 
 ```bash
-cd native_src/backend
-uv sync --extra dev  # Install test dependencies
-uv run pytest
+# All dev tools are in the build/ venv
+cd build
+uv sync  # Install all dev dependencies (if not already done)
+cd ..
+
+# Run tests from project root
+./build/.venv/bin/pytest server/backend/tests
 ```
 
 **Test structure:**
@@ -1607,7 +1659,7 @@ Edit `logging/setup.py` for custom formatters, handlers, or log levels.
 4. **Docker vs Native:**
    - Docker for production-like testing
    - Native for faster development iteration
-   - Keep `native_src/config.yaml` in sync with Docker config
+   - Keep `server/config.yaml` in sync with Docker config
 
 5. **Code Quality:**
    - Use `ruff` for linting (installed in `build/` venv)
@@ -1737,6 +1789,55 @@ Please try again shortly.
 - `orchestrator.py`: Catches `ServerBusyError` and displays notifications
 - Connection remains open after `session_busy` - no need to reconnect
 
+### Connection Management
+
+**Automatic Reconnection:**
+- The client automatically attempts to reconnect on connection loss
+- Maximum reconnection attempts: **10** (defined by `MAX_RECONNECT_ATTEMPTS` in `orchestrator.py`)
+- Reconnection interval: Configurable via `server.reconnect_interval` (default: 10 seconds)
+- After max retries, user is notified: "Could not connect after 10 attempts. Use Settings to reconfigure."
+
+**Initial Connection Handling:**
+- On first connection failure, the settings dialog automatically opens
+- This helps new users configure server details without manual config file editing
+- Settings dialog does NOT open on reconnection attempts (only on initial failure)
+- Implemented in `orchestrator.py` via `_is_initial_connection` flag
+
+**Configuration:**
+```yaml
+server:
+  auto_reconnect: true          # Enable automatic reconnection
+  reconnect_interval: 10        # Seconds between attempts
+```
+
+### Platform-Specific Features
+
+All client platforms (KDE, GNOME, Windows) provide the same core features:
+
+**KDE & Windows (PyQt6):**
+- Full-featured Qt6-based settings dialog
+- System clipboard integration
+- System tray with state icons
+- Desktop notifications
+
+**GNOME (GTK3 + AppIndicator):**
+- GTK3-based settings dialog with tabs (Connection, Audio, Behavior)
+- Settings dialog features:
+  - Connection: Port, HTTPS toggle, token with show/hide, remote server config
+  - Audio: Device selector with refresh button
+  - Behavior: Auto-copy clipboard, notifications toggle
+- GTK clipboard integration via `Gtk.Clipboard`
+- AppIndicator3 tray integration
+- Desktop notifications via `notify-send`
+- Requires: `gtk3`, `libappindicator-gtk3`, AppIndicator GNOME extension
+
+**Implementation Files:**
+- `client/common/tray_base.py` - Base class defining `show_settings_dialog()` and `copy_to_clipboard()` methods
+- `client/kde/tray.py` - Qt6 implementation (used by KDE and Windows)
+- `client/gnome/tray.py` - GTK3 implementation
+- `client/gnome/settings_dialog.py` - GTK3 settings dialog
+- `client/common/orchestrator.py` - Connection management and retry logic
+
 ---
 
 ## Data Storage
@@ -1845,7 +1946,7 @@ The token is passed to the container as `HF_TOKEN` environment variable and cach
 - LM Studio can stay bound to `127.0.0.1` (no need to expose to network)
 
 **Native Development:**
-- Configured in `native_src/config.yaml`
+- Configured in `server/config.yaml`
 - Default: `http://127.0.0.1:1234`
 - Section: `local_llm.base_url`
 
@@ -1952,7 +2053,7 @@ TranscriptionSuite uses a YAML configuration file with the following search prio
 |----------|----------|---------|
 | 1 (highest) | User config directory (see below) | Custom user settings |
 | 2 | `/app/config.yaml` | Docker container defaults (baked into image) |
-| 3 | `native_src/config.yaml` | Local development |
+| 3 | `server/config.yaml` | Local development |
 | 4 | `./config.yaml` | Current directory fallback |
 
 **User Config Directory by Platform:**
@@ -1981,12 +2082,12 @@ To customize the server configuration:
 
 2. **Download the default config file:**
 
-   Copy `native_src/config.yaml` from the repository to your config directory:
+   Copy `server/config.yaml` from the repository to your config directory:
 
    **Linux:**
    ```bash
    curl -o ~/.config/TranscriptionSuite/config.yaml \
-     https://raw.githubusercontent.com/your-repo/TranscriptionSuite/main/native_src/config.yaml
+     https://raw.githubusercontent.com/your-repo/TranscriptionSuite/main/server/config.yaml
    ```
 
    Or manually copy from the repo if you have it cloned.
@@ -2259,7 +2360,7 @@ Tokens are used in `Authorization: Bearer <token>` headers for API authenticatio
 
 ### Native Development Configuration
 
-`native_src/config.yaml` - Full configuration for running without Docker.
+`server/config.yaml` - Full configuration for running without Docker.
 
 ---
 

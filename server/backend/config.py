@@ -9,7 +9,7 @@ Configuration Priority (highest to lowest):
                     or Documents/TranscriptionSuite/config.yaml (Windows)
                     or /user-config/config.yaml (Docker with mounted volume)
     2. Default config: /app/config.yaml (Docker container)
-    3. Dev config: native_src/config.yaml (development)
+    3. Dev config: server/config.yaml (development)
     4. Fallback: ./config.yaml (current directory)
 """
 
@@ -77,7 +77,7 @@ class ServerConfig:
             1. Explicitly provided path
             2. User config directory (platform-specific or Docker mount)
             3. /app/config.yaml (Docker container default)
-            4. native_src/config.yaml (development)
+            4. server/config.yaml (development)
             5. ./config.yaml (current directory fallback)
         """
         if self._config_path and self._config_path.exists():
@@ -88,7 +88,7 @@ class ServerConfig:
         candidates = [
             user_config_dir / "config.yaml",  # User custom config
             Path("/app/config.yaml"),  # Docker container default
-            Path(__file__).parent.parent / "config.yaml",  # native_src/config.yaml
+            Path(__file__).parent.parent / "config.yaml",  # server/config.yaml
             Path.cwd() / "config.yaml",  # Current directory fallback
         ]
 
@@ -117,7 +117,7 @@ class ServerConfig:
                 "Expected one of:\n"
                 f"  - {get_user_config_dir() / 'config.yaml'} (user config)\n"
                 "  - /app/config.yaml (Docker default)\n"
-                "  - native_src/config.yaml (development)\n"
+                "  - server/config.yaml (development)\n"
                 "  - ./config.yaml (current directory)"
             )
 

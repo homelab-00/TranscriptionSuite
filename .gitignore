@@ -18,6 +18,6 @@ build/appimage-windows/
 
 # Frontend web app
 # Node.js / npm dependencies and build outputs
-native_src/frontend/node_modules/
-native_src/frontend/dist/
-native_src/frontend/build/
+server/frontend/node_modules/
+server/frontend/dist/
+server/frontend/build/

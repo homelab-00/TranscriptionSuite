@@ -58,16 +58,16 @@ if (-not (Test-Path $ComposeFile)) {
 # Find Config and .env Files
 # ============================================================================
 # This script works in two scenarios:
-#   1. Development: Run from docker/ directory (finds config at ../native_src/)
+#   1. Development: Run from docker/ directory (finds config at ../server/)
 #   2. End user: Run from Documents\TranscriptionSuite\ (finds config in same dir)
 #
 # Priority order for config.yaml:
-#   1. ../native_src/config.yaml (development - when running from docker/ dir)
+#   1. ../server/config.yaml (development - when running from docker/ dir)
 #   2. $ScriptDir/config.yaml (end user - when running from Documents\TranscriptionSuite\)
 #   3. Documents\TranscriptionSuite\config.yaml (fallback)
 #
 # Priority order for .env:
-#   1. ../native_src/.env (development - alongside dev config)
+#   1. ../server/.env (development - alongside dev config)
 #   2. $ScriptDir/.env (end user running from Documents\TranscriptionSuite\)
 #   3. Documents\TranscriptionSuite\.env (fallback)
 
@@ -75,11 +75,11 @@ if (-not (Test-Path $ComposeFile)) {
 $ConfigFile = ""
 $UserConfigDir = ""
 
-# Check 1: Development location (../native_src/config.yaml relative to script dir)
-$DevConfig = Join-Path (Split-Path $ScriptDir -Parent) "native_src\config.yaml"
+# Check 1: Development location (../server/config.yaml relative to script dir)
+$DevConfig = Join-Path (Split-Path $ScriptDir -Parent) "server\config.yaml"
 if (Test-Path $DevConfig) {
     $ConfigFile = $DevConfig
-    $UserConfigDir = Join-Path (Split-Path $ScriptDir -Parent) "native_src"
+    $UserConfigDir = Join-Path (Split-Path $ScriptDir -Parent) "server"
     Write-Info "Using development config: $ConfigFile"
 }
 # Check 2: Script directory (end user running from Documents\TranscriptionSuite\)
@@ -106,8 +106,8 @@ $env:USER_CONFIG_DIR = $UserConfigDir
 $EnvFile = ""
 $EnvFileArg = @()
 
-# Check 1: Development location (../native_src/.env - alongside dev config)
-$DevEnv = Join-Path (Split-Path $ScriptDir -Parent) "native_src\.env"
+# Check 1: Development location (../server/.env - alongside dev config)
+$DevEnv = Join-Path (Split-Path $ScriptDir -Parent) "server\.env"
 if (Test-Path $DevEnv) {
     $EnvFile = $DevEnv
     Write-Info "Using secrets from: $EnvFile"
@@ -130,6 +130,45 @@ else {
 }
 
 # ============================================================================
+# Check for Existing Container and Mode Conflicts
+# ============================================================================
+$ContainerName = "transcription-suite"
+
+$containerExists = docker ps -a --format "{{.Names}}" 2>$null | Where-Object { $_ -eq $ContainerName }
+if ($containerExists) {
+    Write-Info "Container already exists, checking mode..."
+
+    # Get current TLS_ENABLED value from running/stopped container
+    $envOutput = docker inspect $ContainerName --format "{{range .Config.Env}}{{println .}}{{end}}" 2>$null
+    $currentTLS = "false"
+    if ($envOutput) {
+        $match = $envOutput | Select-String "^TLS_ENABLED=(.+)"
+        if ($match) {
+            $currentTLS = $match.Matches.Groups[1].Value
+        }
+    }
+
+    # We're starting in local mode (TLS disabled)
+    if ($currentTLS -eq "true") {
+        Write-Info "Mode conflict: container is in remote/TLS mode, but starting in local mode"
+        Write-Info "Removing existing container..."
+        Set-Location $ScriptDir
+        docker compose down 2>&1 | Where-Object { $_ -notmatch "No resource found to remove" } | Out-Host
+    } else {
+        Write-Info "Container is already in local mode"
+    }
+}
+
+# Check if image exists
+$imageExists = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null | Where-Object { $_ -eq "bvcsfd/transcription-suite:latest" }
+if ($imageExists) {
+    Write-Host "Info: " -ForegroundColor Cyan -NoNewline
+    Write-Host "Using existing image: bvcsfd/transcription-suite:latest"
+} else {
+    Write-Info "Image will be built on first run"
+}
+
+# ============================================================================
 # Start Container
 # ============================================================================
 Write-Status "Starting TranscriptionSuite server (local mode)..."
@@ -137,7 +176,7 @@ Write-Status "Starting TranscriptionSuite server (local mode)..."
 Set-Location $ScriptDir
 
 # TLS_ENABLED defaults to false in docker-compose.yml
-docker compose @EnvFileArg up -d
+docker compose @EnvFileArg up -d 2>&1 | Where-Object { $_ -notmatch "WARN\[0000\] No services to build" } | Out-Host
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -147,6 +186,10 @@ Write-Host ""
 Write-Host "  Server URL:  http://localhost:8000"
 Write-Host "  Web UI:      http://localhost:8000/record"
 Write-Host "  Notebook:    http://localhost:8000/notebook"
+Write-Host ""
+Write-Host "  Note: On first run, an admin token will be printed in the logs."
+Write-Host "        Wait ~10 seconds, then run:"
+Write-Host "        docker compose logs | Select-String `"Admin Token:`""
 Write-Host ""
 Write-Host "  View logs:   docker compose logs -f"
 Write-Host "  Stop:        .\stop.ps1"

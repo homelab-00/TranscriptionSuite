@@ -73,6 +73,19 @@ if ! docker info &> /dev/null 2>&1; then
     exit 1
 fi
 
+# Check if NVIDIA GPU is available and toolkit is installed
+if command -v nvidia-smi &> /dev/null; then
+    if nvidia-smi &> /dev/null; then
+        print_info "NVIDIA GPU detected"
+        if ! docker info 2>/dev/null | grep -iq "nvidia"; then
+            print_warning "NVIDIA Container Toolkit might not be configured for Docker."
+            echo "To enable GPU support, please install nvidia-container-toolkit and restart Docker."
+        fi
+    fi
+else
+    print_warning "NVIDIA GPU not detected or drivers not installed. Server will run on CPU (slow)."
+fi
+
 print_info "Docker is installed and running"
 
 # ============================================================================
@@ -84,7 +97,7 @@ mkdir -p "$CONFIG_DIR"
 # ============================================================================
 # Copy Config File
 # ============================================================================
-SOURCE_CONFIG="$PROJECT_ROOT/native_src/config.yaml"
+SOURCE_CONFIG="$PROJECT_ROOT/server/config.yaml"
 DEST_CONFIG="$CONFIG_DIR/config.yaml"
 DOCKER_DIR="$PROJECT_ROOT/docker"
 
@@ -99,7 +112,7 @@ if [[ -f "$DEST_CONFIG" ]]; then
             cp "$SOURCE_CONFIG" "$DEST_CONFIG"
         else
             print_status "Downloading config from GitHub..."
-            curl -sSL "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/native_src/config.yaml" \
+            curl -sSL "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/server/config.yaml" \
                 -o "$DEST_CONFIG"
         fi
         print_info "Config file updated"
@@ -110,7 +123,7 @@ else
         cp "$SOURCE_CONFIG" "$DEST_CONFIG"
     else
         print_status "Downloading config from GitHub..."
-        curl -sSL "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/native_src/config.yaml" \
+        curl -sSL "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/server/config.yaml" \
             -o "$DEST_CONFIG"
     fi
     print_info "Config file created"
@@ -191,6 +204,10 @@ echo "  docker-compose.yml"
 echo "  start-local.sh   - Start in HTTP mode"
 echo "  start-remote.sh  - Start in HTTPS mode"
 echo "  stop.sh          - Stop the server"
+echo ""
+echo "Important: On first run, an Admin Token is generated."
+echo "Wait ~10 seconds after starting, then run:"
+echo "  docker compose logs | grep \"Admin Token:\""
 echo ""
 echo "Next steps:"
 echo ""

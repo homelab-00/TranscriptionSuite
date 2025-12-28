@@ -2,10 +2,10 @@
 # Multi-stage build for optimized image size
 #
 # Build:
-#   docker build -t transcriptionsuite/server -f docker/Dockerfile .
+#   docker build -t bvcsfd/transcription-suite -f docker/Dockerfile .
 #
 # Run:
-#   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 transcriptionsuite/server
+#   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 bvcsfd/transcription-suite
 
 # =============================================================================
 # Stage 1: Frontend Builder
@@ -15,11 +15,11 @@ FROM node:20-slim AS frontend-builder
 WORKDIR /build
 
 # Build unified frontend (contains Calendar, Search, Import, Record, and Admin views)
-COPY native_src/frontend/package*.json ./frontend/
+COPY server/frontend/package*.json ./frontend/
 WORKDIR /build/frontend
 RUN npm ci
 
-COPY native_src/frontend/ ./
+COPY server/frontend/ ./
 RUN npm run build
 
 # =============================================================================
@@ -64,20 +64,20 @@ ENV VIRTUAL_ENV="/app/.venv"
 # Install Python dependencies from backend pyproject.toml
 # Copy only dependency files first for better layer caching
 COPY README.md ./
-COPY native_src/backend/pyproject.toml ./server/
+COPY server/backend/pyproject.toml ./server/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd server && \
     uv sync
 
 # Copy server application code
-COPY native_src/backend/ ./server/
+COPY server/backend/ ./server/
 COPY docker/entrypoint.py ./docker/
 
 # Copy built frontend to static serving location (unified UI)
 COPY --from=frontend-builder /build/frontend/dist ./static/frontend
 
 # Copy default configuration (users can override via mounted /user-config/config.yaml)
-COPY native_src/config.yaml ./config.yaml
+COPY server/config.yaml ./config.yaml
 
 # Create data directories with correct permissions
 # /user-config is for user-mounted config and logs (optional)

@@ -68,6 +68,24 @@ try {
     exit 1
 }
 
+# Check if NVIDIA GPU is available
+try {
+    $null = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($LASTEXITCODE -eq 0) {
+        $null = nvidia-smi 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Info "NVIDIA GPU detected"
+            $dockerInfo = docker info 2>$null
+            if ($dockerInfo -notmatch "nvidia") {
+                Write-Warning "NVIDIA Container Toolkit might not be configured for Docker."
+                Write-Host "To enable GPU support, please install nvidia-container-toolkit and restart Docker."
+            }
+        }
+    }
+} catch {
+    Write-Warning "NVIDIA GPU not detected or drivers not installed. Server will run on CPU (slow)."
+}
+
 Write-Info "Docker is installed and running"
 
 # ============================================================================
@@ -79,7 +97,7 @@ New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 # ============================================================================
 # Copy Config File
 # ============================================================================
-$SourceConfig = Join-Path $ProjectRoot "native_src\config.yaml"
+$SourceConfig = Join-Path $ProjectRoot "server\config.yaml"
 $DestConfig = Join-Path $ConfigDir "config.yaml"
 
 if (Test-Path $DestConfig) {
@@ -93,7 +111,7 @@ if (Test-Path $DestConfig) {
             Copy-Item $SourceConfig $DestConfig -Force
         } else {
             Write-Status "Downloading config from GitHub..."
-            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/native_src/config.yaml" `
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/server/config.yaml" `
                 -OutFile $DestConfig
         }
         Write-Info "Config file updated"
@@ -104,7 +122,7 @@ if (Test-Path $DestConfig) {
         Copy-Item $SourceConfig $DestConfig -Force
     } else {
         Write-Status "Downloading config from GitHub..."
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/native_src/config.yaml" `
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main/server/config.yaml" `
             -OutFile $DestConfig
     }
     Write-Info "Config file created"
@@ -190,6 +208,10 @@ Write-Host "  docker-compose.yml"
 Write-Host "  start-local.ps1    - Start in HTTP mode"
 Write-Host "  start-remote.ps1   - Start in HTTPS mode"
 Write-Host "  stop.ps1           - Stop the server"
+Write-Host ""
+Write-Host "Important: On first run, an Admin Token is generated."
+Write-Host "Wait ~10 seconds after starting, then run:"
+Write-Host "  docker compose logs | Select-String `"Admin Token:`""
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host ""

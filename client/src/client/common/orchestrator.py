@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of automatic reconnection attempts
+MAX_RECONNECT_ATTEMPTS = 10
+
 
 class ClientOrchestrator:
     """
@@ -68,6 +71,7 @@ class ClientOrchestrator:
         self.is_recording = False
         self.last_transcription: str | None = None
         self._reconnect_task: concurrent.futures.Future[Any] | None = None
+        self._is_initial_connection = True  # Track if this is the first connection attempt
 
     def start(self, tray: "AbstractTray") -> None:
         """
@@ -185,6 +189,14 @@ class ClientOrchestrator:
                     f"Could not connect to {self.config.server_host}:{self.config.server_port}",
                 )
 
+                # On initial connection failure, open settings dialog so user can configure
+                if self._is_initial_connection and hasattr(self.tray, "show_settings_dialog"):
+                    logger.info("Opening settings dialog for initial connection failure")
+                    self.tray.show_settings_dialog()
+
+            # Mark that we've attempted initial connection
+            self._is_initial_connection = False
+
             # Start reconnection attempts if enabled
             if self.config.get("server", "auto_reconnect", default=True):
                 self._start_reconnect_loop()
@@ -195,21 +207,33 @@ class ClientOrchestrator:
             self._reconnect_task = self._schedule_async(self._reconnect_loop())
 
     async def _reconnect_loop(self) -> None:
-        """Periodically attempt to reconnect."""
+        """Periodically attempt to reconnect (up to MAX_RECONNECT_ATTEMPTS times)."""
         interval = self.config.get("server", "reconnect_interval", default=10)
+        attempt = 0
 
-        while True:
+        while attempt < MAX_RECONNECT_ATTEMPTS:
             await asyncio.sleep(interval)
 
             if self.api_client and self.api_client.is_connected:
                 break  # Already connected
 
-            logger.info("Attempting to reconnect...")
+            attempt += 1
+            logger.info(f"Attempting to reconnect ({attempt}/{MAX_RECONNECT_ATTEMPTS})...")
+
             if self.api_client and await self.api_client.health_check():
                 if self.tray:
                     self.tray.set_state(TrayState.STANDBY)
                     self.tray.show_notification("Reconnected", "Connection restored")
                 break
+        else:
+            # Max retries reached
+            logger.warning(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
+            if self.tray:
+                self.tray.show_notification(
+                    "Connection Failed",
+                    f"Could not connect after {MAX_RECONNECT_ATTEMPTS} attempts. "
+                    "Use Settings to reconfigure.",
+                )
 
     # =========================================================================
     # Recording Actions
