@@ -28,6 +28,6 @@ async def get_status(request: Request) -> Dict[str, Any]:
 
     return {
         "status": "running",
-        "version": "2.0.0",
+        "version": "0.3.0",
         "models": status,
     }

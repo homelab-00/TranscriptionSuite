@@ -9,4 +9,4 @@ Platform-specific tray applications for:
 Handles microphone recording, clipboard, and server communication.
 """
 
-__version__ = "2.0.0"
+__version__ = "0.3.0"

@@ -33,7 +33,7 @@ class ServerBusyError(Exception):
 
 
 # Client identification
-CLIENT_VERSION = "2.0.0"
+CLIENT_VERSION = "0.3.0"
 CLIENT_TYPE = "standalone"  # Identifies this as the native desktop client
 
 # Audio constants
@@ -375,9 +375,7 @@ class APIClient:
             on_progress("Transcribing...")
 
         try:
-            logger.debug(
-                f"Sending transcription request to {self.base_url}/api/transcribe/audio"
-            )
+            logger.debug(f"Sending transcription request to {self.base_url}/api/transcribe/audio")
 
             async with session.post(
                 f"{self.base_url}/api/transcribe/audio",
@@ -445,13 +443,13 @@ class APIClient:
     async def validate_token(self) -> tuple[bool, str | None]:
         """
         Validate the current token with the server.
-        
+
         Returns:
             Tuple of (is_valid, error_message)
         """
         if not self.token:
             return False, "No authentication token configured"
-        
+
         try:
             session = await self._get_session()
             async with session.post(
@@ -462,7 +460,9 @@ class APIClient:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get("success"):
-                        logger.info(f"Token validated for user: {data.get('user', {}).get('name', 'unknown')}")
+                        logger.info(
+                            f"Token validated for user: {data.get('user', {}).get('name', 'unknown')}"
+                        )
                         return True, None
                     return False, data.get("message", "Invalid token")
                 return False, f"Authentication failed (HTTP {resp.status})"
@@ -549,12 +549,8 @@ class StreamingClient:
                     elif msg_type == "final" and self.on_final:
                         self.on_final(data)
                     elif msg_type == "session_busy" and self.on_error:
-                        active_user = data.get("data", {}).get(
-                            "active_user", "another user"
-                        )
-                        self.on_error(
-                            f"Server busy - transcription in progress for {active_user}"
-                        )
+                        active_user = data.get("data", {}).get("active_user", "another user")
+                        self.on_error(f"Server busy - transcription in progress for {active_user}")
                     elif msg_type == "error" and self.on_error:
                         self.on_error(data.get("message", "Unknown error"))
 

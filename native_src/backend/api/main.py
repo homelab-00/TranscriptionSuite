@@ -37,12 +37,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 _log_time("fastapi imports done")
 
 from server.core.token_store import get_token_store
+
 _log_time("token_store imported")
 
 from server.api.routes import admin, auth, health, llm, notebook, search, transcription, websocket
+
 _log_time("routes imported")
 
 from server.config import get_config
+
 _log_time("config imported")
 
 # NOTE: model_manager is imported lazily inside lifespan() to avoid
@@ -50,9 +53,11 @@ _log_time("config imported")
 _log_time("model_manager import SKIPPED (lazy import in lifespan)")
 
 from server.database.database import init_db
+
 _log_time("database imported")
 
 from server.logging import get_logger, setup_logging
+
 _log_time("logging imported")
 
 logger = get_logger("api")
@@ -81,49 +86,49 @@ PUBLIC_PREFIXES = (
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     """
     Middleware to enforce authentication for all routes in TLS mode.
-    
+
     In TLS mode, all requests must include a valid Bearer token,
     except for public routes like /health, /auth, and /api/auth/login.
     Unauthenticated browser requests are redirected to /auth.
     """
-    
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
+
         # Allow public routes without authentication
         if path in PUBLIC_ROUTES or path.startswith(PUBLIC_PREFIXES):
             return await call_next(request)
-        
+
         # Check for valid authentication
         auth_header = request.headers.get("Authorization")
-        
+
         # Check cookie-based auth for browser requests
         auth_cookie = request.cookies.get("auth_token")
-        
+
         token = None
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
         elif auth_cookie:
             token = auth_cookie
-        
+
         if token:
             token_store = get_token_store()
             if token_store.validate_token(token):
                 return await call_next(request)
-        
+
         # For API requests, return 401
         if path.startswith("/api/") or path == "/ws":
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Authentication required"},
             )
-        
+
         # For browser requests to web pages, redirect to /auth
         # Preserve the original destination for redirect after auth
         original_url = str(request.url.path)
         if request.url.query:
             original_url += f"?{request.url.query}"
-        
+
         return RedirectResponse(
             url=f"/auth?redirect={original_url}",
             status_code=302,
@@ -200,7 +205,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app = FastAPI(
         title="TranscriptionSuite",
         description="Unified transcription server with Audio Notebook",
-        version="2.0.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
 
@@ -221,9 +226,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     # Include API routers
     app.include_router(health.router, tags=["Health"])
     app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-    app.include_router(
-        transcription.router, prefix="/api/transcribe", tags=["Transcription"]
-    )
+    app.include_router(transcription.router, prefix="/api/transcribe", tags=["Transcription"])
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
@@ -486,10 +489,18 @@ if _static_dir.exists():
         # Mount frontend assets for all routes
         _frontend_assets = _frontend_dir / "assets"
         if _frontend_assets.exists():
-            app.mount("/notebook/assets", StaticFiles(directory=str(_frontend_assets)), name="notebook_assets")
-            app.mount("/record/assets", StaticFiles(directory=str(_frontend_assets)), name="record_assets")
-            app.mount("/admin/assets", StaticFiles(directory=str(_frontend_assets)), name="admin_assets")
-        
+            app.mount(
+                "/notebook/assets",
+                StaticFiles(directory=str(_frontend_assets)),
+                name="notebook_assets",
+            )
+            app.mount(
+                "/record/assets", StaticFiles(directory=str(_frontend_assets)), name="record_assets"
+            )
+            app.mount(
+                "/admin/assets", StaticFiles(directory=str(_frontend_assets)), name="admin_assets"
+            )
+
         # Serve frontend for /notebook routes
         @app.get("/notebook", include_in_schema=False)
         @app.get("/notebook/{path:path}", include_in_schema=False)
@@ -498,7 +509,7 @@ if _static_dir.exists():
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
             return FileResponse(_frontend_dir / "index.html")
-        
+
         # Serve frontend for /record routes
         @app.get("/record", include_in_schema=False)
         @app.get("/record/{path:path}", include_in_schema=False)
@@ -507,7 +518,7 @@ if _static_dir.exists():
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
             return FileResponse(_frontend_dir / "index.html")
-        
+
         # Serve frontend for /admin routes
         @app.get("/admin", include_in_schema=False)
         @app.get("/admin/{path:path}", include_in_schema=False)
@@ -516,8 +527,10 @@ if _static_dir.exists():
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
             return FileResponse(_frontend_dir / "index.html")
-        
-        logger.info(f"Unified UI frontend mounted at /notebook, /record, /admin from {_frontend_dir}")
+
+        logger.info(
+            f"Unified UI frontend mounted at /notebook, /record, /admin from {_frontend_dir}"
+        )
 
 
 # Auth page route (served for all modes, but only required in TLS mode)
