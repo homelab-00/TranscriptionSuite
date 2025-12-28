@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from server.config import get_config
+from server.core.token_store import get_token_store
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
 from server.database.database import (
@@ -35,6 +36,29 @@ from server.database.database import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _get_client_name(request: Request) -> str:
+    """
+    Extract the client name from the request's authentication token.
+
+    Returns the client_name from the token, or a default value if not found.
+    """
+    # Try Authorization header first
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        # Try cookie
+        token = request.cookies.get("auth_token")
+
+    if token:
+        token_store = get_token_store()
+        stored_token = token_store.validate_token(token)
+        if stored_token:
+            return stored_token.client_name
+
+    return "Unknown Client"
 
 
 class RecordingResponse(BaseModel):
@@ -281,12 +305,26 @@ async def upload_and_transcribe(
     Upload an audio file, transcribe it, and save to the notebook database.
 
     Returns the recording_id for status tracking.
+
+    Returns 409 Conflict if another transcription job is already running.
     """
     # Lazy import to avoid loading torch at module import time
     from server.core.audio_utils import convert_to_mp3, load_audio
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
+
+    # Get model manager and check if busy
+    model_manager = request.app.state.model_manager
+    client_name = _get_client_name(request)
+
+    # Try to acquire a job slot
+    success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
+    if not success:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A transcription is already running for {active_user}",
+        )
 
     # Save uploaded file to temp location
     suffix = Path(file.filename).suffix or ".wav"
@@ -297,7 +335,6 @@ async def upload_and_transcribe(
 
     try:
         # Get transcription engine
-        model_manager = request.app.state.model_manager
         engine = model_manager.transcription_engine
 
         # Transcribe
@@ -391,6 +428,9 @@ async def upload_and_transcribe(
         raise HTTPException(status_code=500, detail=str(e))
 
     finally:
+        # Release the job slot
+        model_manager.job_tracker.end_job(job_id)
+
         # Cleanup temp file
         try:
             tmp_path.unlink()

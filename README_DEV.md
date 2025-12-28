@@ -172,6 +172,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Client detection**: Server detects client type (standalone vs web) to enable features like preview transcription only for standalone clients, saving GPU memory for web users
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD for robust speech detection
+- **Multi-device support with job protection**: Multiple clients can connect simultaneously, but only one transcription job runs at a time. The `TranscriptionJobTracker` ensures exclusive access across all methods (HTTP uploads, WebSocket streaming) and returns clear 409 Conflict errors when busy.
 
 ### Deployment Philosophy
 
@@ -321,9 +322,9 @@ TranscriptionSuite/
 ├── client/                       # Native client (runs locally)
 │   ├── src/client/               # Python package source
 │   │   ├── common/               # Shared client code
-│   │   │   ├── api_client.py     # HTTP client for server communication
+│   │   │   ├── api_client.py     # HTTP client, WebSocket, ServerBusyError handling
 │   │   │   ├── audio_recorder.py # PyAudio recording wrapper
-│   │   │   ├── orchestrator.py   # Main controller, state machine
+│   │   │   ├── orchestrator.py   # Main controller, state machine, error notifications
 │   │   │   ├── tray_base.py      # Abstract tray interface
 │   │   │   ├── config.py         # Client configuration
 │   │   │   └── models.py         # Shared data models
@@ -444,7 +445,8 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
 | `/api/auth/login` | POST | Authenticate with token |
 | `/api/auth/tokens` | GET/POST | Token management (admin only) |
 | `/api/auth/tokens/{id}` | DELETE | Revoke token (admin only) |
-| `/api/transcribe/audio` | POST | Transcribe uploaded audio file |
+| `/api/transcribe/audio` | POST | Transcribe uploaded audio file (returns 409 if busy) |
+| `/api/transcribe/quick` | POST | Quick transcription without word timestamps (returns 409 if busy) |
 | `/api/transcribe/file` | POST | Alias for /audio (Remote UI compatibility) |
 | `/ws` | WebSocket | Real-time audio streaming and transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
@@ -454,7 +456,7 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
 | `/api/notebook/recordings/{id}/summary` | PATCH | Update recording summary |
 | `/api/notebook/recordings/{id}/transcription` | GET | Get full transcription with segments |
 | `/api/notebook/recordings/{id}/audio` | GET | Download audio file |
-| `/api/notebook/transcribe/upload` | POST | Upload and transcribe audio file (with diarization support) |
+| `/api/notebook/transcribe/upload` | POST | Upload and transcribe audio file (with diarization support, returns 409 if busy) |
 | `/api/notebook/calendar` | GET | Calendar view data |
 | `/api/search` | GET | Full-text search |
 | `/api/admin/status` | GET | Admin status info |
@@ -492,8 +494,11 @@ The `/ws` endpoint supports real-time audio streaming for long-form transcriptio
 - `{"type": "vad_recording_stop"}` - Recording stopped after silence
 
 **Session Management:**
-- Only one active session allowed at a time
-- Server sends `{"type": "session_busy"}` if another user is active
+- Multiple WebSocket connections allowed simultaneously
+- Only one transcription job can run at a time (across all methods)
+- When client sends `start` message, server checks job tracker
+- Server sends `{"type": "session_busy", "data": {"active_user": "<client_name>"}}` if another job is running
+- Connection remains open after `session_busy` - client can retry later
 
 ### Swagger UI
 
@@ -1135,7 +1140,7 @@ native_src/backend/
 ├── core/                             # ML and audio processing
 │   ├── transcription_engine.py       # faster-whisper wrapper (file-based)
 │   ├── diarization_engine.py         # PyAnnote wrapper
-│   ├── model_manager.py              # Model lifecycle & GPU management
+│   ├── model_manager.py              # Model lifecycle, GPU management & job tracking
 │   ├── token_store.py                # Token authentication and management
 │   ├── realtime_engine.py            # Async wrapper for real-time STT
 │   ├── preview_engine.py             # Preview transcription for standalone clients
@@ -1325,12 +1330,24 @@ The core FastAPI application:
 
 ##### `core/model_manager.py` - ML Model Lifecycle
 
-Manages GPU memory and model loading:
+Manages GPU memory, model loading, and job concurrency control:
 
 ```python
 from server.core.model_manager import get_model_manager
 
 manager = get_model_manager(config)
+
+# Job tracking - ensures only one transcription runs at a time
+success, job_id, active_user = manager.job_tracker.try_start_job(client_name="Bill's Laptop")
+if not success:
+    print(f"Server busy - job running for {active_user}")
+else:
+    try:
+        # Run transcription
+        result = engine.transcribe_file(...)
+    finally:
+        # Always release the job slot
+        manager.job_tracker.end_job(job_id)
 
 # Load models (lazy loading)
 transcription_model = manager.load_transcription_model()
@@ -1351,6 +1368,12 @@ if manager.gpu_available:
 # Cleanup (called automatically on shutdown)
 manager.cleanup()
 ```
+
+**TranscriptionJobTracker:**
+- Ensures only one transcription job runs at a time across ALL methods (HTTP, WebSocket)
+- Thread-safe with locking for concurrent access from multiple request handlers
+- Tracks active job ID and client name for user-friendly error messages
+- Returns 409 Conflict via HTTP or `session_busy` via WebSocket when busy
 
 ##### `core/transcription_engine.py` - Whisper Wrapper
 
@@ -1591,6 +1614,20 @@ Edit `logging/setup.py` for custom formatters, handlers, or log levels.
    - Run type checking with `pyright`
    - Follow existing code style (100-char line length)
 
+6. **Testing Multi-Device Support:**
+   - Start the Docker server once
+   - Connect multiple clients simultaneously (different terminals, devices, or web browsers)
+   - All clients authenticate successfully
+   - First client to start transcription gets the job slot
+   - Other clients receive clear busy notifications with the active user's name
+   - Test scenarios:
+     - Standalone client recording → another standalone client tries to record
+     - Web UI recording → standalone client tries file upload
+     - Standalone client recording → web UI tries notebook import
+     - Multiple WebSocket connections → only one can record at a time
+   - Verify job is released after completion or client disconnect
+   - Check logs for job tracking messages: `Started transcription job...` and `Ended transcription job...`
+
 ---
 
 ## Client Development
@@ -1672,6 +1709,33 @@ If you encounter SSL/certificate errors:
    - Server not started with `TLS_ENABLED=true`
    - Cert/key files not mounted correctly in Docker
    - Firewall blocking port 8443
+
+### Server Busy Handling
+
+The client automatically handles server busy conditions when another transcription is already running:
+
+**HTTP Transcription (File Upload):**
+- Server returns `409 Conflict` status code
+- Client raises `ServerBusyError` exception with active user information
+- Orchestrator shows user notification: "Server Busy - A transcription is already running for {active_user}"
+
+**WebSocket Recording:**
+- Multiple clients can connect and authenticate simultaneously
+- When client sends `start` message, server checks if a job is already running
+- Server sends `{"type": "session_busy", "data": {"active_user": "<client_name>"}}` message
+- Client shows error notification and connection remains open for retry
+
+**Example Error Messages:**
+```
+Server Busy
+A transcription is already running for Bill's Laptop.
+Please try again shortly.
+```
+
+**Implementation Details:**
+- `api_client.py`: Defines `ServerBusyError` exception and handles 409 responses
+- `orchestrator.py`: Catches `ServerBusyError` and displays notifications
+- Connection remains open after `session_busy` - no need to reconnect
 
 ---
 

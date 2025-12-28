@@ -14,7 +14,9 @@ inside methods to avoid loading them at module import time.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+import threading
+import uuid
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 # Type-only imports for hints (no runtime cost)
 if TYPE_CHECKING:
@@ -25,6 +27,81 @@ if TYPE_CHECKING:
     from server.core.client_detector import ClientType
 
 logger = logging.getLogger(__name__)
+
+
+class TranscriptionJobTracker:
+    """
+    Tracks active transcription jobs across all methods (WebSocket, HTTP uploads).
+
+    Ensures only one transcription job runs at a time across the entire server.
+    Thread-safe for concurrent access from multiple request handlers.
+    """
+
+    def __init__(self):
+        self._active_job_id: Optional[str] = None
+        self._active_user: Optional[str] = None
+        self._lock = threading.Lock()
+
+    def try_start_job(self, user: str) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Attempt to start a new transcription job.
+
+        Args:
+            user: Client name/identifier for the user starting the job
+
+        Returns:
+            Tuple of (success, job_id_if_success, active_user_if_busy)
+            - If success: (True, job_id, None)
+            - If busy: (False, None, active_user)
+        """
+        with self._lock:
+            if self._active_job_id is not None:
+                return (False, None, self._active_user)
+
+            job_id = str(uuid.uuid4())
+            self._active_job_id = job_id
+            self._active_user = user
+            logger.info(f"Started transcription job {job_id[:8]} for user '{user}'")
+            return (True, job_id, None)
+
+    def end_job(self, job_id: str) -> bool:
+        """
+        Mark a transcription job as complete.
+
+        Args:
+            job_id: The job ID returned from try_start_job
+
+        Returns:
+            True if the job was ended, False if job_id didn't match
+        """
+        with self._lock:
+            if self._active_job_id == job_id:
+                logger.info(f"Ended transcription job {job_id[:8]} for user '{self._active_user}'")
+                self._active_job_id = None
+                self._active_user = None
+                return True
+            return False
+
+    def is_busy(self) -> Tuple[bool, Optional[str]]:
+        """
+        Check if a transcription job is currently running.
+
+        Returns:
+            Tuple of (is_busy, active_user_if_busy)
+        """
+        with self._lock:
+            if self._active_job_id is not None:
+                return (True, self._active_user)
+            return (False, None)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get the current job tracker status."""
+        with self._lock:
+            return {
+                "is_busy": self._active_job_id is not None,
+                "active_user": self._active_user,
+                "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
+            }
 
 
 class ModelManager:
@@ -60,6 +137,9 @@ class ModelManager:
 
         # Track connected standalone clients
         self._standalone_client_count = 0
+
+        # Job tracker for ensuring only one transcription runs at a time
+        self.job_tracker = TranscriptionJobTracker()
 
         # Check GPU availability
         self.gpu_available = check_cuda_available()
@@ -337,6 +417,7 @@ class ModelManager:
                 "session_ids": list(self._realtime_engines.keys()),
             },
             "standalone_clients": self._standalone_client_count,
+            "job_tracker": self.job_tracker.get_status(),
         }
         return status
 

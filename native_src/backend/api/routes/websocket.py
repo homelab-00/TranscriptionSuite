@@ -38,9 +38,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-# Global session state (single active session)
-_active_session: Optional[Dict[str, Any]] = None
-_session_lock = asyncio.Lock()
+# Global session state - tracks all connected sessions for cleanup
+# (Multiple connections allowed, but only one can be recording at a time)
+_connected_sessions: Dict[str, "TranscriptionSession"] = {}
+_sessions_lock = asyncio.Lock()
 
 
 class TranscriptionSession:
@@ -74,6 +75,9 @@ class TranscriptionSession:
         # Real-time engine (for standalone clients with VAD)
         self._realtime_engine: Optional[Any] = None
         self._use_realtime_engine = False
+
+        # Job tracking for transcription
+        self._current_job_id: Optional[str] = None
 
         # Get client capabilities
         self.capabilities = get_client_capabilities(
@@ -250,12 +254,28 @@ class TranscriptionSession:
         if self._realtime_engine:
             self._realtime_engine.stop_recording()
 
-        # Process the transcription
-        await self.process_transcription()
+        try:
+            # Process the transcription
+            await self.process_transcription()
+        finally:
+            # Release the job slot when transcription is done
+            self._release_job()
+
+    def _release_job(self) -> None:
+        """Release the job slot in the job tracker."""
+        if self._current_job_id:
+            from server.core.model_manager import get_model_manager
+
+            model_manager = get_model_manager()
+            model_manager.job_tracker.end_job(self._current_job_id)
+            self._current_job_id = None
 
     async def cleanup(self) -> None:
         """Clean up session resources."""
         from server.core.model_manager import get_model_manager
+
+        # Release any active job
+        self._release_job()
 
         if self._realtime_engine:
             model_manager = get_model_manager()
@@ -272,9 +292,29 @@ async def handle_client_message(
     session: TranscriptionSession, message: Dict[str, Any]
 ) -> None:
     """Handle a JSON message from the client."""
+    from server.core.model_manager import get_model_manager
+
     msg_type = message.get("type")
 
     if msg_type == "start":
+        # Check job tracker before starting recording
+        model_manager = get_model_manager()
+        success, job_id, active_user = model_manager.job_tracker.try_start_job(
+            session.client_name
+        )
+
+        if not success:
+            # Another transcription is running - send session_busy but keep connection open
+            await session.send_message("session_busy", {"active_user": active_user})
+            logger.info(
+                f"Recording rejected for {session.client_name} - "
+                f"job already running for {active_user}"
+            )
+            return
+
+        # Store job_id in session for cleanup
+        session._current_job_id = job_id
+
         language = message.get("data", {}).get("language")
         use_vad = message.get("data", {}).get("use_vad", False)
         await session.start_recording(language, use_vad)
@@ -347,8 +387,6 @@ def _get_websocket_query_params(websocket: WebSocket) -> Dict[str, str]:
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time transcription."""
-    global _active_session
-
     await websocket.accept()
     session: Optional[TranscriptionSession] = None
 
@@ -404,33 +442,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         # Generate unique session ID
         session_id = str(uuid.uuid4())
 
-        # Check for active session
-        async with _session_lock:
-            if _active_session is not None:
-                active_user = _active_session.get("client_name", "unknown")
-                await websocket.send_json(
-                    {
-                        "type": "session_busy",
-                        "data": {"active_user": active_user},
-                        "timestamp": asyncio.get_event_loop().time(),
-                    }
-                )
-                await websocket.close()
-                return
+        # Create new session (multiple connections allowed - job tracker
+        # controls who can actually start recording)
+        session = TranscriptionSession(
+            websocket=websocket,
+            client_name=stored_token.client_name,
+            is_admin=stored_token.is_admin,
+            client_type=client_type,
+            session_id=session_id,
+        )
 
-            # Create new session
-            session = TranscriptionSession(
-                websocket=websocket,
-                client_name=stored_token.client_name,
-                is_admin=stored_token.is_admin,
-                client_type=client_type,
-                session_id=session_id,
-            )
-            _active_session = {
-                "client_name": stored_token.client_name,
-                "session": session,
-                "session_id": session_id,
-            }
+        # Track session for cleanup
+        async with _sessions_lock:
+            _connected_sessions[session_id] = session
 
         # Notify model manager about standalone client
         if client_type == ClientType.STANDALONE:
@@ -491,9 +515,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     finally:
         # Clean up session
-        async with _session_lock:
-            if _active_session and session:
-                if _active_session.get("session") == session:
-                    await session.cleanup()
-                    _active_session = None
-                    logger.info(f"WebSocket session ended for {session.client_name}")
+        if session:
+            await session.cleanup()
+            async with _sessions_lock:
+                if session.session_id in _connected_sessions:
+                    del _connected_sessions[session.session_id]
+            logger.info(f"WebSocket session ended for {session.client_name}")

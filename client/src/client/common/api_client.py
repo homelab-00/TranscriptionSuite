@@ -23,6 +23,15 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+
+class ServerBusyError(Exception):
+    """Raised when the server is busy processing another transcription."""
+
+    def __init__(self, message: str, active_user: str = "another user"):
+        self.active_user = active_user
+        super().__init__(message)
+
+
 # Client identification
 CLIENT_VERSION = "2.0.0"
 CLIENT_TYPE = "standalone"  # Identifies this as the native desktop client
@@ -378,6 +387,23 @@ class APIClient:
             ) as resp:
                 logger.debug(f"Transcription response status: {resp.status}")
 
+                if resp.status == 409:
+                    # Server is busy with another transcription
+                    try:
+                        error_data = await resp.json()
+                        detail = error_data.get("detail", "Server is busy")
+                        # Extract active user from detail message
+                        # Format: "A transcription is already running for <user>"
+                        active_user = "another user"
+                        if "already running for " in detail:
+                            active_user = detail.split("already running for ")[-1]
+                        logger.warning(f"Server busy: {detail}")
+                        raise ServerBusyError(detail, active_user=active_user)
+                    except (json.JSONDecodeError, aiohttp.ContentTypeError):
+                        error = await resp.text()
+                        logger.warning(f"Server busy: {error}")
+                        raise ServerBusyError(f"Server is busy: {error}") from None
+
                 if resp.status != 200:
                     error = await resp.text()
                     logger.error(f"Transcription failed (HTTP {resp.status}): {error}")
@@ -522,6 +548,13 @@ class StreamingClient:
                         self.on_preview(data.get("text", ""))
                     elif msg_type == "final" and self.on_final:
                         self.on_final(data)
+                    elif msg_type == "session_busy" and self.on_error:
+                        active_user = data.get("data", {}).get(
+                            "active_user", "another user"
+                        )
+                        self.on_error(
+                            f"Server busy - transcription in progress for {active_user}"
+                        )
                     elif msg_type == "error" and self.on_error:
                         self.on_error(data.get("message", "Unknown error"))
 

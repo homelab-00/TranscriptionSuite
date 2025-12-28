@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from client.common.api_client import APIClient
+from client.common.api_client import APIClient, ServerBusyError
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig
 from client.common.models import TrayAction, TrayState
@@ -326,6 +326,23 @@ class ClientOrchestrator:
 
             if self.tray:
                 self.tray.set_state(TrayState.STANDBY)
+
+        except ServerBusyError as e:
+            logger.warning(f"Server busy: {e}")
+            if self.tray:
+                self.tray.set_state(TrayState.ERROR)
+                self.tray.show_notification(
+                    "Server Busy",
+                    f"A transcription is already running for {e.active_user}. "
+                    "Please try again shortly.",
+                )
+
+                # Reset to standby after a delay
+                await asyncio.sleep(3)
+                if self.api_client and self.api_client.is_connected:
+                    self.tray.set_state(TrayState.STANDBY)
+                else:
+                    self.tray.set_state(TrayState.DISCONNECTED)
 
         except Exception as e:
             logger.error(f"Transcription failed: {e}")
