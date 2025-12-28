@@ -144,7 +144,7 @@ jobs:
           context: .
 
           # Path to Dockerfile
-          file: docker/Dockerfile
+          file: server/docker/Dockerfile
 
           # Push to registry (set to false for testing/PR builds)
           push: true

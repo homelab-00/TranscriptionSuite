@@ -2,10 +2,14 @@
 """
 PyInstaller spec file for TranscriptionSuite Windows client.
 
-Build command (run from project root on Windows):
-    .\build\.venv\Scripts\pyinstaller.exe --clean .\client\src\client\build\pyinstaller-windows.spec
+Build commands (run from project root on Windows):
+    1. Generate multi-resolution icon from logo.png (preserves transparency):
+       magick build\assets\logo.png -background transparent -define icon:auto-resize=256,48,32,16 build\assets\logo.ico
 
-Output: dist/TranscriptionSuite.exe
+    2. Build executable:
+       .\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\.dist .\client\src\client\build\pyinstaller-windows.spec
+
+Output: build\.dist\TranscriptionSuite.exe
 """
 
 import sys
@@ -83,6 +87,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # TODO: Add icon path - e.g., "assets/icon.ico"
+    icon=str(project_root / "build" / "assets" / "logo.ico"),  # Generated from logo.svg
     version=None,  # TODO: Add version info file
 )

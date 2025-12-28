@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build/appimage-kde"
-DIST_DIR="$PROJECT_ROOT/dist"
+DIST_DIR="$PROJECT_ROOT/build/.dist"
 
 echo "=================================================="
 echo "Building TranscriptionSuite KDE AppImage"
@@ -67,15 +67,27 @@ EOF
 cp "$BUILD_DIR/AppDir/transcriptionsuite-kde.desktop" \
    "$BUILD_DIR/AppDir/usr/share/applications/"
 
-# Copy and resize application icon
-echo "→ Copying application icon..."
-if command -v convert &> /dev/null; then
-    # Resize logo to 256x256 using ImageMagick
-    convert "$PROJECT_ROOT/logo.png" -resize 256x256 "$BUILD_DIR/AppDir/transcriptionsuite.png"
-else
-    # Fallback: copy original (will be resized by desktop environment)
-    cp "$PROJECT_ROOT/logo.png" "$BUILD_DIR/AppDir/transcriptionsuite.png"
+# Create application icon (resize from logo.png: 1024x1024 → 256x256)
+echo "→ Creating application icon (256x256)..."
+if [[ ! -f "$PROJECT_ROOT/build/assets/logo.png" ]]; then
+    echo "ERROR: logo.png not found at $PROJECT_ROOT/build/assets/logo.png"
+    exit 1
 fi
+
+# Check for ImageMagick
+if command -v magick &> /dev/null; then
+    MAGICK_CMD="magick"
+elif command -v convert &> /dev/null; then
+    MAGICK_CMD="convert"
+else
+    echo "ERROR: ImageMagick not found. Cannot resize icon."
+    echo "Install with: sudo pacman -S imagemagick"
+    exit 1
+fi
+
+# Resize logo.png (1024x1024) to 256x256 for AppImage
+$MAGICK_CMD "$PROJECT_ROOT/build/assets/logo.png" -resize 256x256 \
+    "$BUILD_DIR/AppDir/transcriptionsuite.png"
 
 cp "$BUILD_DIR/AppDir/transcriptionsuite.png" \
    "$BUILD_DIR/AppDir/usr/share/icons/hicolor/256x256/apps/"

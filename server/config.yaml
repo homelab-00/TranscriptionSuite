@@ -142,11 +142,11 @@ diarization:
     # You must accept the model license on HuggingFace first.
     #
     # IMPORTANT: Do NOT put your token here! This file is baked into
-    # the Docker image. Instead, set HUGGINGFACE_TOKEN in docker/.env
+    # the Docker image. Instead, set HUGGINGFACE_TOKEN in server/docker/.env
     # or pass it as an environment variable.
     #
     # The token is resolved in this order:
-    #   1. HF_TOKEN environment variable (from docker/.env)
+    #   1. HF_TOKEN environment variable (from server/docker/.env)
     #   2. This config value (not recommended for Docker deployments)
     hf_token: null
 

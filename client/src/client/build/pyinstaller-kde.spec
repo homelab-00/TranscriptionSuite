@@ -3,9 +3,9 @@
 PyInstaller spec file for TranscriptionSuite KDE/Qt client.
 
 Build command:
-    pyinstaller --clean client/build/pyinstaller-kde.spec
+    pyinstaller --clean --distpath build/.dist client/build/pyinstaller-kde.spec
 
-Output: dist/TranscriptionSuite-KDE (Linux) or dist/TranscriptionSuite-KDE.exe (Windows)
+Output: build/.dist/TranscriptionSuite-KDE (Linux) or build/.dist/TranscriptionSuite-KDE.exe (Windows)
 """
 
 import sys
@@ -81,5 +81,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # TODO: Add icon path
+    icon=str(repo_root / "build" / "assets" / "logo.ico") if sys.platform == "win32" else None,  # Generated from logo.svg (Windows only)
 )

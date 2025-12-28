@@ -63,7 +63,7 @@ scripts/
 *.bak
 
 # Docker files (avoid recursion)
-docker/docker-compose*.yml
+server/docker/docker-compose*.yml
 
 # Data directories
 data/

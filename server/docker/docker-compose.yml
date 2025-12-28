@@ -40,8 +40,8 @@
 services:
   transcription-suite:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: server/docker/Dockerfile
     image: ghcr.io/homelab-00/transcriptionsuite-server:latest
     container_name: transcription-suite
     

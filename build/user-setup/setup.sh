@@ -99,7 +99,7 @@ mkdir -p "$CONFIG_DIR"
 # ============================================================================
 SOURCE_CONFIG="$PROJECT_ROOT/server/config.yaml"
 DEST_CONFIG="$CONFIG_DIR/config.yaml"
-DOCKER_DIR="$PROJECT_ROOT/docker"
+DOCKER_DIR="$PROJECT_ROOT/server/docker"
 
 if [[ -f "$DEST_CONFIG" ]]; then
     print_warning "Config already exists at $DEST_CONFIG"
@@ -157,7 +157,7 @@ if [[ -f "$DOCKER_DIR/docker-compose.yml" ]]; then
     cp "$DOCKER_DIR/docker-compose.yml" "$CONFIG_DIR/docker-compose.yml"
 else
     print_status "Downloading docker-compose.yml from GitHub..."
-    curl -sSL "$GITHUB_RAW_URL/docker/docker-compose.yml" -o "$CONFIG_DIR/docker-compose.yml"
+    curl -sSL "$GITHUB_RAW_URL/server/docker/docker-compose.yml" -o "$CONFIG_DIR/docker-compose.yml"
 fi
 
 # Copy start/stop scripts
@@ -167,7 +167,7 @@ for script in start-local.sh start-remote.sh stop.sh; do
         chmod +x "$CONFIG_DIR/$script"
     else
         print_status "Downloading $script from GitHub..."
-        curl -sSL "$GITHUB_RAW_URL/docker/$script" -o "$CONFIG_DIR/$script"
+        curl -sSL "$GITHUB_RAW_URL/server/docker/$script" -o "$CONFIG_DIR/$script"
         chmod +x "$CONFIG_DIR/$script"
     fi
 done

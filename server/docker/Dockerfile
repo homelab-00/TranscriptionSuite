@@ -2,7 +2,7 @@
 # Multi-stage build for optimized image size
 #
 # Build:
-#   docker build -t ghcr.io/homelab-00/transcriptionsuite-server:latest -f docker/Dockerfile .
+#   docker build -t ghcr.io/homelab-00/transcriptionsuite-server:latest -f server/docker/Dockerfile .
 #
 # Run:
 #   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 ghcr.io/homelab-00/transcriptionsuite-server:latest
@@ -101,7 +101,7 @@ COPY --from=python-builder /app/.venv /app/.venv
 
 # Copy server application code
 COPY server/backend/ ./server/
-COPY docker/entrypoint.py ./docker/
+COPY server/docker/entrypoint.py ./docker/
 
 # Copy built frontend to static serving location (unified UI)
 COPY --from=frontend-builder /build/frontend/dist ./static/frontend

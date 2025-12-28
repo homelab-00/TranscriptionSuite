@@ -14,10 +14,11 @@ __pycache__/
 .github/instructions/
 
 # Internal build outputs
-dist/
+build/.dist/
 build/appimage-kde/
 build/appimage-gnome/
 build/appimage-windows/
+build/assets/logo.ico
 
 # Frontend web app
 # Node.js / npm dependencies and build outputs

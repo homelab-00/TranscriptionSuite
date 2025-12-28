@@ -67,11 +67,11 @@ fi
 CONFIG_FILE=""
 USER_CONFIG_DIR=""
 
-# Check 1: Development location (../server/config.yaml relative to script dir)
-DEV_CONFIG="$SCRIPT_DIR/../server/config.yaml"
+# Check 1: Development location (../config.yaml relative to script dir)
+DEV_CONFIG="$SCRIPT_DIR/../config.yaml"
 if [[ -f "$DEV_CONFIG" ]]; then
     CONFIG_FILE="$DEV_CONFIG"
-    USER_CONFIG_DIR="$(cd "$SCRIPT_DIR/../server" && pwd)"
+    USER_CONFIG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
     print_info "Using development config: $CONFIG_FILE"
 # Check 2: Script directory (end user running from ~/.config/TranscriptionSuite/)
 elif [[ -f "$SCRIPT_DIR/config.yaml" ]]; then
@@ -95,8 +95,8 @@ export USER_CONFIG_DIR
 ENV_FILE=""
 ENV_FILE_ARG=""
 
-# Check 1: Development location (../server/.env - alongside dev config)
-DEV_ENV="$SCRIPT_DIR/../server/.env"
+# Check 1: Development location (../.env - alongside dev config)
+DEV_ENV="$SCRIPT_DIR/../.env"
 if [[ -f "$DEV_ENV" ]]; then
     ENV_FILE="$DEV_ENV"
     print_info "Using secrets from: $ENV_FILE"

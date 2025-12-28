@@ -152,14 +152,14 @@ if (Test-Path $EnvFile) {
 Write-Status "Setting up Docker files in config directory..."
 
 # Copy docker-compose.yml
-$DockerDir = Join-Path $ProjectRoot "docker"
+$DockerDir = Join-Path $ProjectRoot "server\docker"
 $SourceCompose = Join-Path $DockerDir "docker-compose.yml"
 $DestCompose = Join-Path $ConfigDir "docker-compose.yml"
 if (Test-Path $SourceCompose) {
     Copy-Item $SourceCompose $DestCompose -Force
 } else {
     Write-Status "Downloading docker-compose.yml from GitHub..."
-    Invoke-WebRequest -Uri "$GitHubRawUrl/docker/docker-compose.yml" -OutFile $DestCompose
+    Invoke-WebRequest -Uri "$GitHubRawUrl/server/docker/docker-compose.yml" -OutFile $DestCompose
 }
 
 # Copy start/stop scripts
@@ -171,7 +171,7 @@ foreach ($script in $Scripts) {
         Copy-Item $SourceScript $DestScript -Force
     } else {
         Write-Status "Downloading $script from GitHub..."
-        Invoke-WebRequest -Uri "$GitHubRawUrl/docker/$script" -OutFile $DestScript
+        Invoke-WebRequest -Uri "$GitHubRawUrl/server/docker/$script" -OutFile $DestScript
     }
 }
 

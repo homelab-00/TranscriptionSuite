@@ -92,7 +92,7 @@ cd build && uv venv --python 3.11 && uv sync && cd ..
 cd server/frontend && npm ci && npm audit && cd ../..
 
 # 3. Build and run Docker server
-cd docker
+cd server/docker
 docker compose build
 docker compose up -d
 
@@ -108,15 +108,15 @@ Note: All three scripts are meant to be run from the project root.
 ```bash
 # KDE AppImage (Linux)
 ./build/build-appimage-kde.sh
-# Output: dist/TranscriptionSuite-KDE-x86_64.AppImage
+# Output: build/.dist/TranscriptionSuite-KDE-x86_64.AppImage
 
 # GNOME AppImage (Linux)
 ./build/build-appimage-gnome.sh
-# Output: dist/TranscriptionSuite-GNOME-x86_64.AppImage
+# Output: build/.dist/TranscriptionSuite-GNOME-x86_64.AppImage
 
 # Windows (on Windows machine)
-.\build\.venv\Scripts\pyinstaller.exe --clean .\client\src\client\build\pyinstaller-windows.spec
-# Output: dist\TranscriptionSuite.exe
+.\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\.dist .\client\src\client\build\pyinstaller-windows.spec
+# Output: build\.dist\TranscriptionSuite.exe
 ```
 
 ### Key Commands
@@ -127,7 +127,7 @@ Note: All three scripts are meant to be run from the project root.
 | **Start server (local)** | `cd ~/.config/TranscriptionSuite && ./start-local.sh` |
 | **Start server (HTTPS)** | `cd ~/.config/TranscriptionSuite && ./start-remote.sh` |
 | **Stop server** | `cd ~/.config/TranscriptionSuite && ./stop.sh` |
-| **Build Docker image** | `cd docker && docker compose build` |
+| **Build Docker image** | `cd server/docker && docker compose build` |
 | **Rebuild after code changes** | `docker compose build && docker compose up -d` |
 | **View server logs** | `docker compose logs -f` |
 | **Publish Docker image (release)** | `git tag v0.3.0 -m "Release" && git push origin v0.3.0` |
@@ -430,13 +430,11 @@ TranscriptionSuite/
 │   ├── build-appimage-gnome.sh   # Build GNOME AppImage
 │   └── pyproject.toml            # Dev/build tools (separate venv)
 │
-├── docker/                       # Docker infrastructure
-│   ├── Dockerfile                # Multi-stage build (frontend + Python)
-│   ├── docker-compose.yml        # Unified local + remote deployment
-│   ├── entrypoint.py             # Container entrypoint
-│   └── .dockerignore             # Build context exclusions
-│
-├── server/                   # Server source code
+├── server/                       # Server source code
+│   ├── docker/                   # Docker infrastructure
+│   │   ├── Dockerfile            # Multi-stage build (frontend + Python)
+│   │   ├── docker-compose.yml    # Unified local + remote deployment
+│   │   └── entrypoint.py         # Container entrypoint
 │   ├── backend/                  # Unified backend (runs in Docker + native)
 │   │   ├── api/                  # FastAPI application
 │   │   │   ├── main.py           # App factory, lifespan, static mounting
@@ -645,19 +643,19 @@ For development, the startup scripts (`start-local.sh`, `start-remote.sh`) autom
 **config.yaml:**
 1. `server/config.yaml` (development - highest priority)
 2. `~/.config/TranscriptionSuite/config.yaml` (user config)
-3. `docker/config.yaml` (fallback)
+3. `server/docker/config.yaml` (fallback)
 
 **.env:**
 1. `server/.env` (development - alongside dev config, highest priority)
 2. `~/.config/TranscriptionSuite/.env` (user config)
-3. `docker/.env` (fallback)
+3. `server/docker/.env` (fallback)
 
 **For development**, you should:
 - Keep config in `server/config.yaml` (recommended - already exists)
 - Create `.env` at `server/.env` for secrets (HuggingFace token) - keeps dev config together
 
 The startup scripts work seamlessly for both:
-- **Development**: Run from `docker/` directory (finds config at `../server/`)
+- **Development**: Run from `server/docker/` directory (finds config at `../`)
 - **End users**: Run from `~/.config/TranscriptionSuite/` (finds config in same directory)
 
 ### Step 2: Build Docker Image
@@ -665,7 +663,7 @@ The startup scripts work seamlessly for both:
 Build the Docker image containing the server, ML models support, and the web frontend:
 
 ```bash
-cd docker
+cd server/docker
 docker compose build
 ```
 
@@ -767,7 +765,7 @@ For quick local builds or testing before pushing to production, you can manually
 
 2. **Build Locally**:
    ```bash
-   cd docker
+   cd server/docker
    docker compose build
    ```
 
@@ -803,7 +801,7 @@ Start the Docker server and connect with a local client.
 #### 3.1 Start the Server
 
 ```bash
-cd docker
+cd server/docker
 docker compose up -d
 ```
 
@@ -848,7 +846,7 @@ For connecting to the server from another machine over a secure connection.
 #### 4.1 Server-Side: Enable HTTPS
 
 ```bash
-cd docker
+cd server/docker
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
@@ -929,15 +927,15 @@ This creates `build/.venv` containing packaging tools isolated from runtime depe
 **What it does:**
 1. Runs PyInstaller with `client/build/pyinstaller-kde.spec` to create a standalone binary
 2. Bundles PyQt6, PyAudio, and all Python dependencies
-3. Creates an AppImage with `.desktop` file, icon (from project logo.png), and launcher
-4. Automatically resizes logo to 256x256 using ImageMagick (or copies original if ImageMagick not available)
-5. Uses `appimagetool` to package everything into a single `.AppImage` file
+3. Automatically rescales `build/assets/logo.png` (1024×1024 → 256×256) for AppImage icon
+4. Creates an AppImage with `.desktop` file, icon, and launcher using `appimagetool`
 
 **Requirements:**
 - Linux system (tested on Arch, should work on any distro)
 - `appimagetool` (auto-downloaded if not installed)
+- ImageMagick (`magick` or `convert` command)
 - Build tools venv set up (see Prerequisites)
-- Optional: ImageMagick `convert` command for automatic icon resizing
+- `build/assets/logo.png` (1024×1024) must exist
 
 **Build:**
 
@@ -945,7 +943,7 @@ This creates `build/.venv` containing packaging tools isolated from runtime depe
 ./build/build-appimage-kde.sh
 ```
 
-**Output:** `dist/TranscriptionSuite-KDE-x86_64.AppImage`
+**Output:** `build/.dist/TranscriptionSuite-KDE-x86_64.AppImage`
 
 **Usage on target system:**
 
@@ -960,7 +958,7 @@ chmod +x TranscriptionSuite-KDE-x86_64.AppImage
 1. Copies client source code into AppImage structure (no PyInstaller)
 2. Creates a launcher script that validates system dependencies at runtime
 3. Sets `PYTHONPATH` to include bundled source
-4. Includes application icon from project logo.png (resized to 256x256)
+4. Automatically rescales `build/assets/logo.png` (1024×1024 → 256×256) for AppImage icon
 5. Packages into `.AppImage` for easier distribution
 
 **Features:**
@@ -980,8 +978,8 @@ GTK and GObject Introspection rely heavily on:
 PyInstaller cannot reliably bundle these, and attempts usually result in broken or unstable executables.
 
 **Requirements:**
-- Build system: Linux with `appimagetool`
-- Optional: ImageMagick `convert` command for automatic icon resizing
+- Build system: Linux with `appimagetool` and ImageMagick (`magick` or `convert`)
+- `build/assets/logo.png` (1024×1024) must exist
 - Target system: Python 3.11+, GTK3, libappindicator-gtk3, python-gobject, python-numpy, python-aiohttp
 
 **Build:**
@@ -990,7 +988,7 @@ PyInstaller cannot reliably bundle these, and attempts usually result in broken 
 ./build/build-appimage-gnome.sh
 ```
 
-**Output:** `dist/TranscriptionSuite-GNOME-x86_64.AppImage`
+**Output:** `build/.dist/TranscriptionSuite-GNOME-x86_64.AppImage`
 
 **Target system dependencies:**
 
@@ -1008,8 +1006,9 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
 ### Windows Executable
 
 **What it does:**
+- Uses build/assets/logo.ico (generated from build/assets/logo.svg) as the executable icon
 - Uses PyInstaller to bundle Python interpreter, PyQt6, PyAudio, and dependencies
-- Creates a standalone `.exe` file
+- Creates a standalone `.exe` file with embedded icon
 - No Python installation required on target system
 
 **Why Windows is required:**
@@ -1025,6 +1024,15 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
    Open PowerShell as Administrator and run:
    ```powershell
    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   Close and reopen PowerShell to refresh PATH.
+
+2. **Install ImageMagick** (for icon generation):
+
+   Download and install ImageMagick from [imagemagick.org](https://imagemagick.org/script/download.php#windows) or using winget:
+   ```powershell
+   winget install ImageMagick.ImageMagick
    ```
 
    Close and reopen PowerShell to refresh PATH.
@@ -1045,26 +1053,82 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
    cd ..
    ```
 
-3. **Build the executable:**
+3. **Generate Windows icon** (multi-resolution .ico from logo.png):
    ```powershell
-   .\build\.venv\Scripts\pyinstaller.exe --clean .\client\src\client\build\pyinstaller-windows.spec
+   magick build\assets\logo.png -background transparent -define icon:auto-resize=256,48,32,16 build\assets\logo.ico
    ```
 
-**Output:** `dist\TranscriptionSuite.exe`
+4. **Build the executable:**
+   ```powershell
+   .\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\.dist .\client\src\client\build\pyinstaller-windows.spec
+   ```
+
+**Output:** `build\.dist\TranscriptionSuite.exe`
 
 **Notes:**
 - No need to install Python separately - `uv` handles Python installation automatically
 - The executable is ~50-100 MB due to bundled Python interpreter and Qt libraries
 - The build process takes 1-2 minutes on modern hardware
+- Ensure `build/assets/logo.svg` and `build/assets/logo.png` (both 1024×1024) exist before building
+- Icon sizes are automatically generated during builds - no manual resizing needed
+- Requires ImageMagick installed for icon processing
 
-**TODO:** Create `build/build-windows.ps1` script to automate this process.
+### Icon Management
+
+TranscriptionSuite uses a streamlined icon workflow:
+
+**Source Files (manually maintained in `build/assets/`):**
+- **logo.svg** (1024×1024) - Master vector logo, canonical source
+- **logo.png** (1024×1024) - High-resolution raster export from logo.svg
+
+**Generated Files (created automatically during builds):**
+- **logo.ico** (multi-resolution: 16, 32, 48, 256) - Generated from logo.png for Windows builds
+- **256×256 PNG** - Rescaled from logo.png for AppImage packaging
+
+#### Creating Source Files
+
+Export both files from Inkscape or GIMP at 1024×1024:
+
+**Using Inkscape:**
+1. Open your logo design
+2. **File → Export As** → Save as `build/assets/logo.svg` (SVG format)
+3. **File → Export As** → Set size to `1024` × `1024` → Save as `build/assets/logo.png`
+
+**Using GIMP:**
+1. Open your logo design
+2. **Image → Scale Image** → Set to `1024` × `1024`
+3. **File → Export As** → Save as `build/assets/logo.png`
+4. For SVG: Use Inkscape or another vector editor
+
+#### Automatic Icon Generation
+
+**Linux AppImage Builds:**
+- Automatically rescale `logo.png` (1024×1024 → 256×256) during build
+- Requires: ImageMagick (`magick` or `convert` command)
+
+**Windows Builds:**
+- Run `build/generate-ico.sh` before building to create multi-resolution `logo.ico`
+- Alternatively, run manually:
+  ```bash
+  # Linux/macOS
+  ./build/generate-ico.sh
+
+  # Windows (PowerShell)
+  magick build\assets\logo.png -background transparent -define icon:auto-resize=256,48,32,16 build\assets\logo.ico
+  ```
+
+**Verify Generated Files:**
+```bash
+# Check multi-resolution .ico
+identify build/assets/logo.ico  # Should show 4 sizes: 16, 32, 48, 256
+```
 
 ### Build Artifacts
 
-All builds output to the `dist/` directory:
+All builds output to the `build/.dist/` directory:
 
 ```
-dist/
+build/.dist/
 ├── TranscriptionSuite-KDE-x86_64.AppImage      # Linux KDE (standalone)
 ├── TranscriptionSuite-GNOME-x86_64.AppImage    # Linux GNOME (requires system GTK)
 └── TranscriptionSuite.exe                       # Windows (standalone)
@@ -1182,14 +1246,14 @@ The unified compose file supports both local and remote (Tailscale/HTTPS) deploy
 **Local mode (default):**
 
 ```bash
-cd docker
+cd server/docker
 docker compose up -d
 ```
 
 **Remote mode with HTTPS:**
 
 ```bash
-cd docker
+cd server/docker
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
@@ -1280,7 +1344,7 @@ mv desktop.tail1234.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.
 **Linux:**
 
 ```bash
-cd docker
+cd server/docker
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
@@ -2875,7 +2939,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/ap
 **If you encounter this error**, rebuild the container to ensure the environment is correctly configured:
 
 ```bash
-cd docker
+cd server/docker
 docker compose build --no-cache
 docker compose up -d
 ```

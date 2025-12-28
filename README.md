@@ -1,6 +1,6 @@
 # TranscriptionSuite
 
-<img align="left" style="margin-right: 20px" width="90" height="90" src="./logo.png">
+<img align="left" style="margin-right: 20px" width="90" height="90" src="./build/assets/logo.svg">
 
 <pre>A comprehensive Speech-to-Text Transcription Suite with Docker-first
 architecture. Written in Python, utilizing faster_whisper with
@@ -12,13 +12,13 @@ GPU acceleration.
 - **Multilingual**: Supports [90+ languages](https://platform.openai.com/docs/guides/speech-to-text/supported-languages)
 - **GPU Accelerated**: NVIDIA GPU support via PyTorch bundled CUDA/cuDNN
 - **Long-form Dictation**: Real-time transcription with optional live preview
-- **File Transcription**: Transcribe audio/video files
+- **Static File Transcription**: Transcribe audio/video files
 - **Speaker Diarization**: PyAnnote-based speaker identification
-- **Audio Notebook**: Calendar-based audio notes with full-text search, LLM chat via LM Studio
-- **Remote Access**: Secure access via Tailscale from anywhere
+- **Audio Notebook**: Calendar-based audio notes with full-text search, AI chat about your notes via LM Studio
+- **Remote Access**: Secure access via Tailscale + TLS from anywhere
 - **Cross-Platform Clients**: Native system tray apps for KDE, GNOME, and Windows
 
-*Half an hour of audio transcribed in under a minute (RTX 3060)!*
+📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
 ---
 
