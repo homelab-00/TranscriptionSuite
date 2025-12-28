@@ -6,7 +6,6 @@ Provides a tabbed dialog for configuring client settings.
 
 import logging
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -268,7 +267,7 @@ class SettingsDialog(QDialog):
         self.config.set("server", "host", value=self.host_edit.text().strip() or "localhost")
         self.config.set("server", "port", value=self.port_spin.value())
         self.config.set("server", "use_https", value=self.https_check.isChecked())
-        self.config.set("server", "token", value=self.token_edit.text())
+        self.config.set("server", "token", value=self.token_edit.text().strip())
         self.config.set("server", "use_remote", value=self.use_remote_check.isChecked())
         self.config.set("server", "remote_host", value=self.remote_host_edit.text().strip())
 

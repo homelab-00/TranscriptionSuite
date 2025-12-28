@@ -8,6 +8,8 @@ This document contains technical details, architecture decisions, and developmen
 - [Architecture Overview](#architecture-overview)
   - [Design Decisions](#design-decisions)
   - [Deployment Philosophy](#deployment-philosophy)
+  - [Security Model](#security-model)
+  - [Known Technical Debt](#known-technical-debt)
 - [End User Workflow](#end-user-workflow)
   - [First-Time Setup](#first-time-setup)
   - [Configuration](#configuration)
@@ -18,6 +20,7 @@ This document contains technical details, architecture decisions, and developmen
 - [Development Workflow](#development-workflow)
   - [Step 1: Environment Setup](#step-1-environment-setup)
   - [Step 2: Build Docker Image](#step-2-build-docker-image)
+  - [Step 2.1: Publishing to GitHub Container Registry](#step-21-publishing-to-github-container-registry)
   - [Step 3: Run Client Locally](#step-3-run-client-locally)
   - [Step 4: Run Client Remotely (Tailscale)](#step-4-run-client-remotely-tailscale)
 - [Build Workflow](#build-workflow)
@@ -127,6 +130,9 @@ Note: All three scripts are meant to be run from the project root.
 | **Build Docker image** | `cd docker && docker compose build` |
 | **Rebuild after code changes** | `docker compose build && docker compose up -d` |
 | **View server logs** | `docker compose logs -f` |
+| **Publish Docker image (release)** | `git tag v0.3.0 -m "Release" && git push origin v0.3.0` |
+| **Publish Docker image (manual)** | `gh workflow run docker-publish.yml --field tag=test` |
+| **Monitor GitHub Actions build** | `gh run watch` |
 | **Run client (local)** | `cd client && uv run transcription-client --host localhost --port 8000` |
 | **Run client (remote)** | `cd client && uv run transcription-client --host <tailscale-hostname> --port 8443 --https` |
 | **Lint code** | `./build/.venv/bin/ruff check .` |
@@ -193,6 +199,81 @@ TranscriptionSuite is designed for **easy deployment by end users**, not just de
 3. Edit config file (HuggingFace token, TLS paths if needed)
 4. Run start script
 5. Download and use the native client
+
+### Security Model
+
+TranscriptionSuite uses a **"belt and suspenders"** layered security approach for remote access:
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 1: Tailscale Network (Network Access Control)        │
+│  - Only devices on your Tailnet can reach the server        │
+│  - Zero-trust mesh VPN with identity-based access           │
+│  - No open ports on public internet                         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 2: TLS/HTTPS Encryption (Transport Security)         │
+│  - Tailscale-issued certificates (trusted CA)               │
+│  - All traffic encrypted in transit                         │
+│  - Certificate validation prevents MITM attacks             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 3: Token Authentication (Application Security)       │
+│  - Admin token auto-generated on first run                  │
+│  - Tokens hashed with SHA-256 before storage                │
+│  - Required for all API endpoints in TLS mode               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions:**
+
+1. **Local users are not authenticated**: When running locally (`localhost:8000`), no authentication is required. This is a single-user server under the user's direct control.
+
+2. **CORS allows all origins**: The `allow_origins=["*"]` configuration is acceptable because:
+   - Local mode: Only accessible from localhost
+   - Remote mode: Only accessible via Tailscale network (Layer 1 provides access control)
+
+3. **Admin endpoints don't require role checks**: All users who can reach the server (via Tailscale) are implicitly trusted. The token system exists for:
+   - Multi-device identification (knowing which device is making requests)
+   - Session management (ability to revoke access)
+   - Audit logging (tracking who did what)
+
+4. **Host network mode**: The Docker container uses `network_mode: "host"` because:
+   - Required for LM Studio access (localhost:1234 from within container)
+   - Simplifies GPU passthrough and networking
+   - Acceptable because access control is at the Tailscale layer
+
+**Trust Boundaries:**
+
+| Access Method | Authentication | Trust Level |
+|---------------|----------------|-------------|
+| `localhost:8000` (HTTP) | None | Full trust (user's own machine) |
+| Tailscale + TLS | Token required | High trust (your Tailnet) |
+| Public internet | Not supported | N/A (blocked by design) |
+
+### Known Technical Debt
+
+The following items are documented for future improvement but are not critical issues:
+
+1. **Client Code Duplication (~655 lines)**
+   - KDE and GNOME clients share similar logic but have separate implementations
+   - Settings dialogs have nearly identical structure in different UI frameworks
+   - `_get_client_name()` is duplicated in 3 route files (`transcription.py`, `notebook.py`, `websocket.py`)
+   - *Recommendation:* Extract shared logic to base classes or utility modules
+
+2. **Database N+1 Query Pattern**
+   - `get_transcription()` in `database.py` executes one query per segment to fetch words
+   - *Impact:* 51 queries for a recording with 50 segments instead of 1-2 JOINs
+   - *Recommendation:* Refactor to use JOINs or batch word fetching
+
+3. **Enhanced Search Performance**
+   - `search_words_enhanced()` executes extra queries for context per match
+   - No pagination - loads all results into memory
+   - *Recommendation:* Use JOINs and add LIMIT/OFFSET pagination
 
 ---
 
@@ -611,42 +692,109 @@ This means for development, you can freely build and test local changes without 
 docker compose build --no-cache
 ```
 
-### Step 2.1: Pushing to GitHub Container Registry
+### Step 2.1: Publishing to GitHub Container Registry
 
-To share your built image with others or deploy it to other machines, you can push it to GitHub Container Registry (GHCR):
+TranscriptionSuite uses **GitHub Actions** to automate Docker image builds and publishing to GitHub Container Registry (GHCR). This is the recommended approach for releases and sharing images.
 
-1. **Create a GitHub Personal Access Token** (if not already):
-   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-   - Generate a new token with `write:packages` and `read:packages` scopes
-   - Save the token securely
+#### Option 1: Automated Publishing with GitHub Actions (Recommended)
 
-2. **Login to GitHub Container Registry**:
+The repository includes a GitHub Actions workflow (`.github/workflows/docker-publish.yml`) that automatically builds and publishes Docker images to GHCR.
+
+**Triggering Automated Builds:**
+
+1. **Release Tags (Automatic)** - Creates both versioned and `latest` tags:
    ```bash
+   # Create and push a release tag (e.g., v0.3.0)
+   git tag v0.3.0 -m "Release v0.3.0: Description of changes"
+   git push origin v0.3.0
+
+   # This creates TWO images on GHCR:
+   #   - ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0
+   #   - ghcr.io/homelab-00/transcriptionsuite-server:latest (updated)
+   ```
+
+2. **Manual Dispatch** - For ad-hoc builds with custom tags:
+   ```bash
+   # Install GitHub CLI (if not already installed)
+   # Arch Linux: sudo pacman -S github-cli
+   # Other distros: see https://github.com/cli/cli#installation
+
+   # Authenticate (first time only)
+   gh auth login
+
+   # Trigger a build with custom tag
+   gh workflow run docker-publish.yml --field tag=test
+
+   # Monitor the build progress
+   gh run watch
+
+   # View build logs
+   gh run list --workflow=docker-publish.yml
+   gh run view <run-id> --log
+   ```
+
+**Workflow Features:**
+- **Zero-config authentication**: Uses GitHub's auto-generated `GITHUB_TOKEN` (no manual PAT needed)
+- **Build caching**: First build takes ~15-20 minutes, subsequent builds ~5 minutes (70% faster)
+- **Multi-platform support**: Currently builds for `linux/amd64`, ready for `arm64` when needed
+- **Automatic tagging**: Release tags create both versioned (e.g., `v1.0.0`) and `latest` tags
+- **Build summary**: Each workflow run provides a detailed summary with pull commands
+
+**Monitoring Builds:**
+
+- **Web UI**: Check build status at https://github.com/homelab-00/TranscriptionSuite/actions
+- **Terminal**: Use `gh run watch` for real-time progress
+- **Notifications**: GitHub sends email notifications on build failures
+
+**First-Time Setup:**
+
+After your first automated build, make the package public so anyone can pull without authentication:
+1. Visit: https://github.com/homelab-00/TranscriptionSuite/pkgs/container/transcriptionsuite-server
+2. Click "Package settings" → Change visibility to "Public"
+
+#### Option 2: Manual Publishing (For Local Testing)
+
+For quick local builds or testing before pushing to production, you can manually push images:
+
+1. **Install GitHub CLI** (if using manual dispatch):
+   ```bash
+   # Arch Linux
+   sudo pacman -S github-cli
+
+   # Authenticate
+   gh auth login
+   ```
+
+2. **Build Locally**:
+   ```bash
+   cd docker
+   docker compose build
+   ```
+
+3. **Login to GHCR** (first time only):
+   ```bash
+   # Using GitHub CLI (recommended - uses your gh auth)
+   gh auth token | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+   # OR using a Personal Access Token:
    echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
    ```
 
-   **Security Tip: Secure Credential Storage**
-   To avoid storing credentials in plaintext (the default `~/.docker/config.json`), it is highly recommended to use a credential helper:
-   - **Linux (KDE/GNOME)**: Install `docker-credential-secretservice` and set `"credsStore": "secretservice"` in `~/.docker/config.json`.
-   - **Windows/macOS**: Docker Desktop uses built-in helpers by default.
+   **Security Tip**: To avoid storing credentials in plaintext (`~/.docker/config.json`), use a credential helper:
+   - **Linux (KDE/GNOME)**: Install `docker-credential-secretservice` and set `"credsStore": "secretservice"` in `~/.docker/config.json`
+   - **Windows/macOS**: Docker Desktop uses built-in helpers by default
 
-3. **Tag and Push**:
-   Since the image is already built with the correct tag (`ghcr.io/homelab-00/transcriptionsuite-server:latest`) by Docker Compose, you can push it directly:
+4. **Tag and Push**:
    ```bash
+   # Push with custom tag for testing
+   docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest ghcr.io/homelab-00/transcriptionsuite-server:test
+   docker push ghcr.io/homelab-00/transcriptionsuite-server:test
+
+   # Push as latest (use with caution - prefer GitHub Actions for this)
    docker push ghcr.io/homelab-00/transcriptionsuite-server:latest
    ```
 
-4. **Versioning (Recommended)**:
-   It is good practice to tag releases with version numbers instead of just using `latest`:
-   ```bash
-   docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest ghcr.io/homelab-00/transcriptionsuite-server:v1.0.0
-   docker push ghcr.io/homelab-00/transcriptionsuite-server:v1.0.0
-   ```
-
-5. **Make Package Public** (optional):
-   - Go to the package page on GitHub: `https://github.com/homelab-00/TranscriptionSuite/pkgs/container/transcriptionsuite`
-   - Click "Package settings" → Change visibility to "Public"
-   - This allows users to pull the image without authentication
+**Note**: Manual pushes should be used for testing only. For production releases, use the automated GitHub Actions workflow to ensure consistent builds and proper versioning.
 
 ### Step 3: Run Client Locally
 
@@ -956,10 +1104,14 @@ cd build && uv sync
 
 #### Container Image Metadata
 
-The Docker image includes an OCI (Open Container Initiative) label for source code attribution:
+The Docker image includes an OCI (Open Container Initiative) label for source code attribution in the runtime stage:
 
 ```dockerfile
-LABEL org.opencontainers.image.source https://github.com/homelab-00/TranscriptionSuite
+# In the runtime stage (Stage 3)
+FROM ubuntu:22.04 AS runtime
+
+# GitHub Container Registry label
+LABEL org.opencontainers.image.source=https://github.com/homelab-00/TranscriptionSuite
 ```
 
 This label:
@@ -967,6 +1119,9 @@ This label:
 - Appears in GitHub Container Registry (GHCR) package metadata
 - Helps users discover the source code for any image they pull
 - Follows OCI image spec conventions for image attribution
+- Required for GitHub Actions to properly link packages to the repository
+
+**Note:** The label must be placed **after** a `FROM` statement (inside a build stage). It cannot be placed at the top of the Dockerfile outside of any stage.
 
 #### Securing Docker Credentials
 
@@ -2700,6 +2855,8 @@ Alternatively, use `response_model=None` in the decorator to disable response mo
 
 ### cuDNN Library Errors
 
+> **Note:** The current Dockerfile uses `ubuntu:22.04` as the base image (not nvidia/cuda) and relies on PyTorch's bundled CUDA/cuDNN libraries. The `LD_LIBRARY_PATH` is pre-configured to prioritize PyTorch's bundled cuDNN. You should not encounter these errors with the standard build.
+
 If you see errors like:
 
 ```
@@ -2707,11 +2864,15 @@ Unable to load any of {libcudnn_ops.so.9.1.0, libcudnn_ops.so.9.1, libcudnn_ops.
 Invalid handle. Cannot load symbol cudnnCreateTensorDescriptor
 ```
 
-This means the Docker image is missing cuDNN libraries. The `faster-whisper` library uses CTranslate2 which requires **system cuDNN libraries** (unlike PyTorch which bundles its own).
+This means the cuDNN libraries cannot be found. The `faster-whisper` library uses CTranslate2 which requires cuDNN libraries.
 
-**Solution**: The Dockerfile must use a CUDA base image with cuDNN runtime (e.g., `nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04`). This adds ~1.7GB to the image size but is necessary for GPU transcription.
+**Current Architecture:** The Dockerfile uses a minimal `ubuntu:22.04` base image and PyTorch pip packages that bundle their own CUDA/cuDNN libraries (~4.1 GB). These are prioritized via `LD_LIBRARY_PATH`:
 
-If you encounter this after a Docker update or base image change, rebuild the container:
+```dockerfile
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+```
+
+**If you encounter this error**, rebuild the container to ensure the environment is correctly configured:
 
 ```bash
 cd docker
@@ -2719,7 +2880,9 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-#### cuDNN Version Mismatch
+#### cuDNN Version Mismatch (Historical)
+
+> **Note:** This issue is pre-emptively fixed in the current Dockerfile via `LD_LIBRARY_PATH` configuration. This section is kept for reference if you're customizing the Docker build.
 
 If you see errors like:
 
@@ -2727,30 +2890,19 @@ If you see errors like:
 cuDNN version incompatibility: PyTorch was compiled against (9, 8, 0) but found runtime version (9, 7, 0)
 ```
 
-This occurs when PyTorch expects a newer cuDNN version than what's provided by the CUDA base image. PyTorch bundles its own cuDNN libraries, but the system cuDNN may take precedence.
+This occurs when PyTorch expects a different cuDNN version than what's being loaded. The `LD_LIBRARY_PATH` environment variable determines library search order.
 
-**Root Cause**: The `LD_LIBRARY_PATH` environment variable determines library search order. If the system cuDNN path comes before PyTorch's bundled cuDNN, the incompatible system version is loaded.
-
-**Solution**: Set `LD_LIBRARY_PATH` in the Dockerfile to prioritize PyTorch's bundled cuDNN:
+**Solution**: Ensure `LD_LIBRARY_PATH` prioritizes PyTorch's bundled cuDNN (already configured in the standard Dockerfile):
 
 ```dockerfile
-# Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
+# Prioritize PyTorch's bundled cuDNN
 ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
 **Key Points**:
-- PyTorch 2.8.0+ bundles cuDNN 9.8.0
-- CUDA 12.8 base image includes cuDNN 9.7.0
-- The path must match your actual virtual environment location (check `UV_PROJECT_ENVIRONMENT` in Dockerfile)
-- Both `nvidia/cudnn/lib` and `torch/lib` should be included for compatibility
-
-After updating the Dockerfile:
-
-```bash
-cd docker
-docker compose build --no-cache
-docker compose up -d
-```
+- PyTorch 2.8.0 bundles cuDNN 9.8.0
+- The path must match your virtual environment location (check `UV_PROJECT_ENVIRONMENT` in Dockerfile)
+- Both `nvidia/cudnn/lib` and `torch/lib` should be included
 
 ### Favicon 404 Errors
 
@@ -2856,13 +3008,13 @@ ls -la ~/.config/TranscriptionSuite/logs/
 - PyAnnote Audio 4.0.3+ (for speaker diarization)
 - PyTorch 2.8.0 + TorchAudio 2.8.0
 - SQLite with FTS5
-- CUDA 12.8 with cuDNN 9.x runtime
+- NVIDIA GPU with CUDA support (PyTorch bundles CUDA/cuDNN libraries)
 
 **Key Version Constraints:**
 - PyTorch 2.8.0 is pinned for compatibility with PyAnnote Audio 4.0.3
-- CUDA 12.8 base image provides cuDNN 9.7.0 (system)
 - PyTorch bundles cuDNN 9.8.0 (prioritized via `LD_LIBRARY_PATH`)
 - TorchAudio is being deprecated but still required by PyAnnote and Silero VAD
+- Docker base image is `ubuntu:22.04` (minimal, no system CUDA)
 
 ### Client
 

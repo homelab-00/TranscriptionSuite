@@ -16,8 +16,6 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 
-from server.config import get_config
-
 # Target sample rate for Whisper (technical requirement, not configurable)
 SAMPLE_RATE = 16000
 
@@ -254,7 +252,9 @@ class RealtimeTranscriptionEngine:
             raise RuntimeError("Engine not initialized")
 
         # Run transcription in thread pool (blocking operation)
-        result = await asyncio.to_thread(self._engine.text)
+        # Note: we call text() to trigger transcription but use
+        # _perform_transcription() to get detailed results
+        await asyncio.to_thread(self._engine.text)
 
         # Get detailed result from engine
         engine_result = self._engine._perform_transcription(self._engine.audio)

@@ -4,111 +4,257 @@
 
 <pre>A comprehensive Speech-to-Text Transcription Suite with Docker-first
 architecture. Written in Python, utilizing faster_whisper with
-CUDA 12.8 acceleration.
+GPU acceleration.
 </pre>
 
 ## Features
 
-- **Multilingual**: Supports [90+ languages](https://whisper-api.com/docs/languages/)
-- **GPU Accelerated**: CUDA 12.6 with NVIDIA GPU support
+- **Multilingual**: Supports [90+ languages](https://platform.openai.com/docs/guides/speech-to-text/supported-languages)
+- **GPU Accelerated**: NVIDIA GPU support via PyTorch bundled CUDA/cuDNN
 - **Long-form Dictation**: Real-time transcription with optional live preview
 - **File Transcription**: Transcribe audio/video files
 - **Speaker Diarization**: PyAnnote-based speaker identification
-- **Audio Notebook**: Calendar-based audio notes with full-text search, LLM chat via LM Studio integration
+- **Audio Notebook**: Calendar-based audio notes with full-text search, LLM chat via LM Studio
 - **Remote Access**: Secure access via Tailscale from anywhere
 - **Cross-Platform Clients**: Native system tray apps for KDE, GNOME, and Windows
 
-📌 *Half an hour of audio transcribed in under a minute (RTX 3060)!*
+*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
 ---
 
-## Quick Start
+## Prerequisites
 
-### Prerequisites
+### Docker
 
-- Docker
-- NVIDIA GPU with CUDA support (recommended)
-- If you want GPU acceleration inside Docker:
-  - Linux: Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-  - Windows: Use Docker Desktop with the WSL2 backend and install the NVIDIA GPU driver with WSL support.
+**Linux:**
+```bash
+# Install Docker Engine
+# See: https://docs.docker.com/engine/install/
 
-Verify GPU support:
+# Install NVIDIA Container Toolkit (for GPU support)
+# See: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+```
+
+**Windows:**
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend
+2. Install NVIDIA GPU driver with WSL support
+
+### Git
+
+**Linux:**
+```bash
+# Debian/Ubuntu
+sudo apt install git
+
+# Arch Linux
+sudo pacman -S git
+```
+
+**Windows:**
+Download and install [Git for Windows](https://git-scm.com/download/win)
+
+### Verify GPU Support
 
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 ```
 
-### Installation
+---
+
+## Installation
+
+### Step 1: Clone the Repository
 
 ```bash
-# Clone the repository
 git clone https://github.com/homelab-00/TranscriptionSuite.git
-cd TranscriptionSuite/docker
-
-# Build the Docker image
-docker compose build
-
-# Run first-time setup (interactive)
-docker compose run --rm transcription-suite --setup
-
-# Start the server
-docker compose up -d
+cd TranscriptionSuite
 ```
 
-The server is now running at **[http://localhost:8000](http://localhost:8000)**
+### Step 2: Run Setup Script
 
-### First-Run Setup
+**Linux:**
+```bash
+cd build/user-setup
+./setup.sh
+```
 
-The setup wizard will ask for:
+**Windows (PowerShell):**
+```powershell
+cd build\user-setup
+.\setup.ps1
+```
 
-| Setting | Description | Required |
-|---------|-------------|----------|
-| **HuggingFace Token** | For speaker diarization models | Yes (for diarization) |
-| **Admin Token** | Server authentication | Auto-generated if not provided |
-| **LM Studio URL** | For AI chat features | Optional |
+The setup script will:
+1. Check that Docker is installed and running
+2. Create the config directory with all necessary files
+3. Pull the Docker image from GitHub Container Registry
 
-Get your HuggingFace token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+### Step 3: Configure HuggingFace Token (Optional)
 
-If you run `docker compose up -d` without a TTY (default), the container will automatically generate the minimum required configuration on first run (including an `ADMIN_TOKEN`) and persist it to the Docker volume under `/data/config/secrets.json`.
+For speaker diarization, you need a HuggingFace token:
 
-### Alternative: Skip Interactive Setup
+1. Create a free account at [huggingface.co](https://huggingface.co)
+2. Go to Settings → Access Tokens → Create new token (Read permissions)
+3. Accept the [PyAnnote model license](https://huggingface.co/pyannote/speaker-diarization-community-1)
 
-Provide environment variables instead:
+**Linux:**
+```bash
+nano ~/.config/TranscriptionSuite/.env
+# Add: HUGGINGFACE_TOKEN=hf_your_token_here
+```
+
+**Windows:**
+```powershell
+notepad "$env:USERPROFILE\Documents\TranscriptionSuite\.env"
+# Add: HUGGINGFACE_TOKEN=hf_your_token_here
+```
+
+### Step 4: Start the Server (Local Mode)
+
+**Linux:**
+```bash
+cd ~/.config/TranscriptionSuite
+./start-local.sh
+```
+
+**Windows:**
+```powershell
+cd "$env:USERPROFILE\Documents\TranscriptionSuite"
+.\start-local.ps1
+```
+
+Access the web interface at **http://localhost:8000**
+
+### Stop the Server
+
+**Linux:**
+```bash
+cd ~/.config/TranscriptionSuite
+./stop.sh
+```
+
+**Windows:**
+```powershell
+cd "$env:USERPROFILE\Documents\TranscriptionSuite"
+.\stop.ps1
+```
+
+---
+
+## Remote Access (Optional)
+
+TranscriptionSuite uses a **layered security model** for remote access:
+
+| Layer | Protection |
+|-------|------------|
+| **Tailscale Network** | Only devices on your Tailnet can reach the server |
+| **TLS/HTTPS** | All traffic encrypted with Tailscale certificates |
+| **Token Authentication** | Required for all API requests in remote mode |
+
+### Step 1: Set Up Tailscale
+
+1. Install Tailscale: [tailscale.com/download](https://tailscale.com/download)
+2. Authenticate: `tailscale up` (Linux) or via the app (Windows)
+3. Go to [Tailscale Admin Console](https://login.tailscale.com/admin) → DNS tab
+4. Enable **MagicDNS** and **HTTPS Certificates**
+
+Your DNS settings should look like this:
+
+![Tailscale DNS Settings](./docs/tailscale-dns-settings.png)
+
+### Step 2: Generate Certificates
 
 ```bash
-ADMIN_TOKEN=your-secret-token \
-HUGGINGFACE_TOKEN=hf_xxx \
-docker compose up -d
+# Generate certificate for your machine
+sudo tailscale cert your-machine.your-tailnet.ts.net
 ```
 
-Or create a `.env` file in the `docker/` folder:
+Move the certificates to the standard location:
+
+**Linux:**
+```bash
+mkdir -p ~/.config/Tailscale
+mv your-machine.your-tailnet.ts.net.crt ~/.config/Tailscale/my-machine.crt
+mv your-machine.your-tailnet.ts.net.key ~/.config/Tailscale/my-machine.key
+sudo chown $USER:$USER ~/.config/Tailscale/my-machine.*
+chmod 600 ~/.config/Tailscale/my-machine.key
+```
+
+**Windows (PowerShell):**
+```powershell
+mkdir "$env:USERPROFILE\Documents\Tailscale" -Force
+mv your-machine.your-tailnet.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
+mv your-machine.your-tailnet.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
+```
+
+### Step 3: Configure TLS Paths
+
+Edit your config file to set the certificate paths:
+
+**Linux:**
+```bash
+nano ~/.config/TranscriptionSuite/config.yaml
+```
+
+**Windows:**
+```powershell
+notepad "$env:USERPROFILE\Documents\TranscriptionSuite\config.yaml"
+```
+
+Update the `remote_server.tls` section:
+```yaml
+remote_server:
+  tls:
+    host_cert_path: "~/.config/Tailscale/my-machine.crt"
+    host_key_path: "~/.config/Tailscale/my-machine.key"
+```
+
+### Step 4: Start Server (Remote Mode)
+
+**Linux:**
+```bash
+cd ~/.config/TranscriptionSuite
+./start-remote.sh
+```
+
+**Windows:**
+```powershell
+cd "$env:USERPROFILE\Documents\TranscriptionSuite"
+.\start-remote.ps1
+```
+
+### Step 5: Save the Admin Token (First Run Only)
+
+On first startup, an admin token is automatically generated. **Save this token!**
 
 ```bash
-HF_TOKEN=hf_your_token_here
-ADMIN_TOKEN=your_secret_token
-LOG_LEVEL=INFO
+# Wait ~10 seconds for startup, then:
+docker compose logs | grep "Admin Token"
 ```
 
-To view the generated config inside the running container:
-
-```bash
-docker compose exec transcription-suite cat /data/config/secrets.json
-```
+Use this token to log in at `https://your-machine.your-tailnet.ts.net:8443`
 
 ---
 
 ## Native Client
 
-The Native Client is a lightweight tray application for recording audio and sending it to the server for transcription.
-It does not require Docker or NVIDIA Container Toolkit.
-
-### Download
+Download the native client for your platform:
 
 | Platform | Download | Notes |
 |----------|----------|-------|
-| **KDE Plasma** | `TranscriptionSuite-KDE-x86_64.AppImage` | Standalone |
-| **GNOME** | `TranscriptionSuite-GNOME-x86_64.AppImage` | Requires system GTK3 |
-| **Windows** | `TranscriptionSuite.exe` | Standalone |
+| **KDE Plasma** | `TranscriptionSuite-KDE-x86_64.AppImage` | Standalone, no dependencies |
+| **GNOME** | `TranscriptionSuite-GNOME-x86_64.AppImage` | Requires system packages (see below) |
+| **Windows** | `TranscriptionSuite.exe` | Standalone, no dependencies |
+
+### GNOME Client Dependencies (Ubuntu/Debian)
+
+The GNOME client requires system packages:
+
+```bash
+sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio python3-numpy python3-aiohttp
+```
+
+You also need the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/) for the tray icon.
 
 ### Usage
 
@@ -129,120 +275,58 @@ It does not require Docker or NVIDIA Container Toolkit.
 | Orange | Transcribing |
 | Red | Error |
 
----
-
-## Configuration
-
-### Server Configuration
-
-The server stores configuration in the Docker volume at `/data/config/`. On first run, the setup wizard creates this automatically.
-
-To reconfigure:
-
-```bash
-docker compose run --rm transcription-suite --setup
-```
-
 ### Client Configuration
 
-The client stores settings in `~/.config/TranscriptionSuite/client.yaml`:
+On first connection, enter the server details:
+- **Local mode**: Host `localhost`, Port `8000`, HTTPS off
+- **Remote mode**: Host `your-machine.your-tailnet.ts.net`, Port `8443`, HTTPS on, Token from server logs
 
-```yaml
-server:
-  host: localhost
-  port: 8000
-  use_https: false
-
-recording:
-  sample_rate: 16000
-  device_index: null  # null = default microphone
-
-clipboard:
-  auto_copy: true
-```
-
----
-
-## Remote Access (Tailscale + HTTPS)
-
-Access the server securely from other devices on your Tailscale network.
-
-### 1. Set up Tailscale
-
-1. Install Tailscale on your host: [tailscale.com/download](https://tailscale.com/download)
-2. Authenticate: `tailscale up`
-3. Note your Tailscale hostname (e.g., `my-desktop.tail1234.ts.net`)
-
-### 2. Generate and store certificates
-
-```bash
-tailscale cert your-machine.tailnet-name.ts.net
-```
-
-Move and rename the generated files to a standard location:
-
-| Platform | Directory | Files |
-|----------|-----------|-------|
-| **Linux** | `~/.config/Tailscale/` | `my-machine.crt`, `my-machine.key` |
-| **Windows** | `Documents\Tailscale\` | `my-machine.crt`, `my-machine.key` |
-
-**Linux:**
-
-```bash
-mkdir -p ~/.config/Tailscale
-mv your-machine.tailnet-name.ts.net.crt ~/.config/Tailscale/my-machine.crt
-mv your-machine.tailnet-name.ts.net.key ~/.config/Tailscale/my-machine.key
-chmod 600 ~/.config/Tailscale/my-machine.key
-```
-
-**Windows (PowerShell):**
-
-```powershell
-mkdir "$env:USERPROFILE\Documents\Tailscale" -Force
-mv your-machine.tailnet-name.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
-mv your-machine.tailnet-name.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
-```
-
-### 3. Start with TLS enabled
-
-**Linux:**
-
-```bash
-TLS_ENABLED=true \
-TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
-TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-docker compose up -d
-```
-
-**Windows (PowerShell):**
-
-```powershell
-$env:TLS_ENABLED="true"
-$env:TLS_CERT_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
-$env:TLS_KEY_PATH="$env:USERPROFILE\Documents\Tailscale\my-machine.key"
-docker compose up -d
-```
-
-### Switch back to local mode
-
-```bash
-docker compose stop
-docker compose start  # TLS disabled by default
-```
+Settings are saved to:
+- **Linux**: `~/.config/TranscriptionSuite/client.yaml`
+- **Windows**: `%APPDATA%\TranscriptionSuite\client.yaml`
 
 ---
 
 ## Web Interface
 
-Open [http://localhost:8000](http://localhost:8000) to access the Audio Notebook web interface.
+Access the web interface at your server's address:
+- **Local**: http://localhost:8000
+- **Remote**: https://your-machine.your-tailnet.ts.net:8443
 
 **Features:**
-
 - Calendar view of recordings
 - Full-text search across all transcriptions
 - Audio playback with click-to-seek timestamps
 - AI chat about recordings (requires LM Studio)
 - Import external audio files
+
+---
+
+## Troubleshooting
+
+### Server Won't Start
+
+Check Docker logs:
+```bash
+docker compose logs -f
+```
+
+### GPU Not Detected
+
+Verify NVIDIA Container Toolkit is installed:
+```bash
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+```
+
+### GNOME Tray Icon Not Showing
+
+Install the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/).
+
+### Connection Issues (Remote Mode)
+
+1. Verify Tailscale is connected: `tailscale status`
+2. Check certificate paths in `config.yaml`
+3. Ensure port 8443 is used for HTTPS
 
 ---
 
@@ -252,9 +336,7 @@ MIT License — See [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
-- [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [Tailscale](https://tailscale.com/)

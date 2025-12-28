@@ -191,7 +191,7 @@ class ClientConfig:
     @property
     def token(self) -> str:
         """Get authentication token."""
-        return self.get("server", "token", default="")
+        return self.get("server", "token", default="").strip()
 
     @token.setter
     def token(self, value: str) -> None:

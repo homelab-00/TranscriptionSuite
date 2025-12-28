@@ -21,30 +21,31 @@ Provides a single API serving:
 - Health and status endpoints
 """
 
-import os
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from pathlib import Path
+# Imports are placed after timing instrumentation intentionally
+import os  # noqa: E402
+from collections.abc import AsyncGenerator  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 _log_time("stdlib imports done")
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import FastAPI, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
 _log_time("fastapi imports done")
 
-from server.core.token_store import get_token_store
+from server.core.token_store import get_token_store  # noqa: E402
 
 _log_time("token_store imported")
 
-from server.api.routes import admin, auth, health, llm, notebook, search, transcription, websocket
+from server.api.routes import admin, auth, health, llm, notebook, search, transcription, websocket  # noqa: E402
 
 _log_time("routes imported")
 
-from server.config import get_config
+from server.config import get_config  # noqa: E402
 
 _log_time("config imported")
 
@@ -52,11 +53,11 @@ _log_time("config imported")
 # loading heavy ML libraries (torch, faster_whisper) at module import time.
 _log_time("model_manager import SKIPPED (lazy import in lifespan)")
 
-from server.database.database import init_db
+from server.database.database import init_db  # noqa: E402
 
 _log_time("database imported")
 
-from server.logging import get_logger, setup_logging
+from server.logging import get_logger, setup_logging  # noqa: E402
 
 _log_time("logging imported")
 

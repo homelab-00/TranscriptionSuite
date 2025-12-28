@@ -326,7 +326,7 @@ class SettingsDialog:
         if self.https_check:
             self.config.set("server", "use_https", value=self.https_check.get_active())
         if self.token_entry:
-            self.config.set("server", "token", value=self.token_entry.get_text())
+            self.config.set("server", "token", value=self.token_entry.get_text().strip())
         if self.use_remote_check:
             self.config.set(
                 "server", "use_remote", value=self.use_remote_check.get_active()

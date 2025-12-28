@@ -15,7 +15,6 @@ The core recording state machine and VAD logic is preserved from MAIN.
 import collections
 import copy
 import logging
-import os
 import queue
 import re
 import threading

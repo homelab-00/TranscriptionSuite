@@ -31,7 +31,7 @@ warnings.filterwarnings(
 # Add app root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import uvicorn
+import uvicorn  # noqa: E402
 
 
 def get_user_config_dir() -> Path | None:
