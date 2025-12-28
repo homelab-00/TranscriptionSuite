@@ -109,8 +109,8 @@ uv run transcription-client --host localhost --port 8000
 # Output: dist/TranscriptionSuite-GNOME-x86_64.AppImage
 
 # Windows (on Windows machine)
-.\build\.venv\Scripts\pyinstaller.exe --clean client/build/pyinstaller-windows.spec
-# Output: dist/TranscriptionSuite.exe
+.\build\.venv\Scripts\pyinstaller.exe --clean .\client\src\client\build\pyinstaller-windows.spec
+# Output: dist\TranscriptionSuite.exe
 ```
 
 ### Key Commands
@@ -597,9 +597,13 @@ docker compose up -d
 ```
 
 **First-time startup notes:**
-- Server takes ~30 seconds to load ML models into GPU memory (you can verify by monitoring your GPU VRAM usage, you'll see a jump ~3GB)
-- On first run, an admin token is auto-generated and printed to the console logs - **save this token!**
+- Server startup takes ~9 seconds total:
+  - ~0.9s: Module loading (FastAPI, routes, etc.)
+  - ~2.3s: PyTorch import for GPU detection
+  - ~6s: Whisper model loading into GPU memory (~3GB VRAM)
+- On first run, an admin token is auto-generated and printed to the console logs - **save this token!** (as noted elsewhere on this file, you should wait ~10s and then run `docker compose logs | grep "Admin Token:"` to see this token)
 - Check logs: `docker compose logs -f` (or just use `lazydocker`)
+- Monitor GPU VRAM with `nvidia-smi` to see model loading progress
 
 #### 3.2 Run the Client
 
@@ -782,8 +786,6 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
 
 ### Windows Executable
 
-**Status:** Build script not yet implemented. Manual PyInstaller workflow below.
-
 **What it does:**
 - Uses PyInstaller to bundle Python interpreter, PyQt6, PyAudio, and dependencies
 - Creates a standalone `.exe` file
@@ -795,13 +797,44 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
 - PyInstaller needs Windows linker tools
 - Cross-compilation not supported due to platform-specific binaries
 
-**Build (manual, on Windows):**
+**Prerequisites:**
 
-```powershell
-.\build\.venv\Scripts\pyinstaller.exe --clean client/build/pyinstaller-windows.spec
-```
+1. **Install uv** (Python package manager):
 
-**Output:** `dist/TranscriptionSuite.exe`
+   Open PowerShell as Administrator and run:
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   Close and reopen PowerShell to refresh PATH.
+
+**Build steps:**
+
+1. **Clone the repository** (if not already done):
+   ```powershell
+   git clone <repository-url> TranscriptionSuite
+   cd TranscriptionSuite
+   ```
+
+2. **Set up the build environment:**
+   ```powershell
+   cd build
+   uv venv --python 3.11
+   uv sync
+   cd ..
+   ```
+
+3. **Build the executable:**
+   ```powershell
+   .\build\.venv\Scripts\pyinstaller.exe --clean .\client\src\client\build\pyinstaller-windows.spec
+   ```
+
+**Output:** `dist\TranscriptionSuite.exe`
+
+**Notes:**
+- No need to install Python separately - `uv` handles Python installation automatically
+- The executable is ~50-100 MB due to bundled Python interpreter and Qt libraries
+- The build process takes 1-2 minutes on modern hardware
 
 **TODO:** Create `build/build-windows.ps1` script to automate this process.
 
@@ -898,6 +931,8 @@ docker compose up -d
 # Switch back to local mode
 docker compose up -d    # TLS_ENABLED defaults to false
 ```
+
+> **Note:** Switching modes recreates the container but preserves the Docker volume (`transcription-suite-data`). Your admin token, database, and all data persist across mode switches. The admin token is only regenerated if you delete the volume with `docker volume rm transcription-suite-data`.
 
 **Ports:**
 - `8000` — HTTP API (always available)
@@ -1117,6 +1152,64 @@ native_src/backend/
 ├── config.py                         # Configuration management
 └── pyproject.toml                    # Package definition & dependencies
 ```
+
+#### Lazy Import Optimization
+
+The backend uses **lazy imports** to minimize startup time by deferring heavy ML library loading until actually needed.
+
+**Key principles:**
+
+1. **Module-level imports are minimal**: Only import lightweight dependencies at module load time
+2. **Heavy imports are deferred**: ML libraries (torch, faster-whisper, scipy, etc.) are imported inside methods where they're first used
+3. **TYPE_CHECKING for type hints**: Use `typing.TYPE_CHECKING` to import types without runtime cost
+
+**Example from `model_manager.py`:**
+
+```python
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+# Type-only imports (no runtime cost)
+if TYPE_CHECKING:
+    from server.core.stt.engine import AudioToTextRecorder
+    from server.core.diarization_engine import DiarizationEngine
+
+class ModelManager:
+    def __init__(self, config: Dict[str, Any]):
+        # Lazy import - only loads when ModelManager is created
+        from server.core.audio_utils import check_cuda_available, get_gpu_memory_info
+
+        self.gpu_available = check_cuda_available()
+
+    def _create_transcription_engine(self) -> "AudioToTextRecorder":
+        # Lazy import - only loads when first transcription is requested
+        from server.core.stt.engine import AudioToTextRecorder
+
+        return AudioToTextRecorder(...)
+```
+
+**Affected files:**
+- `api/main.py` - Lazy import of `model_manager` inside `lifespan()`
+- `api/routes/websocket.py` - Lazy imports of `model_manager` in route handlers
+- `api/routes/notebook.py` - Lazy import of `audio_utils` in upload handler
+- `core/model_manager.py` - All heavy imports are lazy (torch, faster-whisper, etc.)
+
+**Startup timing breakdown:**
+```
+[TIMING] 0.882s - main.py module load complete  ✓
+[TIMING] 0.885s - lifespan() started            ✓ (3ms gap)
+[TIMING] 3.143s - model manager created         (imports torch)
+[TIMING] 9.002s - model preload complete        (loads Whisper model)
+```
+
+The ~9 second total startup is dominated by:
+- **2.3s**: PyTorch import for GPU checking
+- **5.9s**: Whisper model loading into GPU memory
+
+Both are unavoidable when preloading models at startup. The key optimization was eliminating the 9.6s delay *before* lifespan starts.
+
+**Timing instrumentation:**
+
+The server includes optional timing instrumentation in `entrypoint.py` and `main.py` using `_log_time()` functions. These log timestamps to help diagnose startup performance. The overhead is negligible (<1ms per log).
 
 #### Setting Up the Development Environment
 
@@ -1714,7 +1807,7 @@ The server uses a unified token-based authentication system managed by `TokenSto
 **If you miss the token:**
 ```bash
 # Check the Docker logs for the admin token
-docker logs transcription-suite 2>&1 | grep -A 5 "ADMIN TOKEN"
+docker logs transcription-suite 2>&1 | grep -A 5 "Admin Token:"
 
 # Or view the token store directly (tokens are hashed, but you can see metadata)
 docker compose exec transcription-suite cat /data/tokens/tokens.json
@@ -2003,22 +2096,102 @@ Environment variables:
 
 ### Client Configuration
 
-`~/.config/TranscriptionSuite/client.yaml`:
+Client config location: `~/.config/TranscriptionSuite/client.yaml` (Linux), `Documents\TranscriptionSuite\client.yaml` (Windows)
+
+**Full configuration with comments:**
 
 ```yaml
 server:
-  host: localhost
-  port: 8000
-  use_https: false
-  token: ""
+  # Local server settings (used when use_remote is false)
+  host: localhost              # Hostname for local connections
+  port: 8000                   # Server port (8000 for HTTP, 8443 for HTTPS)
+  use_https: false             # Enable HTTPS/TLS encryption
+  token: ""                    # Authentication token from server
+
+  # Remote server settings (Tailscale/VPN connections)
+  use_remote: false            # Enable remote server mode
+  remote_host: ""              # ONLY the hostname - no http://, no port
+                               # Examples:
+                               #   - desktop.tail1234.ts.net
+                               #   - 100.101.102.103
+                               # Configure port and HTTPS separately above
+
+  # Connection behavior
+  auto_reconnect: true         # Automatically reconnect on disconnect
+  reconnect_interval: 10       # Seconds between reconnection attempts
+  timeout: 30                  # General request timeout (seconds)
+  transcription_timeout: 300   # Transcription request timeout (seconds)
 
 recording:
-  sample_rate: 16000
-  device_index: null
+  sample_rate: 16000           # Audio sample rate (fixed for Whisper)
+  device_index: null           # Audio input device (null = default)
 
 clipboard:
-  auto_copy: true
+  auto_copy: true              # Copy transcription to clipboard automatically
+
+ui:
+  notifications: true          # Show desktop notifications
+  start_minimized: false       # Start with tray icon only (no window)
+  left_click: start_recording  # Left-click action: start_recording | show_menu
+  middle_click: stop_transcribe # Middle-click: stop_transcribe | cancel_recording | none
 ```
+
+**Key Configuration Concepts:**
+
+**1. Local vs Remote Connection:**
+
+The client supports two modes controlled by `use_remote`:
+
+- **Local mode** (`use_remote: false`): Connects to `host:port` (usually `localhost:8000`)
+- **Remote mode** (`use_remote: true`): Connects to `remote_host:port` (e.g., Tailscale server)
+
+**2. Understanding `host` vs `remote_host`:**
+
+| Setting | Purpose | Valid Values |
+|---------|---------|--------------|
+| `host` | Local server hostname | `localhost`, `127.0.0.1`, or any local hostname |
+| `remote_host` | Remote server hostname | ONLY hostname - no protocol, no port |
+
+**Common Mistakes:**
+
+```yaml
+# WRONG - includes protocol and port
+remote_host: "https://desktop.tail1234.ts.net:8443/"
+
+# CORRECT - hostname only
+remote_host: "desktop.tail1234.ts.net"
+```
+
+The client will automatically strip protocols and ports from `remote_host` if accidentally included.
+
+**3. Port and HTTPS Settings:**
+
+The `port` and `use_https` settings apply to **both** local and remote connections:
+
+```yaml
+# Example: Local HTTP connection
+use_remote: false
+host: localhost
+port: 8000
+use_https: false
+
+# Example: Remote HTTPS connection via Tailscale
+use_remote: true
+remote_host: desktop.tail1234.ts.net
+port: 8443
+use_https: true
+```
+
+**4. Authentication Token:**
+
+The token is automatically saved after first successful connection or when provided via CLI:
+
+```bash
+# Token is saved to config after this command
+uv run transcription-client --token "your_admin_token_here"
+```
+
+Tokens are used in `Authorization: Bearer <token>` headers for API authentication.
 
 ### Native Development Configuration
 
@@ -2099,9 +2272,14 @@ The container health check automatically adapts to your TLS configuration:
 
 ### Model Loading
 
-**First container startup**: On initial boot, the server needs ~30 seconds to load ML models into GPU memory. The container may report as "healthy" before model loading completes. Wait before attempting transcriptions or client connections.
+**First container startup**: On initial boot, the server takes ~9 seconds total to start:
+- **0.9s**: FastAPI module loading and route registration
+- **2.3s**: PyTorch import for GPU detection
+- **6s**: Whisper model loading into GPU memory (~3GB VRAM)
 
-**First transcription of a new model**: Additional time may be needed if Whisper models are being downloaded from HuggingFace (varies by model size and network speed).
+The container health check may report "healthy" before model loading completes. Use `docker compose logs -f` to monitor startup progress and watch for the "Server startup complete" message.
+
+**First transcription of a new model**: Additional time (2-5 minutes) is needed if Whisper models are being downloaded from HuggingFace on first use. Monitor with `docker compose logs -f` to see download progress. Models are cached in the `transcription-suite-models` volume and don't need to be re-downloaded on container recreation.
 
 ### FastAPI Startup Errors
 

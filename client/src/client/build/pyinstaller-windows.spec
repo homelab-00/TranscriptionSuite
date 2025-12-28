@@ -2,8 +2,8 @@
 """
 PyInstaller spec file for TranscriptionSuite Windows client.
 
-Build command (run on Windows):
-    pyinstaller --clean client/build/pyinstaller-windows.spec
+Build command (run from project root on Windows):
+    .\build\.venv\Scripts\pyinstaller.exe --clean .\client\src\client\build\pyinstaller-windows.spec
 
 Output: dist/TranscriptionSuite.exe
 """
@@ -11,19 +11,19 @@ Output: dist/TranscriptionSuite.exe
 import sys
 from pathlib import Path
 
-# Project root
-project_root = Path(SPECPATH).parent.parent.parent
-client_dir = project_root / "client"
+# Project root (4 parents up from spec directory: build -> client -> src -> client -> TranscriptionSuite)
+# Note: SPECPATH is the directory containing the spec file, not the file itself
+project_root = Path(SPECPATH).parent.parent.parent.parent
+client_src = project_root / "client" / "src" / "client"
 
 block_cipher = None
 
 a = Analysis(
-    [str(client_dir / "__main__.py")],
-    pathex=[str(project_root)],
+    [str(client_src / "__main__.py")],
+    pathex=[str(project_root / "client" / "src")],
     binaries=[],
     datas=[
-        # Include any data files needed
-        (str(project_root / "config" / "client.yaml.example"), "config"),
+        # No config files needed - client finds config at runtime
     ],
     hiddenimports=[
         "client.common",

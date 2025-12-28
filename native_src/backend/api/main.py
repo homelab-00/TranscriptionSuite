@@ -1,3 +1,15 @@
+# Timing instrumentation - must be at very top before any imports
+import time as _time
+
+_start_time = _time.perf_counter()
+
+
+def _log_time(msg: str) -> None:
+    print(f"[TIMING] {_time.perf_counter() - _start_time:.3f}s - {msg}", flush=True)
+
+
+_log_time("main.py module load started")
+
 """
 Unified FastAPI application for TranscriptionSuite server.
 
@@ -14,18 +26,34 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+_log_time("stdlib imports done")
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
+_log_time("fastapi imports done")
+
 from server.core.token_store import get_token_store
+_log_time("token_store imported")
+
 from server.api.routes import admin, auth, health, llm, notebook, search, transcription, websocket
+_log_time("routes imported")
+
 from server.config import get_config
-from server.core.model_manager import cleanup_models, get_model_manager
+_log_time("config imported")
+
+# NOTE: model_manager is imported lazily inside lifespan() to avoid
+# loading heavy ML libraries (torch, faster_whisper) at module import time.
+_log_time("model_manager import SKIPPED (lazy import in lifespan)")
+
 from server.database.database import init_db
+_log_time("database imported")
+
 from server.logging import get_logger, setup_logging
+_log_time("logging imported")
 
 logger = get_logger("api")
 
@@ -105,35 +133,47 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup/shutdown."""
+    # Lazy import to avoid loading torch/faster_whisper at module load time
+    from server.core.model_manager import cleanup_models, get_model_manager
+
     # Startup
+    _log_time("lifespan() started")
     logger.info("TranscriptionSuite server starting...")
 
     config = get_config()
+    _log_time("config loaded")
 
     # Initialize logging
     setup_logging(config.logging)
+    _log_time("logging setup complete")
 
     # Initialize database
     init_db()
+    _log_time("database init_db() complete")
     logger.info("Database initialized")
 
     # Initialize token store (generates admin token on first run)
     get_token_store()
+    _log_time("token store initialized")
     logger.info("Token store initialized")
 
     # Initialize model manager
     manager = get_model_manager(config.config)
+    _log_time("model manager created")
     logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
 
     # Preload transcription model at startup
     logger.info("Preloading transcription model...")
+    _log_time("starting model preload (GPU VRAM should spike now)...")
     manager.load_transcription_model()
+    _log_time("model preload complete")
 
     # Store config in app state
     app.state.config = config
     app.state.model_manager = manager
 
     logger.info("Server startup complete")
+    _log_time("lifespan startup complete")
 
     yield
 
@@ -233,7 +273,9 @@ def mount_frontend(app: FastAPI, frontend_path: Path, mount_path: str = "/") -> 
 
 
 # Create default app instance
+_log_time("creating FastAPI app...")
 app = create_app()
+_log_time("FastAPI app created (lifespan will run when uvicorn starts)")
 
 # Auth page HTML template
 AUTH_PAGE_HTML = """
@@ -499,3 +541,6 @@ async def favicon():
 async def root_redirect() -> RedirectResponse:
     """Redirect root to /notebook/calendar."""
     return RedirectResponse(url="/notebook/calendar", status_code=302)
+
+
+_log_time("main.py module load complete")

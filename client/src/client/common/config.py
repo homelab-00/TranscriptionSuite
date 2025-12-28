@@ -15,12 +15,20 @@ import yaml
 
 
 def get_config_dir() -> Path:
-    """Get platform-specific configuration directory."""
+    """
+    Get platform-specific configuration directory.
+
+    Returns:
+        Path to user config directory:
+        - Linux: ~/.config/TranscriptionSuite/
+        - Windows: ~/Documents/TranscriptionSuite/
+        - macOS: ~/Library/Application Support/TranscriptionSuite/
+    """
     system = platform.system()
 
     if system == "Windows":
-        base = Path(os.environ.get("APPDATA", "~"))
-        config_dir = base / "TranscriptionSuite"
+        # Windows: Documents/TranscriptionSuite/ (matches backend config location)
+        config_dir = Path.home() / "Documents" / "TranscriptionSuite"
     elif system == "Darwin":  # macOS
         config_dir = (
             Path.home() / "Library" / "Application Support" / "TranscriptionSuite"
@@ -139,8 +147,36 @@ class ClientConfig:
     def server_host(self) -> str:
         """Get effective server host."""
         if self.get("server", "use_remote"):
-            return self.get("server", "remote_host") or self.get("server", "host")
+            remote_host = self.get("server", "remote_host") or self.get("server", "host")
+            # Sanitize remote_host: strip protocol, port, and trailing slashes
+            return self._sanitize_hostname(remote_host)
         return self.get("server", "host", default="localhost")
+
+    def _sanitize_hostname(self, hostname: str) -> str:
+        """
+        Sanitize hostname by removing protocol, port, and trailing slashes.
+
+        Examples:
+            https://example.com:8443/ -> example.com
+            http://example.com -> example.com
+            example.com:8080 -> example.com
+            example.com/ -> example.com
+        """
+        if not hostname:
+            return "localhost"
+
+        # Remove protocol (http://, https://, ws://, wss://)
+        if "://" in hostname:
+            hostname = hostname.split("://", 1)[1]
+
+        # Remove port (anything after the first colon)
+        if ":" in hostname:
+            hostname = hostname.split(":", 1)[0]
+
+        # Remove trailing slashes and whitespace
+        hostname = hostname.rstrip("/").strip()
+
+        return hostname or "localhost"
 
     @property
     def server_port(self) -> int:

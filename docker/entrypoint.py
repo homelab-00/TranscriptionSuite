@@ -10,8 +10,16 @@ Runs the unified FastAPI server with all services:
 
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
+
+# Timing instrumentation for startup diagnostics
+_start_time = time.perf_counter()
+
+
+def _log_time(msg: str) -> None:
+    print(f"[TIMING] {time.perf_counter() - _start_time:.3f}s - {msg}", flush=True)
 
 # Suppress pkg_resources deprecation warning from webrtcvad (global filter)
 warnings.filterwarnings(
@@ -107,8 +115,11 @@ def print_banner(
 
 def main() -> None:
     """Main entrypoint."""
+    _log_time("entrypoint main() started")
+
     # Setup directories
     data_dir, log_dir = setup_directories()
+    _log_time("directories setup complete")
 
     # Set working directory to app root
     app_root = Path(__file__).parent.parent
@@ -132,10 +143,14 @@ def main() -> None:
     print_banner(data_dir, log_dir, port, tls_enabled)
 
     # Initialize database
+    _log_time("importing database module...")
     from server.database.database import init_db, set_data_directory
+    _log_time("database module imported")
 
     set_data_directory(data_dir)
+    _log_time("data directory set")
     init_db()
+    _log_time("database initialized")
 
     # Prepare uvicorn config
     uvicorn_config = {
@@ -166,6 +181,7 @@ def main() -> None:
         print(f"TLS disabled - listening on http://{host}:{port}")
 
     # Run uvicorn
+    _log_time("starting uvicorn (will load main.py module)...")
     uvicorn.run(**uvicorn_config)
 
 

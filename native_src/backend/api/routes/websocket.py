@@ -23,7 +23,9 @@ import soundfile as sf
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from server.core.model_manager import get_model_manager
+# NOTE: model_manager is imported lazily inside functions to avoid
+# loading heavy ML libraries (torch, faster_whisper) at module import time.
+# This reduces server startup time by ~10 seconds.
 from server.core.token_store import get_token_store
 from server.core.client_detector import (
     ClientType,
@@ -129,7 +131,9 @@ class TranscriptionSession:
                 f"for {self.client_name}"
             )
 
-            # Get transcription engine
+            # Get transcription engine (lazy import to avoid startup delay)
+            from server.core.model_manager import get_model_manager
+
             model_manager = get_model_manager()
             engine = model_manager.transcription_engine
 
@@ -187,6 +191,8 @@ class TranscriptionSession:
 
         if self._use_realtime_engine:
             # Initialize realtime engine for VAD-based recording
+            from server.core.model_manager import get_model_manager
+
             model_manager = get_model_manager()
             self._realtime_engine = model_manager.get_realtime_engine(
                 session_id=self.session_id,
@@ -249,6 +255,8 @@ class TranscriptionSession:
 
     async def cleanup(self) -> None:
         """Clean up session resources."""
+        from server.core.model_manager import get_model_manager
+
         if self._realtime_engine:
             model_manager = get_model_manager()
             model_manager.release_realtime_engine(self.session_id)
@@ -426,6 +434,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
         # Notify model manager about standalone client
         if client_type == ClientType.STANDALONE:
+            from server.core.model_manager import get_model_manager
+
             model_manager = get_model_manager()
             model_manager.on_standalone_client_connected()
 

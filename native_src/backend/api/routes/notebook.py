@@ -18,7 +18,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from server.config import get_config
-from server.core.audio_utils import convert_to_mp3, load_audio
+# NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
+# loading torch at module import time. This reduces server startup time.
 from server.database.database import (
     delete_recording,
     get_all_recordings,
@@ -278,9 +279,12 @@ async def upload_and_transcribe(
 ) -> Dict[str, Any]:
     """
     Upload an audio file, transcribe it, and save to the notebook database.
-    
+
     Returns the recording_id for status tracking.
     """
+    # Lazy import to avoid loading torch at module import time
+    from server.core.audio_utils import convert_to_mp3, load_audio
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 

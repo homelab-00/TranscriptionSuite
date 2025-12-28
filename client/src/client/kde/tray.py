@@ -31,6 +31,7 @@ try:
 
         state_changed = pyqtSignal(object)  # TrayState
         notification_requested = pyqtSignal(str, str)  # title, message
+        clipboard_requested = pyqtSignal(str)  # text to copy
 
 except ImportError:
     # Provide stub for type checking only
@@ -89,6 +90,7 @@ class Qt6Tray(AbstractTray):
         self._signals = TraySignals()
         self._signals.state_changed.connect(self._do_set_state)
         self._signals.notification_requested.connect(self._do_show_notification)
+        self._signals.clipboard_requested.connect(self._do_copy_to_clipboard)
 
         # Dialog instances (created lazily)
         self._settings_dialog = None
@@ -250,15 +252,18 @@ class Qt6Tray(AbstractTray):
         self.tray.setToolTip(text)
 
     def copy_to_clipboard(self, text: str) -> bool:
-        """Copy text to clipboard using Qt (Wayland-safe)."""
+        """Copy text to clipboard (thread-safe)."""
+        self._signals.clipboard_requested.emit(text)
+        return True
+
+    def _do_copy_to_clipboard(self, text: str) -> None:
+        """Actually copy to clipboard (must be called on main thread)."""
         try:
             clipboard = QApplication.clipboard()
             clipboard.setText(text)
             logger.debug("Copied to clipboard via Qt")
-            return True
         except Exception as e:
             logger.warning(f"Clipboard copy failed: {e}")
-            return False
 
     def show_settings_dialog(self) -> None:
         """Show the settings dialog."""

@@ -49,7 +49,6 @@ class SettingsDialog(QDialog):
 
         # Create tabs
         self._create_connection_tab()
-        self._create_remote_tab()
         self._create_audio_tab()
         self._create_behavior_tab()
 
@@ -71,20 +70,24 @@ class SettingsDialog(QDialog):
         form = QFormLayout(tab)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        # Host
-        self.host_edit = QLineEdit()
-        self.host_edit.setPlaceholderText("localhost")
-        form.addRow("Server Host:", self.host_edit)
-
         # Port
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(8000)
-        form.addRow("Server Port:", self.port_spin)
+        form.addRow("Port:", self.port_spin)
 
         # HTTPS
         self.https_check = QCheckBox("Use HTTPS")
         form.addRow("", self.https_check)
+
+        # Help text for connection settings
+        conn_help_label = QLabel(
+            "Port: 8000 (HTTP dev), 8443 (HTTPS via Tailscale)\n"
+            "HTTPS: Enable when connecting to Tailscale servers."
+        )
+        conn_help_label.setWordWrap(True)
+        conn_help_label.setStyleSheet("color: gray; font-size: 11px;")
+        form.addRow("", conn_help_label)
 
         # Token
         token_layout = QHBoxLayout()
@@ -101,33 +104,36 @@ class SettingsDialog(QDialog):
 
         form.addRow("Auth Token:", token_layout)
 
-        self.tabs.addTab(tab, "Connection")
-
-    def _create_remote_tab(self) -> None:
-        """Create the Remote settings tab."""
-        tab = QWidget()
-        form = QFormLayout(tab)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        # Separator
+        separator = QLabel()
+        separator.setStyleSheet("border-top: 1px solid #ccc; margin: 10px 0;")
+        form.addRow("", separator)
 
         # Use remote toggle
         self.use_remote_check = QCheckBox("Use remote server instead of local")
         form.addRow("", self.use_remote_check)
 
+        # Local host
+        self.host_edit = QLineEdit()
+        self.host_edit.setPlaceholderText("localhost")
+        form.addRow("Local Host:", self.host_edit)
+
         # Remote host (Tailscale IP)
         self.remote_host_edit = QLineEdit()
         self.remote_host_edit.setPlaceholderText("e.g., my-desktop.tail1234.ts.net")
-        form.addRow("Tailscale Host:", self.remote_host_edit)
+        form.addRow("Remote Host:", self.remote_host_edit)
 
-        # Help text
-        help_label = QLabel(
-            "When enabled, the client will connect to the remote host "
-            "instead of the local server. Use your Tailscale hostname or IP."
+        # Help text for host settings
+        host_help_label = QLabel(
+            "Enter ONLY the hostname (no http://, no port). Examples:\n"
+            "• my-machine.tail1234.ts.net\n"
+            "• 100.101.102.103"
         )
-        help_label.setWordWrap(True)
-        help_label.setStyleSheet("color: gray; font-size: 11px;")
-        form.addRow("", help_label)
+        host_help_label.setWordWrap(True)
+        host_help_label.setStyleSheet("color: gray; font-size: 11px;")
+        form.addRow("", host_help_label)
 
-        self.tabs.addTab(tab, "Remote")
+        self.tabs.addTab(tab, "Connection")
 
     def _create_audio_tab(self) -> None:
         """Create the Audio settings tab."""
@@ -219,8 +225,6 @@ class SettingsDialog(QDialog):
         self.port_spin.setValue(self.config.get("server", "port", default=8000))
         self.https_check.setChecked(self.config.get("server", "use_https", default=False))
         self.token_edit.setText(self.config.get("server", "token", default=""))
-
-        # Remote tab
         self.use_remote_check.setChecked(
             self.config.get("server", "use_remote", default=False)
         )
@@ -265,8 +269,6 @@ class SettingsDialog(QDialog):
         self.config.set("server", "port", value=self.port_spin.value())
         self.config.set("server", "use_https", value=self.https_check.isChecked())
         self.config.set("server", "token", value=self.token_edit.text())
-
-        # Remote tab
         self.config.set("server", "use_remote", value=self.use_remote_check.isChecked())
         self.config.set("server", "remote_host", value=self.remote_host_edit.text().strip())
 

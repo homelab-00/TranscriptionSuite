@@ -25,7 +25,7 @@ def run_tray(config) -> int:
     from client.kde.tray import Qt6Tray
 
     try:
-        tray = Qt6Tray()
+        tray = Qt6Tray(config=config)
         orchestrator = ClientOrchestrator(
             config=config,
             auto_connect=True,

@@ -8,30 +8,21 @@ Handles:
 - Real-time and preview transcription engines
 - Client-aware model loading (preview for standalone clients)
 - Graceful cleanup
+
+NOTE: All heavy imports (torch, faster_whisper, pyannote, etc.) are done lazily
+inside methods to avoid loading them at module import time.
 """
 
 import logging
-from typing import Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
-from server.core.audio_utils import (
-    check_cuda_available,
-    clear_gpu_cache,
-    get_gpu_memory_info,
-)
-from server.core.stt.engine import AudioToTextRecorder
-from server.core.diarization_engine import (
-    DiarizationEngine,
-    create_diarization_engine,
-)
-from server.core.realtime_engine import (
-    RealtimeTranscriptionEngine,
-    create_realtime_engine,
-)
-from server.core.preview_engine import (
-    PreviewTranscriptionEngine,
-    PreviewConfig,
-)
-from server.core.client_detector import ClientType
+# Type-only imports for hints (no runtime cost)
+if TYPE_CHECKING:
+    from server.core.stt.engine import AudioToTextRecorder
+    from server.core.diarization_engine import DiarizationEngine
+    from server.core.realtime_engine import RealtimeTranscriptionEngine
+    from server.core.preview_engine import PreviewTranscriptionEngine
+    from server.core.client_detector import ClientType
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +48,15 @@ class ModelManager:
         Args:
             config: Full application configuration dict
         """
+        # Lazy imports
+        from server.core.audio_utils import check_cuda_available, get_gpu_memory_info
+        from server.core.preview_engine import PreviewConfig
+
         self.config = config
-        self._transcription_engine: Optional[AudioToTextRecorder] = None
+        self._transcription_engine: Optional["AudioToTextRecorder"] = None
         self._diarization_engine: Optional[Any] = None  # Will be DiarizationEngine
-        self._preview_engine: Optional[PreviewTranscriptionEngine] = None
-        self._realtime_engines: Dict[str, RealtimeTranscriptionEngine] = {}
+        self._preview_engine: Optional["PreviewTranscriptionEngine"] = None
+        self._realtime_engines: Dict[str, "RealtimeTranscriptionEngine"] = {}
 
         # Track connected standalone clients
         self._standalone_client_count = 0
@@ -70,28 +65,26 @@ class ModelManager:
         self.gpu_available = check_cuda_available()
         if self.gpu_available:
             gpu_info = get_gpu_memory_info()
-            logger.info(
-                f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory"
-            )
+            logger.info(f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory")
         else:
             logger.warning("No GPU available, using CPU for transcription")
 
         # Check if preview is enabled in config
         self._preview_config = PreviewConfig.from_dict(config)
         if self._preview_config.enabled:
-            logger.info(
-                f"Preview transcriber configured with model: {self._preview_config.model}"
-            )
+            logger.info(f"Preview transcriber configured with model: {self._preview_config.model}")
 
     @property
-    def transcription_engine(self) -> AudioToTextRecorder:
+    def transcription_engine(self) -> "AudioToTextRecorder":
         """Get or create the unified transcription engine."""
         if self._transcription_engine is None:
             self._transcription_engine = self._create_transcription_engine()
         return self._transcription_engine
 
-    def _create_transcription_engine(self) -> AudioToTextRecorder:
+    def _create_transcription_engine(self) -> "AudioToTextRecorder":
         """Create the unified transcription engine from config."""
+        from server.core.stt.engine import AudioToTextRecorder
+
         main_cfg = self.config.get("main_transcriber", {})
         trans_opts = self.config.get("transcription_options", {})
 
@@ -121,8 +114,10 @@ class ModelManager:
             self._transcription_engine.unload_model()
 
     @property
-    def diarization_engine(self) -> DiarizationEngine:
+    def diarization_engine(self) -> "DiarizationEngine":
         """Get or create the diarization engine."""
+        from server.core.diarization_engine import create_diarization_engine
+
         if self._diarization_engine is None:
             self._diarization_engine = create_diarization_engine(self.config)
         return self._diarization_engine
@@ -137,6 +132,8 @@ class ModelManager:
 
     def unload_diarization_model(self) -> None:
         """Unload the diarization model."""
+        from server.core.audio_utils import clear_gpu_cache
+
         if self._diarization_engine is not None:
             try:
                 self._diarization_engine.unload()
@@ -153,30 +150,35 @@ class ModelManager:
     def get_realtime_engine(
         self,
         session_id: str,
-        client_type: ClientType = ClientType.WEB,
+        client_type: "ClientType | None" = None,
         language: Optional[str] = None,
         **callbacks: Callable,
-    ) -> RealtimeTranscriptionEngine:
+    ) -> "RealtimeTranscriptionEngine":
         """
         Get or create a real-time transcription engine for a session.
 
         Args:
             session_id: Unique session identifier
-            client_type: Type of client (standalone or web)
+            client_type: Type of client (standalone or web), defaults to WEB
             language: Target language code
             **callbacks: Optional callback functions
 
         Returns:
             RealtimeTranscriptionEngine for the session
         """
+        from server.core.client_detector import ClientType
+        from server.core.realtime_engine import create_realtime_engine
+
+        # Default to WEB client type
+        if client_type is None:
+            client_type = ClientType.WEB
+
         # Check if engine already exists for this session
         if session_id in self._realtime_engines:
             return self._realtime_engines[session_id]
 
         # Determine if preview should be enabled
-        enable_preview = (
-            client_type == ClientType.STANDALONE and self._preview_config.enabled
-        )
+        enable_preview = client_type == ClientType.STANDALONE and self._preview_config.enabled
 
         if enable_preview:
             logger.info(f"Creating realtime engine with preview for session {session_id}")
@@ -224,7 +226,7 @@ class ModelManager:
     # =========================================================================
 
     @property
-    def preview_engine(self) -> Optional[PreviewTranscriptionEngine]:
+    def preview_engine(self) -> Optional["PreviewTranscriptionEngine"]:
         """Get the preview engine if available."""
         return self._preview_engine
 
@@ -240,6 +242,8 @@ class ModelManager:
         Returns:
             True if loaded successfully
         """
+        from server.core.preview_engine import PreviewTranscriptionEngine
+
         if not self._preview_config.enabled:
             logger.debug("Preview engine disabled in config")
             return False
@@ -296,6 +300,8 @@ class ModelManager:
 
     def unload_all(self) -> None:
         """Unload all models and free GPU memory."""
+        from server.core.audio_utils import clear_gpu_cache
+
         logger.info("Unloading all models...")
         self.unload_transcription_model()
         self.unload_diarization_model()
@@ -306,6 +312,8 @@ class ModelManager:
 
     def get_status(self) -> Dict[str, Any]:
         """Get status information about loaded models."""
+        from server.core.audio_utils import get_gpu_memory_info
+
         status = {
             "gpu_available": self.gpu_available,
             "gpu_memory": get_gpu_memory_info() if self.gpu_available else None,
@@ -321,8 +329,7 @@ class ModelManager:
             },
             "preview": {
                 "enabled": self._preview_config.enabled,
-                "loaded": self._preview_engine is not None
-                and self._preview_engine.is_loaded,
+                "loaded": self._preview_engine is not None and self._preview_engine.is_loaded,
                 "model": self._preview_config.model if self._preview_config.enabled else None,
             },
             "realtime": {
