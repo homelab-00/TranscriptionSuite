@@ -229,10 +229,10 @@ if ($containerExists) {
 }
 
 # Check if image exists
-$imageExists = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null | Where-Object { $_ -eq "bvcsfd/transcription-suite:latest" }
+$imageExists = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null | Where-Object { $_ -eq "ghcr.io/homelab-00/transcriptionsuite-server:latest" }
 if ($imageExists) {
     Write-Host "Info: " -ForegroundColor Cyan -NoNewline
-    Write-Host "Using existing image: bvcsfd/transcription-suite:latest"
+    Write-Host "Using existing image: ghcr.io/homelab-00/transcriptionsuite-server:latest"
 } else {
     Write-Info "Image will be built on first run"
 }

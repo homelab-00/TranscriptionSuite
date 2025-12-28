@@ -8,7 +8,7 @@ set -e
 # ============================================================================
 # Constants
 # ============================================================================
-DOCKER_IMAGE="bvcsfd/transcription-suite"
+DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main"
@@ -184,7 +184,7 @@ echo ""
 if docker pull "$DOCKER_IMAGE:latest"; then
     print_info "Docker image pulled successfully"
 else
-    print_warning "Could not pull from Docker Hub (image may not be published yet)"
+    print_warning "Could not pull from GitHub Container Registry (image may not be published yet)"
     print_info "You can build locally instead: cd docker && docker compose build"
 fi
 

@@ -42,7 +42,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: bvcsfd/transcription-suite:latest
+    image: ghcr.io/homelab-00/transcriptionsuite-server:latest
     container_name: transcription-suite
     
     # Use host network mode for direct access to host services (LM Studio)

@@ -62,6 +62,7 @@ This document contains technical details, architecture decisions, and developmen
   - [Docker GPU Access](#docker-gpu-access)
   - [Docker Logs](#docker-logs)
   - [Health Check Issues](#health-check-issues)
+  - [Tailscale DNS Resolution Issues](#tailscale-dns-resolution-issues)
   - [Model Loading](#model-loading)
   - [cuDNN Library Errors](#cudnn-library-errors)
   - [GNOME Tray Not Showing](#gnome-tray-not-showing)
@@ -220,7 +221,7 @@ The setup script will:
 2. Create the config directory with all necessary files:
    - Linux: `~/.config/TranscriptionSuite/`
    - Windows: `Documents\TranscriptionSuite\`
-3. Pull the Docker image from Docker Hub
+3. Pull the Docker image from GitHub Container Registry
 
 **Files created in your config directory:**
 - `config.yaml` - Server settings
@@ -594,15 +595,15 @@ docker compose build
 4. **Config template**: Copies `server/config.yaml` as `config/config.yaml.example`
 
 **Development vs. Production Images:**
-When you run `docker compose build`, Docker uses the `build:` section in `docker-compose.yml` to create a local image tagged as `bvcsfd/transcription-suite:latest`. This local image will **always** take priority over the one on Docker Hub when you run `docker compose up`. Docker only attempts to pull from the registry if the image does not exist locally.
+When you run `docker compose build`, Docker uses the `build:` section in `docker-compose.yml` to create a local image tagged as `ghcr.io/homelab-00/transcriptionsuite-server:latest`. This local image will **always** take priority over the one from GitHub Container Registry when you run `docker compose up`. Docker only attempts to pull from the registry if the image does not exist locally.
 
 **Startup Script Behavior:**
 The same priority applies when using the startup scripts (`start-local.sh`, `start-remote.sh`, etc.). These scripts run `docker compose up -d`, which follows the same logic:
-- If a local image with the tag `bvcsfd/transcription-suite:latest` exists (from a previous `docker compose build`), it will be used.
-- If no local image exists, Docker Compose will attempt to pull it from Docker Hub.
+- If a local image with the tag `ghcr.io/homelab-00/transcriptionsuite-server:latest` exists (from a previous `docker compose build`), it will be used.
+- If no local image exists, Docker Compose will attempt to pull it from GitHub Container Registry.
 - The scripts check if the image exists locally and inform you, but they do **not** force a pull if a local image is present.
 
-This means for development, you can freely build and test local changes without worrying about Docker Hub overwriting your work.
+This means for development, you can freely build and test local changes without worrying about the registry overwriting your work.
 
 **Force rebuild** (if layer caching causes issues):
 
@@ -610,27 +611,42 @@ This means for development, you can freely build and test local changes without 
 docker compose build --no-cache
 ```
 
-### Step 2.1: Pushing to Docker Hub
+### Step 2.1: Pushing to GitHub Container Registry
 
-To share your built image with others or deploy it to other machines, you can push it to Docker Hub:
+To share your built image with others or deploy it to other machines, you can push it to GitHub Container Registry (GHCR):
 
-1. **Login to Docker Hub** (if not already):
+1. **Create a GitHub Personal Access Token** (if not already):
+   - Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - Generate a new token with `write:packages` and `read:packages` scopes
+   - Save the token securely
+
+2. **Login to GitHub Container Registry**:
    ```bash
-   docker login
+   echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
    ```
 
-2. **Tag and Push**:
-   Since the image is already built with the correct tag (`bvcsfd/transcription-suite:latest`) by Docker Compose, you can push it directly:
+   **Security Tip: Secure Credential Storage**
+   To avoid storing credentials in plaintext (the default `~/.docker/config.json`), it is highly recommended to use a credential helper:
+   - **Linux (KDE/GNOME)**: Install `docker-credential-secretservice` and set `"credsStore": "secretservice"` in `~/.docker/config.json`.
+   - **Windows/macOS**: Docker Desktop uses built-in helpers by default.
+
+3. **Tag and Push**:
+   Since the image is already built with the correct tag (`ghcr.io/homelab-00/transcriptionsuite-server:latest`) by Docker Compose, you can push it directly:
    ```bash
-   docker push bvcsfd/transcription-suite:latest
+   docker push ghcr.io/homelab-00/transcriptionsuite-server:latest
    ```
 
-3. **Versioning (Recommended)**:
+4. **Versioning (Recommended)**:
    It is good practice to tag releases with version numbers instead of just using `latest`:
    ```bash
-   docker tag bvcsfd/transcription-suite:latest bvcsfd/transcription-suite:v1.0.0
-   docker push bvcsfd/transcription-suite:v1.0.0
+   docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest ghcr.io/homelab-00/transcriptionsuite-server:v1.0.0
+   docker push ghcr.io/homelab-00/transcriptionsuite-server:v1.0.0
    ```
+
+5. **Make Package Public** (optional):
+   - Go to the package page on GitHub: `https://github.com/homelab-00/TranscriptionSuite/pkgs/container/transcriptionsuite`
+   - Click "Package settings" → Change visibility to "Public"
+   - This allows users to pull the image without authentication
 
 ### Step 3: Run Client Locally
 
@@ -765,13 +781,15 @@ This creates `build/.venv` containing packaging tools isolated from runtime depe
 **What it does:**
 1. Runs PyInstaller with `client/build/pyinstaller-kde.spec` to create a standalone binary
 2. Bundles PyQt6, PyAudio, and all Python dependencies
-3. Creates an AppImage with `.desktop` file, icon, and launcher
-4. Uses `appimagetool` to package everything into a single `.AppImage` file
+3. Creates an AppImage with `.desktop` file, icon (from project logo.png), and launcher
+4. Automatically resizes logo to 256x256 using ImageMagick (or copies original if ImageMagick not available)
+5. Uses `appimagetool` to package everything into a single `.AppImage` file
 
 **Requirements:**
 - Linux system (tested on Arch, should work on any distro)
 - `appimagetool` (auto-downloaded if not installed)
 - Build tools venv set up (see Prerequisites)
+- Optional: ImageMagick `convert` command for automatic icon resizing
 
 **Build:**
 
@@ -794,7 +812,8 @@ chmod +x TranscriptionSuite-KDE-x86_64.AppImage
 1. Copies client source code into AppImage structure (no PyInstaller)
 2. Creates a launcher script that validates system dependencies at runtime
 3. Sets `PYTHONPATH` to include bundled source
-4. Packages into `.AppImage` for easier distribution
+4. Includes application icon from project logo.png (resized to 256x256)
+5. Packages into `.AppImage` for easier distribution
 
 **Features:**
 - GTK3-based settings dialog (Connection, Audio, Behavior tabs)
@@ -814,6 +833,7 @@ PyInstaller cannot reliably bundle these, and attempts usually result in broken 
 
 **Requirements:**
 - Build system: Linux with `appimagetool`
+- Optional: ImageMagick `convert` command for automatic icon resizing
 - Target system: Python 3.11+, GTK3, libappindicator-gtk3, python-gobject, python-numpy, python-aiohttp
 
 **Build:**
@@ -934,6 +954,40 @@ cd build && uv sync
 
 ### Docker Build & Runtime Notes
 
+#### Container Image Metadata
+
+The Docker image includes an OCI (Open Container Initiative) label for source code attribution:
+
+```dockerfile
+LABEL org.opencontainers.image.source https://github.com/homelab-00/TranscriptionSuite
+```
+
+This label:
+- Links the container image to the source code repository
+- Appears in GitHub Container Registry (GHCR) package metadata
+- Helps users discover the source code for any image they pull
+- Follows OCI image spec conventions for image attribution
+
+#### Securing Docker Credentials
+
+By default, Docker stores credentials in plaintext in `~/.docker/config.json`, which triggers a security warning during login. To secure your credentials:
+
+1. **Install a credential helper**:
+   - **Arch Linux (KDE/GNOME)**: `yay -S docker-credential-secretservice`
+   - **Debian/Ubuntu**: `sudo apt install docker-credential-helpers`
+
+2. **Configure Docker**:
+   Edit `~/.docker/config.json` and add/update the `credsStore` field:
+   ```json
+   {
+     "credsStore": "secretservice",
+     "auths": { ... }
+   }
+   ```
+
+3. **Re-login**:
+   After configuring the helper, run `docker logout` and `docker login` again. The credentials will now be stored in your system keyring (KWallet or GNOME Keyring) instead of the config file.
+
 #### Default Configuration
 
 - **Docker image default config**: The Docker build copies `server/config.yaml` into the image as `/app/config.yaml`.
@@ -948,6 +1002,23 @@ cd build && uv sync
   - `npm run build`
 - Docker layer caching may reuse these layers if `package*.json` and frontend sources are unchanged. Use `--no-cache` to force rebuilding.
 - The Docker build **does not run `npm audit`** — run audits locally before building.
+
+#### Docker Image Size Optimization
+
+The Dockerfile uses `ubuntu:22.04` as the base image instead of `nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04` to avoid CUDA library duplication:
+
+- **Previous approach**: Used NVIDIA CUDA base image (~4.2 GB of CUDA/cuDNN libraries in base)
+- **Current approach**: Uses minimal Ubuntu base image
+- **Why it works**: PyTorch pip packages bundle their own CUDA libraries (~4.1 GB), which are prioritized via `LD_LIBRARY_PATH`
+- **GPU access**: The nvidia-container-toolkit injects GPU drivers at runtime regardless of base image
+- **Size savings**: ~4.2 GB reduction (from 19.9 GB to 15.5 GB)
+
+The system CUDA libraries from the nvidia/cuda base image were unused since the Dockerfile already configured:
+```dockerfile
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+```
+
+This prioritizes PyTorch's bundled libraries, making the base image's CUDA installation redundant.
 
 ### Local vs Remote Mode
 
@@ -1762,6 +1833,25 @@ If you encounter SSL/certificate errors:
    - Cert/key files not mounted correctly in Docker
    - Firewall blocking port 8443
 
+#### DNS Resolution Issues
+
+**Note:** As of December 2024, the client uses async DNS resolution to gracefully handle Tailscale MagicDNS timing issues.
+
+If you see DNS errors like "DNS resolution failed for <your-machine>.tail1234.ts.net":
+
+1. **This is usually a timing issue**, not a configuration problem
+2. The client now logs this as WARNING (not ERROR) and continues with connection attempts
+3. The actual aiohttp connection will retry DNS resolution with its own timeout
+4. See [Tailscale DNS Resolution Issues](#tailscale-dns-resolution-issues) in the Troubleshooting section for detailed diagnosis and solutions
+
+**Quick fix:** Restart Tailscale service:
+```bash
+sudo systemctl restart tailscaled
+# Wait ~5 seconds, then retry connection
+```
+
+**Developer note:** The fix was implemented in `client/src/client/common/api_client.py` by replacing blocking `socket.getaddrinfo()` with async `asyncio.get_running_loop().getaddrinfo()` and adding graceful error handling.
+
 ### Server Busy Handling
 
 The client automatically handles server busy conditions when another transcription is already running:
@@ -2434,6 +2524,139 @@ The container health check automatically adapts to your TLS configuration:
    # Wait 60 seconds for start_period, then check:
    docker compose ps
    ```
+
+### Tailscale DNS Resolution Issues
+
+If the client fails to connect with DNS resolution errors like:
+
+```
+DNS resolution failed for <your-machine>.tail1234.ts.net: [Errno -2] Name or service not known
+```
+
+**This was a known issue prior to the async DNS resolution fix** (implemented December 2024). The client now uses non-blocking async DNS resolution with graceful error handling.
+
+#### Root Cause
+
+The error typically occurs when:
+- Client starts before Tailscale MagicDNS is fully initialized
+- System DNS resolver (systemd-resolved) forwards to Tailscale DNS (100.100.100.100)
+- MagicDNS isn't ready yet to resolve the Tailscale hostname
+
+**Note:** This is a timing issue, not a configuration problem. DNS resolution works perfectly once Tailscale is fully initialized.
+
+#### The Fix (December 2024)
+
+The client now uses **async DNS resolution** instead of blocking calls:
+
+**File:** `client/src/client/common/api_client.py` (Lines 200-228)
+
+**Key changes:**
+- Replaced blocking `socket.getaddrinfo()` with async `asyncio.get_running_loop().getaddrinfo()`
+- Added 2-second timeout to prevent hanging on DNS failures
+- Changed log level from ERROR to WARNING for DNS pre-check failures (these are diagnostic only)
+- Added debug messages about Tailscale MagicDNS timing
+
+**Why this helps:**
+- DNS resolution no longer blocks the async event loop
+- The actual aiohttp connection handles DNS with built-in retries
+- Graceful degradation: diagnostic DNS check can fail without blocking connection attempts
+- Warning-level logging reduces alarm for expected timing issues
+
+#### Verification Steps
+
+**1. Check Tailscale is connected:**
+
+```bash
+tailscale status
+# Should show your machine's IP, name, and "active; direct" connection
+```
+
+**2. Verify DNS resolution works:**
+
+```bash
+# Resolve the Tailscale hostname
+getent hosts <your-machine>.tail1234.ts.net
+
+# Or use dig/nslookup
+dig <your-machine>.tail1234.ts.net
+```
+
+**3. Check systemd-resolved configuration:**
+
+```bash
+resolvectl status
+# Look for:
+# - DNS Servers: 100.100.100.100 (on tailscale0 interface)
+# - DNS Domain: ~<your-tailnet>.ts.net
+```
+
+**4. Test direct IP connection:**
+
+```bash
+# If DNS fails, try using Tailscale IP directly
+uv run transcription-client --host 100.92.85.36 --port 8443 --https
+```
+
+#### Restarting/Resetting Tailscale MagicDNS
+
+If you suspect MagicDNS is stuck, try these methods (from least to most aggressive):
+
+**Method 1: Restart Tailscale service** (least intrusive)
+
+```bash
+sudo systemctl restart tailscaled
+# Wait ~5 seconds for initialization
+tailscale status
+```
+
+**Method 2: Disconnect and reconnect**
+
+```bash
+sudo tailscale down
+sudo tailscale up --accept-dns=true
+# Wait ~10 seconds for full DNS propagation
+```
+
+**Method 3: Force DNS configuration refresh**
+
+```bash
+# Restart both Tailscale and systemd-resolved
+sudo systemctl restart tailscaled
+sudo systemctl restart systemd-resolved
+# Wait ~10 seconds
+resolvectl status  # Verify DNS is configured
+```
+
+**Method 4: Verify Tailscale admin settings**
+
+1. Go to [https://login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns)
+2. Verify MagicDNS is enabled
+3. Check your Tailnet name/suffix (e.g., `tail1234.ts.net`)
+4. Confirm HTTPS certificates are enabled (if using TLS)
+5. Force a configuration sync:
+   ```bash
+   sudo tailscale down && sudo tailscale up --accept-dns=true --accept-routes
+   ```
+
+**Method 5: Full reset** (nuclear option - only if above methods fail)
+
+```bash
+# This will remove all Tailscale state and require re-authentication
+sudo systemctl stop tailscaled
+sudo rm -rf /var/lib/tailscale/
+sudo systemctl start tailscaled
+sudo tailscale up
+# Re-authenticate via browser
+```
+
+#### Prevention
+
+The async DNS fix in `api_client.py` makes the client resilient to MagicDNS timing issues:
+- Client startup no longer depends on immediate DNS resolution
+- Warnings instead of errors for diagnostic DNS checks
+- Actual connection attempts use aiohttp's async DNS with retries
+
+**For developers:** Always use async DNS resolution (`asyncio.get_running_loop().getaddrinfo()`) instead of blocking `socket.getaddrinfo()` in async code.
 
 ### Model Loading
 

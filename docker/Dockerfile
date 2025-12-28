@@ -2,11 +2,11 @@
 # Multi-stage build for optimized image size
 #
 # Build:
-#   docker build -t bvcsfd/transcription-suite -f docker/Dockerfile .
+#   docker build -t ghcr.io/homelab-00/transcriptionsuite-server:latest -f docker/Dockerfile .
 #
 # Run:
-#   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 bvcsfd/transcription-suite
-
+#   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 ghcr.io/homelab-00/transcriptionsuite-server:latest
+#
 # =============================================================================
 # Stage 1: Frontend Builder
 # =============================================================================
@@ -23,34 +23,27 @@ COPY server/frontend/ ./
 RUN npm run build
 
 # =============================================================================
-# Stage 2: Python Runtime
+# Stage 2: Python Builder (with build dependencies)
 # =============================================================================
-# CTranslate2 (used by faster-whisper) requires system cuDNN libraries
-# CUDA 12.8 with cuDNN 9.x is compatible with PyTorch 2.8.0
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 AS runtime
+FROM ubuntu:22.04 AS python-builder
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
+# Install build dependencies (will be removed in final stage)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3.11 \
     python3.11-venv \
     python3.11-dev \
     python3-pip \
-    ffmpeg \
-    libsndfile1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
-
-# Create non-root user for security
-RUN useradd -m -u 1000 -s /bin/bash appuser
 
 # Create app directory
 WORKDIR /app
@@ -68,6 +61,43 @@ COPY server/backend/pyproject.toml ./server/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd server && \
     uv sync
+
+# =============================================================================
+# Stage 3: Python Runtime (minimal, without build dependencies)
+# =============================================================================
+FROM ubuntu:22.04 AS runtime
+
+# GitHub Container Registry label
+LABEL org.opencontainers.image.source=https://github.com/homelab-00/TranscriptionSuite
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install only runtime dependencies (no build-essential, no python-dev)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash appuser
+
+# Create app directory
+WORKDIR /app
+
+# Configure Python environment
+ENV UV_PYTHON=python3.11
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
+
+# Copy built Python virtual environment from builder stage
+COPY --from=python-builder /app/.venv /app/.venv
 
 # Copy server application code
 COPY server/backend/ ./server/

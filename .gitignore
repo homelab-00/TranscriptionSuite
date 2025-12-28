@@ -6,9 +6,12 @@ __pycache__/
 *.mp3
 .directory
 .idea/
-.github/
 .windsurf/
 .vscode/
+
+# Separate entry for GitHub because we want to commit workflows
+.github/prompts/
+.github/instructions/
 
 # Internal build outputs
 dist/

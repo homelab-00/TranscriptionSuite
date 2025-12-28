@@ -200,17 +200,25 @@ class APIClient:
     async def _diagnose_connection(self) -> None:
         """Perform pre-connection diagnostics for troubleshooting."""
         try:
-            # DNS resolution check
+            # DNS resolution check (async, non-blocking)
             logger.debug(f"Resolving hostname: {self.host}")
             try:
-                addr_info = socket.getaddrinfo(
-                    self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM
-                )
-                for _, _, _, _, sockaddr in addr_info:
-                    logger.debug(f"  Resolved to: {sockaddr[0]}:{sockaddr[1]}")
+                # Use async DNS resolution with timeout to avoid blocking
+                async with asyncio.timeout(2.0):
+                    loop = asyncio.get_running_loop()
+                    addr_info = await loop.getaddrinfo(
+                        self.host, self.port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+                    )
+                    for _, _, _, _, sockaddr in addr_info:
+                        logger.debug(f"  Resolved to: {sockaddr[0]}:{sockaddr[1]}")
+            except asyncio.TimeoutError:
+                # Log as warning - this is diagnostic only, aiohttp will handle DNS
+                logger.warning(f"DNS resolution timeout for {self.host} (2s)")
+                logger.debug("This may indicate Tailscale MagicDNS is not ready yet or DNS is slow")
             except socket.gaierror as e:
-                logger.error(f"DNS resolution failed for {self.host}: {e}")
-                logger.error("Check: 1. Hostname is correct, 2. DNS/Tailscale is working")
+                # Log as warning - this is diagnostic only, aiohttp will handle DNS
+                logger.warning(f"DNS pre-check failed for {self.host}: {e}")
+                logger.debug("This may indicate Tailscale MagicDNS is not ready yet")
 
             # SSL certificate check (only for HTTPS)
             if self.use_https:

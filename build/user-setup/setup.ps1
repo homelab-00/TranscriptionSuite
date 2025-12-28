@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 # ============================================================================
 # Constants
 # ============================================================================
-$DockerImage = "bvcsfd/transcription-suite"
+$DockerImage = "ghcr.io/homelab-00/transcriptionsuite-server"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $GitHubRawUrl = "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main"
@@ -188,7 +188,7 @@ try {
     docker pull "${DockerImage}:latest"
     Write-Info "Docker image pulled successfully"
 } catch {
-    Write-Warning "Could not pull from Docker Hub (image may not be published yet)"
+    Write-Warning "Could not pull from GitHub Container Registry (image may not be published yet)"
     Write-Info "You can build locally instead: cd docker; docker compose build"
 }
 

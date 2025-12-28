@@ -67,17 +67,17 @@ EOF
 cp "$BUILD_DIR/AppDir/transcriptionsuite-kde.desktop" \
    "$BUILD_DIR/AppDir/usr/share/applications/"
 
-# Create a simple icon (placeholder - replace with actual icon)
-# TODO: Add proper application icon
-cat > "$BUILD_DIR/AppDir/transcriptionsuite.svg" << 'EOF'
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <circle cx="50" cy="50" r="45" fill="#3daee9"/>
-  <circle cx="50" cy="35" r="12" fill="white"/>
-  <rect x="44" y="45" width="12" height="25" rx="3" fill="white"/>
-</svg>
-EOF
+# Copy and resize application icon
+echo "→ Copying application icon..."
+if command -v convert &> /dev/null; then
+    # Resize logo to 256x256 using ImageMagick
+    convert "$PROJECT_ROOT/logo.png" -resize 256x256 "$BUILD_DIR/AppDir/transcriptionsuite.png"
+else
+    # Fallback: copy original (will be resized by desktop environment)
+    cp "$PROJECT_ROOT/logo.png" "$BUILD_DIR/AppDir/transcriptionsuite.png"
+fi
 
-cp "$BUILD_DIR/AppDir/transcriptionsuite.svg" \
+cp "$BUILD_DIR/AppDir/transcriptionsuite.png" \
    "$BUILD_DIR/AppDir/usr/share/icons/hicolor/256x256/apps/"
 
 # Create AppRun script

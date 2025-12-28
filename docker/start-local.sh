@@ -139,8 +139,8 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 fi
 
 # Check if image exists
-if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^bvcsfd/transcription-suite:latest$"; then
-    print_info "Using existing image: bvcsfd/transcription-suite:latest"
+if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^ghcr.io/homelab-00/transcriptionsuite-server:latest$"; then
+    print_info "Using existing image: ghcr.io/homelab-00/transcriptionsuite-server:latest"
 else
     print_info "Image will be built on first run"
 fi
