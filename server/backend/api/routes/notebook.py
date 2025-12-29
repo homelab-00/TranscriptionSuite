@@ -140,24 +140,30 @@ async def get_recording_detail(recording_id: int) -> Dict[str, Any]:
 async def remove_recording(recording_id: int) -> Dict[str, str]:
     """
     Delete a recording and all associated data.
+
+    Deletion order is important for data integrity:
+    1. Delete from database first (can be rolled back, critical data)
+    2. Then delete audio file (orphan file is safer than orphan record)
     """
     recording = get_recording(recording_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    # Delete audio file if it exists
+    audio_path = Path(recording["filepath"])
+
+    # 1. Delete from database FIRST (critical - can be rolled back)
+    if not delete_recording(recording_id):
+        raise HTTPException(status_code=500, detail="Failed to delete recording")
+
+    # 2. Delete audio file AFTER database success
+    # If this fails, we have an orphan file (harmless) rather than an orphan record
     try:
-        audio_path = Path(recording["filepath"])
         if audio_path.exists():
             audio_path.unlink()
     except Exception as e:
-        logger.warning(f"Could not delete audio file: {e}")
+        logger.warning(f"Orphan file cleanup needed for {audio_path}: {e}")
 
-    # Delete from database
-    if delete_recording(recording_id):
-        return {"status": "deleted", "id": str(recording_id)}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to delete recording")
+    return {"status": "deleted", "id": str(recording_id)}
 
 
 @router.put("/recordings/{recording_id}/summary")

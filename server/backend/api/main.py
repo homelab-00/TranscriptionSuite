@@ -22,6 +22,7 @@ Provides a single API serving:
 """
 
 # Imports are placed after timing instrumentation intentionally
+import asyncio  # noqa: E402
 import os  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
@@ -157,6 +158,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
     _log_time("database init_db() complete")
     logger.info("Database initialized")
+
+    # Schedule backup check in background (non-blocking)
+    backup_config = config.config.get("backup", {})
+    backup_enabled = backup_config.get("enabled", True)
+
+    if backup_enabled:
+        from server.database.backup import run_backup_if_needed
+        from server.database.database import get_data_dir, get_db_path
+
+        backup_dir = get_data_dir() / "database" / "backups"
+        max_age_hours = backup_config.get("max_age_hours", 1)
+        max_backups = backup_config.get("max_backups", 3)
+
+        # Run backup check as background task (does not block startup)
+        asyncio.create_task(
+            run_backup_if_needed(
+                db_path=get_db_path(),
+                backup_dir=backup_dir,
+                max_age_hours=max_age_hours,
+                max_backups=max_backups,
+            )
+        )
+        _log_time("backup check scheduled (async)")
+        logger.info(
+            f"Backup check scheduled (max_age={max_age_hours}h, max_backups={max_backups})"
+        )
 
     # Initialize token store (generates admin token on first run)
     get_token_store()

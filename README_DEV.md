@@ -60,6 +60,8 @@ This document contains technical details, architecture decisions, and developmen
   - [Native Development Configuration](#native-development-configuration)
 - [Data Storage](#data-storage)
   - [Database Schema](#database-schema)
+  - [Database Migrations (Alembic)](#database-migrations-alembic)
+  - [Database Backups](#database-backups)
   - [Sensitive Data Storage & Lifecycle](#sensitive-data-storage--lifecycle)
 - [Troubleshooting](#troubleshooting)
   - [Docker GPU Access](#docker-gpu-access)
@@ -2160,7 +2162,95 @@ All client platforms (KDE, GNOME, Windows) provide the same core features:
 - `words` - Word-level timestamps and confidence
 - `conversations` - LLM chat conversations
 - `messages` - Individual chat messages
-- `recordings_fts` - FTS5 virtual table for search
+- `words_fts` - FTS5 virtual table for full-text search
+
+**Database Features:**
+
+- **WAL Mode**: Enabled for crash safety and concurrent access
+- **Atomic Transactions**: Multi-step saves are wrapped in transactions with rollback on failure
+- **Full-Text Search**: FTS5 virtual table with triggers for automatic sync
+- **Cascade Deletes**: Deleting a recording removes all associated segments, words, and conversations
+
+### Database Migrations (Alembic)
+
+TranscriptionSuite uses [Alembic](https://alembic.sqlalchemy.org/) for database schema versioning.
+
+**Migration files:** `server/backend/database/migrations/versions/`
+
+**Key features:**
+- `render_as_batch=True` for SQLite compatibility (required for ALTER TABLE)
+- Migrations run automatically on server startup via `run_migrations()`
+- Existing databases are upgraded seamlessly (IF NOT EXISTS checks)
+
+**Migration commands (from project root):**
+
+```bash
+# Upgrade to latest version (runs automatically on startup)
+./build/.venv/bin/alembic -c server/backend/database/migrations/env.py upgrade head
+
+# View current version
+./build/.venv/bin/alembic -c server/backend/database/migrations/env.py current
+
+# Create a new migration
+./build/.venv/bin/alembic -c server/backend/database/migrations/env.py revision -m "Add new_column to recordings"
+
+# Generate SQL without applying (for review)
+./build/.venv/bin/alembic -c server/backend/database/migrations/env.py upgrade head --sql
+```
+
+**Creating migrations:**
+
+1. Modify the schema in `server/backend/database/migrations/versions/xxx_your_migration.py`
+2. Use `op.add_column()`, `op.drop_column()`, etc. with `batch_alter_table()` for SQLite
+3. Always implement both `upgrade()` and `downgrade()` functions
+
+### Database Backups
+
+Automatic backups are created on server startup using SQLite's built-in backup API.
+
+**How it works:**
+1. On startup, check age of latest backup
+2. If backup is >1 hour old OR no backup exists → create backup async in background
+3. Rotate old backups (keep max 3)
+4. Never blocks server startup
+
+**Configuration** (in `config.yaml`):
+
+```yaml
+backup:
+    enabled: true        # Enable/disable automatic backups
+    max_age_hours: 1     # Backup if latest is older than this
+    max_backups: 3       # Number of backups to keep
+```
+
+**Backup location:** `/data/database/backups/` (Docker) or `<data_dir>/database/backups/` (local)
+
+**Manual backup:**
+
+```bash
+# Using SQLite's built-in backup (preferred)
+sqlite3 /path/to/notebook.db ".backup '/path/to/backup.db'"
+
+# Docker: Copy from volume
+docker run --rm -v transcription-suite-data:/data -v $(pwd):/backup \
+    alpine cp /data/database/notebook.db /backup/notebook_backup.db
+```
+
+**Restore from backup:**
+
+```bash
+# Stop the server first
+docker compose down
+
+# Replace the database
+docker run --rm -v transcription-suite-data:/data -v $(pwd):/backup \
+    alpine cp /backup/notebook_backup.db /data/database/notebook.db
+
+# Restart the server
+docker compose up -d
+```
+
+**Backup files are named:** `notebook_backup_YYYYMMDD_HHMMSS.db`
 
 ### Sensitive Data Storage & Lifecycle
 

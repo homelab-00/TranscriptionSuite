@@ -215,6 +215,30 @@ storage:
 
 
 # ----------------------------------------------------------------------------
+# Database Backup Configuration
+# ----------------------------------------------------------------------------
+# Automatic backup settings for the SQLite database.
+# Backups are created at server startup if the latest backup is too old.
+# Backups use SQLite's built-in backup API which is safe with WAL mode.
+backup:
+    # Enable/disable automatic backups
+    enabled: true
+
+    # Maximum age of the latest backup (hours) before a new backup is triggered.
+    # Set to 1 to backup at most once per hour.
+    # Default: 1
+    max_age_hours: 1
+
+    # Maximum number of backup files to keep.
+    # Older backups are automatically deleted.
+    # Default: 3
+    max_backups: 3
+
+    # Note: Backups are stored in /data/database/backups/ (Docker)
+    # or <data_dir>/database/backups/ (local development)
+
+
+# ----------------------------------------------------------------------------
 # Processing Settings
 # ----------------------------------------------------------------------------
 processing:

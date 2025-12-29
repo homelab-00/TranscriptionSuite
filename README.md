@@ -302,6 +302,38 @@ Access the web interface at your server's address:
 
 ---
 
+## Database & Backups
+
+TranscriptionSuite automatically backs up the SQLite database on server startup:
+
+- Backups are stored in the Docker volume (`/data/database/backups/`)
+- A new backup is created if the latest is more than 1 hour old
+- Up to 3 backups are kept (oldest automatically deleted)
+- Uses SQLite's built-in backup API (safe with concurrent access)
+
+**Configuration** (in `config.yaml`):
+```yaml
+backup:
+    enabled: true        # Enable/disable automatic backups
+    max_age_hours: 1     # Backup if latest is older than this
+    max_backups: 3       # Number of backups to keep
+```
+
+**Manual Backup:**
+```bash
+# Stop the server first
+docker compose down
+
+# Copy the database file
+docker run --rm -v transcription-suite-data:/data -v $(pwd):/backup \
+    alpine cp /data/database/notebook.db /backup/notebook_backup.db
+
+# Restart the server
+docker compose up -d
+```
+
+---
+
 ## Troubleshooting
 
 ### Server Won't Start

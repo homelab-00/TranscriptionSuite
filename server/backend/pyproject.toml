@@ -46,6 +46,7 @@ dependencies = [
     # Database
     "aiosqlite==0.22.1",
     "sqlalchemy==2.0.45",
+    "alembic==1.17.1",
 
     # Utilities
     "pyyaml==6.0.3",

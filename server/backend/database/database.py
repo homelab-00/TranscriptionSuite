@@ -24,6 +24,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Path to migrations directory
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
 # Default paths - can be overridden via environment or config
 _data_dir: Optional[Path] = None
 _db_path: Optional[Path] = None
@@ -73,9 +76,20 @@ def get_audio_dir() -> Path:
 
 @contextmanager
 def get_connection() -> Generator[sqlite3.Connection, None, None]:
-    """Get a database connection with context manager."""
-    conn = sqlite3.connect(get_db_path())
+    """Get a database connection with context manager.
+
+    Connection is configured for multi-user safety:
+    - 30 second timeout waiting for locks
+    - 5 second busy timeout for retry on SQLITE_BUSY
+    - Multi-thread support enabled
+    """
+    conn = sqlite3.connect(
+        get_db_path(),
+        timeout=30.0,  # Wait up to 30s for locks
+        check_same_thread=False,  # Allow multi-thread access
+    )
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")  # 5s retry on SQLITE_BUSY
     try:
         yield conn
     finally:
@@ -89,9 +103,52 @@ def get_db_session() -> Generator[sqlite3.Connection, None, None]:
         yield conn
 
 
+def run_migrations() -> bool:
+    """
+    Run pending Alembic migrations.
+
+    Returns:
+        True if migrations ran successfully, False otherwise
+    """
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        db_path = get_db_path()
+        logger.info(f"Running database migrations for {db_path}")
+
+        # Configure Alembic programmatically
+        alembic_cfg = Config()
+        alembic_cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
+        alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+
+        # Upgrade to latest version
+        command.upgrade(alembic_cfg, "head")
+
+        logger.info("Database migrations completed successfully")
+        return True
+
+    except ImportError:
+        logger.warning("Alembic not available - skipping migrations")
+        return False
+    except Exception as e:
+        logger.error(f"Migration error: {e}", exc_info=True)
+        return False
+
+
 def init_db() -> None:
-    """Initialize database schema with FTS5 for word search."""
+    """Initialize database schema with FTS5 for word search.
+
+    This function:
+    1. Ensures the database directory exists
+    2. Runs any pending Alembic migrations
+    3. Applies manual migrations for column additions (legacy support)
+    4. Enables WAL mode for crash safety
+    """
     logger.info(f"Initializing database at {get_db_path()}")
+
+    # Run Alembic migrations first (creates tables if needed)
+    run_migrations()
 
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -245,7 +302,14 @@ def init_db() -> None:
         )
 
         conn.commit()
-        logger.info("Database initialized successfully")
+
+        # Enable WAL mode for crash safety and concurrent access
+        # WAL provides better concurrency and crash recovery than rollback journal
+        cursor.execute("PRAGMA journal_mode=WAL")
+        journal_mode = cursor.fetchone()[0]
+        cursor.execute("PRAGMA synchronous=NORMAL")  # Good balance for WAL
+        cursor.execute("PRAGMA foreign_keys=ON")  # Enforce FK constraints
+        logger.info(f"Database initialized successfully (journal_mode={journal_mode})")
 
 
 # =============================================================================
@@ -1118,13 +1182,16 @@ def _insert_single_segment_with_words(
     duration: float,
     word_timestamps: List[Dict[str, Any]],
 ) -> None:
-    """Insert a single segment with word timestamps (internal helper)."""
+    """Insert a single segment with word timestamps (internal helper).
+
+    Note: This function does NOT commit - caller is responsible for transaction management.
+    """
     start_time = word_timestamps[0].get("start", 0.0) if word_timestamps else 0.0
     end_time = word_timestamps[-1].get("end", duration) if word_timestamps else duration
 
     cursor.execute(
         """
-        INSERT INTO segments 
+        INSERT INTO segments
         (recording_id, segment_index, text, start_time, end_time, speaker)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
@@ -1147,13 +1214,12 @@ def _insert_single_segment_with_words(
         ]
         cursor.executemany(
             """
-            INSERT INTO words 
+            INSERT INTO words
             (recording_id, segment_id, word_index, word, start_time, end_time, confidence)
             VALUES (:recording_id, :segment_id, :word_index, :word, :start_time, :end_time, :confidence)
             """,
             words_batch,
         )
-    cursor.connection.commit()
 
 
 def _insert_diarization_segments_with_words(
@@ -1162,7 +1228,10 @@ def _insert_diarization_segments_with_words(
     diarization_segments: List[Dict[str, Any]],
     word_timestamps: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
-    """Insert diarization segments with optional word timestamps (internal helper)."""
+    """Insert diarization segments with optional word timestamps (internal helper).
+
+    Note: This function does NOT commit - caller is responsible for transaction management.
+    """
     word_map: List[Dict[str, Any]] = word_timestamps or []
 
     inserted_segments: List[Dict[str, Any]] = []
@@ -1280,7 +1349,6 @@ def _insert_diarization_segments_with_words(
                 "UPDATE segments SET text = ? WHERE id = ?",
                 (segment_text, segment_id),
             )
-    cursor.connection.commit()
 
 
 def save_longform_to_database(
@@ -1292,7 +1360,10 @@ def save_longform_to_database(
     recorded_at: Optional[datetime] = None,
 ) -> Optional[int]:
     """
-    Save a longform recording to the database.
+    Save a longform recording to the database atomically.
+
+    All inserts (recording, segments, words) are wrapped in a single transaction.
+    If any step fails, the entire operation is rolled back to prevent partial data.
 
     Args:
         audio_path: Path to the MP3 file
@@ -1313,77 +1384,95 @@ def save_longform_to_database(
         )
         return None
 
+    conn = None
     try:
         recorded_at = recorded_at or datetime.now()
         has_diarization = bool(diarization_segments and len(diarization_segments) > 0)
 
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(
+            db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute(
-            """
-            INSERT INTO recordings 
-            (filename, filepath, title, duration_seconds, recorded_at, has_diarization)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                audio_path.name,
-                str(audio_path),
-                audio_path.stem,
-                duration_seconds,
-                recorded_at.isoformat(),
-                int(has_diarization),
-            ),
-        )
-        recording_id: int = cursor.lastrowid or 0
-        conn.commit()
+        # Begin explicit transaction for atomicity
+        # IMMEDIATE mode acquires write lock immediately, preventing conflicts
+        cursor.execute("BEGIN IMMEDIATE")
 
-        if recording_id == 0:
-            logger.error("Failed to insert recording into database")
-            conn.close()
-            return None
-
-        if diarization_segments:
-            _insert_diarization_segments_with_words(
-                cursor, recording_id, diarization_segments, word_timestamps
-            )
-        elif word_timestamps:
-            _insert_single_segment_with_words(
-                cursor,
-                recording_id,
-                transcription_text,
-                duration_seconds,
-                word_timestamps,
-            )
-        else:
+        try:
+            # Insert recording
             cursor.execute(
                 """
-                INSERT INTO segments 
-                (recording_id, segment_index, text, start_time, end_time, speaker)
+                INSERT INTO recordings
+                (filename, filepath, title, duration_seconds, recorded_at, has_diarization)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (recording_id, 0, transcription_text, 0.0, duration_seconds, None),
+                (
+                    audio_path.name,
+                    str(audio_path),
+                    audio_path.stem,
+                    duration_seconds,
+                    recorded_at.isoformat(),
+                    int(has_diarization),
+                ),
             )
+            recording_id: int = cursor.lastrowid or 0
+
+            if recording_id == 0:
+                raise ValueError("Failed to insert recording - no lastrowid")
+
+            # Insert segments and words (no intermediate commits)
+            if diarization_segments:
+                _insert_diarization_segments_with_words(
+                    cursor, recording_id, diarization_segments, word_timestamps
+                )
+            elif word_timestamps:
+                _insert_single_segment_with_words(
+                    cursor,
+                    recording_id,
+                    transcription_text,
+                    duration_seconds,
+                    word_timestamps,
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO segments
+                    (recording_id, segment_index, text, start_time, end_time, speaker)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (recording_id, 0, transcription_text, 0.0, duration_seconds, None),
+                )
+
+            # Update word count
+            cursor.execute(
+                """
+                UPDATE recordings
+                SET word_count = (SELECT COUNT(*) FROM words WHERE recording_id = ?)
+                WHERE id = ?
+                """,
+                (recording_id, recording_id),
+            )
+
+            # Commit entire transaction atomically
             conn.commit()
+            logger.info(f"Recording saved to database with ID: {recording_id}")
+            return recording_id
 
-        cursor.execute(
-            """
-            UPDATE recordings 
-            SET word_count = (SELECT COUNT(*) FROM words WHERE recording_id = ?)
-            WHERE id = ?
-            """,
-            (recording_id, recording_id),
-        )
-        conn.commit()
-        conn.close()
-
-        logger.info(f"Recording saved to database with ID: {recording_id}")
-        return recording_id
+        except Exception:
+            # Rollback on any error within the transaction
+            conn.rollback()
+            raise
 
     except Exception as e:
         logger.error(f"Error saving to database: {e}", exc_info=True)
         return None
+
+    finally:
+        if conn:
+            conn.close()
 
 
 def save_longform_recording(
