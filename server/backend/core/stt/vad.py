@@ -144,6 +144,9 @@ class VoiceActivityDetector:
             True if speech is detected
         """
         # Resample to 16kHz if needed
+        # NOTE: Uses scipy.signal.resample_poly for real-time VAD performance.
+        # Polyphase resampling is efficient for small chunks. File operations
+        # use FFmpeg for quality (see audio_utils.py).
         if sample_rate != SAMPLE_RATE:
             pcm_data = np.frombuffer(chunk, dtype=np.int16)
             resampled = scipy_signal.resample_poly(pcm_data, SAMPLE_RATE, sample_rate)
@@ -189,6 +192,9 @@ class VoiceActivityDetector:
             True if speech is detected
         """
         # Resample to 16kHz if needed
+        # NOTE: Uses scipy.signal.resample_poly for real-time VAD performance.
+        # Polyphase resampling is efficient for small chunks. File operations
+        # use FFmpeg for quality (see audio_utils.py).
         if sample_rate != SAMPLE_RATE:
             pcm_data = np.frombuffer(chunk, dtype=np.int16)
             resampled = scipy_signal.resample_poly(pcm_data, SAMPLE_RATE, sample_rate)

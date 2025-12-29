@@ -8,7 +8,6 @@ import {
   Edit2,
   Check,
   X,
-  Power,
   PowerOff,
   ChevronRight,
   ChevronDown,
@@ -156,41 +155,6 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
       }
     } catch (error) {
       console.error('Failed to load conversations:', error);
-    }
-  };
-
-  const handleStartLLM = async (modelId?: string) => {
-    setLlmLoading(true);
-    setLlmError(null);
-    try {
-      // First start the server
-      const serverResult = await api.startLMStudioServer();
-      if (!serverResult.success && 
-          !serverResult.message.includes('already running') &&
-          !serverResult.message.includes('loaded')) {
-        // If server failed to start and it's not because it's already running
-        // Check if model is specified - try loading it directly
-        if (modelId) {
-          const modelResult = await api.loadModel({ model_id: modelId });
-          if (!modelResult.success) {
-            setLlmError(modelResult.message);
-            setLlmLoading(false);
-            return;
-          }
-        } else {
-          setLlmError(serverResult.message);
-          setLlmLoading(false);
-          return;
-        }
-      }
-
-      // Refresh status
-      await checkLLMStatus();
-      await loadAvailableModels();
-    } catch (error) {
-      setLlmError((error as Error).message);
-    } finally {
-      setLlmLoading(false);
     }
   };
 
@@ -434,18 +398,9 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
               Unload
             </button>
           ) : (
-            <button
-              onClick={() => handleStartLLM()}
-              className="btn-ghost text-green-400 hover:text-green-300 text-xs flex items-center gap-1 px-2 py-1"
-              disabled={llmLoading}
-            >
-              {llmLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Power size={14} />
-              )}
-              Start
-            </button>
+            <p className="text-xs text-yellow-400">
+              Start LM Studio and load a model to enable chat
+            </p>
           )}
         </div>
 
@@ -677,7 +632,7 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={llmStatus?.available ? "Type a message... (Enter to send, Shift+Enter for new line)" : "Load a model to start chatting..."}
+              placeholder={llmStatus?.available ? "Type a message... (Enter to send, Shift+Enter for new line)" : "LM Studio offline - view history only"}
               disabled={isSending || !llmStatus?.available}
               className="flex-1 bg-surface border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 resize-none focus:outline-none focus:border-purple-500 disabled:opacity-50"
               rows={3}

@@ -113,7 +113,7 @@ class SettingsDialog:
         help_label = Gtk.Label()
         help_label.set_markup(
             '<span size="small" foreground="gray">'
-            "Port: 8000 (HTTP dev), 8443 (HTTPS via Tailscale)\n"
+            "Port: 8000 (HTTP local), 8443 (HTTPS via Tailscale)\n"
             "HTTPS: Enable when connecting to Tailscale servers."
             "</span>"
         )
@@ -286,7 +286,8 @@ class SettingsDialog:
                 self.config.get("server", "use_https", default=False)
             )
         if self.token_entry:
-            self.token_entry.set_text(self.config.get("server", "token", default=""))
+            token = self.config.get("server", "token", default="")
+            self.token_entry.set_text(token.strip() if token else "")
         if self.use_remote_check:
             self.use_remote_check.set_active(
                 self.config.get("server", "use_remote", default=False)

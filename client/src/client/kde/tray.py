@@ -261,9 +261,11 @@ class Qt6Tray(AbstractTray):
     def _do_copy_to_clipboard(self, text: str) -> None:
         """Actually copy to clipboard (must be called on main thread)."""
         try:
-            clipboard = QApplication.clipboard()
+            clipboard = self.app.clipboard()
             clipboard.setText(text)
-            logger.debug("Copied to clipboard via Qt")
+            # Process events to ensure clipboard is committed (critical for Wayland)
+            self.app.processEvents()
+            logger.debug(f"Copied to clipboard via Qt: {len(text)} characters")
         except Exception as e:
             logger.warning(f"Clipboard copy failed: {e}")
 

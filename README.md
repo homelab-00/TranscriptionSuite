@@ -360,6 +360,16 @@ Install the [AppIndicator extension](https://extensions.gnome.org/extension/615/
 2. Check certificate paths in `config.yaml`
 3. Ensure port 8443 is used for HTTPS
 
+**DNS Resolution Errors:**
+
+If you see errors like `Name or service not known` for `.ts.net` hostnames:
+
+- **Automatic fallback:** The client automatically tries to use Tailscale IP addresses when DNS fails. Check the logs for "Tailscale IP fallback" messages.
+- **Check for DNS fight:** Run `tailscale status` and look for DNS warnings. If you see `/etc/resolv.conf overwritten`, your system's DNS isn't forwarding to Tailscale's MagicDNS.
+- **Manual workaround:** Use the Tailscale IP directly: `--host 100.x.x.x` (find IPs with `tailscale status`)
+
+See [README_DEV.md](README_DEV.md#tailscale-dns-resolution-issues) for detailed troubleshooting.
+
 ---
 
 ## License

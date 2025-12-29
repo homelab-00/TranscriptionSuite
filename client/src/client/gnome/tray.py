@@ -247,6 +247,7 @@ class GtkTray(AbstractTray):
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(text, -1)
             clipboard.store()
+            logger.debug(f"Copied to clipboard via GTK: {len(text)} characters")
             return True
         except Exception as e:
             logger.error(f"Failed to copy to clipboard: {e}")

@@ -51,12 +51,14 @@ static_transcription:
     # Segments are split when speaker changes or this limit is reached.
     max_segment_chars: 500
 
-    # WebRTC VAD preprocessing removes silence before transcription.
+    # Silero VAD preprocessing removes silence before transcription.
     # Stage 1 of two-stage VAD (Stage 2 is faster_whisper_vad_filter).
-    webrtc_vad_preprocessing: true
+    # Silero VAD is used for static transcription to maintain timestamp consistency.
+    silero_vad_preprocessing: true
 
-    # WebRTC VAD aggressiveness (0-3, higher = more aggressive).
-    webrtc_vad_aggressiveness: 3
+    # Silero VAD sensitivity (0.0-1.0, higher = more sensitive to speech).
+    # 0.5 is a good default balance between removing silence and keeping speech.
+    silero_vad_sensitivity: 0.5
 
 
 # ----------------------------------------------------------------------------
@@ -188,6 +190,54 @@ audio:
     # If true, automatically use the default system microphone.
     # If false, use the device specified by input_device_index.
     use_default_input: true
+
+
+# ----------------------------------------------------------------------------
+# Audio Processing Backend
+# ----------------------------------------------------------------------------
+# Configuration for the audio processing engine.
+# FFmpeg provides professional-grade quality and performance for file operations.
+# For real-time WebSocket streaming, scipy is retained for low-latency performance.
+audio_processing:
+    # Audio processing backend for file-based operations:
+    #   - "ffmpeg": Professional-grade filters (recommended)
+    #     * 30-40% faster file loading (single-pass)
+    #     * High-quality SoX resampler
+    #     * Professional normalization (dynaudnorm/loudnorm)
+    #     * Handles all formats without temp WAV files
+    #   - "legacy": scipy/soundfile (for compatibility)
+    #     * Two-pass operation (load + resample)
+    #     * Simple peak normalization
+    # Default: "ffmpeg"
+    backend: "ffmpeg"
+
+    # FFmpeg resampling algorithm (used when backend="ffmpeg"):
+    #   - "soxr": SoX resampler - highest quality, professional-grade
+    #     * 28-bit intermediate precision
+    #     * Sinc interpolation
+    #     * Slightly slower but best audio quality
+    #   - "swr_linear": Linear interpolation - fast, good quality
+    #     * Faster than soxr
+    #     * Good for most use cases
+    # Default: "soxr"
+    resampler: "soxr"
+
+    # Audio normalization method (used when backend="ffmpeg"):
+    #   - "dynaudnorm": Dynamic range normalization (recommended for speech)
+    #     * Adapts to volume changes over time
+    #     * 500ms analysis window
+    #     * Target RMS 0.25 (prevents clipping)
+    #     * Best for varied speech levels
+    #   - "loudnorm": EBU R128 loudness standard (broadcasting quality)
+    #     * Integrated loudness: -16 LUFS
+    #     * True peak limit: -1.5 dBFS
+    #     * Loudness range: 11 LU
+    #     * Professional broadcasting standard
+    #   - "peak": Simple peak normalization to -3.0 dB (legacy behavior)
+    #     * Fast, simple algorithm
+    #     * Compatible with legacy backend
+    # Default: "dynaudnorm"
+    normalization_method: "dynaudnorm"
 
 
 # ----------------------------------------------------------------------------

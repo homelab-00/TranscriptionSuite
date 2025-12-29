@@ -77,6 +77,10 @@ class APIClient:
         self._session: aiohttp.ClientSession | None = None
         self._connected = False
 
+        # Tailscale IP fallback state
+        self._original_hostname: str | None = None  # For SSL server_hostname when using IP
+        self._using_fallback_ip: bool = False
+
         # Log initialization with connection details
         logger.info(f"API Client initialized: {self.base_url}")
         if use_https:
@@ -104,6 +108,26 @@ class APIClient:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    def _get_ssl_kwargs(self) -> dict:
+        """
+        Get SSL kwargs for requests, handling IP fallback.
+
+        When using Tailscale IP fallback, we need to specify server_hostname
+        so that SSL certificate validation works with the original hostname.
+        """
+        if not self.use_https:
+            return {}
+
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+        kwargs: dict = {"ssl": ssl_context}
+        if self._using_fallback_ip and self._original_hostname:
+            # Tell SSL to verify certificate for original hostname, not IP
+            kwargs["server_hostname"] = self._original_hostname
+        return kwargs
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session with SSL configuration."""
@@ -142,17 +166,50 @@ class APIClient:
             await self._session.close()
             self._session = None
 
+    async def update_connection(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        use_https: bool | None = None,
+        token: str | None = None,
+    ) -> None:
+        """
+        Update connection settings, properly closing old session.
+
+        This method should be used instead of creating a new APIClient
+        when changing connection settings to avoid resource leaks.
+        """
+        # Close existing session if any
+        await self.close()
+
+        # Update settings
+        if host is not None:
+            self.host = host
+        if port is not None:
+            self.port = port
+        if use_https is not None:
+            self.use_https = use_https
+        if token is not None:
+            self.token = token
+
+        # Reset fallback state
+        self._original_hostname = None
+        self._using_fallback_ip = False
+        self._connected = False
+
+        logger.info(f"API Client updated: {self.base_url}")
+
     async def health_check(self) -> bool:
         """Check if server is healthy with detailed diagnostics."""
         url = f"{self.base_url}/health"
         logger.debug(f"Health check: {url}")
 
         try:
-            # Pre-connection DNS/network check
+            # Pre-connection DNS/network check (may switch to fallback IP)
             await self._diagnose_connection()
 
             session = await self._get_session()
-            async with session.get(url) as resp:
+            async with session.get(url, **self._get_ssl_kwargs()) as resp:
                 logger.debug(f"Health check response: {resp.status}")
 
                 if resp.status == 200:
@@ -198,10 +255,21 @@ class APIClient:
             return False
 
     async def _diagnose_connection(self) -> None:
-        """Perform pre-connection diagnostics for troubleshooting."""
+        """
+        Perform pre-connection diagnostics and attempt fallback if needed.
+
+        If DNS resolution fails for a .ts.net hostname, attempts to resolve
+        the IP via `tailscale status --json` and switches to using the IP
+        directly while preserving the original hostname for SSL verification.
+        """
+        # Lazy import to avoid overhead when not needed
+        from client.common.tailscale_resolver import TailscaleResolver
+
         try:
             # DNS resolution check (async, non-blocking)
             logger.debug(f"Resolving hostname: {self.host}")
+            dns_failed = False
+
             try:
                 # Use async DNS resolution with timeout to avoid blocking
                 async with asyncio.timeout(2.0):
@@ -212,17 +280,38 @@ class APIClient:
                     for _, _, _, _, sockaddr in addr_info:
                         logger.debug(f"  Resolved to: {sockaddr[0]}:{sockaddr[1]}")
             except asyncio.TimeoutError:
-                # Log as warning - this is diagnostic only, aiohttp will handle DNS
+                dns_failed = True
                 logger.warning(f"DNS resolution timeout for {self.host} (2s)")
-                logger.debug("This may indicate Tailscale MagicDNS is not ready yet or DNS is slow")
             except socket.gaierror as e:
-                # Log as warning - this is diagnostic only, aiohttp will handle DNS
+                dns_failed = True
                 logger.warning(f"DNS pre-check failed for {self.host}: {e}")
-                logger.debug("This may indicate Tailscale MagicDNS is not ready yet")
+
+            # Attempt Tailscale IP fallback if DNS failed for a .ts.net hostname
+            if dns_failed and TailscaleResolver.is_tailscale_hostname(self.host):
+                logger.info(f"Attempting Tailscale IP fallback for {self.host}")
+                ip, original_hostname = await TailscaleResolver.resolve_ip(self.host)
+
+                if ip:
+                    logger.info(f"Tailscale IP fallback: {self.host} -> {ip}")
+                    self._original_hostname = original_hostname
+                    self.host = ip
+                    self._using_fallback_ip = True
+                else:
+                    logger.warning(
+                        "Tailscale IP fallback failed - device not found in tailscale status. "
+                        "Check that Tailscale is running and the device is online."
+                    )
+            elif dns_failed:
+                logger.debug("DNS failed but not a .ts.net hostname - no fallback available")
 
             # SSL certificate check (only for HTTPS)
             if self.use_https:
-                logger.debug(f"HTTPS mode - will verify SSL certificate for {self.host}")
+                if self._using_fallback_ip:
+                    logger.debug(
+                        f"HTTPS mode with IP fallback - SSL will verify hostname: {self._original_hostname}"
+                    )
+                else:
+                    logger.debug(f"HTTPS mode - will verify SSL certificate for {self.host}")
 
         except Exception as e:
             logger.debug(f"Connection diagnostics failed: {e}")
@@ -233,6 +322,7 @@ class APIClient:
         async with session.get(
             f"{self.base_url}/api/status",
             headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
         ) as resp:
             resp.raise_for_status()
             return await resp.json()
@@ -287,6 +377,7 @@ class APIClient:
             data=data,
             headers=headers,
             timeout=timeout,
+            **self._get_ssl_kwargs(),
         ) as resp:
             if on_progress:
                 on_progress("Transcribing...")
@@ -317,6 +408,7 @@ class APIClient:
             f"{self.base_url}/api/notebook/recordings",
             headers=self._get_headers(),
             params=params,
+            **self._get_ssl_kwargs(),
         ) as resp:
             resp.raise_for_status()
             return await resp.json()
@@ -334,6 +426,7 @@ class APIClient:
             f"{self.base_url}/api/search/",
             headers=self._get_headers(),
             params={"q": query, "type": search_type, "limit": limit},
+            **self._get_ssl_kwargs(),
         ) as resp:
             resp.raise_for_status()
             return await resp.json()
@@ -390,6 +483,7 @@ class APIClient:
                 data=data,
                 headers=headers,
                 timeout=timeout,
+                **self._get_ssl_kwargs(),
             ) as resp:
                 logger.debug(f"Transcription response status: {resp.status}")
 
@@ -442,6 +536,7 @@ class APIClient:
             async with session.post(
                 f"{self.base_url}/api/admin/models/load",
                 headers=self._get_headers(),
+                **self._get_ssl_kwargs(),
             ) as resp:
                 return resp.status == 200
         except Exception as e:
@@ -464,6 +559,7 @@ class APIClient:
                 f"{self.base_url}/api/auth/login",
                 headers={"Content-Type": "application/json"},
                 json={"token": self.token},
+                **self._get_ssl_kwargs(),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -527,7 +623,9 @@ class StreamingClient:
             if self.api_client.token:
                 headers["Authorization"] = f"Bearer {self.api_client.token}"
 
-            self._ws = await session.ws_connect(url, headers=headers)
+            # Use SSL kwargs for HTTPS WebSocket connections (handles IP fallback)
+            ssl_kwargs = self.api_client._get_ssl_kwargs()
+            self._ws = await session.ws_connect(url, headers=headers, **ssl_kwargs)
             self._running = True
 
             # Start receiving messages

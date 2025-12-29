@@ -101,6 +101,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if path in PUBLIC_ROUTES or path.startswith(PUBLIC_PREFIXES):
             return await call_next(request)
 
+        # Allow /record from localhost without authentication
+        client_host = request.client.host if request.client else None
+        if (path == "/record" or path.startswith("/record/")) and client_host in ("127.0.0.1", "::1", "localhost"):
+            return await call_next(request)
+
         # Check for valid authentication
         auth_header = request.headers.get("Authorization")
 
@@ -572,7 +577,7 @@ async def serve_auth_page(path: str = "") -> HTMLResponse:
 # Root redirect - send to notebook calendar by default
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    icon_path = Path("/app/static/frontend/vite.svg")
+    icon_path = Path("/app/static/frontend/logo.svg")
     if icon_path.exists():
         return FileResponse(icon_path)
     return JSONResponse(status_code=204, content=None)

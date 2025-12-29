@@ -7,9 +7,9 @@ Build commands (run from project root on Windows):
        magick build\assets\logo.png -background transparent -define icon:auto-resize=256,48,32,16 build\assets\logo.ico
 
     2. Build executable:
-       .\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\.dist .\client\src\client\build\pyinstaller-windows.spec
+       .\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\dist .\client\src\client\build\pyinstaller-windows.spec
 
-Output: build\.dist\TranscriptionSuite.exe
+Output: build\dist\TranscriptionSuite.exe
 """
 
 import sys

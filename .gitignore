@@ -1,3 +1,20 @@
+# Internal build outputs
+build/dist/
+build/appimage-kde/
+build/appimage-gnome/
+build/appimage-windows/
+build/assets/logo.ico
+
+# Frontend web app (Node.js / npm dependencies and build outputs)
+server/frontend/node_modules/
+server/frontend/dist/
+server/frontend/build/
+
+# Separate entry for GitHub because we want to commit workflows
+.github/prompts/
+.github/instructions/
+
+# Misc
 __pycache__/
 *.env
 *.tmp
@@ -8,20 +25,5 @@ __pycache__/
 .idea/
 .windsurf/
 .vscode/
-
-# Separate entry for GitHub because we want to commit workflows
-.github/prompts/
-.github/instructions/
-
-# Internal build outputs
-build/.dist/
-build/appimage-kde/
-build/appimage-gnome/
-build/appimage-windows/
-build/assets/logo.ico
-
-# Frontend web app
-# Node.js / npm dependencies and build outputs
-server/frontend/node_modules/
-server/frontend/dist/
-server/frontend/build/
+.ruff_cache/
+.claude/

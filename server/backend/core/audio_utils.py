@@ -50,6 +50,14 @@ except ImportError:
     webrtcvad = None  # type: ignore
     HAS_WEBRTCVAD = False
 
+try:
+    from silero_vad import load_silero_vad
+
+    HAS_SILERO_VAD = True
+except ImportError:
+    load_silero_vad = None  # type: ignore
+    HAS_SILERO_VAD = False
+
 
 def clear_gpu_cache() -> None:
     """
@@ -200,12 +208,18 @@ def convert_to_mp3(
         raise RuntimeError(f"MP3 conversion failed: {e.stderr}")
 
 
-def load_audio(
+def load_audio_legacy(
     file_path: str,
     target_sample_rate: int = 16000,
 ) -> Tuple[np.ndarray, int]:
     """
-    Load an audio file and return as numpy array.
+    Load an audio file using legacy scipy/soundfile backend (for compatibility).
+
+    This is a two-pass operation:
+    1. Convert non-WAV files to WAV using FFmpeg
+    2. Load with soundfile and resample with scipy
+
+    For better performance, use load_audio() with backend="ffmpeg" in config.
 
     Args:
         file_path: Path to audio file
@@ -251,9 +265,57 @@ def load_audio(
             os.unlink(temp_wav)
 
 
-def normalize_audio(audio: np.ndarray, target_db: float = -3.0) -> np.ndarray:
+def load_audio(
+    file_path: str,
+    target_sample_rate: int = 16000,
+) -> Tuple[np.ndarray, int]:
     """
-    Normalize audio to a target dB level.
+    Load an audio file and return as numpy array.
+
+    Uses the audio processing backend configured in config.yaml:
+    - backend="ffmpeg": Single-pass load + resample (30-40% faster, professional quality)
+    - backend="legacy": Two-pass soundfile + scipy (for compatibility)
+
+    Args:
+        file_path: Path to audio file (any format: WAV, MP3, M4A, OGG, etc.)
+        target_sample_rate: Target sample rate for resampling (default 16000 for Whisper)
+
+    Returns:
+        Tuple of (audio_data as float32 array, sample_rate)
+    """
+    # Import config here to avoid circular dependency
+    from server.config import get_config
+
+    try:
+        cfg = get_config()
+        backend = cfg.get("audio_processing", default={}).get("backend", "ffmpeg")
+    except Exception as e:
+        logger.warning(f"Could not load config, falling back to legacy backend: {e}")
+        backend = "legacy"
+
+    if backend == "ffmpeg":
+        try:
+            from server.core.ffmpeg_utils import load_audio_ffmpeg
+
+            return load_audio_ffmpeg(file_path, target_sample_rate)
+        except ImportError as e:
+            logger.warning(
+                f"ffmpeg-python not available, falling back to legacy: {e}"
+            )
+            return load_audio_legacy(file_path, target_sample_rate)
+        except Exception as e:
+            logger.warning(f"FFmpeg loading failed, falling back to legacy: {e}")
+            return load_audio_legacy(file_path, target_sample_rate)
+    else:
+        return load_audio_legacy(file_path, target_sample_rate)
+
+
+def normalize_audio_legacy(audio: np.ndarray, target_db: float = -3.0) -> np.ndarray:
+    """
+    Normalize audio using legacy peak normalization (for compatibility).
+
+    Simple peak normalization to a target dB level.
+    For professional normalization, use normalize_audio() with backend="ffmpeg" in config.
 
     Args:
         audio: Audio data as numpy array
@@ -275,6 +337,60 @@ def normalize_audio(audio: np.ndarray, target_db: float = -3.0) -> np.ndarray:
 
     # Normalize
     return (audio / peak) * target_amplitude
+
+
+def normalize_audio(
+    audio: np.ndarray,
+    target_db: float = -3.0,
+    sample_rate: int = 16000,
+) -> np.ndarray:
+    """
+    Normalize audio using configured backend.
+
+    Uses the audio processing backend and method configured in config.yaml:
+    - FFmpeg backend with dynaudnorm: Dynamic range normalization (best for speech)
+    - FFmpeg backend with loudnorm: EBU R128 standard (broadcasting quality)
+    - FFmpeg backend with peak: Simple peak normalization
+    - Legacy backend: Simple peak normalization (compatible with old behavior)
+
+    Args:
+        audio: Audio data as float32 numpy array
+        target_db: Target level in dB (default -3.0, used for legacy peak normalization)
+        sample_rate: Sample rate in Hz (default 16000, required for FFmpeg filters)
+
+    Returns:
+        Normalized audio array (float32)
+    """
+    if audio.size == 0:
+        return audio
+
+    # Import config here to avoid circular dependency
+    from server.config import get_config
+
+    try:
+        cfg = get_config()
+        backend = cfg.get("audio_processing", default={}).get("backend", "ffmpeg")
+        method = cfg.get("audio_processing", default={}).get("normalization_method", "dynaudnorm")
+    except Exception as e:
+        logger.warning(f"Could not load config, falling back to legacy normalization: {e}")
+        return normalize_audio_legacy(audio, target_db)
+
+    if backend == "ffmpeg" and method in ["dynaudnorm", "loudnorm"]:
+        try:
+            from server.core.ffmpeg_utils import normalize_audio_ffmpeg
+
+            return normalize_audio_ffmpeg(audio, sample_rate, method)
+        except ImportError as e:
+            logger.warning(
+                f"ffmpeg-python not available for normalization, falling back to legacy: {e}"
+            )
+            return normalize_audio_legacy(audio, target_db)
+        except Exception as e:
+            logger.warning(f"FFmpeg normalization failed, falling back to legacy: {e}")
+            return normalize_audio_legacy(audio, target_db)
+    else:
+        # Use legacy peak normalization for "peak" method or legacy backend
+        return normalize_audio_legacy(audio, target_db)
 
 
 def get_audio_duration(file_path: str) -> float:
@@ -396,4 +512,92 @@ def apply_webrtc_vad(
 
     except Exception as e:
         logger.warning(f"WebRTC VAD preprocessing failed: {e}, using original audio")
+        return audio_data
+
+
+def apply_silero_vad(
+    audio_data: np.ndarray,
+    sample_rate: int = 16000,
+    sensitivity: float = 0.5,
+) -> np.ndarray:
+    """
+    Apply Silero VAD preprocessing to remove silence from audio.
+
+    This is Stage 1 of two-stage VAD for static transcription: physically
+    removes silence before transcription. Stage 2 is faster_whisper_vad_filter
+    during transcription.
+
+    Args:
+        audio_data: Audio samples as float32 numpy array (16kHz, mono)
+        sample_rate: Sample rate (must be 16000 for Silero VAD)
+        sensitivity: VAD sensitivity (0.0-1.0, higher = more sensitive)
+
+    Returns:
+        Audio with silence removed as float32 numpy array
+    """
+    if not HAS_SILERO_VAD or load_silero_vad is None:
+        logger.debug("silero_vad not installed, skipping VAD preprocessing")
+        return audio_data
+
+    if not HAS_TORCH or torch is None:
+        logger.debug("torch not installed, skipping Silero VAD preprocessing")
+        return audio_data
+
+    if len(audio_data) == 0:
+        return audio_data
+
+    original_duration = len(audio_data) / sample_rate
+
+    try:
+        # Load Silero VAD model
+        model = load_silero_vad(onnx=False)
+
+        # Process in 512ms chunks (recommended by Silero for batch processing)
+        # Silero works best with 30-4000ms chunks
+        chunk_duration_ms = 512
+        chunk_size = int(sample_rate * chunk_duration_ms / 1000)
+
+        voiced_chunks = []
+        for i in range(0, len(audio_data), chunk_size):
+            chunk = audio_data[i : i + chunk_size]
+
+            # Skip incomplete final chunk if it's too small
+            if len(chunk) < int(sample_rate * 0.03):  # Minimum 30ms
+                break
+
+            # Convert to tensor
+            audio_tensor = torch.from_numpy(chunk)
+
+            # Get VAD probability
+            try:
+                vad_prob = model(audio_tensor, sample_rate).item()
+
+                # Compare against sensitivity threshold
+                # Higher sensitivity means lower threshold (detect speech more easily)
+                if vad_prob > (1 - sensitivity):
+                    voiced_chunks.append(chunk)
+            except Exception:
+                # Chunk processing error, keep the chunk to be safe
+                voiced_chunks.append(chunk)
+
+        if not voiced_chunks:
+            logger.warning("Silero VAD found no speech, returning original audio")
+            return audio_data
+
+        # Concatenate voiced chunks
+        voiced_audio = np.concatenate(voiced_chunks)
+
+        new_duration = len(voiced_audio) / sample_rate
+        removed_duration = original_duration - new_duration
+
+        if removed_duration > 0.1:  # Only log if significant silence removed
+            logger.info(
+                f"Silero VAD preprocessing: removed {removed_duration:.1f}s of silence "
+                f"({original_duration:.1f}s -> {new_duration:.1f}s)"
+            )
+
+        return voiced_audio
+
+    except Exception as e:
+        logger.warning(f"Silero VAD preprocessing failed: {e}, using original audio")
         return audio_data

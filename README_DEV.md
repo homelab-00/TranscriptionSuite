@@ -110,15 +110,15 @@ Note: All three scripts are meant to be run from the project root.
 ```bash
 # KDE AppImage (Linux)
 ./build/build-appimage-kde.sh
-# Output: build/.dist/TranscriptionSuite-KDE-x86_64.AppImage
+# Output: build/dist/TranscriptionSuite-KDE-x86_64.AppImage
 
 # GNOME AppImage (Linux)
 ./build/build-appimage-gnome.sh
-# Output: build/.dist/TranscriptionSuite-GNOME-x86_64.AppImage
+# Output: build/dist/TranscriptionSuite-GNOME-x86_64.AppImage
 
 # Windows (on Windows machine)
-.\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\.dist .\client\src\client\build\pyinstaller-windows.spec
-# Output: build\.dist\TranscriptionSuite.exe
+.\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\dist .\client\src\client\build\pyinstaller-windows.spec
+# Output: build\dist\TranscriptionSuite.exe
 ```
 
 ### Key Commands
@@ -233,7 +233,7 @@ TranscriptionSuite uses a **"belt and suspenders"** layered security approach fo
 
 **Key Design Decisions:**
 
-1. **Local users are not authenticated**: When running locally (`localhost:8000`), no authentication is required. This is a single-user server under the user's direct control.
+1. **Local users are not authenticated**: When running locally (`localhost:8000` or `127.0.0.1:8000`), no authentication is required. The `/record` view is specifically accessible without authentication from localhost to enable seamless local usage. This is a single-user server under the user's direct control.
 
 2. **CORS allows all origins**: The `allow_origins=["*"]` configuration is acceptable because:
    - Local mode: Only accessible from localhost
@@ -411,6 +411,7 @@ TranscriptionSuite/
 │   │   │   ├── api_client.py     # HTTP client, WebSocket, ServerBusyError handling
 │   │   │   ├── audio_recorder.py # PyAudio recording wrapper
 │   │   │   ├── orchestrator.py   # Main controller, state machine, error notifications
+│   │   │   ├── tailscale_resolver.py # Tailscale IP fallback when DNS fails
 │   │   │   ├── tray_base.py      # Abstract tray interface
 │   │   │   ├── config.py         # Client configuration
 │   │   │   └── models.py         # Shared data models
@@ -501,18 +502,19 @@ The server uses a layered security approach:
 
 **TLS Mode Authentication:**
 
-When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
-- Unauthenticated browser requests are redirected to `/auth`
-- API requests without valid token receive 401 Unauthorized
-- Tokens can be provided via:
+When `TLS_ENABLED=true`, the server enforces authentication for most routes **except localhost**:
+- **Localhost access** (`127.0.0.1`, `::1`, `localhost`): `/record` and `/api/` endpoints accessible without authentication
+- **Remote access via Tailscale**: Unauthenticated browser requests are redirected to `/auth`
+- **Remote API requests**: Requests without valid token receive 401 Unauthorized
+- **Tokens can be provided via:**
   - `Authorization: Bearer <token>` header (API clients)
   - `auth_token` cookie (web browsers)
 
 **Record View Features:**
-- Token-based authentication (login with admin or user token)
 - File upload transcription (with optional diarization and word timestamps)
 - Real-time microphone recording via WebSocket
-- Admin panel for token management (admin users only)
+- Admin panel for token management (requires login in TLS mode; accessible without login on localhost)
+- Token-based authentication (login with admin or user token when using remote Tailscale access)
 - Works on Android browsers (no app needed)
 
 **Notebook View Features:**
@@ -525,7 +527,9 @@ When `TLS_ENABLED=true`, the server enforces authentication for ALL routes:
 - LLM chat integration for summarization and Q&A
 - Audio playback with waveform visualization
 
-**Authentication:** On first run, an admin token is automatically generated and printed to the console logs. Save this token to login at `/auth` (or `/record` which will redirect to `/auth`) and access the admin panel for token management.
+**Authentication:** On first run, an admin token is automatically generated and printed to the console logs.
+- **Localhost users**: No token needed - access `/record` directly
+- **Remote users (via Tailscale)**: Save this token to login at `/auth` (or visit `/record` which will redirect to `/auth`) and access the admin panel for token management
 
 ### Endpoints
 
@@ -945,7 +949,7 @@ This creates `build/.venv` containing packaging tools isolated from runtime depe
 ./build/build-appimage-kde.sh
 ```
 
-**Output:** `build/.dist/TranscriptionSuite-KDE-x86_64.AppImage`
+**Output:** `build/dist/TranscriptionSuite-KDE-x86_64.AppImage`
 
 **Usage on target system:**
 
@@ -990,7 +994,7 @@ PyInstaller cannot reliably bundle these, and attempts usually result in broken 
 ./build/build-appimage-gnome.sh
 ```
 
-**Output:** `build/.dist/TranscriptionSuite-GNOME-x86_64.AppImage`
+**Output:** `build/dist/TranscriptionSuite-GNOME-x86_64.AppImage`
 
 **Target system dependencies:**
 
@@ -1059,13 +1063,14 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
    ```powershell
    magick build\assets\logo.png -background transparent -define icon:auto-resize=256,48,32,16 build\assets\logo.ico
    ```
+   *Note: you may need to restart the terminal after installing `magick` for it to be detected in your PATH (or you must run the windows `source .zshrc` equivalent).*
 
 4. **Build the executable:**
    ```powershell
-   .\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\.dist .\client\src\client\build\pyinstaller-windows.spec
+   .\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\dist .\client\src\client\build\pyinstaller-windows.spec
    ```
 
-**Output:** `build\.dist\TranscriptionSuite.exe`
+**Output:** `build\dist\TranscriptionSuite.exe`
 
 **Notes:**
 - No need to install Python separately - `uv` handles Python installation automatically
@@ -1127,10 +1132,10 @@ identify build/assets/logo.ico  # Should show 4 sizes: 16, 32, 48, 256
 
 ### Build Artifacts
 
-All builds output to the `build/.dist/` directory:
+All builds output to the `build/dist/` directory:
 
 ```
-build/.dist/
+build/dist/
 ├── TranscriptionSuite-KDE-x86_64.AppImage      # Linux KDE (standalone)
 ├── TranscriptionSuite-GNOME-x86_64.AppImage    # Linux GNOME (requires system GTK)
 └── TranscriptionSuite.exe                       # Windows (standalone)
@@ -1224,6 +1229,14 @@ By default, Docker stores credentials in plaintext in `~/.docker/config.json`, w
 - Docker layer caching may reuse these layers if `package*.json` and frontend sources are unchanged. Use `--no-cache` to force rebuilding.
 - The Docker build **does not run `npm audit`** — run audits locally before building.
 
+#### List all packages installed in running container
+
+Helpful for diagnosing and pinning software versions prior to releases.
+
+```bash
+docker exec transcription-suite python -c "from importlib.metadata import distributions; print('\n'.join([f'{d.name}=={d.version}' for d in distributions()]))"
+```
+
 #### Docker Image Size Optimization
 
 The Dockerfile uses `ubuntu:22.04` as the base image instead of `nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04` to avoid CUDA library duplication:
@@ -1292,7 +1305,7 @@ Complete instructions for setting up secure remote access via Tailscale.
 1. Install Tailscale on your host machine: [tailscale.com/download](https://tailscale.com/download)
 2. Authenticate: `sudo tailscale up`
    - Tailscale opens a browser window to authenticate
-   - Verify with `tailscale status` — you should see your machine's Tailscale IP, device name, username, OS (e.g., `100.78.16.89 desktop github-account@ linux -`)
+   - Verify with `tailscale status` — you should see your machine's Tailscale IP, device name, username, OS (e.g., `100.98.45.21 desktop github-account@ linux -`)
 3. Go to [https://login.tailscale.com/admin](https://login.tailscale.com/admin) and log in
 4. Go to the **DNS** tab. Note the Tailnet DNS name at the top (e.g., `tail1234.ts.net`). You can change it once to something more memorable.
 5. Scroll to the bottom of the DNS tab and enable **HTTPS Certificates**
@@ -1806,11 +1819,11 @@ The server uses PyAnnote Audio for speaker diarization (identifying "who spoke w
 - **Configuration**: Enable via `enable_diarization=true` parameter in upload endpoint
 - **Storage**: Diarization segments stored in `diarization_segments` table with speaker labels
 - **Display**: DayView shows speaker chips for each segment when diarization data is available
-- **Warning Suppression**: PyAnnote generates several benign warnings that are now filtered:
-  - TensorFloat-32 (TF32) reproducibility warnings (see [pyannote/pyannote-audio#1370](https://github.com/pyannote/pyannote-audio/issues/1370))
-  - Pooling `std()` degrees of freedom warnings during inference
-  - TF32 is explicitly disabled before pipeline loading to prevent accuracy issues
-  - Warnings are filtered in `diarization_engine.py` using `warnings.catch_warnings()`
+- **Known Warnings** (Non-Critical): Several benign warnings occur during operation but do not affect functionality:
+  - PyTorch Tensor Warning: `audio_utils.py:569` - Non-writable NumPy array converted to PyTorch tensor. PyTorch only reads the data, so undefined behavior is not triggered. Cosmetic issue; fix available by using `.copy()` on the array.
+  - PyAnnote torchcodec Warning: Missing torchcodec for audio decoding, but PyAnnote falls back to preloaded in-memory audio. Acceptable because audio is preprocessed before PyAnnote receives it. Docker uses `ubuntu:22.04` base (not nvidia/cuda) to save ~4GB image size.
+  - PyAnnote TensorFloat-32 (TF32) Warnings: Reproducibility warnings from PyTorch (see [pyannote/pyannote-audio#1370](https://github.com/pyannote/pyannote-audio/issues/1370)) and pooling `std()` degrees of freedom warnings during inference. TF32 is explicitly disabled before pipeline loading to prevent accuracy issues.
+  - All benign warnings are filtered in `diarization_engine.py` using `warnings.catch_warnings()`
 
 ##### `token_store.py` - Authentication Management
 
@@ -1881,12 +1894,18 @@ cd ..
 **Test structure:**
 
 ```txt
-tests/
-├── test_api_routes.py        # API endpoint tests
-├── test_transcription.py     # Transcription engine tests
-├── test_database.py          # Database operations
-└── conftest.py               # Pytest fixtures
+server/backend/tests/
+└── test_ffmpeg_utils.py      # FFmpeg audio processing tests (load, resample, normalize)
 ```
+
+**Note:** Currently only FFmpeg utilities have test coverage. The test suite validates:
+- Audio loading with format conversion and resampling
+- Normalization methods (peak, dynaudnorm, loudnorm)
+- Resampling quality comparison against scipy reference
+- Edge cases (empty audio, stereo-to-mono, invalid inputs)
+- Performance benchmarks for real-time processing
+
+Additional tests for API routes, transcription engine, and database operations can be added following the same pytest structure.
 
 **Manual API testing:**
 
@@ -2534,30 +2553,37 @@ TranscriptionSuite uses Voice Activity Detection to remove silence and improve t
 
 | Method | VAD Stage 1 | VAD Stage 2 | Purpose |
 |--------|-------------|-------------|---------|
-| **Static file transcription** | WebRTC preprocessing | faster_whisper VAD filter (Silero) | Remove silence from existing audio files |
+| **Static file transcription** | Silero preprocessing | faster_whisper VAD filter (Silero) | Remove silence from existing audio files while maintaining timestamp consistency |
 | **Longform recording** | Dual VAD (WebRTC + Silero) | faster_whisper VAD filter (Silero) | Control when to record based on voice activity |
 | **Real-time preview** | Dual VAD (WebRTC + Silero) | faster_whisper VAD filter (Silero) | Control when to record based on voice activity |
 
 #### Static File Transcription VAD
 
 **Two-stage approach:**
-1. **Stage 1 - WebRTC preprocessing**: Processes the entire audio file upfront, physically removes silence frames, creates shorter audio
+1. **Stage 1 - Silero preprocessing**: Processes the entire audio file upfront, intelligently removes silence while preserving natural pauses, maintains timestamp consistency with playback
 2. **Stage 2 - faster_whisper VAD filter**: Silero VAD during Whisper transcription as additional safety net
 
 **Configuration:**
 
 ```yaml
 static_transcription:
-  # Stage 1: WebRTC preprocessing removes silence before transcription
-  webrtc_vad_preprocessing: true
-  webrtc_vad_aggressiveness: 3  # 0-3, higher = more aggressive silence removal
+  # Stage 1: Silero preprocessing removes silence before transcription
+  # Silero VAD is used for static transcription to ensure timestamps align
+  # with the original audio during playback
+  silero_vad_preprocessing: true
+  silero_vad_sensitivity: 0.5  # 0.0-1.0, higher = more sensitive to speech (lower silence removal)
 ```
 
 **How it works:**
-- WebRTC VAD processes 30ms audio frames
-- Keeps only frames detected as speech
-- Logs duration removed (e.g., "Removed 5.2s of silence (60.0s -> 54.8s)")
+- Silero VAD processes 512ms audio chunks (optimal for accurate speech detection)
+- Uses neural-network-based probability scoring for robust speech vs silence detection
+- Sensitivity threshold: speech detected when probability > (1 - sensitivity)
+  - 0.5 = balanced: removes most silence while preserving important pauses
+  - 0.3 = aggressive: removes more silence (use if audio has many gaps)
+  - 0.7 = conservative: keeps more audio including pauses (use for natural speech)
+- Logs duration removed (e.g., "Silero VAD preprocessing: removed 5.2s of silence (60.0s -> 54.8s)")
 - Whisper receives shorter audio with silence already removed
+- **Critical for diarization**: Ensures word timestamps match with diarization segment boundaries
 
 #### Longform & Real-Time Preview VAD
 
@@ -2842,34 +2868,45 @@ If the client fails to connect with DNS resolution errors like:
 DNS resolution failed for <your-machine>.tail1234.ts.net: [Errno -2] Name or service not known
 ```
 
-**This was a known issue prior to the async DNS resolution fix** (implemented December 2024). The client now uses non-blocking async DNS resolution with graceful error handling.
+**The client now automatically falls back to using Tailscale IP addresses** when DNS resolution fails for `.ts.net` hostnames. This handles both timing issues and permanent DNS misconfigurations.
 
 #### Root Cause
 
 The error typically occurs when:
-- Client starts before Tailscale MagicDNS is fully initialized
-- System DNS resolver (systemd-resolved) forwards to Tailscale DNS (100.100.100.100)
-- MagicDNS isn't ready yet to resolve the Tailscale hostname
+- **Timing issue:** Client starts before Tailscale MagicDNS is fully initialized
+- **DNS fight:** `/etc/resolv.conf` has been overwritten (common on mobile networks)
+- **systemd-resolved not running:** The system DNS resolver doesn't forward `.ts.net` queries to Tailscale
 
-**Note:** This is a timing issue, not a configuration problem. DNS resolution works perfectly once Tailscale is fully initialized.
+**To diagnose**, run `tailscale status` on the client machine. If you see:
+```
+# Health check:
+#     - System DNS config not ideal. /etc/resolv.conf overwritten.
+```
 
-#### The Fix (December 2024)
+This indicates a "DNS fight" where NetworkManager (or another tool) has overwritten DNS configuration, preventing Tailscale's MagicDNS from working.
 
-The client now uses **async DNS resolution** instead of blocking calls:
+#### Automatic IP Fallback (December 2024)
 
-**File:** `client/src/client/common/api_client.py` (Lines 200-228)
+When DNS resolution fails for a `.ts.net` hostname, the client automatically:
+1. Queries `tailscale status --json` to find the device's IP
+2. Switches to using the IP address directly
+3. Preserves the original hostname for SSL certificate validation
 
-**Key changes:**
-- Replaced blocking `socket.getaddrinfo()` with async `asyncio.get_running_loop().getaddrinfo()`
-- Added 2-second timeout to prevent hanging on DNS failures
-- Changed log level from ERROR to WARNING for DNS pre-check failures (these are diagnostic only)
-- Added debug messages about Tailscale MagicDNS timing
+**Files:**
+- `client/src/client/common/tailscale_resolver.py` - Tailscale CLI helper
+- `client/src/client/common/api_client.py` - Fallback logic in `_diagnose_connection()`
 
-**Why this helps:**
-- DNS resolution no longer blocks the async event loop
-- The actual aiohttp connection handles DNS with built-in retries
-- Graceful degradation: diagnostic DNS check can fail without blocking connection attempts
-- Warning-level logging reduces alarm for expected timing issues
+**Log output when fallback activates:**
+```
+WARNING - DNS pre-check failed for <your-machine>.tail1234.ts.net: [Errno -2] Name or service not known
+INFO - Attempting Tailscale IP fallback for <your-machine>.tail1234.ts.net
+INFO - Tailscale IP fallback: <your-machine>.tail1234.ts.net -> 100.98.45.21
+```
+
+**Why this works:**
+- Tailscale connectivity works even when DNS doesn't (the VPN tunnel is independent of DNS)
+- The `tailscale` CLI can resolve device IPs locally without DNS
+- SSL certificates are validated using `server_hostname` parameter, so HTTPS still works
 
 #### Verification Steps
 
@@ -2903,7 +2940,7 @@ resolvectl status
 
 ```bash
 # If DNS fails, try using Tailscale IP directly
-uv run transcription-client --host 100.92.85.36 --port 8443 --https
+uv run transcription-client --host 100.98.45.21 --port 8443 --https
 ```
 
 #### Restarting/Resetting Tailscale MagicDNS
@@ -2958,14 +2995,43 @@ sudo tailscale up
 # Re-authenticate via browser
 ```
 
-#### Prevention
+#### Fixing DNS Fight Permanently (Optional)
 
-The async DNS fix in `api_client.py` makes the client resilient to MagicDNS timing issues:
-- Client startup no longer depends on immediate DNS resolution
-- Warnings instead of errors for diagnostic DNS checks
-- Actual connection attempts use aiohttp's async DNS with retries
+If you want DNS to work natively (instead of relying on IP fallback), fix the DNS configuration on the client machine:
 
-**For developers:** Always use async DNS resolution (`asyncio.get_running_loop().getaddrinfo()`) instead of blocking `socket.getaddrinfo()` in async code.
+**Option A: Enable systemd-resolved (Recommended for Linux)**
+
+```bash
+# 1. Enable and start systemd-resolved
+sudo systemctl enable systemd-resolved
+sudo systemctl start systemd-resolved
+
+# 2. Link /etc/resolv.conf to systemd-resolved's stub
+sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+# 3. Restart Tailscale to pick up the change
+sudo systemctl restart tailscaled
+
+# 4. Verify - tailscale status should no longer show DNS warning
+tailscale status
+```
+
+**Option B: Force Tailscale DNS override**
+
+```bash
+sudo tailscale down
+sudo tailscale up --accept-dns=true --reset
+```
+
+#### Resilience Summary
+
+The client is now resilient to DNS issues through multiple mechanisms:
+- **Async DNS resolution:** Non-blocking, won't hang the event loop
+- **Automatic IP fallback:** Uses `tailscale status --json` when DNS fails
+- **SSL hostname preservation:** HTTPS works even when connecting via IP
+- **Graceful degradation:** Warnings instead of errors for diagnostic checks
+
+**For developers:** The `TailscaleResolver` class in `client/common/tailscale_resolver.py` can be reused for other Tailscale-aware applications.
 
 ### Model Loading
 
@@ -3169,6 +3235,8 @@ ls -la ~/.config/TranscriptionSuite/logs/
 - PyTorch bundles cuDNN 9.8.0 (prioritized via `LD_LIBRARY_PATH`)
 - TorchAudio is being deprecated but still required by PyAnnote and Silero VAD
 - Docker base image is `ubuntu:22.04` (minimal, no system CUDA)
+
+> **Note:** The current Dockerfile uses `ubuntu:22.04` as the base image (not nvidia/cuda) and relies on PyTorch's bundled CUDA/cuDNN libraries. The `LD_LIBRARY_PATH` is pre-configured to prioritize PyTorch's bundled cuDNN.
 
 ### Client
 

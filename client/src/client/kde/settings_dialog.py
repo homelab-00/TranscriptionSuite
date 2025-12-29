@@ -81,7 +81,7 @@ class SettingsDialog(QDialog):
 
         # Help text for connection settings
         conn_help_label = QLabel(
-            "Port: 8000 (HTTP dev), 8443 (HTTPS via Tailscale)\n"
+            "Port: 8000 (HTTP local), 8443 (HTTPS via Tailscale)\n"
             "HTTPS: Enable when connecting to Tailscale servers."
         )
         conn_help_label.setWordWrap(True)
@@ -223,7 +223,8 @@ class SettingsDialog(QDialog):
         self.host_edit.setText(self.config.get("server", "host", default="localhost"))
         self.port_spin.setValue(self.config.get("server", "port", default=8000))
         self.https_check.setChecked(self.config.get("server", "use_https", default=False))
-        self.token_edit.setText(self.config.get("server", "token", default=""))
+        token = self.config.get("server", "token", default="")
+        self.token_edit.setText(token.strip() if token else "")
         self.use_remote_check.setChecked(
             self.config.get("server", "use_remote", default=False)
         )

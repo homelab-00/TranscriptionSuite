@@ -17,7 +17,6 @@ import {
   Sparkles,
   X,
   RefreshCw,
-  Power,
   MessageSquare,
 } from 'lucide-react';
 import dayjs, { Dayjs } from 'dayjs';
@@ -371,34 +370,12 @@ export default function DayView() {
   };
 
   // LLM Functions
-  const [llmStarting, setLlmStarting] = useState(false);
-
   const checkLLMStatus = async () => {
     try {
       const status = await api.getLLMStatus();
       setLlmStatus(status);
     } catch {
       setLlmStatus({ available: false, base_url: '', model: null, error: 'Failed to check status' });
-    }
-  };
-
-  const handleStartLLM = async () => {
-    setLlmStarting(true);
-    setLlmError(null);
-    try {
-      // Start server (will also auto-load model from config)
-      const serverResult = await api.startLMStudioServer();
-      if (!serverResult.success && !serverResult.message.includes('already running') && !serverResult.message.includes('loaded')) {
-        setLlmError(serverResult.message);
-        setLlmStarting(false);
-        return;
-      }
-      // Refresh status
-      await checkLLMStatus();
-    } catch (error) {
-      setLlmError((error as Error).message);
-    } finally {
-      setLlmStarting(false);
     }
   };
 
@@ -929,21 +906,6 @@ export default function DayView() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* Start LLM button when not available */}
-                    {!llmStatus?.available && !llmLoading && (
-                      <button
-                        onClick={handleStartLLM}
-                        className="btn-ghost text-green-400 hover:text-green-300 text-sm flex items-center gap-1"
-                        disabled={llmStarting}
-                      >
-                        {llmStarting ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          <Power size={14} />
-                        )}
-                        Start LLM
-                      </button>
-                    )}
                     {llmLoading ? (
                       <button
                         onClick={handleStopGeneration}
@@ -1028,41 +990,42 @@ export default function DayView() {
                   
                   {/* AI Buttons */}
                   <div className="flex items-center gap-2">
-                    {/* Chat Button - always visible when LLM available */}
+                    {/* LM Studio Status Indicator */}
+                    {llmStatus && (
+                      <div className="flex items-center gap-2 text-xs mr-2">
+                        <span className={`w-2 h-2 rounded-full ${llmStatus.available ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <span className="text-gray-400">
+                          {llmStatus.available
+                            ? `LM Studio: ${llmStatus.model}`
+                            : 'LM Studio: Not Available'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Chat Button - Always enabled to allow viewing history */}
                     <button
                       onClick={() => setChatPanelOpen(true)}
                       className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
+                      title={!llmStatus?.available ? 'LM Studio offline - view history only' : undefined}
                     >
                       <MessageSquare size={18} />
                       <span>Chat</span>
                     </button>
-                    
+
                     {!llmSummary && !llmLoading && (
-                      <>
-                        {!llmStatus?.available ? (
-                          <button
-                            onClick={handleStartLLM}
-                            className="btn-ghost text-green-400 hover:text-green-300 flex items-center gap-2"
-                            disabled={llmStarting}
-                          >
-                            {llmStarting ? (
-                              <Loader2 size={18} className="animate-spin" />
-                            ) : (
-                              <Power size={18} />
-                            )}
-                            <span>Start LLM</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleSummarize}
-                            className="btn-ghost text-purple-400 hover:text-purple-300 flex items-center gap-2"
-                            disabled={llmLoading}
-                          >
-                            <Bot size={18} />
-                            <span>Summarize</span>
-                          </button>
-                        )}
-                      </>
+                      <button
+                        onClick={handleSummarize}
+                        disabled={!llmStatus?.available || llmLoading}
+                        className={`btn-ghost flex items-center gap-2 ${
+                          llmStatus?.available
+                            ? 'text-purple-400 hover:text-purple-300'
+                            : 'text-gray-600 cursor-not-allowed'
+                        }`}
+                        title={!llmStatus?.available ? 'LM Studio offline - view history only' : undefined}
+                      >
+                        <Bot size={18} />
+                        <span>Summarize</span>
+                      </button>
                     )}
                   </div>
                 </div>

@@ -10,6 +10,11 @@ adapted for server use. Key differences from the original:
 - Maintains the sophisticated VAD logic (Silero + WebRTC)
 
 The core recording state machine and VAD logic is preserved from MAIN.
+
+Portions inspired by/adapted from RealtimeSTT by Kolja Beigel (MIT License).
+https://github.com/KoljaB/RealtimeSTT
+Major modifications: removed multiprocessing, PyAudio, wake word detection;
+added file transcription, WebSocket streaming support, server integration.
 """
 
 import collections
@@ -167,13 +172,19 @@ class AudioToTextRecorder:
         stt_cfg = cfg.stt
 
         self.instance_name = instance_name
-        self.model_name = model or main_cfg.get("model", "Systran/faster-whisper-large-v3")
+        self.model_name = model or main_cfg.get(
+            "model", "Systran/faster-whisper-large-v3"
+        )
         self.download_root = download_root
         self.language = language
         self.compute_type = compute_type or main_cfg.get("compute_type", "default")
         self.gpu_device_index = gpu_device_index
-        self.batch_size = batch_size if batch_size is not None else main_cfg.get("batch_size", 16)
-        self.beam_size = beam_size if beam_size is not None else main_cfg.get("beam_size", 5)
+        self.batch_size = (
+            batch_size if batch_size is not None else main_cfg.get("batch_size", 16)
+        )
+        self.beam_size = (
+            beam_size if beam_size is not None else main_cfg.get("beam_size", 5)
+        )
 
         # VAD parameters - resolve from config (stt section is primary, preview_transcriber for silero)
         silero_sensitivity = (
@@ -407,6 +418,8 @@ class AudioToTextRecorder:
                 chunk = np.mean(chunk, axis=1)
 
             # Resample to 16kHz if needed
+            # NOTE: Uses scipy for real-time performance (<50ms latency required).
+            # File operations use FFmpeg for quality (see audio_utils.py).
             if original_sample_rate != SAMPLE_RATE:
                 num_samples = int(len(chunk) * SAMPLE_RATE / original_sample_rate)
                 chunk = resample(chunk, num_samples)
@@ -674,7 +687,7 @@ class AudioToTextRecorder:
         Returns:
             TranscriptionResult with full transcription data
         """
-        from server.core.audio_utils import apply_webrtc_vad, load_audio
+        from server.core.audio_utils import apply_silero_vad, load_audio
 
         path = Path(file_path)
         if not path.exists():
@@ -685,18 +698,19 @@ class AudioToTextRecorder:
         # Load and convert audio to 16kHz float32
         audio_data, _ = load_audio(str(path), target_sample_rate=SAMPLE_RATE)
 
-        # Apply WebRTC VAD preprocessing (Stage 1 of two-stage VAD)
+        # Apply Silero VAD preprocessing (Stage 1 of two-stage VAD)
+        # Silero VAD is used for static transcription to maintain timestamp consistency
         if apply_vad_preprocessing:
             cfg = get_config()
             static_cfg = cfg.get("static_transcription", default={})
-            vad_enabled = static_cfg.get("webrtc_vad_preprocessing", True)
-            vad_aggressiveness = static_cfg.get("webrtc_vad_aggressiveness", 3)
+            vad_enabled = static_cfg.get("silero_vad_preprocessing", True)
+            vad_sensitivity = static_cfg.get("silero_vad_sensitivity", 0.5)
 
             if vad_enabled:
-                audio_data = apply_webrtc_vad(
+                audio_data = apply_silero_vad(
                     audio_data,
                     sample_rate=SAMPLE_RATE,
-                    aggressiveness=vad_aggressiveness,
+                    sensitivity=vad_sensitivity,
                 )
 
         return self.transcribe_audio(
@@ -742,7 +756,9 @@ class AudioToTextRecorder:
                         audio_data = (audio_data / peak) * 0.95
 
                 # Use provided language or fall back to instance language
-                lang = language if language else (self.language if self.language else None)
+                lang = (
+                    language if language else (self.language if self.language else None)
+                )
                 prompt = initial_prompt if initial_prompt else self.initial_prompt
 
                 start_time = time.time()
@@ -838,7 +854,9 @@ class AudioToTextRecorder:
                                 if self.on_vad_start:
                                     self.on_vad_start()
 
-                                logger.info("Voice activity detected, starting recording")
+                                logger.info(
+                                    "Voice activity detected, starting recording"
+                                )
                                 self.start()
                                 self.start_recording_on_voice_activity = False
 
@@ -900,7 +918,9 @@ class AudioToTextRecorder:
                                 if self.on_vad_stop:
                                     self.on_vad_stop()
 
-                                logger.info("Voice deactivity detected, stopping recording")
+                                logger.info(
+                                    "Voice deactivity detected, stopping recording"
+                                )
                                 self.frames.append(data)
                                 self.stop()
                                 self.stop_recording_on_voice_deactivity = False

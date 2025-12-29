@@ -42,6 +42,7 @@ dependencies = [
     "soundfile==0.13.1",
     "webrtcvad==2.0.10",
     "silero-vad==6.2.0",
+    "ffmpeg-python==0.2.0",
 
     # Database
     "aiosqlite==0.22.1",

@@ -80,11 +80,12 @@ class StoredToken:
         else:
             expires_at = (now + timedelta(days=expiry_days)).isoformat()
 
-        # Generate a non-secret ID for UI operations (128 bits)
-        token_id = secrets.token_hex(16)  # 32 chars, sufficient entropy
+        # Generate a non-secret ID for UI operations (64 bits)
+        token_id = secrets.token_hex(8)  # 16 chars, sufficient for UI identification
 
-        # Generate plaintext token and its hash
-        plaintext_token = secrets.token_hex(32)
+        # Generate plaintext token and its hash (128 bits = 32 hex chars)
+        # Secure for belt-and-suspenders model with Tailscale network isolation
+        plaintext_token = secrets.token_hex(16)
         hashed_token = hash_token(plaintext_token)
 
         stored_token = cls(

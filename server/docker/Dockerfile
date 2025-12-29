@@ -20,6 +20,8 @@ WORKDIR /build/frontend
 RUN npm ci
 
 COPY server/frontend/ ./
+# Copy logo from build/assets/ to public/ before building
+COPY build/assets/logo.svg ./public/logo.svg
 RUN npm run build
 
 # =============================================================================
@@ -80,6 +82,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
     ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
     libsndfile1 \
     curl \
     && rm -rf /var/lib/apt/lists/*

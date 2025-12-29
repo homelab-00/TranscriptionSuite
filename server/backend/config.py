@@ -138,10 +138,35 @@ class ServerConfig:
         """
         Get a configuration value by dot-separated path.
 
-        Example:
-            config.get("transcription", "model")
-            config.get("logging", "level", default="INFO")
+        Supports nested key access with multiple arguments:
+            config.get("transcription", "model")  # Returns config["transcription"]["model"]
+            config.get("logging", "level", default="INFO")  # Nested with default
+            config.get("audio_processing", default={})  # Single key with default
+
+        Args:
+            *keys: One or more string configuration keys for nested access
+            default: Default value to return if any key in the path is not found
+
+        Returns:
+            Configuration value at the specified path, or default if not found
+
+        Raises:
+            TypeError: If any key argument is not a string
         """
+        if not keys:
+            return self.config
+
+        # Validate all keys are strings (catches cfg.get("key", {}) mistake early)
+        for i, key in enumerate(keys):
+            if not isinstance(key, str):
+                # Provide helpful error message for common mistake
+                raise TypeError(
+                    f"All configuration keys must be strings, got {type(key).__name__} "
+                    f"for keys[{i}]: {repr(key)}. "
+                    f"If you want to provide a default value, use the 'default=' keyword argument: "
+                    f"cfg.get({', '.join(repr(k) for k in keys[:i] if isinstance(k, str))}, default={repr(key)})"
+                )
+
         value = self.config
         for key in keys:
             if isinstance(value, dict):

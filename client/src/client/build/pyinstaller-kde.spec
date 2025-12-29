@@ -3,9 +3,9 @@
 PyInstaller spec file for TranscriptionSuite KDE/Qt client.
 
 Build command:
-    pyinstaller --clean --distpath build/.dist client/build/pyinstaller-kde.spec
+    pyinstaller --clean --distpath build/dist client/build/pyinstaller-kde.spec
 
-Output: build/.dist/TranscriptionSuite-KDE (Linux) or build/.dist/TranscriptionSuite-KDE.exe (Windows)
+Output: build/dist/TranscriptionSuite-KDE (Linux) or build/dist/TranscriptionSuite-KDE.exe (Windows)
 """
 
 import sys
