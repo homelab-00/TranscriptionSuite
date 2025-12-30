@@ -33,6 +33,11 @@ class TrayAction(Enum):
     SETTINGS = "settings"
     RECONNECT = "reconnect"
     QUIT = "quit"
+    # Docker server control actions
+    SERVER_START_LOCAL = "server_start_local"
+    SERVER_START_REMOTE = "server_start_remote"
+    SERVER_STOP = "server_stop"
+    SERVER_SETUP = "server_setup"
 
 
 class TranscriptionMode(Enum):

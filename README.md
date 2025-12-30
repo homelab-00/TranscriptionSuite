@@ -246,6 +246,15 @@ Download the native client for your platform:
 | **GNOME** | `TranscriptionSuite-GNOME-x86_64.AppImage` | Requires system packages (see below) |
 | **Windows** | `TranscriptionSuite.exe` | Standalone, no dependencies |
 
+### First-Time Setup
+
+On first run, the client automatically performs initial setup:
+1. Checks Docker availability
+2. Creates the config directory with required files
+3. Pulls the Docker image from GitHub Container Registry
+
+This replaces the manual `setup.sh`/`setup.ps1` script execution for most users.
+
 ### GNOME Client Dependencies (Ubuntu/Debian)
 
 The GNOME client requires system packages:
@@ -263,6 +272,19 @@ You also need the [AppIndicator extension](https://extensions.gnome.org/extensio
 3. **Left-click** to start recording
 4. **Middle-click** to stop and transcribe
 5. Result is automatically copied to clipboard
+
+### Docker Server Control
+
+The client includes built-in Docker server management via the tray menu:
+
+| Menu Item | Action |
+|-----------|--------|
+| **Docker Server → Start Server (Local)** | Start in HTTP mode (port 8000) |
+| **Docker Server → Start Server (Remote)** | Start in HTTPS mode (port 8443) |
+| **Docker Server → Stop Server** | Stop the running server |
+| **Docker Server → Check Status** | Show current server status |
+
+This eliminates the need to run scripts manually from the command line.
 
 ### Tray Icon Colors
 

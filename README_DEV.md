@@ -410,7 +410,9 @@ TranscriptionSuite/
 │   │   ├── common/               # Shared client code
 │   │   │   ├── api_client.py     # HTTP client, WebSocket, ServerBusyError handling
 │   │   │   ├── audio_recorder.py # PyAudio recording wrapper
+│   │   │   ├── docker_manager.py # Docker server control (start/stop/status)
 │   │   │   ├── orchestrator.py   # Main controller, state machine, error notifications
+│   │   │   ├── setup_wizard.py   # First-time setup wizard
 │   │   │   ├── tailscale_resolver.py # Tailscale IP fallback when DNS fails
 │   │   │   ├── tray_base.py      # Abstract tray interface
 │   │   │   ├── config.py         # Client configuration
@@ -2147,6 +2149,50 @@ server:
   auto_reconnect: true          # Enable automatic reconnection
   reconnect_interval: 10        # Seconds between attempts
 ```
+
+### Docker Server Control
+
+The client includes built-in Docker server management, eliminating the need for external scripts.
+
+**Key Modules:**
+
+| Module | Purpose |
+|--------|---------|
+| `docker_manager.py` | Docker operations (start, stop, status check) |
+| `setup_wizard.py` | First-time setup with embedded config files |
+
+**Tray Menu Actions:**
+- **Docker Server → Start Server (Local)**: Starts container in HTTP mode (port 8000)
+- **Docker Server → Start Server (Remote)**: Starts container in HTTPS/TLS mode (port 8443)
+- **Docker Server → Stop Server**: Stops the running container
+- **Docker Server → Check Status**: Shows current server status via notification
+
+**Implementation Details:**
+
+The `DockerManager` class in `docker_manager.py`:
+- Runs `docker compose` commands using subprocess
+- Automatically detects config/env files in the user's config directory
+- Handles mode conflicts (automatically removes container when switching modes)
+- Parses TLS paths from `config.yaml` for remote mode
+- Triggers automatic reconnection after server start
+
+**First-Time Setup:**
+
+The `SetupWizard` class in `setup_wizard.py`:
+- Runs automatically on first client launch (when config dir doesn't exist)
+- Checks Docker availability and GPU support
+- Creates config directory with embedded files:
+  - `docker-compose.yml` (for pulling pre-built image)
+  - `.env` (for HuggingFace token)
+- Downloads `config.yaml` from GitHub
+- Pulls Docker image from GHCR
+
+**Skip Setup Flag:**
+```bash
+uv run transcription-client --skip-setup
+```
+
+Use this flag to bypass the first-time setup wizard (useful for development or when setup was done manually).
 
 ### Platform-Specific Features
 

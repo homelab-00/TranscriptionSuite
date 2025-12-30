@@ -10,6 +10,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, cast
 
+from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
 from client.common.models import TrayAction, TrayState
 from client.common.tray_base import AbstractTray
 
@@ -88,6 +89,9 @@ class Qt6Tray(AbstractTray):
         self.stop_action: QAction | None = None
         self.reconnect_action: QAction | None = None
 
+        # Docker manager for server control
+        self._docker_manager = DockerManager()
+
         # Thread-safe signals for GUI updates from async thread
         self._signals = TraySignals()
         self._signals.state_changed.connect(self._do_set_state)
@@ -140,6 +144,31 @@ class Qt6Tray(AbstractTray):
             lambda: self._trigger_callback(TrayAction.OPEN_AUDIO_NOTEBOOK)
         )
         menu.addAction(notebook_action)
+
+        menu.addSeparator()
+
+        # Docker Server Control submenu
+        server_menu = QMenu("Docker Server", menu)
+
+        start_local_action = QAction("Start Server (Local)", server_menu)
+        start_local_action.triggered.connect(self._on_server_start_local)
+        server_menu.addAction(start_local_action)
+
+        start_remote_action = QAction("Start Server (Remote)", server_menu)
+        start_remote_action.triggered.connect(self._on_server_start_remote)
+        server_menu.addAction(start_remote_action)
+
+        stop_server_action = QAction("Stop Server", server_menu)
+        stop_server_action.triggered.connect(self._on_server_stop)
+        server_menu.addAction(stop_server_action)
+
+        server_menu.addSeparator()
+
+        server_status_action = QAction("Check Status", server_menu)
+        server_status_action.triggered.connect(self._on_server_status)
+        server_menu.addAction(server_status_action)
+
+        menu.addMenu(server_menu)
 
         menu.addSeparator()
 
@@ -300,6 +329,77 @@ class Qt6Tray(AbstractTray):
         # Reload values in case config changed externally
         self._settings_dialog._load_values()
         self._settings_dialog.exec()
+
+    def _on_server_start_local(self) -> None:
+        """Start Docker server in local (HTTP) mode."""
+        self._run_server_operation(
+            lambda: self._docker_manager.start_server(
+                mode=ServerMode.LOCAL,
+                progress_callback=lambda msg: logger.info(msg),
+            ),
+            "Starting server (local mode)...",
+        )
+
+    def _on_server_start_remote(self) -> None:
+        """Start Docker server in remote (HTTPS) mode."""
+        self._run_server_operation(
+            lambda: self._docker_manager.start_server(
+                mode=ServerMode.REMOTE,
+                progress_callback=lambda msg: logger.info(msg),
+            ),
+            "Starting server (remote mode)...",
+        )
+
+    def _on_server_stop(self) -> None:
+        """Stop the Docker server."""
+        self._run_server_operation(
+            lambda: self._docker_manager.stop_server(
+                progress_callback=lambda msg: logger.info(msg),
+            ),
+            "Stopping server...",
+        )
+
+    def _on_server_status(self) -> None:
+        """Check Docker server status."""
+        try:
+            available, docker_msg = self._docker_manager.is_docker_available()
+            if not available:
+                self.show_notification("Docker Server", docker_msg)
+                return
+
+            status = self._docker_manager.get_server_status()
+            mode = self._docker_manager.get_current_mode()
+
+            status_text = {
+                ServerStatus.RUNNING: "Running",
+                ServerStatus.STOPPED: "Stopped",
+                ServerStatus.NOT_FOUND: "Not set up",
+                ServerStatus.ERROR: "Error",
+            }.get(status, "Unknown")
+
+            mode_text = f" ({mode.value} mode)" if mode and status == ServerStatus.RUNNING else ""
+
+            self.show_notification("Docker Server", f"Status: {status_text}{mode_text}")
+        except Exception as e:
+            logger.error(f"Failed to check server status: {e}")
+            self.show_notification("Docker Server", f"Error: {e}")
+
+    def _run_server_operation(self, operation, progress_msg: str) -> None:
+        """Run a Docker server operation with notification feedback."""
+        try:
+            self.show_notification("Docker Server", progress_msg)
+            result = operation()
+            self.show_notification("Docker Server", result.message)
+
+            # Trigger reconnect if server started successfully
+            if result.success and result.status == ServerStatus.RUNNING:
+                # Give server time to start, then reconnect
+                from PyQt6.QtCore import QTimer
+
+                QTimer.singleShot(3000, lambda: self._trigger_callback(TrayAction.RECONNECT))
+        except Exception as e:
+            logger.error(f"Server operation failed: {e}")
+            self.show_notification("Docker Server", f"Error: {e}")
 
     def cleanup(self) -> None:
         """Clean up resources before quitting."""

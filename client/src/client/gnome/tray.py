@@ -10,6 +10,7 @@ import logging
 import subprocess
 from typing import TYPE_CHECKING, Any, Optional
 
+from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
 from client.common.models import TrayAction, TrayState
 from client.common.tray_base import AbstractTray
 
@@ -76,6 +77,9 @@ class GtkTray(AbstractTray):
         self.stop_item: Optional[Any] = None
         self.reconnect_item: Optional[Any] = None
 
+        # Docker manager for server control
+        self._docker_manager = DockerManager()
+
         # Create menu
         self._setup_menu()
 
@@ -116,6 +120,33 @@ class GtkTray(AbstractTray):
             "activate", lambda _: self._trigger_callback(TrayAction.OPEN_AUDIO_NOTEBOOK)
         )
         menu.append(notebook_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        # Docker Server Control submenu
+        server_item = Gtk.MenuItem(label="Docker Server")
+        server_submenu = Gtk.Menu()
+
+        start_local_item = Gtk.MenuItem(label="Start Server (Local)")
+        start_local_item.connect("activate", lambda _: self._on_server_start_local())
+        server_submenu.append(start_local_item)
+
+        start_remote_item = Gtk.MenuItem(label="Start Server (Remote)")
+        start_remote_item.connect("activate", lambda _: self._on_server_start_remote())
+        server_submenu.append(start_remote_item)
+
+        stop_server_item = Gtk.MenuItem(label="Stop Server")
+        stop_server_item.connect("activate", lambda _: self._on_server_stop())
+        server_submenu.append(stop_server_item)
+
+        server_submenu.append(Gtk.SeparatorMenuItem())
+
+        status_item = Gtk.MenuItem(label="Check Status")
+        status_item.connect("activate", lambda _: self._on_server_status())
+        server_submenu.append(status_item)
+
+        server_item.set_submenu(server_submenu)
+        menu.append(server_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -276,6 +307,75 @@ class GtkTray(AbstractTray):
             except (FileNotFoundError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as wl_err:
                 logger.error(f"wl-copy fallback also failed: {wl_err}")
         return False
+
+    def _on_server_start_local(self) -> None:
+        """Start Docker server in local (HTTP) mode."""
+        self._run_server_operation(
+            lambda: self._docker_manager.start_server(
+                mode=ServerMode.LOCAL,
+                progress_callback=lambda msg: logger.info(msg),
+            ),
+            "Starting server (local mode)...",
+        )
+
+    def _on_server_start_remote(self) -> None:
+        """Start Docker server in remote (HTTPS) mode."""
+        self._run_server_operation(
+            lambda: self._docker_manager.start_server(
+                mode=ServerMode.REMOTE,
+                progress_callback=lambda msg: logger.info(msg),
+            ),
+            "Starting server (remote mode)...",
+        )
+
+    def _on_server_stop(self) -> None:
+        """Stop the Docker server."""
+        self._run_server_operation(
+            lambda: self._docker_manager.stop_server(
+                progress_callback=lambda msg: logger.info(msg),
+            ),
+            "Stopping server...",
+        )
+
+    def _on_server_status(self) -> None:
+        """Check Docker server status."""
+        try:
+            available, docker_msg = self._docker_manager.is_docker_available()
+            if not available:
+                self.show_notification("Docker Server", docker_msg)
+                return
+
+            status = self._docker_manager.get_server_status()
+            mode = self._docker_manager.get_current_mode()
+
+            status_text = {
+                ServerStatus.RUNNING: "Running",
+                ServerStatus.STOPPED: "Stopped",
+                ServerStatus.NOT_FOUND: "Not set up",
+                ServerStatus.ERROR: "Error",
+            }.get(status, "Unknown")
+
+            mode_text = f" ({mode.value} mode)" if mode and status == ServerStatus.RUNNING else ""
+
+            self.show_notification("Docker Server", f"Status: {status_text}{mode_text}")
+        except Exception as e:
+            logger.error(f"Failed to check server status: {e}")
+            self.show_notification("Docker Server", f"Error: {e}")
+
+    def _run_server_operation(self, operation, progress_msg: str) -> None:
+        """Run a Docker server operation with notification feedback."""
+        try:
+            self.show_notification("Docker Server", progress_msg)
+            result = operation()
+            self.show_notification("Docker Server", result.message)
+
+            # Trigger reconnect if server started successfully
+            if result.success and result.status == ServerStatus.RUNNING:
+                # Give server time to start, then reconnect
+                GLib.timeout_add(3000, lambda: self._trigger_callback(TrayAction.RECONNECT) or False)
+        except Exception as e:
+            logger.error(f"Server operation failed: {e}")
+            self.show_notification("Docker Server", f"Error: {e}")
 
 
 def run_tray(config) -> int:

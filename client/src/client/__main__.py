@@ -11,6 +11,7 @@ Options:
     --https              Use HTTPS
     --verbose, -v        Enable verbose debug logging
     --list-devices       List available audio devices and exit
+    --skip-setup         Skip first-time setup wizard
     --help               Show this help message
 """
 
@@ -22,6 +23,7 @@ from pathlib import Path
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig, get_config_dir
 from client.common.single_instance import acquire_instance_lock, release_instance_lock
+from client.common.setup_wizard import is_first_time_setup, SetupWizard, ConnectionMode
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,6 +68,11 @@ def parse_args() -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Alias for --verbose (deprecated, use --verbose instead)",
+    )
+    parser.add_argument(
+        "--skip-setup",
+        action="store_true",
+        help="Skip first-time setup wizard",
     )
 
     return parser.parse_args()
@@ -193,6 +200,29 @@ def main() -> int:
     except Exception as e:
         print(f"WARNING: Failed to set up logging: {e}", file=sys.stderr)
         # Continue anyway - we can still run without file logging
+
+    # Check for first-time setup (before loading config)
+    if not args.skip_setup and is_first_time_setup():
+        print("\n" + "=" * 60)
+        print("  First-Time Setup")
+        print("=" * 60)
+        print("\nThis appears to be your first time running TranscriptionSuite.")
+        print("Running initial setup to configure Docker server files...")
+        print()
+
+        wizard = SetupWizard()
+        result = wizard.run_setup(
+            pull_image=True,
+            progress_callback=lambda msg: print(f"  {msg}"),
+        )
+
+        if result.success:
+            print("\n" + result.message)
+        else:
+            print(f"\nSetup warning: {result.message}")
+            print("You can continue, but server control may not work.")
+
+        print()
 
     # Load configuration
     config = ClientConfig()
