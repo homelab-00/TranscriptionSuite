@@ -6,6 +6,7 @@ Based on the architecture from NATIVE_CLIENT/tray/qt6_tray.py.
 """
 
 import logging
+import subprocess
 import sys
 from typing import TYPE_CHECKING, cast
 
@@ -267,7 +268,19 @@ class Qt6Tray(AbstractTray):
             self.app.processEvents()
             logger.debug(f"Copied to clipboard via Qt: {len(text)} characters")
         except Exception as e:
-            logger.warning(f"Clipboard copy failed: {e}")
+            logger.warning(f"Qt clipboard copy failed: {e}")
+            # Try wl-copy fallback on Wayland
+            try:
+                result = subprocess.run(
+                    ["wl-copy"],
+                    input=text.encode("utf-8"),
+                    check=True,
+                    capture_output=True,
+                    timeout=2,
+                )
+                logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
+            except (FileNotFoundError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as wl_err:
+                logger.error(f"wl-copy fallback also failed: {wl_err}")
 
     def show_settings_dialog(self) -> None:
         """Show the settings dialog (thread-safe)."""

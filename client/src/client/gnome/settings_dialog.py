@@ -50,6 +50,9 @@ class SettingsDialog:
             flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
         )
         self.dialog.set_default_size(450, 400)
+        
+        # Set window icon from system theme
+        self.dialog.set_icon_name("audio-input-microphone-symbolic")
 
         # Add buttons
         self.dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
@@ -91,63 +94,6 @@ class SettingsDialog:
         box.set_margin_top(10)
         box.set_margin_bottom(10)
 
-        # Port
-        port_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        port_label = Gtk.Label(label="Port:")
-        port_label.set_xalign(0)
-        port_label.set_size_request(100, -1)
-        port_box.pack_start(port_label, False, False, 0)
-
-        adjustment = Gtk.Adjustment(value=8000, lower=1, upper=65535, step_increment=1)
-        self.port_spin = Gtk.SpinButton()
-        self.port_spin.set_adjustment(adjustment)
-        self.port_spin.set_numeric(True)
-        port_box.pack_start(self.port_spin, True, True, 0)
-        box.pack_start(port_box, False, False, 0)
-
-        # HTTPS checkbox
-        self.https_check = Gtk.CheckButton(label="Use HTTPS")
-        box.pack_start(self.https_check, False, False, 0)
-
-        # Help text
-        help_label = Gtk.Label()
-        help_label.set_markup(
-            '<span size="small" foreground="gray">'
-            "Port: 8000 (HTTP local), 8443 (HTTPS via Tailscale)\n"
-            "HTTPS: Enable when connecting to Tailscale servers."
-            "</span>"
-        )
-        help_label.set_line_wrap(True)
-        help_label.set_xalign(0)
-        box.pack_start(help_label, False, False, 0)
-
-        # Separator
-        box.pack_start(Gtk.Separator(), False, False, 5)
-
-        # Token
-        token_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        token_label = Gtk.Label(label="Auth Token:")
-        token_label.set_xalign(0)
-        token_label.set_size_request(100, -1)
-        token_box.pack_start(token_label, False, False, 0)
-
-        self.token_entry = Gtk.Entry()
-        self.token_entry.set_visibility(False)
-        self.token_entry.set_placeholder_text("Authentication token")
-        token_box.pack_start(self.token_entry, True, True, 0)
-
-        show_token_btn = Gtk.ToggleButton(label="Show")
-        show_token_btn.connect("toggled", self._on_toggle_token_visibility)
-        token_box.pack_start(show_token_btn, False, False, 0)
-        box.pack_start(token_box, False, False, 0)
-
-        # Separator
-        box.pack_start(Gtk.Separator(), False, False, 5)
-
-        # Use remote toggle
-        self.use_remote_check = Gtk.CheckButton(label="Use remote server instead of local")
-        box.pack_start(self.use_remote_check, False, False, 0)
-
         # Local host
         host_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         host_label = Gtk.Label(label="Local Host:")
@@ -172,13 +118,63 @@ class SettingsDialog:
         remote_host_box.pack_start(self.remote_host_entry, True, True, 0)
         box.pack_start(remote_host_box, False, False, 0)
 
+        # Use remote toggle
+        self.use_remote_check = Gtk.CheckButton(label="Use remote server instead of local")
+        box.pack_start(self.use_remote_check, False, False, 0)
+
+        # Help text for remote usage
+        remote_help_label = Gtk.Label()
+        remote_help_label.set_markup(
+            '<span size="small" foreground="gray">'
+            "Don't forget to enable HTTPS and switch port to 8443 if using remote server"
+            "</span>"
+        )
+        remote_help_label.set_line_wrap(True)
+        remote_help_label.set_xalign(0)
+        box.pack_start(remote_help_label, False, False, 0)
+
+        # Token
+        token_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        token_label = Gtk.Label(label="Auth Token:")
+        token_label.set_xalign(0)
+        token_label.set_size_request(100, -1)
+        token_box.pack_start(token_label, False, False, 0)
+
+        self.token_entry = Gtk.Entry()
+        self.token_entry.set_visibility(False)
+        self.token_entry.set_placeholder_text("Authentication token")
+        token_box.pack_start(self.token_entry, True, True, 0)
+
+        show_token_btn = Gtk.ToggleButton(label="Show")
+        show_token_btn.connect("toggled", self._on_toggle_token_visibility)
+        token_box.pack_start(show_token_btn, False, False, 0)
+        box.pack_start(token_box, False, False, 0)
+
+        # Port
+        port_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        port_label = Gtk.Label(label="Port:")
+        port_label.set_xalign(0)
+        port_label.set_size_request(100, -1)
+        port_box.pack_start(port_label, False, False, 0)
+
+        adjustment = Gtk.Adjustment(value=8000, lower=1, upper=65535, step_increment=1)
+        self.port_spin = Gtk.SpinButton()
+        self.port_spin.set_adjustment(adjustment)
+        self.port_spin.set_numeric(True)
+        port_box.pack_start(self.port_spin, True, True, 0)
+        box.pack_start(port_box, False, False, 0)
+
+        # HTTPS checkbox
+        self.https_check = Gtk.CheckButton(label="Use HTTPS")
+        box.pack_start(self.https_check, False, False, 0)
+
         # Help text
         host_help_label = Gtk.Label()
         host_help_label.set_markup(
             '<span size="small" foreground="gray">'
             "Enter ONLY the hostname (no http://, no port). Examples:\n"
-            "  - my-machine.tail1234.ts.net\n"
-            "  - 100.101.102.103"
+            "  - Local: localhost or 127.0.0.1\n"
+            "  - Remote: my-machine.tail1234.ts.net or 100.101.102.103"
             "</span>"
         )
         host_help_label.set_line_wrap(True)

@@ -231,9 +231,9 @@ export default function RecordView() {
 
         {/* Main content area with two columns */}
         <div className="flex-1 flex gap-8">
-          {/* Live Recording Section */}
+          {/* Long Form Recording Section */}
           <div className="flex-1 flex flex-col items-center justify-center border-r border-gray-800 pr-8">
-            <h2 className="text-lg font-medium text-gray-400 mb-6">Live Recording</h2>
+            <h2 className="text-lg font-medium text-gray-400 mb-6">Long Form Recording</h2>
             <button
               onClick={showRecording ? handleStopRecording : handleStartRecording}
               disabled={!isConnected || isTranscribing || isUploadTranscribing}

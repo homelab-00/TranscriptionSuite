@@ -395,7 +395,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     query_params = _get_websocket_query_params(websocket)
     client_type = ClientDetector.detect(headers, query_params)
 
-    logger.debug(f"WebSocket connection from client type: {client_type.value}")
+    # Check if connection is from localhost
+    client_host = websocket.client.host if websocket.client else None
+    is_localhost = client_host in ("127.0.0.1", "::1", "localhost")
+
+    logger.debug(f"WebSocket connection from client type: {client_type.value}, host: {client_host}")
 
     try:
         # Wait for authentication message
@@ -412,32 +416,46 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             await websocket.close()
             return
 
-        # Validate token
+        # Validate token (skip validation for localhost connections)
         token = auth_msg.get("data", {}).get("token")
-        if not token:
-            await websocket.send_json(
-                {
-                    "type": "auth_fail",
-                    "data": {"message": "No token provided"},
-                    "timestamp": asyncio.get_event_loop().time(),
-                }
+        
+        if is_localhost:
+            # For localhost, allow connection without token validation
+            # Use a default token for tracking purposes
+            from server.core.token_store import StoredToken
+            stored_token = StoredToken(
+                token_hash="localhost",
+                client_name="localhost-user",
+                is_admin=True,
+                created_at=asyncio.get_event_loop().time(),
             )
-            await websocket.close()
-            return
+            logger.info("WebSocket connection from localhost - bypassing authentication")
+        else:
+            # For remote connections, require valid token
+            if not token:
+                await websocket.send_json(
+                    {
+                        "type": "auth_fail",
+                        "data": {"message": "No token provided"},
+                        "timestamp": asyncio.get_event_loop().time(),
+                    }
+                )
+                await websocket.close()
+                return
 
-        token_store = get_token_store()
-        stored_token = token_store.validate_token(token)
+            token_store = get_token_store()
+            stored_token = token_store.validate_token(token)
 
-        if not stored_token:
-            await websocket.send_json(
-                {
-                    "type": "auth_fail",
-                    "data": {"message": "Invalid or expired token"},
-                    "timestamp": asyncio.get_event_loop().time(),
-                }
-            )
-            await websocket.close()
-            return
+            if not stored_token:
+                await websocket.send_json(
+                    {
+                        "type": "auth_fail",
+                        "data": {"message": "Invalid or expired token"},
+                        "timestamp": asyncio.get_event_loop().time(),
+                    }
+                )
+                await websocket.close()
+                return
 
         # Generate unique session ID
         session_id = str(uuid.uuid4())

@@ -6,6 +6,7 @@ Provides a tabbed dialog for configuring client settings.
 
 import logging
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,6 +39,11 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setMinimumWidth(450)
         self.setMinimumHeight(350)
+        
+        # Set window icon from system theme
+        icon = QIcon.fromTheme("audio-input-microphone")
+        if not icon.isNull():
+            self.setWindowIcon(icon)
 
         # Main layout
         layout = QVBoxLayout(self)
@@ -69,24 +75,27 @@ class SettingsDialog(QDialog):
         form = QFormLayout(tab)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
-        # Port
-        self.port_spin = QSpinBox()
-        self.port_spin.setRange(1, 65535)
-        self.port_spin.setValue(8000)
-        form.addRow("Port:", self.port_spin)
+        # Local host
+        self.host_edit = QLineEdit()
+        self.host_edit.setPlaceholderText("localhost")
+        form.addRow("Local Host:", self.host_edit)
 
-        # HTTPS
-        self.https_check = QCheckBox("Use HTTPS")
-        form.addRow("", self.https_check)
+        # Remote host (Tailscale)
+        self.remote_host_edit = QLineEdit()
+        self.remote_host_edit.setPlaceholderText("e.g., my-desktop.tail1234.ts.net")
+        form.addRow("Remote Host:", self.remote_host_edit)
 
-        # Help text for connection settings
-        conn_help_label = QLabel(
-            "Port: 8000 (HTTP local), 8443 (HTTPS via Tailscale)\n"
-            "HTTPS: Enable when connecting to Tailscale servers."
+        # Use remote toggle
+        self.use_remote_check = QCheckBox("Use remote server instead of local")
+        form.addRow("", self.use_remote_check)
+
+        # Help text for remote usage
+        remote_help_label = QLabel(
+            "Don't forget to enable HTTPS and switch port to 8443 if using remote server"
         )
-        conn_help_label.setWordWrap(True)
-        conn_help_label.setStyleSheet("color: gray; font-size: 11px;")
-        form.addRow("", conn_help_label)
+        remote_help_label.setWordWrap(True)
+        remote_help_label.setStyleSheet("color: gray; font-size: 11px;")
+        form.addRow("", remote_help_label)
 
         # Token
         token_layout = QHBoxLayout()
@@ -103,30 +112,21 @@ class SettingsDialog(QDialog):
 
         form.addRow("Auth Token:", token_layout)
 
-        # Separator
-        separator = QLabel()
-        separator.setStyleSheet("border-top: 1px solid #ccc; margin: 10px 0;")
-        form.addRow("", separator)
+        # Port
+        self.port_spin = QSpinBox()
+        self.port_spin.setRange(1, 65535)
+        self.port_spin.setValue(8000)
+        form.addRow("Port:", self.port_spin)
 
-        # Use remote toggle
-        self.use_remote_check = QCheckBox("Use remote server instead of local")
-        form.addRow("", self.use_remote_check)
-
-        # Local host
-        self.host_edit = QLineEdit()
-        self.host_edit.setPlaceholderText("localhost")
-        form.addRow("Local Host:", self.host_edit)
-
-        # Remote host (Tailscale IP)
-        self.remote_host_edit = QLineEdit()
-        self.remote_host_edit.setPlaceholderText("e.g., my-desktop.tail1234.ts.net")
-        form.addRow("Remote Host:", self.remote_host_edit)
+        # HTTPS
+        self.https_check = QCheckBox("Use HTTPS")
+        form.addRow("", self.https_check)
 
         # Help text for host settings
         host_help_label = QLabel(
             "Enter ONLY the hostname (no http://, no port). Examples:\n"
-            "• my-machine.tail1234.ts.net\n"
-            "• 100.101.102.103"
+            "• Local: localhost or 127.0.0.1\n"
+            "• Remote: my-machine.tail1234.ts.net or 100.101.102.103"
         )
         host_help_label.setWordWrap(True)
         host_help_label.setStyleSheet("color: gray; font-size: 11px;")
@@ -177,18 +177,19 @@ class SettingsDialog(QDialog):
         self.notifications_check = QCheckBox("Show desktop notifications")
         form.addRow("", self.notifications_check)
 
+        # TODO: Implement configurable click actions
         # Left-click action
-        self.left_click_combo = QComboBox()
-        self.left_click_combo.addItem("Start Recording", "start_recording")
-        self.left_click_combo.addItem("Show Menu", "show_menu")
-        form.addRow("Left-click action:", self.left_click_combo)
+        # self.left_click_combo = QComboBox()
+        # self.left_click_combo.addItem("Start Recording", "start_recording")
+        # self.left_click_combo.addItem("Show Menu", "show_menu")
+        # form.addRow("Left-click action:", self.left_click_combo)
 
         # Middle-click action
-        self.middle_click_combo = QComboBox()
-        self.middle_click_combo.addItem("Stop & Transcribe", "stop_transcribe")
-        self.middle_click_combo.addItem("Cancel Recording", "cancel_recording")
-        self.middle_click_combo.addItem("None", "none")
-        form.addRow("Middle-click action:", self.middle_click_combo)
+        # self.middle_click_combo = QComboBox()
+        # self.middle_click_combo.addItem("Stop & Transcribe", "stop_transcribe")
+        # self.middle_click_combo.addItem("Cancel Recording", "cancel_recording")
+        # self.middle_click_combo.addItem("None", "none")
+        # form.addRow("Middle-click action:", self.middle_click_combo)
 
         self.tabs.addTab(tab, "Behavior")
 
@@ -250,17 +251,18 @@ class SettingsDialog(QDialog):
             self.config.get("ui", "notifications", default=True)
         )
 
+        # TODO: Implement configurable click actions
         # Left-click action
-        left_click = self.config.get("ui", "left_click", default="start_recording")
-        index = self.left_click_combo.findData(left_click)
-        if index >= 0:
-            self.left_click_combo.setCurrentIndex(index)
+        # left_click = self.config.get("ui", "left_click", default="start_recording")
+        # index = self.left_click_combo.findData(left_click)
+        # if index >= 0:
+        #     self.left_click_combo.setCurrentIndex(index)
 
         # Middle-click action
-        middle_click = self.config.get("ui", "middle_click", default="stop_transcribe")
-        index = self.middle_click_combo.findData(middle_click)
-        if index >= 0:
-            self.middle_click_combo.setCurrentIndex(index)
+        # middle_click = self.config.get("ui", "middle_click", default="stop_transcribe")
+        # index = self.middle_click_combo.findData(middle_click)
+        # if index >= 0:
+        #     self.middle_click_combo.setCurrentIndex(index)
 
     def _save_and_close(self) -> None:
         """Save settings and close the dialog."""
@@ -279,8 +281,9 @@ class SettingsDialog(QDialog):
         # Behavior tab
         self.config.set("clipboard", "auto_copy", value=self.auto_copy_check.isChecked())
         self.config.set("ui", "notifications", value=self.notifications_check.isChecked())
-        self.config.set("ui", "left_click", value=self.left_click_combo.currentData())
-        self.config.set("ui", "middle_click", value=self.middle_click_combo.currentData())
+        # TODO: Implement configurable click actions
+        # self.config.set("ui", "left_click", value=self.left_click_combo.currentData())
+        # self.config.set("ui", "middle_click", value=self.middle_click_combo.currentData())
 
         # Save to file
         if self.config.save():

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig, get_config_dir
+from client.common.single_instance import acquire_instance_lock, release_instance_lock
 
 
 def parse_args() -> argparse.Namespace:
@@ -178,6 +179,13 @@ def main() -> int:
         list_audio_devices()
         return 0
 
+    # Enforce single instance - acquire lock before proceeding
+    lock_fd = acquire_instance_lock()
+    if lock_fd is None:
+        print("Another instance of TranscriptionSuite is already running.", file=sys.stderr)
+        print("Only one instance can run at a time.", file=sys.stderr)
+        return 1
+
     # Set up logging (verbose mode or legacy debug flag)
     verbose = args.verbose or args.debug
     try:
@@ -240,7 +248,11 @@ def main() -> int:
             return 1
 
         # Run the tray application
-        return run_tray(config)
+        try:
+            return run_tray(config)
+        finally:
+            # Release instance lock when exiting
+            release_instance_lock(lock_fd)
 
     except ImportError as e:
         print(f"\nError: Missing dependency - {e}")

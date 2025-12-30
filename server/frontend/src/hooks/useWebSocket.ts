@@ -53,11 +53,23 @@ export function useWebSocket(options: WebSocketOptions = {}) {
   }, []);
 
   const connect = useCallback(() => {
-    const token = getAuthToken();
-    if (!token) {
+    // For localhost connections, authentication is bypassed
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                       window.location.hostname === '127.0.0.1' ||
+                       window.location.hostname === '::1';
+    
+    let token = getAuthToken();
+    
+    // If no token and not localhost, show error
+    if (!token && !isLocalhost) {
       setError('Not authenticated');
       updateStatus('error');
       return;
+    }
+    
+    // For localhost without token, use placeholder
+    if (!token && isLocalhost) {
+      token = 'localhost';
     }
 
     if (wsRef.current?.readyState === WebSocket.OPEN || 

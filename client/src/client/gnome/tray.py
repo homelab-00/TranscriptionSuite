@@ -235,7 +235,7 @@ class GtkTray(AbstractTray):
 
     def copy_to_clipboard(self, text: str) -> bool:
         """
-        Copy text to the system clipboard.
+        Copy text to the system clipboard (thread-safe).
 
         Args:
             text: Text to copy
@@ -243,15 +243,39 @@ class GtkTray(AbstractTray):
         Returns:
             True if successful
         """
+        GLib.idle_add(self._do_copy_to_clipboard, text)
+        return True
+
+    def _do_copy_to_clipboard(self, text: str) -> bool:
+        """
+        Actually copy to clipboard (called on main thread).
+
+        Args:
+            text: Text to copy
+
+        Returns:
+            False to not repeat the idle callback
+        """
         try:
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(text, -1)
             clipboard.store()
             logger.debug(f"Copied to clipboard via GTK: {len(text)} characters")
-            return True
         except Exception as e:
-            logger.error(f"Failed to copy to clipboard: {e}")
-            return False
+            logger.warning(f"GTK clipboard copy failed: {e}")
+            # Try wl-copy fallback on Wayland
+            try:
+                result = subprocess.run(
+                    ["wl-copy"],
+                    input=text.encode("utf-8"),
+                    check=True,
+                    capture_output=True,
+                    timeout=2,
+                )
+                logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
+            except (FileNotFoundError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as wl_err:
+                logger.error(f"wl-copy fallback also failed: {wl_err}")
+        return False
 
 
 def run_tray(config) -> int:

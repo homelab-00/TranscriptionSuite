@@ -1388,6 +1388,14 @@ Replace `desktop.tail1234.ts.net` with your actual Tailscale hostname (from `tai
 
 **Login:** Use the admin token printed in the server logs on first startup, or create additional tokens via the admin panel.
 
+#### Tailscale Network Access (Remote and LAN)
+
+Tailscale connections work in both scenarios:
+- **Remotely**: When connected from a different network (e.g., accessing your home server from a coffee shop)
+- **Locally (LAN)**: When on the same local network as the Docker server
+
+This means you can use the Tailscale hostname even when on the same LAN, providing consistent addressing regardless of your location. The connection will automatically use the most efficient route (direct LAN connection when available, or relay through Tailscale when remote).
+
 ### Docker Volume Structure
 
 Two named Docker volumes plus an optional user config bind mount:
@@ -3163,6 +3171,24 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/ap
 Install the AppIndicator extension:
 
 - [AppIndicator Support](https://extensions.gnome.org/extension/615/appindicator-support/)
+
+### GNOME Tray Behavior (Left-Click)
+
+**Platform Limitation**: On GNOME with AppIndicator, left-clicking the tray icon opens the menu instead of starting recording. This is a technical limitation of the AppIndicator API.
+
+**Why this happens:**
+- AppIndicator (used by GNOME) only supports menu-based interactions
+- Unlike KDE/Windows (which use Qt's QSystemTrayIcon), AppIndicator doesn't provide click event handlers
+- The library only exposes a `menu` property, not `activate` signals for direct clicks
+
+**Workaround:**
+- Use the menu to start recording: Click tray icon → "Start Recording"
+- Or use keyboard shortcuts if configured in your system
+
+**Technical Details:**
+- KDE and Windows clients use `QSystemTrayIcon.activated` signal for click detection
+- GNOME client uses `AppIndicator3.Indicator` which only supports menu attachment
+- This is an upstream limitation of the AppIndicator specification, not a TranscriptionSuite bug
 
 ### Permission Errors
 
