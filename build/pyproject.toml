@@ -33,6 +33,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     "pyyaml>=6.0",
     "numpy>=1.26.0",
+    "requests>=2.32.0",
 ]
 
 [tool.ruff]

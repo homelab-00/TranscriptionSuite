@@ -184,6 +184,8 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Client detection**: Server detects client type (standalone vs web) to enable features like preview transcription only for standalone clients, saving GPU memory for web users
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD for robust speech detection
 - **Multi-device support with job protection**: Multiple clients can connect simultaneously, but only one transcription job runs at a time. The `TranscriptionJobTracker` ensures exclusive access across all methods (HTTP uploads, WebSocket streaming) and returns clear 409 Conflict errors when busy.
+- **Server-side cancellation**: Transcription jobs can be cancelled mid-processing via `/api/transcribe/cancel`. The cancellation flag is checked between Whisper segments for graceful termination.
+- **Global hotkeys**: Native clients support global keyboard shortcuts via XDG Desktop Portal (Wayland) or Windows keyboard library. Default shortcuts: Ctrl+Shift+R (start), Ctrl+Shift+S (stop), Ctrl+Shift+Esc (cancel).
 
 ### Deployment Philosophy
 
@@ -411,6 +413,7 @@ TranscriptionSuite/
 │   │   │   ├── api_client.py     # HTTP client, WebSocket, ServerBusyError handling
 │   │   │   ├── audio_recorder.py # PyAudio recording wrapper
 │   │   │   ├── docker_manager.py # Docker server control (start/stop/status)
+│   │   │   ├── hotkey_manager.py # Global hotkeys (XDG Portal, Windows keyboard)
 │   │   │   ├── orchestrator.py   # Main controller, state machine, error notifications
 │   │   │   ├── setup_wizard.py   # First-time setup wizard
 │   │   │   ├── tailscale_resolver.py # Tailscale IP fallback when DNS fails
@@ -447,7 +450,7 @@ TranscriptionSuite/
 │   │   ├── core/                 # ML engines
 │   │   │   ├── transcription_engine.py  # Unified Whisper wrapper
 │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
-│   │   │   ├── model_manager.py         # Model lifecycle management
+│   │   │   ├── model_manager.py         # Model lifecycle, job tracking, cancellation
 │   │   │   ├── stt/              # Real-time speech-to-text engine
 │   │   │   │   ├── engine.py     # AudioToTextRecorder (VAD-based)
 │   │   │   │   ├── vad.py        # Dual VAD (Silero + WebRTC)
@@ -544,6 +547,7 @@ When `TLS_ENABLED=true`, the server enforces authentication for most routes **ex
 | `/api/auth/tokens/{id}` | DELETE | Revoke token (admin only) |
 | `/api/transcribe/audio` | POST | Transcribe uploaded audio file (returns 409 if busy) |
 | `/api/transcribe/quick` | POST | Quick transcription without word timestamps (returns 409 if busy) |
+| `/api/transcribe/cancel` | POST | Cancel currently running transcription job |
 | `/api/transcribe/file` | POST | Alias for /audio (Remote UI compatibility) |
 | `/ws` | WebSocket | Real-time audio streaming and transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
@@ -2778,6 +2782,12 @@ ui:
   start_minimized: false       # Start with tray icon only (no window)
   left_click: start_recording  # Left-click action: start_recording | show_menu
   middle_click: stop_transcribe # Middle-click: stop_transcribe | cancel_recording | none
+
+hotkeys:
+  enabled: true                # Enable global keyboard shortcuts
+  start_recording: CTRL+SHIFT+R    # Start long-form recording
+  stop_recording: CTRL+SHIFT+S     # Stop recording and transcribe
+  cancel: CTRL+SHIFT+Escape        # Cancel recording or transcription
 ```
 
 **Key Configuration Concepts:**
@@ -2836,6 +2846,20 @@ uv run transcription-client --token "your_admin_token_here"
 ```
 
 Tokens are used in `Authorization: Bearer <token>` headers for API authentication.
+
+**5. Global Hotkeys:**
+
+Global keyboard shortcuts are supported on:
+- **Linux Wayland**: KDE Plasma 5.27+, GNOME 48+ (via XDG Desktop Portal)
+- **Windows**: Windows 10/11 (via keyboard library)
+
+On first use, Wayland users will see a desktop environment dialog to confirm/customize shortcuts. The shortcuts persist in your DE settings.
+
+**Platform Requirements:**
+- **Linux**: `dbus-python` and `PyGObject` (included in KDE/GNOME extras)
+- **Windows**: `keyboard` library (included in Windows extra)
+
+If hotkeys are not available on your platform, the client will log a message and continue without them. Set `hotkeys.enabled: false` to disable the feature entirely.
 
 ### Native Development Configuration
 

@@ -669,6 +669,7 @@ class AudioToTextRecorder:
         language: Optional[str] = None,
         word_timestamps: bool = True,
         apply_vad_preprocessing: bool = True,
+        cancellation_check: Optional[Callable[[], bool]] = None,
     ) -> TranscriptionResult:
         """
         Transcribe an audio/video file directly (bypasses streaming recording workflow).
@@ -683,9 +684,13 @@ class AudioToTextRecorder:
             language: Language code (overrides instance language if provided)
             word_timestamps: Whether to include word-level timestamps
             apply_vad_preprocessing: Apply WebRTC VAD to remove silence (Stage 1)
+            cancellation_check: Optional callback that returns True if transcription should be cancelled
 
         Returns:
             TranscriptionResult with full transcription data
+
+        Raises:
+            TranscriptionCancelledError: If cancellation_check returns True during processing
         """
         from server.core.audio_utils import apply_silero_vad, load_audio
 
@@ -717,6 +722,7 @@ class AudioToTextRecorder:
             audio_data,
             language=language,
             word_timestamps=word_timestamps,
+            cancellation_check=cancellation_check,
         )
 
     def transcribe_audio(
@@ -725,6 +731,7 @@ class AudioToTextRecorder:
         language: Optional[str] = None,
         word_timestamps: bool = True,
         initial_prompt: Optional[str] = None,
+        cancellation_check: Optional[Callable[[], bool]] = None,
     ) -> TranscriptionResult:
         """
         Transcribe preprocessed audio data directly (bypasses streaming recording workflow).
@@ -739,9 +746,13 @@ class AudioToTextRecorder:
             language: Language code (overrides instance language if provided)
             word_timestamps: Whether to include word-level timestamps
             initial_prompt: Optional prompt for context
+            cancellation_check: Optional callback that returns True if transcription should be cancelled
 
         Returns:
             TranscriptionResult with full transcription data
+
+        Raises:
+            TranscriptionCancelledError: If cancellation_check returns True during processing
         """
         with self.transcription_lock:
             if audio_data is None or len(audio_data) == 0:
@@ -780,6 +791,12 @@ class AudioToTextRecorder:
                 full_text_parts = []
 
                 for segment in segments:
+                    # Check for cancellation between segments
+                    if cancellation_check and cancellation_check():
+                        from server.core.model_manager import TranscriptionCancelledError
+                        logger.info("Transcription cancelled by user")
+                        raise TranscriptionCancelledError("Transcription cancelled by user")
+
                     seg_dict = {
                         "text": segment.text.strip(),
                         "start": round(segment.start, 3),

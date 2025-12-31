@@ -75,6 +75,7 @@ class GtkTray(AbstractTray):
         # Menu items (stored for state updates)
         self.start_item: Optional[Any] = None
         self.stop_item: Optional[Any] = None
+        self.cancel_item: Optional[Any] = None
         self.reconnect_item: Optional[Any] = None
 
         # Docker manager for server control
@@ -102,6 +103,13 @@ class GtkTray(AbstractTray):
         )
         self.stop_item.set_sensitive(False)
         menu.append(self.stop_item)
+
+        self.cancel_item = Gtk.MenuItem(label="Cancel")
+        self.cancel_item.connect(
+            "activate", lambda _: self._trigger_callback(TrayAction.CANCEL_RECORDING)
+        )
+        self.cancel_item.set_sensitive(False)
+        menu.append(self.cancel_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -144,6 +152,12 @@ class GtkTray(AbstractTray):
         status_item = Gtk.MenuItem(label="Check Status")
         status_item.connect("activate", lambda _: self._on_server_status())
         server_submenu.append(status_item)
+
+        server_submenu.append(Gtk.SeparatorMenuItem())
+
+        lazydocker_item = Gtk.MenuItem(label="Open lazydocker")
+        lazydocker_item.connect("activate", lambda _: self._on_open_lazydocker())
+        server_submenu.append(lazydocker_item)
 
         server_item.set_submenu(server_submenu)
         menu.append(server_item)
@@ -193,6 +207,11 @@ class GtkTray(AbstractTray):
             else:
                 self.start_item.set_sensitive(state == TrayState.STANDBY)
                 self.stop_item.set_sensitive(False)
+
+        # Cancel is enabled during recording, uploading, or transcribing
+        if self.cancel_item:
+            cancellable_states = {TrayState.RECORDING, TrayState.UPLOADING, TrayState.TRANSCRIBING}
+            self.cancel_item.set_sensitive(state in cancellable_states)
 
         # Update reconnect visibility
         if self.reconnect_item:
@@ -361,6 +380,46 @@ class GtkTray(AbstractTray):
         except Exception as e:
             logger.error(f"Failed to check server status: {e}")
             self.show_notification("Docker Server", f"Error: {e}")
+
+    def _on_open_lazydocker(self) -> None:
+        """Open lazydocker in a terminal."""
+        import shutil
+
+        # Check if lazydocker is available
+        lazydocker_path = shutil.which("lazydocker")
+        if not lazydocker_path:
+            self.show_notification(
+                "lazydocker",
+                "lazydocker not found. Install with: sudo pacman -S lazydocker",
+            )
+            return
+
+        # Try different terminal emulators
+        terminals = [
+            ["gnome-terminal", "--", "lazydocker"],
+            ["konsole", "-e", "lazydocker"],
+            ["xterm", "-e", "lazydocker"],
+        ]
+
+        for terminal_cmd in terminals:
+            if shutil.which(terminal_cmd[0]):
+                try:
+                    subprocess.Popen(
+                        terminal_cmd,
+                        start_new_session=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    logger.info(f"Launched lazydocker with {terminal_cmd[0]}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to launch with {terminal_cmd[0]}: {e}")
+                    continue
+
+        self.show_notification(
+            "lazydocker",
+            "No supported terminal emulator found (gnome-terminal, konsole, xterm)",
+        )
 
     def _run_server_operation(self, operation, progress_msg: str) -> None:
         """Run a Docker server operation with notification feedback."""

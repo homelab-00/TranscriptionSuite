@@ -543,6 +543,36 @@ class APIClient:
             logger.error(f"Model preload failed: {e}")
             return False
 
+    async def cancel_transcription(self) -> dict[str, Any]:
+        """
+        Request cancellation of the currently running transcription job.
+
+        Returns:
+            Dict with 'success', 'cancelled_user', and 'message' keys
+        """
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/api/transcribe/cancel",
+                headers=self._get_headers(),
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                else:
+                    return {
+                        "success": False,
+                        "cancelled_user": None,
+                        "message": f"Cancel request failed (HTTP {resp.status})",
+                    }
+        except Exception as e:
+            logger.error(f"Cancel transcription failed: {e}")
+            return {
+                "success": False,
+                "cancelled_user": None,
+                "message": str(e),
+            }
+
     async def validate_token(self) -> tuple[bool, str | None]:
         """
         Validate the current token with the server.

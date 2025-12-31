@@ -72,6 +72,12 @@ def get_default_config() -> dict[str, Any]:
             "left_click": "start_recording",
             "middle_click": "stop_transcribe",
         },
+        "hotkeys": {
+            "enabled": True,
+            "start_recording": "CTRL+SHIFT+R",
+            "stop_recording": "CTRL+SHIFT+S",
+            "cancel": "CTRL+SHIFT+Escape",
+        },
     }
 
 

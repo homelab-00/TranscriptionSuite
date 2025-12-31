@@ -16,6 +16,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from server.config import get_config
+from server.core.model_manager import TranscriptionCancelledError
 from server.core.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
@@ -139,12 +140,13 @@ async def transcribe_audio(
         # Get transcription engine
         engine = model_manager.transcription_engine
 
-        # Transcribe
+        # Transcribe with cancellation support
         logger.info(f"Transcribing uploaded file: {file.filename}")
         result = engine.transcribe_file(
             tmp_path,
             language=language,
             word_timestamps=word_timestamps,
+            cancellation_check=model_manager.job_tracker.is_cancelled,
         )
 
         # Handle diarization if requested
@@ -157,6 +159,10 @@ async def transcribe_audio(
                 logger.warning(f"Diarization failed: {e}")
 
         return result.to_dict()
+
+    except TranscriptionCancelledError:
+        logger.info(f"Transcription cancelled for file: {file.filename}")
+        raise HTTPException(status_code=499, detail="Transcription cancelled by user")
 
     except Exception as e:
         logger.error(f"Transcription failed: {e}", exc_info=True)
@@ -212,15 +218,20 @@ async def transcribe_quick(
         # Get transcription engine
         engine = model_manager.transcription_engine
 
-        # Transcribe without word timestamps for speed
+        # Transcribe without word timestamps for speed, with cancellation support
         logger.info(f"Quick transcription for: {file.filename}")
         result = engine.transcribe_file(
             tmp_path,
             language=language,
             word_timestamps=False,  # No word timestamps for speed
+            cancellation_check=model_manager.job_tracker.is_cancelled,
         )
 
         return result.to_dict()
+
+    except TranscriptionCancelledError:
+        logger.info(f"Quick transcription cancelled for file: {file.filename}")
+        raise HTTPException(status_code=499, detail="Transcription cancelled by user")
 
     except Exception as e:
         logger.error(f"Quick transcription failed: {e}", exc_info=True)
@@ -235,6 +246,36 @@ async def transcribe_quick(
             Path(tmp_path).unlink()
         except Exception:
             pass
+
+
+@router.post("/cancel")
+async def cancel_transcription(request: Request) -> Dict[str, Any]:
+    """
+    Cancel the currently running transcription job.
+
+    This requests cancellation of any active transcription. The actual cancellation
+    happens between segments during processing, so there may be a brief delay.
+
+    Returns:
+        - success: Whether a job was cancelled
+        - cancelled_user: The user whose job was cancelled (if any)
+        - message: Human-readable status message
+    """
+    model_manager = request.app.state.model_manager
+    success, cancelled_user = model_manager.job_tracker.cancel_job()
+
+    if success:
+        return {
+            "success": True,
+            "cancelled_user": cancelled_user,
+            "message": f"Cancellation requested for {cancelled_user}'s transcription",
+        }
+    else:
+        return {
+            "success": False,
+            "cancelled_user": None,
+            "message": "No transcription job is currently running",
+        }
 
 
 @router.get("/languages")

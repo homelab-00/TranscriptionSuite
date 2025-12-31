@@ -87,6 +87,7 @@ class Qt6Tray(AbstractTray):
         # Menu actions (stored for state updates)
         self.start_action: QAction | None = None
         self.stop_action: QAction | None = None
+        self.cancel_action: QAction | None = None
         self.reconnect_action: QAction | None = None
 
         # Docker manager for server control
@@ -126,6 +127,13 @@ class Qt6Tray(AbstractTray):
         )
         self.stop_action.setEnabled(False)
         menu.addAction(self.stop_action)
+
+        self.cancel_action = QAction("Cancel", menu)
+        self.cancel_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.CANCEL_RECORDING)
+        )
+        self.cancel_action.setEnabled(False)
+        menu.addAction(self.cancel_action)
 
         menu.addSeparator()
 
@@ -167,6 +175,12 @@ class Qt6Tray(AbstractTray):
         server_status_action = QAction("Check Status", server_menu)
         server_status_action.triggered.connect(self._on_server_status)
         server_menu.addAction(server_status_action)
+
+        server_menu.addSeparator()
+
+        lazydocker_action = QAction("Open lazydocker", server_menu)
+        lazydocker_action.triggered.connect(self._on_open_lazydocker)
+        server_menu.addAction(lazydocker_action)
 
         menu.addMenu(server_menu)
 
@@ -244,6 +258,11 @@ class Qt6Tray(AbstractTray):
             else:
                 self.start_action.setEnabled(state == TrayState.STANDBY)
                 self.stop_action.setEnabled(False)
+
+        # Cancel is enabled during recording, uploading, or transcribing
+        if self.cancel_action:
+            cancellable_states = {TrayState.RECORDING, TrayState.UPLOADING, TrayState.TRANSCRIBING}
+            self.cancel_action.setEnabled(state in cancellable_states)
 
         # Update reconnect visibility
         if self.reconnect_action:
@@ -383,6 +402,57 @@ class Qt6Tray(AbstractTray):
         except Exception as e:
             logger.error(f"Failed to check server status: {e}")
             self.show_notification("Docker Server", f"Error: {e}")
+
+    def _on_open_lazydocker(self) -> None:
+        """Open lazydocker in a terminal."""
+        import platform
+        import shutil
+
+        # Check if lazydocker is available
+        lazydocker_path = shutil.which("lazydocker")
+        if not lazydocker_path:
+            system = platform.system()
+            if system == "Windows":
+                install_msg = "lazydocker not found. Install with: scoop install lazydocker"
+            else:
+                install_msg = "lazydocker not found. Install with: sudo pacman -S lazydocker"
+            self.show_notification("lazydocker", install_msg)
+            return
+
+        # Platform-specific terminal commands
+        system = platform.system()
+        if system == "Windows":
+            terminals = [
+                ["wt.exe", "-w", "0", "nt", "lazydocker"],  # Windows Terminal (new tab)
+                ["cmd.exe", "/c", "start", "lazydocker"],  # cmd fallback
+            ]
+        else:  # Linux
+            terminals = [
+                ["konsole", "-e", "lazydocker"],
+                ["gnome-terminal", "--", "lazydocker"],
+                ["xterm", "-e", "lazydocker"],
+            ]
+
+        for terminal_cmd in terminals:
+            if shutil.which(terminal_cmd[0]):
+                try:
+                    subprocess.Popen(
+                        terminal_cmd,
+                        start_new_session=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    logger.info(f"Launched lazydocker with {terminal_cmd[0]}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to launch with {terminal_cmd[0]}: {e}")
+                    continue
+
+        if system == "Windows":
+            error_msg = "No supported terminal found (Windows Terminal, cmd)"
+        else:
+            error_msg = "No supported terminal emulator found (konsole, gnome-terminal, xterm)"
+        self.show_notification("lazydocker", error_msg)
 
     def _run_server_operation(self, operation, progress_msg: str) -> None:
         """Run a Docker server operation with notification feedback."""

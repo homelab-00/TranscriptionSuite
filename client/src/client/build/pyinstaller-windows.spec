@@ -49,6 +49,7 @@ a = Analysis(
         "aiohttp",
         "numpy",
         "pyaudio",
+        "requests",
         "yaml",
     ],
     hookspath=[],

@@ -29,17 +29,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class TranscriptionCancelledError(Exception):
+    """Raised when a transcription job is cancelled."""
+    pass
+
+
 class TranscriptionJobTracker:
     """
     Tracks active transcription jobs across all methods (WebSocket, HTTP uploads).
 
     Ensures only one transcription job runs at a time across the entire server.
     Thread-safe for concurrent access from multiple request handlers.
+    Supports cancellation of running jobs.
     """
 
     def __init__(self):
         self._active_job_id: Optional[str] = None
         self._active_user: Optional[str] = None
+        self._cancelled: bool = False
         self._lock = threading.Lock()
 
     def try_start_job(self, user: str) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -61,6 +68,7 @@ class TranscriptionJobTracker:
             job_id = str(uuid.uuid4())
             self._active_job_id = job_id
             self._active_user = user
+            self._cancelled = False
             logger.info(f"Started transcription job {job_id[:8]} for user '{user}'")
             return (True, job_id, None)
 
@@ -79,8 +87,39 @@ class TranscriptionJobTracker:
                 logger.info(f"Ended transcription job {job_id[:8]} for user '{self._active_user}'")
                 self._active_job_id = None
                 self._active_user = None
+                self._cancelled = False
                 return True
             return False
+
+    def cancel_job(self) -> Tuple[bool, Optional[str]]:
+        """
+        Request cancellation of the currently running job.
+
+        Returns:
+            Tuple of (success, cancelled_user)
+            - If job was running: (True, user_who_was_cancelled)
+            - If no job running: (False, None)
+        """
+        with self._lock:
+            if self._active_job_id is not None:
+                self._cancelled = True
+                user = self._active_user
+                logger.info(f"Cancellation requested for job {self._active_job_id[:8]} (user: {user})")
+                return (True, user)
+            return (False, None)
+
+    def is_cancelled(self) -> bool:
+        """
+        Check if cancellation has been requested for the current job.
+
+        This should be called periodically during transcription to allow
+        early termination.
+
+        Returns:
+            True if cancellation was requested
+        """
+        with self._lock:
+            return self._cancelled
 
     def is_busy(self) -> Tuple[bool, Optional[str]]:
         """
@@ -101,6 +140,7 @@ class TranscriptionJobTracker:
                 "is_busy": self._active_job_id is not None,
                 "active_user": self._active_user,
                 "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
+                "cancellation_requested": self._cancelled,
             }
 
 

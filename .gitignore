@@ -2,7 +2,7 @@
 build/dist/
 build/appimage-kde/
 build/appimage-gnome/
-build/appimage-windows/
+build/pyinstaller-windows
 build/assets/logo.ico
 
 # Frontend web app (Node.js / npm dependencies and build outputs)
@@ -10,9 +10,9 @@ server/frontend/node_modules/
 server/frontend/dist/
 server/frontend/build/
 
-# Separate entry for GitHub because we want to commit workflows
-.github/prompts/
-.github/instructions/
+# GitHub folder (excluding everything except workflows)
+.github/*
+!.github/workflows/
 
 # Misc
 __pycache__/

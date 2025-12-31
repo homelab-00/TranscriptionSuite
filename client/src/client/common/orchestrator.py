@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from client.common.api_client import APIClient, ServerBusyError
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig
+from client.common.hotkey_manager import HotkeyAction, HotkeyManager, create_hotkey_manager
 from client.common.models import TrayAction, TrayState
 
 if TYPE_CHECKING:
@@ -61,6 +62,7 @@ class ClientOrchestrator:
         self.tray: AbstractTray | None = None
         self.api_client: APIClient | None = None
         self.recorder: AudioRecorder | None = None
+        self.hotkey_manager: HotkeyManager | None = None
 
         # Async event loop management
         self.event_loop: asyncio.AbstractEventLoop | None = None
@@ -69,6 +71,7 @@ class ClientOrchestrator:
 
         # State
         self.is_recording = False
+        self.is_transcribing = False  # Track if transcription is in progress
         self.last_transcription: str | None = None
         self._reconnect_task: concurrent.futures.Future[Any] | None = None
         self._is_initial_connection = True  # Track if this is the first connection attempt
@@ -98,6 +101,10 @@ class ClientOrchestrator:
         # Connect to server if auto_connect is enabled
         if self.auto_connect:
             self._schedule_async(self._connect_to_server())
+
+        # Initialize global hotkeys if enabled
+        if self.config.get("hotkeys", "enabled", default=True):
+            self._init_hotkeys()
 
         # Run tray (blocks until quit)
         self.tray.run()
@@ -300,28 +307,50 @@ class ClientOrchestrator:
                 self.tray.show_notification("Error", str(e))
 
     def _on_cancel_recording(self) -> None:
-        """Handle cancel recording action."""
-        if not self.is_recording or not self.recorder:
+        """Handle cancel recording/transcription action."""
+        # Cancel recording if in progress
+        if self.is_recording and self.recorder:
+            self.is_recording = False
+            try:
+                self.recorder.cancel()
+            except Exception:
+                pass
+            self.recorder = None
+
+            if self.tray:
+                self.tray.set_state(TrayState.STANDBY)
+                self.tray.show_notification("Cancelled", "Recording cancelled")
+
+            logger.info("Recording cancelled")
             return
 
-        self.is_recording = False
-        try:
-            self.recorder.cancel()
-        except Exception:
-            pass
-        self.recorder = None
+        # Cancel transcription if in progress
+        if self.is_transcribing:
+            self._schedule_async(self._cancel_transcription())
 
-        if self.tray:
-            self.tray.set_state(TrayState.STANDBY)
-            self.tray.show_notification("Cancelled", "Recording cancelled")
+    async def _cancel_transcription(self) -> None:
+        """Request cancellation of the current transcription."""
+        if not self.api_client:
+            return
 
-        logger.info("Recording cancelled")
+        logger.info("Requesting transcription cancellation...")
+        result = await self.api_client.cancel_transcription()
+
+        if result.get("success"):
+            logger.info(f"Cancellation requested: {result.get('message')}")
+            if self.tray:
+                self.tray.show_notification("Cancelling", "Transcription cancellation requested")
+        else:
+            logger.warning(f"Cancellation failed: {result.get('message')}")
+            if self.tray:
+                self.tray.show_notification("Cancel Failed", result.get("message", "Unknown error"))
 
     async def _transcribe_audio(self, audio_data: bytes) -> None:
         """Send audio to server for transcription."""
         if not self.api_client:
             return
 
+        self.is_transcribing = True
         try:
             if self.tray:
                 self.tray.set_state(TrayState.TRANSCRIBING)
@@ -369,17 +398,28 @@ class ClientOrchestrator:
                     self.tray.set_state(TrayState.DISCONNECTED)
 
         except Exception as e:
-            logger.error(f"Transcription failed: {e}")
-            if self.tray:
-                self.tray.set_state(TrayState.ERROR)
-                self.tray.show_notification("Transcription Error", str(e))
-
-                # Reset to standby after a delay
-                await asyncio.sleep(3)
-                if self.api_client and self.api_client.is_connected:
+            error_msg = str(e)
+            # Check if this was a cancellation
+            if "499" in error_msg or "cancelled" in error_msg.lower():
+                logger.info("Transcription was cancelled")
+                if self.tray:
                     self.tray.set_state(TrayState.STANDBY)
-                else:
-                    self.tray.set_state(TrayState.DISCONNECTED)
+                    self.tray.show_notification("Cancelled", "Transcription cancelled")
+            else:
+                logger.error(f"Transcription failed: {e}")
+                if self.tray:
+                    self.tray.set_state(TrayState.ERROR)
+                    self.tray.show_notification("Transcription Error", error_msg)
+
+                    # Reset to standby after a delay
+                    await asyncio.sleep(3)
+                    if self.api_client and self.api_client.is_connected:
+                        self.tray.set_state(TrayState.STANDBY)
+                    else:
+                        self.tray.set_state(TrayState.DISCONNECTED)
+
+        finally:
+            self.is_transcribing = False
 
     # =========================================================================
     # File Transcription
@@ -406,6 +446,7 @@ class ClientOrchestrator:
         if not self.api_client:
             return
 
+        self.is_transcribing = True
         try:
             if self.tray:
                 self.tray.set_state(TrayState.TRANSCRIBING)
@@ -434,13 +475,24 @@ class ClientOrchestrator:
                 self.tray.set_state(TrayState.STANDBY)
 
         except Exception as e:
-            logger.error(f"File transcription failed: {e}")
-            if self.tray:
-                self.tray.set_state(TrayState.ERROR)
-                self.tray.show_notification("Error", str(e))
+            error_msg = str(e)
+            # Check if this was a cancellation
+            if "499" in error_msg or "cancelled" in error_msg.lower():
+                logger.info("File transcription was cancelled")
+                if self.tray:
+                    self.tray.set_state(TrayState.STANDBY)
+                    self.tray.show_notification("Cancelled", "Transcription cancelled")
+            else:
+                logger.error(f"File transcription failed: {e}")
+                if self.tray:
+                    self.tray.set_state(TrayState.ERROR)
+                    self.tray.show_notification("Error", error_msg)
 
-                await asyncio.sleep(3)
-                self.tray.set_state(TrayState.STANDBY)
+                    await asyncio.sleep(3)
+                    self.tray.set_state(TrayState.STANDBY)
+
+        finally:
+            self.is_transcribing = False
 
     # =========================================================================
     # Clipboard
@@ -478,9 +530,56 @@ class ClientOrchestrator:
             self.tray.set_state(TrayState.CONNECTING)
         self._schedule_async(self._connect_to_server())
 
+    # =========================================================================
+    # Global Hotkeys
+    # =========================================================================
+
+    def _init_hotkeys(self) -> None:
+        """Initialize global hotkey manager."""
+        try:
+            self.hotkey_manager = create_hotkey_manager()
+            if self.hotkey_manager is None:
+                logger.info("Global hotkeys not available on this platform")
+                return
+
+            # Register callbacks
+            self.hotkey_manager.register_callback(
+                HotkeyAction.START_RECORDING, self._on_start_recording
+            )
+            self.hotkey_manager.register_callback(
+                HotkeyAction.STOP_RECORDING, self._on_stop_recording
+            )
+            self.hotkey_manager.register_callback(
+                HotkeyAction.CANCEL, self._on_cancel_recording
+            )
+
+            # Start listening
+            if self.hotkey_manager.start():
+                logger.info("Global hotkeys initialized")
+                if self.tray:
+                    self.tray.show_notification(
+                        "Hotkeys Active",
+                        "Global keyboard shortcuts are now active",
+                    )
+            else:
+                logger.warning("Failed to start global hotkeys")
+                self.hotkey_manager = None
+
+        except Exception as e:
+            logger.error(f"Failed to initialize hotkeys: {e}")
+            self.hotkey_manager = None
+
     def _on_quit(self) -> None:
         """Handle quit action."""
         logger.info("Shutting down native client...")
+
+        # Stop hotkey manager
+        if self.hotkey_manager:
+            try:
+                self.hotkey_manager.stop()
+            except Exception:
+                pass
+            self.hotkey_manager = None
 
         # Cancel reconnect task
         if self._reconnect_task:
