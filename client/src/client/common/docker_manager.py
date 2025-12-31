@@ -216,6 +216,64 @@ class DockerManager:
         except Exception:
             return False
 
+    def get_image_created_date(self) -> str | None:
+        """Get the creation date of the local Docker image."""
+        try:
+            result = self._run_command(
+                ["docker", "images", self.DOCKER_IMAGE, "--format", "{{.CreatedAt}}"]
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().split()[0]  # Return just the date part
+            return None
+        except Exception:
+            return None
+
+    def remove_container(
+        self,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> DockerResult:
+        """
+        Remove the server container (for recreating from fresh image).
+
+        Args:
+            progress_callback: Optional callback for progress messages
+
+        Returns:
+            DockerResult with success status and message
+        """
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        # Check if container exists
+        status = self.get_server_status()
+        if status == ServerStatus.NOT_FOUND:
+            return DockerResult(True, "Container does not exist.")
+
+        # Stop container if running
+        if status == ServerStatus.RUNNING:
+            log("Stopping container before removal...")
+            self.stop_server(progress_callback=progress_callback)
+
+        # Remove container
+        log("Removing container...")
+        compose_file = self._find_compose_file()
+        if compose_file:
+            result = self._run_command(
+                ["docker", "compose", "down", "-v"],
+                cwd=self.config_dir,
+            )
+        else:
+            result = self._run_command(["docker", "rm", self.CONTAINER_NAME])
+
+        if result.returncode == 0:
+            return DockerResult(True, "Container removed. You can now start fresh from the image.")
+        else:
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            return DockerResult(False, f"Failed to remove container: {error_msg}")
+
     def start_server(
         self,
         mode: ServerMode = ServerMode.LOCAL,

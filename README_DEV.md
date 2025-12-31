@@ -175,9 +175,27 @@ TranscriptionSuite uses a **client-server architecture**:
 └─────────────────────────────────────────────────────────┘
 ```
 
+### Terminology: Mothership
+
+The standalone native client application is internally called **"Mothership"**. This is the command center for the entire TranscriptionSuite - from here you can:
+- Start/stop the Docker server (local or remote mode)
+- Start/stop the transcription client
+- Configure all settings
+- View server and client logs
+
+The Mothership is distinct from:
+- **Web client**: The browser-based `/record` view for file uploads and recording
+- **Server**: The Docker container running the transcription backend
+
+When referring to code or documentation:
+- Use "Mothership" when discussing the standalone application as a whole
+- Use "client" when discussing the client functionality (recording, transcription)
+- Use "server" when discussing the Docker backend
+
 ### Design Decisions
 
 - **Server in Docker**: All ML/GPU operations run in Docker for reproducibility and isolation
+- **Mothership as command center**: The native client (Mothership) provides a GUI to manage all aspects of the application - server control, client control, and configuration - without requiring command-line knowledge
 - **Native clients**: System tray, microphone, clipboard require native access (can't be containerized)
 - **Single port**: Server exposes everything on port 8000 (API, WebSocket, static files)
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies

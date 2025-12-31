@@ -3,11 +3,15 @@ KDE Plasma system tray implementation using PyQt6.
 
 Provides native system tray integration for KDE Plasma desktop.
 Based on the architecture from NATIVE_CLIENT/tray/qt6_tray.py.
+
+The Mothership window is the main command center for the application,
+providing a GUI to manage both the Docker server and the transcription client.
 """
 
 import logging
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
@@ -44,8 +48,9 @@ except ImportError:
 class Qt6Tray(AbstractTray):
     """PyQt6 system tray implementation for KDE Plasma."""
 
-    # State colors (RGB)
+    # State colors (RGB) - used when client is running
     COLORS: dict[TrayState, tuple[int, int, int]] = {
+        TrayState.IDLE: (128, 128, 128),  # Grey (fallback, normally uses logo)
         TrayState.DISCONNECTED: (128, 128, 128),  # Grey
         TrayState.CONNECTING: (255, 165, 0),  # Orange
         TrayState.STANDBY: (0, 255, 0),  # Green
@@ -54,6 +59,9 @@ class Qt6Tray(AbstractTray):
         TrayState.TRANSCRIBING: (255, 128, 0),  # Orange
         TrayState.ERROR: (255, 0, 0),  # Red
     }
+
+    # Path to app logo (relative to project root)
+    LOGO_PATH = Path(__file__).parent.parent.parent.parent.parent / "build" / "assets" / "logo.png"
 
     def __init__(
         self, app_name: str = "TranscriptionSuite", config: "ClientConfig | None" = None
@@ -103,18 +111,21 @@ class Qt6Tray(AbstractTray):
         # Dialog instances (created lazily)
         self._settings_dialog = None
 
+        # Mothership window (command center)
+        self._mothership_window = None
+
         # Setup menu and click handlers
         self._setup_menu()
         self._setup_click_handlers()
 
-        # Set initial state
-        self._do_set_state(TrayState.DISCONNECTED)
+        # Set initial state - IDLE until client is started
+        self._do_set_state(TrayState.IDLE)
 
     def _setup_menu(self) -> None:
         """Create the context menu."""
         menu = QMenu()
 
-        # Recording actions
+        # Recording actions (only enabled when client is running)
         self.start_action = QAction("Start Recording", menu)
         self.start_action.triggered.connect(
             lambda: self._trigger_callback(TrayAction.START_RECORDING)
@@ -146,57 +157,10 @@ class Qt6Tray(AbstractTray):
 
         menu.addSeparator()
 
-        # Web interface
-        notebook_action = QAction("Open Audio Notebook", menu)
-        notebook_action.triggered.connect(
-            lambda: self._trigger_callback(TrayAction.OPEN_AUDIO_NOTEBOOK)
-        )
-        menu.addAction(notebook_action)
-
-        menu.addSeparator()
-
-        # Docker Server Control submenu
-        server_menu = QMenu("Docker Server", menu)
-
-        start_local_action = QAction("Start Server (Local)", server_menu)
-        start_local_action.triggered.connect(self._on_server_start_local)
-        server_menu.addAction(start_local_action)
-
-        start_remote_action = QAction("Start Server (Remote)", server_menu)
-        start_remote_action.triggered.connect(self._on_server_start_remote)
-        server_menu.addAction(start_remote_action)
-
-        stop_server_action = QAction("Stop Server", server_menu)
-        stop_server_action.triggered.connect(self._on_server_stop)
-        server_menu.addAction(stop_server_action)
-
-        server_menu.addSeparator()
-
-        server_status_action = QAction("Check Status", server_menu)
-        server_status_action.triggered.connect(self._on_server_status)
-        server_menu.addAction(server_status_action)
-
-        server_menu.addSeparator()
-
-        lazydocker_action = QAction("Open lazydocker", server_menu)
-        lazydocker_action.triggered.connect(self._on_open_lazydocker)
-        server_menu.addAction(lazydocker_action)
-
-        menu.addMenu(server_menu)
-
-        menu.addSeparator()
-
-        # Reconnect
-        self.reconnect_action = QAction("Reconnect", menu)
-        self.reconnect_action.triggered.connect(
-            lambda: self._trigger_callback(TrayAction.RECONNECT)
-        )
-        menu.addAction(self.reconnect_action)
-
-        # Settings
-        settings_action = QAction("Settings...", menu)
-        settings_action.triggered.connect(self.show_settings_dialog)
-        menu.addAction(settings_action)
+        # Show app window
+        show_app_action = QAction("Show App", menu)
+        show_app_action.triggered.connect(self.show_mothership_window)
+        menu.addAction(show_app_action)
 
         menu.addSeparator()
 
@@ -244,15 +208,23 @@ class Qt6Tray(AbstractTray):
     def _do_set_state(self, state: TrayState) -> None:
         """Actually update the tray state (must be called on main thread)."""
         self.state = state
-        color = self.COLORS.get(state, (128, 128, 128))
-        self.tray.setIcon(self._create_icon(color))
+
+        # Use app logo for IDLE state, colored circles for running client
+        if state == TrayState.IDLE:
+            self.tray.setIcon(self._get_logo_icon())
+        else:
+            color = self.COLORS.get(state, (128, 128, 128))
+            self.tray.setIcon(self._create_icon(color))
 
         # Update tooltip
         self.tray.setToolTip(self.get_state_tooltip(state))
 
-        # Update menu item states
+        # Update menu item states - recording only when client is running (not IDLE)
         if self.start_action and self.stop_action:
-            if state == TrayState.RECORDING:
+            if state == TrayState.IDLE:
+                self.start_action.setEnabled(False)
+                self.stop_action.setEnabled(False)
+            elif state == TrayState.RECORDING:
                 self.start_action.setEnabled(False)
                 self.stop_action.setEnabled(True)
             else:
@@ -264,9 +236,14 @@ class Qt6Tray(AbstractTray):
             cancellable_states = {TrayState.RECORDING, TrayState.UPLOADING, TrayState.TRANSCRIBING}
             self.cancel_action.setEnabled(state in cancellable_states)
 
-        # Update reconnect visibility
-        if self.reconnect_action:
-            self.reconnect_action.setVisible(state == TrayState.DISCONNECTED)
+    def _get_logo_icon(self) -> QIcon:
+        """Get the app logo icon for IDLE state."""
+        if self.LOGO_PATH.exists():
+            return QIcon(str(self.LOGO_PATH))
+        else:
+            # Fallback to a grey circle if logo not found
+            logger.warning(f"App logo not found at {self.LOGO_PATH}")
+            return self._create_icon((128, 128, 128))
 
     def show_notification(self, title: str, message: str) -> None:
         """Show a system notification (thread-safe)."""
@@ -281,6 +258,8 @@ class Qt6Tray(AbstractTray):
     def run(self) -> None:
         """Start the Qt event loop."""
         self.tray.show()
+        # Show Mothership window on startup
+        self.show_mothership_window()
         self.app.exec()
 
     def quit(self) -> None:
@@ -348,6 +327,43 @@ class Qt6Tray(AbstractTray):
         # Reload values in case config changed externally
         self._settings_dialog._load_values()
         self._settings_dialog.exec()
+
+    def show_mothership_window(self) -> None:
+        """Show the Mothership command center window."""
+        if self.config is None:
+            logger.warning("Cannot show Mothership: no config available")
+            return
+
+        from client.kde.mothership import MothershipWindow
+
+        if self._mothership_window is None:
+            self._mothership_window = MothershipWindow(self.config)
+            # Connect Mothership signals
+            self._mothership_window.start_client_requested.connect(self._on_mothership_start_client)
+            self._mothership_window.stop_client_requested.connect(self._on_mothership_stop_client)
+            self._mothership_window.show_settings_requested.connect(self.show_settings_dialog)
+
+        self._mothership_window.show()
+        self._mothership_window.raise_()
+        self._mothership_window.activateWindow()
+
+    def _on_mothership_start_client(self, remote: bool) -> None:
+        """Handle start client request from Mothership."""
+        logger.info(f"Mothership requested client start (remote={remote})")
+        # Trigger reconnect to apply new settings and connect
+        self._trigger_callback(TrayAction.RECONNECT)
+        # Update Mothership with running state
+        if self._mothership_window:
+            self._mothership_window.set_client_running(True)
+
+    def _on_mothership_stop_client(self) -> None:
+        """Handle stop client request from Mothership."""
+        logger.info("Mothership requested client stop")
+        # Set tray state to IDLE (client not running)
+        self.set_state(TrayState.IDLE)
+        # Update Mothership
+        if self._mothership_window:
+            self._mothership_window.set_client_running(False)
 
     def _on_server_start_local(self) -> None:
         """Start Docker server in local (HTTP) mode."""
@@ -476,6 +492,9 @@ class Qt6Tray(AbstractTray):
         if self._settings_dialog is not None:
             self._settings_dialog.close()
             self._settings_dialog = None
+        if self._mothership_window is not None:
+            self._mothership_window.force_close()
+            self._mothership_window = None
 
 
 def run_tray(config) -> int:
@@ -492,9 +511,11 @@ def run_tray(config) -> int:
 
     try:
         tray = Qt6Tray(config=config)
+        # Check if user wants to auto-start client when app launches
+        auto_start = config.get("behavior", "auto_start_client", default=False)
         orchestrator = ClientOrchestrator(
             config=config,
-            auto_connect=True,
+            auto_connect=auto_start,
             auto_copy_clipboard=config.get("clipboard", "auto_copy", default=True),
         )
         orchestrator.start(tray)

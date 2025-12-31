@@ -196,11 +196,6 @@ class ClientOrchestrator:
                     f"Could not connect to {self.config.server_host}:{self.config.server_port}",
                 )
 
-                # On initial connection failure, open settings dialog so user can configure
-                if self._is_initial_connection and hasattr(self.tray, "show_settings_dialog"):
-                    logger.info("Opening settings dialog for initial connection failure")
-                    self.tray.show_settings_dialog()
-
             # Mark that we've attempted initial connection
             self._is_initial_connection = False
 

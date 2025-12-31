@@ -116,6 +116,7 @@ class AbstractTray(ABC):
     def get_state_tooltip(self, state: TrayState) -> str:
         """Get tooltip text for a state."""
         state_names = {
+            TrayState.IDLE: "Client not running",
             TrayState.DISCONNECTED: "Disconnected",
             TrayState.CONNECTING: "Connecting...",
             TrayState.STANDBY: "Ready",

@@ -72,6 +72,9 @@ def get_default_config() -> dict[str, Any]:
             "left_click": "start_recording",
             "middle_click": "stop_transcribe",
         },
+        "behavior": {
+            "auto_start_client": False,  # Start client when app launches
+        },
         "hotkeys": {
             "enabled": True,
             "start_recording": "CTRL+SHIFT+R",

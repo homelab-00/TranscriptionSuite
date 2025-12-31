@@ -13,7 +13,8 @@ from typing import Any
 class TrayState(Enum):
     """Application states reflected in tray icon."""
 
-    DISCONNECTED = "disconnected"  # Not connected to server
+    IDLE = "idle"  # Client not running (shows app logo)
+    DISCONNECTED = "disconnected"  # Client running but not connected to server
     CONNECTING = "connecting"  # Establishing connection
     STANDBY = "standby"  # Connected, ready
     RECORDING = "recording"  # Microphone active

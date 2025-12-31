@@ -437,9 +437,17 @@ def create_hotkey_manager() -> HotkeyManager | None:
     """
     Create the appropriate hotkey manager for the current platform.
 
+    Global hotkeys are supported on:
+    - Windows: Using keyboard library
+    - KDE Plasma: Using XDG Desktop Portal GlobalShortcuts
+
+    GNOME is NOT supported because Mutter doesn't fully implement the
+    GlobalShortcuts protocol.
+
     Returns:
         HotkeyManager instance or None if not available
     """
+    import os
     import platform
 
     system = platform.system()
@@ -450,11 +458,15 @@ def create_hotkey_manager() -> HotkeyManager | None:
         if manager.is_available():
             return manager
 
-    # Linux/Wayland: Use XDG Portal
-    else:
-        manager = XDGPortalHotkeyManager()
-        if manager.is_available():
-            return manager
+    # Linux: Only support KDE (GNOME's Mutter doesn't fully implement the protocol)
+    elif system == "Linux":
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        if "kde" in desktop:
+            manager = XDGPortalHotkeyManager()
+            if manager.is_available():
+                return manager
+        else:
+            logger.info(f"Global hotkeys not supported on {desktop or 'unknown'} desktop")
 
     logger.info("No hotkey manager available for this platform")
     return None
