@@ -65,9 +65,17 @@ docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 
 ### Step 1: Clone the Repository
 
+**From GitHub:**
 ```bash
 git clone https://github.com/homelab-00/TranscriptionSuite.git
 cd TranscriptionSuite
+```
+
+**Or from GitLab:**
+*Note: GitLab repository is private, use GitHub.*
+```bash
+git clone https://gitlab.com/bluemoon7/transcription-suite.git
+cd transcription-suite
 ```
 
 ### Step 2: Run Setup Script

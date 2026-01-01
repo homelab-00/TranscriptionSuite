@@ -201,9 +201,9 @@ The Mothership window has a persistent **navigation bar** at the top:
 **Views:**
 
 1. **Home View** - Welcome screen with:
-   - Status indicators centered above their buttons (Server blue / Client orange)
-   - Quick access buttons to Server and Client views
-   - "Open Web Client" button (URL based on client settings)
+   - Status indicators centered above their buttons (Server blue #1D63ED / Client magenta #CA23DF)
+   - Quick access buttons to Server and Client views (with matching icons from navbar)
+   - "Open Web Client" button (light blue accent, URL based on client settings)
 
 2. **Server View** - Docker server management:
    - Status card showing:
@@ -232,10 +232,14 @@ The Mothership window has a persistent **navigation bar** at the top:
 4. **Help Menu** - Documentation access:
    - User Guide (README.md) - for end users
    - Developer Guide (README_DEV.md) - for developers
-   - Both displayed in a styled text viewer within the app
+   - Both displayed in a styled markdown viewer with dark theme (requires `markdown` Python package)
+   - Table of contents links navigate within the document
+   - External links open in the system browser
 
 5. **About Dialog** - Application info:
-   - Author profile picture
+   - Author profile picture (circular cropped)
+   - Application version from pyproject.toml
+   - Copyright notice (MIT License)
    - GitHub and GitLab profile links
    - Repository links (GitHub and GitLab)
 

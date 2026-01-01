@@ -221,24 +221,31 @@ class SettingsDialog(QDialog):
             QCheckBox {
                 color: #ffffff;
                 font-size: 13px;
-                spacing: 8px;
+                spacing: 10px;
             }
             
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
+                width: 22px;
+                height: 22px;
                 border-radius: 4px;
-                border: 1px solid #3d3d3d;
+                border: 2px solid #505050;
                 background-color: #1e1e1e;
             }
             
             QCheckBox::indicator:checked {
                 background-color: #90caf9;
                 border-color: #90caf9;
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxMjEyMTIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
             }
             
-            QCheckBox::indicator:hover {
-                border-color: #90caf9;
+            QCheckBox::indicator:unchecked:hover {
+                border-color: #707070;
+                background-color: #252525;
+            }
+            
+            QCheckBox::indicator:checked:hover {
+                background-color: #42a5f5;
+                border-color: #42a5f5;
             }
             
             #primaryButton {
@@ -289,6 +296,27 @@ class SettingsDialog(QDialog):
                 border-top: 1px solid #2d2d2d;
             }
             
+            QGroupBox {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding: 16px;
+                padding-top: 24px;
+                font-size: 13px;
+                font-weight: bold;
+                color: #90caf9;
+            }
+            
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 12px;
+                padding: 0 6px;
+                background-color: #1e1e1e;
+                color: #90caf9;
+            }
+            
             QFrame#settingsCard {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
@@ -300,6 +328,7 @@ class SettingsDialog(QDialog):
         """Create the Connection settings tab."""
         tab = QWidget()
         tab.setObjectName("tabContent")
+        tab.setMinimumHeight(600)  # Minimum height for connection panel
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
@@ -429,25 +458,110 @@ class SettingsDialog(QDialog):
 
     def _create_behavior_tab(self) -> None:
         """Create the Behavior settings tab."""
+        from PyQt6.QtWidgets import QFrame, QGroupBox
+
         tab = QWidget()
         tab.setObjectName("tabContent")
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
 
-        # Hotkeys checkbox
+        # === Hotkeys Section ===
+        hotkeys_group = QGroupBox("Hotkeys")
+        hotkeys_group.setObjectName("settingsGroup")
+        hotkeys_layout = QVBoxLayout(hotkeys_group)
+        hotkeys_layout.setSpacing(12)
+
+        # Enable hotkeys checkbox
         self.hotkeys_enabled_check = QCheckBox("Enable global hotkeys")
-        layout.addWidget(self.hotkeys_enabled_check)
+        hotkeys_layout.addWidget(self.hotkeys_enabled_check)
 
-        # Auto-copy checkbox
+        # Hotkey configuration inputs
+        hotkeys_config = QWidget()
+        hotkeys_config_layout = QVBoxLayout(hotkeys_config)
+        hotkeys_config_layout.setContentsMargins(24, 8, 0, 0)
+        hotkeys_config_layout.setSpacing(10)
+
+        # Start recording hotkey
+        start_row = QHBoxLayout()
+        start_label = QLabel("Start Recording:")
+        start_label.setObjectName("fieldLabel")
+        start_label.setMinimumWidth(120)
+        start_row.addWidget(start_label)
+        self.hotkey_start_edit = QLineEdit()
+        self.hotkey_start_edit.setPlaceholderText("e.g., CTRL+SHIFT+R")
+        self.hotkey_start_edit.setMaximumWidth(200)
+        start_row.addWidget(self.hotkey_start_edit)
+        start_row.addStretch()
+        hotkeys_config_layout.addLayout(start_row)
+
+        # Stop recording hotkey
+        stop_row = QHBoxLayout()
+        stop_label = QLabel("Stop Recording:")
+        stop_label.setObjectName("fieldLabel")
+        stop_label.setMinimumWidth(120)
+        stop_row.addWidget(stop_label)
+        self.hotkey_stop_edit = QLineEdit()
+        self.hotkey_stop_edit.setPlaceholderText("e.g., CTRL+SHIFT+S")
+        self.hotkey_stop_edit.setMaximumWidth(200)
+        stop_row.addWidget(self.hotkey_stop_edit)
+        stop_row.addStretch()
+        hotkeys_config_layout.addLayout(stop_row)
+
+        # Cancel hotkey
+        cancel_row = QHBoxLayout()
+        cancel_label = QLabel("Cancel:")
+        cancel_label.setObjectName("fieldLabel")
+        cancel_label.setMinimumWidth(120)
+        cancel_row.addWidget(cancel_label)
+        self.hotkey_cancel_edit = QLineEdit()
+        self.hotkey_cancel_edit.setPlaceholderText("e.g., CTRL+SHIFT+Escape")
+        self.hotkey_cancel_edit.setMaximumWidth(200)
+        cancel_row.addWidget(self.hotkey_cancel_edit)
+        cancel_row.addStretch()
+        hotkeys_config_layout.addLayout(cancel_row)
+
+        hotkeys_layout.addWidget(hotkeys_config)
+
+        # Help text for hotkeys
+        hotkeys_help = QLabel(
+            "Use format: MODIFIER+KEY (e.g., CTRL+SHIFT+R, ALT+F1)\n"
+            "Supported modifiers: CTRL, SHIFT, ALT, SUPER"
+        )
+        hotkeys_help.setObjectName("helpText")
+        hotkeys_help.setWordWrap(True)
+        hotkeys_layout.addWidget(hotkeys_help)
+
+        # Connect enable checkbox to toggle hotkey inputs
+        self.hotkeys_enabled_check.toggled.connect(hotkeys_config.setEnabled)
+
+        layout.addWidget(hotkeys_group)
+
+        layout.addSpacing(8)
+
+        # === Clipboard Section ===
+        clipboard_group = QGroupBox("Clipboard")
+        clipboard_group.setObjectName("settingsGroup")
+        clipboard_layout = QVBoxLayout(clipboard_group)
+
         self.auto_copy_check = QCheckBox(
             "Automatically copy transcription to clipboard"
         )
-        layout.addWidget(self.auto_copy_check)
+        clipboard_layout.addWidget(self.auto_copy_check)
 
-        # Notifications checkbox
+        layout.addWidget(clipboard_group)
+
+        layout.addSpacing(8)
+
+        # === Notifications Section ===
+        notifications_group = QGroupBox("Notifications")
+        notifications_group.setObjectName("settingsGroup")
+        notifications_layout = QVBoxLayout(notifications_group)
+
         self.notifications_check = QCheckBox("Show desktop notifications")
-        layout.addWidget(self.notifications_check)
+        notifications_layout.addWidget(self.notifications_check)
+
+        layout.addWidget(notifications_group)
 
         layout.addStretch()
 
@@ -509,6 +623,22 @@ class SettingsDialog(QDialog):
         self.hotkeys_enabled_check.setChecked(
             self.config.get("hotkeys", "enabled", default=True)
         )
+        # Load hotkey bindings
+        self.hotkey_start_edit.setText(
+            self.config.get("hotkeys", "start_recording", default="CTRL+SHIFT+R")
+        )
+        self.hotkey_stop_edit.setText(
+            self.config.get("hotkeys", "stop_recording", default="CTRL+SHIFT+S")
+        )
+        self.hotkey_cancel_edit.setText(
+            self.config.get("hotkeys", "cancel", default="CTRL+SHIFT+Escape")
+        )
+        # Update hotkey inputs enabled state based on checkbox
+        hotkeys_enabled = self.config.get("hotkeys", "enabled", default=True)
+        self.hotkey_start_edit.setEnabled(hotkeys_enabled)
+        self.hotkey_stop_edit.setEnabled(hotkeys_enabled)
+        self.hotkey_cancel_edit.setEnabled(hotkeys_enabled)
+
         self.auto_copy_check.setChecked(
             self.config.get("clipboard", "auto_copy", default=True)
         )
@@ -538,6 +668,17 @@ class SettingsDialog(QDialog):
         self.config.set(
             "hotkeys", "enabled", value=self.hotkeys_enabled_check.isChecked()
         )
+        # Save hotkey bindings (uppercase and stripped)
+        start_hotkey = self.hotkey_start_edit.text().strip().upper()
+        if start_hotkey:
+            self.config.set("hotkeys", "start_recording", value=start_hotkey)
+        stop_hotkey = self.hotkey_stop_edit.text().strip().upper()
+        if stop_hotkey:
+            self.config.set("hotkeys", "stop_recording", value=stop_hotkey)
+        cancel_hotkey = self.hotkey_cancel_edit.text().strip().upper()
+        if cancel_hotkey:
+            self.config.set("hotkeys", "cancel", value=cancel_hotkey)
+
         self.config.set(
             "clipboard", "auto_copy", value=self.auto_copy_check.isChecked()
         )

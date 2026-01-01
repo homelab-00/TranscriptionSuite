@@ -25,6 +25,7 @@ dependencies = [
     "numpy>=2.3.5",
     "pyyaml>=6.0.3",
     "requests>=2.32.0",
+    "markdown>=3.7",
 ]
 
 [project.optional-dependencies]

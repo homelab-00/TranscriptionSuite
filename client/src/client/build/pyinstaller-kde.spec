@@ -29,6 +29,8 @@ a = Analysis(
         # README files for Help menu
         (str(repo_root / "README.md"), "."),
         (str(repo_root / "README_DEV.md"), "."),
+        # Version file for About dialog
+        (str(repo_root / "client" / "pyproject.toml"), "client"),
     ],
     hiddenimports=[
         "client.common",
@@ -50,6 +52,7 @@ a = Analysis(
         "pyaudio",
         "requests",
         "yaml",
+        "toml",
     ],
     hookspath=[],
     hooksconfig={},

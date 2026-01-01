@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QPixmap
+from PyQt6.QtGui import QFont, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -41,9 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Constants for embedded resources
 GITHUB_PROFILE_URL = "https://github.com/homelab-00"
-GITLAB_PROFILE_URL = "https://gitlab.com/homelab-00"
 GITHUB_REPO_URL = "https://github.com/homelab-00/TranscriptionSuite"
-GITLAB_REPO_URL = "https://gitlab.com/homelab-00/TranscriptionSuite"
 
 
 def _get_assets_path() -> Path:
@@ -384,19 +382,29 @@ class MothershipWindow(QMainWindow):
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setSpacing(20)
 
-        # Server button
+        # Server button with icon (same as navbar)
         server_btn = QPushButton("Manage\nDocker Server")
         server_btn.setObjectName("welcomeButton")
         server_btn.setProperty("accent", "server")
         server_btn.setFixedSize(180, 90)
+        server_icon = QIcon.fromTheme("server-database")
+        if server_icon.isNull():
+            server_icon = QIcon.fromTheme("network-server")
+        if not server_icon.isNull():
+            server_btn.setIcon(server_icon)
+            server_btn.setIconSize(server_btn.size() * 0.3)  # 30% of button size
         server_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
         btn_layout.addWidget(server_btn)
 
-        # Client button
+        # Client button with icon (same as navbar)
         client_btn = QPushButton("Manage\nClient")
         client_btn.setObjectName("welcomeButton")
         client_btn.setProperty("accent", "client")
         client_btn.setFixedSize(180, 90)
+        client_icon = QIcon.fromTheme("audio-input-microphone")
+        if not client_icon.isNull():
+            client_btn.setIcon(client_icon)
+            client_btn.setIconSize(client_btn.size() * 0.3)  # 30% of button size
         client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
         btn_layout.addWidget(client_btn)
 
@@ -413,7 +421,7 @@ class MothershipWindow(QMainWindow):
 
         # Note about web client
         web_note = QLabel("Opens browser based on your client settings")
-        web_note.setObjectName("noteLabel")
+        web_note.setObjectName("webNoteLabel")
         web_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(web_note)
 
@@ -1081,6 +1089,12 @@ class MothershipWindow(QMainWindow):
                 font-style: italic;
             }
 
+            #webNoteLabel {
+                color: #808080;
+                font-size: 11px;
+                font-style: italic;
+            }
+
             #dangerButton {
                 background-color: #f44336;
                 border: none;
@@ -1113,35 +1127,35 @@ class MothershipWindow(QMainWindow):
             }
 
             QLabel#homeStatusLabel[accent="server"] {
-                color: #90caf9;
+                color: #6B8DD9;
             }
 
             QLabel#homeStatusLabel[accent="client"] {
-                color: #ff9800;
+                color: #D070D0;
             }
 
             QPushButton#welcomeButton[accent="server"] {
-                border: 2px solid #90caf9;
+                border: 2px solid #7BA9F5;
             }
 
             QPushButton#welcomeButton[accent="server"]:hover {
-                border-color: #42a5f5;
+                border-color: #A0C5FF;
             }
 
             QPushButton#welcomeButton[accent="client"] {
-                border: 2px solid #ff9800;
+                border: 2px solid #E78FF5;
             }
 
             QPushButton#welcomeButton[accent="client"]:hover {
-                border-color: #f57c00;
+                border-color: #F5B3FF;
             }
 
             QPushButton#secondaryButton[accent="web"] {
-                border: 1px solid #ce93d8;
+                border: 1px solid #D7F62E;
             }
 
             QPushButton#secondaryButton[accent="web"]:hover {
-                border-color: #ab47bc;
+                border-color: #E5FF6E;
             }
 
             #sectionHeader {
@@ -1839,13 +1853,23 @@ class MothershipWindow(QMainWindow):
             }
         """)
 
-        readme_action = menu.addAction(
-            QIcon.fromTheme("text-x-readme"), "User Guide (README)"
-        )
+        # User Guide icon - use document-properties or x-office-document for documentation
+        user_guide_icon = QIcon.fromTheme("x-office-document")
+        if user_guide_icon.isNull():
+            user_guide_icon = QIcon.fromTheme("document-properties")
+        if user_guide_icon.isNull():
+            user_guide_icon = QIcon.fromTheme("text-x-generic")
+        readme_action = menu.addAction(user_guide_icon, "User Guide (README)")
         readme_action.triggered.connect(lambda: self._show_readme_viewer(dev=False))
 
+        # Developer Guide icon - use text-x-script or application-x-executable for code/dev docs
+        dev_guide_icon = QIcon.fromTheme("text-x-script")
+        if dev_guide_icon.isNull():
+            dev_guide_icon = QIcon.fromTheme("text-x-source")
+        if dev_guide_icon.isNull():
+            dev_guide_icon = QIcon.fromTheme("application-x-executable")
         readme_dev_action = menu.addAction(
-            QIcon.fromTheme("text-x-script"), "Developer Guide (README_DEV)"
+            dev_guide_icon, "Developer Guide (README_DEV)"
         )
         readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
 
@@ -1855,7 +1879,10 @@ class MothershipWindow(QMainWindow):
         )
 
     def _show_readme_viewer(self, dev: bool = False) -> None:
-        """Show a README file in a viewer dialog."""
+        """Show a README file in a markdown viewer dialog with dark theme."""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtWidgets import QTextBrowser
+
         readme_path = _get_readme_path(dev=dev)
         title = "Developer Guide" if dev else "User Guide"
 
@@ -1876,39 +1903,189 @@ class MothershipWindow(QMainWindow):
         # Create viewer dialog
         dialog = QDialog(self)
         dialog.setWindowTitle(f"TranscriptionSuite - {title}")
-        dialog.resize(900, 700)
+        dialog.resize(950, 750)
         dialog.setModal(False)
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Markdown content viewer
-        text_view = QPlainTextEdit()
-        text_view.setReadOnly(True)
-        font = QFont("CaskydiaCove Nerd Font", 11)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        text_view.setFont(font)
-        text_view.setStyleSheet("""
-            QPlainTextEdit {
+        # Markdown content viewer with HTML rendering
+        from PyQt6.QtGui import QPalette, QColor
+
+        text_browser = QTextBrowser()
+        text_browser.setReadOnly(True)
+        # Disable automatic link handling - we'll handle anchors manually
+        text_browser.setOpenLinks(False)
+        text_browser.setOpenExternalLinks(False)
+
+        def handle_anchor_click(url: QUrl) -> None:
+            """Handle anchor clicks - internal anchors scroll, external open browser."""
+            url_str = url.toString()
+            if url_str.startswith("#"):
+                # Internal anchor - scroll to it
+                anchor_name = url_str[1:]  # Remove the # prefix
+                text_browser.scrollToAnchor(anchor_name)
+            elif url_str.startswith("http://") or url_str.startswith("https://"):
+                # External link - open in browser
+                webbrowser.open(url_str)
+            # Ignore other URL schemes (file://, etc.)
+
+        text_browser.anchorClicked.connect(handle_anchor_click)
+
+        # Apply dark theme styling
+        text_browser.setStyleSheet("""
+            QTextBrowser {
                 background-color: #1e1e1e;
                 color: #d4d4d4;
                 border: none;
-                padding: 16px;
+                padding: 20px;
+                font-size: 14px;
+                selection-background-color: #3d3d3d;
+                selection-color: #ffffff;
             }
         """)
 
+        # Set custom colors for links
+        palette = text_browser.palette()
+        palette.setColor(QPalette.ColorRole.Base, QColor("#1e1e1e"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#d4d4d4"))
+        palette.setColor(QPalette.ColorRole.Link, QColor("#90caf9"))
+        palette.setColor(QPalette.ColorRole.LinkVisited, QColor("#81d4fa"))
+        text_browser.setPalette(palette)
+
         try:
             content = readme_path.read_text(encoding="utf-8")
-            text_view.setPlainText(content)
-        except Exception as e:
-            text_view.setPlainText(f"Error reading file: {e}")
 
-        layout.addWidget(text_view)
+            # Pre-process markdown content to handle HTML img tags and embedded HTML
+            # The markdown library with extra extension handles inline HTML better
+            import re
+
+            # Remove HTML img tags and replace with text description
+            # QTextBrowser has limited HTML support
+            content = re.sub(
+                r'<img[^>]*alt=["\']([^"\']*)["\'][^>]*>',
+                r"[Image: \1]",
+                content,
+                flags=re.IGNORECASE,
+            )
+            content = re.sub(
+                r'<img[^>]*src=["\']([^"\']*)["\'][^>]*>',
+                r"[Image]",
+                content,
+                flags=re.IGNORECASE,
+            )
+
+            # Convert <pre> tags to fenced code blocks for better handling
+            content = re.sub(r"<pre>\s*", "\n```\n", content, flags=re.IGNORECASE)
+            content = re.sub(r"\s*</pre>", "\n```\n", content, flags=re.IGNORECASE)
+
+            # Try using markdown library to convert to HTML
+            try:
+                import markdown
+
+                # Convert markdown to HTML with extensions
+                # Using toc extension with slugify for consistent anchor IDs
+                html_body = markdown.markdown(
+                    content,
+                    extensions=[
+                        "fenced_code",
+                        "tables",
+                        "toc",
+                        "sane_lists",
+                        "attr_list",
+                    ],
+                    extension_configs={
+                        "toc": {
+                            "permalink": False,
+                            "toc_depth": 4,
+                        }
+                    },
+                )
+
+                # Wrap in HTML with inline dark theme CSS
+                html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{
+                            color: #d4d4d4;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            font-size: 14px;
+                            line-height: 1.6;
+                            margin: 0;
+                            padding: 0;
+                        }}
+                        h1 {{ color: #90caf9; font-size: 28px; margin-top: 24px; border-bottom: 1px solid #3d3d3d; padding-bottom: 8px; }}
+                        h2 {{ color: #81d4fa; font-size: 22px; margin-top: 20px; border-bottom: 1px solid #2d2d2d; padding-bottom: 6px; }}
+                        h3 {{ color: #b3e5fc; font-size: 18px; margin-top: 16px; }}
+                        h4, h5, h6 {{ color: #e1f5fe; margin-top: 12px; }}
+                        a {{ color: #90caf9; text-decoration: none; }}
+                        a:hover {{ text-decoration: underline; }}
+                        code {{
+                            background-color: #2d2d2d;
+                            color: #ce93d8;
+                            padding: 2px 6px;
+                            border-radius: 4px;
+                            font-family: 'CaskaydiaCove Nerd Font', 'Fira Code', 'Consolas', monospace;
+                            font-size: 13px;
+                        }}
+                        pre {{
+                            background-color: #1a1a1a;
+                            border: 1px solid #3d3d3d;
+                            border-radius: 6px;
+                            padding: 12px;
+                            overflow-x: auto;
+                            font-family: 'CaskaydiaCove Nerd Font', 'Fira Code', 'Consolas', monospace;
+                            font-size: 13px;
+                        }}
+                        pre code {{
+                            background-color: transparent;
+                            padding: 0;
+                            color: #d4d4d4;
+                        }}
+                        blockquote {{
+                            border-left: 4px solid #90caf9;
+                            margin: 16px 0;
+                            padding: 8px 16px;
+                            background-color: #252525;
+                            color: #b0b0b0;
+                        }}
+                        table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
+                        th, td {{ border: 1px solid #3d3d3d; padding: 10px; text-align: left; }}
+                        th {{ background-color: #2d2d2d; color: #90caf9; font-weight: 600; }}
+                        tr:nth-child(even) {{ background-color: #252525; }}
+                        ul, ol {{ padding-left: 24px; margin: 12px 0; }}
+                        li {{ margin: 6px 0; }}
+                        hr {{ border: none; border-top: 1px solid #3d3d3d; margin: 24px 0; }}
+                        strong {{ color: #ffffff; }}
+                        em {{ color: #b0b0b0; }}
+                    </style>
+                </head>
+                <body>
+                    {html_body}
+                </body>
+                </html>
+                """
+                text_browser.setHtml(html)
+
+            except ImportError:
+                # Fallback: use Qt's built-in setMarkdown
+                text_browser.setMarkdown(content)
+
+        except Exception as e:
+            text_browser.setPlainText(f"Error reading file: {e}")
+
+        layout.addWidget(text_browser)
 
         # Style the dialog
         dialog.setStyleSheet("""
             QDialog {
                 background-color: #121212;
+            }
+            QTextBrowser {
+                background-color: #1e1e1e;
+                border: none;
             }
         """)
 
@@ -1918,39 +2095,53 @@ class MothershipWindow(QMainWindow):
         """Show the About dialog with author info and links."""
         dialog = QDialog(self)
         dialog.setWindowTitle("About TranscriptionSuite")
-        dialog.setFixedSize(420, 480)
+        dialog.setFixedSize(480, 620)
         dialog.setModal(True)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
 
-        # Profile picture
+        # Profile picture with proper centering and clipping
+        profile_container = QWidget()
+        profile_container.setFixedSize(120, 120)
+        profile_container_layout = QVBoxLayout(profile_container)
+        profile_container_layout.setContentsMargins(0, 0, 0, 0)
+        profile_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         profile_label = QLabel()
         profile_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        profile_label.setFixedSize(110, 110)
+
         profile_pixmap = self._load_profile_picture()
         if profile_pixmap:
-            profile_label.setPixmap(
-                profile_pixmap.scaled(
-                    100,
-                    100,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+            # Create circular mask for the profile picture
+            scaled_pixmap = profile_pixmap.scaled(
+                100,
+                100,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
             )
+
+            # Create a rounded pixmap
+            rounded = QPixmap(100, 100)
+            rounded.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, 100, 100)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, scaled_pixmap)
+            painter.end()
+
+            profile_label.setPixmap(rounded)
         else:
             # Fallback: use a placeholder
             profile_label.setText("👤")
-            profile_label.setStyleSheet("font-size: 64px;")
-        profile_label.setFixedSize(110, 110)
-        profile_label.setStyleSheet("""
-            QLabel {
-                background-color: #2d2d2d;
-                border-radius: 55px;
-                border: 2px solid #90caf9;
-            }
-        """)
-        layout.addWidget(profile_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        profile_container_layout.addWidget(profile_label)
+        layout.addWidget(profile_container, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # App name
         app_name = QLabel("TranscriptionSuite")
@@ -1958,70 +2149,108 @@ class MothershipWindow(QMainWindow):
         app_name.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold;")
         layout.addWidget(app_name)
 
+        # Version info - always display
+        try:
+            from importlib.metadata import version
+            app_version = version("transcription-suite-client")
+        except Exception:
+            # When running from source or PyInstaller bundle, try to read version from pyproject.toml
+            try:
+                import sys
+                import toml
+                # Check if running as PyInstaller bundle
+                if getattr(sys, "frozen", False):
+                    # Running as bundled app - pyproject.toml should be in the client directory
+                    bundle_dir = Path(sys._MEIPASS)  # type: ignore
+                    pyproject_path = bundle_dir / "client" / "pyproject.toml"
+                else:
+                    # Running from source - find pyproject.toml relative to this file
+                    current = Path(__file__).resolve()
+                    pyproject_path = None
+                    for parent in current.parents:
+                        potential_path = parent / "pyproject.toml"
+                        if potential_path.exists():
+                            pyproject_path = potential_path
+                            break
+                
+                if pyproject_path and pyproject_path.exists():
+                    with open(pyproject_path, 'r') as f:
+                        data = toml.load(f)
+                    app_version = data.get("project", {}).get("version", "dev")
+                else:
+                    app_version = "dev"
+            except Exception:
+                app_version = "dev"  # Fallback when running from source without install
+
+        version_label = QLabel(f"v{app_version}")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        layout.addWidget(version_label)
+
+        layout.addSpacing(4)
+
         # Description
         description = QLabel("Speech-to-Text Transcription Suite")
         description.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description.setStyleSheet("color: #a0a0a0; font-size: 13px;")
         layout.addWidget(description)
 
-        layout.addSpacing(16)
+        # Copyright notice
+        copyright_label = QLabel("© 2025-2026 homelab-00 • MIT License")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        layout.addWidget(copyright_label)
+
+        layout.addSpacing(12)
 
         # Links section
         links_frame = QFrame()
         links_frame.setObjectName("linksFrame")
         links_layout = QVBoxLayout(links_frame)
-        links_layout.setSpacing(8)
-        links_layout.setContentsMargins(16, 16, 16, 16)
+        links_layout.setSpacing(10)
+        links_layout.setContentsMargins(20, 20, 20, 20)
 
         # Author section header
         author_header = QLabel("Author")
         author_header.setStyleSheet(
-            "color: #90caf9; font-size: 12px; font-weight: bold;"
+            "color: #90caf9; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
         )
         links_layout.addWidget(author_header)
 
         # GitHub profile
         github_btn = QPushButton("  GitHub Profile")
-        github_btn.setIcon(QIcon.fromTheme("web-browser"))
+        github_icon = QIcon.fromTheme("user-identity")
+        if github_icon.isNull():
+            github_icon = QIcon.fromTheme("contact-new")
+        github_btn.setIcon(github_icon)
         github_btn.setObjectName("linkButton")
         github_btn.clicked.connect(lambda: webbrowser.open(GITHUB_PROFILE_URL))
         github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         links_layout.addWidget(github_btn)
 
-        # GitLab profile
-        gitlab_btn = QPushButton("  GitLab Profile")
-        gitlab_btn.setIcon(QIcon.fromTheme("web-browser"))
-        gitlab_btn.setObjectName("linkButton")
-        gitlab_btn.clicked.connect(lambda: webbrowser.open(GITLAB_PROFILE_URL))
-        gitlab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        links_layout.addWidget(gitlab_btn)
 
-        links_layout.addSpacing(8)
+        links_layout.addSpacing(12)
 
         # Repository section header
         repo_header = QLabel("Repository")
-        repo_header.setStyleSheet("color: #90caf9; font-size: 12px; font-weight: bold;")
+        repo_header.setStyleSheet(
+            "color: #90caf9; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
+        )
         links_layout.addWidget(repo_header)
 
         # GitHub repo
         github_repo_btn = QPushButton("  GitHub Repository")
-        github_repo_btn.setIcon(QIcon.fromTheme("folder-git"))
-        if github_repo_btn.icon().isNull():
-            github_repo_btn.setIcon(QIcon.fromTheme("vcs-normal"))
+        repo_icon = QIcon.fromTheme("folder-git")
+        if repo_icon.isNull():
+            repo_icon = QIcon.fromTheme("folder-development")
+        if repo_icon.isNull():
+            repo_icon = QIcon.fromTheme("folder")
+        github_repo_btn.setIcon(repo_icon)
         github_repo_btn.setObjectName("linkButton")
         github_repo_btn.clicked.connect(lambda: webbrowser.open(GITHUB_REPO_URL))
         github_repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         links_layout.addWidget(github_repo_btn)
 
-        # GitLab repo
-        gitlab_repo_btn = QPushButton("  GitLab Repository")
-        gitlab_repo_btn.setIcon(QIcon.fromTheme("folder-git"))
-        if gitlab_repo_btn.icon().isNull():
-            gitlab_repo_btn.setIcon(QIcon.fromTheme("vcs-normal"))
-        gitlab_repo_btn.setObjectName("linkButton")
-        gitlab_repo_btn.clicked.connect(lambda: webbrowser.open(GITLAB_REPO_URL))
-        gitlab_repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        links_layout.addWidget(gitlab_repo_btn)
 
         layout.addWidget(links_frame)
 
@@ -2048,9 +2277,12 @@ class MothershipWindow(QMainWindow):
                 border: 1px solid #3d3d3d;
                 border-radius: 6px;
                 color: #ffffff;
-                padding: 8px 16px;
+                padding: 10px 16px;
+                padding-left: 12px;
                 text-align: left;
                 font-size: 13px;
+                min-width: 200px;
+                min-height: 20px;
             }
             #linkButton:hover {
                 background-color: #2d2d2d;
