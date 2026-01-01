@@ -275,14 +275,23 @@ You also need the [AppIndicator extension](https://extensions.gnome.org/extensio
 
 ### Docker Server Control
 
-The client includes built-in Docker server management via the tray menu:
+The client includes a full Docker management GUI. Click the tray icon and select "Show App" to open the Mothership window, which provides:
+
+- **Server View**: Full Docker management including:
+  - Container and image status with health indicators
+  - Volume status with sizes and downloaded models list
+  - 3-column management section (Container | Image | Volumes)
+  - Server configuration with Settings button
+- **Client View**: Start/stop client, configure settings
+- Navigation bar with Home, Server, and Client buttons
+
+The tray menu also provides quick access:
 
 | Menu Item | Action |
 |-----------|--------|
 | **Docker Server → Start Server (Local)** | Start in HTTP mode (port 8000) |
 | **Docker Server → Start Server (Remote)** | Start in HTTPS mode (port 8443) |
 | **Docker Server → Stop Server** | Stop the running server |
-| **Docker Server → Check Status** | Show current server status |
 
 This eliminates the need to run scripts manually from the command line.
 

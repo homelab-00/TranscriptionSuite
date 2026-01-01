@@ -194,7 +194,12 @@ When referring to code or documentation:
 
 ### Mothership UI Structure
 
-The Mothership window has three main views:
+The Mothership window has a persistent **navigation bar** at the top with three buttons:
+- 🏠 **Home** - Welcome screen
+- 🐳 **Server** - Docker server management
+- 💻 **Client** - Transcription client management
+
+**Views:**
 
 1. **Home View** - Welcome screen with:
    - Status indicators centered above their buttons (Server blue / Client orange)
@@ -202,22 +207,28 @@ The Mothership window has three main views:
    - "Open Web Client" button (URL based on client settings)
 
 2. **Server View** - Docker server management:
-   - Image status with inline date
-   - Server status (Starting/Running/Stopped with mode)
-   - Start Local / Start Remote / Stop buttons
-   - Inline Auth Token field (copyable, read-only) for remote connections
-   - "Remove Container" for clean reinstall
+   - Status card showing:
+     - Container status (Running/Stopped/Not set up)
+     - Docker Image status with date and size
+     - (separator line)
+     - Auth Token (selectable, wider field for full visibility)
+   - Primary controls: Start Local / Start Remote / Stop buttons
+   - Management section with 3 columns:
+     - **Container**: Remove
+     - **Image**: Remove, Fetch Fresh
+     - **Volumes**: Remove Data, Remove Models
+   - Volumes status panel showing:
+     - Data Volume (status + size)
+     - Models Volume (status + size + downloaded models list when running)
+     - Volume base path
+   - Settings button (centered)
    - Expandable server logs
-
-   Navigation: a single circular Home icon button (top-right)
 
 3. **Client View** - Transcription client management:
    - Client status and connection info
    - Start Local / Start Remote / Stop buttons
    - Settings access (including global hotkeys toggle)
    - Expandable client logs
-
-   Navigation: a single circular Home icon button (top-right)
 
 **Tray behavior:**
 - Tray icon shows app logo when client is idle (not running)
@@ -230,6 +241,7 @@ The Mothership window has three main views:
 
 - **Server in Docker**: All ML/GPU operations run in Docker for reproducibility and isolation
 - **Mothership as command center**: The native client (Mothership) provides a GUI to manage all aspects of the application - server control, client control, and configuration - without requiring command-line knowledge
+- **Unified design language**: The Mothership UI matches the Web UI's design language using the Tailwind CSS color palette (Material Design 3). Both interfaces share the same colors, typography principles, and visual hierarchy for a consistent user experience across platforms.
 - **Native clients**: System tray, microphone, clipboard require native access (can't be containerized)
 - **Single port**: Server exposes everything on port 8000 (API, WebSocket, static files)
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
@@ -2231,6 +2243,13 @@ The `DockerManager` class in `docker_manager.py`:
 - Handles mode conflicts (automatically removes container when switching modes)
 - Parses TLS paths from `config.yaml` for remote mode
 - Triggers automatic reconnection after server start
+- Auth token management: `get_admin_token()`, `refresh_admin_token()`, `save_server_auth_token()`
+- Volume management: `volume_exists()`, `get_volume_size()`, `remove_data_volume()`, `remove_models_volume()`
+- Model discovery: `list_downloaded_models()` - lists models in the models volume (requires running container)
+- Desktop-aware config file opening: `open_config_file()` - detects KDE/GNOME/XFCE for appropriate editor
+
+**Note on Container Removal:**
+The `remove_container()` method uses `docker compose down` **without** the `-v` flag, preserving data and models volumes. Users must explicitly remove volumes if desired.
 
 **First-Time Setup:**
 
