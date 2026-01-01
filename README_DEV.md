@@ -192,6 +192,40 @@ When referring to code or documentation:
 - Use "client" when discussing the client functionality (recording, transcription)
 - Use "server" when discussing the Docker backend
 
+### Mothership UI Structure
+
+The Mothership window has three main views:
+
+1. **Home View** - Welcome screen with:
+   - Status indicators centered above their buttons (Server blue / Client orange)
+   - Quick access buttons to Server and Client views
+   - "Open Web Client" button (URL based on client settings)
+
+2. **Server View** - Docker server management:
+   - Image status with inline date
+   - Server status (Starting/Running/Stopped with mode)
+   - Start Local / Start Remote / Stop buttons
+   - Inline Auth Token field (copyable, read-only) for remote connections
+   - "Remove Container" for clean reinstall
+   - Expandable server logs
+
+   Navigation: a single circular Home icon button (top-right)
+
+3. **Client View** - Transcription client management:
+   - Client status and connection info
+   - Start Local / Start Remote / Stop buttons
+   - Settings access (including global hotkeys toggle)
+   - Expandable client logs
+
+   Navigation: a single circular Home icon button (top-right)
+
+**Tray behavior:**
+- Tray icon shows app logo when client is idle (not running)
+- Colored status indicators when client is running (green=ready, yellow=recording, etc.)
+- Simplified menu: recording controls, transcribe file, show app, quit
+- Closing window hides to tray; quit only via tray menu
+- Global hotkeys supported on KDE and Windows only (GNOME's GlobalShortcuts protocol not fully implemented)
+
 ### Design Decisions
 
 - **Server in Docker**: All ML/GPU operations run in Docker for reproducibility and isolation

@@ -132,6 +132,27 @@ class DockerManager:
             logger.error(f"Failed to get server status: {e}")
             return ServerStatus.ERROR
 
+    def get_container_health(self) -> str | None:
+        try:
+            result = self._run_command(
+                [
+                    "docker",
+                    "inspect",
+                    self.CONTAINER_NAME,
+                    "--format",
+                    "{{.State.Health.Status}}",
+                ]
+            )
+            if result.returncode != 0:
+                return None
+
+            health = result.stdout.strip()
+            if not health or health in ("<no value>", "null"):
+                return None
+            return health
+        except Exception:
+            return None
+
     def get_current_mode(self) -> ServerMode | None:
         """Get the current mode of the running container."""
         try:

@@ -169,6 +169,9 @@ class SettingsDialog(QDialog):
         form = QFormLayout(tab)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
+        self.hotkeys_enabled_check = QCheckBox("Enable global hotkeys")
+        form.addRow("", self.hotkeys_enabled_check)
+
         # Auto-copy to clipboard
         self.auto_copy_check = QCheckBox("Automatically copy transcription to clipboard")
         form.addRow("", self.auto_copy_check)
@@ -244,6 +247,9 @@ class SettingsDialog(QDialog):
                     break
 
         # Behavior tab
+        self.hotkeys_enabled_check.setChecked(
+            self.config.get("hotkeys", "enabled", default=True)
+        )
         self.auto_copy_check.setChecked(
             self.config.get("clipboard", "auto_copy", default=True)
         )
@@ -279,6 +285,9 @@ class SettingsDialog(QDialog):
         self.config.set("recording", "device_index", value=device_index)
 
         # Behavior tab
+        self.config.set(
+            "hotkeys", "enabled", value=self.hotkeys_enabled_check.isChecked()
+        )
         self.config.set("clipboard", "auto_copy", value=self.auto_copy_check.isChecked())
         self.config.set("ui", "notifications", value=self.notifications_check.isChecked())
         # TODO: Implement configurable click actions

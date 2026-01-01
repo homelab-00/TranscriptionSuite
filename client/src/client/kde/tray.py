@@ -61,7 +61,15 @@ class Qt6Tray(AbstractTray):
     }
 
     # Path to app logo (relative to project root)
-    LOGO_PATH = Path(__file__).parent.parent.parent.parent.parent / "build" / "assets" / "logo.png"
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        LOGO_PATH = Path(sys._MEIPASS) / "build" / "assets" / "logo.png"
+    else:
+        LOGO_PATH = (
+            Path(__file__).resolve().parent.parent.parent.parent.parent
+            / "build"
+            / "assets"
+            / "logo.png"
+        )
 
     def __init__(
         self, app_name: str = "TranscriptionSuite", config: "ClientConfig | None" = None

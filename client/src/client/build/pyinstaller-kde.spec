@@ -24,6 +24,7 @@ a = Analysis(
     binaries=[],
     datas=[
         # No config file needed - client creates default config at runtime
+        (str(repo_root / "build" / "assets" / "logo.png"), "build/assets"),
     ],
     hiddenimports=[
         "client.common",
