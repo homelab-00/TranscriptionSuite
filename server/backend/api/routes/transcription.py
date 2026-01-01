@@ -15,34 +15,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from server.api.routes.utils import get_client_name
 from server.config import get_config
 from server.core.model_manager import TranscriptionCancelledError
-from server.core.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
-
-
-def _get_client_name(request: Request) -> str:
-    """
-    Extract the client name from the request's authentication token.
-
-    Returns the client_name from the token, or a default value if not found.
-    """
-    # Try Authorization header first
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-    else:
-        # Try cookie
-        token = request.cookies.get("auth_token")
-
-    if token:
-        token_store = get_token_store()
-        stored_token = token_store.validate_token(token)
-        if stored_token:
-            return stored_token.client_name
-
-    return "Unknown Client"
 
 router = APIRouter()
 
@@ -96,7 +73,7 @@ async def transcribe_audio(
 
     # Get model manager and check if busy
     model_manager = request.app.state.model_manager
-    client_name = _get_client_name(request)
+    client_name = get_client_name(request)
 
     # Try to acquire a job slot
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
@@ -197,7 +174,7 @@ async def transcribe_quick(
 
     # Get model manager and check if busy
     model_manager = request.app.state.model_manager
-    client_name = _get_client_name(request)
+    client_name = get_client_name(request)
 
     # Try to acquire a job slot
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)

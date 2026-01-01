@@ -6,7 +6,6 @@ including Docker image setup and connection mode selection.
 """
 
 import logging
-import os
 import platform
 import shutil
 import subprocess

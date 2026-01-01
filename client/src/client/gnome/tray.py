@@ -315,7 +315,7 @@ class GtkTray(AbstractTray):
             logger.warning(f"GTK clipboard copy failed: {e}")
             # Try wl-copy fallback on Wayland
             try:
-                result = subprocess.run(
+                subprocess.run(
                     ["wl-copy"],
                     input=text.encode("utf-8"),
                     check=True,

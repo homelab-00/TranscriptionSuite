@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from server.api.routes.utils import require_admin
 from server.core.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
@@ -80,10 +81,10 @@ async def login(request: LoginRequest) -> Dict[str, Any]:
 async def list_tokens(request: Request) -> Dict[str, Any]:
     """
     List all tokens (admin only).
-
-    Note: This endpoint should be protected by admin authentication middleware.
-    For now, it's accessible to anyone who can reach the API.
     """
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         token_store = get_token_store()
         tokens = token_store.list_tokens()
@@ -110,18 +111,21 @@ async def list_tokens(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/tokens")
-async def create_token(request: CreateTokenRequest) -> Dict[str, Any]:
+async def create_token(request: Request, body: CreateTokenRequest) -> Dict[str, Any]:
     """
     Create a new token (admin only).
 
     Returns the newly created token (only shown once).
     """
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         token_store = get_token_store()
         stored_token, plaintext_token = token_store.generate_token(
-            client_name=request.client_name,
-            is_admin=request.is_admin,
-            expiry_days=request.expiry_days,
+            client_name=body.client_name,
+            is_admin=body.is_admin,
+            expiry_days=body.expiry_days,
         )
 
         return {
@@ -143,10 +147,13 @@ async def create_token(request: CreateTokenRequest) -> Dict[str, Any]:
 
 
 @router.delete("/tokens/{token_id}")
-async def revoke_token(token_id: str) -> Dict[str, Any]:
+async def revoke_token(request: Request, token_id: str) -> Dict[str, Any]:
     """
     Revoke a token by its ID (admin only).
     """
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         token_store = get_token_store()
         success = token_store.revoke_token_by_id(token_id)

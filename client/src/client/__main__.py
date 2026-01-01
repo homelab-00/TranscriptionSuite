@@ -23,7 +23,7 @@ from pathlib import Path
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig, get_config_dir
 from client.common.single_instance import acquire_instance_lock, release_instance_lock
-from client.common.setup_wizard import is_first_time_setup, SetupWizard, ConnectionMode
+from client.common.setup_wizard import is_first_time_setup, SetupWizard
 
 
 def parse_args() -> argparse.Namespace:

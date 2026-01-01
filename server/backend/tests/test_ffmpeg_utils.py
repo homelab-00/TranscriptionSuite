@@ -8,9 +8,7 @@ Tests include:
 - Performance benchmarks
 """
 
-import tempfile
 import time
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -370,7 +368,7 @@ class TestPerformance:
 
         # Measure dynaudnorm time
         start = time.time()
-        normalized = ffmpeg_utils.normalize_audio_ffmpeg(
+        _ = ffmpeg_utils.normalize_audio_ffmpeg(
             audio, sample_rate=16000, method="dynaudnorm"
         )
         dynaudnorm_time = time.time() - start

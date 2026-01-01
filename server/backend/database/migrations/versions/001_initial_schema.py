@@ -15,7 +15,6 @@ Running this on an existing database will:
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 from sqlalchemy import text
 
 

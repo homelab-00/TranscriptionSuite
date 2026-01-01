@@ -306,7 +306,7 @@ class Qt6Tray(AbstractTray):
             logger.warning(f"Qt clipboard copy failed: {e}")
             # Try wl-copy fallback on Wayland
             try:
-                result = subprocess.run(
+                subprocess.run(
                     ["wl-copy"],
                     input=text.encode("utf-8"),
                     check=True,

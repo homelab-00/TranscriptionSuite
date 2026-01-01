@@ -17,8 +17,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from server.api.routes.utils import get_client_name
 from server.config import get_config
-from server.core.token_store import get_token_store
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
 from server.database.database import (
@@ -36,29 +36,6 @@ from server.database.database import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _get_client_name(request: Request) -> str:
-    """
-    Extract the client name from the request's authentication token.
-
-    Returns the client_name from the token, or a default value if not found.
-    """
-    # Try Authorization header first
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-    else:
-        # Try cookie
-        token = request.cookies.get("auth_token")
-
-    if token:
-        token_store = get_token_store()
-        stored_token = token_store.validate_token(token)
-        if stored_token:
-            return stored_token.client_name
-
-    return "Unknown Client"
 
 
 class RecordingResponse(BaseModel):
@@ -322,7 +299,7 @@ async def upload_and_transcribe(
 
     # Get model manager and check if busy
     model_manager = request.app.state.model_manager
-    client_name = _get_client_name(request)
+    client_name = get_client_name(request)
 
     # Try to acquire a job slot
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
@@ -388,7 +365,12 @@ async def upload_and_transcribe(
         audio_dir.mkdir(parents=True, exist_ok=True)
         
         # Keep original filename, convert to .mp3 extension
-        original_stem = Path(file.filename or "audio").stem
+        # Sanitize filename to prevent path traversal
+        raw_stem = Path(file.filename or "audio").stem
+        # Remove any path separators and sanitize to alphanumeric + safe chars
+        original_stem = "".join(c for c in raw_stem if c.isalnum() or c in "._- ")[:100]
+        if not original_stem:
+            original_stem = "audio"
         dest_filename = f"{original_stem}.mp3"
         dest_path = audio_dir / dest_filename
         

@@ -339,7 +339,6 @@ The following items are documented for future improvement but are not critical i
 1. **Client Code Duplication (~655 lines)**
    - KDE and GNOME clients share similar logic but have separate implementations
    - Settings dialogs have nearly identical structure in different UI frameworks
-   - `_get_client_name()` is duplicated in 3 route files (`transcription.py`, `notebook.py`, `websocket.py`)
    - *Recommendation:* Extract shared logic to base classes or utility modules
 
 2. **Database N+1 Query Pattern**
@@ -351,6 +350,43 @@ The following items are documented for future improvement but are not critical i
    - `search_words_enhanced()` executes extra queries for context per match
    - No pagination - loads all results into memory
    - *Recommendation:* Use JOINs and add LIMIT/OFFSET pagination
+
+### Code Review (January 2026)
+
+A comprehensive code review was performed covering linting, security, and code quality.
+
+#### Fixes Applied
+
+1. **Security: Admin Endpoint Authorization** *(Critical)*
+   - `/api/auth/tokens` endpoints (list, create, revoke) now properly verify admin status
+   - Added `require_admin()` check to all token management endpoints in `auth.py`
+   - Previously these endpoints were accessible to any authenticated user
+
+2. **Security: File Handle Leak**
+   - Fixed unclosed file handle in `api_client.py` `transcribe_audio()` method
+   - Changed `open(file_path, "rb")` to use context manager before passing to FormData
+
+3. **Security: Filename Sanitization**
+   - Added input sanitization in `notebook.py` to prevent path traversal attacks
+   - Filenames are now stripped of path separators and limited to 100 characters
+
+4. **Code Duplication: Shared Utilities**
+   - Extracted `_get_client_name()` to new `server/backend/api/routes/utils.py`
+   - Added `get_client_name()`, `get_authenticated_token()`, and `require_admin()` utilities
+   - Updated `transcription.py` and `notebook.py` to use shared module
+
+5. **Linting Fixes**
+   - Fixed unused variable assignments in `client/src/client/gnome/tray.py`
+   - Fixed unused variable assignments in `client/src/client/kde/tray.py`
+   - Fixed unused variable in `server/backend/tests/test_ffmpeg_utils.py`
+
+#### Security Analysis Summary
+
+- **Subprocess calls:** All use fixed command arrays (no shell injection risk)
+- **No dangerous eval/exec:** No dynamic code execution in source files
+- **Input validation:** File uploads use temp files; filenames now sanitized
+- **Authentication:** Token-based auth with proper middleware enforcement
+- **Path handling:** Uses `Path` objects; no string concatenation vulnerabilities
 
 ---
 

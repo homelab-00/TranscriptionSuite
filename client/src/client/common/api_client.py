@@ -350,11 +350,14 @@ class APIClient:
         """
         session = await self._get_session()
 
-        # Prepare form data
+        # Prepare form data - read file contents to avoid handle leak
+        with open(file_path, "rb") as f:
+            file_contents = f.read()
+        
         data = aiohttp.FormData()
         data.add_field(
             "file",
-            open(file_path, "rb"),
+            file_contents,
             filename=file_path.name,
         )
         if language:

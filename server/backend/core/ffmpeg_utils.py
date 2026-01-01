@@ -11,7 +11,7 @@ All operations use ffmpeg-python for pipe-based processing to avoid disk I/O ove
 
 import logging
 import shutil
-from typing import Optional, Tuple
+from typing import Tuple
 
 import ffmpeg
 import numpy as np
