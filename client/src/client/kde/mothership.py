@@ -10,16 +10,20 @@ and the transcription client. It provides a unified GUI for:
 """
 
 import logging
+import webbrowser
 from enum import Enum, auto
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QPlainTextEdit,
     QLineEdit,
     QPushButton,
@@ -34,6 +38,54 @@ if TYPE_CHECKING:
     from client.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
+
+# Constants for embedded resources
+GITHUB_PROFILE_URL = "https://github.com/homelab-00"
+GITLAB_PROFILE_URL = "https://gitlab.com/homelab-00"
+GITHUB_REPO_URL = "https://github.com/homelab-00/TranscriptionSuite"
+GITLAB_REPO_URL = "https://gitlab.com/homelab-00/TranscriptionSuite"
+
+
+def _get_assets_path() -> Path:
+    """Get the path to the assets directory, handling both dev and bundled modes."""
+    import sys
+
+    # Check if running as PyInstaller bundle
+    if getattr(sys, "frozen", False):
+        # Running as bundled app
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore
+        return bundle_dir / "build" / "assets"
+    else:
+        # Running from source - find repo root
+        current = Path(__file__).resolve()
+        for parent in current.parents:
+            if (parent / "README.md").exists():
+                return parent / "build" / "assets"
+        # Fallback
+        return Path(__file__).parent.parent.parent.parent.parent / "build" / "assets"
+
+
+def _get_readme_path(dev: bool = False) -> Path | None:
+    """Get the path to README.md or README_DEV.md, handling both dev and bundled modes."""
+    import sys
+
+    filename = "README_DEV.md" if dev else "README.md"
+
+    # Check if running as PyInstaller bundle
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore
+        readme = bundle_dir / filename
+        if readme.exists():
+            return readme
+        return None
+    else:
+        # Running from source - find repo root
+        current = Path(__file__).resolve()
+        for parent in current.parents:
+            readme = parent / filename
+            if readme.exists():
+                return readme
+        return None
 
 
 class View(Enum):
@@ -73,8 +125,8 @@ class LogWindow(QMainWindow):
         self._log_view = QPlainTextEdit()
         self._log_view.setReadOnly(True)
 
-        # Set font to CaskydiaCove Nerd Font 10pt
-        font = QFont("CaskydiaCove Nerd Font", 10)
+        # Set font to CaskydiaCove Nerd Font 12pt
+        font = QFont("CaskydiaCove Nerd Font", 12)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self._log_view.setFont(font)
 
@@ -195,32 +247,65 @@ class MothershipWindow(QMainWindow):
         self._navigate_to(View.WELCOME, add_to_history=False)
 
     def _create_nav_bar(self) -> QWidget:
-        """Create the navigation bar with Home, Server, Client buttons."""
+        """Create the navigation bar with Home, Server, Client buttons and Help/About."""
         nav = QFrame()
         nav.setObjectName("navBar")
         layout = QHBoxLayout(nav)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(12)
 
-        # Home button
-        self._nav_home_btn = QPushButton("Home")
+        # Home button with icon
+        self._nav_home_btn = QPushButton("  Home")
         self._nav_home_btn.setObjectName("navButton")
+        home_icon = QIcon.fromTheme("go-home")
+        if not home_icon.isNull():
+            self._nav_home_btn.setIcon(home_icon)
         self._nav_home_btn.clicked.connect(self._go_home)
         layout.addWidget(self._nav_home_btn)
 
-        # Server button
-        self._nav_server_btn = QPushButton("Server")
+        # Server button with icon
+        self._nav_server_btn = QPushButton("  Server")
         self._nav_server_btn.setObjectName("navButton")
+        server_icon = QIcon.fromTheme("server-database")
+        if server_icon.isNull():
+            server_icon = QIcon.fromTheme("network-server")
+        if not server_icon.isNull():
+            self._nav_server_btn.setIcon(server_icon)
         self._nav_server_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
         layout.addWidget(self._nav_server_btn)
 
-        # Client button
-        self._nav_client_btn = QPushButton("Client")
+        # Client button with icon
+        self._nav_client_btn = QPushButton("  Client")
         self._nav_client_btn.setObjectName("navButton")
+        client_icon = QIcon.fromTheme("audio-input-microphone")
+        if not client_icon.isNull():
+            self._nav_client_btn.setIcon(client_icon)
         self._nav_client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
         layout.addWidget(self._nav_client_btn)
 
         layout.addStretch()
+
+        # Help button with icon
+        self._nav_help_btn = QPushButton("  Help")
+        self._nav_help_btn.setObjectName("navButton")
+        help_icon = QIcon.fromTheme("help-contents")
+        if help_icon.isNull():
+            help_icon = QIcon.fromTheme("help-about")
+        if not help_icon.isNull():
+            self._nav_help_btn.setIcon(help_icon)
+        self._nav_help_btn.clicked.connect(self._show_help_menu)
+        layout.addWidget(self._nav_help_btn)
+
+        # About button with icon
+        self._nav_about_btn = QPushButton("  About")
+        self._nav_about_btn.setObjectName("navButton")
+        about_icon = QIcon.fromTheme("help-about")
+        if about_icon.isNull():
+            about_icon = QIcon.fromTheme("dialog-information")
+        if not about_icon.isNull():
+            self._nav_about_btn.setIcon(about_icon)
+        self._nav_about_btn.clicked.connect(self._show_about_dialog)
+        layout.addWidget(self._nav_about_btn)
 
         return nav
 
@@ -457,7 +542,7 @@ class MothershipWindow(QMainWindow):
         self._server_token_field.setText("Not saved yet")
         self._server_token_field.setFrame(False)
         self._server_token_field.setStyleSheet("background: transparent; border: none;")
-        self._server_token_field.setMaximumWidth(600)  # 2x wider (was 280)
+        self._server_token_field.setMinimumWidth(320)  # Wider for full token visibility
         token_row.addWidget(self._server_token_field)
         token_note = QLabel("(for remote)")
         token_note.setObjectName("statusDateInline")
@@ -1729,6 +1814,282 @@ class MothershipWindow(QMainWindow):
         self._client_running = running
         if self._current_view == View.CLIENT:
             self._refresh_client_status()
+
+    # =========================================================================
+    # Help and About
+    # =========================================================================
+
+    def _show_help_menu(self) -> None:
+        """Show help menu with README options."""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                color: #ffffff;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2d2d2d;
+            }
+        """)
+
+        readme_action = menu.addAction(
+            QIcon.fromTheme("text-x-readme"), "User Guide (README)"
+        )
+        readme_action.triggered.connect(lambda: self._show_readme_viewer(dev=False))
+
+        readme_dev_action = menu.addAction(
+            QIcon.fromTheme("text-x-script"), "Developer Guide (README_DEV)"
+        )
+        readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
+
+        # Show menu below the help button
+        menu.exec(
+            self._nav_help_btn.mapToGlobal(self._nav_help_btn.rect().bottomLeft())
+        )
+
+    def _show_readme_viewer(self, dev: bool = False) -> None:
+        """Show a README file in a viewer dialog."""
+        readme_path = _get_readme_path(dev=dev)
+        title = "Developer Guide" if dev else "User Guide"
+
+        if readme_path is None or not readme_path.exists():
+            from PyQt6.QtWidgets import QMessageBox
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("File Not Found")
+            msg.setText(f"Could not find {'README_DEV.md' if dev else 'README.md'}")
+            msg.setInformativeText(
+                "This file should be bundled with the application. "
+                "If running from source, ensure you're in the repository root."
+            )
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.exec()
+            return
+
+        # Create viewer dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"TranscriptionSuite - {title}")
+        dialog.resize(900, 700)
+        dialog.setModal(False)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Markdown content viewer
+        text_view = QPlainTextEdit()
+        text_view.setReadOnly(True)
+        font = QFont("CaskydiaCove Nerd Font", 11)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        text_view.setFont(font)
+        text_view.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: none;
+                padding: 16px;
+            }
+        """)
+
+        try:
+            content = readme_path.read_text(encoding="utf-8")
+            text_view.setPlainText(content)
+        except Exception as e:
+            text_view.setPlainText(f"Error reading file: {e}")
+
+        layout.addWidget(text_view)
+
+        # Style the dialog
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #121212;
+            }
+        """)
+
+        dialog.show()
+
+    def _show_about_dialog(self) -> None:
+        """Show the About dialog with author info and links."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About TranscriptionSuite")
+        dialog.setFixedSize(420, 480)
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        # Profile picture
+        profile_label = QLabel()
+        profile_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        profile_pixmap = self._load_profile_picture()
+        if profile_pixmap:
+            profile_label.setPixmap(
+                profile_pixmap.scaled(
+                    100,
+                    100,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        else:
+            # Fallback: use a placeholder
+            profile_label.setText("👤")
+            profile_label.setStyleSheet("font-size: 64px;")
+        profile_label.setFixedSize(110, 110)
+        profile_label.setStyleSheet("""
+            QLabel {
+                background-color: #2d2d2d;
+                border-radius: 55px;
+                border: 2px solid #90caf9;
+            }
+        """)
+        layout.addWidget(profile_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # App name
+        app_name = QLabel("TranscriptionSuite")
+        app_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        app_name.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold;")
+        layout.addWidget(app_name)
+
+        # Description
+        description = QLabel("Speech-to-Text Transcription Suite")
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        description.setStyleSheet("color: #a0a0a0; font-size: 13px;")
+        layout.addWidget(description)
+
+        layout.addSpacing(16)
+
+        # Links section
+        links_frame = QFrame()
+        links_frame.setObjectName("linksFrame")
+        links_layout = QVBoxLayout(links_frame)
+        links_layout.setSpacing(8)
+        links_layout.setContentsMargins(16, 16, 16, 16)
+
+        # Author section header
+        author_header = QLabel("Author")
+        author_header.setStyleSheet(
+            "color: #90caf9; font-size: 12px; font-weight: bold;"
+        )
+        links_layout.addWidget(author_header)
+
+        # GitHub profile
+        github_btn = QPushButton("  GitHub Profile")
+        github_btn.setIcon(QIcon.fromTheme("web-browser"))
+        github_btn.setObjectName("linkButton")
+        github_btn.clicked.connect(lambda: webbrowser.open(GITHUB_PROFILE_URL))
+        github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        links_layout.addWidget(github_btn)
+
+        # GitLab profile
+        gitlab_btn = QPushButton("  GitLab Profile")
+        gitlab_btn.setIcon(QIcon.fromTheme("web-browser"))
+        gitlab_btn.setObjectName("linkButton")
+        gitlab_btn.clicked.connect(lambda: webbrowser.open(GITLAB_PROFILE_URL))
+        gitlab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        links_layout.addWidget(gitlab_btn)
+
+        links_layout.addSpacing(8)
+
+        # Repository section header
+        repo_header = QLabel("Repository")
+        repo_header.setStyleSheet("color: #90caf9; font-size: 12px; font-weight: bold;")
+        links_layout.addWidget(repo_header)
+
+        # GitHub repo
+        github_repo_btn = QPushButton("  GitHub Repository")
+        github_repo_btn.setIcon(QIcon.fromTheme("folder-git"))
+        if github_repo_btn.icon().isNull():
+            github_repo_btn.setIcon(QIcon.fromTheme("vcs-normal"))
+        github_repo_btn.setObjectName("linkButton")
+        github_repo_btn.clicked.connect(lambda: webbrowser.open(GITHUB_REPO_URL))
+        github_repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        links_layout.addWidget(github_repo_btn)
+
+        # GitLab repo
+        gitlab_repo_btn = QPushButton("  GitLab Repository")
+        gitlab_repo_btn.setIcon(QIcon.fromTheme("folder-git"))
+        if gitlab_repo_btn.icon().isNull():
+            gitlab_repo_btn.setIcon(QIcon.fromTheme("vcs-normal"))
+        gitlab_repo_btn.setObjectName("linkButton")
+        gitlab_repo_btn.clicked.connect(lambda: webbrowser.open(GITLAB_REPO_URL))
+        gitlab_repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        links_layout.addWidget(gitlab_repo_btn)
+
+        layout.addWidget(links_frame)
+
+        layout.addStretch()
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("primaryButton")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Style the dialog
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #121212;
+            }
+            #linksFrame {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+            }
+            #linkButton {
+                background-color: transparent;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 16px;
+                text-align: left;
+                font-size: 13px;
+            }
+            #linkButton:hover {
+                background-color: #2d2d2d;
+                border-color: #90caf9;
+            }
+            #primaryButton {
+                background-color: #90caf9;
+                border: none;
+                border-radius: 6px;
+                color: #121212;
+                padding: 10px 32px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            #primaryButton:hover {
+                background-color: #42a5f5;
+            }
+        """)
+
+        dialog.exec()
+
+    def _load_profile_picture(self) -> QPixmap | None:
+        """Load the profile picture from bundled assets."""
+        assets_path = _get_assets_path()
+        profile_path = assets_path / "profile.png"
+
+        if profile_path.exists():
+            pixmap = QPixmap(str(profile_path))
+            if not pixmap.isNull():
+                return pixmap
+
+        # Try loading from logo as fallback
+        logo_path = assets_path / "logo.png"
+        if logo_path.exists():
+            pixmap = QPixmap(str(logo_path))
+            if not pixmap.isNull():
+                return pixmap
+
+        return None
 
     # =========================================================================
     # Lifecycle

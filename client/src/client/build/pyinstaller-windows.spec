@@ -27,7 +27,12 @@ a = Analysis(
     pathex=[str(project_root / "client" / "src")],
     binaries=[],
     datas=[
-        # No config files needed - client finds config at runtime
+        # Assets (logo, profile picture)
+        (str(project_root / "build" / "assets" / "logo.png"), "build/assets"),
+        (str(project_root / "build" / "assets" / "profile.png"), "build/assets"),
+        # README files for Help menu
+        (str(project_root / "README.md"), "."),
+        (str(project_root / "README_DEV.md"), "."),
     ],
     hiddenimports=[
         "client.common",

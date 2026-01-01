@@ -23,8 +23,12 @@ a = Analysis(
     pathex=[str(repo_root / "client" / "src")],
     binaries=[],
     datas=[
-        # No config file needed - client creates default config at runtime
+        # Assets (logo, profile picture)
         (str(repo_root / "build" / "assets" / "logo.png"), "build/assets"),
+        (str(repo_root / "build" / "assets" / "profile.png"), "build/assets"),
+        # README files for Help menu
+        (str(repo_root / "README.md"), "."),
+        (str(repo_root / "README_DEV.md"), "."),
     ],
     hiddenimports=[
         "client.common",

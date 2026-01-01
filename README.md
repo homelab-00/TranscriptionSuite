@@ -283,7 +283,9 @@ The client includes a full Docker management GUI. Click the tray icon and select
   - 3-column management section (Container | Image | Volumes)
   - Server configuration with Settings button
 - **Client View**: Start/stop client, configure settings
-- Navigation bar with Home, Server, and Client buttons
+- **Help Menu**: Access built-in documentation (User Guide / Developer Guide)
+- **About Dialog**: Application info and links to GitHub/GitLab
+- Navigation bar with Home, Server, Client, Help, and About buttons (all with icons)
 
 The tray menu also provides quick access:
 

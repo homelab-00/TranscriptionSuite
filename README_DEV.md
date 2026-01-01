@@ -194,10 +194,9 @@ When referring to code or documentation:
 
 ### Mothership UI Structure
 
-The Mothership window has a persistent **navigation bar** at the top with three buttons:
-- 🏠 **Home** - Welcome screen
-- 🐳 **Server** - Docker server management
-- 💻 **Client** - Transcription client management
+The Mothership window has a persistent **navigation bar** at the top:
+- Left side: 🏠 **Home**, 🐳 **Server**, 💻 **Client** (with icons)
+- Right side: ❓ **Help**, ℹ️ **About** (with icons)
 
 **Views:**
 
@@ -227,8 +226,18 @@ The Mothership window has a persistent **navigation bar** at the top with three 
 3. **Client View** - Transcription client management:
    - Client status and connection info
    - Start Local / Start Remote / Stop buttons
-   - Settings access (including global hotkeys toggle)
+   - Settings access (styled to match Mothership design)
    - Expandable client logs
+
+4. **Help Menu** - Documentation access:
+   - User Guide (README.md) - for end users
+   - Developer Guide (README_DEV.md) - for developers
+   - Both displayed in a styled text viewer within the app
+
+5. **About Dialog** - Application info:
+   - Author profile picture
+   - GitHub and GitLab profile links
+   - Repository links (GitHub and GitLab)
 
 **Tray behavior:**
 - Tray icon shows app logo when client is idle (not running)
@@ -1150,17 +1159,24 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
 - Icon sizes are automatically generated during builds - no manual resizing needed
 - Requires ImageMagick installed for icon processing
 
-### Icon Management
+### Build Assets
 
-TranscriptionSuite uses a streamlined icon workflow:
+TranscriptionSuite uses a streamlined asset workflow:
 
 **Source Files (manually maintained in `build/assets/`):**
 - **logo.svg** (1024×1024) - Master vector logo, canonical source
 - **logo.png** (1024×1024) - High-resolution raster export from logo.svg
+- **profile.png** - Author profile picture for About dialog (bundled into app)
 
 **Generated Files (created automatically during builds):**
 - **logo.ico** (multi-resolution: 16, 32, 48, 256) - Generated from logo.png for Windows builds
 - **256×256 PNG** - Rescaled from logo.png for AppImage packaging
+
+**Bundled into PyInstaller builds:**
+- `build/assets/logo.png` - Application logo
+- `build/assets/profile.png` - Author profile picture
+- `README.md` - User guide (displayed in Help menu)
+- `README_DEV.md` - Developer guide (displayed in Help menu)
 
 #### Creating Source Files
 
