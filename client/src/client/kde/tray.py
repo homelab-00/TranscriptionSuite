@@ -4,7 +4,7 @@ KDE Plasma system tray implementation using PyQt6.
 Provides native system tray integration for KDE Plasma desktop.
 Based on the architecture from NATIVE_CLIENT/tray/qt6_tray.py.
 
-The Mothership window is the main command center for the application,
+The Dashboard window is the main command center for the application,
 providing a GUI to manage both the Docker server and the transcription client.
 """
 
@@ -120,8 +120,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         # Dialog instances (created lazily)
         self._settings_dialog = None
 
-        # Mothership window (command center)
-        self._mothership_window = None
+        # Dashboard window (command center)
+        self._dashboard_window = None
 
         # Setup menu and click handlers
         self._setup_menu()
@@ -168,7 +168,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
         # Show app window
         show_app_action = QAction("Show App", menu)
-        show_app_action.triggered.connect(self.show_mothership_window)
+        show_app_action.triggered.connect(self.show_dashboard_window)
         menu.addAction(show_app_action)
 
         menu.addSeparator()
@@ -271,8 +271,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
     def run(self) -> None:
         """Start the Qt event loop."""
         self.tray.show()
-        # Show Mothership window on startup
-        self.show_mothership_window()
+        # Show Dashboard window on startup
+        self.show_dashboard_window()
         self.app.exec()
 
     def quit(self) -> None:
@@ -345,52 +345,52 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self._settings_dialog._load_values()
         self._settings_dialog.exec()
 
-    def show_mothership_window(self) -> None:
-        """Show the Mothership command center window."""
+    def show_dashboard_window(self) -> None:
+        """Show the Dashboard command center window."""
         if self.config is None:
-            logger.warning("Cannot show Mothership: no config available")
+            logger.warning("Cannot show Dashboard: no config available")
             return
 
-        from client.kde.mothership import MothershipWindow
+        from client.kde.dashboard import DashboardWindow
 
-        if self._mothership_window is None:
-            self._mothership_window = MothershipWindow(self.config)
-            # Connect Mothership signals
-            self._mothership_window.start_client_requested.connect(
-                self._on_mothership_start_client
+        if self._dashboard_window is None:
+            self._dashboard_window = DashboardWindow(self.config)
+            # Connect Dashboard signals
+            self._dashboard_window.start_client_requested.connect(
+                self._on_dashboard_start_client
             )
-            self._mothership_window.stop_client_requested.connect(
-                self._on_mothership_stop_client
+            self._dashboard_window.stop_client_requested.connect(
+                self._on_dashboard_stop_client
             )
-            self._mothership_window.show_settings_requested.connect(
+            self._dashboard_window.show_settings_requested.connect(
                 self.show_settings_dialog
             )
 
-        self._mothership_window.show()
-        self._mothership_window.raise_()
-        self._mothership_window.activateWindow()
+        self._dashboard_window.show()
+        self._dashboard_window.raise_()
+        self._dashboard_window.activateWindow()
 
-    def _on_mothership_start_client(self, remote: bool) -> None:
-        """Handle start client request from Mothership."""
-        logger.info(f"Mothership requested client start (remote={remote})")
+    def _on_dashboard_start_client(self, remote: bool) -> None:
+        """Handle start client request from Dashboard."""
+        logger.info(f"Dashboard requested client start (remote={remote})")
         # Trigger reconnect to apply new settings and connect
         self._trigger_callback(TrayAction.RECONNECT)
-        # Update Mothership with running state
-        if self._mothership_window:
-            self._mothership_window.set_client_running(True)
+        # Update Dashboard with running state
+        if self._dashboard_window:
+            self._dashboard_window.set_client_running(True)
 
-    def _on_mothership_stop_client(self) -> None:
-        """Handle stop client request from Mothership."""
-        logger.info("Mothership requested client stop")
+    def _on_dashboard_stop_client(self) -> None:
+        """Handle stop client request from Dashboard."""
+        logger.info("Dashboard requested client stop")
         # Set tray state to IDLE (client not running)
         self.set_state(TrayState.IDLE)
-        # Update Mothership
-        if self._mothership_window:
-            self._mothership_window.set_client_running(False)
+        # Update Dashboard
+        if self._dashboard_window:
+            self._dashboard_window.set_client_running(False)
 
     # Server control methods are provided by ServerControlMixin
     # (_on_server_start_local, _on_server_start_remote, _on_server_stop,
-    #  _on_server_status, _on_open_lazydocker)
+    #  _on_server_status)
 
     def _run_server_operation(self, operation, progress_msg: str) -> None:
         """Run a Docker server operation with notification feedback."""
@@ -416,9 +416,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if self._settings_dialog is not None:
             self._settings_dialog.close()
             self._settings_dialog = None
-        if self._mothership_window is not None:
-            self._mothership_window.force_close()
-            self._mothership_window = None
+        if self._dashboard_window is not None:
+            self._dashboard_window.force_close()
+            self._dashboard_window = None
 
 
 def run_tray(config) -> int:

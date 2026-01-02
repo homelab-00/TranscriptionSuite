@@ -24,6 +24,7 @@ from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig, get_config_dir
 from client.common.single_instance import acquire_instance_lock, release_instance_lock
 from client.common.setup_wizard import is_first_time_setup, SetupWizard
+from client.common.logging_config import setup_logging, get_log_file
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,80 +95,11 @@ def list_audio_devices() -> None:
 
     for device in devices:
         print(f"  [{device['index']}] {device['name']}")
-        print(f"      Channels: {device['channels']}, Sample Rate: {device['sample_rate']}")
+        print(
+            f"      Channels: {device['channels']}, Sample Rate: {device['sample_rate']}"
+        )
 
     print()
-
-
-def get_log_file() -> Path:
-    """Get platform-specific log file path."""
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "client.log"
-
-
-def setup_logging(verbose: bool = False) -> None:
-    """
-    Set up logging configuration with file and console handlers.
-
-    Args:
-        verbose: Enable verbose debug logging
-    """
-    level = logging.DEBUG if verbose else logging.INFO
-
-    # Create formatters
-    verbose_formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-    )
-    console_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-
-    # Clear existing handlers
-    root_logger.handlers.clear()
-
-    # Console handler (always present)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(console_formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler (logs wiped on each startup for clean debugging)
-    try:
-        log_file = get_log_file()
-
-        # Wipe log file on startup for clean logs each session
-        if log_file.exists():
-            log_file.unlink()
-
-        # Simple file handler (no rotation - wiped each startup)
-        file_handler = logging.FileHandler(
-            log_file,
-            mode="w",  # Write mode - start fresh
-            encoding="utf-8",
-        )
-        file_handler.setLevel(logging.DEBUG)  # Always log DEBUG to file
-        file_handler.setFormatter(verbose_formatter)
-        root_logger.addHandler(file_handler)
-
-        print(f"Logs written to: {log_file}")
-
-    except Exception as e:
-        print(f"Warning: Could not set up file logging: {e}")
-
-    # Set up verbose logging for key modules
-    if verbose:
-        # Enable detailed aiohttp logging for connection debugging
-        logging.getLogger("aiohttp").setLevel(logging.DEBUG)
-        logging.getLogger("aiohttp.client").setLevel(logging.DEBUG)
-
-        # Log initial verbose mode notification
-        logger = logging.getLogger(__name__)
-        logger.info("=" * 60)
-        logger.info("VERBOSE MODE ENABLED - Detailed connection diagnostics active")
-        logger.info("=" * 60)
 
 
 def main() -> int:
@@ -189,14 +121,17 @@ def main() -> int:
     # Enforce single instance - acquire lock before proceeding
     lock_fd = acquire_instance_lock()
     if lock_fd is None:
-        print("Another instance of TranscriptionSuite is already running.", file=sys.stderr)
+        print(
+            "Another instance of TranscriptionSuite is already running.",
+            file=sys.stderr,
+        )
         print("Only one instance can run at a time.", file=sys.stderr)
         return 1
 
     # Set up logging (verbose mode or legacy debug flag)
     verbose = args.verbose or args.debug
     try:
-        setup_logging(verbose)
+        setup_logging(verbose=verbose, component="client", wipe_on_startup=True)
     except Exception as e:
         print(f"WARNING: Failed to set up logging: {e}", file=sys.stderr)
         # Continue anyway - we can still run without file logging

@@ -263,15 +263,45 @@ On first run, the client automatically performs initial setup:
 
 This replaces the manual `setup.sh`/`setup.ps1` script execution for most users.
 
-### GNOME Client Dependencies (Ubuntu/Debian)
+### GNOME Client Dependencies
 
-The GNOME client requires system packages:
-
-```bash
-sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio python3-numpy python3-aiohttp
-```
+The GNOME client uses a **dual-process architecture** because GTK3 (AppIndicator3 for the tray) and GTK4 (libadwaita for the Dashboard window) cannot coexist in the same Python process. The tray and Dashboard communicate via D-Bus.
 
 You also need the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/) for the tray icon.
+
+> **Note:** The tray will work without GTK4/libadwaita, but "Show App" will be unavailable.
+
+**Ubuntu 24.04 (GNOME):**
+```bash
+sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio \
+    python3-numpy python3-aiohttp gir1.2-adw-1 gir1.2-gtk-4.0
+```
+
+**Fedora (GNOME):**
+```bash
+sudo dnf install python3 python3-gobject gtk3 libappindicator-gtk3 python3-pyaudio \
+    python3-numpy python3-aiohttp libadwaita gtk4
+```
+
+**Arch Linux (GNOME):**
+```bash
+sudo pacman -S python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
+    python-numpy python-aiohttp libadwaita gtk4
+```
+
+### KDE Client Dependencies
+
+The KDE client is a self-contained AppImage on Linux and a standalone executable on Windows. No additional system packages are required.
+
+**Arch Linux (KDE Plasma) - from source only:**
+```bash
+sudo pacman -S python python-pyqt6 python-pyaudio python-numpy python-aiohttp
+```
+
+**Fedora (KDE Plasma) - from source only:**
+```bash
+sudo dnf install python3 python3-qt6 python3-pyaudio python3-numpy python3-aiohttp
+```
 
 ### Usage
 
@@ -283,7 +313,7 @@ You also need the [AppIndicator extension](https://extensions.gnome.org/extensio
 
 ### Docker Server Control
 
-The client includes a full Docker management GUI. Click the tray icon and select "Show App" to open the Mothership window, which provides:
+The client includes a full Docker management GUI. Click the tray icon and select "Show App" to open the Dashboard window, which provides:
 
 - **Server View**: Full Docker management including:
   - Container and image status with health indicators
@@ -410,6 +440,20 @@ If you see errors like `Name or service not known` for `.ts.net` hostnames:
 - **Manual workaround:** Use the Tailscale IP directly: `--host 100.x.x.x` (find IPs with `tailscale status`)
 
 See [README_DEV.md](README_DEV.md#tailscale-dns-resolution-issues) for detailed troubleshooting.
+
+---
+
+## Security
+
+TranscriptionSuite uses a layered security model (see [Security Model](README_DEV.md#security-model) in README_DEV.md):
+- **Network isolation** via Tailscale VPN
+- **TLS/HTTPS** encryption with certificate validation
+- **Token-based authentication** for API access
+
+The project undergoes continuous security analysis:
+- **GitHub CodeQL** scans run automatically on every push and weekly
+- **Security-extended queries** analyze Python and TypeScript code for vulnerabilities
+- Results are monitored in the [Security](https://github.com/homelab-00/TranscriptionSuite/security) tab
 
 ---
 

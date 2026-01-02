@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcription-suite-client"
-version = "0.3.0"
+version = "0.3.1"
 description = "TranscriptionSuite native client for desktop integration"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.12,<3.13"
 license = "MIT"
 authors = [
     { name = "homelab-00" }
 ]
 keywords = ["transcription", "tray", "desktop", "client"]
 classifiers = [
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows :: Windows 11",

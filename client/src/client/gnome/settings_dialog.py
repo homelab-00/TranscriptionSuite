@@ -42,11 +42,6 @@ class SettingsDialog:
         self.device_combo: Gtk.ComboBoxText | None = None
         self.auto_copy_check: Gtk.CheckButton | None = None
         self.notifications_check: Gtk.CheckButton | None = None
-        # Hotkey widgets
-        self.hotkeys_enabled_check: Gtk.CheckButton | None = None
-        self.hotkey_start_entry: Gtk.Entry | None = None
-        self.hotkey_stop_entry: Gtk.Entry | None = None
-        self.hotkey_cancel_entry: Gtk.Entry | None = None
 
     def show(self) -> None:
         """Create and show the settings dialog."""
@@ -66,11 +61,11 @@ class SettingsDialog:
         # Create notebook (tab container)
         notebook = Gtk.Notebook()
         content_area = self.dialog.get_content_area()
-        content_area.set_spacing(10)
-        content_area.set_margin_start(10)
-        content_area.set_margin_end(10)
-        content_area.set_margin_top(10)
-        content_area.set_margin_bottom(10)
+        content_area.set_spacing(8)
+        content_area.set_margin_start(8)
+        content_area.set_margin_end(8)
+        content_area.set_margin_top(8)
+        content_area.set_margin_bottom(8)
         content_area.pack_start(notebook, True, True, 0)
 
         # Create tabs
@@ -95,11 +90,11 @@ class SettingsDialog:
 
     def _create_connection_tab(self) -> Gtk.Box:
         """Create the Connection settings tab."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        box.set_margin_top(10)
-        box.set_margin_bottom(10)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
 
         # Local host
         host_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -194,11 +189,11 @@ class SettingsDialog:
 
     def _create_audio_tab(self) -> Gtk.Box:
         """Create the Audio settings tab."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        box.set_margin_top(10)
-        box.set_margin_bottom(10)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
 
         # Device selector
         device_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -233,95 +228,20 @@ class SettingsDialog:
 
     def _create_behavior_tab(self) -> Gtk.Box:
         """Create the Behavior settings tab."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        box.set_margin_top(10)
-        box.set_margin_bottom(10)
-
-        # === Hotkeys Section ===
-        hotkeys_frame = Gtk.Frame(label="Hotkeys")
-        hotkeys_frame.set_margin_bottom(10)
-        hotkeys_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        hotkeys_box.set_margin_start(10)
-        hotkeys_box.set_margin_end(10)
-        hotkeys_box.set_margin_top(10)
-        hotkeys_box.set_margin_bottom(10)
-
-        # Enable hotkeys checkbox
-        self.hotkeys_enabled_check = Gtk.CheckButton(label="Enable global hotkeys")
-        hotkeys_box.pack_start(self.hotkeys_enabled_check, False, False, 0)
-
-        # Hotkey configuration inputs
-        hotkeys_config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        hotkeys_config_box.set_margin_start(20)
-
-        # Start recording hotkey
-        start_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        start_label = Gtk.Label(label="Start Recording:")
-        start_label.set_xalign(0)
-        start_label.set_size_request(120, -1)
-        start_row.pack_start(start_label, False, False, 0)
-        self.hotkey_start_entry = Gtk.Entry()
-        self.hotkey_start_entry.set_placeholder_text("e.g., CTRL+SHIFT+R")
-        self.hotkey_start_entry.set_max_width_chars(25)
-        start_row.pack_start(self.hotkey_start_entry, True, True, 0)
-        hotkeys_config_box.pack_start(start_row, False, False, 0)
-
-        # Stop recording hotkey
-        stop_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        stop_label = Gtk.Label(label="Stop Recording:")
-        stop_label.set_xalign(0)
-        stop_label.set_size_request(120, -1)
-        stop_row.pack_start(stop_label, False, False, 0)
-        self.hotkey_stop_entry = Gtk.Entry()
-        self.hotkey_stop_entry.set_placeholder_text("e.g., CTRL+SHIFT+S")
-        self.hotkey_stop_entry.set_max_width_chars(25)
-        stop_row.pack_start(self.hotkey_stop_entry, True, True, 0)
-        hotkeys_config_box.pack_start(stop_row, False, False, 0)
-
-        # Cancel hotkey
-        cancel_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        cancel_label = Gtk.Label(label="Cancel:")
-        cancel_label.set_xalign(0)
-        cancel_label.set_size_request(120, -1)
-        cancel_row.pack_start(cancel_label, False, False, 0)
-        self.hotkey_cancel_entry = Gtk.Entry()
-        self.hotkey_cancel_entry.set_placeholder_text("e.g., CTRL+SHIFT+Escape")
-        self.hotkey_cancel_entry.set_max_width_chars(25)
-        cancel_row.pack_start(self.hotkey_cancel_entry, True, True, 0)
-        hotkeys_config_box.pack_start(cancel_row, False, False, 0)
-
-        hotkeys_box.pack_start(hotkeys_config_box, False, False, 0)
-
-        # Help text for hotkeys
-        hotkeys_help_label = Gtk.Label()
-        hotkeys_help_label.set_markup(
-            '<span size="small" foreground="gray">'
-            "Use format: MODIFIER+KEY (e.g., CTRL+SHIFT+R, ALT+F1)\n"
-            "Supported modifiers: CTRL, SHIFT, ALT, SUPER"
-            "</span>"
-        )
-        hotkeys_help_label.set_line_wrap(True)
-        hotkeys_help_label.set_xalign(0)
-        hotkeys_box.pack_start(hotkeys_help_label, False, False, 0)
-
-        hotkeys_frame.add(hotkeys_box)
-        box.pack_start(hotkeys_frame, False, False, 0)
-
-        # Connect enable checkbox to toggle hotkey inputs
-        self.hotkeys_enabled_check.connect(
-            "toggled", self._on_hotkeys_enabled_toggled, hotkeys_config_box
-        )
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
 
         # === Clipboard Section ===
         clipboard_frame = Gtk.Frame(label="Clipboard")
-        clipboard_frame.set_margin_bottom(10)
+        clipboard_frame.set_margin_bottom(8)
         clipboard_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        clipboard_box.set_margin_start(10)
-        clipboard_box.set_margin_end(10)
-        clipboard_box.set_margin_top(10)
-        clipboard_box.set_margin_bottom(10)
+        clipboard_box.set_margin_start(8)
+        clipboard_box.set_margin_end(8)
+        clipboard_box.set_margin_top(8)
+        clipboard_box.set_margin_bottom(8)
 
         # Auto-copy to clipboard
         self.auto_copy_check = Gtk.CheckButton(
@@ -335,10 +255,10 @@ class SettingsDialog:
         # === Notifications Section ===
         notifications_frame = Gtk.Frame(label="Notifications")
         notifications_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        notifications_box.set_margin_start(10)
-        notifications_box.set_margin_end(10)
-        notifications_box.set_margin_top(10)
-        notifications_box.set_margin_bottom(10)
+        notifications_box.set_margin_start(8)
+        notifications_box.set_margin_end(8)
+        notifications_box.set_margin_top(8)
+        notifications_box.set_margin_bottom(8)
 
         # Notifications
         self.notifications_check = Gtk.CheckButton(label="Show desktop notifications")
@@ -348,13 +268,6 @@ class SettingsDialog:
         box.pack_start(notifications_frame, False, False, 0)
 
         return box
-
-    def _on_hotkeys_enabled_toggled(
-        self, button: Gtk.CheckButton, config_box: Gtk.Box
-    ) -> None:
-        """Toggle hotkey inputs sensitivity based on enable checkbox."""
-        enabled = button.get_active()
-        config_box.set_sensitive(enabled)
 
     def _on_toggle_token_visibility(self, button: Gtk.ToggleButton) -> None:
         """Toggle token visibility."""
@@ -416,30 +329,6 @@ class SettingsDialog:
                 self.device_combo.set_active_id(str(current_device))
 
         # Behavior tab
-        if self.hotkeys_enabled_check:
-            hotkeys_enabled = self.config.get("hotkeys", "enabled", default=True)
-            self.hotkeys_enabled_check.set_active(hotkeys_enabled)
-        if self.hotkey_start_entry:
-            self.hotkey_start_entry.set_text(
-                self.config.get("hotkeys", "start_recording", default="CTRL+SHIFT+R")
-            )
-            self.hotkey_start_entry.set_sensitive(
-                self.config.get("hotkeys", "enabled", default=True)
-            )
-        if self.hotkey_stop_entry:
-            self.hotkey_stop_entry.set_text(
-                self.config.get("hotkeys", "stop_recording", default="CTRL+SHIFT+S")
-            )
-            self.hotkey_stop_entry.set_sensitive(
-                self.config.get("hotkeys", "enabled", default=True)
-            )
-        if self.hotkey_cancel_entry:
-            self.hotkey_cancel_entry.set_text(
-                self.config.get("hotkeys", "cancel", default="CTRL+SHIFT+Escape")
-            )
-            self.hotkey_cancel_entry.set_sensitive(
-                self.config.get("hotkeys", "enabled", default=True)
-            )
         if self.auto_copy_check:
             self.auto_copy_check.set_active(
                 self.config.get("clipboard", "auto_copy", default=True)
@@ -487,22 +376,6 @@ class SettingsDialog:
                     self.config.set("recording", "device_index", value=None)
 
         # Behavior tab
-        if self.hotkeys_enabled_check:
-            self.config.set(
-                "hotkeys", "enabled", value=self.hotkeys_enabled_check.get_active()
-            )
-        if self.hotkey_start_entry:
-            start_hotkey = self.hotkey_start_entry.get_text().strip().upper()
-            if start_hotkey:
-                self.config.set("hotkeys", "start_recording", value=start_hotkey)
-        if self.hotkey_stop_entry:
-            stop_hotkey = self.hotkey_stop_entry.get_text().strip().upper()
-            if stop_hotkey:
-                self.config.set("hotkeys", "stop_recording", value=stop_hotkey)
-        if self.hotkey_cancel_entry:
-            cancel_hotkey = self.hotkey_cancel_entry.get_text().strip().upper()
-            if cancel_hotkey:
-                self.config.set("hotkeys", "cancel", value=cancel_hotkey)
         if self.auto_copy_check:
             self.config.set(
                 "clipboard", "auto_copy", value=self.auto_copy_check.get_active()

@@ -613,7 +613,10 @@ if _static_dir.exists():
         @app.get("/notebook", include_in_schema=False)
         @app.get("/notebook/{path:path}", include_in_schema=False)
         async def serve_notebook_ui(path: str = "") -> FileResponse:
-            file_path = _frontend_dir / path
+            file_path = (_frontend_dir / path).resolve()
+            # Prevent path traversal attacks
+            if not file_path.is_relative_to(_frontend_dir):
+                return FileResponse(_frontend_dir / "index.html")
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
             return FileResponse(_frontend_dir / "index.html")
@@ -622,7 +625,10 @@ if _static_dir.exists():
         @app.get("/record", include_in_schema=False)
         @app.get("/record/{path:path}", include_in_schema=False)
         async def serve_record_ui(path: str = "") -> FileResponse:
-            file_path = _frontend_dir / path
+            file_path = (_frontend_dir / path).resolve()
+            # Prevent path traversal attacks
+            if not file_path.is_relative_to(_frontend_dir):
+                return FileResponse(_frontend_dir / "index.html")
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
             return FileResponse(_frontend_dir / "index.html")
@@ -631,7 +637,10 @@ if _static_dir.exists():
         @app.get("/admin", include_in_schema=False)
         @app.get("/admin/{path:path}", include_in_schema=False)
         async def serve_admin_ui(path: str = "") -> FileResponse:
-            file_path = _frontend_dir / path
+            file_path = (_frontend_dir / path).resolve()
+            # Prevent path traversal attacks
+            if not file_path.is_relative_to(_frontend_dir):
+                return FileResponse(_frontend_dir / "index.html")
             if file_path.is_file() and not path.startswith("assets"):
                 return FileResponse(file_path)
             return FileResponse(_frontend_dir / "index.html")

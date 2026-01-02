@@ -92,7 +92,13 @@ $MAGICK_CMD "$PROJECT_ROOT/build/assets/logo.png" -resize 256x256 \
 cp "$BUILD_DIR/AppDir/transcriptionsuite.png" \
    "$BUILD_DIR/AppDir/usr/share/icons/hicolor/256x256/apps/"
 
-# Create AppRun script
+# Copy README files for Help menu (to AppDir root and share directory)
+echo "→ Copying README files..."
+cp "$PROJECT_ROOT/README.md" "$BUILD_DIR/AppDir/"
+cp "$PROJECT_ROOT/README_DEV.md" "$BUILD_DIR/AppDir/"
+mkdir -p "$BUILD_DIR/AppDir/usr/share/transcriptionsuite"
+cp "$PROJECT_ROOT/README.md" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
+cp "$PROJECT_ROOT/README_DEV.md" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
 cat > "$BUILD_DIR/AppDir/AppRun" << 'EOF'
 #!/bin/bash
 SELF=$(readlink -f "$0")

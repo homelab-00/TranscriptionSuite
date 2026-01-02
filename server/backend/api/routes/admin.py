@@ -160,7 +160,7 @@ async def get_logs(
                 lines = [line for line in lines if line.strip()]
         except Exception as e:
             logger.error(f"Failed to read log file: {e}")
-            return {"logs": [], "message": f"Error reading log file: {e}"}
+            return {"logs": [], "message": "Error reading log file"}
 
         # Parse JSON logs
         logs = []

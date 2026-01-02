@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcription-suite-server"
-version = "0.3.0"
+version = "0.3.1"
 description = "TranscriptionSuite unified server for transcription services"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.12,<3.13"
 license = "MIT"
 authors = [
     { name = "homelab-00" }
 ]
 keywords = ["transcription", "whisper", "speech-to-text", "diarization"]
 classifiers = [
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Topic :: Multimedia :: Sound/Audio :: Speech",

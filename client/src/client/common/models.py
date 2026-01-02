@@ -39,8 +39,6 @@ class TrayAction(Enum):
     SERVER_START_REMOTE = "server_start_remote"
     SERVER_STOP = "server_stop"
     SERVER_SETUP = "server_setup"
-    # Tools
-    OPEN_LAZYDOCKER = "open_lazydocker"
 
 
 class TranscriptionMode(Enum):
