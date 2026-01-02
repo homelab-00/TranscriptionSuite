@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from server.api.routes.utils import get_client_name
 from server.config import get_config
+
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
 from server.database.database import (
@@ -245,24 +246,28 @@ async def get_transcription(recording_id: int) -> Dict[str, Any]:
         seg_id = word.get("segment_id")
         if seg_id not in words_by_segment:
             words_by_segment[seg_id] = []
-        words_by_segment[seg_id].append({
-            "word": word.get("word", ""),
-            "start": word.get("start_time", 0),
-            "end": word.get("end_time", 0),
-            "confidence": word.get("confidence"),
-        })
+        words_by_segment[seg_id].append(
+            {
+                "word": word.get("word", ""),
+                "start": word.get("start_time", 0),
+                "end": word.get("end_time", 0),
+                "confidence": word.get("confidence"),
+            }
+        )
 
     # Build segments with embedded words
     result_segments = []
     for seg in segments:
         seg_id = seg.get("id")
-        result_segments.append({
-            "text": seg.get("text", ""),
-            "start": seg.get("start_time", 0),
-            "end": seg.get("end_time", 0),
-            "speaker": seg.get("speaker"),
-            "words": words_by_segment.get(seg_id, []),
-        })
+        result_segments.append(
+            {
+                "text": seg.get("text", ""),
+                "start": seg.get("start_time", 0),
+                "end": seg.get("end_time", 0),
+                "speaker": seg.get("speaker"),
+                "words": words_by_segment.get(seg_id, []),
+            }
+        )
 
     return {
         "recording_id": recording_id,
@@ -272,6 +277,7 @@ async def get_transcription(recording_id: int) -> Dict[str, Any]:
 
 class UploadResponse(BaseModel):
     """Response model for file upload."""
+
     recording_id: int
     message: str
 
@@ -335,18 +341,24 @@ async def upload_and_transcribe(
                 logger.info(f"Running diarization for: {file.filename}")
                 model_manager.load_diarization_model()
                 diar_engine = model_manager.diarization_engine
-                
+
                 # Load audio for diarization
-                audio_data, sample_rate = load_audio(str(tmp_path), target_sample_rate=16000)
+                audio_data, sample_rate = load_audio(
+                    str(tmp_path), target_sample_rate=16000
+                )
                 diar_result = diar_engine.diarize_audio(audio_data, sample_rate)
-                
+
                 # Convert to list of dicts for database
                 diarization_segments = [seg.to_dict() for seg in diar_result.segments]
-                logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
+                logger.info(
+                    f"Diarization complete: {diar_result.num_speakers} speakers found"
+                )
             except ValueError as e:
                 # HF_TOKEN missing - log helpful message
                 logger.error(f"Diarization requires HuggingFace token: {e}")
-                logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
+                logger.error(
+                    "Set HUGGINGFACE_TOKEN env var when starting docker compose"
+                )
             except Exception as e:
                 logger.error(f"Diarization failed (continuing without): {e}")
                 # Don't fail the whole upload if diarization fails
@@ -355,15 +367,19 @@ async def upload_and_transcribe(
         recorded_at = None
         if file_created_at:
             try:
-                recorded_at = datetime.fromisoformat(file_created_at.replace('Z', '+00:00'))
+                recorded_at = datetime.fromisoformat(
+                    file_created_at.replace("Z", "+00:00")
+                )
             except ValueError:
                 logger.warning(f"Invalid file_created_at format: {file_created_at}")
 
         # Convert audio to MP3 and save to permanent storage
         config = get_config()
-        audio_dir = Path(config.get("audio_notebook", "audio_dir", default="/data/audio"))
+        audio_dir = Path(
+            config.get("audio_notebook", "audio_dir", default="/data/audio")
+        )
         audio_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Keep original filename, convert to .mp3 extension
         # Sanitize filename to prevent path traversal
         raw_stem = Path(file.filename or "audio").stem
@@ -373,14 +389,14 @@ async def upload_and_transcribe(
             original_stem = "audio"
         dest_filename = f"{original_stem}.mp3"
         dest_path = audio_dir / dest_filename
-        
+
         # Handle duplicates by adding -2, -3, etc. suffix
         counter = 2
         while dest_path.exists():
             dest_filename = f"{original_stem}-{counter}.mp3"
             dest_path = audio_dir / dest_filename
             counter += 1
-        
+
         # Convert to MP3 for storage efficiency
         convert_to_mp3(str(tmp_path), str(dest_path))
 
@@ -404,7 +420,9 @@ async def upload_and_transcribe(
         )
 
         if not recording_id:
-            raise HTTPException(status_code=500, detail="Failed to save recording to database")
+            raise HTTPException(
+                status_code=500, detail="Failed to save recording to database"
+            )
 
         return {
             "recording_id": recording_id,
@@ -422,8 +440,8 @@ async def upload_and_transcribe(
         # Cleanup temp file
         try:
             tmp_path.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
 
 
 @router.get("/calendar")

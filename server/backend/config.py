@@ -126,14 +126,6 @@ class ServerConfig:
         """Return the path of the loaded configuration file."""
         return self._loaded_from
 
-    def _deep_merge(self, base: Dict, override: Dict) -> None:
-        """Deep merge override into base dict."""
-        for key, value in override.items():
-            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                self._deep_merge(base[key], value)
-            else:
-                base[key] = value
-
     def get(self, *keys: str, default: Any = None) -> Any:
         """
         Get a configuration value by dot-separated path.

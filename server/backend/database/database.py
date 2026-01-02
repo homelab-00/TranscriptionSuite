@@ -364,7 +364,14 @@ def insert_recording(
             INSERT INTO recordings (filename, filepath, title, duration_seconds, recorded_at, has_diarization)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (filename, filepath, recording_title, duration_seconds, recorded_at, int(has_diarization)),
+            (
+                filename,
+                filepath,
+                recording_title,
+                duration_seconds,
+                recorded_at,
+                int(has_diarization),
+            ),
         )
         conn.commit()
         return cursor.lastrowid or 0
@@ -387,7 +394,9 @@ def get_all_recordings() -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
-def get_recordings_by_date_range(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+def get_recordings_by_date_range(
+    start_date: str, end_date: str
+) -> List[Dict[str, Any]]:
     """Get recordings within a date range."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -856,26 +865,48 @@ def get_transcription(recording_id: int) -> Dict[str, Any]:
         )
         segments = [dict(row) for row in cursor.fetchall()]
 
-        # Get words for each segment
-        for segment in segments:
+        # Get all words for all segments in a single query using JOIN
+        segment_ids = [seg["id"] for seg in segments]
+        if segment_ids:
+            # Use placeholders for IN clause
+            placeholders = ",".join("?" * len(segment_ids))
             cursor.execute(
-                """
-                SELECT word, start_time, end_time, confidence 
-                FROM words 
-                WHERE segment_id = ? 
-                ORDER BY word_index
+                f"""
+                SELECT 
+                    w.segment_id,
+                    w.word,
+                    w.start_time,
+                    w.end_time,
+                    w.confidence
+                FROM words w
+                WHERE w.segment_id IN ({placeholders})
+                ORDER BY w.segment_id, w.word_index
                 """,
-                (segment["id"],),
+                segment_ids,
             )
-            segment["words"] = [
-                {
-                    "word": row["word"],
-                    "start": row["start_time"],
-                    "end": row["end_time"],
-                    "confidence": row["confidence"],
-                }
-                for row in cursor.fetchall()
-            ]
+
+            # Group words by segment_id
+            words_by_segment = {}
+            for row in cursor.fetchall():
+                segment_id = row["segment_id"]
+                if segment_id not in words_by_segment:
+                    words_by_segment[segment_id] = []
+                words_by_segment[segment_id].append(
+                    {
+                        "word": row["word"],
+                        "start": row["start_time"],
+                        "end": row["end_time"],
+                        "confidence": row["confidence"],
+                    }
+                )
+
+            # Attach words to segments
+            for segment in segments:
+                segment["words"] = words_by_segment.get(segment["id"], [])
+        else:
+            # No segments, no words
+            for segment in segments:
+                segment["words"] = []
 
         return {
             "recording_id": recording_id,
@@ -1317,7 +1348,9 @@ def _insert_diarization_segments_with_words(
                     "segment_id": segment_id,
                     "word_index": i,
                     "word": w.get("word", ""),
-                    "start_time": float(w.get("start", w.get("start_time", 0.0)) or 0.0),
+                    "start_time": float(
+                        w.get("start", w.get("start_time", 0.0)) or 0.0
+                    ),
                     "end_time": float(
                         w.get(
                             "end",

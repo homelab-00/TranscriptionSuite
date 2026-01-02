@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
 from client.common.models import TrayAction, TrayState
+from client.common.server_control_mixin import ServerControlMixin
 from client.common.tray_base import AbstractTray
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ except (ImportError, ValueError):
     Gtk = None  # type: ignore
 
 
-class GtkTray(AbstractTray):
+class GtkTray(ServerControlMixin, AbstractTray):
     """GTK + AppIndicator3 tray implementation for GNOME."""
 
     # Icon names for different states (using system theme icons)
@@ -210,7 +211,11 @@ class GtkTray(AbstractTray):
 
         # Cancel is enabled during recording, uploading, or transcribing
         if self.cancel_item:
-            cancellable_states = {TrayState.RECORDING, TrayState.UPLOADING, TrayState.TRANSCRIBING}
+            cancellable_states = {
+                TrayState.RECORDING,
+                TrayState.UPLOADING,
+                TrayState.TRANSCRIBING,
+            }
             self.cancel_item.set_sensitive(state in cancellable_states)
 
         # Update reconnect visibility
@@ -323,103 +328,17 @@ class GtkTray(AbstractTray):
                     timeout=2,
                 )
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
-            except (FileNotFoundError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as wl_err:
+            except (
+                FileNotFoundError,
+                subprocess.TimeoutExpired,
+                subprocess.CalledProcessError,
+            ) as wl_err:
                 logger.error(f"wl-copy fallback also failed: {wl_err}")
         return False
 
-    def _on_server_start_local(self) -> None:
-        """Start Docker server in local (HTTP) mode."""
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(
-                mode=ServerMode.LOCAL,
-                progress_callback=lambda msg: logger.info(msg),
-            ),
-            "Starting server (local mode)...",
-        )
-
-    def _on_server_start_remote(self) -> None:
-        """Start Docker server in remote (HTTPS) mode."""
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(
-                mode=ServerMode.REMOTE,
-                progress_callback=lambda msg: logger.info(msg),
-            ),
-            "Starting server (remote mode)...",
-        )
-
-    def _on_server_stop(self) -> None:
-        """Stop the Docker server."""
-        self._run_server_operation(
-            lambda: self._docker_manager.stop_server(
-                progress_callback=lambda msg: logger.info(msg),
-            ),
-            "Stopping server...",
-        )
-
-    def _on_server_status(self) -> None:
-        """Check Docker server status."""
-        try:
-            available, docker_msg = self._docker_manager.is_docker_available()
-            if not available:
-                self.show_notification("Docker Server", docker_msg)
-                return
-
-            status = self._docker_manager.get_server_status()
-            mode = self._docker_manager.get_current_mode()
-
-            status_text = {
-                ServerStatus.RUNNING: "Running",
-                ServerStatus.STOPPED: "Stopped",
-                ServerStatus.NOT_FOUND: "Not set up",
-                ServerStatus.ERROR: "Error",
-            }.get(status, "Unknown")
-
-            mode_text = f" ({mode.value} mode)" if mode and status == ServerStatus.RUNNING else ""
-
-            self.show_notification("Docker Server", f"Status: {status_text}{mode_text}")
-        except Exception as e:
-            logger.error(f"Failed to check server status: {e}")
-            self.show_notification("Docker Server", f"Error: {e}")
-
-    def _on_open_lazydocker(self) -> None:
-        """Open lazydocker in a terminal."""
-        import shutil
-
-        # Check if lazydocker is available
-        lazydocker_path = shutil.which("lazydocker")
-        if not lazydocker_path:
-            self.show_notification(
-                "lazydocker",
-                "lazydocker not found. Install with: sudo pacman -S lazydocker",
-            )
-            return
-
-        # Try different terminal emulators
-        terminals = [
-            ["gnome-terminal", "--", "lazydocker"],
-            ["konsole", "-e", "lazydocker"],
-            ["xterm", "-e", "lazydocker"],
-        ]
-
-        for terminal_cmd in terminals:
-            if shutil.which(terminal_cmd[0]):
-                try:
-                    subprocess.Popen(
-                        terminal_cmd,
-                        start_new_session=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    logger.info(f"Launched lazydocker with {terminal_cmd[0]}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to launch with {terminal_cmd[0]}: {e}")
-                    continue
-
-        self.show_notification(
-            "lazydocker",
-            "No supported terminal emulator found (gnome-terminal, konsole, xterm)",
-        )
+    # Server control methods are provided by ServerControlMixin
+    # (_on_server_start_local, _on_server_start_remote, _on_server_stop,
+    #  _on_server_status, _on_open_lazydocker)
 
     def _run_server_operation(self, operation, progress_msg: str) -> None:
         """Run a Docker server operation with notification feedback."""
@@ -431,7 +350,9 @@ class GtkTray(AbstractTray):
             # Trigger reconnect if server started successfully
             if result.success and result.status == ServerStatus.RUNNING:
                 # Give server time to start, then reconnect
-                GLib.timeout_add(3000, lambda: self._trigger_callback(TrayAction.RECONNECT) or False)
+                GLib.timeout_add(
+                    3000, lambda: self._trigger_callback(TrayAction.RECONNECT) or False
+                )
         except Exception as e:
             logger.error(f"Server operation failed: {e}")
             self.show_notification("Docker Server", f"Error: {e}")

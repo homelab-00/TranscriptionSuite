@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from server.api.routes.utils import require_admin
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -39,6 +41,9 @@ class TokenResponse(BaseModel):
 @router.get("/status")
 async def get_admin_status(request: Request) -> Dict[str, Any]:
     """Get detailed admin status information."""
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         model_manager = request.app.state.model_manager
         config = request.app.state.config
@@ -62,6 +67,9 @@ async def get_admin_status(request: Request) -> Dict[str, Any]:
 @router.post("/models/load")
 async def load_models(request: Request) -> Dict[str, str]:
     """Explicitly load transcription models."""
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         model_manager = request.app.state.model_manager
         model_manager.load_transcription_model()
@@ -74,6 +82,9 @@ async def load_models(request: Request) -> Dict[str, str]:
 @router.post("/models/unload")
 async def unload_models(request: Request) -> Dict[str, str]:
     """Unload transcription models to free memory."""
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     try:
         model_manager = request.app.state.model_manager
         model_manager.unload_all()
@@ -114,11 +125,42 @@ async def get_logs(
         if not log_path:
             return {"logs": [], "message": "Log file not found"}
 
-        # Read last N lines
+        # Read last N lines efficiently using file seeking
+        # This avoids loading the entire file into memory
         lines = []
-        with open(log_path, "r") as f:
-            all_lines = f.readlines()
-            lines = all_lines[-limit:]
+        try:
+            with open(log_path, "rb") as f:
+                # Seek to end of file
+                f.seek(0, 2)
+                file_size = f.tell()
+
+                # Read backwards in chunks to find last N lines
+                buffer_size = 8192
+                lines_found = []
+                position = file_size
+
+                while position > 0 and len(lines_found) < limit:
+                    # Calculate chunk size
+                    chunk_size = min(buffer_size, position)
+                    position -= chunk_size
+
+                    # Read chunk
+                    f.seek(position)
+                    chunk = f.read(chunk_size).decode("utf-8", errors="replace")
+
+                    # Split into lines and prepend to our list
+                    chunk_lines = chunk.split("\n")
+                    lines_found = chunk_lines + lines_found
+
+                # Get the last N lines (may have extra from chunk reading)
+                lines = (
+                    lines_found[-limit:] if len(lines_found) > limit else lines_found
+                )
+                # Remove empty lines
+                lines = [line for line in lines if line.strip()]
+        except Exception as e:
+            logger.error(f"Failed to read log file: {e}")
+            return {"logs": [], "message": f"Error reading log file: {e}"}
 
         # Parse JSON logs
         logs = []

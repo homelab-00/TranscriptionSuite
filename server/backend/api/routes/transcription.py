@@ -152,8 +152,8 @@ async def transcribe_audio(
         # Cleanup temp file
         try:
             Path(tmp_path).unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
 
 
 @router.post("/quick", response_model=TranscriptionResponse)
@@ -221,8 +221,8 @@ async def transcribe_quick(
         # Cleanup temp file
         try:
             Path(tmp_path).unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
 
 
 @router.post("/cancel")

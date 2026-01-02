@@ -295,7 +295,6 @@ class AudioToTextRecorder:
         self.recording_start_time = 0.0
         self.recording_stop_time = 0.0
         self.speech_end_silence_start = 0.0
-        self.detected_language: Optional[str] = None
 
         # Extended silence trimming state
         self.extended_silence_start = 0.0
@@ -643,10 +642,6 @@ class AudioToTextRecorder:
                 elapsed = time.time() - start_time
                 logger.debug(f"Transcription completed in {elapsed:.2f}s")
 
-                # Update detected language
-                if info.language_probability > 0.5:
-                    self.detected_language = info.language
-
                 self._set_state("inactive")
 
                 return TranscriptionResult(
@@ -793,9 +788,14 @@ class AudioToTextRecorder:
                 for segment in segments:
                     # Check for cancellation between segments
                     if cancellation_check and cancellation_check():
-                        from server.core.model_manager import TranscriptionCancelledError
+                        from server.core.model_manager import (
+                            TranscriptionCancelledError,
+                        )
+
                         logger.info("Transcription cancelled by user")
-                        raise TranscriptionCancelledError("Transcription cancelled by user")
+                        raise TranscriptionCancelledError(
+                            "Transcription cancelled by user"
+                        )
 
                     seg_dict = {
                         "text": segment.text.strip(),

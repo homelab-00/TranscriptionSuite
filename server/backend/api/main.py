@@ -42,7 +42,16 @@ from server.core.token_store import get_token_store  # noqa: E402
 
 _log_time("token_store imported")
 
-from server.api.routes import admin, auth, health, llm, notebook, search, transcription, websocket  # noqa: E402
+from server.api.routes import (
+    admin,
+    auth,
+    health,
+    llm,
+    notebook,
+    search,
+    transcription,
+    websocket,
+)  # noqa: E402
 
 _log_time("routes imported")
 
@@ -85,6 +94,55 @@ PUBLIC_PREFIXES = (
 )
 
 
+class OriginValidationMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to validate CORS origins based on deployment mode.
+
+    In TLS mode: Only allow same-origin requests (server's own hostname)
+    In local mode: Only allow localhost origins
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin")
+
+        # If no origin header, allow (same-origin requests don't send Origin)
+        if not origin:
+            return await call_next(request)
+
+        # Parse the origin
+        from urllib.parse import urlparse
+
+        parsed_origin = urlparse(origin)
+
+        if TLS_MODE:
+            # In TLS mode, only allow same-origin requests
+            # Compare origin hostname with request hostname
+            request_host = request.headers.get("host", "").split(":")[0]
+            origin_host = parsed_origin.netloc.split(":")[0]
+
+            if origin_host != request_host:
+                logger.warning(
+                    f"CORS: Blocked cross-origin request from {origin} to {request_host}"
+                )
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-origin requests not allowed"},
+                )
+        else:
+            # In local mode, only allow localhost origins
+            allowed_hosts = {"localhost", "127.0.0.1", "::1", "[::1]"}
+            origin_host = parsed_origin.netloc.split(":")[0]
+
+            if origin_host not in allowed_hosts:
+                logger.warning(f"CORS: Blocked non-localhost origin {origin}")
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Only localhost origins allowed"},
+                )
+
+        return await call_next(request)
+
+
 class AuthenticationMiddleware(BaseHTTPMiddleware):
     """
     Middleware to enforce authentication for all routes in TLS mode.
@@ -103,7 +161,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
         # Allow /record from localhost without authentication
         client_host = request.client.host if request.client else None
-        if (path == "/record" or path.startswith("/record/")) and client_host in ("127.0.0.1", "::1", "localhost"):
+        if (path == "/record" or path.startswith("/record/")) and client_host in (
+            "127.0.0.1",
+            "::1",
+            "localhost",
+        ):
             return await call_next(request)
 
         # Check for valid authentication
@@ -242,14 +304,19 @@ def create_app(config_path: Path | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware
+    # CORS middleware - configured permissively but validated by OriginValidationMiddleware
+    # We need allow_origins=["*"] to enable CORS headers, but our custom middleware
+    # will enforce strict origin validation based on deployment mode
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Add origin validation middleware to enforce strict CORS policies
+    app.add_middleware(OriginValidationMiddleware)
 
     # Add authentication middleware in TLS mode
     if TLS_MODE:
@@ -259,7 +326,9 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     # Include API routers
     app.include_router(health.router, tags=["Health"])
     app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-    app.include_router(transcription.router, prefix="/api/transcribe", tags=["Transcription"])
+    app.include_router(
+        transcription.router, prefix="/api/transcribe", tags=["Transcription"]
+    )
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
@@ -268,7 +337,9 @@ def create_app(config_path: Path | None = None) -> FastAPI:
 
     # Exception handler
     @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    async def global_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
         return JSONResponse(
             status_code=500,
@@ -528,10 +599,14 @@ if _static_dir.exists():
                 name="notebook_assets",
             )
             app.mount(
-                "/record/assets", StaticFiles(directory=str(_frontend_assets)), name="record_assets"
+                "/record/assets",
+                StaticFiles(directory=str(_frontend_assets)),
+                name="record_assets",
             )
             app.mount(
-                "/admin/assets", StaticFiles(directory=str(_frontend_assets)), name="admin_assets"
+                "/admin/assets",
+                StaticFiles(directory=str(_frontend_assets)),
+                name="admin_assets",
             )
 
         # Serve frontend for /notebook routes

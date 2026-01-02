@@ -458,7 +458,7 @@ class SettingsDialog(QDialog):
 
     def _create_behavior_tab(self) -> None:
         """Create the Behavior settings tab."""
-        from PyQt6.QtWidgets import QFrame, QGroupBox
+        from PyQt6.QtWidgets import QGroupBox
 
         tab = QWidget()
         tab.setObjectName("tabContent")

@@ -78,7 +78,9 @@ class APIClient:
         self._connected = False
 
         # Tailscale IP fallback state
-        self._original_hostname: str | None = None  # For SSL server_hostname when using IP
+        self._original_hostname: str | None = (
+            None  # For SSL server_hostname when using IP
+        )
         self._using_fallback_ip: bool = False
 
         # Log initialization with connection details
@@ -242,7 +244,7 @@ class APIClient:
             self._connected = False
             return False
 
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.error(f"Connection timeout to {self.base_url}")
             logger.error(f"Timeout after {self.timeout} seconds")
             self._connected = False
@@ -275,7 +277,10 @@ class APIClient:
                 async with asyncio.timeout(2.0):
                     loop = asyncio.get_running_loop()
                     addr_info = await loop.getaddrinfo(
-                        self.host, self.port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+                        self.host,
+                        self.port,
+                        family=socket.AF_UNSPEC,
+                        type=socket.SOCK_STREAM,
                     )
                     for _, _, _, _, sockaddr in addr_info:
                         logger.debug(f"  Resolved to: {sockaddr[0]}:{sockaddr[1]}")
@@ -302,7 +307,9 @@ class APIClient:
                         "Check that Tailscale is running and the device is online."
                     )
             elif dns_failed:
-                logger.debug("DNS failed but not a .ts.net hostname - no fallback available")
+                logger.debug(
+                    "DNS failed but not a .ts.net hostname - no fallback available"
+                )
 
             # SSL certificate check (only for HTTPS)
             if self.use_https:
@@ -311,7 +318,9 @@ class APIClient:
                         f"HTTPS mode with IP fallback - SSL will verify hostname: {self._original_hostname}"
                     )
                 else:
-                    logger.debug(f"HTTPS mode - will verify SSL certificate for {self.host}")
+                    logger.debug(
+                        f"HTTPS mode - will verify SSL certificate for {self.host}"
+                    )
 
         except Exception as e:
             logger.debug(f"Connection diagnostics failed: {e}")
@@ -350,10 +359,9 @@ class APIClient:
         """
         session = await self._get_session()
 
-        # Prepare form data - read file contents to avoid handle leak
-        with open(file_path, "rb") as f:
-            file_contents = f.read()
-        
+        # Prepare form data - read file contents asynchronously to avoid blocking
+        file_contents = await asyncio.to_thread(file_path.read_bytes)
+
         data = aiohttp.FormData()
         data.add_field(
             "file",
@@ -479,7 +487,9 @@ class APIClient:
             on_progress("Transcribing...")
 
         try:
-            logger.debug(f"Sending transcription request to {self.base_url}/api/transcribe/audio")
+            logger.debug(
+                f"Sending transcription request to {self.base_url}/api/transcribe/audio"
+            )
 
             async with session.post(
                 f"{self.base_url}/api/transcribe/audio",
@@ -495,16 +505,21 @@ class APIClient:
                     try:
                         error_data = await resp.json()
                         detail = error_data.get("detail", "Server is busy")
-                        # Extract active user from detail message
+
+                        # Parse active user from detail message
                         # Format: "A transcription is already running for <user>"
                         active_user = "another user"
-                        if "already running for " in detail:
-                            active_user = detail.split("already running for ")[-1]
+                        if isinstance(detail, str) and " for " in detail:
+                            # Extract text after last " for " occurrence
+                            parts = detail.rsplit(" for ", 1)
+                            if len(parts) == 2:
+                                active_user = parts[1].strip()
+
                         logger.warning(f"Server busy: {detail}")
                         raise ServerBusyError(detail, active_user=active_user)
-                    except (json.JSONDecodeError, aiohttp.ContentTypeError):
+                    except (json.JSONDecodeError, aiohttp.ContentTypeError) as e:
                         error = await resp.text()
-                        logger.warning(f"Server busy: {error}")
+                        logger.warning(f"Server busy (parse error: {e}): {error}")
                         raise ServerBusyError(f"Server is busy: {error}") from None
 
                 if resp.status != 200:
@@ -525,7 +540,7 @@ class APIClient:
         except aiohttp.ClientConnectorError as e:
             logger.error(f"Connection error during transcription: {e}")
             raise RuntimeError(f"Connection error: {e}") from e
-        except TimeoutError as e:
+        except asyncio.TimeoutError as e:
             logger.error(f"Transcription timeout after {self.transcription_timeout}s")
             raise RuntimeError("Request timeout") from e
         except aiohttp.ClientError as e:
@@ -688,8 +703,12 @@ class StreamingClient:
                     elif msg_type == "final" and self.on_final:
                         self.on_final(data)
                     elif msg_type == "session_busy" and self.on_error:
-                        active_user = data.get("data", {}).get("active_user", "another user")
-                        self.on_error(f"Server busy - transcription in progress for {active_user}")
+                        active_user = data.get("data", {}).get(
+                            "active_user", "another user"
+                        )
+                        self.on_error(
+                            f"Server busy - transcription in progress for {active_user}"
+                        )
                     elif msg_type == "error" and self.on_error:
                         self.on_error(data.get("message", "Unknown error"))
 

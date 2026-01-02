@@ -399,7 +399,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     client_host = websocket.client.host if websocket.client else None
     is_localhost = client_host in ("127.0.0.1", "::1", "localhost")
 
-    logger.debug(f"WebSocket connection from client type: {client_type.value}, host: {client_host}")
+    logger.debug(
+        f"WebSocket connection from client type: {client_type.value}, host: {client_host}"
+    )
 
     try:
         # Wait for authentication message
@@ -418,18 +420,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
         # Validate token (skip validation for localhost connections)
         token = auth_msg.get("data", {}).get("token")
-        
+
         if is_localhost:
             # For localhost, allow connection without token validation
             # Use a default token for tracking purposes
+            from datetime import datetime, timezone
             from server.core.token_store import StoredToken
+
             stored_token = StoredToken(
                 token_hash="localhost",
                 client_name="localhost-user",
                 is_admin=True,
-                created_at=asyncio.get_event_loop().time(),
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
-            logger.info("WebSocket connection from localhost - bypassing authentication")
+            logger.info(
+                "WebSocket connection from localhost - bypassing authentication"
+            )
         else:
             # For remote connections, require valid token
             if not token:
@@ -528,8 +534,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.error(f"WebSocket error: {e}", exc_info=True)
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as close_error:
+            logger.debug(f"Failed to close WebSocket (already closed?): {close_error}")
 
     finally:
         # Clean up session

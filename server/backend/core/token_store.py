@@ -74,7 +74,9 @@ class StoredToken:
             if is_admin:
                 expires_at = None  # Admin tokens never expire
             else:
-                expires_at = (now + timedelta(days=DEFAULT_TOKEN_EXPIRY_DAYS)).isoformat()
+                expires_at = (
+                    now + timedelta(days=DEFAULT_TOKEN_EXPIRY_DAYS)
+                ).isoformat()
         elif expiry_days <= 0:
             expires_at = None  # Explicit no expiry
         else:
@@ -235,11 +237,6 @@ class TokenStore:
                 json.dump(data, f, indent=2)
             temp_path.rename(self.store_path)
 
-    def get_secret_key(self) -> str:
-        """Get the secret key for token signing."""
-        data = self._read_store()
-        return data["secret_key"]
-
     def validate_token(self, token: str) -> Optional[StoredToken]:
         """
         Validate a token string.
@@ -260,7 +257,9 @@ class TokenStore:
                     logger.warning(f"Token for '{stored_token.client_name}' is revoked")
                     return None
                 if stored_token.is_expired():
-                    logger.warning(f"Token for '{stored_token.client_name}' has expired")
+                    logger.warning(
+                        f"Token for '{stored_token.client_name}' has expired"
+                    )
                     return None
                 logger.debug(f"Token validated for client: {stored_token.client_name}")
                 return stored_token

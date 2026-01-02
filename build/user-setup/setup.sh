@@ -141,6 +141,7 @@ else
     if [[ -f "$ENV_EXAMPLE" ]]; then
         print_status "Creating .env file for secrets..."
         cp "$ENV_EXAMPLE" "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
         print_info ".env file created at $ENV_FILE"
     else
         print_warning ".env.example not found - skipping .env creation"

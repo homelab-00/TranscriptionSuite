@@ -365,24 +365,84 @@ A comprehensive code review was performed covering linting, security, and code q
    - `/api/auth/tokens` endpoints (list, create, revoke) now properly verify admin status
    - Added `require_admin()` check to all token management endpoints in `auth.py`
    - Previously these endpoints were accessible to any authenticated user
+   - **January 2026 Update:** Added `require_admin()` checks to `/api/admin/status`, `/api/admin/models/load`, and `/api/admin/models/unload`
 
 2. **Security: File Handle Leak**
    - Fixed unclosed file handle in `api_client.py` `transcribe_audio()` method
    - Changed `open(file_path, "rb")` to use context manager before passing to FormData
+   - **January 2026 Update:** Replaced with async `asyncio.to_thread()` for non-blocking I/O
 
 3. **Security: Filename Sanitization**
    - Added input sanitization in `notebook.py` to prevent path traversal attacks
    - Filenames are now stripped of path separators and limited to 100 characters
 
-4. **Code Duplication: Shared Utilities**
+4. **Security: CORS Origin Validation** *(January 2026)*
+   - Implemented `OriginValidationMiddleware` to restrict cross-origin requests
+   - TLS mode: Only same-origin requests allowed (prevents attacks within Tailscale network)
+   - Local mode: Only localhost origins allowed
+   - Protects against malicious users inside the Tailscale network
+
+5. **Security: Token Type Fix** *(January 2026)*
+   - Fixed localhost bypass token creation in WebSocket endpoint
+   - Changed `created_at` from `asyncio.get_event_loop().time()` (float) to ISO datetime string
+   - Matches `StoredToken` model requirements
+
+6. **Security: File Permissions** *(January 2026)*
+   - Added `chmod 600` to `.env` file creation in `setup.sh`
+   - Protects sensitive tokens from unauthorized access
+
+7. **Code Duplication: Shared Utilities**
    - Extracted `_get_client_name()` to new `server/backend/api/routes/utils.py`
    - Added `get_client_name()`, `get_authenticated_token()`, and `require_admin()` utilities
    - Updated `transcription.py` and `notebook.py` to use shared module
 
-5. **Linting Fixes**
+8. **Code Duplication: ServerControlMixin** *(January 2026)*
+   - Created `client/src/client/common/server_control_mixin.py` with ~150 lines of shared code
+   - Extracted server control methods from KDE and GNOME tray implementations
+   - Both tray classes now inherit from `ServerControlMixin`
+   - Methods moved: `_on_server_start_local`, `_on_server_start_remote`, `_on_server_stop`, `_on_server_status`, `_on_open_lazydocker`
+
+9. **Logic: Threading Locks** *(January 2026)*
+   - Added `_state_lock` to `orchestrator.py` to protect state variables
+   - Prevents race conditions on `is_recording` and `is_transcribing` flags
+   - All state accesses now properly synchronized
+
+10. **Logic: Error Handling** *(January 2026)*
+    - Improved 409 error parsing in `api_client.py` to use `rsplit()` instead of brittle string matching
+    - Standardized timeout exceptions to use `asyncio.TimeoutError`
+    - Added user-friendly error messages in `orchestrator.py` with `_format_user_error()` helper
+
+11. **Performance: Database Optimization** *(January 2026)*
+    - Fixed N+1 query problem in `get_transcription()` 
+    - Now uses single JOIN query to fetch all words instead of one query per segment
+    - Significant performance improvement for transcriptions with many segments
+
+12. **Performance: Log File Reading** *(January 2026)*
+    - Optimized `/api/admin/logs` endpoint to use file seeking
+    - Reads last N lines without loading entire file into memory
+    - Prevents memory exhaustion on large log files
+
+13. **Linting Fixes**
    - Fixed unused variable assignments in `client/src/client/gnome/tray.py`
    - Fixed unused variable assignments in `client/src/client/kde/tray.py`
    - Fixed unused variable in `server/backend/tests/test_ffmpeg_utils.py`
+   - **January 2026:** Removed unused `QFrame` import from `client/src/client/kde/settings_dialog.py`
+
+14. **Dead Code Removal** *(January 2026)*
+    - Removed unused `get_secret_key()` method from `token_store.py`
+    - Removed unused `detected_language` variable from `stt/engine.py`
+    - Removed unused `_deep_merge()` method from `config.py`
+
+15. **Logging Improvements** *(January 2026)*
+    - Added logging to silent exception handlers in:
+      - `server/backend/api/routes/transcription.py` (temp file cleanup)
+      - `server/backend/api/routes/notebook.py` (temp file cleanup)
+      - `server/backend/api/routes/websocket.py` (WebSocket close errors)
+
+16. **Testing** *(January 2026)*
+    - Added security test suite in `server/backend/tests/test_cors.py`
+    - Added admin authorization tests in `server/backend/tests/test_admin_auth.py`
+    - Tests validate CORS origin validation and admin endpoint protection
 
 #### Security Analysis Summary
 
@@ -391,6 +451,7 @@ A comprehensive code review was performed covering linting, security, and code q
 - **Input validation:** File uploads use temp files; filenames now sanitized
 - **Authentication:** Token-based auth with proper middleware enforcement
 - **Path handling:** Uses `Path` objects; no string concatenation vulnerabilities
+- **CORS:** Origin validation protects against cross-origin attacks in both local and TLS modes
 
 ---
 

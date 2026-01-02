@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, cast
 
 from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
 from client.common.models import TrayAction, TrayState
+from client.common.server_control_mixin import ServerControlMixin
 from client.common.tray_base import AbstractTray
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ except ImportError:
     TraySignals = None  # type: ignore
 
 
-class Qt6Tray(AbstractTray):
+class Qt6Tray(ServerControlMixin, AbstractTray):
     """PyQt6 system tray implementation for KDE Plasma."""
 
     # State colors (RGB) - used when client is running
@@ -241,7 +242,11 @@ class Qt6Tray(AbstractTray):
 
         # Cancel is enabled during recording, uploading, or transcribing
         if self.cancel_action:
-            cancellable_states = {TrayState.RECORDING, TrayState.UPLOADING, TrayState.TRANSCRIBING}
+            cancellable_states = {
+                TrayState.RECORDING,
+                TrayState.UPLOADING,
+                TrayState.TRANSCRIBING,
+            }
             self.cancel_action.setEnabled(state in cancellable_states)
 
     def _get_logo_icon(self) -> QIcon:
@@ -314,7 +319,11 @@ class Qt6Tray(AbstractTray):
                     timeout=2,
                 )
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
-            except (FileNotFoundError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as wl_err:
+            except (
+                FileNotFoundError,
+                subprocess.TimeoutExpired,
+                subprocess.CalledProcessError,
+            ) as wl_err:
                 logger.error(f"wl-copy fallback also failed: {wl_err}")
 
     def show_settings_dialog(self) -> None:
@@ -347,9 +356,15 @@ class Qt6Tray(AbstractTray):
         if self._mothership_window is None:
             self._mothership_window = MothershipWindow(self.config)
             # Connect Mothership signals
-            self._mothership_window.start_client_requested.connect(self._on_mothership_start_client)
-            self._mothership_window.stop_client_requested.connect(self._on_mothership_stop_client)
-            self._mothership_window.show_settings_requested.connect(self.show_settings_dialog)
+            self._mothership_window.start_client_requested.connect(
+                self._on_mothership_start_client
+            )
+            self._mothership_window.stop_client_requested.connect(
+                self._on_mothership_stop_client
+            )
+            self._mothership_window.show_settings_requested.connect(
+                self.show_settings_dialog
+            )
 
         self._mothership_window.show()
         self._mothership_window.raise_()
@@ -373,110 +388,9 @@ class Qt6Tray(AbstractTray):
         if self._mothership_window:
             self._mothership_window.set_client_running(False)
 
-    def _on_server_start_local(self) -> None:
-        """Start Docker server in local (HTTP) mode."""
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(
-                mode=ServerMode.LOCAL,
-                progress_callback=lambda msg: logger.info(msg),
-            ),
-            "Starting server (local mode)...",
-        )
-
-    def _on_server_start_remote(self) -> None:
-        """Start Docker server in remote (HTTPS) mode."""
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(
-                mode=ServerMode.REMOTE,
-                progress_callback=lambda msg: logger.info(msg),
-            ),
-            "Starting server (remote mode)...",
-        )
-
-    def _on_server_stop(self) -> None:
-        """Stop the Docker server."""
-        self._run_server_operation(
-            lambda: self._docker_manager.stop_server(
-                progress_callback=lambda msg: logger.info(msg),
-            ),
-            "Stopping server...",
-        )
-
-    def _on_server_status(self) -> None:
-        """Check Docker server status."""
-        try:
-            available, docker_msg = self._docker_manager.is_docker_available()
-            if not available:
-                self.show_notification("Docker Server", docker_msg)
-                return
-
-            status = self._docker_manager.get_server_status()
-            mode = self._docker_manager.get_current_mode()
-
-            status_text = {
-                ServerStatus.RUNNING: "Running",
-                ServerStatus.STOPPED: "Stopped",
-                ServerStatus.NOT_FOUND: "Not set up",
-                ServerStatus.ERROR: "Error",
-            }.get(status, "Unknown")
-
-            mode_text = f" ({mode.value} mode)" if mode and status == ServerStatus.RUNNING else ""
-
-            self.show_notification("Docker Server", f"Status: {status_text}{mode_text}")
-        except Exception as e:
-            logger.error(f"Failed to check server status: {e}")
-            self.show_notification("Docker Server", f"Error: {e}")
-
-    def _on_open_lazydocker(self) -> None:
-        """Open lazydocker in a terminal."""
-        import platform
-        import shutil
-
-        # Check if lazydocker is available
-        lazydocker_path = shutil.which("lazydocker")
-        if not lazydocker_path:
-            system = platform.system()
-            if system == "Windows":
-                install_msg = "lazydocker not found. Install with: scoop install lazydocker"
-            else:
-                install_msg = "lazydocker not found. Install with: sudo pacman -S lazydocker"
-            self.show_notification("lazydocker", install_msg)
-            return
-
-        # Platform-specific terminal commands
-        system = platform.system()
-        if system == "Windows":
-            terminals = [
-                ["wt.exe", "-w", "0", "nt", "lazydocker"],  # Windows Terminal (new tab)
-                ["cmd.exe", "/c", "start", "lazydocker"],  # cmd fallback
-            ]
-        else:  # Linux
-            terminals = [
-                ["konsole", "-e", "lazydocker"],
-                ["gnome-terminal", "--", "lazydocker"],
-                ["xterm", "-e", "lazydocker"],
-            ]
-
-        for terminal_cmd in terminals:
-            if shutil.which(terminal_cmd[0]):
-                try:
-                    subprocess.Popen(
-                        terminal_cmd,
-                        start_new_session=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    logger.info(f"Launched lazydocker with {terminal_cmd[0]}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to launch with {terminal_cmd[0]}: {e}")
-                    continue
-
-        if system == "Windows":
-            error_msg = "No supported terminal found (Windows Terminal, cmd)"
-        else:
-            error_msg = "No supported terminal emulator found (konsole, gnome-terminal, xterm)"
-        self.show_notification("lazydocker", error_msg)
+    # Server control methods are provided by ServerControlMixin
+    # (_on_server_start_local, _on_server_start_remote, _on_server_stop,
+    #  _on_server_status, _on_open_lazydocker)
 
     def _run_server_operation(self, operation, progress_msg: str) -> None:
         """Run a Docker server operation with notification feedback."""
@@ -490,7 +404,9 @@ class Qt6Tray(AbstractTray):
                 # Give server time to start, then reconnect
                 from PyQt6.QtCore import QTimer
 
-                QTimer.singleShot(3000, lambda: self._trigger_callback(TrayAction.RECONNECT))
+                QTimer.singleShot(
+                    3000, lambda: self._trigger_callback(TrayAction.RECONNECT)
+                )
         except Exception as e:
             logger.error(f"Server operation failed: {e}")
             self.show_notification("Docker Server", f"Error: {e}")

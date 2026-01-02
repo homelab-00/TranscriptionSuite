@@ -2152,12 +2152,14 @@ class MothershipWindow(QMainWindow):
         # Version info - always display
         try:
             from importlib.metadata import version
+
             app_version = version("transcription-suite-client")
         except Exception:
             # When running from source or PyInstaller bundle, try to read version from pyproject.toml
             try:
                 import sys
                 import toml
+
                 # Check if running as PyInstaller bundle
                 if getattr(sys, "frozen", False):
                     # Running as bundled app - pyproject.toml should be in the client directory
@@ -2172,9 +2174,9 @@ class MothershipWindow(QMainWindow):
                         if potential_path.exists():
                             pyproject_path = potential_path
                             break
-                
+
                 if pyproject_path and pyproject_path.exists():
-                    with open(pyproject_path, 'r') as f:
+                    with open(pyproject_path, "r") as f:
                         data = toml.load(f)
                     app_version = data.get("project", {}).get("version", "dev")
                 else:
@@ -2228,7 +2230,6 @@ class MothershipWindow(QMainWindow):
         github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         links_layout.addWidget(github_btn)
 
-
         links_layout.addSpacing(12)
 
         # Repository section header
@@ -2250,7 +2251,6 @@ class MothershipWindow(QMainWindow):
         github_repo_btn.clicked.connect(lambda: webbrowser.open(GITHUB_REPO_URL))
         github_repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         links_layout.addWidget(github_repo_btn)
-
 
         layout.addWidget(links_frame)
 
