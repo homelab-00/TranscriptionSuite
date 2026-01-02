@@ -1,0 +1,522 @@
+# ============================================================================
+# TranscriptionSuite - Unified Configuration
+# ============================================================================
+# This is the central configuration file for the entire TranscriptionSuite.
+# It combines settings for:
+#   - Core transcription engine (MAIN/)
+#   - Speaker diarization module (DIARIZATION/)
+#   - Audio Notebook web application (AUDIO_NOTEBOOK/)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Global Transcription Options
+# ----------------------------------------------------------------------------
+transcription_options:
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    # Set to null for automatic language detection.
+    # This setting applies to both the main and preview transcribers.
+    language: null
+
+    # If true, the live preview transcriber will be enabled for longform recording.
+    # If false, only the main transcriber is used (saves GPU resources).
+    enable_preview_transcriber: false
+
+
+# ----------------------------------------------------------------------------
+# Longform Recording
+# ----------------------------------------------------------------------------
+# Settings for live recording mode (start/stop dictation).
+longform_recording:
+    # Include longform recordings in the viewer app's calendar/list.
+    # If false, only static file transcriptions appear in the app.
+    include_in_viewer: false
+
+
+# ----------------------------------------------------------------------------
+# Static File Transcription
+# ----------------------------------------------------------------------------
+# Settings for transcribing audio/video files (not live recording).
+# These settings are used as defaults for standalone client file transcriptions.
+static_transcription:
+    # Enable speaker diarization (identifies "who spoke when").
+    # Requires PyAnnote models to be downloaded.
+    # Used as default for standalone client file transcriptions.
+    enable_diarization: false
+
+    # Enable word-level timestamps in the transcription output.
+    # Used as default for standalone client file transcriptions.
+    word_timestamps: false
+
+    # Maximum characters per segment in the output (when longer we create a new line)
+    # Segments are split when speaker changes or this limit is reached.
+    max_segment_chars: 500
+
+    # Silero VAD preprocessing removes silence before transcription.
+    # Stage 1 of two-stage VAD (Stage 2 is faster_whisper_vad_filter).
+    # Silero VAD is used for static transcription to maintain timestamp consistency.
+    silero_vad_preprocessing: true
+
+    # Silero VAD sensitivity (0.0-1.0, higher = more sensitive to speech).
+    # 0.5 is a good default balance between removing silence and keeping speech.
+    silero_vad_sensitivity: 0.5
+
+
+# ----------------------------------------------------------------------------
+# Main Transcriber Configuration
+# ----------------------------------------------------------------------------
+# The high-accuracy transcriber used for final transcription.
+main_transcriber:
+    # Model from HuggingFace to use for transcription.
+    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    model: "Systran/faster-whisper-large-v3"
+
+    # Compute type for the model. "default" is recommended.
+    # Options: "default", "auto", "int8", "int8_float16", "int16", "float16", "float32"
+    compute_type: "default"
+
+    # Hardware device: "cuda" for NVIDIA GPUs, "cpu" for CPU.
+    device: "cuda"
+
+    # GPU device index if you have multiple GPUs. Usually 0.
+    gpu_device_index: 0
+
+    # Transcription engine batch size. Higher may be faster on powerful GPUs.
+    batch_size: 16
+
+    # Beam size for decoding. Higher can improve accuracy but is slower.
+    beam_size: 5
+
+    # Optional initial prompt to guide transcription style/context.
+    # Example: "This is a technical transcript. ZFS, Kubernetes, TCP/IP."
+    initial_prompt: null
+
+    # Use faster-whisper's built-in VAD to filter silence.
+    faster_whisper_vad_filter: true
+
+    # Prevent the library from creating its own log file.
+    no_log_file: true
+
+
+# ----------------------------------------------------------------------------
+# Preview Transcriber Configuration
+# ----------------------------------------------------------------------------
+# The fast transcriber used for live preview during recording.
+# Only loaded when:
+#   1. enabled: true (below)
+#   2. A standalone client connects (not web browser)
+preview_transcriber:
+    # Enable/disable preview transcription.
+    # When enabled AND a standalone client connects, the preview model is loaded.
+    # Web browser clients never use preview to save GPU resources.
+    enabled: false
+
+    # A smaller, faster model is recommended for preview.
+    model: "Systran/faster-whisper-medium"
+    compute_type: "default"
+    device: "cuda"
+    gpu_device_index: 0
+    batch_size: 16
+    beam_size: 3  # Smaller for faster preview
+
+    # VAD settings for quick sentence-by-sentence transcription.
+    silero_sensitivity: 0.4
+    silero_use_onnx: false
+    post_speech_silence_duration: 0.5
+    min_length_of_recording: 1.0
+
+    # Trigger early transcription during silence (seconds, 0 = disabled)
+    early_transcription_on_silence: 0.5
+
+    no_log_file: true
+
+
+# ----------------------------------------------------------------------------
+# Speaker Diarization (PyAnnote)
+# ----------------------------------------------------------------------------
+# Settings for the speaker diarization module.
+# Requires a HuggingFace token with access to PyAnnote models.
+diarization:
+    # PyAnnote model for speaker diarization.
+    # Default: "pyannote/speaker-diarization-community-1"
+    model: "pyannote/speaker-diarization-community-1"
+
+    # HuggingFace token for accessing PyAnnote models.
+    # You must accept the model license on HuggingFace first.
+    #
+    # IMPORTANT: Do NOT put your token here! This file is baked into
+    # the Docker image. Instead, set HUGGINGFACE_TOKEN in server/docker/.env
+    # or pass it as an environment variable.
+    #
+    # The token is resolved in this order:
+    #   1. HF_TOKEN environment variable (from server/docker/.env)
+    #   2. This config value (not recommended for Docker deployments)
+    hf_token: null
+
+    # Device for diarization: "cuda" or "cpu"
+    # Default: "cuda"
+    device: "cuda"
+
+    # Speaker count hints (null for auto-detection).
+    # If you know exactly how many speakers, set both to the same value.
+    # Default: null (auto-detect)
+    min_speakers: null
+    max_speakers: null
+
+    # Minimum speech segment duration (seconds).
+    # Segments shorter than this are discarded.
+    # Default: 0.0
+    min_duration_on: 0.0
+
+    # Minimum silence duration (seconds) between speech segments.
+    # Shorter silences within a speaker's turn are ignored.
+    # Default: 0.0
+    min_duration_off: 0.0
+
+    # Merge segments from same speaker if gap is less than this (seconds).
+    # Helps create cleaner segment boundaries.
+    # Default: 0.5
+    merge_gap_threshold: 0.5
+
+
+# ----------------------------------------------------------------------------
+# Audio Settings
+# ----------------------------------------------------------------------------
+audio:
+    # Audio input device index for microphone.
+    # Run `python .list_audio_devices.py` to find available devices.
+    # Set to null if using use_default_input: true
+    input_device_index: null
+
+    # If true, automatically use the default system microphone.
+    # If false, use the device specified by input_device_index.
+    use_default_input: true
+
+
+# ----------------------------------------------------------------------------
+# Audio Processing Backend
+# ----------------------------------------------------------------------------
+# Configuration for the audio processing engine.
+# FFmpeg provides professional-grade quality and performance for file operations.
+# For real-time WebSocket streaming, scipy is retained for low-latency performance.
+audio_processing:
+    # Audio processing backend for file-based operations:
+    #   - "ffmpeg": Professional-grade filters (recommended)
+    #     * 30-40% faster file loading (single-pass)
+    #     * High-quality SoX resampler
+    #     * Professional normalization (dynaudnorm/loudnorm)
+    #     * Handles all formats without temp WAV files
+    #   - "legacy": scipy/soundfile (for compatibility)
+    #     * Two-pass operation (load + resample)
+    #     * Simple peak normalization
+    # Default: "ffmpeg"
+    backend: "ffmpeg"
+
+    # FFmpeg resampling algorithm (used when backend="ffmpeg"):
+    #   - "soxr": SoX resampler - highest quality, professional-grade
+    #     * 28-bit intermediate precision
+    #     * Sinc interpolation
+    #     * Slightly slower but best audio quality
+    #   - "swr_linear": Linear interpolation - fast, good quality
+    #     * Faster than soxr
+    #     * Good for most use cases
+    # Default: "soxr"
+    resampler: "soxr"
+
+    # Audio normalization method (used when backend="ffmpeg"):
+    #   - "dynaudnorm": Dynamic range normalization (recommended for speech)
+    #     * Adapts to volume changes over time
+    #     * 500ms analysis window
+    #     * Target RMS 0.25 (prevents clipping)
+    #     * Best for varied speech levels
+    #   - "loudnorm": EBU R128 loudness standard (broadcasting quality)
+    #     * Integrated loudness: -16 LUFS
+    #     * True peak limit: -1.5 dBFS
+    #     * Loudness range: 11 LU
+    #     * Professional broadcasting standard
+    #   - "peak": Simple peak normalization to -3.0 dB (legacy behavior)
+    #     * Fast, simple algorithm
+    #     * Compatible with legacy backend
+    # Default: "dynaudnorm"
+    normalization_method: "dynaudnorm"
+
+
+# ----------------------------------------------------------------------------
+# Storage Settings
+# ----------------------------------------------------------------------------
+# Configuration for where the viewer app stores files.
+# These paths are Docker container paths by default.
+# For local development, override via your own config.yaml.
+storage:
+    # Directory for storing audio files.
+    audio_dir: "/data/audio"
+
+    # Directory for the SQLite database.
+    database_dir: "/data/database"
+
+    # Audio storage format for imported files.
+    # Source files are converted to MP3 for efficient storage.
+    audio_format: "mp3"
+
+    # MP3 encoding quality (bitrate in kbps).
+    # 128 = good quality, reasonable size
+    # 192 = high quality
+    # 64  = smaller files, lower quality
+    audio_bitrate: 160
+
+
+# ----------------------------------------------------------------------------
+# Database Backup Configuration
+# ----------------------------------------------------------------------------
+# Automatic backup settings for the SQLite database.
+# Backups are created at server startup if the latest backup is too old.
+# Backups use SQLite's built-in backup API which is safe with WAL mode.
+backup:
+    # Enable/disable automatic backups
+    enabled: true
+
+    # Maximum age of the latest backup (hours) before a new backup is triggered.
+    # Set to 1 to backup at most once per hour.
+    # Default: 1
+    max_age_hours: 1
+
+    # Maximum number of backup files to keep.
+    # Older backups are automatically deleted.
+    # Default: 3
+    max_backups: 3
+
+    # Note: Backups are stored in /data/database/backups/ (Docker)
+    # or <data_dir>/database/backups/ (local development)
+
+
+# ----------------------------------------------------------------------------
+# Processing Settings
+# ----------------------------------------------------------------------------
+processing:
+    # Temporary directory for intermediate files during transcription.
+    temp_dir: "/tmp/transcription-suite"
+
+    # Whether to keep temporary WAV files after processing.
+    keep_temp_files: false
+
+    # Sample rate for audio processing (Whisper requires 16kHz).
+    sample_rate: 16000
+
+
+# ----------------------------------------------------------------------------
+# Local LLM Integration (LM Studio)
+# ----------------------------------------------------------------------------
+local_llm:
+    # Enable/disable LLM features in the viewer app
+    enabled: true
+
+    # LM Studio server URL (default local)
+    base_url: "http://127.0.0.1:1234"
+
+    # Model to auto-load when clicking "Start LLM" in the UI.
+    # Use the model identifier from LM Studio (e.g., "qwen/qwen3-30b-a3b-2507").
+    # Leave empty to use whatever model is already loaded in LM Studio.
+    # Run `lms ls` in terminal to see available model identifiers.
+    model: "liquid/lfm2-1.2b"
+
+    # GPU offload ratio (0.0 = CPU only, 1.0 = full GPU). 
+    # Adjust if model is too large for VRAM.
+    gpu_offload: 1.0
+
+    # Context length override (optional, leave as null to use model default)
+    context_length: 4096
+
+    # Maximum tokens for the response
+    max_tokens: null
+
+    # Temperature for generation (0.0 = deterministic, 1.0 = creative)
+    temperature: 0.7
+
+    # Default system prompt for summarization
+    default_system_prompt: |
+        You are a helpful assistant that analyzes transcriptions. 
+        When given a transcription, provide a clear and concise summary 
+        highlighting the main points, key topics discussed, and any 
+        action items if applicable. Respond in the same language as 
+        the transcription.
+
+
+# ----------------------------------------------------------------------------
+# Remote Transcription Server
+# ----------------------------------------------------------------------------
+# Settings for the web-based remote transcription server.
+# This allows clients on other devices to transcribe audio via a web browser
+# interface over a Tailscale VPN or local network.
+# These paths are Docker container paths by default.
+remote_server:
+    # Enable the remote server mode
+    enabled: true
+
+    # Network interface to bind to.
+    # Use "0.0.0.0" to accept connections from any interface.
+    # Use "127.0.0.1" for local-only connections.
+    host: "0.0.0.0"
+
+    # Port for HTTPS (web UI + REST API)
+    https_port: 8443
+
+    # Port for WebSocket Secure (audio streaming)
+    wss_port: 8444
+
+    # Path to token storage file
+    token_store: "/data/tokens/tokens.json"
+
+    # TLS/SSL configuration
+    # Certificates are mounted from host when TLS_ENABLED=true
+    tls:
+        enabled: false  # Controlled via TLS_ENABLED env var in Docker
+        cert_file: "/certs/cert.crt"   # Container path (don't modify)
+        key_file: "/certs/cert.key"    # Container path (don't modify)
+        auto_generate: false
+
+        # HOST paths for TLS certificates (used by startup scripts)
+        # These are paths on YOUR machine, not inside the Docker container.
+        # The docker server startup scripts read these and mount them into
+        # the container.
+        # Windows: ~/Documents/Tailscale/my-machine.crt
+        host_cert_path: "~/.config/Tailscale/my-machine.crt"
+        host_key_path: "~/.config/Tailscale/my-machine.key"
+
+
+# ----------------------------------------------------------------------------
+# Logging Configuration
+# ----------------------------------------------------------------------------
+# Note: In Docker, the log directory is set via the LOG_DIR environment variable.
+# If USER_CONFIG_DIR is mounted, logs go there; otherwise to /data/logs.
+logging:
+    # Logging level: "DEBUG", "INFO", "WARNING", "ERROR"
+    level: "INFO"
+
+    # Print log messages to console (useful for debugging).
+    console_output: true
+
+    # Log file name for the server.
+    file_name: "server.log"
+
+    # Directory for log files.
+    # In Docker: Overridden by LOG_DIR env var (user config dir or /data/logs)
+    # For local dev: Set to your preferred path
+    directory: "/data/logs"
+
+    # Maximum log file size in MB before rotation
+    max_size_mb: 10
+
+    # Number of backup log files to keep
+    backup_count: 5
+
+
+# ============================================================================
+# Real-time STT Engine Configuration
+# ============================================================================
+# Settings for the real-time speech-to-text engine used for live transcription.
+# This controls voice activity detection, audio buffering, and transcription behavior.
+stt:
+    # --------------------------------------------------------------------------
+    # Voice Activity Detection (VAD)
+    # --------------------------------------------------------------------------
+    # The STT engine uses a dual VAD approach: WebRTC for fast initial screening,
+    # Silero for accurate confirmation. Voice is active only when BOTH agree.
+
+    # WebRTC VAD sensitivity.
+    # Range: 0 (most sensitive/aggressive) to 3 (least sensitive/aggressive).
+    # Higher values = less likely to detect speech, more resistant to noise.
+    # Default: 3
+    webrtc_sensitivity: 3
+
+    # Use Silero VAD for end-of-speech detection instead of WebRTC.
+    # More robust against noise but uses more GPU resources.
+    # Default: false
+    silero_deactivity_detection: false
+
+    # --------------------------------------------------------------------------
+    # Recording Timing Parameters
+    # --------------------------------------------------------------------------
+
+    # Duration of silence (seconds) that must follow speech before recording stops.
+    # Shorter = faster response, but may cut off speech. Longer = more complete but slower.
+    # Default: 0.6
+    post_speech_silence_duration: 0.6
+
+    # Minimum recording length (seconds) before the recording can be stopped.
+    # Prevents very short accidental recordings.
+    # Default: 0.5
+    min_length_of_recording: 0.5
+
+    # Minimum time interval (seconds) between the end of one recording and start of next.
+    # Prevents rapid successive recordings.
+    # Default: 0.0
+    min_gap_between_recordings: 0.0
+
+    # Duration (seconds) of audio to keep in a pre-roll buffer.
+    # Compensates for VAD detection latency by capturing audio before speech is detected.
+    # Default: 1.0
+    pre_recording_buffer_duration: 1.0
+
+    # Maximum continuous silence duration (seconds) before trimming audio.
+    # Long silence in recordings can cause Whisper hallucinations.
+    # Default: 10.0
+    max_silence_duration: 10.0
+
+    # --------------------------------------------------------------------------
+    # Early Transcription
+    # --------------------------------------------------------------------------
+
+    # Trigger speculative transcription after this period of silence (seconds).
+    # Set to 0 to disable. Enabling can result in faster final transcriptions
+    # but increases GPU load due to multiple transcription attempts.
+    # Default: 0.0 (disabled)
+    early_transcription_on_silence: 0.0
+
+    # --------------------------------------------------------------------------
+    # Audio Processing
+    # --------------------------------------------------------------------------
+
+    # Audio buffer size in samples per chunk.
+    # The Silero VAD model expects minimum 512 samples.
+    # Changing this may impact VAD performance.
+    # Default: 512
+    buffer_size: 512
+
+    # Normalize audio to -0.95 dBFS before transcription.
+    # Can improve transcription quality for quiet recordings.
+    # Default: false
+    normalize_audio: false
+
+    # --------------------------------------------------------------------------
+    # Performance Tuning
+    # --------------------------------------------------------------------------
+
+    # Maximum audio queue size before discarding old chunks.
+    # Prevents memory buildup if processing falls behind real-time.
+    # Default: 100
+    allowed_latency_limit: 100
+
+    # Sleep duration (seconds) between processing loop iterations.
+    # Lower = more responsive but higher CPU usage.
+    # Default: 0.02
+    time_sleep: 0.02
+
+    # --------------------------------------------------------------------------
+    # Output Formatting
+    # --------------------------------------------------------------------------
+
+    # Capitalize the first letter of transcribed sentences.
+    # Default: true
+    ensure_sentence_starting_uppercase: true
+
+    # Add a period at the end of sentences that lack punctuation.
+    # Default: true
+    ensure_sentence_ends_with_period: true
+
+    # --------------------------------------------------------------------------
+    # Advanced: Token Suppression
+    # --------------------------------------------------------------------------
+
+    # List of Whisper token IDs to suppress from transcription output.
+    # Token -1 means no suppression. See Whisper tokenizer for token IDs.
+    # Default: [-1]
+    suppress_tokens: [-1]

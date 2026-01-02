@@ -1,0 +1,105 @@
+# TranscriptionSuite Docker Compose Configuration
+# Unified local + remote deployment with GPU support
+#
+# Build:
+#   docker compose build
+#
+# Run (local HTTP):
+#   docker compose up -d
+#
+# Run (remote HTTPS with Tailscale):
+#   1. Generate certs: tailscale cert your-machine.tailnet-name.ts.net
+#   2. Start with env vars:
+#      TLS_ENABLED=true \
+#      TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
+#      TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
+#      docker compose up -d
+#
+# Switch between modes:
+#   NOTE: Use "docker compose up -d" (not "start") to apply env var changes!
+#   - Local:  docker compose up -d
+#   - Remote: TLS_ENABLED=true TLS_CERT_PATH=... TLS_KEY_PATH=... docker compose up -d
+#
+# Optional environment variables:
+#   HUGGINGFACE_TOKEN=xxx  # For downloading diarization models
+#
+# User Configuration & Logs:
+#   The server looks for custom config and writes logs to a user config directory.
+#   Mount your local config directory to enable custom settings and persistent logs:
+#
+#   Linux:
+#     USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d
+#
+#   Windows (PowerShell):
+#     $env:USER_CONFIG_DIR="$env:USERPROFILE\Documents\TranscriptionSuite"
+#     docker compose up -d
+#
+#   To customize settings, copy config.yaml from the repo to your USER_CONFIG_DIR
+#   and edit as needed. The server will use your custom config instead of defaults.
+
+services:
+  transcription-suite:
+    build:
+      context: ../..
+      dockerfile: server/docker/Dockerfile
+    image: ghcr.io/homelab-00/transcriptionsuite-server:latest
+    container_name: transcription-suite
+    
+    # Use host network mode for direct access to host services (LM Studio)
+    # Note: Ports are exposed directly on host (no port mapping needed)
+    network_mode: "host"
+    
+    # GPU support (NVIDIA)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - DATA_DIR=/data
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # HuggingFace token for downloading models (optional)
+      - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
+      - HF_HOME=/models
+      # LM Studio URL for chat features (localhost works with host network mode)
+      - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
+      # TLS settings for remote access (optional)
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - TLS_CERT_FILE=/certs/cert.crt
+      - TLS_KEY_FILE=/certs/cert.key
+    
+    # Volume mounts for persistent data
+    volumes:
+      - transcription-data:/data  # Database, audio files, tokens, logs
+      - huggingface-models:/models  # Whisper and diarization models cache
+      # User config directory (optional - for custom config.yaml and logs)
+      # Set USER_CONFIG_DIR to mount your local config directory:
+      #   Linux: USER_CONFIG_DIR=~/.config/TranscriptionSuite
+      #   Windows: USER_CONFIG_DIR=$HOME/Documents/TranscriptionSuite
+      - ${USER_CONFIG_DIR:-./.empty}:/user-config
+      # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
+      - ${TLS_CERT_PATH:-./.empty}:/certs/cert.crt:ro
+      - ${TLS_KEY_PATH:-./.empty}:/certs/cert.key:ro
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check - works with both HTTP and HTTPS modes
+    healthcheck:
+      test: ["CMD", "sh", "-c", "if [ \"$${TLS_ENABLED:-false}\" = \"true\" ]; then curl -f -k https://localhost:8443/health; else curl -f http://localhost:8000/health; fi"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  transcription-data:
+    name: transcription-suite-data
+  huggingface-models:
+    name: transcription-suite-models

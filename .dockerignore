@@ -1,0 +1,71 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.eggs
+*.egg
+# Virtual environments (recursive)
+.venv
+**/.venv
+venv
+**/venv
+env
+.env
+*.env.local
+# uv lock files not needed in container
+**/uv.lock
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.windsurf
+
+# Build artifacts
+build/
+!build/assets/
+dist/
+*.spec
+
+# Node modules (will be rebuilt in container)
+node_modules/
+server/AUDIO_NOTEBOOK/node_modules/
+server/frontend/node_modules/
+
+# Test files
+tests/
+*.test.py
+pytest_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Client code (not needed in server container)
+client/
+scripts/
+
+# Development files
+*.log
+*.tmp
+*.bak
+
+# Docker files (avoid recursion)
+server/docker/docker-compose*.yml
+
+# Data directories
+data/
+/data/

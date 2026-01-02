@@ -1,0 +1,2359 @@
+"""
+Mothership - Main control window for TranscriptionSuite.
+
+The Mothership is the command center for managing both the Docker server
+and the transcription client. It provides a unified GUI for:
+- Starting/stopping the Docker server (local or remote mode)
+- Starting/stopping the transcription client
+- Configuring all settings
+- Viewing server and client logs
+"""
+
+import logging
+import webbrowser
+from enum import Enum, auto
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QIcon, QPainter, QPainterPath, QPixmap
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QPlainTextEdit,
+    QLineEdit,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
+
+if TYPE_CHECKING:
+    from client.common.config import ClientConfig
+
+logger = logging.getLogger(__name__)
+
+# Constants for embedded resources
+GITHUB_PROFILE_URL = "https://github.com/homelab-00"
+GITHUB_REPO_URL = "https://github.com/homelab-00/TranscriptionSuite"
+
+
+def _get_assets_path() -> Path:
+    """Get the path to the assets directory, handling both dev and bundled modes."""
+    import sys
+
+    # Check if running as PyInstaller bundle
+    if getattr(sys, "frozen", False):
+        # Running as bundled app
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore
+        return bundle_dir / "build" / "assets"
+    else:
+        # Running from source - find repo root
+        current = Path(__file__).resolve()
+        for parent in current.parents:
+            if (parent / "README.md").exists():
+                return parent / "build" / "assets"
+        # Fallback
+        return Path(__file__).parent.parent.parent.parent.parent / "build" / "assets"
+
+
+def _get_readme_path(dev: bool = False) -> Path | None:
+    """Get the path to README.md or README_DEV.md, handling both dev and bundled modes."""
+    import sys
+
+    filename = "README_DEV.md" if dev else "README.md"
+
+    # Check if running as PyInstaller bundle
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore
+        readme = bundle_dir / filename
+        if readme.exists():
+            return readme
+        return None
+    else:
+        # Running from source - find repo root
+        current = Path(__file__).resolve()
+        for parent in current.parents:
+            readme = parent / filename
+            if readme.exists():
+                return readme
+        return None
+
+
+class View(Enum):
+    """Available views in the Mothership."""
+
+    WELCOME = auto()
+    SERVER = auto()
+    CLIENT = auto()
+
+
+class LogWindow(QMainWindow):
+    """
+    Separate window for displaying logs.
+
+    This window displays logs in a terminal-like view with CaskydiaCove Nerd Font.
+    """
+
+    def __init__(self, title: str, parent: QWidget | None = None):
+        """
+        Initialize the log window.
+
+        Args:
+            title: Window title (e.g., "Server Logs" or "Client Logs")
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(800, 600)
+
+        # Central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Log view
+        self._log_view = QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+
+        # Set font to CaskydiaCove Nerd Font 12pt
+        font = QFont("CaskydiaCove Nerd Font", 12)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        self._log_view.setFont(font)
+
+        layout.addWidget(self._log_view)
+
+        # Apply dark theme styling
+        self._apply_styles()
+
+    def append_log(self, message: str) -> None:
+        """Append a log message to the view."""
+        self._log_view.appendPlainText(message)
+        # Auto-scroll to bottom
+        scrollbar = self._log_view.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
+
+    def set_logs(self, logs: str) -> None:
+        """Set the entire log content (replaces existing)."""
+        self._log_view.setPlainText(logs)
+        # Auto-scroll to bottom
+        scrollbar = self._log_view.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
+
+    def clear_logs(self) -> None:
+        """Clear all logs."""
+        self._log_view.clear()
+
+    def _apply_styles(self) -> None:
+        """Apply dark theme matching the Mothership UI."""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #121212;
+            }
+            QPlainTextEdit {
+                background-color: #1e1e1e;
+                border: none;
+                color: #d4d4d4;
+            }
+        """)
+
+
+class MothershipWindow(QMainWindow):
+    """
+    Main Mothership window - the command center for TranscriptionSuite.
+
+    Provides navigation between:
+    - Welcome screen (home)
+    - Server management view
+    - Client management view
+    """
+
+    # Signals for client operations
+    start_client_requested = pyqtSignal(bool)  # True = remote, False = local
+    stop_client_requested = pyqtSignal()
+    show_settings_requested = pyqtSignal()
+
+    def __init__(self, config: "ClientConfig", parent: QWidget | None = None):
+        super().__init__(parent)
+        self.config = config
+        self._docker_manager = DockerManager()
+
+        # View history for back navigation
+        self._view_history: list[View] = []
+        self._current_view: View = View.WELCOME
+
+        # Log windows
+        self._server_log_window: LogWindow | None = None
+        self._client_log_window: LogWindow | None = None
+
+        # Log polling timers
+        self._server_log_timer: QTimer | None = None
+        self._client_log_timer: QTimer | None = None
+
+        self._server_health_timer: QTimer | None = None
+
+        # Client state tracking
+        self._client_running = False
+
+        self._setup_ui()
+        self._apply_styles()
+
+    def _setup_ui(self) -> None:
+        """Set up the main UI structure."""
+        self.setWindowTitle("TranscriptionSuite")
+        self.setMinimumSize(700, 500)
+
+        # Set window icon
+        icon = QIcon.fromTheme("audio-input-microphone")
+        if not icon.isNull():
+            self.setWindowIcon(icon)
+
+        # Central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Add navigation bar
+        nav_bar = self._create_nav_bar()
+        main_layout.addWidget(nav_bar)
+
+        # Stacked widget for views
+        self._stack = QStackedWidget()
+        main_layout.addWidget(self._stack, 1)
+
+        # Create views
+        self._welcome_view = self._create_welcome_view()
+        self._server_view = self._create_server_view()
+        self._client_view = self._create_client_view()
+
+        self._stack.addWidget(self._welcome_view)
+        self._stack.addWidget(self._server_view)
+        self._stack.addWidget(self._client_view)
+
+        # Start on welcome view
+        self._navigate_to(View.WELCOME, add_to_history=False)
+
+    def _create_nav_bar(self) -> QWidget:
+        """Create the navigation bar with Home, Server, Client buttons and Help/About."""
+        nav = QFrame()
+        nav.setObjectName("navBar")
+        layout = QHBoxLayout(nav)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(12)
+
+        # Home button with icon
+        self._nav_home_btn = QPushButton("  Home")
+        self._nav_home_btn.setObjectName("navButton")
+        home_icon = QIcon.fromTheme("go-home")
+        if not home_icon.isNull():
+            self._nav_home_btn.setIcon(home_icon)
+        self._nav_home_btn.clicked.connect(self._go_home)
+        layout.addWidget(self._nav_home_btn)
+
+        # Server button with icon
+        self._nav_server_btn = QPushButton("  Server")
+        self._nav_server_btn.setObjectName("navButton")
+        server_icon = QIcon.fromTheme("server-database")
+        if server_icon.isNull():
+            server_icon = QIcon.fromTheme("network-server")
+        if not server_icon.isNull():
+            self._nav_server_btn.setIcon(server_icon)
+        self._nav_server_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
+        layout.addWidget(self._nav_server_btn)
+
+        # Client button with icon
+        self._nav_client_btn = QPushButton("  Client")
+        self._nav_client_btn.setObjectName("navButton")
+        client_icon = QIcon.fromTheme("audio-input-microphone")
+        if not client_icon.isNull():
+            self._nav_client_btn.setIcon(client_icon)
+        self._nav_client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
+        layout.addWidget(self._nav_client_btn)
+
+        layout.addStretch()
+
+        # Help button with icon
+        self._nav_help_btn = QPushButton("  Help")
+        self._nav_help_btn.setObjectName("navButton")
+        help_icon = QIcon.fromTheme("help-contents")
+        if help_icon.isNull():
+            help_icon = QIcon.fromTheme("help-about")
+        if not help_icon.isNull():
+            self._nav_help_btn.setIcon(help_icon)
+        self._nav_help_btn.clicked.connect(self._show_help_menu)
+        layout.addWidget(self._nav_help_btn)
+
+        # About button with icon
+        self._nav_about_btn = QPushButton("  About")
+        self._nav_about_btn.setObjectName("navButton")
+        about_icon = QIcon.fromTheme("help-about")
+        if about_icon.isNull():
+            about_icon = QIcon.fromTheme("dialog-information")
+        if not about_icon.isNull():
+            self._nav_about_btn.setIcon(about_icon)
+        self._nav_about_btn.clicked.connect(self._show_about_dialog)
+        layout.addWidget(self._nav_about_btn)
+
+        return nav
+
+    def _create_welcome_view(self) -> QWidget:
+        """Create the welcome/home view."""
+        view = QWidget()
+        layout = QVBoxLayout(view)
+        layout.setContentsMargins(40, 30, 40, 30)
+
+        # Welcome message
+        welcome_label = QLabel("Welcome to TranscriptionSuite")
+        welcome_label.setObjectName("welcomeTitle")
+        welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(welcome_label)
+
+        subtitle = QLabel("Manage the Docker server and transcription client")
+        subtitle.setObjectName("welcomeSubtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+
+        layout.addSpacing(30)
+
+        # Status indicators
+        status_container = QWidget()
+        status_container.setObjectName("homeStatusContainer")
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setSpacing(20)
+
+        # Server status indicator
+        server_status_widget = QWidget()
+        server_status_widget.setFixedWidth(180)
+        server_status_layout = QVBoxLayout(server_status_widget)
+        server_status_layout.setSpacing(4)
+        server_status_layout.setContentsMargins(0, 0, 0, 0)
+
+        server_label = QLabel("Server")
+        server_label.setObjectName("homeStatusLabel")
+        server_label.setProperty("accent", "server")
+        server_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        server_status_layout.addWidget(server_label)
+
+        self._home_server_status = QLabel("⬤ Checking...")
+        self._home_server_status.setObjectName("homeStatusValue")
+        self._home_server_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        server_status_layout.addWidget(self._home_server_status)
+
+        status_layout.addWidget(server_status_widget)
+
+        # Client status indicator
+        client_status_widget = QWidget()
+        client_status_widget.setFixedWidth(180)
+        client_status_layout = QVBoxLayout(client_status_widget)
+        client_status_layout.setSpacing(4)
+        client_status_layout.setContentsMargins(0, 0, 0, 0)
+
+        client_label = QLabel("Client")
+        client_label.setObjectName("homeStatusLabel")
+        client_label.setProperty("accent", "client")
+        client_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        client_status_layout.addWidget(client_label)
+
+        self._home_client_status = QLabel("⬤ Stopped")
+        self._home_client_status.setObjectName("homeStatusValue")
+        self._home_client_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        client_status_layout.addWidget(self._home_client_status)
+
+        status_layout.addWidget(client_status_widget)
+
+        layout.addWidget(status_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(12)
+
+        # Main buttons container
+        btn_container = QWidget()
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setSpacing(20)
+
+        # Server button with icon (same as navbar)
+        server_btn = QPushButton("Manage\nDocker Server")
+        server_btn.setObjectName("welcomeButton")
+        server_btn.setProperty("accent", "server")
+        server_btn.setFixedSize(180, 90)
+        server_icon = QIcon.fromTheme("server-database")
+        if server_icon.isNull():
+            server_icon = QIcon.fromTheme("network-server")
+        if not server_icon.isNull():
+            server_btn.setIcon(server_icon)
+            server_btn.setIconSize(server_btn.size() * 0.3)  # 30% of button size
+        server_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
+        btn_layout.addWidget(server_btn)
+
+        # Client button with icon (same as navbar)
+        client_btn = QPushButton("Manage\nClient")
+        client_btn.setObjectName("welcomeButton")
+        client_btn.setProperty("accent", "client")
+        client_btn.setFixedSize(180, 90)
+        client_icon = QIcon.fromTheme("audio-input-microphone")
+        if not client_icon.isNull():
+            client_btn.setIcon(client_icon)
+            client_btn.setIconSize(client_btn.size() * 0.3)  # 30% of button size
+        client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
+        btn_layout.addWidget(client_btn)
+
+        layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(20)
+
+        # Web client button (smaller)
+        web_btn = QPushButton("Open Web Client")
+        web_btn.setObjectName("secondaryButton")
+        web_btn.setProperty("accent", "web")
+        web_btn.clicked.connect(self._on_open_web_client)
+        layout.addWidget(web_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Note about web client
+        web_note = QLabel("Opens browser based on your client settings")
+        web_note.setObjectName("webNoteLabel")
+        web_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(web_note)
+
+        layout.addStretch()
+
+        return view
+
+    def _refresh_home_status(self) -> None:
+        """Refresh the status indicators on the home view."""
+        # Server status (using Web UI colors)
+        status = self._docker_manager.get_server_status()
+        mode = self._docker_manager.get_current_mode()
+
+        if status == ServerStatus.RUNNING:
+            mode_str = f" ({mode.value})" if mode else ""
+            health = self._docker_manager.get_container_health()
+            if health and health != "healthy":
+                if health == "unhealthy":
+                    self._home_server_status.setText(f"⬤ Unhealthy{mode_str}")
+                    self._home_server_status.setStyleSheet("color: #f44336;")  # error
+                else:
+                    self._home_server_status.setText(f"⬤ Starting...{mode_str}")
+                    self._home_server_status.setStyleSheet("color: #2196f3;")  # info
+            else:
+                self._home_server_status.setText(f"⬤ Running{mode_str}")
+                self._home_server_status.setStyleSheet("color: #4caf50;")  # success
+        elif status == ServerStatus.STOPPED:
+            self._home_server_status.setText("⬤ Stopped")
+            self._home_server_status.setStyleSheet("color: #ff9800;")  # warning
+        else:
+            self._home_server_status.setText("⬤ Not set up")
+            self._home_server_status.setStyleSheet("color: #6c757d;")
+
+        # Client status
+        if self._client_running:
+            self._home_client_status.setText("⬤ Running")
+            self._home_client_status.setStyleSheet("color: #4caf50;")  # success
+        else:
+            self._home_client_status.setText("⬤ Stopped")
+            self._home_client_status.setStyleSheet("color: #ff9800;")  # warning
+
+    def _on_open_web_client(self) -> None:
+        """Open the web client in the default browser."""
+        import webbrowser
+
+        # Determine URL based on client configuration
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        scheme = "https" if use_https else "http"
+        url = f"{scheme}://{host}:{port}"
+
+        logger.info(f"Opening web client: {url}")
+        webbrowser.open(url)
+
+    def _create_server_view(self) -> QWidget:
+        """Create the server management view."""
+        view = QWidget()
+        layout = QVBoxLayout(view)
+        layout.setContentsMargins(40, 30, 40, 30)
+
+        # Title section (centered)
+        title = QLabel("Docker Server")
+        title.setObjectName("viewTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        layout.addSpacing(20)
+
+        # Status card (compact)
+        status_frame = QFrame()
+        status_frame.setObjectName("statusCard")
+        status_layout = QVBoxLayout(status_frame)
+        status_layout.setSpacing(8)
+
+        # Container status row (FIRST)
+        container_row = QHBoxLayout()
+        container_label = QLabel("Container:")
+        container_label.setObjectName("statusLabel")
+        container_row.addWidget(container_label)
+        self._server_status_label = QLabel("Checking...")
+        self._server_status_label.setObjectName("statusValue")
+        container_row.addWidget(self._server_status_label)
+        container_row.addStretch()
+        status_layout.addLayout(container_row)
+
+        # Docker Image status row (SECOND)
+        image_row = QHBoxLayout()
+        image_label = QLabel("Docker Image:")
+        image_label.setObjectName("statusLabel")
+        image_row.addWidget(image_label)
+        self._image_status_label = QLabel("Checking...")
+        self._image_status_label.setObjectName("statusValue")
+        image_row.addWidget(self._image_status_label)
+        self._image_date_label = QLabel("")
+        self._image_date_label.setObjectName("statusDateInline")
+        image_row.addWidget(self._image_date_label)
+        self._image_size_label = QLabel("")
+        self._image_size_label.setObjectName("statusDateInline")
+        image_row.addWidget(self._image_size_label)
+        image_row.addStretch()
+        status_layout.addLayout(image_row)
+
+        # Separator line before Auth Token
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("background-color: #2d2d2d; max-height: 1px;")
+        status_layout.addWidget(separator)
+
+        # Auth Token row (LAST, after separator)
+        token_row = QHBoxLayout()
+        token_label = QLabel("Auth Token:")
+        token_label.setObjectName("statusLabel")
+        token_row.addWidget(token_label)
+        self._server_token_field = QLineEdit()
+        self._server_token_field.setObjectName("tokenFieldInline")
+        self._server_token_field.setReadOnly(True)
+        self._server_token_field.setText("Not saved yet")
+        self._server_token_field.setFrame(False)
+        self._server_token_field.setStyleSheet("background: transparent; border: none;")
+        self._server_token_field.setMinimumWidth(320)  # Wider for full token visibility
+        token_row.addWidget(self._server_token_field)
+        token_note = QLabel("(for remote)")
+        token_note.setObjectName("statusDateInline")
+        token_row.addWidget(token_note)
+        token_row.addStretch()
+        status_layout.addLayout(token_row)
+
+        layout.addWidget(status_frame)
+
+        layout.addSpacing(20)
+
+        # Primary control buttons (centered)
+        btn_container = QWidget()
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setSpacing(12)
+
+        self._start_local_btn = QPushButton("Start Local")
+        self._start_local_btn.setObjectName("primaryButton")
+        self._start_local_btn.clicked.connect(self._on_start_server_local)
+        btn_layout.addWidget(self._start_local_btn)
+
+        self._start_remote_btn = QPushButton("Start Remote")
+        self._start_remote_btn.setObjectName("primaryButton")
+        self._start_remote_btn.clicked.connect(self._on_start_server_remote)
+        btn_layout.addWidget(self._start_remote_btn)
+
+        self._stop_server_btn = QPushButton("Stop")
+        self._stop_server_btn.setObjectName("stopButton")
+        self._stop_server_btn.clicked.connect(self._on_stop_server)
+        btn_layout.addWidget(self._stop_server_btn)
+
+        layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(20)
+
+        # Management section header
+        mgmt_header = QLabel("Management")
+        mgmt_header.setObjectName("sectionHeader")
+        mgmt_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(mgmt_header)
+
+        layout.addSpacing(10)
+
+        # 3-column management layout
+        mgmt_container = QWidget()
+        mgmt_grid = QHBoxLayout(mgmt_container)
+        mgmt_grid.setSpacing(16)
+        mgmt_grid.addStretch()
+
+        # Column 1: Container Management
+        container_col = QFrame()
+        container_col.setObjectName("managementGroup")
+        container_col_layout = QVBoxLayout(container_col)
+        container_col_layout.setSpacing(8)
+        container_col_layout.setContentsMargins(12, 12, 12, 12)
+
+        container_col_header = QLabel("Container")
+        container_col_header.setObjectName("columnHeader")
+        container_col_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        container_col_layout.addWidget(container_col_header)
+
+        self._remove_container_btn = QPushButton("Remove")
+        self._remove_container_btn.setObjectName("dangerButton")
+        self._remove_container_btn.setMinimumWidth(140)
+        self._remove_container_btn.setToolTip("Remove the Docker container")
+        self._remove_container_btn.clicked.connect(self._on_remove_container)
+        container_col_layout.addWidget(self._remove_container_btn)
+
+        mgmt_grid.addWidget(container_col)
+
+        # Column 2: Image Management
+        image_col = QFrame()
+        image_col.setObjectName("managementGroup")
+        image_col_layout = QVBoxLayout(image_col)
+        image_col_layout.setSpacing(8)
+        image_col_layout.setContentsMargins(12, 12, 12, 12)
+
+        image_col_header = QLabel("Image")
+        image_col_header.setObjectName("columnHeader")
+        image_col_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image_col_layout.addWidget(image_col_header)
+
+        self._remove_image_btn = QPushButton("Remove")
+        self._remove_image_btn.setObjectName("dangerButton")
+        self._remove_image_btn.setMinimumWidth(140)
+        self._remove_image_btn.clicked.connect(self._on_remove_image)
+        image_col_layout.addWidget(self._remove_image_btn)
+
+        self._pull_image_btn = QPushButton("Fetch Fresh")
+        self._pull_image_btn.setObjectName("primaryButton")
+        self._pull_image_btn.setMinimumWidth(140)
+        self._pull_image_btn.clicked.connect(self._on_pull_fresh_image)
+        image_col_layout.addWidget(self._pull_image_btn)
+
+        mgmt_grid.addWidget(image_col)
+
+        # Column 3: Volumes Management
+        volumes_col = QFrame()
+        volumes_col.setObjectName("managementGroup")
+        volumes_col_layout = QVBoxLayout(volumes_col)
+        volumes_col_layout.setSpacing(8)
+        volumes_col_layout.setContentsMargins(12, 12, 12, 12)
+
+        volumes_col_header = QLabel("Volumes")
+        volumes_col_header.setObjectName("columnHeader")
+        volumes_col_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        volumes_col_layout.addWidget(volumes_col_header)
+
+        self._remove_data_volume_btn = QPushButton("Remove Data")
+        self._remove_data_volume_btn.setObjectName("dangerButton")
+        self._remove_data_volume_btn.setMinimumWidth(140)
+        self._remove_data_volume_btn.clicked.connect(self._on_remove_data_volume)
+        volumes_col_layout.addWidget(self._remove_data_volume_btn)
+
+        self._remove_models_volume_btn = QPushButton("Remove Models")
+        self._remove_models_volume_btn.setObjectName("dangerButton")
+        self._remove_models_volume_btn.setMinimumWidth(140)
+        self._remove_models_volume_btn.clicked.connect(self._on_remove_models_volume)
+        volumes_col_layout.addWidget(self._remove_models_volume_btn)
+
+        mgmt_grid.addWidget(volumes_col)
+        mgmt_grid.addStretch()
+
+        layout.addWidget(mgmt_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(20)
+
+        # Volumes status panel
+        volumes_frame = QFrame()
+        volumes_frame.setObjectName("volumesStatusCard")
+        volumes_layout = QVBoxLayout(volumes_frame)
+        volumes_layout.setSpacing(10)
+        volumes_layout.setContentsMargins(16, 12, 16, 12)
+
+        # Data volume row
+        data_volume_row = QHBoxLayout()
+        data_volume_label = QLabel("Data Volume:")
+        data_volume_label.setObjectName("statusLabel")
+        data_volume_label.setMinimumWidth(110)
+        data_volume_row.addWidget(data_volume_label)
+
+        self._data_volume_status = QLabel("Not found")
+        self._data_volume_status.setObjectName("statusValue")
+        data_volume_row.addWidget(self._data_volume_status)
+
+        self._data_volume_size = QLabel("")
+        self._data_volume_size.setObjectName("statusDateInline")
+        data_volume_row.addWidget(self._data_volume_size)
+
+        data_volume_row.addStretch()
+        volumes_layout.addLayout(data_volume_row)
+
+        # Models volume row
+        models_volume_row = QHBoxLayout()
+        models_volume_label = QLabel("Models Volume:")
+        models_volume_label.setObjectName("statusLabel")
+        models_volume_label.setMinimumWidth(110)
+        models_volume_row.addWidget(models_volume_label)
+
+        self._models_volume_status = QLabel("Not found")
+        self._models_volume_status.setObjectName("statusValue")
+        models_volume_row.addWidget(self._models_volume_status)
+
+        self._models_volume_size = QLabel("")
+        self._models_volume_size.setObjectName("statusDateInline")
+        models_volume_row.addWidget(self._models_volume_size)
+
+        models_volume_row.addStretch()
+        volumes_layout.addLayout(models_volume_row)
+
+        # Models list (shown when container is running)
+        self._models_list_label = QLabel("")
+        self._models_list_label.setObjectName("modelsListLabel")
+        self._models_list_label.setWordWrap(True)
+        self._models_list_label.setStyleSheet(
+            "color: #a0a0a0; font-size: 11px; margin-left: 110px;"
+        )
+        self._models_list_label.setVisible(False)
+        volumes_layout.addWidget(self._models_list_label)
+
+        # Volume path info
+        volumes_path = self._docker_manager.get_volumes_base_path()
+        path_label = QLabel(f"Path: {volumes_path}")
+        path_label.setObjectName("volumePathLabel")
+        path_label.setStyleSheet("color: #6c757d; font-size: 10px; margin-top: 4px;")
+        volumes_layout.addWidget(path_label)
+
+        layout.addWidget(volumes_frame)
+
+        layout.addSpacing(15)
+
+        # Settings button (centered, standalone)
+        self._open_server_settings_btn = QPushButton("Settings")
+        self._open_server_settings_btn.setObjectName("secondaryButton")
+        self._open_server_settings_btn.clicked.connect(self._on_open_server_settings)
+        layout.addWidget(
+            self._open_server_settings_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
+        layout.addSpacing(15)
+
+        # Show logs button (centered)
+        self._show_server_logs_btn = QPushButton("Show Logs")
+        self._show_server_logs_btn.setObjectName("secondaryButton")
+        self._show_server_logs_btn.clicked.connect(self._toggle_server_logs)
+        layout.addWidget(
+            self._show_server_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
+        layout.addStretch()
+
+        return view
+
+    def _create_client_view(self) -> QWidget:
+        """Create the client management view."""
+        view = QWidget()
+        layout = QVBoxLayout(view)
+        layout.setContentsMargins(40, 30, 40, 30)
+
+        # Title section (centered)
+        title = QLabel("Client")
+        title.setObjectName("viewTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        layout.addSpacing(20)
+
+        # Status card
+        status_frame = QFrame()
+        status_frame.setObjectName("statusCard")
+        status_layout = QVBoxLayout(status_frame)
+        status_layout.setSpacing(12)
+
+        # Client status
+        client_row = QHBoxLayout()
+        status_label = QLabel("Status:")
+        status_label.setObjectName("statusLabel")
+        client_row.addWidget(status_label)
+        self._client_status_label = QLabel("Stopped")
+        self._client_status_label.setObjectName("statusValue")
+        client_row.addWidget(self._client_status_label)
+        client_row.addStretch()
+        status_layout.addLayout(client_row)
+
+        # Connection info
+        conn_row = QHBoxLayout()
+        conn_label = QLabel("Connection:")
+        conn_label.setObjectName("statusLabel")
+        conn_row.addWidget(conn_label)
+        self._connection_info_label = QLabel("Not connected")
+        self._connection_info_label.setObjectName("statusValue")
+        conn_row.addWidget(self._connection_info_label)
+        conn_row.addStretch()
+        status_layout.addLayout(conn_row)
+
+        layout.addWidget(status_frame)
+
+        layout.addSpacing(25)
+
+        # Control buttons (centered)
+        btn_container = QWidget()
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setSpacing(12)
+
+        self._start_client_local_btn = QPushButton("Start Local")
+        self._start_client_local_btn.setObjectName("primaryButton")
+        self._start_client_local_btn.clicked.connect(self._on_start_client_local)
+        btn_layout.addWidget(self._start_client_local_btn)
+
+        self._start_client_remote_btn = QPushButton("Start Remote")
+        self._start_client_remote_btn.setObjectName("primaryButton")
+        self._start_client_remote_btn.clicked.connect(self._on_start_client_remote)
+        btn_layout.addWidget(self._start_client_remote_btn)
+
+        self._stop_client_btn = QPushButton("Stop")
+        self._stop_client_btn.setObjectName("stopButton")
+        self._stop_client_btn.clicked.connect(self._on_stop_client)
+        self._stop_client_btn.setEnabled(False)
+        btn_layout.addWidget(self._stop_client_btn)
+
+        layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(15)
+
+        # Secondary actions (centered)
+        secondary_container = QWidget()
+        secondary_layout = QHBoxLayout(secondary_container)
+        secondary_layout.setSpacing(12)
+
+        settings_btn = QPushButton("⚙ Settings")
+        settings_btn.setObjectName("secondaryButton")
+        settings_btn.clicked.connect(self._on_show_settings)
+        secondary_layout.addWidget(settings_btn)
+
+        layout.addWidget(secondary_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(15)
+
+        # Show logs button (centered)
+        self._show_client_logs_btn = QPushButton("Show Logs")
+        self._show_client_logs_btn.setObjectName("secondaryButton")
+        self._show_client_logs_btn.clicked.connect(self._toggle_client_logs)
+        layout.addWidget(
+            self._show_client_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
+        layout.addStretch()
+
+        return view
+
+    def _apply_styles(self) -> None:
+        """Apply stylesheet to the window - matching Web UI colors."""
+        # Web UI color palette:
+        # background: #121212, surface: #1e1e1e, surface-light: #2d2d2d
+        # primary: #90caf9, primary-dark: #42a5f5
+        # error: #f44336, success: #4caf50, warning: #ff9800, info: #2196f3
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #121212;
+            }
+
+            #navBar {
+                background-color: #1e1e1e;
+                border-bottom: 1px solid #2d2d2d;
+            }
+
+            #navButton {
+                background-color: transparent;
+                border: none;
+                color: #a0a0a0;
+                padding: 5px 10px;
+                font-size: 13px;
+            }
+
+            #navButton:hover {
+                color: #90caf9;
+                background-color: #2d2d2d;
+                border-radius: 4px;
+            }
+
+            #navTitle {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #welcomeTitle {
+                color: #ffffff;
+                font-size: 24px;
+                font-weight: bold;
+            }
+
+            #welcomeSubtitle {
+                color: #a0a0a0;
+                font-size: 14px;
+            }
+
+            #welcomeButton {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+                color: #ffffff;
+                font-size: 14px;
+                padding: 20px;
+            }
+
+            #welcomeButton:hover {
+                background-color: #2d2d2d;
+                border-color: #3d3d3d;
+            }
+
+            #homeStatusLabel {
+                color: #a0a0a0;
+                font-size: 12px;
+            }
+
+            #homeStatusValue {
+                color: #ffffff;
+                font-size: 13px;
+            }
+
+            #viewTitle {
+                color: #ffffff;
+                font-size: 22px;
+                font-weight: bold;
+            }
+
+            #statusCard {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+                padding: 20px;
+            }
+
+            #managementGroup {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+            }
+
+            #columnHeader {
+                color: #90caf9;
+                font-size: 13px;
+                font-weight: bold;
+                margin-bottom: 6px;
+            }
+
+            #volumesStatusCard {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+                max-width: 600px;
+            }
+
+            #statusLabel {
+                color: #a0a0a0;
+                font-size: 13px;
+                min-width: 100px;
+            }
+
+            #statusValue {
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 13px;
+            }
+
+            #statusDateInline {
+                color: #6c757d;
+                font-size: 11px;
+                margin-left: 8px;
+            }
+
+            #tokenField {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 10px;
+                font-size: 12px;
+                font-family: monospace;
+            }
+
+            #tokenField:focus {
+                border-color: #90caf9;
+            }
+
+            #primaryButton {
+                background-color: #90caf9;
+                border: none;
+                border-radius: 6px;
+                color: #121212;
+                padding: 10px 20px;
+                font-size: 13px;
+                min-width: 100px;
+                font-weight: 500;
+            }
+
+            #primaryButton:hover {
+                background-color: #42a5f5;
+            }
+
+            #primaryButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            #stopButton {
+                background-color: #f44336;
+                border: none;
+                border-radius: 6px;
+                color: white;
+                padding: 10px 20px;
+                font-size: 13px;
+                min-width: 80px;
+            }
+
+            #stopButton:hover {
+                background-color: #d32f2f;
+            }
+
+            #stopButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            #secondaryButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: white;
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+
+            #secondaryButton:hover {
+                background-color: #3d3d3d;
+                border-color: #4d4d4d;
+            }
+
+            #toggleButton {
+                background-color: transparent;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #a0a0a0;
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+
+            #toggleButton:hover {
+                background-color: #2d2d2d;
+                color: #ffffff;
+            }
+
+            #toggleButton:checked {
+                background-color: #2d2d2d;
+                color: #ffffff;
+            }
+
+            #logView {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 4px;
+                color: #d4d4d4;
+                font-family: monospace;
+                font-size: 11px;
+            }
+
+            QPushButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            #noteLabel {
+                color: #6c757d;
+                font-size: 11px;
+                font-style: italic;
+            }
+
+            #webNoteLabel {
+                color: #808080;
+                font-size: 11px;
+                font-style: italic;
+            }
+
+            #dangerButton {
+                background-color: #f44336;
+                border: none;
+                border-radius: 4px;
+                color: white;
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+
+            #dangerButton:hover {
+                background-color: #d32f2f;
+            }
+
+            #dangerButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            #homeIconButton {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 18px;
+                color: #ffffff;
+                font-size: 16px;
+            }
+
+            #homeIconButton:hover {
+                background-color: #2d2d2d;
+                border-color: #3d3d3d;
+            }
+
+            QLabel#homeStatusLabel[accent="server"] {
+                color: #6B8DD9;
+            }
+
+            QLabel#homeStatusLabel[accent="client"] {
+                color: #D070D0;
+            }
+
+            QPushButton#welcomeButton[accent="server"] {
+                border: 2px solid #7BA9F5;
+            }
+
+            QPushButton#welcomeButton[accent="server"]:hover {
+                border-color: #A0C5FF;
+            }
+
+            QPushButton#welcomeButton[accent="client"] {
+                border: 2px solid #E78FF5;
+            }
+
+            QPushButton#welcomeButton[accent="client"]:hover {
+                border-color: #F5B3FF;
+            }
+
+            QPushButton#secondaryButton[accent="web"] {
+                border: 1px solid #D7F62E;
+            }
+
+            QPushButton#secondaryButton[accent="web"]:hover {
+                border-color: #E5FF6E;
+            }
+
+            #sectionHeader {
+                color: #a0a0a0;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+
+    # =========================================================================
+    # Navigation
+    # =========================================================================
+
+    def _navigate_to(self, view: View, add_to_history: bool = True) -> None:
+        """Navigate to a specific view."""
+        if add_to_history and self._current_view != view:
+            self._view_history.append(self._current_view)
+
+        self._current_view = view
+
+        # Update stack
+        view_map = {
+            View.WELCOME: 0,
+            View.SERVER: 1,
+            View.CLIENT: 2,
+        }
+        self._stack.setCurrentIndex(view_map[view])
+
+        # Refresh view data
+        if view == View.WELCOME:
+            self._refresh_home_status()
+        elif view == View.SERVER:
+            self._refresh_server_status()
+        elif view == View.CLIENT:
+            self._refresh_client_status()
+
+    def _go_back(self) -> None:
+        """Navigate to the previous view."""
+        if self._view_history:
+            prev_view = self._view_history.pop()
+            self._navigate_to(prev_view, add_to_history=False)
+
+    def _go_home(self) -> None:
+        """Navigate to the welcome/home view."""
+        self._view_history.clear()
+        self._navigate_to(View.WELCOME, add_to_history=False)
+
+    # =========================================================================
+    # Server Operations
+    # =========================================================================
+
+    def _refresh_server_status(self) -> None:
+        """Refresh the server status display."""
+        # Check image (using Web UI colors)
+        if self._docker_manager.image_exists_locally():
+            self._image_status_label.setText("✓ Available")
+            self._image_status_label.setStyleSheet("color: #4caf50;")  # success
+
+            # Get image date (inline, smaller)
+            image_date = self._docker_manager.get_image_created_date()
+            if image_date:
+                self._image_date_label.setText(f"({image_date})")
+            else:
+                self._image_date_label.setText("")
+
+            # Get image size (inline, smaller)
+            image_size = self._docker_manager.get_image_size()
+            if image_size:
+                self._image_size_label.setText(f"{image_size}")
+            else:
+                self._image_size_label.setText("")
+        else:
+            self._image_status_label.setText("✗ Not found")
+            self._image_status_label.setStyleSheet("color: #f44336;")  # error
+            self._image_date_label.setText("")
+            self._image_size_label.setText("")
+
+        # Check server status
+        status = self._docker_manager.get_server_status()
+        mode = self._docker_manager.get_current_mode()
+
+        health: str | None = None
+        mode_str = f" ({mode.value})" if mode else ""
+
+        if status == ServerStatus.RUNNING:
+            health = self._docker_manager.get_container_health()
+            if health and health != "healthy":
+                if health == "unhealthy":
+                    status_text = f"Unhealthy{mode_str}"
+                else:
+                    status_text = f"Starting...{mode_str}"
+            else:
+                status_text = f"Running{mode_str}"
+        elif status == ServerStatus.STOPPED:
+            status_text = "Stopped"
+        elif status == ServerStatus.NOT_FOUND:
+            status_text = "Not set up"
+        elif status == ServerStatus.ERROR:
+            status_text = "Error"
+        else:
+            status_text = "Unknown"
+
+        self._server_status_label.setText(status_text)
+
+        # Update auth token display (always check for saved token)
+        token = self._docker_manager.get_admin_token(
+            check_logs=(status == ServerStatus.RUNNING)
+        )
+        if token:
+            self._server_token_field.setText(token)
+            self._server_token_field.setStyleSheet(
+                "background: transparent; border: none; color: #4caf50;"
+            )  # success
+        else:
+            self._server_token_field.setText("Not saved yet")
+            self._server_token_field.setStyleSheet(
+                "background: transparent; border: none; color: #6c757d;"
+            )
+
+        # Update button states
+        is_running = status == ServerStatus.RUNNING
+        container_exists = status in (ServerStatus.RUNNING, ServerStatus.STOPPED)
+        image_exists = self._docker_manager.image_exists_locally()
+
+        self._start_local_btn.setEnabled(not is_running)
+        self._start_remote_btn.setEnabled(not is_running)
+        self._stop_server_btn.setEnabled(is_running)
+        self._remove_container_btn.setEnabled(container_exists and not is_running)
+
+        # Docker management buttons with tooltips
+        self._remove_image_btn.setEnabled(not container_exists and image_exists)
+        if container_exists:
+            self._remove_image_btn.setToolTip(
+                "Remove container first before removing image"
+            )
+        else:
+            self._remove_image_btn.setToolTip("Remove the Docker image")
+
+        if is_running:
+            self._remove_container_btn.setToolTip(
+                "Stop container first before removing"
+            )
+        else:
+            self._remove_container_btn.setToolTip("Remove the Docker container")
+
+        self._pull_image_btn.setEnabled(True)  # Can always pull
+        self._remove_data_volume_btn.setEnabled(not is_running)
+        self._remove_models_volume_btn.setEnabled(not is_running)
+
+        # Style based on status (using Web UI colors)
+        if status == ServerStatus.RUNNING:
+            if health and health != "healthy":
+                if health == "unhealthy":
+                    self._server_status_label.setStyleSheet("color: #f44336;")  # error
+                else:
+                    self._server_status_label.setStyleSheet("color: #2196f3;")  # info
+            else:
+                self._server_status_label.setStyleSheet("color: #4caf50;")  # success
+        elif status == ServerStatus.STOPPED:
+            self._server_status_label.setStyleSheet("color: #ff9800;")  # warning
+        elif status == ServerStatus.NOT_FOUND:
+            self._server_status_label.setStyleSheet("color: #6c757d;")
+        else:
+            self._server_status_label.setStyleSheet("color: #f44336;")  # error
+
+        if self._server_health_timer:
+            if status != ServerStatus.RUNNING or health in (None, "healthy"):
+                self._server_health_timer.stop()
+                self._server_health_timer = None
+
+        # Update volumes status
+        data_volume_exists = self._docker_manager.volume_exists(
+            "transcription-suite-data"
+        )
+        models_volume_exists = self._docker_manager.volume_exists(
+            "transcription-suite-models"
+        )
+
+        if data_volume_exists:
+            self._data_volume_status.setText("✓ Exists")
+            self._data_volume_status.setStyleSheet("color: #4caf50;")  # success
+            # Get volume size
+            size = self._docker_manager.get_volume_size("transcription-suite-data")
+            if size:
+                self._data_volume_size.setText(f"({size})")
+            else:
+                self._data_volume_size.setText("")
+        else:
+            self._data_volume_status.setText("✗ Not found")
+            self._data_volume_status.setStyleSheet("color: #6c757d;")
+            self._data_volume_size.setText("")
+
+        if models_volume_exists:
+            self._models_volume_status.setText("✓ Exists")
+            self._models_volume_status.setStyleSheet("color: #4caf50;")  # success
+            # Get volume size
+            size = self._docker_manager.get_volume_size("transcription-suite-models")
+            if size:
+                self._models_volume_size.setText(f"({size})")
+            else:
+                self._models_volume_size.setText("")
+
+            # Update models list (only when container is running)
+            if is_running:
+                models = self._docker_manager.list_downloaded_models()
+                if models:
+                    models_text = ", ".join(
+                        [f"{m['name']} ({m['size']})" for m in models]
+                    )
+                    self._models_list_label.setText(f"Downloaded: {models_text}")
+                    self._models_list_label.setVisible(True)
+                else:
+                    self._models_list_label.setText("No models downloaded yet")
+                    self._models_list_label.setVisible(True)
+            else:
+                self._models_list_label.setText("Start container to view models")
+                self._models_list_label.setVisible(True)
+        else:
+            self._models_volume_status.setText("✗ Not found")
+            self._models_volume_status.setStyleSheet("color: #6c757d;")
+            self._models_volume_size.setText("")
+            self._models_list_label.setVisible(False)
+
+    def _on_start_server_local(self) -> None:
+        """Start server in local mode."""
+        self._start_server(ServerMode.LOCAL)
+
+    def _on_start_server_remote(self) -> None:
+        """Start server in remote mode."""
+        self._start_server(ServerMode.REMOTE)
+
+    def _start_server(self, mode: ServerMode) -> None:
+        """Start the Docker server."""
+        if self._server_health_timer:
+            self._server_health_timer.stop()
+            self._server_health_timer = None
+
+        self._server_status_label.setText("Starting...")
+        self._start_local_btn.setEnabled(False)
+        self._start_remote_btn.setEnabled(False)
+
+        # Log progress
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.start_server(
+            mode=mode, progress_callback=progress
+        )
+
+        if result.success:
+            progress(result.message)
+            # Force refresh token from logs for new/restarted container
+            QTimer.singleShot(2000, self._docker_manager.refresh_admin_token)
+            self._refresh_server_status()
+
+            self._server_health_timer = QTimer(self)
+            self._server_health_timer.timeout.connect(self._refresh_server_status)
+            self._server_health_timer.start(1500)
+        else:
+            progress(f"Error: {result.message}")
+            QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_stop_server(self) -> None:
+        """Stop the Docker server."""
+        if self._server_health_timer:
+            self._server_health_timer.stop()
+            self._server_health_timer = None
+
+        self._server_status_label.setText("Stopping...")
+        self._stop_server_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.stop_server(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_remove_container(self) -> None:
+        """Remove the Docker container (for recreating from fresh image)."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        if self._server_health_timer:
+            self._server_health_timer.stop()
+            self._server_health_timer = None
+
+        # Confirm with user
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Remove Container")
+        msg_box.setText("Are you sure you want to remove the container?")
+        msg_box.setInformativeText(
+            "This will delete the container and its data. "
+            "The Docker image will be kept. You can recreate the container by starting the server again."
+        )
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._server_status_label.setText("Removing...")
+        self._remove_container_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.remove_container(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_remove_image(self) -> None:
+        """Remove the Docker server image."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Confirm with user
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Remove Docker Image")
+        msg_box.setText("Are you sure you want to remove the Docker image?")
+        msg_box.setInformativeText(
+            "This will delete the server Docker image from your system. "
+            "The container must be removed first. "
+            "You can re-download the image using 'Fetch Fresh Image'."
+        )
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._image_status_label.setText("Removing...")
+        self._remove_image_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.remove_image(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_pull_fresh_image(self) -> None:
+        """Pull a fresh copy of the Docker server image."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Inform user this may take time
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Fetch Fresh Image")
+        msg_box.setText("Pull a fresh copy of the Docker image?")
+        msg_box.setInformativeText(
+            "This will download the latest server image. "
+            "This may take several minutes depending on your connection speed."
+        )
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._image_status_label.setText("Pulling...")
+        self._pull_image_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.pull_fresh_image(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_remove_data_volume(self) -> None:
+        """Remove the data volume."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Confirm with user - this is destructive!
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Remove Data Volume")
+        msg_box.setText("WARNING: This will DELETE ALL SERVER DATA!")
+        msg_box.setInformativeText(
+            "This will permanently delete:\n"
+            "• The SQLite database\n"
+            "• All user data and transcription history\n"
+            "• Server authentication token\n\n"
+            "The server must be stopped first. This action cannot be undone!"
+        )
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._remove_data_volume_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.remove_data_volume(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_remove_models_volume(self) -> None:
+        """Remove the models volume."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        # Confirm with user
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Remove Models Volume")
+        msg_box.setText("WARNING: This will DELETE ALL DOWNLOADED MODELS!")
+        msg_box.setInformativeText(
+            "This will permanently delete all downloaded Whisper models. "
+            "The server must be stopped first. "
+            "Models will need to be re-downloaded when needed (may take time)."
+        )
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._remove_models_volume_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.remove_models_volume(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_open_server_settings(self) -> None:
+        """Open the server config.yaml file."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        config_file = self._docker_manager._find_config_file()
+        success = self._docker_manager.open_config_file()
+
+        if not success:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cannot Open Settings")
+
+            if not config_file:
+                msg_box.setText("Configuration file not found")
+                msg_box.setInformativeText(
+                    "The config.yaml file doesn't exist yet.\n\n"
+                    "To create it:\n"
+                    f"  1. Run first-time setup from terminal:\n"
+                    f"     transcription-suite-setup\n\n"
+                    f"  2. Or create it manually at:\n"
+                    f"     {self._docker_manager.config_dir}/config.yaml"
+                )
+            else:
+                msg_box.setText("Failed to open config.yaml")
+                msg_box.setInformativeText(
+                    f"The file exists but no editor was found.\n\n"
+                    f"Location: {config_file}\n\n"
+                    f"To edit manually, try:\n"
+                    f"  • kate {config_file}\n"
+                    f"  • gedit {config_file}\n"
+                    f"  • nano {config_file}"
+                )
+
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+
+    def _toggle_server_logs(self) -> None:
+        """Open server logs in a separate window."""
+        if self._server_log_window is None:
+            self._server_log_window = LogWindow("Server Logs", self)
+
+        # Start log polling if not already running
+        if self._server_log_timer is None:
+            self._refresh_server_logs()
+            self._server_log_timer = QTimer()
+            self._server_log_timer.timeout.connect(self._refresh_server_logs)
+            self._server_log_timer.start(3000)  # Poll every 3 seconds
+
+        self._server_log_window.show()
+        self._server_log_window.raise_()
+        self._server_log_window.activateWindow()
+
+    def _refresh_server_logs(self) -> None:
+        """Refresh server logs."""
+        if self._server_log_window is None:
+            return
+        logs = self._docker_manager.get_logs(lines=100)
+        self._server_log_window.set_logs(logs)
+
+    # =========================================================================
+    # Client Operations
+    # =========================================================================
+
+    def _refresh_client_status(self) -> None:
+        """Refresh the client status display."""
+        if self._client_running:
+            self._client_status_label.setText("Running")
+            self._client_status_label.setStyleSheet("color: #4caf50;")  # success
+
+            # Show connection info
+            host = self.config.server_host
+            port = self.config.server_port
+            https = "HTTPS" if self.config.use_https else "HTTP"
+            self._connection_info_label.setText(f"{https}://{host}:{port}")
+        else:
+            self._client_status_label.setText("Stopped")
+            self._client_status_label.setStyleSheet("color: #ff9800;")  # warning
+            self._connection_info_label.setText("Not connected")
+
+        # Update button states
+        self._start_client_local_btn.setEnabled(not self._client_running)
+        self._start_client_remote_btn.setEnabled(not self._client_running)
+        self._stop_client_btn.setEnabled(self._client_running)
+
+    def _validate_remote_settings(self) -> tuple[bool, str]:
+        """
+        Validate settings for remote client connection.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        errors = []
+
+        # Check remote host is set and contains .ts.net
+        remote_host = self.config.get("server", "remote_host", default="")
+        if not remote_host:
+            errors.append("Remote host is not set")
+        elif ".ts.net" not in remote_host:
+            errors.append("Remote host should be a Tailscale hostname (*.ts.net)")
+
+        # Check use_remote is enabled
+        if not self.config.get("server", "use_remote", default=False):
+            errors.append("'Use remote server' is not enabled")
+
+        # Check HTTPS is enabled
+        if not self.config.get("server", "use_https", default=False):
+            errors.append("HTTPS is not enabled (required for remote)")
+
+        # Check authentication token
+        token = self.config.get("server", "token", default="")
+        if not token or not token.strip():
+            errors.append("Authentication token is not set")
+
+        # Check port is appropriate for remote (should be 8443)
+        port = self.config.get("server", "port", default=8000)
+        # Note: We get the expected remote port from a constant or config
+        # For now, we check for 8443 as the standard remote port
+        expected_remote_port = 8443
+        if port != expected_remote_port:
+            errors.append(
+                f"Port should be {expected_remote_port} for remote connection (currently {port})"
+            )
+
+        if errors:
+            return False, "\n".join(errors)
+        return True, ""
+
+    def _on_start_client_local(self) -> None:
+        """Start client in local mode."""
+        # Configure for local connection
+        self.config.set("server", "use_remote", value=False)
+        self.config.set("server", "use_https", value=False)
+        self.config.set("server", "port", value=8000)
+        self.config.save()
+
+        self._client_running = True
+        self._refresh_client_status()
+        self.start_client_requested.emit(False)  # False = local
+
+    def _on_start_client_remote(self) -> None:
+        """Start client in remote mode."""
+        # Validate settings first
+        is_valid, error_msg = self._validate_remote_settings()
+
+        if not is_valid:
+            from PyQt6.QtWidgets import QMessageBox
+
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Invalid Settings")
+            msg_box.setText("Please edit your settings before starting remote client.")
+            msg_box.setDetailedText(error_msg)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+            return
+
+        self._client_running = True
+        self._refresh_client_status()
+        self.start_client_requested.emit(True)  # True = remote
+
+    def _on_stop_client(self) -> None:
+        """Stop the client."""
+        self._client_running = False
+        self._refresh_client_status()
+        self.stop_client_requested.emit()
+
+    def _on_show_settings(self) -> None:
+        """Show settings dialog."""
+        self.show_settings_requested.emit()
+
+    def _toggle_client_logs(self) -> None:
+        """Open client logs in a separate window."""
+        if self._client_log_window is None:
+            self._client_log_window = LogWindow("Client Logs", self)
+
+        self._client_log_window.show()
+        self._client_log_window.raise_()
+        self._client_log_window.activateWindow()
+
+    def append_client_log(self, message: str) -> None:
+        """Append a message to the client log view."""
+        if self._client_log_window is None:
+            self._client_log_window = LogWindow("Client Logs", self)
+        self._client_log_window.append_log(message)
+
+    def set_client_running(self, running: bool) -> None:
+        """Update client running state (called from orchestrator)."""
+        self._client_running = running
+        if self._current_view == View.CLIENT:
+            self._refresh_client_status()
+
+    # =========================================================================
+    # Help and About
+    # =========================================================================
+
+    def _show_help_menu(self) -> None:
+        """Show help menu with README options."""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                color: #ffffff;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2d2d2d;
+            }
+        """)
+
+        # User Guide icon - use document-properties or x-office-document for documentation
+        user_guide_icon = QIcon.fromTheme("x-office-document")
+        if user_guide_icon.isNull():
+            user_guide_icon = QIcon.fromTheme("document-properties")
+        if user_guide_icon.isNull():
+            user_guide_icon = QIcon.fromTheme("text-x-generic")
+        readme_action = menu.addAction(user_guide_icon, "User Guide (README)")
+        readme_action.triggered.connect(lambda: self._show_readme_viewer(dev=False))
+
+        # Developer Guide icon - use text-x-script or application-x-executable for code/dev docs
+        dev_guide_icon = QIcon.fromTheme("text-x-script")
+        if dev_guide_icon.isNull():
+            dev_guide_icon = QIcon.fromTheme("text-x-source")
+        if dev_guide_icon.isNull():
+            dev_guide_icon = QIcon.fromTheme("application-x-executable")
+        readme_dev_action = menu.addAction(
+            dev_guide_icon, "Developer Guide (README_DEV)"
+        )
+        readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
+
+        # Show menu below the help button
+        menu.exec(
+            self._nav_help_btn.mapToGlobal(self._nav_help_btn.rect().bottomLeft())
+        )
+
+    def _show_readme_viewer(self, dev: bool = False) -> None:
+        """Show a README file in a markdown viewer dialog with dark theme."""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtWidgets import QTextBrowser
+
+        readme_path = _get_readme_path(dev=dev)
+        title = "Developer Guide" if dev else "User Guide"
+
+        if readme_path is None or not readme_path.exists():
+            from PyQt6.QtWidgets import QMessageBox
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("File Not Found")
+            msg.setText(f"Could not find {'README_DEV.md' if dev else 'README.md'}")
+            msg.setInformativeText(
+                "This file should be bundled with the application. "
+                "If running from source, ensure you're in the repository root."
+            )
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.exec()
+            return
+
+        # Create viewer dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"TranscriptionSuite - {title}")
+        dialog.resize(950, 750)
+        dialog.setModal(False)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Markdown content viewer with HTML rendering
+        from PyQt6.QtGui import QPalette, QColor
+
+        text_browser = QTextBrowser()
+        text_browser.setReadOnly(True)
+        # Disable automatic link handling - we'll handle anchors manually
+        text_browser.setOpenLinks(False)
+        text_browser.setOpenExternalLinks(False)
+
+        def handle_anchor_click(url: QUrl) -> None:
+            """Handle anchor clicks - internal anchors scroll, external open browser."""
+            url_str = url.toString()
+            if url_str.startswith("#"):
+                # Internal anchor - scroll to it
+                anchor_name = url_str[1:]  # Remove the # prefix
+                text_browser.scrollToAnchor(anchor_name)
+            elif url_str.startswith("http://") or url_str.startswith("https://"):
+                # External link - open in browser
+                webbrowser.open(url_str)
+            # Ignore other URL schemes (file://, etc.)
+
+        text_browser.anchorClicked.connect(handle_anchor_click)
+
+        # Apply dark theme styling
+        text_browser.setStyleSheet("""
+            QTextBrowser {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: none;
+                padding: 20px;
+                font-size: 14px;
+                selection-background-color: #3d3d3d;
+                selection-color: #ffffff;
+            }
+        """)
+
+        # Set custom colors for links
+        palette = text_browser.palette()
+        palette.setColor(QPalette.ColorRole.Base, QColor("#1e1e1e"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#d4d4d4"))
+        palette.setColor(QPalette.ColorRole.Link, QColor("#90caf9"))
+        palette.setColor(QPalette.ColorRole.LinkVisited, QColor("#81d4fa"))
+        text_browser.setPalette(palette)
+
+        try:
+            content = readme_path.read_text(encoding="utf-8")
+
+            # Pre-process markdown content to handle HTML img tags and embedded HTML
+            # The markdown library with extra extension handles inline HTML better
+            import re
+
+            # Remove HTML img tags and replace with text description
+            # QTextBrowser has limited HTML support
+            content = re.sub(
+                r'<img[^>]*alt=["\']([^"\']*)["\'][^>]*>',
+                r"[Image: \1]",
+                content,
+                flags=re.IGNORECASE,
+            )
+            content = re.sub(
+                r'<img[^>]*src=["\']([^"\']*)["\'][^>]*>',
+                r"[Image]",
+                content,
+                flags=re.IGNORECASE,
+            )
+
+            # Convert <pre> tags to fenced code blocks for better handling
+            content = re.sub(r"<pre>\s*", "\n```\n", content, flags=re.IGNORECASE)
+            content = re.sub(r"\s*</pre>", "\n```\n", content, flags=re.IGNORECASE)
+
+            # Try using markdown library to convert to HTML
+            try:
+                import markdown
+
+                # Convert markdown to HTML with extensions
+                # Using toc extension with slugify for consistent anchor IDs
+                html_body = markdown.markdown(
+                    content,
+                    extensions=[
+                        "fenced_code",
+                        "tables",
+                        "toc",
+                        "sane_lists",
+                        "attr_list",
+                    ],
+                    extension_configs={
+                        "toc": {
+                            "permalink": False,
+                            "toc_depth": 4,
+                        }
+                    },
+                )
+
+                # Wrap in HTML with inline dark theme CSS
+                html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{
+                            color: #d4d4d4;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            font-size: 14px;
+                            line-height: 1.6;
+                            margin: 0;
+                            padding: 0;
+                        }}
+                        h1 {{ color: #90caf9; font-size: 28px; margin-top: 24px; border-bottom: 1px solid #3d3d3d; padding-bottom: 8px; }}
+                        h2 {{ color: #81d4fa; font-size: 22px; margin-top: 20px; border-bottom: 1px solid #2d2d2d; padding-bottom: 6px; }}
+                        h3 {{ color: #b3e5fc; font-size: 18px; margin-top: 16px; }}
+                        h4, h5, h6 {{ color: #e1f5fe; margin-top: 12px; }}
+                        a {{ color: #90caf9; text-decoration: none; }}
+                        a:hover {{ text-decoration: underline; }}
+                        code {{
+                            background-color: #2d2d2d;
+                            color: #ce93d8;
+                            padding: 2px 6px;
+                            border-radius: 4px;
+                            font-family: 'CaskaydiaCove Nerd Font', 'Fira Code', 'Consolas', monospace;
+                            font-size: 13px;
+                        }}
+                        pre {{
+                            background-color: #1a1a1a;
+                            border: 1px solid #3d3d3d;
+                            border-radius: 6px;
+                            padding: 12px;
+                            overflow-x: auto;
+                            font-family: 'CaskaydiaCove Nerd Font', 'Fira Code', 'Consolas', monospace;
+                            font-size: 13px;
+                        }}
+                        pre code {{
+                            background-color: transparent;
+                            padding: 0;
+                            color: #d4d4d4;
+                        }}
+                        blockquote {{
+                            border-left: 4px solid #90caf9;
+                            margin: 16px 0;
+                            padding: 8px 16px;
+                            background-color: #252525;
+                            color: #b0b0b0;
+                        }}
+                        table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
+                        th, td {{ border: 1px solid #3d3d3d; padding: 10px; text-align: left; }}
+                        th {{ background-color: #2d2d2d; color: #90caf9; font-weight: 600; }}
+                        tr:nth-child(even) {{ background-color: #252525; }}
+                        ul, ol {{ padding-left: 24px; margin: 12px 0; }}
+                        li {{ margin: 6px 0; }}
+                        hr {{ border: none; border-top: 1px solid #3d3d3d; margin: 24px 0; }}
+                        strong {{ color: #ffffff; }}
+                        em {{ color: #b0b0b0; }}
+                    </style>
+                </head>
+                <body>
+                    {html_body}
+                </body>
+                </html>
+                """
+                text_browser.setHtml(html)
+
+            except ImportError:
+                # Fallback: use Qt's built-in setMarkdown
+                text_browser.setMarkdown(content)
+
+        except Exception as e:
+            text_browser.setPlainText(f"Error reading file: {e}")
+
+        layout.addWidget(text_browser)
+
+        # Style the dialog
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #121212;
+            }
+            QTextBrowser {
+                background-color: #1e1e1e;
+                border: none;
+            }
+        """)
+
+        dialog.show()
+
+    def _show_about_dialog(self) -> None:
+        """Show the About dialog with author info and links."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About TranscriptionSuite")
+        dialog.setFixedSize(480, 620)
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(20)
+
+        # Profile picture with proper centering and clipping
+        profile_container = QWidget()
+        profile_container.setFixedSize(120, 120)
+        profile_container_layout = QVBoxLayout(profile_container)
+        profile_container_layout.setContentsMargins(0, 0, 0, 0)
+        profile_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        profile_label = QLabel()
+        profile_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        profile_label.setFixedSize(110, 110)
+
+        profile_pixmap = self._load_profile_picture()
+        if profile_pixmap:
+            # Create circular mask for the profile picture
+            scaled_pixmap = profile_pixmap.scaled(
+                100,
+                100,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+
+            # Create a rounded pixmap
+            rounded = QPixmap(100, 100)
+            rounded.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, 100, 100)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, scaled_pixmap)
+            painter.end()
+
+            profile_label.setPixmap(rounded)
+        else:
+            # Fallback: use a placeholder
+            profile_label.setText("👤")
+
+        profile_container_layout.addWidget(profile_label)
+        layout.addWidget(profile_container, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # App name
+        app_name = QLabel("TranscriptionSuite")
+        app_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        app_name.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold;")
+        layout.addWidget(app_name)
+
+        # Version info - always display
+        try:
+            from importlib.metadata import version
+
+            app_version = version("transcription-suite-client")
+        except Exception:
+            # When running from source or PyInstaller bundle, try to read version from pyproject.toml
+            try:
+                import sys
+                import toml
+
+                # Check if running as PyInstaller bundle
+                if getattr(sys, "frozen", False):
+                    # Running as bundled app - pyproject.toml should be in the client directory
+                    bundle_dir = Path(sys._MEIPASS)  # type: ignore
+                    pyproject_path = bundle_dir / "client" / "pyproject.toml"
+                else:
+                    # Running from source - find pyproject.toml relative to this file
+                    current = Path(__file__).resolve()
+                    pyproject_path = None
+                    for parent in current.parents:
+                        potential_path = parent / "pyproject.toml"
+                        if potential_path.exists():
+                            pyproject_path = potential_path
+                            break
+
+                if pyproject_path and pyproject_path.exists():
+                    with open(pyproject_path, "r") as f:
+                        data = toml.load(f)
+                    app_version = data.get("project", {}).get("version", "dev")
+                else:
+                    app_version = "dev"
+            except Exception:
+                app_version = "dev"  # Fallback when running from source without install
+
+        version_label = QLabel(f"v{app_version}")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        layout.addWidget(version_label)
+
+        layout.addSpacing(4)
+
+        # Description
+        description = QLabel("Speech-to-Text Transcription Suite")
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        description.setStyleSheet("color: #a0a0a0; font-size: 13px;")
+        layout.addWidget(description)
+
+        # Copyright notice
+        copyright_label = QLabel("© 2025-2026 homelab-00 • MIT License")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+        layout.addWidget(copyright_label)
+
+        layout.addSpacing(12)
+
+        # Links section
+        links_frame = QFrame()
+        links_frame.setObjectName("linksFrame")
+        links_layout = QVBoxLayout(links_frame)
+        links_layout.setSpacing(10)
+        links_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Author section header
+        author_header = QLabel("Author")
+        author_header.setStyleSheet(
+            "color: #90caf9; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
+        )
+        links_layout.addWidget(author_header)
+
+        # GitHub profile
+        github_btn = QPushButton("  GitHub Profile")
+        github_icon = QIcon.fromTheme("user-identity")
+        if github_icon.isNull():
+            github_icon = QIcon.fromTheme("contact-new")
+        github_btn.setIcon(github_icon)
+        github_btn.setObjectName("linkButton")
+        github_btn.clicked.connect(lambda: webbrowser.open(GITHUB_PROFILE_URL))
+        github_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        links_layout.addWidget(github_btn)
+
+        links_layout.addSpacing(12)
+
+        # Repository section header
+        repo_header = QLabel("Repository")
+        repo_header.setStyleSheet(
+            "color: #90caf9; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
+        )
+        links_layout.addWidget(repo_header)
+
+        # GitHub repo
+        github_repo_btn = QPushButton("  GitHub Repository")
+        repo_icon = QIcon.fromTheme("folder-git")
+        if repo_icon.isNull():
+            repo_icon = QIcon.fromTheme("folder-development")
+        if repo_icon.isNull():
+            repo_icon = QIcon.fromTheme("folder")
+        github_repo_btn.setIcon(repo_icon)
+        github_repo_btn.setObjectName("linkButton")
+        github_repo_btn.clicked.connect(lambda: webbrowser.open(GITHUB_REPO_URL))
+        github_repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        links_layout.addWidget(github_repo_btn)
+
+        layout.addWidget(links_frame)
+
+        layout.addStretch()
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("primaryButton")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Style the dialog
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #121212;
+            }
+            #linksFrame {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+            }
+            #linkButton {
+                background-color: transparent;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 10px 16px;
+                padding-left: 12px;
+                text-align: left;
+                font-size: 13px;
+                min-width: 200px;
+                min-height: 20px;
+            }
+            #linkButton:hover {
+                background-color: #2d2d2d;
+                border-color: #90caf9;
+            }
+            #primaryButton {
+                background-color: #90caf9;
+                border: none;
+                border-radius: 6px;
+                color: #121212;
+                padding: 10px 32px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            #primaryButton:hover {
+                background-color: #42a5f5;
+            }
+        """)
+
+        dialog.exec()
+
+    def _load_profile_picture(self) -> QPixmap | None:
+        """Load the profile picture from bundled assets."""
+        assets_path = _get_assets_path()
+        profile_path = assets_path / "profile.png"
+
+        if profile_path.exists():
+            pixmap = QPixmap(str(profile_path))
+            if not pixmap.isNull():
+                return pixmap
+
+        # Try loading from logo as fallback
+        logo_path = assets_path / "logo.png"
+        if logo_path.exists():
+            pixmap = QPixmap(str(logo_path))
+            if not pixmap.isNull():
+                return pixmap
+
+        return None
+
+    # =========================================================================
+    # Lifecycle
+    # =========================================================================
+
+    def showEvent(self, event) -> None:
+        """Handle show event."""
+        super().showEvent(event)
+        # Refresh current view data
+        if self._current_view == View.SERVER:
+            self._refresh_server_status()
+        elif self._current_view == View.CLIENT:
+            self._refresh_client_status()
+
+    def closeEvent(self, event) -> None:
+        """Handle close event - hide window instead of closing."""
+        # Stop log timers when hiding
+        if self._server_log_timer:
+            self._server_log_timer.stop()
+            self._server_log_timer = None
+        if self._client_log_timer:
+            self._client_log_timer.stop()
+            self._client_log_timer = None
+        # Hide the window instead of closing - app continues in tray
+        event.ignore()
+        self.hide()
+
+    def force_close(self) -> None:
+        """Force close the window (called when quitting app)."""
+        if self._server_log_timer:
+            self._server_log_timer.stop()
+        if self._client_log_timer:
+            self._client_log_timer.stop()
+        # Actually close the window
+        self.deleteLater()
