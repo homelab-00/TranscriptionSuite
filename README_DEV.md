@@ -87,8 +87,8 @@ This section provides a streamlined overview of the most common development task
 
 ```bash
 # 1. Setup all Python virtual environments
-cd client && uv venv --python 3.11 && uv sync --extra kde && cd ..
-cd build && uv venv --python 3.11 && uv sync && cd ..
+cd client && uv venv --python 3.12 && uv sync --extra kde && cd ..
+cd build && uv venv --python 3.12 && uv sync && cd ..
 
 # 2. Audit NPM packages (frontend)
 cd server/frontend && npm ci && npm audit && cd ../..
@@ -132,9 +132,9 @@ Note: All three scripts are meant to be run from the project root.
 | **Build Docker image** | `cd server/docker && docker compose build` |
 | **Rebuild after code changes** | `docker compose build && docker compose up -d` |
 | **View server logs** | `docker compose logs -f` |
-| **Publish Docker image (release)** | `git tag v0.3.0 -m "Release" && git push origin v0.3.0` |
-| **Publish Docker image (manual)** | `gh workflow run docker-publish.yml --field tag=test` |
-| **Monitor GitHub Actions build** | `gh run watch` |
+| **Build & publish Docker image** | `./build/docker-build-push.sh` (local build) |
+| **Publish release version** | `./build/docker-build-push.sh v0.3.0` (tags as latest too) |
+| **Publish dev/test version** | `./build/docker-build-push.sh dev` (custom tag) |
 | **Run client (local)** | `cd client && uv run transcription-client --host localhost --port 8000` |
 | **Run client (remote)** | `cd client && uv run transcription-client --host <tailscale-hostname> --port 8443 --https` |
 | **Lint code** | `./build/.venv/bin/ruff check .` |
@@ -166,8 +166,13 @@ TranscriptionSuite uses a **client-server architecture**:
 │                     Native Clients                      │
 │     ┌─────────────┐ ┌─────────────┐ ┌─────────────┐     │
 │     │   KDE Tray  │ │ GNOME Tray  │ │Windows Tray │     │
-│     │   (PyQt6)   │ │(GTK+AppInd) │ │  (PyQt6)    │     │
-│     └─────────────┘ └─────────────┘ └─────────────┘     │
+│     │   (PyQt6)   │ │(GTK3+D-Bus) │ │  (PyQt6)    │     │
+│     └─────────────┘ └──────┬──────┘ └─────────────┘     │
+│                            │ D-Bus IPC                  │
+│                      ┌─────┴──────┐                     │
+│                      │ Dashboard │                     │
+│                      │   (GTK4)   │                     │
+│                      └────────────┘                     │
 │     - Microphone recording                              │
 │     - Clipboard integration                             │
 │     - System notifications                              │
@@ -175,26 +180,35 @@ TranscriptionSuite uses a **client-server architecture**:
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Terminology: Mothership
+**GNOME Dual-Process Architecture:**
 
-The standalone native client application is internally called **"Mothership"**. This is the command center for the entire TranscriptionSuite - from here you can:
+The GNOME client uses two separate processes because GTK3 and GTK4 cannot coexist in the same Python process (GObject Introspection limitation):
+
+1. **Tray Process (GTK3)**: Runs the AppIndicator3 system tray, handles recording, communicates with server
+2. **Dashboard Process (GTK4)**: Provides the main GUI window using libadwaita, spawned on-demand when user clicks "Show App"
+
+These processes communicate via **D-Bus** (`com.transcriptionsuite.Client`). The tray exposes methods for the Dashboard to control the client (start/stop, status, settings).
+
+### Terminology: Dashboard
+
+The standalone native client application is internally called **"Dashboard"**. This is the command center for the entire TranscriptionSuite - from here you can:
 - Start/stop the Docker server (local or remote mode)
 - Start/stop the transcription client
 - Configure all settings
 - View server and client logs
 
-The Mothership is distinct from:
+The Dashboard is distinct from:
 - **Web client**: The browser-based `/record` view for file uploads and recording
 - **Server**: The Docker container running the transcription backend
 
 When referring to code or documentation:
-- Use "Mothership" when discussing the standalone application as a whole
+- Use "Dashboard" when discussing the standalone application as a whole
 - Use "client" when discussing the client functionality (recording, transcription)
 - Use "server" when discussing the Docker backend
 
-### Mothership UI Structure
+### Dashboard UI Structure
 
-The Mothership window has a persistent **navigation bar** at the top:
+The Dashboard window has a persistent **navigation bar** at the top:
 - Left side: 🏠 **Home**, 🐳 **Server**, 💻 **Client** (with icons)
 - Right side: ❓ **Help**, ℹ️ **About** (with icons)
 
@@ -226,35 +240,36 @@ The Mothership window has a persistent **navigation bar** at the top:
 3. **Client View** - Transcription client management:
    - Client status and connection info
    - Start Local / Start Remote / Stop buttons
-   - Settings access (styled to match Mothership design)
+   - Settings access (styled to match Dashboard design)
    - Expandable client logs
 
 4. **Help Menu** - Documentation access:
    - User Guide (README.md) - for end users
    - Developer Guide (README_DEV.md) - for developers
-   - Both displayed in a styled markdown viewer with dark theme (requires `markdown` Python package)
-   - Table of contents links navigate within the document
+   - Both displayed in a styled markdown viewer with dark theme
    - External links open in the system browser
 
 5. **About Dialog** - Application info:
-   - Author profile picture (circular cropped)
+   - Author profile picture (circular, loaded from bundled `profile.png`)
    - Application version from pyproject.toml
    - Copyright notice (MIT License)
-   - GitHub and GitLab profile links
-   - Repository links (GitHub and GitLab)
+   - GitHub profile link (Author section)
+   - GitHub repository link (Repository section)
 
 **Tray behavior:**
 - Tray icon shows app logo when client is idle (not running)
 - Colored status indicators when client is running (green=ready, yellow=recording, etc.)
 - Simplified menu: recording controls, transcribe file, show app, quit
+- Dashboard window opens automatically on startup (all platforms)
 - Closing window hides to tray; quit only via tray menu
-- Global hotkeys supported on KDE and Windows only (GNOME's GlobalShortcuts protocol not fully implemented)
 
 ### Design Decisions
 
 - **Server in Docker**: All ML/GPU operations run in Docker for reproducibility and isolation
-- **Mothership as command center**: The native client (Mothership) provides a GUI to manage all aspects of the application - server control, client control, and configuration - without requiring command-line knowledge
-- **Unified design language**: The Mothership UI matches the Web UI's design language using the Tailwind CSS color palette (Material Design 3). Both interfaces share the same colors, typography principles, and visual hierarchy for a consistent user experience across platforms.
+- **Dashboard as command center**: The native client (Dashboard) provides a GUI to manage all aspects of the application - server control, client control, and configuration - without requiring command-line knowledge
+- **Auto-open on startup**: The Dashboard window opens automatically when the application starts on all platforms (KDE, GNOME, Windows), providing immediate access to the command center
+- **Unified logging**: Both client and dashboard processes write to a single log file (`dashboard.log`) for easier debugging
+- **Unified design language**: The Dashboard UI matches the Web UI's design language using the Tailwind CSS color palette (Material Design 3). Both interfaces share the same colors, typography principles, and visual hierarchy for a consistent user experience across platforms.
 - **Native clients**: System tray, microphone, clipboard require native access (can't be containerized)
 - **Single port**: Server exposes everything on port 8000 (API, WebSocket, static files)
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
@@ -262,7 +277,49 @@ The Mothership window has a persistent **navigation bar** at the top:
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD for robust speech detection
 - **Multi-device support with job protection**: Multiple clients can connect simultaneously, but only one transcription job runs at a time. The `TranscriptionJobTracker` ensures exclusive access across all methods (HTTP uploads, WebSocket streaming) and returns clear 409 Conflict errors when busy.
 - **Server-side cancellation**: Transcription jobs can be cancelled mid-processing via `/api/transcribe/cancel`. The cancellation flag is checked between Whisper segments for graceful termination.
-- **Global hotkeys**: Native clients support global keyboard shortcuts via XDG Desktop Portal (Wayland) or Windows keyboard library. Default shortcuts: Ctrl+Shift+R (start), Ctrl+Shift+S (stop), Ctrl+Shift+Esc (cancel).
+
+### Platform-Specific Architectures
+
+The native clients have different architectures based on platform constraints:
+
+| Platform | Architecture | UI Toolkit | Notes |
+|----------|--------------|------------|-------|
+| **KDE Plasma** | Single-process | PyQt6 | Tray and Dashboard share one process |
+| **Windows** | Single-process | PyQt6 | Same as KDE |
+| **GNOME** | Dual-process | GTK3 + GTK4 | Tray (GTK3) and Dashboard (GTK4) via D-Bus |
+
+**GNOME Dual-Process Design:**
+
+The GNOME client uses a dual-process architecture due to a fundamental GObject Introspection limitation: GTK3 and GTK4 cannot be loaded in the same Python process. Once `gi.require_version("Gtk", "3.0")` is called, attempting `gi.require_version("Gtk", "4.0")` raises `ValueError: Namespace Gtk is already loaded with version 3.0`.
+
+Since AppIndicator3 (required for GNOME tray icons) only works with GTK3, and libadwaita (for modern GNOME styling) requires GTK4, the solution is to run them in separate processes:
+
+1. **Tray Process** (`client/src/client/gnome/tray.py`):
+   - Uses GTK3 + AppIndicator3
+   - Handles system tray icon and menu
+   - Manages recording and server communication
+   - Exposes D-Bus service for IPC
+
+2. **Dashboard Process** (`client/src/client/gnome/dashboard_main.py`):
+   - Uses GTK4 + libadwaita (Adw)
+   - Spawned via subprocess when user clicks "Show App"
+   - Communicates with tray via D-Bus client
+   - Can still manage Docker server independently
+
+**D-Bus Interface** (`com.transcriptionsuite.Client`):
+```
+Methods:
+  StartClient(use_remote: bool) → (success: bool, message: str)
+  StopClient() → (success: bool, message: str)
+  GetClientStatus() → (state: str, server_host: str, is_connected: bool)
+  Reconnect() → (success: bool, message: str)
+  ShowSettings() → (success: bool)
+
+Signals:
+  ClientStateChanged(state: str)
+```
+
+Both platforms assume Wayland as the display server.
 
 ### Deployment Philosophy
 
@@ -400,7 +457,7 @@ A comprehensive code review was performed covering linting, security, and code q
    - Created `client/src/client/common/server_control_mixin.py` with ~150 lines of shared code
    - Extracted server control methods from KDE and GNOME tray implementations
    - Both tray classes now inherit from `ServerControlMixin`
-   - Methods moved: `_on_server_start_local`, `_on_server_start_remote`, `_on_server_stop`, `_on_server_status`, `_on_open_lazydocker`
+   - Methods moved: `_on_server_start_local`, `_on_server_start_remote`, `_on_server_stop`, `_on_server_status`
 
 9. **Logic: Threading Locks** *(January 2026)*
    - Added `_state_lock` to `orchestrator.py` to protect state variables
@@ -444,6 +501,50 @@ A comprehensive code review was performed covering linting, security, and code q
     - Added admin authorization tests in `server/backend/tests/test_admin_auth.py`
     - Tests validate CORS origin validation and admin endpoint protection
 
+17. **Bug Fix: GNOME Dashboard Startup** *(January 2026)*
+    - Fixed syntax error in `client/src/client/gnome/dashboard.py` that prevented Dashboard from launching
+    - The `View` enum class was incorrectly placed inside `_get_readme_path()` function
+    - Added missing `return None` statement and properly defined `View(Enum)` class
+    - Dashboard now spawns correctly when clicking "Show App" from tray
+
+18. **Feature: GNOME Dashboard UI Improvements** *(January 2026)*
+    - **About Dialog**: Updated buttons to match KDE version with proper styled buttons and icons
+      - Changed from flat buttons to framed buttons with icon+label layout
+      - Added proper spacing and alignment for better visual appearance
+      - Fixed profile picture loading with proper GdkPixbuf import and enhanced logging
+    - **Client Logs**: Implemented client log viewing functionality
+      - Reads from unified log file (`dashboard.log`) using `get_log_file()` from `logging_config`
+      - Displays last 200 lines of logs in LogWindow
+      - Replaces "Client logs not yet implemented" placeholder
+    - **Markdown Viewer**: Added styled markdown rendering for User Guide and Developer Guide
+      - Uses Gtk.TextView with TextTags for styled text rendering (WebKit removed due to crashes)
+      - Supports headings (h1-h3 with blue color and scaled font), inline code, and bold text
+      - Dark theme styling matching the Dashboard color scheme
+      - See item 19 for the WebKit crash fix details
+    - **Color Scheme**: Unified GNOME and KDE color schemes for consistent UI
+      - Client accent color updated from #E78FF5 to #D070D0 to match KDE
+      - Added comprehensive CSS documentation with all color definitions
+      - Enhanced button styling (primary, secondary) to match KDE appearance
+      - Added status color classes (warning, error, success, info)
+    - **Server Logs**: Fixed method name consistency (`get_logs()` instead of `get_server_logs()`)
+
+19. **Bug Fix: GNOME AppImage Assets and Dependencies** *(January 2026)*
+    - **Profile Picture**: Fixed missing profile picture in About dialog when running from AppImage
+      - Build script now copies `profile.png` and `logo.png` to AppImage at `usr/share/transcriptionsuite/assets/`
+      - Updated `_get_assets_path()` in `dashboard.py` to check `APPDIR` environment variable for AppImage
+    - **Markdown Viewer**: Fixed markdown library not being found at runtime in AppImage
+      - Updated launcher script `PYTHONPATH` to include bundled site-packages directory
+      - Now includes both `client/src` (source code) and root dist-packages (bundled dependencies)
+    - **WebKit Crash Fix**: Replaced WebKit rendering with plain text display
+      - WebKit 6.0 has known SIGTRAP crashes on Ubuntu 24.04 (native library issue)
+      - Attempted workaround with Gtk.TextView + TextTags was also problematic
+      - Final solution: Display README files as plain text in monospace font
+      - Simple, stable, no external dependencies, maximum compatibility
+      - Supports headings (h1-h3), inline code, and bold text formatting
+      - Removed WebKit dependency entirely from GNOME Dashboard
+    - **Python Version**: Updated `requires-python` constraint to `>=3.12,<3.14` to support Python 3.12+
+      - GNOME AppImage uses system Python, which is 3.12 on Ubuntu 24.04
+
 #### Security Analysis Summary
 
 - **Subprocess calls:** All use fixed command arrays (no shell injection risk)
@@ -452,6 +553,16 @@ A comprehensive code review was performed covering linting, security, and code q
 - **Authentication:** Token-based auth with proper middleware enforcement
 - **Path handling:** Uses `Path` objects; no string concatenation vulnerabilities
 - **CORS:** Origin validation protects against cross-origin attacks in both local and TLS modes
+
+#### Continuous Security Monitoring
+
+The project uses **GitHub CodeQL** for automated security analysis:
+- Runs on every push/PR to main branch
+- Weekly scheduled scans
+- Analyzes Python (server + client) and TypeScript (frontend)
+- Enabled query sets: `security-extended` and `security-and-quality`
+- Monitors for: SQL injection, XSS, authentication issues, token handling, path traversal, etc.
+- Results visible in the **Security** tab on GitHub
 
 ---
 
@@ -587,7 +698,6 @@ TranscriptionSuite/
 │   │   │   ├── api_client.py     # HTTP client, WebSocket, ServerBusyError handling
 │   │   │   ├── audio_recorder.py # PyAudio recording wrapper
 │   │   │   ├── docker_manager.py # Docker server control (start/stop/status)
-│   │   │   ├── hotkey_manager.py # Global hotkeys (XDG Portal, Windows keyboard)
 │   │   │   ├── orchestrator.py   # Main controller, state machine, error notifications
 │   │   │   ├── setup_wizard.py   # First-time setup wizard
 │   │   │   ├── tailscale_resolver.py # Tailscale IP fallback when DNS fails
@@ -595,9 +705,14 @@ TranscriptionSuite/
 │   │   │   ├── config.py         # Client configuration
 │   │   │   └── models.py         # Shared data models
 │   │   ├── kde/                  # KDE Plasma (PyQt6)
-│   │   │   └── tray.py           # Qt6 system tray implementation
-│   │   ├── gnome/                # GNOME (GTK + AppIndicator)
-│   │   │   ├── tray.py           # GTK/AppIndicator implementation
+│   │   │   ├── tray.py           # Qt6 system tray implementation
+│   │   │   ├── dashboard.py     # Dashboard command center window
+│   │   │   └── settings_dialog.py # PyQt6 settings dialog
+│   │   ├── gnome/                # GNOME (GTK3 tray + GTK4 Dashboard via D-Bus)
+│   │   │   ├── tray.py           # GTK3/AppIndicator tray + D-Bus service
+│   │   │   ├── dashboard.py     # GTK4/Adwaita Dashboard window
+│   │   │   ├── dashboard_main.py # Standalone entry point for GTK4 Dashboard
+│   │   │   ├── dbus_service.py   # D-Bus IPC (tray ↔ Dashboard communication)
 │   │   │   └── settings_dialog.py # GTK3 settings dialog
 │   │   ├── windows/              # Windows (PyQt6)
 │   │   │   └── tray.py           # Windows tray (same as KDE)
@@ -793,7 +908,7 @@ Set up all required Python virtual environments and audit NPM packages.
 
 ```bash
 cd client
-uv venv --python 3.11
+uv venv --python 3.12
 uv sync --extra kde    # For KDE/Plasma (PyQt6)
 # OR: uv sync --extra gnome   # For GNOME (GTK + AppIndicator)
 # OR: uv sync --extra windows # For Windows (PyQt6)
@@ -804,7 +919,7 @@ cd ..
 
 ```bash
 cd build
-uv venv --python 3.11
+uv venv --python 3.12
 uv sync    # Installs ruff, pyright, pytest, pyinstaller, etc.
 cd ..
 ```
@@ -878,107 +993,145 @@ docker compose build --no-cache
 
 ### Step 2.1: Publishing to GitHub Container Registry
 
-TranscriptionSuite uses **GitHub Actions** to automate Docker image builds and publishing to GitHub Container Registry (GHCR). This is the recommended approach for releases and sharing images.
+TranscriptionSuite uses a **local build-and-push script** to publish Docker images to GitHub Container Registry (GHCR). This approach was chosen because the Docker image is too large to build on GitHub Actions free runners (disk space limitations).
 
-#### Option 1: Automated Publishing with GitHub Actions (Recommended)
+#### Building and Publishing (Recommended Method)
 
-The repository includes a GitHub Actions workflow (`.github/workflows/docker-publish.yml`) that automatically builds and publishes Docker images to GHCR.
+Use the provided shell script from the project root:
 
-**Triggering Automated Builds:**
+```bash
+# Build and push as 'latest'
+./build/docker-build-push.sh
 
-1. **Release Tags (Automatic)** - Creates both versioned and `latest` tags:
+# Build and push a release version (creates both v0.3.0 and latest tags)
+./build/docker-build-push.sh v0.3.0
+
+# Build and push a custom tag (dev, test, etc.)
+./build/docker-build-push.sh dev
+```
+
+**What the script does:**
+1. Validates prerequisites (Docker installed, Dockerfile present)
+2. Builds the Docker image locally (first build: ~15-20 minutes)
+3. Tags the image appropriately
+4. Pushes to GHCR at `ghcr.io/homelab-00/transcriptionsuite-server`
+5. For release versions (v*.*.*), also tags as `latest`
+6. Cleans up dangling images
+
+**Prerequisites:**
+
+1. **Docker**: Ensure Docker is installed and running
    ```bash
-   # Create and push a release tag (e.g., v0.3.0)
-   git tag v0.3.0 -m "Release v0.3.0: Description of changes"
-   git push origin v0.3.0
-
-   # This creates TWO images on GHCR:
-   #   - ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0
-   #   - ghcr.io/homelab-00/transcriptionsuite-server:latest (updated)
+   docker --version
+   docker info  # Verify daemon is running
    ```
 
-2. **Manual Dispatch** - For ad-hoc builds with custom tags:
+2. **GHCR Authentication** (first time only):
    ```bash
-   # Install GitHub CLI (if not already installed)
-   # Arch Linux: sudo pacman -S github-cli
-   # Other distros: see https://github.com/cli/cli#installation
-
-   # Authenticate (first time only)
+   # Using GitHub CLI (recommended)
+   sudo pacman -S github-cli  # Arch Linux
    gh auth login
-
-   # Trigger a build with custom tag
-   gh workflow run docker-publish.yml --field tag=test
-
-   # Monitor the build progress
-   gh run watch
-
-   # View build logs
-   gh run list --workflow=docker-publish.yml
-   gh run view <run-id> --log
-   ```
-
-**Workflow Features:**
-- **Zero-config authentication**: Uses GitHub's auto-generated `GITHUB_TOKEN` (no manual PAT needed)
-- **Build caching**: First build takes ~15-20 minutes, subsequent builds ~5 minutes (70% faster)
-- **Multi-platform support**: Currently builds for `linux/amd64`, ready for `arm64` when needed
-- **Automatic tagging**: Release tags create both versioned (e.g., `v1.0.0`) and `latest` tags
-- **Build summary**: Each workflow run provides a detailed summary with pull commands
-
-**Monitoring Builds:**
-
-- **Web UI**: Check build status at https://github.com/homelab-00/TranscriptionSuite/actions
-- **Terminal**: Use `gh run watch` for real-time progress
-- **Notifications**: GitHub sends email notifications on build failures
-
-**First-Time Setup:**
-
-After your first automated build, make the package public so anyone can pull without authentication:
-1. Visit: https://github.com/homelab-00/TranscriptionSuite/pkgs/container/transcriptionsuite-server
-2. Click "Package settings" → Change visibility to "Public"
-
-#### Option 2: Manual Publishing (For Local Testing)
-
-For quick local builds or testing before pushing to production, you can manually push images:
-
-1. **Install GitHub CLI** (if using manual dispatch):
-   ```bash
-   # Arch Linux
-   sudo pacman -S github-cli
-
-   # Authenticate
-   gh auth login
-   ```
-
-2. **Build Locally**:
-   ```bash
-   cd server/docker
-   docker compose build
-   ```
-
-3. **Login to GHCR** (first time only):
-   ```bash
-   # Using GitHub CLI (recommended - uses your gh auth)
    gh auth token | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
    # OR using a Personal Access Token:
    echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
    ```
 
+   **Creating a Personal Access Token (PAT):**
+   - Visit: https://github.com/settings/tokens/new
+   - Required scopes: `write:packages`, `read:packages`, `delete:packages`
+   - Token expiration: Choose based on your security preferences (90 days recommended)
+
    **Security Tip**: To avoid storing credentials in plaintext (`~/.docker/config.json`), use a credential helper:
    - **Linux (KDE/GNOME)**: Install `docker-credential-secretservice` and set `"credsStore": "secretservice"` in `~/.docker/config.json`
    - **Windows/macOS**: Docker Desktop uses built-in helpers by default
 
-4. **Tag and Push**:
-   ```bash
-   # Push with custom tag for testing
-   docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest ghcr.io/homelab-00/transcriptionsuite-server:test
-   docker push ghcr.io/homelab-00/transcriptionsuite-server:test
+**Release Workflow Example:**
 
-   # Push as latest (use with caution - prefer GitHub Actions for this)
-   docker push ghcr.io/homelab-00/transcriptionsuite-server:latest
-   ```
+```bash
+# 1. Commit and tag your release
+git add .
+git commit -m "Release v0.3.0: Add new features"
+git tag v0.3.0 -m "Release v0.3.0"
+git push origin main
+git push origin v0.3.0
 
-**Note**: Manual pushes should be used for testing only. For production releases, use the automated GitHub Actions workflow to ensure consistent builds and proper versioning.
+# 2. Build and push Docker images
+./build/docker-build-push.sh v0.3.0
+# This creates TWO images on GHCR:
+#   - ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0
+#   - ghcr.io/homelab-00/transcriptionsuite-server:latest (updated)
+
+# 3. (First time only) Make the package public
+# Visit: https://github.com/homelab-00/TranscriptionSuite/pkgs/container/transcriptionsuite-server
+# Click "Package settings" → Change visibility to "Public"
+```
+
+**Script Output:**
+
+The script provides clear feedback throughout the process:
+- ✓ Prerequisites validation (Docker installed, Dockerfile present)
+- ✓ Build progress with timing (15-20 minutes first time, faster with cache)
+- ✓ Push status for each tag
+- ✓ Pull command for testing the published image
+- ✓ Cleanup of dangling images
+
+**Troubleshooting Docker Publishing:**
+
+**"Docker daemon is not running"**
+```bash
+sudo systemctl start docker
+```
+
+**"Authentication required" or login errors**
+```bash
+# Re-authenticate with GitHub
+gh auth login
+gh auth token | docker login ghcr.io -u YOUR_USERNAME --password-stdin
+```
+
+**"No space left on device" or disk space errors**
+```bash
+# Clean up Docker system
+docker system prune -a
+docker volume prune
+
+# Check available space
+df -h
+```
+
+**Build failures or layer caching issues**
+```bash
+# Try building without cache
+cd server/docker
+docker compose build --no-cache
+```
+
+**Image push fails with "denied: permission_denied"**
+- Verify your PAT has the required scopes: `write:packages`, `read:packages`, `delete:packages`
+- Check that you're logged in: `docker login ghcr.io`
+- Ensure the repository name matches: `ghcr.io/homelab-00/transcriptionsuite-server`
+
+**Alternative: GitHub Actions Workflow (Currently Disabled)**
+
+A GitHub Actions workflow exists at `.github/workflows/docker-publish.yml` but is currently disabled due to disk space limitations on free runners. The workflow file is kept as reference documentation and can be re-enabled if:
+- GitHub provides larger free runners in the future
+- You use self-hosted runners with sufficient disk space (50GB+ recommended)
+- The Docker image size is significantly reduced
+
+To re-enable, edit the workflow file and uncomment the triggers section.
+
+#### Manual Build Without Script (For Testing)
+
+#### Manual Build Without Script (For Testing)
+
+For quick local testing without pushing to GHCR:
+
+```bash
+cd server/docker
+docker compose build
+docker compose up -d
+```
 
 ### Step 3: Run Client Locally
 
@@ -997,7 +1150,7 @@ docker compose up -d
   - ~2.3s: PyTorch import for GPU detection
   - ~6s: Whisper model loading into GPU memory (~3GB VRAM)
 - On first run, an admin token is auto-generated and printed to the console logs - **save this token!** (as noted elsewhere on this file, you should wait ~10s and then run `docker compose logs | grep "Admin Token:"` to see this token)
-- Check logs: `docker compose logs -f` (or just use `lazydocker`)
+- Check logs: `docker compose logs -f`
 - Monitor GPU VRAM with `nvidia-smi` to see model loading progress
 
 #### 3.2 Run the Client
@@ -1065,7 +1218,7 @@ A single environment for linting, type-checking, testing, and packaging:
 
 ```bash
 cd build
-uv venv --python 3.11
+uv venv --python 3.12
 uv sync    # Installs ruff, pyright, pytest, pyinstaller, etc.
 ```
 
@@ -1094,7 +1247,7 @@ All builds require the build tools environment:
 
 ```bash
 cd build
-uv venv --python 3.11
+uv venv --python 3.12
 uv sync    # Installs PyInstaller, build, ruff, pytest, etc.
 ```
 
@@ -1105,7 +1258,7 @@ This creates `build/.venv` containing packaging tools isolated from runtime depe
 | Platform | Method | Output | Target System Requirements |
 |----------|--------|--------|---------------------------|
 | **KDE (Linux)** | PyInstaller + AppImage | Fully standalone | None |
-| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.11+, GTK3, AppIndicator3 |
+| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.12+, GTK3, AppIndicator3 |
 | **Windows** | PyInstaller | Fully standalone | None |
 
 ### KDE AppImage (Linux)
@@ -1141,11 +1294,12 @@ chmod +x TranscriptionSuite-KDE-x86_64.AppImage
 ### GNOME AppImage (Linux)
 
 **What it does:**
-1. Copies client source code into AppImage structure (no PyInstaller)
-2. Creates a launcher script that validates system dependencies at runtime
-3. Sets `PYTHONPATH` to include bundled source
-4. Automatically rescales `build/assets/logo.png` (1024×1024 → 256×256) for AppImage icon
-5. Packages into `.AppImage` for easier distribution
+1. Copies client source code and pure Python dependencies (markdown, pyyaml, etc.) into AppImage structure (no PyInstaller)
+2. Copies assets (profile.png, logo.png) for About dialog and Help menu
+3. Creates a launcher script that validates system dependencies at runtime
+4. Sets `PYTHONPATH` to include both bundled source and site-packages
+5. Automatically rescales `build/assets/logo.png` (1024×1024 → 256×256) for AppImage icon
+6. Packages into `.AppImage` for easier distribution
 
 **Features:**
 - GTK3-based settings dialog (Connection, Audio, Behavior tabs)
@@ -1166,7 +1320,7 @@ PyInstaller cannot reliably bundle these, and attempts usually result in broken 
 **Requirements:**
 - Build system: Linux with `appimagetool` and ImageMagick (`magick` or `convert`)
 - `build/assets/logo.png` (1024×1024) must exist
-- Target system: Python 3.11+, GTK3, libappindicator-gtk3, python-gobject, python-numpy, python-aiohttp
+- Target system: Python 3.12+, GTK3, libappindicator-gtk3, python-gobject, python-numpy, python-aiohttp
 
 **Build:**
 
@@ -1234,7 +1388,7 @@ sudo dnf install python3 gtk3 libappindicator-gtk3 python3-gobject python3-numpy
 2. **Set up the build environment:**
    ```powershell
    cd build
-   uv venv --python 3.11
+   uv venv --python 3.12
    uv sync
    cd ..
    ```
@@ -1436,7 +1590,7 @@ The Dockerfile uses `ubuntu:22.04` as the base image instead of `nvidia/cuda:12.
 
 The system CUDA libraries from the nvidia/cuda base image were unused since the Dockerfile already configured:
 ```dockerfile
-ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
 This prioritizes PyTorch's bundled libraries, making the base image's CUDA installation redundant.
@@ -1767,7 +1921,7 @@ The server includes optional timing instrumentation in `entrypoint.py` and `main
 #### Setting Up the Development Environment
 
 **Prerequisites:**
-- Python 3.11+
+- Python 3.12+
 - CUDA 12.8 (for GPU acceleration)
 - `uv` package manager
 
@@ -1775,7 +1929,7 @@ The server includes optional timing instrumentation in `entrypoint.py` and `main
 
 ```bash
 cd server/backend
-uv venv --python 3.11
+uv venv --python 3.12
 uv sync                    # Install all dependencies including diarization
 ```
 
@@ -2196,7 +2350,7 @@ Edit `logging/setup.py` for custom formatters, handlers, or log levels.
 
 ```bash
 cd client
-uv venv --python 3.11
+uv venv --python 3.12
 uv sync --extra kde    # or --extra gnome / --extra windows
 
 uv run transcription-client --host localhost --port 8000
@@ -2234,18 +2388,18 @@ uv run transcription-client --host <host> --port 8443 --https --verbose
 - SSL/TLS certificate validation details
 - Detailed connection error messages with troubleshooting hints
 - HTTP request/response logging
-- File-based logs at `~/.config/TranscriptionSuite/logs/client.log`
-- Log rotation (5MB per file, 3 backups retained)
+- File-based logs at `~/.config/TranscriptionSuite/dashboard.log`
+- Unified logging for both client and dashboard processes
 
 **Log locations by platform:**
 
-| Platform | Log Directory |
-|----------|--------------|
-| Linux | `~/.config/TranscriptionSuite/logs/` |
-| macOS | `~/Library/Application Support/TranscriptionSuite/logs/` |
-| Windows | `%APPDATA%\TranscriptionSuite\logs\` |
+| Platform | Log File |
+|----------|----------|
+| Linux | `~/.config/TranscriptionSuite/dashboard.log` |
+| macOS | `~/Library/Application Support/TranscriptionSuite/dashboard.log` |
+| Windows | `%APPDATA%\TranscriptionSuite\dashboard.log` |
 
-**Note:** Logs are written to files even in packaged versions (AppImage, .exe).
+**Note:** Logs are written to files even in packaged versions (AppImage, .exe). The log file is wiped on each startup for clean debugging.
 
 ### Troubleshooting Tailscale HTTPS
 
@@ -2970,12 +3124,6 @@ ui:
   start_minimized: false       # Start with tray icon only (no window)
   left_click: start_recording  # Left-click action: start_recording | show_menu
   middle_click: stop_transcribe # Middle-click: stop_transcribe | cancel_recording | none
-
-hotkeys:
-  enabled: true                # Enable global keyboard shortcuts
-  start_recording: CTRL+SHIFT+R    # Start long-form recording
-  stop_recording: CTRL+SHIFT+S     # Stop recording and transcribe
-  cancel: CTRL+SHIFT+Escape        # Cancel recording or transcription
 ```
 
 **Key Configuration Concepts:**
@@ -3034,20 +3182,6 @@ uv run transcription-client --token "your_admin_token_here"
 ```
 
 Tokens are used in `Authorization: Bearer <token>` headers for API authentication.
-
-**5. Global Hotkeys:**
-
-Global keyboard shortcuts are supported on:
-- **Linux Wayland**: KDE Plasma 5.27+, GNOME 48+ (via XDG Desktop Portal)
-- **Windows**: Windows 10/11 (via keyboard library)
-
-On first use, Wayland users will see a desktop environment dialog to confirm/customize shortcuts. The shortcuts persist in your DE settings.
-
-**Platform Requirements:**
-- **Linux**: `dbus-python` and `PyGObject` (included in KDE/GNOME extras)
-- **Windows**: `keyboard` library (included in Windows extra)
-
-If hotkeys are not available on your platform, the client will log a message and continue without them. Set `hotkeys.enabled: false` to disable the feature entirely.
 
 ### Native Development Configuration
 
@@ -3355,7 +3489,7 @@ This means the cuDNN libraries cannot be found. The `faster-whisper` library use
 **Current Architecture:** The Dockerfile uses a minimal `ubuntu:22.04` base image and PyTorch pip packages that bundle their own CUDA/cuDNN libraries (~4.1 GB). These are prioritized via `LD_LIBRARY_PATH`:
 
 ```dockerfile
-ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
 **If you encounter this error**, rebuild the container to ensure the environment is correctly configured:
@@ -3382,7 +3516,7 @@ This occurs when PyTorch expects a different cuDNN version than what's being loa
 
 ```dockerfile
 # Prioritize PyTorch's bundled cuDNN
-ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
 **Key Points**:
@@ -3441,7 +3575,6 @@ Install the AppIndicator extension:
 
 **Workaround:**
 - Use the menu to start recording: Click tray icon → "Start Recording"
-- Or use keyboard shortcuts if configured in your system
 
 **Technical Details:**
 - KDE and Windows clients use `QSystemTrayIcon.activated` signal for click detection
@@ -3506,7 +3639,7 @@ ls -la ~/.config/TranscriptionSuite/logs/
 
 ### Server (Docker)
 
-- Python 3.11
+- Python 3.12
 - FastAPI + Uvicorn
 - faster-whisper (CTranslate2 backend)
 - PyAnnote Audio 4.0.3+ (for speaker diarization)
@@ -3524,7 +3657,7 @@ ls -la ~/.config/TranscriptionSuite/logs/
 
 ### Client
 
-- Python 3.11
+- Python 3.12
 - aiohttp (async HTTP client)
 - PyAudio (audio recording)
 - PyQt6 (KDE/Windows) or GTK3+AppIndicator (GNOME)

@@ -4,10 +4,15 @@ GNOME system tray implementation using GTK + AppIndicator.
 Provides system tray integration for GNOME desktop.
 Requires the AppIndicator GNOME extension to be installed.
 Based on the architecture from NATIVE_CLIENT/tray/gtk4_tray.py.
+
+NOTE: The tray uses GTK3 + AppIndicator3 because AppIndicator doesn't have
+a GTK4 version. The Dashboard window uses GTK4/Adwaita for modern look.
 """
 
 import logging
+import os
 import subprocess
+import sys
 from typing import TYPE_CHECKING, Any, Optional
 
 from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
@@ -20,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Try to import GTK
+# Try to import GTK3 for tray (AppIndicator3 requires GTK3)
 HAS_GTK = False
 try:
     import gi
@@ -36,6 +41,10 @@ except (ImportError, ValueError):
     Gdk = None  # type: ignore
     GLib = None  # type: ignore
     Gtk = None  # type: ignore
+
+# NOTE: GTK4/Adwaita imports removed - GTK3 and GTK4 cannot coexist in the
+# same Python process. The Dashboard (GTK4) runs as a separate subprocess.
+# See dashboard_main.py and dbus_service.py for the IPC architecture.
 
 
 class GtkTray(ServerControlMixin, AbstractTray):
@@ -77,10 +86,16 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.start_item: Optional[Any] = None
         self.stop_item: Optional[Any] = None
         self.cancel_item: Optional[Any] = None
-        self.reconnect_item: Optional[Any] = None
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
+
+        # Dashboard process tracking (runs as separate GTK4 process)
+        self._dashboard_process: Optional[subprocess.Popen] = None
+
+        # D-Bus service for IPC with Dashboard
+        self._dbus_service: Optional[Any] = None
+        self._init_dbus_service()
 
         # Create menu
         self._setup_menu()
@@ -123,61 +138,10 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Web interface
-        notebook_item = Gtk.MenuItem(label="Open Audio Notebook")
-        notebook_item.connect(
-            "activate", lambda _: self._trigger_callback(TrayAction.OPEN_AUDIO_NOTEBOOK)
-        )
-        menu.append(notebook_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        # Docker Server Control submenu
-        server_item = Gtk.MenuItem(label="Docker Server")
-        server_submenu = Gtk.Menu()
-
-        start_local_item = Gtk.MenuItem(label="Start Server (Local)")
-        start_local_item.connect("activate", lambda _: self._on_server_start_local())
-        server_submenu.append(start_local_item)
-
-        start_remote_item = Gtk.MenuItem(label="Start Server (Remote)")
-        start_remote_item.connect("activate", lambda _: self._on_server_start_remote())
-        server_submenu.append(start_remote_item)
-
-        stop_server_item = Gtk.MenuItem(label="Stop Server")
-        stop_server_item.connect("activate", lambda _: self._on_server_stop())
-        server_submenu.append(stop_server_item)
-
-        server_submenu.append(Gtk.SeparatorMenuItem())
-
-        status_item = Gtk.MenuItem(label="Check Status")
-        status_item.connect("activate", lambda _: self._on_server_status())
-        server_submenu.append(status_item)
-
-        server_submenu.append(Gtk.SeparatorMenuItem())
-
-        lazydocker_item = Gtk.MenuItem(label="Open lazydocker")
-        lazydocker_item.connect("activate", lambda _: self._on_open_lazydocker())
-        server_submenu.append(lazydocker_item)
-
-        server_item.set_submenu(server_submenu)
-        menu.append(server_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        # Reconnect
-        self.reconnect_item = Gtk.MenuItem(label="Reconnect")
-        self.reconnect_item.connect(
-            "activate", lambda _: self._trigger_callback(TrayAction.RECONNECT)
-        )
-        menu.append(self.reconnect_item)
-
-        # Settings
-        settings_item = Gtk.MenuItem(label="Settings...")
-        settings_item.connect(
-            "activate", lambda _: self._trigger_callback(TrayAction.SETTINGS)
-        )
-        menu.append(settings_item)
+        # Show App (opens Dashboard window)
+        show_app_item = Gtk.MenuItem(label="Show App")
+        show_app_item.connect("activate", lambda _: self._show_dashboard())
+        menu.append(show_app_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -218,12 +182,12 @@ class GtkTray(ServerControlMixin, AbstractTray):
             }
             self.cancel_item.set_sensitive(state in cancellable_states)
 
-        # Update reconnect visibility
-        if self.reconnect_item:
-            if state == TrayState.DISCONNECTED:
-                self.reconnect_item.show()
-            else:
-                self.reconnect_item.hide()
+        # Emit D-Bus signal for Dashboard to track state
+        if self._dbus_service:
+            try:
+                self._dbus_service.emit_state_changed(state.name)
+            except Exception as e:
+                logger.debug(f"Failed to emit D-Bus state signal: {e}")
 
         return False  # Don't repeat
 
@@ -245,12 +209,204 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
     def run(self) -> None:
         """Start the GTK main loop."""
+        # Show Dashboard window on startup (matches KDE behavior)
+        GLib.idle_add(self._show_dashboard)
         Gtk.main()
 
     def quit(self) -> None:
         """Exit the application."""
+        # Clean up Dashboard subprocess if running
+        if self._dashboard_process:
+            try:
+                self._dashboard_process.terminate()
+                self._dashboard_process.wait(timeout=2)
+            except Exception as e:
+                logger.debug(f"Error terminating Dashboard process: {e}")
+            self._dashboard_process = None
+
+        # Stop D-Bus service
+        if self._dbus_service:
+            try:
+                self._dbus_service.stop()
+            except Exception as e:
+                logger.debug(f"Error stopping D-Bus service: {e}")
+            self._dbus_service = None
+
         self._trigger_callback(TrayAction.QUIT)
         Gtk.main_quit()
+
+    def _init_dbus_service(self) -> None:
+        """Initialize the D-Bus service for IPC with Dashboard."""
+        try:
+            from client.gnome.dbus_service import TranscriptionSuiteDBusService
+
+            self._dbus_service = TranscriptionSuiteDBusService(
+                on_start_client=self._dbus_start_client,
+                on_stop_client=self._dbus_stop_client,
+                on_get_status=self._dbus_get_status,
+                on_reconnect=self._dbus_reconnect,
+                on_show_settings=self._dbus_show_settings,
+            )
+            logger.info("D-Bus service initialized for Dashboard IPC")
+        except Exception as e:
+            logger.warning(f"Failed to initialize D-Bus service: {e}")
+            self._dbus_service = None
+
+    def _dbus_start_client(self, use_remote: bool) -> tuple[bool, str]:
+        """D-Bus callback: Start the transcription client."""
+        try:
+            if use_remote:
+                self.config.set("server", "use_remote", value=True)
+                self.config.set("server", "use_https", value=True)
+                self.config.set("server", "port", value=8443)
+            else:
+                self.config.set("server", "use_remote", value=False)
+                self.config.set("server", "use_https", value=False)
+                self.config.set("server", "port", value=8000)
+            self.config.save()
+            self._trigger_callback(TrayAction.RECONNECT)
+            return True, "Client starting..."
+        except Exception as e:
+            logger.error(f"Failed to start client via D-Bus: {e}")
+            return False, str(e)
+
+    def _dbus_stop_client(self) -> tuple[bool, str]:
+        """D-Bus callback: Stop the transcription client."""
+        # Note: There's no direct "stop client" action, but we can trigger disconnect
+        # For now, return a message indicating manual stop is needed
+        return True, "Use tray menu to stop recording"
+
+    def _dbus_get_status(self) -> tuple[str, str, bool]:
+        """D-Bus callback: Get client status."""
+        state = self.state.name if self.state else "UNKNOWN"
+        host = ""
+        connected = False
+
+        if self.config:
+            use_remote = self.config.get("server", "use_remote", default=False)
+            if use_remote:
+                host = self.config.get("server", "remote_host", default="")
+            else:
+                host = "localhost"
+            connected = self.state in (
+                TrayState.STANDBY,
+                TrayState.RECORDING,
+                TrayState.UPLOADING,
+                TrayState.TRANSCRIBING,
+            )
+
+        return state, host, connected
+
+    def _dbus_reconnect(self) -> tuple[bool, str]:
+        """D-Bus callback: Reconnect to server."""
+        try:
+            self._trigger_callback(TrayAction.RECONNECT)
+            return True, "Reconnecting..."
+        except Exception as e:
+            return False, str(e)
+
+    def _dbus_show_settings(self) -> bool:
+        """D-Bus callback: Show settings dialog."""
+        try:
+            GLib.idle_add(self.show_settings_dialog)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to show settings via D-Bus: {e}")
+            return False
+
+    def _show_dashboard(self) -> None:
+        """Show the Dashboard command center window (spawns separate GTK4 process)."""
+        import sys
+
+        # Check if Dashboard process is already running
+        if self._dashboard_process:
+            poll = self._dashboard_process.poll()
+            if poll is None:
+                # Process still running - try to present existing window
+                if self._present_dashboard_window():
+                    logger.debug("Existing Dashboard window presented")
+                    return
+
+                logger.debug(
+                    "Dashboard process running but present attempt failed; "
+                    "showing fallback notification"
+                )
+                self.show_notification(
+                    "TranscriptionSuite",
+                    "Dashboard is running; click its icon if the window stays hidden.",
+                )
+                return
+
+        # Spawn Dashboard as separate process (GTK4 cannot coexist with GTK3)
+        try:
+            # Use the same Python interpreter to run dashboard_main
+            cmd = [sys.executable, "-m", "client.gnome.dashboard_main"]
+
+            # Add config path if available
+            if self.config and hasattr(self.config, "_config_path"):
+                config_path = self.config._config_path
+                if config_path:
+                    cmd.extend(["--config", str(config_path)])
+
+            logger.info(f"Spawning Dashboard process: {' '.join(cmd)}")
+
+            # Inherit PYTHONPATH from current process so the module can be imported
+            env = os.environ.copy()
+
+            # Dashboard now uses unified logging (dashboard.log)
+            # No need for separate log file - just inherit stdout/stderr
+            self._dashboard_process = subprocess.Popen(
+                cmd,
+                start_new_session=True,  # Detach from parent process group
+                stdout=subprocess.DEVNULL,  # Output goes to shared log file
+                stderr=subprocess.DEVNULL,
+                env=env,
+            )
+            logger.info(
+                f"Dashboard process started (PID: {self._dashboard_process.pid})"
+            )
+
+        except FileNotFoundError as e:
+            logger.error(f"Failed to launch Dashboard - Python not found: {e}")
+            self.show_notification(
+                "Show App",
+                "Error: Could not find Python interpreter",
+            )
+        except Exception as e:
+            logger.error(f"Failed to launch Dashboard: {e}")
+            self.show_notification("Show App", f"Error: {e}")
+
+    def _present_dashboard_window(self) -> bool:
+        """Attempt to focus an already-running Dashboard window."""
+
+        commands = [
+            ["gapplication", "launch", "com.transcriptionsuite.dashboard"],
+            ["gio", "launch", "com.transcriptionsuite.dashboard"],
+        ]
+
+        for cmd in commands:
+            try:
+                subprocess.run(cmd, check=True, timeout=5)
+                return True
+            except FileNotFoundError:
+                logger.debug(f"Focus helper not available: {' '.join(cmd)}")
+            except subprocess.CalledProcessError as exc:
+                logger.warning(
+                    "Focus helper %s exited with %s", " ".join(cmd), exc.returncode
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("Focus helper %s timed out", " ".join(cmd))
+
+        return False
+
+    def _on_dashboard_start_client(self, use_remote: bool) -> None:
+        """Callback when Dashboard requests to start client (legacy, kept for compatibility)."""
+        self._trigger_callback(TrayAction.RECONNECT)
+
+    def _on_dashboard_stop_client(self) -> None:
+        """Callback when Dashboard requests to stop client (legacy, kept for compatibility)."""
+        # Note: The orchestrator will handle disconnection
+        pass
 
     def open_file_dialog(
         self, title: str, filetypes: list[tuple[str, str]]
@@ -338,7 +494,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
     # Server control methods are provided by ServerControlMixin
     # (_on_server_start_local, _on_server_start_remote, _on_server_stop,
-    #  _on_server_status, _on_open_lazydocker)
+    #  _on_server_status)
 
     def _run_server_operation(self, operation, progress_msg: str) -> None:
         """Run a Docker server operation with notification feedback."""
@@ -372,9 +528,11 @@ def run_tray(config) -> int:
 
     try:
         tray = GtkTray(config=config)
+        # Check if user wants to auto-start client when app launches
+        auto_start = config.get("behavior", "auto_start_client", default=False)
         orchestrator = ClientOrchestrator(
             config=config,
-            auto_connect=True,
+            auto_connect=auto_start,
             auto_copy_clipboard=config.get("clipboard", "auto_copy", default=True),
         )
         orchestrator.start(tray)

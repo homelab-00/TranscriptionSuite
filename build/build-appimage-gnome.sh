@@ -2,6 +2,12 @@
 # Build AppImage for TranscriptionSuite GNOME client
 # Note: GNOME client uses GTK which is harder to bundle in AppImage
 # This creates a "portable" package that expects GTK to be installed on the system
+#
+# Architecture Note:
+# The GNOME client uses a dual-process architecture because GTK3 (AppIndicator3)
+# and GTK4 (libadwaita) cannot coexist in the same Python process. The tray runs
+# with GTK3, and the Dashboard window spawns as a separate GTK4 process.
+# Communication between them happens via D-Bus.
 
 set -e
 
@@ -14,7 +20,7 @@ echo "=================================================="
 echo "Building TranscriptionSuite GNOME Package"
 echo "=================================================="
 echo ""
-echo "NOTE: The GNOME client requires system GTK3 and AppIndicator."
+echo "NOTE: The GNOME client requires system GTK3, GTK4, and AppIndicator."
 echo "This builds a portable package, not a fully standalone AppImage."
 echo ""
 
@@ -70,26 +76,53 @@ fi
 echo "→ Copying client code..."
 cp -r "$PROJECT_ROOT/client" "$BUILD_DIR/AppDir/usr/lib/python3/dist-packages/"
 
+# Copy README files for Help menu (to AppDir root and share directory)
+echo "→ Copying README files..."
+cp "$PROJECT_ROOT/README.md" "$BUILD_DIR/AppDir/"
+cp "$PROJECT_ROOT/README_DEV.md" "$BUILD_DIR/AppDir/"
+mkdir -p "$BUILD_DIR/AppDir/usr/share/transcriptionsuite"
+cp "$PROJECT_ROOT/README.md" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
+cp "$PROJECT_ROOT/README_DEV.md" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
+
+# Copy assets for About dialog (profile picture, logo)
+echo "→ Copying assets..."
+mkdir -p "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets"
+cp "$PROJECT_ROOT/build/assets/profile.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
+cp "$PROJECT_ROOT/build/assets/logo.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
+
 # Create launcher script that uses system Python with GTK
 cat > "$BUILD_DIR/AppDir/usr/bin/transcriptionsuite-gnome" << 'EOF'
 #!/bin/bash
 # TranscriptionSuite GNOME Launcher
-# Requires: python3, python3-gi, gir1.2-appindicator3-0.1, python3-pyaudio
+# Requires: python3, python3-gi, gir1.2-appindicator3-0.1, gir1.2-adw-1
 
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
 APP_DIR="${HERE}/../lib/python3/dist-packages"
 
-# Check dependencies
+# Check GTK3 + AppIndicator3 dependencies (for tray)
 python3 -c "import gi; gi.require_version('Gtk', '3.0'); gi.require_version('AppIndicator3', '0.1')" 2>/dev/null
 if [[ $? -ne 0 ]]; then
-    echo "Error: Missing GTK3 or AppIndicator3 dependencies."
+    echo "Error: Missing GTK3 or AppIndicator3 dependencies (required for tray)."
     echo ""
     echo "Install with:"
     echo "  Arch Linux: sudo pacman -S gtk3 libappindicator-gtk3 python-gobject"
     echo "  Ubuntu/Debian: sudo apt install python3-gi gir1.2-appindicator3-0.1"
     echo "  Fedora: sudo dnf install gtk3 libappindicator-gtk3 python3-gobject"
     exit 1
+fi
+
+# Check GTK4 + libadwaita dependencies (for Dashboard window)
+python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')" 2>/dev/null
+if [[ $? -ne 0 ]]; then
+    echo "Warning: GTK4/libadwaita not available. Dashboard window will not work."
+    echo ""
+    echo "Install with:"
+    echo "  Arch Linux: sudo pacman -S gtk4 libadwaita"
+    echo "  Ubuntu/Debian: sudo apt install gir1.2-adw-1 gir1.2-gtk-4.0"
+    echo "  Fedora: sudo dnf install gtk4 libadwaita"
+    echo ""
+    echo "The tray will still work, but 'Show App' will be unavailable."
 fi
 
 # Check for packages with compiled extensions (required, can't be bundled)
@@ -115,7 +148,10 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-export PYTHONPATH="${APP_DIR}/client/src:${PYTHONPATH}"
+# Add bundled packages to PYTHONPATH:
+# - client/src: client source code
+# - dist-packages: bundled Python dependencies (markdown, pyyaml, etc.)
+export PYTHONPATH="${APP_DIR}/client/src:${APP_DIR}:${PYTHONPATH}"
 exec python3 -m client "$@"
 EOF
 chmod +x "$BUILD_DIR/AppDir/usr/bin/transcriptionsuite-gnome"
@@ -130,6 +166,7 @@ Exec=transcriptionsuite-gnome
 Icon=transcriptionsuite
 Categories=AudioVideo;Audio;Utility;
 Terminal=false
+StartupWMClass=com.transcriptionsuite.dashboard
 EOF
 
 cp "$BUILD_DIR/AppDir/transcriptionsuite-gnome.desktop" \
@@ -160,6 +197,14 @@ $MAGICK_CMD "$PROJECT_ROOT/build/assets/logo.png" -resize 256x256 \
 cp "$BUILD_DIR/AppDir/transcriptionsuite.png" \
    "$BUILD_DIR/AppDir/usr/share/icons/hicolor/256x256/apps/"
 
+# Also create a symlink with .DirIcon for AppImage standard
+ln -sf transcriptionsuite.png "$BUILD_DIR/AppDir/.DirIcon"
+
+# Copy icon to pixmaps as well (some systems look there)
+mkdir -p "$BUILD_DIR/AppDir/usr/share/pixmaps"
+cp "$BUILD_DIR/AppDir/transcriptionsuite.png" \
+   "$BUILD_DIR/AppDir/usr/share/pixmaps/"
+
 # Create AppRun
 cat > "$BUILD_DIR/AppDir/AppRun" << 'EOF'
 #!/bin/bash
@@ -179,8 +224,11 @@ echo "=================================================="
 echo "✓ AppImage created: $DIST_DIR/TranscriptionSuite-GNOME-x86_64.AppImage"
 echo ""
 echo "NOTE: This AppImage requires system packages:"
-echo "  - GTK3 and AppIndicator3 (for UI)"
+echo "  - GTK3 and AppIndicator3 (for tray icon)"
+echo "  - GTK4 and libadwaita (for Dashboard window)"
 echo "  - python3-numpy (for audio processing)"
 echo "  - python3-aiohttp (for HTTP client)"
-echo "It is NOT fully standalone like the KDE version."
+echo ""
+echo "The tray (GTK3) and Dashboard (GTK4) run as separate processes"
+echo "and communicate via D-Bus."
 echo "=================================================="

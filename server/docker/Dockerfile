@@ -27,7 +27,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Python Builder (with build dependencies)
 # =============================================================================
-FROM ubuntu:22.04 AS python-builder
+FROM ubuntu:24.04 AS python-builder
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -37,9 +37,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Install build dependencies (will be removed in final stage)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    python3.11 \
-    python3.11-venv \
-    python3.11-dev \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
     python3-pip \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -51,7 +51,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="/usr/
 WORKDIR /app
 
 # Configure uv to use system Python and target venv location
-ENV UV_PYTHON=python3.11
+ENV UV_PYTHON=python3.12
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/.venv"
@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # =============================================================================
 # Stage 3: Python Runtime (minimal, without build dependencies)
 # =============================================================================
-FROM ubuntu:22.04 AS runtime
+FROM ubuntu:24.04 AS runtime
 
 # GitHub Container Registry label
 LABEL org.opencontainers.image.source=https://github.com/homelab-00/TranscriptionSuite
@@ -79,8 +79,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install only runtime dependencies (no build-essential, no python-dev)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-venv \
+    python3.12 \
+    python3.12-venv \
     ffmpeg \
     libavcodec-dev \
     libavformat-dev \
@@ -94,13 +94,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
-RUN useradd -m -u 1000 -s /bin/bash appuser
+# Don't specify UID to avoid conflicts - let the system assign one
+RUN useradd -m -s /bin/bash appuser
 
 # Create app directory
 WORKDIR /app
 
 # Configure Python environment
-ENV UV_PYTHON=python3.11
+ENV UV_PYTHON=python3.12
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/.venv"
@@ -130,7 +131,7 @@ ENV SERVER_PORT=8000
 ENV LOG_LEVEL=INFO
 ENV HF_HOME=/models
 # Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
-ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/torch/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/torch/lib:$LD_LIBRARY_PATH
 
 # Expose port
 EXPOSE 8000

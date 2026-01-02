@@ -1,7 +1,7 @@
 """
-Mothership - Main control window for TranscriptionSuite.
+Dashboard - Main control window for TranscriptionSuite.
 
-The Mothership is the command center for managing both the Docker server
+The Dashboard is the command center for managing both the Docker server
 and the transcription client. It provides a unified GUI for:
 - Starting/stopping the Docker server (local or remote mode)
 - Starting/stopping the transcription client
@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -64,30 +65,76 @@ def _get_assets_path() -> Path:
 
 
 def _get_readme_path(dev: bool = False) -> Path | None:
-    """Get the path to README.md or README_DEV.md, handling both dev and bundled modes."""
+    """Get the path to README.md or README_DEV.md.
+
+    Handles multiple scenarios:
+    - AppImage (looks in AppDir - checked even when not frozen)
+    - PyInstaller bundle (looks in _MEIPASS)
+    - Running from source (searches parent directories)
+    - Current working directory (fallback)
+    """
+    import os
     import sys
 
     filename = "README_DEV.md" if dev else "README.md"
 
-    # Check if running as PyInstaller bundle
+    # List of potential paths to check (in order of priority)
+    paths_to_check: list[Path] = []
+
+    # 1. AppImage root directory (APPDIR is set by AppImage runtime)
+    if "APPDIR" in os.environ:
+        appdir = Path(os.environ["APPDIR"])
+        logger.debug(f"Checking AppImage APPDIR: {appdir}")
+        paths_to_check.extend(
+            [
+                appdir / filename,
+                appdir / "usr" / "share" / "transcriptionsuite" / filename,
+            ]
+        )
+
+    # 2. PyInstaller bundle (_MEIPASS)
     if getattr(sys, "frozen", False):
         bundle_dir = Path(sys._MEIPASS)  # type: ignore
-        readme = bundle_dir / filename
-        if readme.exists():
-            return readme
-        return None
-    else:
-        # Running from source - find repo root
-        current = Path(__file__).resolve()
-        for parent in current.parents:
-            readme = parent / filename
-            if readme.exists():
-                return readme
-        return None
+        logger.debug(f"Checking PyInstaller bundle: {bundle_dir}")
+        paths_to_check.extend(
+            [
+                bundle_dir / filename,
+                bundle_dir / "docs" / filename,
+                bundle_dir / "src" / "client" / filename,
+            ]
+        )
+
+    # 3. Running from source - find repo root
+    current = Path(__file__).resolve()
+    logger.debug(f"Searching from module path: {current}")
+    for parent in current.parents:
+        if (parent / "README.md").exists():
+            # Found project root
+            paths_to_check.insert(0, parent / filename)
+            logger.debug(f"Found project root at: {parent}")
+            break
+        paths_to_check.append(parent / filename)
+
+    # 4. Current working directory (fallback)
+    paths_to_check.append(Path.cwd() / filename)
+
+    # Check all paths and return first existing one
+    logger.debug(
+        f"Searching for {filename} in paths: {[str(p) for p in paths_to_check[:5]]}..."
+    )
+    for path in paths_to_check:
+        if path.exists():
+            logger.info(f"Found {filename} at: {path}")
+            return path
+
+    logger.error(
+        f"Could not find {filename} in any expected location. Searched {len(paths_to_check)} paths."
+    )
+    return None
 
 
 class View(Enum):
-    """Available views in the Mothership."""
+    """Available views in the Dashboard."""
 
     WELCOME = auto()
     SERVER = auto()
@@ -154,7 +201,7 @@ class LogWindow(QMainWindow):
         self._log_view.clear()
 
     def _apply_styles(self) -> None:
-        """Apply dark theme matching the Mothership UI."""
+        """Apply dark theme matching the Dashboard UI."""
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #121212;
@@ -167,9 +214,9 @@ class LogWindow(QMainWindow):
         """)
 
 
-class MothershipWindow(QMainWindow):
+class DashboardWindow(QMainWindow):
     """
-    Main Mothership window - the command center for TranscriptionSuite.
+    Main Dashboard window - the command center for TranscriptionSuite.
 
     Provides navigation between:
     - Welcome screen (home)
@@ -309,6 +356,13 @@ class MothershipWindow(QMainWindow):
 
     def _create_welcome_view(self) -> QWidget:
         """Create the welcome/home view."""
+        # Create scroll area for the view
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         view = QWidget()
         layout = QVBoxLayout(view)
         layout.setContentsMargins(40, 30, 40, 30)
@@ -427,7 +481,8 @@ class MothershipWindow(QMainWindow):
 
         layout.addStretch()
 
-        return view
+        scroll.setWidget(view)
+        return scroll
 
     def _refresh_home_status(self) -> None:
         """Refresh the status indicators on the home view."""
@@ -486,6 +541,13 @@ class MothershipWindow(QMainWindow):
 
     def _create_server_view(self) -> QWidget:
         """Create the server management view."""
+        # Create scroll area for the view
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         view = QWidget()
         layout = QVBoxLayout(view)
         layout.setContentsMargins(40, 30, 40, 30)
@@ -762,10 +824,18 @@ class MothershipWindow(QMainWindow):
 
         layout.addStretch()
 
-        return view
+        scroll.setWidget(view)
+        return scroll
 
     def _create_client_view(self) -> QWidget:
         """Create the client management view."""
+        # Create scroll area for the view
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         view = QWidget()
         layout = QVBoxLayout(view)
         layout.setContentsMargins(40, 30, 40, 30)
@@ -859,7 +929,8 @@ class MothershipWindow(QMainWindow):
 
         layout.addStretch()
 
-        return view
+        scroll.setWidget(view)
+        return scroll
 
     def _apply_styles(self) -> None:
         """Apply stylesheet to the window - matching Web UI colors."""
@@ -870,6 +941,59 @@ class MothershipWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #121212;
+            }
+
+            QScrollArea {
+                background-color: #121212;
+                border: none;
+            }
+
+            QScrollBar:vertical {
+                background-color: #1e1e1e;
+                width: 10px;
+                margin: 0;
+            }
+
+            QScrollBar::handle:vertical {
+                background-color: #3d3d3d;
+                min-height: 30px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background-color: #4d4d4d;
+            }
+
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+
+            QScrollBar:horizontal {
+                background-color: #1e1e1e;
+                height: 10px;
+                margin: 0;
+            }
+
+            QScrollBar::handle:horizontal {
+                background-color: #3d3d3d;
+                min-width: 30px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:horizontal:hover {
+                background-color: #4d4d4d;
+            }
+
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0;
+            }
+
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: none;
             }
 
             #navBar {

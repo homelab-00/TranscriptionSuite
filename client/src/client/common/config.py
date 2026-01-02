@@ -75,12 +75,6 @@ def get_default_config() -> dict[str, Any]:
         "behavior": {
             "auto_start_client": False,  # Start client when app launches
         },
-        "hotkeys": {
-            "enabled": True,
-            "start_recording": "CTRL+SHIFT+R",
-            "stop_recording": "CTRL+SHIFT+S",
-            "cancel": "CTRL+SHIFT+Escape",
-        },
     }
 
 
@@ -156,7 +150,9 @@ class ClientConfig:
     def server_host(self) -> str:
         """Get effective server host."""
         if self.get("server", "use_remote"):
-            remote_host = self.get("server", "remote_host") or self.get("server", "host")
+            remote_host = self.get("server", "remote_host") or self.get(
+                "server", "host"
+            )
             # Sanitize remote_host: strip protocol, port, and trailing slashes
             return self._sanitize_hostname(remote_host)
         return self.get("server", "host", default="localhost")

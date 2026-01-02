@@ -2,7 +2,7 @@
 Settings dialog for TranscriptionSuite client.
 
 Provides a tabbed dialog for configuring client settings.
-Styled to match the Mothership UI design language.
+Styled to match the Dashboard UI design language.
 """
 
 import logging
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog with tabbed interface matching Mothership design language."""
+    """Settings dialog with tabbed interface matching Dashboard design language."""
 
     def __init__(self, config: ClientConfig, parent: QWidget | None = None):
         super().__init__(parent)
@@ -90,7 +90,7 @@ class SettingsDialog(QDialog):
         self._load_values()
 
     def _apply_styles(self) -> None:
-        """Apply dark theme styling matching Mothership UI."""
+        """Apply dark theme styling matching Dashboard UI."""
         self.setStyleSheet("""
             QDialog {
                 background-color: #121212;
@@ -221,13 +221,13 @@ class SettingsDialog(QDialog):
             QCheckBox {
                 color: #ffffff;
                 font-size: 13px;
-                spacing: 10px;
+                spacing: 8px;
             }
             
             QCheckBox::indicator {
-                width: 22px;
-                height: 22px;
-                border-radius: 4px;
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
                 border: 2px solid #505050;
                 background-color: #1e1e1e;
             }
@@ -300,9 +300,9 @@ class SettingsDialog(QDialog):
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
                 border-radius: 8px;
-                margin-top: 12px;
-                padding: 16px;
-                padding-top: 24px;
+                margin-top: 10px;
+                padding: 12px;
+                padding-top: 20px;
                 font-size: 13px;
                 font-weight: bold;
                 color: #90caf9;
@@ -311,8 +311,8 @@ class SettingsDialog(QDialog):
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 12px;
-                padding: 0 6px;
+                left: 10px;
+                padding: 0 4px;
                 background-color: #1e1e1e;
                 color: #90caf9;
             }
@@ -330,8 +330,8 @@ class SettingsDialog(QDialog):
         tab.setObjectName("tabContent")
         tab.setMinimumHeight(600)  # Minimum height for connection panel
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         # Local host row
         local_row = QHBoxLayout()
@@ -425,8 +425,8 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         tab.setObjectName("tabContent")
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         # Device selector row
         device_row = QHBoxLayout()
@@ -463,81 +463,8 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         tab.setObjectName("tabContent")
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
-
-        # === Hotkeys Section ===
-        hotkeys_group = QGroupBox("Hotkeys")
-        hotkeys_group.setObjectName("settingsGroup")
-        hotkeys_layout = QVBoxLayout(hotkeys_group)
-        hotkeys_layout.setSpacing(12)
-
-        # Enable hotkeys checkbox
-        self.hotkeys_enabled_check = QCheckBox("Enable global hotkeys")
-        hotkeys_layout.addWidget(self.hotkeys_enabled_check)
-
-        # Hotkey configuration inputs
-        hotkeys_config = QWidget()
-        hotkeys_config_layout = QVBoxLayout(hotkeys_config)
-        hotkeys_config_layout.setContentsMargins(24, 8, 0, 0)
-        hotkeys_config_layout.setSpacing(10)
-
-        # Start recording hotkey
-        start_row = QHBoxLayout()
-        start_label = QLabel("Start Recording:")
-        start_label.setObjectName("fieldLabel")
-        start_label.setMinimumWidth(120)
-        start_row.addWidget(start_label)
-        self.hotkey_start_edit = QLineEdit()
-        self.hotkey_start_edit.setPlaceholderText("e.g., CTRL+SHIFT+R")
-        self.hotkey_start_edit.setMaximumWidth(200)
-        start_row.addWidget(self.hotkey_start_edit)
-        start_row.addStretch()
-        hotkeys_config_layout.addLayout(start_row)
-
-        # Stop recording hotkey
-        stop_row = QHBoxLayout()
-        stop_label = QLabel("Stop Recording:")
-        stop_label.setObjectName("fieldLabel")
-        stop_label.setMinimumWidth(120)
-        stop_row.addWidget(stop_label)
-        self.hotkey_stop_edit = QLineEdit()
-        self.hotkey_stop_edit.setPlaceholderText("e.g., CTRL+SHIFT+S")
-        self.hotkey_stop_edit.setMaximumWidth(200)
-        stop_row.addWidget(self.hotkey_stop_edit)
-        stop_row.addStretch()
-        hotkeys_config_layout.addLayout(stop_row)
-
-        # Cancel hotkey
-        cancel_row = QHBoxLayout()
-        cancel_label = QLabel("Cancel:")
-        cancel_label.setObjectName("fieldLabel")
-        cancel_label.setMinimumWidth(120)
-        cancel_row.addWidget(cancel_label)
-        self.hotkey_cancel_edit = QLineEdit()
-        self.hotkey_cancel_edit.setPlaceholderText("e.g., CTRL+SHIFT+Escape")
-        self.hotkey_cancel_edit.setMaximumWidth(200)
-        cancel_row.addWidget(self.hotkey_cancel_edit)
-        cancel_row.addStretch()
-        hotkeys_config_layout.addLayout(cancel_row)
-
-        hotkeys_layout.addWidget(hotkeys_config)
-
-        # Help text for hotkeys
-        hotkeys_help = QLabel(
-            "Use format: MODIFIER+KEY (e.g., CTRL+SHIFT+R, ALT+F1)\n"
-            "Supported modifiers: CTRL, SHIFT, ALT, SUPER"
-        )
-        hotkeys_help.setObjectName("helpText")
-        hotkeys_help.setWordWrap(True)
-        hotkeys_layout.addWidget(hotkeys_help)
-
-        # Connect enable checkbox to toggle hotkey inputs
-        self.hotkeys_enabled_check.toggled.connect(hotkeys_config.setEnabled)
-
-        layout.addWidget(hotkeys_group)
-
-        layout.addSpacing(8)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         # === Clipboard Section ===
         clipboard_group = QGroupBox("Clipboard")
@@ -620,25 +547,6 @@ class SettingsDialog(QDialog):
                     break
 
         # Behavior tab
-        self.hotkeys_enabled_check.setChecked(
-            self.config.get("hotkeys", "enabled", default=True)
-        )
-        # Load hotkey bindings
-        self.hotkey_start_edit.setText(
-            self.config.get("hotkeys", "start_recording", default="CTRL+SHIFT+R")
-        )
-        self.hotkey_stop_edit.setText(
-            self.config.get("hotkeys", "stop_recording", default="CTRL+SHIFT+S")
-        )
-        self.hotkey_cancel_edit.setText(
-            self.config.get("hotkeys", "cancel", default="CTRL+SHIFT+Escape")
-        )
-        # Update hotkey inputs enabled state based on checkbox
-        hotkeys_enabled = self.config.get("hotkeys", "enabled", default=True)
-        self.hotkey_start_edit.setEnabled(hotkeys_enabled)
-        self.hotkey_stop_edit.setEnabled(hotkeys_enabled)
-        self.hotkey_cancel_edit.setEnabled(hotkeys_enabled)
-
         self.auto_copy_check.setChecked(
             self.config.get("clipboard", "auto_copy", default=True)
         )
@@ -665,20 +573,6 @@ class SettingsDialog(QDialog):
         self.config.set("recording", "device_index", value=device_index)
 
         # Behavior tab
-        self.config.set(
-            "hotkeys", "enabled", value=self.hotkeys_enabled_check.isChecked()
-        )
-        # Save hotkey bindings (uppercase and stripped)
-        start_hotkey = self.hotkey_start_edit.text().strip().upper()
-        if start_hotkey:
-            self.config.set("hotkeys", "start_recording", value=start_hotkey)
-        stop_hotkey = self.hotkey_stop_edit.text().strip().upper()
-        if stop_hotkey:
-            self.config.set("hotkeys", "stop_recording", value=stop_hotkey)
-        cancel_hotkey = self.hotkey_cancel_edit.text().strip().upper()
-        if cancel_hotkey:
-            self.config.set("hotkeys", "cancel", value=cancel_hotkey)
-
         self.config.set(
             "clipboard", "auto_copy", value=self.auto_copy_check.isChecked()
         )

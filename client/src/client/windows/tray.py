@@ -26,9 +26,11 @@ def run_tray(config) -> int:
 
     try:
         tray = Qt6Tray(config=config)
+        # Check if user wants to auto-start client when app launches
+        auto_start = config.get("behavior", "auto_start_client", default=False)
         orchestrator = ClientOrchestrator(
             config=config,
-            auto_connect=True,
+            auto_connect=auto_start,
             auto_copy_clipboard=config.get("clipboard", "auto_copy", default=True),
         )
         orchestrator.start(tray)

@@ -11,8 +11,8 @@ server/frontend/dist/
 server/frontend/build/
 
 # GitHub folder (excluding everything except workflows)
-.github/*
-!.github/workflows/
+.github/instructions/
+.github/prompts/
 
 # Misc
 __pycache__/

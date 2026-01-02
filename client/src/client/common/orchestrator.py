@@ -16,11 +16,6 @@ from typing import TYPE_CHECKING, Any
 from client.common.api_client import APIClient, ServerBusyError
 from client.common.audio_recorder import AudioRecorder
 from client.common.config import ClientConfig
-from client.common.hotkey_manager import (
-    HotkeyAction,
-    HotkeyManager,
-    create_hotkey_manager,
-)
 from client.common.models import TrayAction, TrayState
 
 if TYPE_CHECKING:
@@ -66,7 +61,6 @@ class ClientOrchestrator:
         self.tray: AbstractTray | None = None
         self.api_client: APIClient | None = None
         self.recorder: AudioRecorder | None = None
-        self.hotkey_manager: HotkeyManager | None = None
 
         # Async event loop management
         self.event_loop: asyncio.AbstractEventLoop | None = None
@@ -108,10 +102,6 @@ class ClientOrchestrator:
         # Connect to server if auto_connect is enabled
         if self.auto_connect:
             self._schedule_async(self._connect_to_server())
-
-        # Initialize global hotkeys if enabled
-        if self.config.get("hotkeys", "enabled", default=True):
-            self._init_hotkeys()
 
         # Run tray (blocks until quit)
         self.tray.run()
@@ -550,7 +540,7 @@ class ClientOrchestrator:
         if "connection" in error_lower and "refused" in error_lower:
             return (
                 "Cannot reach the server. "
-                "Make sure the server is running (check Server view in Mothership)."
+                "Make sure the server is running (check Server view in Dashboard)."
             )
 
         if "timeout" in error_lower or "timed out" in error_lower:
@@ -625,56 +615,9 @@ class ClientOrchestrator:
             self.tray.set_state(TrayState.CONNECTING)
         self._schedule_async(self._connect_to_server())
 
-    # =========================================================================
-    # Global Hotkeys
-    # =========================================================================
-
-    def _init_hotkeys(self) -> None:
-        """Initialize global hotkey manager."""
-        try:
-            self.hotkey_manager = create_hotkey_manager()
-            if self.hotkey_manager is None:
-                logger.info("Global hotkeys not available on this platform")
-                return
-
-            # Register callbacks
-            self.hotkey_manager.register_callback(
-                HotkeyAction.START_RECORDING, self._on_start_recording
-            )
-            self.hotkey_manager.register_callback(
-                HotkeyAction.STOP_RECORDING, self._on_stop_recording
-            )
-            self.hotkey_manager.register_callback(
-                HotkeyAction.CANCEL, self._on_cancel_recording
-            )
-
-            # Start listening
-            if self.hotkey_manager.start():
-                logger.info("Global hotkeys initialized")
-                if self.tray:
-                    self.tray.show_notification(
-                        "Hotkeys Active",
-                        "Global keyboard shortcuts are now active",
-                    )
-            else:
-                logger.warning("Failed to start global hotkeys")
-                self.hotkey_manager = None
-
-        except Exception as e:
-            logger.error(f"Failed to initialize hotkeys: {e}")
-            self.hotkey_manager = None
-
     def _on_quit(self) -> None:
         """Handle quit action."""
         logger.info("Shutting down native client...")
-
-        # Stop hotkey manager
-        if self.hotkey_manager:
-            try:
-                self.hotkey_manager.stop()
-            except Exception:
-                pass
-            self.hotkey_manager = None
 
         # Cancel reconnect task
         if self._reconnect_task:
