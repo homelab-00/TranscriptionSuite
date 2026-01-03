@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -406,6 +407,32 @@ class SettingsDialog(QDialog):
 
         layout.addSpacing(8)
 
+        # === Advanced TLS Options Section ===
+        tls_group = QGroupBox("Advanced TLS Options")
+        tls_layout = QVBoxLayout(tls_group)
+
+        # TLS Verify checkbox
+        self.tls_verify_check = QCheckBox("Verify TLS certificates")
+        self.tls_verify_check.setChecked(True)
+        self.tls_verify_check.setToolTip(
+            "Disable for self-signed certificates.\nConnection is still encrypted."
+        )
+        tls_layout.addWidget(self.tls_verify_check)
+
+        # Allow HTTP to remote hosts
+        self.allow_insecure_http_check = QCheckBox(
+            "Allow HTTP to remote hosts (WireGuard encrypts traffic)"
+        )
+        self.allow_insecure_http_check.setToolTip(
+            "Enable for Tailscale without MagicDNS.\n"
+            "Use Tailscale IP (e.g., 100.x.y.z) with port 8000."
+        )
+        tls_layout.addWidget(self.allow_insecure_http_check)
+
+        layout.addWidget(tls_group)
+
+        layout.addSpacing(8)
+
         # Help text for host settings
         host_help = QLabel(
             "Enter ONLY the hostname (no http://, no port). Examples:\n"
@@ -458,8 +485,6 @@ class SettingsDialog(QDialog):
 
     def _create_behavior_tab(self) -> None:
         """Create the Behavior settings tab."""
-        from PyQt6.QtWidgets import QGroupBox
-
         tab = QWidget()
         tab.setObjectName("tabContent")
         layout = QVBoxLayout(tab)
@@ -536,6 +561,14 @@ class SettingsDialog(QDialog):
             self.config.get("server", "remote_host", default="")
         )
 
+        # Advanced TLS options
+        self.tls_verify_check.setChecked(
+            self.config.get("server", "tls_verify", default=True)
+        )
+        self.allow_insecure_http_check.setChecked(
+            self.config.get("server", "allow_insecure_http", default=False)
+        )
+
         # Audio tab - select current device
         current_device = self.config.get("recording", "device_index")
         if current_device is None:
@@ -566,6 +599,14 @@ class SettingsDialog(QDialog):
         self.config.set("server", "use_remote", value=self.use_remote_check.isChecked())
         self.config.set(
             "server", "remote_host", value=self.remote_host_edit.text().strip()
+        )
+
+        # Advanced TLS options
+        self.config.set("server", "tls_verify", value=self.tls_verify_check.isChecked())
+        self.config.set(
+            "server",
+            "allow_insecure_http",
+            value=self.allow_insecure_http_check.isChecked(),
         )
 
         # Audio tab

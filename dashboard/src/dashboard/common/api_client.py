@@ -55,6 +55,8 @@ class APIClient:
         token: str | None = None,
         timeout: int = 30,
         transcription_timeout: int = 300,
+        tls_verify: bool = True,
+        allow_insecure_http: bool = False,
     ):
         """
         Initialize the API client.
@@ -66,6 +68,8 @@ class APIClient:
             token: Authentication token
             timeout: Default request timeout in seconds
             transcription_timeout: Timeout for transcription requests
+            tls_verify: Verify TLS certificates (set False for self-signed)
+            allow_insecure_http: Allow HTTP to non-localhost hosts
         """
         self.host = host
         self.port = port
@@ -73,6 +77,8 @@ class APIClient:
         self.token = token
         self.timeout = timeout
         self.transcription_timeout = transcription_timeout
+        self.tls_verify = tls_verify
+        self.allow_insecure_http = allow_insecure_http
 
         self._session: aiohttp.ClientSession | None = None
         self._connected = False
@@ -113,7 +119,7 @@ class APIClient:
 
     def _get_ssl_kwargs(self) -> dict:
         """
-        Get SSL kwargs for requests, handling IP fallback.
+        Get SSL kwargs for requests, handling IP fallback and TLS verification.
 
         When using Tailscale IP fallback, we need to specify server_hostname
         so that SSL certificate validation works with the original hostname.
@@ -122,8 +128,16 @@ class APIClient:
             return {}
 
         ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = True
-        ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+        if not self.tls_verify:
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            logger.warning(
+                "TLS certificate verification DISABLED - connection encrypted but not verified"
+            )
+        else:
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
 
         kwargs: dict = {"ssl": ssl_context}
         if self._using_fallback_ip and self._original_hostname:
@@ -140,11 +154,17 @@ class APIClient:
             ssl_context = None
             if self.use_https:
                 ssl_context = ssl.create_default_context()
-                # For Tailscale HTTPS certs, enable hostname validation
-                ssl_context.check_hostname = True
-                ssl_context.verify_mode = ssl.CERT_REQUIRED
 
-                logger.debug("SSL context created with hostname verification")
+                if not self.tls_verify:
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    logger.debug("SSL context created with verification DISABLED")
+                else:
+                    # For Tailscale HTTPS certs, enable hostname validation
+                    ssl_context.check_hostname = True
+                    ssl_context.verify_mode = ssl.CERT_REQUIRED
+                    logger.debug("SSL context created with hostname verification")
+
                 logger.debug(f"SSL version: {ssl.OPENSSL_VERSION}")
 
             connector = aiohttp.TCPConnector(
@@ -174,6 +194,8 @@ class APIClient:
         port: int | None = None,
         use_https: bool | None = None,
         token: str | None = None,
+        tls_verify: bool | None = None,
+        allow_insecure_http: bool | None = None,
     ) -> None:
         """
         Update connection settings, properly closing old session.
@@ -193,6 +215,10 @@ class APIClient:
             self.use_https = use_https
         if token is not None:
             self.token = token
+        if tls_verify is not None:
+            self.tls_verify = tls_verify
+        if allow_insecure_http is not None:
+            self.allow_insecure_http = allow_insecure_http
 
         # Reset fallback state
         self._original_hostname = None
@@ -201,10 +227,26 @@ class APIClient:
 
         logger.info(f"API Client updated: {self.base_url}")
 
+    def _is_localhost(self) -> bool:
+        """Check if the current host is localhost."""
+        return self.host in ("localhost", "127.0.0.1", "::1")
+
     async def health_check(self) -> bool:
         """Check if server is healthy with detailed diagnostics."""
         url = f"{self.base_url}/health"
         logger.debug(f"Health check: {url}")
+
+        # Block HTTP to remote hosts without explicit opt-in
+        if not self.use_https and not self._is_localhost():
+            if not self.allow_insecure_http:
+                logger.error(
+                    f"HTTP to remote host {self.host} blocked. "
+                    "Enable 'Allow HTTP to remote hosts' in settings or use --allow-insecure-http"
+                )
+                return False
+            logger.info(
+                f"HTTP to remote host {self.host} - WireGuard provides network encryption"
+            )
 
         try:
             # Pre-connection DNS/network check (may switch to fallback IP)

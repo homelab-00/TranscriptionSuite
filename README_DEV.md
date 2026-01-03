@@ -57,6 +57,7 @@ This document contains technical details, architecture decisions, and developmen
   - [Static File Transcription Configuration](#static-file-transcription-configuration)
   - [Server Configuration (Docker)](#server-configuration-docker)
   - [Client Configuration](#client-configuration)
+  - [TLS Verification Options](#tls-verification-options)
   - [Native Development Configuration](#native-development-configuration)
 - [Data Storage](#data-storage)
   - [Database Schema](#database-schema)
@@ -772,6 +773,13 @@ TranscriptionSuite/
 │   ├── frontend/                 # Web UI frontend (React)
 │   └── config.yaml               # Configuration file (also serves as template)
 ```
+
+> **Note on `dashboard/src/dashboard/` structure:** The path has "dashboard" twice by design. This follows Python's **src-layout** packaging convention:
+> - **First `dashboard/`** = Project directory (separates dashboard component from server/, build/)
+> - **`src/`** = Isolation layer (prevents import mistakes during development, standard Python packaging practice)
+> - **Second `dashboard/`** = Python package name (matches the importable module used in all imports: `from dashboard.common import ...`)
+>
+> This pattern is standard in modern Python projects (requests, pytest, etc.) and provides real benefits—it's not redundancy for its own sake.
 
 ### pyproject.toml Files
 
@@ -3129,6 +3137,10 @@ server:
   timeout: 30                  # General request timeout (seconds)
   transcription_timeout: 300   # Transcription request timeout (seconds)
 
+  # Advanced TLS options (for users without MagicDNS)
+  tls_verify: true             # Verify TLS certificates (false for self-signed)
+  allow_insecure_http: false   # Allow HTTP to non-localhost (for Tailscale IP mode)
+
 recording:
   sample_rate: 16000           # Audio sample rate (fixed for Whisper)
   device_index: null           # Audio input device (null = default)
@@ -3199,6 +3211,33 @@ uv run transcription-dashboard --token "your_admin_token_here"
 ```
 
 Tokens are used in `Authorization: Bearer <token>` headers for API authentication.
+
+### TLS Verification Options
+
+For users who cannot or prefer not to use Tailscale MagicDNS (required for Tailscale HTTPS certificates), the client supports alternative connection modes:
+
+| Option | CLI Flag | Config Key | Description |
+|--------|----------|------------|-------------|
+| Verify TLS | (default) | `server.tls_verify: true` | Standard certificate verification |
+| Skip Verify | `--no-tls-verify` | `server.tls_verify: false` | For self-signed certificates |
+| Allow HTTP Remote | `--allow-insecure-http` | `server.allow_insecure_http: true` | HTTP to non-localhost hosts |
+
+**Configuration in `dashboard.yaml`:**
+
+```yaml
+server:
+  # ... other settings ...
+  tls_verify: true           # Verify TLS certificates (disable for self-signed)
+  allow_insecure_http: false # Allow HTTP to non-localhost hosts (Tailscale IP mode)
+```
+
+**Security Levels (most to least secure):**
+
+1. **MagicDNS + HTTPS** (full verification) - Most secure, recommended
+2. **Self-signed + skip verify** - Encrypted, but MITM possible within network
+3. **IP + HTTP over Tailscale** - WireGuard encrypts at network layer, practical for single-user
+
+**Why MagicDNS is recommended:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, not IP addresses. This is a Let's Encrypt/CA limitation. Enable MagicDNS in the [Tailscale Admin Console](https://login.tailscale.com/admin/dns) for the best experience.
 
 ### Native Development Configuration
 

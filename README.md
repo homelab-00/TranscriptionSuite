@@ -244,6 +244,54 @@ Use this token to log in at `https://your-machine.your-tailnet.ts.net:8443`
 
 ---
 
+## Remote Access Without MagicDNS
+
+If you cannot or prefer not to use Tailscale MagicDNS, you have alternative options.
+
+### Option 1: IP-Only Mode (Recommended)
+
+Use Tailscale IPs directly with HTTP. WireGuard encrypts all traffic at the network layer.
+
+**Server:** Start with `./start-local.sh` (HTTP on port 8000)
+
+**Client:**
+1. Find server's Tailscale IP: `tailscale ip -4`
+2. Configure:
+   - Host: `100.x.y.z` (Tailscale IP)
+   - Port: `8000`
+   - HTTPS: Off
+   - Settings → Advanced TLS Options: Enable "Allow HTTP to remote hosts"
+
+**Security:** WireGuard encrypts all Tailscale traffic. HTTP over Tailscale is secure for single-user setups.
+
+### Option 2: Self-Signed Certificates
+
+For HTTPS without MagicDNS:
+
+1. Generate certificates:
+   ```bash
+   openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
+       -days 365 -nodes -subj "/CN=100.x.y.z"
+   ```
+
+2. Configure server with certificates (see [README_DEV.md](README_DEV.md))
+
+3. Configure client:
+   - Host: `100.x.y.z`
+   - Port: `8443`
+   - HTTPS: On
+   - Settings → Advanced TLS Options: Uncheck "Verify TLS certificates"
+
+### Why MagicDNS is Recommended
+
+Tailscale HTTPS certificates require MagicDNS because:
+- Certificates are issued for `.ts.net` hostnames, not IP addresses
+- This is a Let's Encrypt/CA limitation, not Tailscale-specific
+
+Enable MagicDNS in [Tailscale Admin Console](https://login.tailscale.com/admin/dns) for the best experience.
+
+---
+
 ## Dashboard
 
 Download the Dashboard for your platform:
