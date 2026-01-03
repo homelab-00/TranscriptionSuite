@@ -13,13 +13,13 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from client.common.api_client import APIClient, ServerBusyError
-from client.common.audio_recorder import AudioRecorder
-from client.common.config import ClientConfig
-from client.common.models import TrayAction, TrayState
+from dashboard.common.api_client import APIClient, ServerBusyError
+from dashboard.common.audio_recorder import AudioRecorder
+from dashboard.common.config import ClientConfig
+from dashboard.common.models import TrayAction, TrayState
 
 if TYPE_CHECKING:
-    from client.common.tray_base import AbstractTray
+    from dashboard.common.tray_base import AbstractTray
 
 logger = logging.getLogger(__name__)
 

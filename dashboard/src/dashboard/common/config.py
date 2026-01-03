@@ -91,7 +91,7 @@ class ClientConfig:
         if config_path:
             self.config_path = config_path
         else:
-            self.config_path = get_config_dir() / "client.yaml"
+            self.config_path = get_config_dir() / "dashboard.yaml"
 
         self.config = get_default_config()
         self._load()

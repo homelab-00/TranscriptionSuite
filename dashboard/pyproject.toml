@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "transcription-suite-client"
+name = "transcription-suite-dashboard"
 version = "0.3.1"
-description = "TranscriptionSuite native client for desktop integration"
+description = "TranscriptionSuite Dashboard for desktop integration"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
 authors = [
@@ -49,7 +49,7 @@ windows = [
 ]
 
 [project.scripts]
-transcription-client = "client.__main__:main"
+transcription-dashboard = "dashboard.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/client"]
+packages = ["src/dashboard"]

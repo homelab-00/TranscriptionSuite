@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
-from client.common.config import get_config_dir
+from dashboard.common.config import get_config_dir
 
 logger = logging.getLogger(__name__)
 

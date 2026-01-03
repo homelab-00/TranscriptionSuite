@@ -301,7 +301,7 @@ wheels = [
 ]
 
 [[package]]
-name = "transcription-suite-client"
+name = "transcription-suite-dashboard"
 version = "0.3.1"
 source = { editable = "." }
 dependencies = [

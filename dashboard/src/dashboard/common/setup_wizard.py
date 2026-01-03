@@ -16,7 +16,7 @@ from typing import Callable
 
 import requests
 
-from client.common.config import get_config_dir
+from dashboard.common.config import get_config_dir
 
 logger = logging.getLogger(__name__)
 

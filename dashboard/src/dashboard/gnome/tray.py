@@ -15,13 +15,13 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, Optional
 
-from client.common.docker_manager import DockerManager, ServerStatus
-from client.common.models import TrayAction, TrayState
-from client.common.server_control_mixin import ServerControlMixin
-from client.common.tray_base import AbstractTray
+from dashboard.common.docker_manager import DockerManager, ServerStatus
+from dashboard.common.models import TrayAction, TrayState
+from dashboard.common.server_control_mixin import ServerControlMixin
+from dashboard.common.tray_base import AbstractTray
 
 if TYPE_CHECKING:
-    from client.common.config import ClientConfig
+    from dashboard.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +238,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
     def _init_dbus_service(self) -> None:
         """Initialize the D-Bus service for IPC with Dashboard."""
         try:
-            from client.gnome.dbus_service import TranscriptionSuiteDBusService
+            from dashboard.gnome.dbus_service import TranscriptionSuiteDBusService
 
             self._dbus_service = TranscriptionSuiteDBusService(
                 on_start_client=self._dbus_start_client,
@@ -439,7 +439,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
             return
 
         # Import here to avoid circular imports
-        from client.gnome.settings_dialog import SettingsDialog
+        from dashboard.gnome.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(self.config)
         GLib.idle_add(dialog.show)
@@ -524,7 +524,7 @@ def run_tray(config) -> int:
     Returns:
         Exit code
     """
-    from client.common.orchestrator import ClientOrchestrator
+    from dashboard.common.orchestrator import ClientOrchestrator
 
     try:
         tray = GtkTray(config=config)

@@ -21,7 +21,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
+from dashboard.common.docker_manager import DockerManager, ServerMode, ServerStatus
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ except (ImportError, ValueError) as e:
     Gtk = None  # type: ignore
 
 if TYPE_CHECKING:
-    from client.common.config import ClientConfig
+    from dashboard.common.config import ClientConfig
 
 # Constants for embedded resources
 GITHUB_PROFILE_URL = "https://github.com/homelab-00"
@@ -113,7 +113,7 @@ def _get_readme_path(dev: bool = False) -> Path | None:
             [
                 bundle_dir / filename,
                 bundle_dir / "docs" / filename,
-                bundle_dir / "src" / "client" / filename,
+                bundle_dir / "src" / "dashboard" / filename,
             ]
         )
 
@@ -1314,7 +1314,7 @@ class DashboardWindow(_get_dashboard_base()):
     def _on_open_server_settings(self) -> None:
         """Open server settings file."""
         try:
-            from client.common.config import get_config_dir
+            from dashboard.common.config import get_config_dir
 
             config_dir = get_config_dir()
             config_file = config_dir / "config.yaml"
@@ -1376,7 +1376,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Read client logs from the unified log file
         try:
-            from client.common.logging_config import get_log_file
+            from dashboard.common.logging_config import get_log_file
 
             log_file = get_log_file()
             if log_file.exists():
@@ -1709,7 +1709,7 @@ class DashboardWindow(_get_dashboard_base()):
 
                 if getattr(sys, "frozen", False):
                     bundle_dir = Path(sys._MEIPASS)  # type: ignore
-                    pyproject_path = bundle_dir / "client" / "pyproject.toml"
+                    pyproject_path = bundle_dir / "dashboard" / "pyproject.toml"
                 else:
                     current = Path(__file__).resolve()
                     pyproject_path = None
@@ -1774,7 +1774,7 @@ def run_dashboard(config_path: Path | None = None) -> int:
         return 1
 
     # Load config
-    from client.common.config import ClientConfig
+    from dashboard.common.config import ClientConfig
 
     if config_path:
         config = ClientConfig(config_path)
@@ -1782,7 +1782,7 @@ def run_dashboard(config_path: Path | None = None) -> int:
         config = ClientConfig()
 
     # Create D-Bus client for communicating with tray process
-    from client.gnome.dbus_service import DashboardDBusClient
+    from dashboard.gnome.dbus_service import DashboardDBusClient
 
     dbus_client = DashboardDBusClient()
     tray_connected = dbus_client.is_connected()

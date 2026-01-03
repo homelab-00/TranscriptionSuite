@@ -21,8 +21,8 @@ def run_tray(config) -> int:
         Exit code
     """
     # Windows uses the same PyQt6 implementation as KDE
-    from client.common.orchestrator import ClientOrchestrator
-    from client.kde.tray import Qt6Tray
+    from dashboard.common.orchestrator import ClientOrchestrator
+    from dashboard.kde.tray import Qt6Tray
 
     try:
         tray = Qt6Tray(config=config)

@@ -265,7 +265,7 @@ class APIClient:
         directly while preserving the original hostname for SSL verification.
         """
         # Lazy import to avoid overhead when not needed
-        from client.common.tailscale_resolver import TailscaleResolver
+        from dashboard.common.tailscale_resolver import TailscaleResolver
 
         try:
             # DNS resolution check (async, non-blocking)

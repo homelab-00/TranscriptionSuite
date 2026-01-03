@@ -14,13 +14,13 @@ from pathlib import Path
 # Resolve repo root dynamically (look for README.md)
 spec_path = Path(SPECPATH).resolve()
 repo_root = next(p for p in spec_path.parents if (p / "README.md").exists())
-client_dir = repo_root / "client" / "src" / "client"
+dashboard_dir = repo_root / "dashboard" / "src" / "dashboard"
 
 block_cipher = None
 
 a = Analysis(
-    [str(client_dir / "__main__.py")],
-    pathex=[str(repo_root / "client" / "src")],
+    [str(dashboard_dir / "__main__.py")],
+    pathex=[str(repo_root / "dashboard" / "src")],
     binaries=[],
     datas=[
         # Assets (logo, profile picture)
@@ -30,18 +30,18 @@ a = Analysis(
         (str(repo_root / "README.md"), "."),
         (str(repo_root / "README_DEV.md"), "."),
         # Version file for About dialog
-        (str(repo_root / "client" / "pyproject.toml"), "client"),
+        (str(repo_root / "dashboard" / "pyproject.toml"), "dashboard"),
     ],
     hiddenimports=[
-        "client.common",
-        "client.common.api_client",
-        "client.common.audio_recorder",
-        "client.common.config",
-        "client.common.models",
-        "client.common.orchestrator",
-        "client.common.tray_base",
-        "client.kde",
-        "client.kde.tray",
+        "dashboard.common",
+        "dashboard.common.api_client",
+        "dashboard.common.audio_recorder",
+        "dashboard.common.config",
+        "dashboard.common.models",
+        "dashboard.common.orchestrator",
+        "dashboard.common.tray_base",
+        "dashboard.kde",
+        "dashboard.kde.tray",
         # PyQt6 modules
         "PyQt6.QtCore",
         "PyQt6.QtGui",
@@ -60,7 +60,7 @@ a = Analysis(
     excludes=[
         # Exclude GNOME-specific modules
         "gi",
-        "client.gnome",
+        "dashboard.gnome",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

@@ -15,16 +15,16 @@ Output: build\dist\TranscriptionSuite.exe
 import sys
 from pathlib import Path
 
-# Project root (4 parents up from spec directory: build -> client -> src -> client -> TranscriptionSuite)
+# Project root (4 parents up from spec directory: build -> dashboard -> src -> dashboard -> TranscriptionSuite)
 # Note: SPECPATH is the directory containing the spec file, not the file itself
 project_root = Path(SPECPATH).parent.parent.parent.parent
-client_src = project_root / "client" / "src" / "client"
+dashboard_src = project_root / "dashboard" / "src" / "dashboard"
 
 block_cipher = None
 
 a = Analysis(
-    [str(client_src / "__main__.py")],
-    pathex=[str(project_root / "client" / "src")],
+    [str(dashboard_src / "__main__.py")],
+    pathex=[str(project_root / "dashboard" / "src")],
     binaries=[],
     datas=[
         # Assets (logo, profile picture)
@@ -35,17 +35,17 @@ a = Analysis(
         (str(project_root / "README_DEV.md"), "."),
     ],
     hiddenimports=[
-        "client.common",
-        "client.common.api_client",
-        "client.common.audio_recorder",
-        "client.common.config",
-        "client.common.models",
-        "client.common.orchestrator",
-        "client.common.tray_base",
-        "client.windows",
-        "client.windows.tray",
-        "client.kde",  # Windows uses Qt6Tray from KDE module
-        "client.kde.tray",
+        "dashboard.common",
+        "dashboard.common.api_client",
+        "dashboard.common.audio_recorder",
+        "dashboard.common.config",
+        "dashboard.common.models",
+        "dashboard.common.orchestrator",
+        "dashboard.common.tray_base",
+        "dashboard.windows",
+        "dashboard.windows.tray",
+        "dashboard.kde",  # Windows uses Qt6Tray from KDE module
+        "dashboard.kde.tray",
         # PyQt6 modules
         "PyQt6.QtCore",
         "PyQt6.QtGui",
@@ -63,7 +63,7 @@ a = Analysis(
     excludes=[
         # Exclude Linux-specific modules
         "gi",
-        "client.gnome",
+        "dashboard.gnome",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

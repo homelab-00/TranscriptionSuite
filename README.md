@@ -168,7 +168,7 @@ TranscriptionSuite uses a **layered security model** for remote access:
 
 Your DNS settings should look like this:
 
-![Tailscale DNS Settings](./docs/tailscale-dns-settings.png)
+![Tailscale DNS Settings](./build/assets/tailscale-dns-settings.png)
 
 ### Step 2: Generate Certificates
 
@@ -244,9 +244,9 @@ Use this token to log in at `https://your-machine.your-tailnet.ts.net:8443`
 
 ---
 
-## Native Client
+## Dashboard
 
-Download the native client for your platform:
+Download the Dashboard for your platform:
 
 | Platform | Download | Notes |
 |----------|----------|-------|
@@ -256,16 +256,16 @@ Download the native client for your platform:
 
 ### First-Time Setup
 
-On first run, the client automatically performs initial setup:
+On first run, the Dashboard automatically performs initial setup:
 1. Checks Docker availability
 2. Creates the config directory with required files
 3. Pulls the Docker image from GitHub Container Registry
 
 This replaces the manual `setup.sh`/`setup.ps1` script execution for most users.
 
-### GNOME Client Dependencies
+### GNOME Dashboard Dependencies
 
-The GNOME client uses a **dual-process architecture** because GTK3 (AppIndicator3 for the tray) and GTK4 (libadwaita for the Dashboard window) cannot coexist in the same Python process. The tray and Dashboard communicate via D-Bus.
+The GNOME Dashboard uses a **dual-process architecture** because GTK3 (AppIndicator3 for the tray) and GTK4 (libadwaita for the Dashboard window) cannot coexist in the same Python process. The tray and Dashboard communicate via D-Bus.
 
 You also need the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/) for the tray icon.
 
@@ -353,8 +353,8 @@ On first connection, enter the server details:
 - **Remote mode**: Host `your-machine.your-tailnet.ts.net`, Port `8443`, HTTPS on, Token from server logs
 
 Settings are saved to:
-- **Linux**: `~/.config/TranscriptionSuite/client.yaml`
-- **Windows**: `%APPDATA%\TranscriptionSuite\client.yaml`
+- **Linux**: `~/.config/TranscriptionSuite/dashboard.yaml`
+- **Windows**: `%APPDATA%\TranscriptionSuite\dashboard.yaml`
 
 ---
 

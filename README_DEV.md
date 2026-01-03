@@ -87,7 +87,7 @@ This section provides a streamlined overview of the most common development task
 
 ```bash
 # 1. Setup all Python virtual environments
-cd client && uv venv --python 3.12 && uv sync --extra kde && cd ..
+cd dashboard && uv venv --python 3.12 && uv sync --extra kde && cd ..
 cd build && uv venv --python 3.12 && uv sync && cd ..
 
 # 2. Audit NPM packages (frontend)
@@ -99,8 +99,8 @@ docker compose build
 docker compose up -d
 
 # 4. Run client locally
-cd client
-uv run transcription-client --host localhost --port 8000
+cd dashboard
+uv run transcription-dashboard --host localhost --port 8000
 ```
 
 ### Build Workflow (TL;DR)
@@ -135,8 +135,8 @@ Note: All three scripts are meant to be run from the project root.
 | **Build & publish Docker image** | `./build/docker-build-push.sh` (local build) |
 | **Publish release version** | `./build/docker-build-push.sh v0.3.0` (tags as latest too) |
 | **Publish dev/test version** | `./build/docker-build-push.sh dev` (custom tag) |
-| **Run client (local)** | `cd client && uv run transcription-client --host localhost --port 8000` |
-| **Run client (remote)** | `cd client && uv run transcription-client --host <tailscale-hostname> --port 8443 --https` |
+| **Run client (local)** | `cd dashboard && uv run transcription-dashboard --host localhost --port 8000` |
+| **Run client (remote)** | `cd dashboard && uv run transcription-dashboard --host <tailscale-hostname> --port 8443 --https` |
 | **Lint code** | `./build/.venv/bin/ruff check .` |
 | **Format code** | `./build/.venv/bin/ruff format .` |
 | **Type check** | `./build/.venv/bin/pyright` |
@@ -187,7 +187,7 @@ The GNOME client uses two separate processes because GTK3 and GTK4 cannot coexis
 1. **Tray Process (GTK3)**: Runs the AppIndicator3 system tray, handles recording, communicates with server
 2. **Dashboard Process (GTK4)**: Provides the main GUI window using libadwaita, spawned on-demand when user clicks "Show App"
 
-These processes communicate via **D-Bus** (`com.transcriptionsuite.Client`). The tray exposes methods for the Dashboard to control the client (start/stop, status, settings).
+These processes communicate via **D-Bus** (`com.transcriptionsuite.Dashboard`). The tray exposes methods for the Dashboard to control the client (start/stop, status, settings).
 
 ### Terminology: Dashboard
 
@@ -294,19 +294,19 @@ The GNOME client uses a dual-process architecture due to a fundamental GObject I
 
 Since AppIndicator3 (required for GNOME tray icons) only works with GTK3, and libadwaita (for modern GNOME styling) requires GTK4, the solution is to run them in separate processes:
 
-1. **Tray Process** (`client/src/client/gnome/tray.py`):
+1. **Tray Process** (`dashboard/src/dashboard/gnome/tray.py`):
    - Uses GTK3 + AppIndicator3
    - Handles system tray icon and menu
    - Manages recording and server communication
    - Exposes D-Bus service for IPC
 
-2. **Dashboard Process** (`client/src/client/gnome/dashboard_main.py`):
+2. **Dashboard Process** (`dashboard/src/dashboard/gnome/dashboard_main.py`):
    - Uses GTK4 + libadwaita (Adw)
    - Spawned via subprocess when user clicks "Show App"
    - Communicates with tray via D-Bus client
    - Can still manage Docker server independently
 
-**D-Bus Interface** (`com.transcriptionsuite.Client`):
+**D-Bus Interface** (`com.transcriptionsuite.Dashboard`):
 ```
 Methods:
   StartClient(use_remote: bool) → (success: bool, message: str)
@@ -454,7 +454,7 @@ A comprehensive code review was performed covering linting, security, and code q
    - Updated `transcription.py` and `notebook.py` to use shared module
 
 8. **Code Duplication: ServerControlMixin** *(January 2026)*
-   - Created `client/src/client/common/server_control_mixin.py` with ~150 lines of shared code
+   - Created `dashboard/src/dashboard/common/server_control_mixin.py` with ~150 lines of shared code
    - Extracted server control methods from KDE and GNOME tray implementations
    - Both tray classes now inherit from `ServerControlMixin`
    - Methods moved: `_on_server_start_local`, `_on_server_start_remote`, `_on_server_stop`, `_on_server_status`
@@ -480,10 +480,10 @@ A comprehensive code review was performed covering linting, security, and code q
     - Prevents memory exhaustion on large log files
 
 13. **Linting Fixes**
-   - Fixed unused variable assignments in `client/src/client/gnome/tray.py`
-   - Fixed unused variable assignments in `client/src/client/kde/tray.py`
+   - Fixed unused variable assignments in `dashboard/src/dashboard/gnome/tray.py`
+   - Fixed unused variable assignments in `dashboard/src/dashboard/kde/tray.py`
    - Fixed unused variable in `server/backend/tests/test_ffmpeg_utils.py`
-   - **January 2026:** Removed unused `QFrame` import from `client/src/client/kde/settings_dialog.py`
+   - **January 2026:** Removed unused `QFrame` import from `dashboard/src/dashboard/kde/settings_dialog.py`
 
 14. **Dead Code Removal** *(January 2026)*
     - Removed unused `get_secret_key()` method from `token_store.py`
@@ -502,7 +502,7 @@ A comprehensive code review was performed covering linting, security, and code q
     - Tests validate CORS origin validation and admin endpoint protection
 
 17. **Bug Fix: GNOME Dashboard Startup** *(January 2026)*
-    - Fixed syntax error in `client/src/client/gnome/dashboard.py` that prevented Dashboard from launching
+    - Fixed syntax error in `dashboard/src/dashboard/gnome/dashboard.py` that prevented Dashboard from launching
     - The `View` enum class was incorrectly placed inside `_get_readme_path()` function
     - Added missing `return None` statement and properly defined `View(Enum)` class
     - Dashboard now spawns correctly when clicking "Show App" from tray
@@ -534,7 +534,7 @@ A comprehensive code review was performed covering linting, security, and code q
       - Updated `_get_assets_path()` in `dashboard.py` to check `APPDIR` environment variable for AppImage
     - **Markdown Viewer**: Fixed markdown library not being found at runtime in AppImage
       - Updated launcher script `PYTHONPATH` to include bundled site-packages directory
-      - Now includes both `client/src` (source code) and root dist-packages (bundled dependencies)
+      - Now includes both `dashboard/src` (source code) and root dist-packages (bundled dependencies)
     - **WebKit Crash Fix**: Replaced WebKit rendering with plain text display
       - WebKit 6.0 has known SIGTRAP crashes on Ubuntu 24.04 (native library issue)
       - Attempted workaround with Gtk.TextView + TextTags was also problematic
@@ -709,9 +709,9 @@ docker compose logs -f
 
 ```txt
 TranscriptionSuite/
-├── client/                       # Native client (runs locally)
-│   ├── src/client/               # Python package source
-│   │   ├── common/               # Shared client code
+├── dashboard/                    # Native dashboard (runs locally)
+│   ├── src/dashboard/            # Python package source
+│   │   ├── common/               # Shared dashboard code
 │   │   │   ├── api_client.py     # HTTP client, WebSocket, ServerBusyError handling
 │   │   │   ├── audio_recorder.py # PyAudio recording wrapper
 │   │   │   ├── docker_manager.py # Docker server control (start/stop/status)
@@ -719,7 +719,7 @@ TranscriptionSuite/
 │   │   │   ├── setup_wizard.py   # First-time setup wizard
 │   │   │   ├── tailscale_resolver.py # Tailscale IP fallback when DNS fails
 │   │   │   ├── tray_base.py      # Abstract tray interface
-│   │   │   ├── config.py         # Client configuration
+│   │   │   ├── config.py         # Dashboard configuration
 │   │   │   └── models.py         # Shared data models
 │   │   ├── kde/                  # KDE Plasma (PyQt6)
 │   │   │   ├── tray.py           # Qt6 system tray implementation
@@ -737,7 +737,7 @@ TranscriptionSuite/
 │   │   │   ├── pyinstaller-kde.spec
 │   │   │   └── pyinstaller-windows.spec
 │   │   └── __main__.py           # CLI entry point
-│   └── pyproject.toml            # Client package + dependencies
+│   └── pyproject.toml            # Dashboard package + dependencies
 │
 ├── build/                        # Build and development tools
 │   ├── build-appimage-kde.sh     # Build KDE AppImage
@@ -779,7 +779,7 @@ The project has ***three*** `pyproject.toml` files, each serving a different pur
 
 | File | Purpose |
 |------|------|
-| `client/pyproject.toml` | Native client package definition. Defines runtime deps and platform extras (`kde`, `gnome`, `windows`). Provides the `transcription-client` entrypoint. **No dev dependencies** - use `build/.venv` for development tools. |
+| `dashboard/pyproject.toml` | Native dashboard package definition. Defines runtime deps and platform extras (`kde`, `gnome`, `windows`). Provides the `transcription-dashboard` entrypoint. **No dev dependencies** - use `build/.venv` for development tools. |
 | `build/pyproject.toml` | **All dev/build tools** (ruff, pyright, pytest, pyinstaller, httpx for testing). Use `build/.venv` for linting, type-checking, testing, and packaging. This is the single source of truth for all development tooling. |
 | `server/backend/pyproject.toml` | Server/backend package definition. Defines server deps (FastAPI, faster-whisper, torch, pyannote.audio, etc.) with **pinned versions** for reproducible Docker builds. **No dev dependencies** - use `build/.venv` for development tools. |
 
@@ -924,7 +924,7 @@ Set up all required Python virtual environments and audit NPM packages.
 #### 1.1 Client Virtual Environment
 
 ```bash
-cd client
+cd dashboard
 uv venv --python 3.12
 uv sync --extra kde    # For KDE/Plasma (PyQt6)
 # OR: uv sync --extra gnome   # For GNOME (GTK + AppIndicator)
@@ -1173,8 +1173,8 @@ docker compose up -d
 #### 3.2 Run the Client
 
 ```bash
-cd client
-uv run transcription-client --host localhost --port 8000
+cd dashboard
+uv run transcription-dashboard --host localhost --port 8000
 ```
 
 The client connects via HTTP to the local Docker server.
@@ -1214,8 +1214,8 @@ See [Tailscale HTTPS Setup](#tailscale-https-setup) for certificate generation i
 #### 4.2 Client-Side: Connect via HTTPS
 
 ```bash
-cd client
-uv run transcription-client --host <your-machine>.tail1234.ts.net --port 8443 --https
+cd dashboard
+uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443 --https
 ```
 
 Or with the AppImage:
@@ -1281,7 +1281,7 @@ This creates `build/.venv` containing packaging tools isolated from runtime depe
 ### KDE AppImage (Linux)
 
 **What it does:**
-1. Runs PyInstaller with `client/build/pyinstaller-kde.spec` to create a standalone binary
+1. Runs PyInstaller with `dashboard/build/pyinstaller-kde.spec` to create a standalone binary
 2. Bundles PyQt6, PyAudio, and all Python dependencies
 3. Automatically rescales `build/assets/logo.png` (1024×1024 → 256×256) for AppImage icon
 4. Creates an AppImage with `.desktop` file, icon, and launcher using `appimagetool`
@@ -2366,18 +2366,18 @@ Edit `logging/setup.py` for custom formatters, handlers, or log levels.
 **Local mode (Docker server on the same machine):**
 
 ```bash
-cd client
+cd dashboard
 uv venv --python 3.12
 uv sync --extra kde    # or --extra gnome / --extra windows
 
-uv run transcription-client --host localhost --port 8000
+uv run transcription-dashboard --host localhost --port 8000
 ```
 
 **Remote mode (Docker server reachable via Tailscale):**
 
 ```bash
-cd client
-uv run transcription-client --host <your-machine>.tail1234.ts.net --port 8443 --https
+cd dashboard
+uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443 --https
 
 # Or with the AppImage:
 ./TranscriptionSuite-KDE-x86_64.AppImage --host <your-machine>.tail1234.ts.net --port 8443 --https
@@ -2394,7 +2394,7 @@ uv run transcription-client --host <your-machine>.tail1234.ts.net --port 8443 --
 Enable detailed diagnostic logging for troubleshooting:
 
 ```bash
-uv run transcription-client --host <host> --port 8443 --https --verbose
+uv run transcription-dashboard --host <host> --port 8443 --https --verbose
 
 # Or with AppImage:
 ./TranscriptionSuite-KDE-x86_64.AppImage --verbose
@@ -2456,7 +2456,7 @@ sudo systemctl restart tailscaled
 # Wait ~5 seconds, then retry connection
 ```
 
-**Developer note:** The fix was implemented in `client/src/client/common/api_client.py` by replacing blocking `socket.getaddrinfo()` with async `asyncio.get_running_loop().getaddrinfo()` and adding graceful error handling.
+**Developer note:** The fix was implemented in `dashboard/src/dashboard/common/api_client.py` by replacing blocking `socket.getaddrinfo()` with async `asyncio.get_running_loop().getaddrinfo()` and adding graceful error handling.
 
 ### Server Busy Handling
 
@@ -2552,7 +2552,7 @@ The `SetupWizard` class in `setup_wizard.py`:
 
 **Skip Setup Flag:**
 ```bash
-uv run transcription-client --skip-setup
+uv run transcription-dashboard --skip-setup
 ```
 
 Use this flag to bypass the first-time setup wizard (useful for development or when setup was done manually).
@@ -2579,11 +2579,11 @@ All client platforms (KDE, GNOME, Windows) provide the same core features:
 - Requires: `gtk3`, `libappindicator-gtk3`, AppIndicator GNOME extension
 
 **Implementation Files:**
-- `client/common/tray_base.py` - Base class defining `show_settings_dialog()` and `copy_to_clipboard()` methods
-- `client/kde/tray.py` - Qt6 implementation (used by KDE and Windows)
-- `client/gnome/tray.py` - GTK3 implementation
-- `client/gnome/settings_dialog.py` - GTK3 settings dialog
-- `client/common/orchestrator.py` - Connection management and retry logic
+- `dashboard/common/tray_base.py` - Base class defining `show_settings_dialog()` and `copy_to_clipboard()` methods
+- `dashboard/kde/tray.py` - Qt6 implementation (used by KDE and Windows)
+- `dashboard/gnome/tray.py` - GTK3 implementation
+- `dashboard/gnome/settings_dialog.py` - GTK3 settings dialog
+- `dashboard/common/orchestrator.py` - Connection management and retry logic
 
 ---
 
@@ -2836,9 +2836,9 @@ docker compose exec transcription-suite cat /data/tokens/tokens.json
 
 **Native/AppImage Client:**
 - File: Platform-specific config file
-  - Linux: `~/.config/TranscriptionSuite/client.yaml`
-  - Windows: `%APPDATA%\TranscriptionSuite\client.yaml`
-  - macOS: `~/Library/Application Support/TranscriptionSuite/client.yaml`
+  - Linux: `~/.config/TranscriptionSuite/dashboard.yaml`
+  - Windows: `%APPDATA%\TranscriptionSuite\dashboard.yaml`
+  - macOS: `~/Library/Application Support/TranscriptionSuite/dashboard.yaml`
 - Key: `server.token`
 - When stored: After first successful connection or when provided via CLI flag
 - Used in `Authorization: Bearer <token>` header for API requests
@@ -3103,7 +3103,7 @@ Environment variables:
 
 ### Client Configuration
 
-Client config location: `~/.config/TranscriptionSuite/client.yaml` (Linux), `Documents\TranscriptionSuite\client.yaml` (Windows)
+Client config location: `~/.config/TranscriptionSuite/dashboard.yaml` (Linux), `Documents\TranscriptionSuite\dashboard.yaml` (Windows)
 
 **Full configuration with comments:**
 
@@ -3195,7 +3195,7 @@ The token is automatically saved after first successful connection or when provi
 
 ```bash
 # Token is saved to config after this command
-uv run transcription-client --token "your_admin_token_here"
+uv run transcription-dashboard --token "your_admin_token_here"
 ```
 
 Tokens are used in `Authorization: Bearer <token>` headers for API authentication.
@@ -3310,8 +3310,8 @@ When DNS resolution fails for a `.ts.net` hostname, the client automatically:
 3. Preserves the original hostname for SSL certificate validation
 
 **Files:**
-- `client/src/client/common/tailscale_resolver.py` - Tailscale CLI helper
-- `client/src/client/common/api_client.py` - Fallback logic in `_diagnose_connection()`
+- `dashboard/src/dashboard/common/tailscale_resolver.py` - Tailscale CLI helper
+- `dashboard/src/dashboard/common/api_client.py` - Fallback logic in `_diagnose_connection()`
 
 **Log output when fallback activates:**
 ```
@@ -3357,7 +3357,7 @@ resolvectl status
 
 ```bash
 # If DNS fails, try using Tailscale IP directly
-uv run transcription-client --host 100.98.45.21 --port 8443 --https
+uv run transcription-dashboard --host 100.98.45.21 --port 8443 --https
 ```
 
 #### Restarting/Resetting Tailscale MagicDNS
@@ -3448,7 +3448,7 @@ The client is now resilient to DNS issues through multiple mechanisms:
 - **SSL hostname preservation:** HTTPS works even when connecting via IP
 - **Graceful degradation:** Warnings instead of errors for diagnostic checks
 
-**For developers:** The `TailscaleResolver` class in `client/common/tailscale_resolver.py` can be reused for other Tailscale-aware applications.
+**For developers:** The `TailscaleResolver` class in `dashboard/common/tailscale_resolver.py` can be reused for other Tailscale-aware applications.
 
 ### Model Loading
 

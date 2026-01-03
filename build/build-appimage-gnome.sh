@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build AppImage for TranscriptionSuite GNOME client
-# Note: GNOME client uses GTK which is harder to bundle in AppImage
+# Build AppImage for TranscriptionSuite GNOME dashboard
+# Note: GNOME dashboard uses GTK which is harder to bundle in AppImage
 # This creates a "portable" package that expects GTK to be installed on the system
 #
 # Architecture Note:
-# The GNOME client uses a dual-process architecture because GTK3 (AppIndicator3)
+# The GNOME dashboard uses a dual-process architecture because GTK3 (AppIndicator3)
 # and GTK4 (libadwaita) cannot coexist in the same Python process. The tray runs
 # with GTK3, and the Dashboard window spawns as a separate GTK4 process.
 # Communication between them happens via D-Bus.
@@ -20,7 +20,7 @@ echo "=================================================="
 echo "Building TranscriptionSuite GNOME Package"
 echo "=================================================="
 echo ""
-echo "NOTE: The GNOME client requires system GTK3, GTK4, and AppIndicator."
+echo "NOTE: The GNOME dashboard requires system GTK3, GTK4, and AppIndicator."
 echo "This builds a portable package, not a fully standalone AppImage."
 echo ""
 
@@ -45,13 +45,13 @@ fi
 
 # Install Python dependencies using uv
 echo "→ Installing Python dependencies..."
-cd "$PROJECT_ROOT/client"
+cd "$PROJECT_ROOT/dashboard"
 uv sync --frozen --extra gnome
 
 # Copy all site-packages from venv to AppImage, excluding binary packages
 # that must be provided by the target system (packages with compiled .so files
 # that are ABI-specific and won't work across different Python versions/systems)
-SITE_PACKAGES=$(find "$PROJECT_ROOT/client/.venv/lib" -type d -name "site-packages" | head -1)
+SITE_PACKAGES=$(find "$PROJECT_ROOT/dashboard/.venv/lib" -type d -name "site-packages" | head -1)
 if [[ -d "$SITE_PACKAGES" ]]; then
     echo "→ Copying dependencies from $SITE_PACKAGES (excluding packages with compiled extensions)"
     for item in "$SITE_PACKAGES"/*; do
@@ -72,9 +72,9 @@ else
     exit 1
 fi
 
-# Copy client code
-echo "→ Copying client code..."
-cp -r "$PROJECT_ROOT/client" "$BUILD_DIR/AppDir/usr/lib/python3/dist-packages/"
+# Copy dashboard code
+echo "→ Copying dashboard code..."
+cp -r "$PROJECT_ROOT/dashboard" "$BUILD_DIR/AppDir/usr/lib/python3/dist-packages/"
 
 # Copy README files for Help menu (to AppDir root and share directory)
 echo "→ Copying README files..."
@@ -149,10 +149,10 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Add bundled packages to PYTHONPATH:
-# - client/src: client source code
+# - dashboard/src: dashboard source code
 # - dist-packages: bundled Python dependencies (markdown, pyyaml, etc.)
-export PYTHONPATH="${APP_DIR}/client/src:${APP_DIR}:${PYTHONPATH}"
-exec python3 -m client "$@"
+export PYTHONPATH="${APP_DIR}/dashboard/src:${APP_DIR}:${PYTHONPATH}"
+exec python3 -m dashboard "$@"
 EOF
 chmod +x "$BUILD_DIR/AppDir/usr/bin/transcriptionsuite-gnome"
 

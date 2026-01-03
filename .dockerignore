@@ -54,8 +54,8 @@ docs/
 *.md
 !README.md
 
-# Client code (not needed in server container)
-client/
+# Dashboard code (not needed in server container)
+dashboard/
 scripts/
 
 # Development files

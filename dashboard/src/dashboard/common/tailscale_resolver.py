@@ -6,7 +6,7 @@ which commonly occurs on mobile networks or when systemd-resolved
 is not configured properly.
 
 Usage:
-    from client.common.tailscale_resolver import TailscaleResolver
+    from dashboard.common.tailscale_resolver import TailscaleResolver
 
     if TailscaleResolver.is_tailscale_hostname(hostname):
         ip, original = await TailscaleResolver.resolve_ip(hostname)
