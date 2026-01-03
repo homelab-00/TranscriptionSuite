@@ -19,11 +19,11 @@ import argparse
 import logging
 import sys
 
-from client.common.audio_recorder import AudioRecorder
-from client.common.config import ClientConfig, get_config_dir
-from client.common.single_instance import acquire_instance_lock, release_instance_lock
-from client.common.setup_wizard import SetupWizard, is_first_time_setup
-from client.common.logging_config import setup_logging
+from dashboard.common.audio_recorder import AudioRecorder
+from dashboard.common.config import ClientConfig, get_config_dir
+from dashboard.common.single_instance import acquire_instance_lock, release_instance_lock
+from dashboard.common.setup_wizard import SetupWizard, is_first_time_setup
+from dashboard.common.logging_config import setup_logging
 
 
 def parse_args() -> argparse.Namespace:
@@ -194,18 +194,18 @@ def main() -> int:
 
             if "kde" in (desktop or ""):
                 print("Detected KDE Plasma - using PyQt6 tray")
-                from client.kde.tray import run_tray
+                from dashboard.kde.tray import run_tray
             elif "gnome" in (desktop or ""):
                 print("Detected GNOME - using GTK tray")
-                from client.gnome.tray import run_tray
+                from dashboard.gnome.tray import run_tray
             else:
                 # Default to Qt
                 print(f"Desktop: {desktop or 'unknown'} - using PyQt6 tray")
-                from client.kde.tray import run_tray
+                from dashboard.kde.tray import run_tray
 
         elif system == "Windows":
             print("Detected Windows - using PyQt6 tray")
-            from client.windows.tray import run_tray
+            from dashboard.windows.tray import run_tray
 
         else:
             print(f"Unsupported platform: {system}")

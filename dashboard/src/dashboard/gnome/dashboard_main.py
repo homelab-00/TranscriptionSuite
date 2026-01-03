@@ -21,7 +21,7 @@ import logging
 import sys
 from pathlib import Path
 
-from client.common.logging_config import setup_logging
+from dashboard.common.logging_config import setup_logging
 
 # Set up logging using unified config
 logger = setup_logging(verbose=False, component="dashboard", wipe_on_startup=False)
@@ -51,7 +51,7 @@ def main() -> int:
         logging.getLogger().setLevel(logging.INFO)
 
     try:
-        from client.gnome.dashboard import run_dashboard
+        from dashboard.gnome.dashboard import run_dashboard
 
         return run_dashboard(config_path=args.config)
     except ImportError as e:

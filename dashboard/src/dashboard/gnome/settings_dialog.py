@@ -7,8 +7,8 @@ Provides a GTK3 tabbed dialog for configuring client settings.
 import logging
 from typing import Any
 
-from client.common.audio_recorder import AudioRecorder
-from client.common.config import ClientConfig
+from dashboard.common.audio_recorder import AudioRecorder
+from dashboard.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 

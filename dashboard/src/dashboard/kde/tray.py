@@ -14,13 +14,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from client.common.docker_manager import DockerManager, ServerStatus
-from client.common.models import TrayAction, TrayState
-from client.common.server_control_mixin import ServerControlMixin
-from client.common.tray_base import AbstractTray
+from dashboard.common.docker_manager import DockerManager, ServerStatus
+from dashboard.common.models import TrayAction, TrayState
+from dashboard.common.server_control_mixin import ServerControlMixin
+from dashboard.common.tray_base import AbstractTray
 
 if TYPE_CHECKING:
-    from client.common.config import ClientConfig
+    from dashboard.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +336,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             logger.warning("Cannot show settings dialog: no config available")
             return
 
-        from client.kde.settings_dialog import SettingsDialog
+        from dashboard.kde.settings_dialog import SettingsDialog
 
         if self._settings_dialog is None:
             self._settings_dialog = SettingsDialog(self.config)
@@ -351,7 +351,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             logger.warning("Cannot show Dashboard: no config available")
             return
 
-        from client.kde.dashboard import DashboardWindow
+        from dashboard.kde.dashboard import DashboardWindow
 
         if self._dashboard_window is None:
             self._dashboard_window = DashboardWindow(self.config)
@@ -431,7 +431,7 @@ def run_tray(config) -> int:
     Returns:
         Exit code
     """
-    from client.common.orchestrator import ClientOrchestrator
+    from dashboard.common.orchestrator import ClientOrchestrator
 
     try:
         tray = Qt6Tray(config=config)

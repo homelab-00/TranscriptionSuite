@@ -7,7 +7,7 @@ the Docker server across different platform-specific tray implementations.
 
 import logging
 
-from client.common.docker_manager import DockerManager, ServerMode
+from dashboard.common.docker_manager import DockerManager, ServerMode
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ and Dashboard run as separate processes. They communicate via D-Bus:
 - The tray exposes a D-Bus service for controlling the transcription client
 - The Dashboard acts as a D-Bus client to invoke tray methods
 
-D-Bus Interface: com.transcriptionsuite.Client
+D-Bus Interface: com.transcriptionsuite.Dashboard
 Object Path: /com/transcriptionsuite/Client
 
 Methods exposed by tray:
@@ -29,14 +29,14 @@ from typing import TYPE_CHECKING, Any, Callable
 logger = logging.getLogger(__name__)
 
 # D-Bus constants
-DBUS_SERVICE_NAME = "com.transcriptionsuite.Client"
+DBUS_SERVICE_NAME = "com.transcriptionsuite.Dashboard"
 DBUS_OBJECT_PATH = "/com/transcriptionsuite/Client"
-DBUS_INTERFACE_NAME = "com.transcriptionsuite.Client"
+DBUS_INTERFACE_NAME = "com.transcriptionsuite.Dashboard"
 
 # D-Bus interface XML for introspection
 INTERFACE_XML = """
 <node>
-  <interface name="com.transcriptionsuite.Client">
+  <interface name="com.transcriptionsuite.Dashboard">
     <method name="StartClient">
       <arg direction="in" name="use_remote" type="b"/>
       <arg direction="out" name="success" type="b"/>

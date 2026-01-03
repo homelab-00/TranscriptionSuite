@@ -7,7 +7,7 @@ Defines the interface that all platform-specific tray implementations must follo
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from client.common.models import TrayAction, TrayState
+from dashboard.common.models import TrayAction, TrayState
 
 
 class AbstractTray(ABC):

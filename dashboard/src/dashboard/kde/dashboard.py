@@ -33,10 +33,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
+from dashboard.common.docker_manager import DockerManager, ServerMode, ServerStatus
 
 if TYPE_CHECKING:
-    from client.common.config import ClientConfig
+    from dashboard.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def _get_readme_path(dev: bool = False) -> Path | None:
             [
                 bundle_dir / filename,
                 bundle_dir / "docs" / filename,
-                bundle_dir / "src" / "client" / filename,
+                bundle_dir / "src" / "dashboard" / filename,
             ]
         )
 
@@ -2286,9 +2286,9 @@ class DashboardWindow(QMainWindow):
 
                 # Check if running as PyInstaller bundle
                 if getattr(sys, "frozen", False):
-                    # Running as bundled app - pyproject.toml should be in the client directory
+                    # Running as bundled app - pyproject.toml should be in the dashboard directory
                     bundle_dir = Path(sys._MEIPASS)  # type: ignore
-                    pyproject_path = bundle_dir / "client" / "pyproject.toml"
+                    pyproject_path = bundle_dir / "dashboard" / "pyproject.toml"
                 else:
                     # Running from source - find pyproject.toml relative to this file
                     current = Path(__file__).resolve()

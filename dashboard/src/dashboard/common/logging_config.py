@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 
-from client.common.config import get_config_dir
+from dashboard.common.config import get_config_dir
 
 
 # Shared log file name for unified logging

@@ -49,7 +49,7 @@ PYINSTALLER="$SCRIPT_DIR/.venv/bin/pyinstaller"
 
 "$PYINSTALLER" --clean --distpath "$BUILD_DIR/AppDir/usr/bin" \
     --workpath "$BUILD_DIR/work" \
-    client/src/client/build/pyinstaller-kde.spec
+    dashboard/src/dashboard/build/pyinstaller-kde.spec
 
 # Create .desktop file
 cat > "$BUILD_DIR/AppDir/transcriptionsuite-kde.desktop" << EOF
