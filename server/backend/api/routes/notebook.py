@@ -17,7 +17,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from server.api.routes.utils import get_client_name
+from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
@@ -371,7 +371,9 @@ async def upload_and_transcribe(
                     file_created_at.replace("Z", "+00:00")
                 )
             except ValueError:
-                logger.warning(f"Invalid file_created_at format: {file_created_at}")
+                logger.warning(
+                    f"Invalid file_created_at format: {sanitize_for_log(file_created_at)}"
+                )
 
         # Convert audio to MP3 and save to permanent storage
         config = get_config()

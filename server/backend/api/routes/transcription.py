@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-from server.api.routes.utils import get_client_name
+from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 from server.core.model_manager import TranscriptionCancelledError
 

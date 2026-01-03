@@ -319,7 +319,7 @@ class ClientOrchestrator:
                 try:
                     self.recorder.cancel()
                 except Exception:
-                    pass
+                    logger.debug("Failed to cancel recorder during cleanup")
                 self.recorder = None
 
             if self.tray:
@@ -632,7 +632,7 @@ class ClientOrchestrator:
             try:
                 self.recorder.cancel()
             except Exception:
-                pass
+                logger.debug("Failed to cancel recorder during shutdown")
             self.recorder = None
 
         # Close API client

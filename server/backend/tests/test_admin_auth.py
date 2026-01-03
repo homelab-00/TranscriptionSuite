@@ -5,9 +5,6 @@ Tests that admin endpoints properly require admin role and reject
 non-admin users.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-
 
 def test_admin_status_requires_admin(test_client_tls, admin_token, user_token):
     """Test that /api/admin/status requires admin role."""

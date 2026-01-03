@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from server.api.routes.utils import sanitize_for_log
 from server.config import get_config
 
 router = APIRouter()
@@ -223,11 +224,11 @@ async def process_with_llm(request: LLMRequest):
         payload["model"] = config["model"]
 
     # Log the request
-    logger.info(f"LLM Request (non-streaming) to {base_url}")
+    logger.info(f"LLM Request (non-streaming) to {sanitize_for_log(base_url)}")
     logger.info(
-        f"  System prompt: {system_prompt[:100]}..."
+        f"  System prompt: {sanitize_for_log(system_prompt, max_length=100)}..."
         if len(system_prompt) > 100
-        else f"  System prompt: {system_prompt}"
+        else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
     logger.info(
@@ -322,11 +323,11 @@ async def process_with_llm_stream(request: LLMRequest):
         payload["model"] = config["model"]
 
     # Log the streaming request
-    logger.info(f"LLM Request (streaming) to {base_url}")
+    logger.info(f"LLM Request (streaming) to {sanitize_for_log(base_url)}")
     logger.info(
-        f"  System prompt: {system_prompt[:100]}..."
+        f"  System prompt: {sanitize_for_log(system_prompt, max_length=100)}..."
         if len(system_prompt) > 100
-        else f"  System prompt: {system_prompt}"
+        else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
     logger.info(
@@ -663,7 +664,9 @@ async def load_model(request: ModelLoadRequest):
                 detail=str(e),
             )
 
-    logger.info(f"Loading model: {model_id} (gpu={gpu_offload}, ctx={context_length})")
+    logger.info(
+        f"Loading model: {sanitize_for_log(model_id)} (gpu={gpu_offload}, ctx={context_length})"
+    )
 
     # Build lms load command
     cmd_args = ["load", model_id]
@@ -684,17 +687,19 @@ async def load_model(request: ModelLoadRequest):
     )
 
     if success:
-        logger.info(f"Model {model_id} loaded successfully")
+        logger.info(f"Model {sanitize_for_log(model_id)} loaded successfully")
         return ServerControlResponse(
             success=True,
-            message=f"Model '{model_id}' loaded successfully",
+            message=f"Model '{sanitize_for_log(model_id)}' loaded successfully",
             detail=output,
         )
     else:
-        logger.error(f"Failed to load model {model_id}: {output}")
+        logger.error(
+            f"Failed to load model {sanitize_for_log(model_id)}: {sanitize_for_log(output, max_length=100)}"
+        )
         return ServerControlResponse(
             success=False,
-            message=f"Failed to load model '{model_id}'",
+            message=f"Failed to load model '{sanitize_for_log(model_id)}'",
             detail=output,
         )
 
@@ -985,7 +990,9 @@ async def chat_with_llm(request: ChatRequest):
     if config["model"]:
         payload["model"] = config["model"]
 
-    logger.info(f"Chat request to {base_url} for conversation {request.conversation_id}")
+    logger.info(
+        f"Chat request to {sanitize_for_log(base_url)} for conversation {sanitize_for_log(str(request.conversation_id))}"
+    )
 
     async def generate_stream() -> AsyncGenerator[str, None]:
         """Generate SSE stream from LLM response and save to DB."""

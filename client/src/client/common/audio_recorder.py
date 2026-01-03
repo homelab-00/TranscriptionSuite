@@ -118,8 +118,8 @@ class AudioRecorder:
             ):
                 return self.sample_rate
         except Exception:
-            pass
-        
+            logger.debug(f"Failed to validate sample rate {self.sample_rate} for device")
+
         # Get device's default sample rate
         try:
             if device_index is not None:
@@ -141,7 +141,7 @@ class AudioRecorder:
                     logger.info(f"Using device default sample rate: {default_rate} Hz")
                     return default_rate
             except Exception:
-                pass
+                logger.debug("Failed to validate device default sample rate")
         except Exception as e:
             logger.warning(f"Could not get device info: {e}")
         
@@ -339,14 +339,14 @@ class AudioRecorder:
                 self._stream.stop_stream()
                 self._stream.close()
             except Exception:
-                pass
+                logger.debug("Failed to stop/close audio stream during cleanup")
             self._stream = None
 
         if self._audio:
             try:
                 self._audio.terminate()
             except Exception:
-                pass
+                logger.debug("Failed to terminate PyAudio during cleanup")
             self._audio = None
 
     @property

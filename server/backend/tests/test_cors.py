@@ -5,9 +5,6 @@ Tests the OriginValidationMiddleware to ensure it properly restricts
 cross-origin requests based on deployment mode.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-
 
 def test_cors_local_mode_localhost_allowed(test_client_local):
     """Test that localhost origins are allowed in local mode."""

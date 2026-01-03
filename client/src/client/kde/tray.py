@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from client.common.docker_manager import DockerManager, ServerMode, ServerStatus
+from client.common.docker_manager import DockerManager, ServerStatus
 from client.common.models import TrayAction, TrayState
 from client.common.server_control_mixin import ServerControlMixin
 from client.common.tray_base import AbstractTray
