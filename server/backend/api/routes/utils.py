@@ -59,3 +59,33 @@ def require_admin(request: Request) -> bool:
     """
     stored_token = get_authenticated_token(request)
     return stored_token is not None and stored_token.is_admin
+
+
+def sanitize_for_log(value: str, max_length: int = 200) -> str:
+    """
+    Sanitize user input before logging to prevent log injection attacks.
+
+    Escapes newlines and removes control characters that could interfere
+    with log parsing or monitoring systems.
+
+    Args:
+        value: The string to sanitize
+        max_length: Maximum length before truncation (default: 200)
+
+    Returns:
+        Sanitized string safe for logging
+    """
+    if not value:
+        return value
+
+    # Escape newlines and carriage returns
+    sanitized = value.replace("\n", "\\n").replace("\r", "\\r")
+
+    # Remove non-printable control characters (keep spaces and tabs)
+    sanitized = "".join(c for c in sanitized if c.isprintable() or c in " \t")
+
+    # Truncate if too long
+    if len(sanitized) > max_length:
+        return sanitized[:max_length] + "..."
+
+    return sanitized

@@ -156,7 +156,7 @@ class DatabaseBackupManager:
                 try:
                     backup_path.unlink()
                 except Exception:
-                    pass
+                    logger.debug(f"Failed to cleanup partial backup file: {backup_path}")
 
             return None
 

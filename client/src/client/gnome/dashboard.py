@@ -1724,7 +1724,7 @@ class DashboardWindow(_get_dashboard_base()):
                         data = tomllib.load(f)
                     return data.get("project", {}).get("version", "dev")
             except Exception:
-                pass
+                logger.debug("Failed to read version from pyproject.toml")
         return "dev"
 
     # =========================================================================
@@ -1740,7 +1740,7 @@ class DashboardWindow(_get_dashboard_base()):
                 capture_output=True,
             )
         except FileNotFoundError:
-            pass
+            logger.debug("notify-send not found - cannot show desktop notifications")
 
 
 # =============================================================================

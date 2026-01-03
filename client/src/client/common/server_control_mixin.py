@@ -6,8 +6,6 @@ the Docker server across different platform-specific tray implementations.
 """
 
 import logging
-import subprocess
-from typing import Callable
 
 from client.common.docker_manager import DockerManager, ServerMode
 

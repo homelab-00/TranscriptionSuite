@@ -258,7 +258,7 @@ class ModelManager:
             try:
                 self._diarization_engine.unload()
             except AttributeError:
-                pass
+                logger.debug("Diarization engine has no unload method")
             self._diarization_engine = None
             clear_gpu_cache()
             logger.info("Diarization model unloaded")

@@ -545,6 +545,22 @@ A comprehensive code review was performed covering linting, security, and code q
     - **Python Version**: Updated `requires-python` constraint to `>=3.12,<3.14` to support Python 3.12+
       - GNOME AppImage uses system Python, which is 3.12 on Ubuntu 24.04
 
+20. **Defense-in-Depth: Log Injection Prevention** *(January 2026)*
+    - **CodeQL Analysis**: Addressed HIGH severity log injection warnings from GitHub CodeQL scanner
+    - **Context**: While users are trusted (localhost or authenticated Tailscale users), added sanitization as defense-in-depth
+    - **Implementation**: Added `sanitize_for_log()` helper function in `server/backend/api/routes/utils.py`
+      - Escapes newlines (`\n` → `\\n`) and carriage returns (`\r` → `\\r`)
+      - Removes non-printable control characters that could interfere with log parsing
+      - Truncates long values to prevent log bloat (default: 200 chars)
+    - **Applied sanitization to**:
+      - `server/backend/api/routes/llm.py` - 10 log statements (system prompts, model IDs, conversation IDs)
+      - `server/backend/api/routes/notebook.py` - 1 log statement (file timestamps)
+      - `server/backend/api/routes/transcription.py` - Import added for consistency
+    - **Code Quality Improvements**:
+      - Removed unused imports from 7 files (client + server test files)
+      - Added logging to 12 empty except blocks across client and server
+      - Improved error visibility for debugging without silently swallowing exceptions
+
 #### Security Analysis Summary
 
 - **Subprocess calls:** All use fixed command arrays (no shell injection risk)
@@ -553,6 +569,7 @@ A comprehensive code review was performed covering linting, security, and code q
 - **Authentication:** Token-based auth with proper middleware enforcement
 - **Path handling:** Uses `Path` objects; no string concatenation vulnerabilities
 - **CORS:** Origin validation protects against cross-origin attacks in both local and TLS modes
+- **Log injection:** User input sanitized before logging (defense-in-depth even though users are trusted)
 
 #### Continuous Security Monitoring
 
