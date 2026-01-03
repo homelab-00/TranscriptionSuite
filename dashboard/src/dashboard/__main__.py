@@ -21,7 +21,10 @@ import sys
 
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig, get_config_dir
-from dashboard.common.single_instance import acquire_instance_lock, release_instance_lock
+from dashboard.common.single_instance import (
+    acquire_instance_lock,
+    release_instance_lock,
+)
 from dashboard.common.setup_wizard import SetupWizard, is_first_time_setup
 from dashboard.common.logging_config import setup_logging
 
@@ -73,6 +76,16 @@ def parse_args() -> argparse.Namespace:
         "--skip-setup",
         action="store_true",
         help="Skip first-time setup wizard",
+    )
+    parser.add_argument(
+        "--no-tls-verify",
+        action="store_true",
+        help="Disable TLS certificate verification (for self-signed certs)",
+    )
+    parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow HTTP to remote hosts (Tailscale WireGuard encrypts traffic)",
     )
 
     return parser.parse_args()
@@ -168,6 +181,10 @@ def main() -> int:
         config.set("server", "port", value=args.port)
     if args.https:
         config.set("server", "use_https", value=True)
+    if args.no_tls_verify:
+        config.set("server", "tls_verify", value=False)
+    if args.allow_insecure_http:
+        config.set("server", "allow_insecure_http", value=True)
 
     # Print startup info
     print("\nTranscriptionSuite Native Client v0.3.0")

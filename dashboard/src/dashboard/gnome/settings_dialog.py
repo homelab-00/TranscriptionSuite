@@ -42,6 +42,8 @@ class SettingsDialog:
         self.device_combo: Gtk.ComboBoxText | None = None
         self.auto_copy_check: Gtk.CheckButton | None = None
         self.notifications_check: Gtk.CheckButton | None = None
+        self.tls_verify_check: Gtk.CheckButton | None = None
+        self.allow_insecure_http_check: Gtk.CheckButton | None = None
 
     def show(self) -> None:
         """Create and show the settings dialog."""
@@ -171,6 +173,35 @@ class SettingsDialog:
         # HTTPS checkbox
         self.https_check = Gtk.CheckButton(label="Use HTTPS")
         box.pack_start(self.https_check, False, False, 0)
+
+        # === Advanced TLS Options Frame ===
+        tls_frame = Gtk.Frame(label="Advanced TLS Options")
+        tls_frame.set_margin_top(8)
+        tls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        tls_box.set_margin_start(8)
+        tls_box.set_margin_end(8)
+        tls_box.set_margin_top(8)
+        tls_box.set_margin_bottom(8)
+
+        # TLS Verify checkbox
+        self.tls_verify_check = Gtk.CheckButton(label="Verify TLS certificates")
+        self.tls_verify_check.set_tooltip_text(
+            "Disable for self-signed certificates.\nConnection is still encrypted."
+        )
+        tls_box.pack_start(self.tls_verify_check, False, False, 0)
+
+        # Allow HTTP to remote hosts
+        self.allow_insecure_http_check = Gtk.CheckButton(
+            label="Allow HTTP to remote hosts (WireGuard encrypts traffic)"
+        )
+        self.allow_insecure_http_check.set_tooltip_text(
+            "Enable for Tailscale without MagicDNS.\n"
+            "Use Tailscale IP (e.g., 100.x.y.z) with port 8000."
+        )
+        tls_box.pack_start(self.allow_insecure_http_check, False, False, 0)
+
+        tls_frame.add(tls_box)
+        box.pack_start(tls_frame, False, False, 0)
 
         # Help text
         host_help_label = Gtk.Label()
@@ -320,6 +351,16 @@ class SettingsDialog:
                 self.config.get("server", "remote_host", default="")
             )
 
+        # Advanced TLS options
+        if self.tls_verify_check:
+            self.tls_verify_check.set_active(
+                self.config.get("server", "tls_verify", default=True)
+            )
+        if self.allow_insecure_http_check:
+            self.allow_insecure_http_check.set_active(
+                self.config.get("server", "allow_insecure_http", default=False)
+            )
+
         # Audio tab - select current device
         if self.device_combo:
             current_device = self.config.get("recording", "device_index")
@@ -362,6 +403,18 @@ class SettingsDialog:
         if self.remote_host_entry:
             self.config.set(
                 "server", "remote_host", value=self.remote_host_entry.get_text().strip()
+            )
+
+        # Advanced TLS options
+        if self.tls_verify_check:
+            self.config.set(
+                "server", "tls_verify", value=self.tls_verify_check.get_active()
+            )
+        if self.allow_insecure_http_check:
+            self.config.set(
+                "server",
+                "allow_insecure_http",
+                value=self.allow_insecure_http_check.get_active(),
             )
 
         # Audio tab
