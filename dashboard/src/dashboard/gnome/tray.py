@@ -340,7 +340,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
         # Spawn Dashboard as separate process (GTK4 cannot coexist with GTK3)
         try:
             # Use the same Python interpreter to run dashboard_main
-            cmd = [sys.executable, "-m", "client.gnome.dashboard_main"]
+            cmd = [sys.executable, "-m", "dashboard.gnome.dashboard_main"]
 
             # Add config path if available
             if self.config and hasattr(self.config, "_config_path"):

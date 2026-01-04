@@ -19,6 +19,7 @@ import argparse
 import logging
 import sys
 
+from dashboard import __version__
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig, get_config_dir
 from dashboard.common.single_instance import (
@@ -187,7 +188,7 @@ def main() -> int:
         config.set("server", "allow_insecure_http", value=True)
 
     # Print startup info
-    print("\nTranscriptionSuite Native Client v0.3.0")
+    print(f"\nTranscriptionSuite Native Client v{__version__}")
     print(f"Config directory: {get_config_dir()}")
     print(f"Server: {config.server_host}:{config.server_port}")
     print(f"HTTPS: {config.use_https}")
@@ -207,7 +208,7 @@ def main() -> int:
 
                 desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
             except Exception:
-                logger.debug("Failed to detect desktop environment")
+                pass  # Unlikely to fail - proceed with None
 
             if "kde" in (desktop or ""):
                 print("Detected KDE Plasma - using PyQt6 tray")

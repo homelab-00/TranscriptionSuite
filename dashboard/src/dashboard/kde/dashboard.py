@@ -935,16 +935,16 @@ class DashboardWindow(QMainWindow):
     def _apply_styles(self) -> None:
         """Apply stylesheet to the window - matching Web UI colors."""
         # Web UI color palette:
-        # background: #121212, surface: #1e1e1e, surface-light: #2d2d2d
+        # background: #0a0a0a (darker), surface: #1e1e1e, surface-light: #2d2d2d
         # primary: #90caf9, primary-dark: #42a5f5
         # error: #f44336, success: #4caf50, warning: #ff9800, info: #2196f3
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #121212;
+                background-color: #0a0a0a;
             }
 
             QScrollArea {
-                background-color: #121212;
+                background-color: #0a0a0a;
                 border: none;
             }
 
@@ -1086,7 +1086,6 @@ class DashboardWindow(QMainWindow):
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
                 border-radius: 8px;
-                max-width: 600px;
             }
 
             #statusLabel {
@@ -1275,11 +1274,11 @@ class DashboardWindow(QMainWindow):
             }
 
             QPushButton#secondaryButton[accent="web"] {
-                border: 1px solid #D7F62E;
+                border: 1px solid #4DD0E1;
             }
 
             QPushButton#secondaryButton[accent="web"]:hover {
-                border-color: #E5FF6E;
+                border-color: #80DEEA;
             }
 
             #sectionHeader {
@@ -1384,10 +1383,29 @@ class DashboardWindow(QMainWindow):
 
         self._server_status_label.setText(status_text)
 
-        # Update auth token display (always check for saved token)
-        token = self._docker_manager.get_admin_token(
-            check_logs=(status == ServerStatus.RUNNING)
-        )
+        # Update auth token display - always check logs when running to catch new tokens
+        if status == ServerStatus.RUNNING:
+            # Force check logs for latest token (clears cache first)
+            import re
+            logs = self._docker_manager.get_logs(lines=100)
+            new_token = None
+            for line in logs.split("\n"):
+                if "Admin Token:" in line:
+                    match = re.search(r"Admin Token:\s*(\S+)", line)
+                    if match:
+                        new_token = match.group(1)
+                        # Update cache if token changed
+                        if new_token != self._docker_manager._cached_auth_token:
+                            self._docker_manager._cached_auth_token = new_token
+                            self._docker_manager.save_server_auth_token(new_token)
+                            logger.info("Detected new admin token from logs")
+
+            # Display the token (either new or cached)
+            token = new_token or self._docker_manager.get_admin_token(check_logs=False)
+        else:
+            # When not running, just use cached token
+            token = self._docker_manager.get_admin_token(check_logs=False)
+
         if token:
             self._server_token_field.setText(token)
             self._server_token_field.setStyleSheet(
@@ -2274,42 +2292,10 @@ class DashboardWindow(QMainWindow):
         app_name.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: bold;")
         layout.addWidget(app_name)
 
-        # Version info - always display
-        try:
-            from importlib.metadata import version
+        # Version info - always display (use shared version utility)
+        from dashboard.common.version import __version__
 
-            app_version = version("transcription-suite-client")
-        except Exception:
-            # When running from source or PyInstaller bundle, try to read version from pyproject.toml
-            try:
-                import sys
-                import toml
-
-                # Check if running as PyInstaller bundle
-                if getattr(sys, "frozen", False):
-                    # Running as bundled app - pyproject.toml should be in the dashboard directory
-                    bundle_dir = Path(sys._MEIPASS)  # type: ignore
-                    pyproject_path = bundle_dir / "dashboard" / "pyproject.toml"
-                else:
-                    # Running from source - find pyproject.toml relative to this file
-                    current = Path(__file__).resolve()
-                    pyproject_path = None
-                    for parent in current.parents:
-                        potential_path = parent / "pyproject.toml"
-                        if potential_path.exists():
-                            pyproject_path = potential_path
-                            break
-
-                if pyproject_path and pyproject_path.exists():
-                    with open(pyproject_path, "r") as f:
-                        data = toml.load(f)
-                    app_version = data.get("project", {}).get("version", "dev")
-                else:
-                    app_version = "dev"
-            except Exception:
-                app_version = "dev"  # Fallback when running from source without install
-
-        version_label = QLabel(f"v{app_version}")
+        version_label = QLabel(f"v{__version__}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("color: #6c757d; font-size: 11px;")
         layout.addWidget(version_label)

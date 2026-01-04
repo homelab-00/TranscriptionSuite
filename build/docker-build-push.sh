@@ -27,8 +27,10 @@ readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
 # Configuration
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server"
-readonly DOCKERFILE_PATH="server/docker/Dockerfile"
+readonly DOCKERFILE_PATH="$PROJECT_ROOT/server/docker/Dockerfile"
 
 # Functions
 log_info() {
@@ -62,10 +64,9 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check if we're in the project root
+    # Check if Dockerfile exists
     if [[ ! -f "$DOCKERFILE_PATH" ]]; then
         log_error "Dockerfile not found at $DOCKERFILE_PATH"
-        log_error "Please run this script from the project root directory."
         exit 1
     fi
     
@@ -97,7 +98,7 @@ build_image() {
         --file "$DOCKERFILE_PATH" \
         --tag "$IMAGE_NAME:$tag" \
         $build_args \
-        .; then
+        "$PROJECT_ROOT"; then
         log_success "Image built successfully: $IMAGE_NAME:$tag"
         return 0
     else

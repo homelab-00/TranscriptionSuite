@@ -71,6 +71,8 @@ from server.logging import get_logger, setup_logging  # noqa: E402
 
 _log_time("logging imported")
 
+from server import __version__  # noqa: E402
+
 logger = get_logger("api")
 
 # Check if TLS mode is enabled (requires authentication for all routes)
@@ -300,7 +302,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app = FastAPI(
         title="TranscriptionSuite",
         description="Unified transcription server with Audio Notebook",
-        version="0.3.0",
+        version=__version__,
         lifespan=lifespan,
     )
 

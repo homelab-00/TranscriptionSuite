@@ -6,6 +6,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request
 
+from server import __version__
+
 router = APIRouter()
 
 
@@ -28,6 +30,6 @@ async def get_status(request: Request) -> Dict[str, Any]:
 
     return {
         "status": "running",
-        "version": "0.3.0",
+        "version": __version__,
         "models": status,
     }

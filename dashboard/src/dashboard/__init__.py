@@ -9,4 +9,6 @@ Platform-specific tray applications for:
 Handles microphone recording, clipboard, and server communication.
 """
 
-__version__ = "0.3.0"
+from dashboard.common.version import get_version
+
+__version__ = get_version()

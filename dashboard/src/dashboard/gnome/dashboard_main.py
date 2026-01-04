@@ -11,7 +11,7 @@ The solution is to run the Dashboard as a separate process from the tray.
 Communication between tray and Dashboard happens via D-Bus.
 
 Usage:
-    python -m client.gnome.dashboard_main [--config PATH]
+    python -m dashboard.gnome.dashboard_main [--config PATH]
 
 Or invoked by the tray process via subprocess when user clicks "Show App".
 """

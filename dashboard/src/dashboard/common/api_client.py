@@ -21,6 +21,8 @@ from typing import Any
 
 import aiohttp
 
+from dashboard.common.version import __version__
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,7 @@ class ServerBusyError(Exception):
 
 
 # Client identification
-CLIENT_VERSION = "0.3.0"
+CLIENT_VERSION = __version__
 CLIENT_TYPE = "standalone"  # Identifies this as the native desktop client
 
 # Audio constants

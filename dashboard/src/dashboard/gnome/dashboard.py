@@ -539,6 +539,7 @@ class DashboardWindow(_get_dashboard_base()):
         # Web client button
         web_btn = Gtk.Button(label="Open Web Client")
         web_btn.add_css_class("secondary-button")
+        web_btn.add_css_class("web-accent")
         web_btn.set_margin_top(20)
         web_btn.set_halign(Gtk.Align.CENTER)
         web_btn.connect("clicked", lambda _: self._on_open_web_client())
@@ -899,12 +900,17 @@ class DashboardWindow(_get_dashboard_base()):
         """Apply custom CSS styling matching KDE color scheme."""
         css = b"""
         /* Color scheme matching KDE Dashboard:
-           - Background: #121212
+           - Background: #0a0a0a (darker)
            - Surface: #1e1e1e, #2d2d2d
            - Primary: #90caf9, #42a5f5
            - Error: #f44336, Success: #4caf50, Warning: #ff9800, Info: #2196f3
-           - Server: #6B8DD9, Client: #D070D0
+           - Server: #6B8DD9, Client: #D070D0, Web: #4DD0E1
         */
+
+        /* Window background */
+        window {
+            background-color: #0a0a0a;
+        }
 
         /* Accent colors */
         .server-accent {
@@ -912,6 +918,9 @@ class DashboardWindow(_get_dashboard_base()):
         }
         .client-accent {
             color: #D070D0;
+        }
+        .web-accent {
+            color: #4DD0E1;
         }
 
         /* Welcome buttons */
@@ -943,6 +952,14 @@ class DashboardWindow(_get_dashboard_base()):
         .secondary-button:hover {
             background: #3d3d3d;
             border-color: #4d4d4d;
+        }
+
+        /* Web button with green-aquamarine accent */
+        .secondary-button.web-accent {
+            border-color: #4DD0E1;
+        }
+        .secondary-button.web-accent:hover {
+            border-color: #80DEEA;
         }
 
         /* Primary button (suggested-action style) */
@@ -1218,9 +1235,30 @@ class DashboardWindow(_get_dashboard_base()):
             else:
                 self._models_list_label.set_visible(False)
 
-        # Load auth token
+        # Load auth token - check logs when running to catch new tokens
         if self._server_token_entry:
-            token = self.config.get("server", "token", default="")
+            if status == ServerStatus.RUNNING:
+                # Force check logs for latest token
+                import re
+                logs = self._docker_manager.get_logs(lines=100)
+                new_token = None
+                for line in logs.split("\n"):
+                    if "Admin Token:" in line:
+                        match = re.search(r"Admin Token:\s*(\S+)", line)
+                        if match:
+                            new_token = match.group(1)
+                            # Update cache if token changed
+                            if new_token != self._docker_manager._cached_auth_token:
+                                self._docker_manager._cached_auth_token = new_token
+                                self._docker_manager.save_server_auth_token(new_token)
+                                logger.info("Detected new admin token from logs")
+
+                # Display the token (either new or cached)
+                token = new_token or self._docker_manager.get_admin_token(check_logs=False)
+            else:
+                # When not running, just use cached token
+                token = self._docker_manager.get_admin_token(check_logs=False)
+
             if token:
                 self._server_token_entry.set_text(token)
             else:
@@ -1716,36 +1754,10 @@ class DashboardWindow(_get_dashboard_base()):
         return None
 
     def _get_app_version(self) -> str:
-        """Get the application version."""
-        try:
-            from importlib.metadata import version
+        """Get the application version using shared version utility."""
+        from dashboard.common.version import __version__
 
-            return version("transcription-suite-client")
-        except Exception:
-            # When running from source or PyInstaller bundle
-            try:
-                import sys
-                import tomllib
-
-                if getattr(sys, "frozen", False):
-                    bundle_dir = Path(sys._MEIPASS)  # type: ignore
-                    pyproject_path = bundle_dir / "dashboard" / "pyproject.toml"
-                else:
-                    current = Path(__file__).resolve()
-                    pyproject_path = None
-                    for parent in current.parents:
-                        potential_path = parent / "pyproject.toml"
-                        if potential_path.exists():
-                            pyproject_path = potential_path
-                            break
-
-                if pyproject_path and pyproject_path.exists():
-                    with open(pyproject_path, "rb") as f:
-                        data = tomllib.load(f)
-                    return data.get("project", {}).get("version", "dev")
-            except Exception:
-                logger.debug("Failed to read version from pyproject.toml")
-        return "dev"
+        return __version__
 
     # =========================================================================
     # Notifications
