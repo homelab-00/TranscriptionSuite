@@ -1198,6 +1198,26 @@ class DashboardWindow(_get_dashboard_base()):
                 if self._models_volume_size:
                     self._models_volume_size.set_text("")
 
+        # Update models list
+        if self._models_list_label:
+            if models_volume_exists and status == ServerStatus.RUNNING:
+                models = self._docker_manager.list_downloaded_models()
+                if models:
+                    models_lines = [
+                        f"  • {m['name']} ({m['size']})" for m in models
+                    ]
+                    models_text = "Downloaded:\n" + "\n".join(models_lines)
+                    self._models_list_label.set_text(models_text)
+                    self._models_list_label.set_visible(True)
+                else:
+                    self._models_list_label.set_text("No models downloaded yet")
+                    self._models_list_label.set_visible(True)
+            elif models_volume_exists:
+                self._models_list_label.set_text("(Start server to view models)")
+                self._models_list_label.set_visible(True)
+            else:
+                self._models_list_label.set_visible(False)
+
         # Load auth token
         if self._server_token_entry:
             token = self.config.get("server", "token", default="")

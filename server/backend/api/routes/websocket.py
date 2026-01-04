@@ -428,9 +428,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             from server.core.token_store import StoredToken
 
             stored_token = StoredToken(
-                token_hash="localhost",
+                token="localhost",  # Note: 'token' not 'token_hash' (stores the hash)
                 client_name="localhost-user",
                 is_admin=True,
+                is_revoked=False,
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
             logger.info(

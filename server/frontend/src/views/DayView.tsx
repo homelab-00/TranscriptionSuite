@@ -66,7 +66,15 @@ export default function DayView() {
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<string | null>(null);
-  
+
+  // Auto-enable word timestamps when diarization is enabled
+  // (diarization requires word-level data for proper speaker-text alignment)
+  useEffect(() => {
+    if (enableDiarization && !enableWordTimestamps) {
+      setEnableWordTimestamps(true);
+    }
+  }, [enableDiarization, enableWordTimestamps]);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -1123,8 +1131,10 @@ export default function DayView() {
           <Toggle
             checked={enableWordTimestamps}
             onChange={setEnableWordTimestamps}
-            label="Enable word-level timestamps"
-            disabled={importLoading}
+            label={enableDiarization
+              ? "Enable word-level timestamps (required for diarization)"
+              : "Enable word-level timestamps"}
+            disabled={importLoading || enableDiarization}
           />
           
           <Toggle

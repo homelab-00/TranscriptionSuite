@@ -1257,13 +1257,21 @@ def _insert_diarization_segments_with_words(
     cursor: sqlite3.Cursor,
     recording_id: int,
     diarization_segments: List[Dict[str, Any]],
-    word_timestamps: Optional[List[Dict[str, Any]]] = None,
+    alignment_words: Optional[List[Dict[str, Any]]] = None,
+    save_words: bool = True,
 ) -> None:
     """Insert diarization segments with optional word timestamps (internal helper).
 
+    Args:
+        cursor: Database cursor
+        recording_id: ID of the recording
+        diarization_segments: List of speaker segments
+        alignment_words: Optional word timestamps for aligning text with speaker segments
+        save_words: Whether to save individual words to the database (vs just using them for segment text)
+
     Note: This function does NOT commit - caller is responsible for transaction management.
     """
-    word_map: List[Dict[str, Any]] = word_timestamps or []
+    word_map: List[Dict[str, Any]] = alignment_words or []
 
     inserted_segments: List[Dict[str, Any]] = []
 
@@ -1342,39 +1350,7 @@ def _insert_diarization_segments_with_words(
                 key=lambda x: float(x.get("start", x.get("start_time", 0.0)) or 0.0),
             )
 
-            words_batch = [
-                {
-                    "recording_id": recording_id,
-                    "segment_id": segment_id,
-                    "word_index": i,
-                    "word": w.get("word", ""),
-                    "start_time": float(
-                        w.get("start", w.get("start_time", 0.0)) or 0.0
-                    ),
-                    "end_time": float(
-                        w.get(
-                            "end",
-                            w.get(
-                                "end_time",
-                                w.get("start", w.get("start_time", 0.0)),
-                            ),
-                        )
-                        or 0.0
-                    ),
-                    "confidence": w.get("confidence"),
-                }
-                for i, w in enumerate(segment_words_sorted)
-            ]
-
-            cursor.executemany(
-                """
-                INSERT INTO words 
-                (recording_id, segment_id, word_index, word, start_time, end_time, confidence)
-                VALUES (:recording_id, :segment_id, :word_index, :word, :start_time, :end_time, :confidence)
-                """,
-                words_batch,
-            )
-
+            # Build segment text from words (always needed)
             segment_text = " ".join(
                 [str(w.get("word", "")).strip() for w in segment_words_sorted]
             ).strip()
@@ -1382,6 +1358,41 @@ def _insert_diarization_segments_with_words(
                 "UPDATE segments SET text = ? WHERE id = ?",
                 (segment_text, segment_id),
             )
+
+            # Only save individual words to database if requested
+            if save_words:
+                words_batch = [
+                    {
+                        "recording_id": recording_id,
+                        "segment_id": segment_id,
+                        "word_index": i,
+                        "word": w.get("word", ""),
+                        "start_time": float(
+                            w.get("start", w.get("start_time", 0.0)) or 0.0
+                        ),
+                        "end_time": float(
+                            w.get(
+                                "end",
+                                w.get(
+                                    "end_time",
+                                    w.get("start", w.get("start_time", 0.0)),
+                                ),
+                            )
+                            or 0.0
+                        ),
+                        "confidence": w.get("confidence"),
+                    }
+                    for i, w in enumerate(segment_words_sorted)
+                ]
+
+                cursor.executemany(
+                    """
+                    INSERT INTO words
+                    (recording_id, segment_id, word_index, word, start_time, end_time, confidence)
+                    VALUES (:recording_id, :segment_id, :word_index, :word, :start_time, :end_time, :confidence)
+                    """,
+                    words_batch,
+                )
 
 
 def save_longform_to_database(
@@ -1403,6 +1414,7 @@ def save_longform_to_database(
         duration_seconds: Duration in seconds
         transcription_text: Full transcription text
         word_timestamps: Optional list of word timing dicts
+            (automatically provided when diarization is enabled for text alignment)
         diarization_segments: Optional list of speaker segments
         recorded_at: Optional timestamp (defaults to now)
 
@@ -1458,8 +1470,14 @@ def save_longform_to_database(
 
             # Insert segments and words (no intermediate commits)
             if diarization_segments:
+                # Diarization requires word timestamps for text alignment
+                # Words are always saved when diarization is enabled
                 _insert_diarization_segments_with_words(
-                    cursor, recording_id, diarization_segments, word_timestamps
+                    cursor,
+                    recording_id,
+                    diarization_segments,
+                    alignment_words=word_timestamps,
+                    save_words=True,
                 )
             elif word_timestamps:
                 _insert_single_segment_with_words(
