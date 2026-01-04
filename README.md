@@ -515,3 +515,4 @@ MIT License — See [LICENSE](LICENSE).
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [Tailscale](https://tailscale.com/)
+- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)
