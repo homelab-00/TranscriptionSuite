@@ -443,6 +443,8 @@ A comprehensive code review was performed covering linting, security, and code q
 5. **Security: Token Type Fix** *(January 2026)*
    - Fixed localhost bypass token creation in WebSocket endpoint
    - Changed `created_at` from `asyncio.get_event_loop().time()` (float) to ISO datetime string
+   - Fixed incorrect parameter name: `token_hash` → `token` (matches StoredToken dataclass)
+   - Added missing required field `is_revoked=False`
    - Matches `StoredToken` model requirements
 
 6. **Security: File Permissions** *(January 2026)*
@@ -561,6 +563,45 @@ A comprehensive code review was performed covering linting, security, and code q
       - Removed unused imports from 7 files (client + server test files)
       - Added logging to 12 empty except blocks across client and server
       - Improved error visibility for debugging without silently swallowing exceptions
+
+21. **Bug Fix & Simplification: Diarization Auto-Enables Word Timestamps** *(January 2026)*
+    - **Issue**: When word-level timestamps were disabled in the web UI upload, no transcription was saved to the audio notebook
+    - **Root Cause**: Diarization segments were created without text when word timestamps were disabled, because there was no word-level data to align with speaker segments
+    - **Solution**: Simplified the UI/UX by making diarization automatically enable word timestamps
+      - Word timestamps are always computed and saved when diarization is enabled (they're needed anyway)
+      - Frontend auto-enables word timestamps toggle when diarization is turned on
+      - Word timestamps toggle is disabled when diarization is active (with explanatory label)
+      - Transcription text is always saved, regardless of feature settings
+    - **Backend Changes** ([notebook.py:409-428](server/backend/api/routes/notebook.py#L409-L428)):
+      - Simplified word timestamp extraction logic (removed separate alignment parameter)
+      - Words are always saved when diarization is enabled
+    - **Frontend Changes** ([ImportView.tsx:23-29](server/frontend/src/views/ImportView.tsx#L23-L29), [ImportView.tsx:238-244](server/frontend/src/views/ImportView.tsx#L238-L244)):
+      - Added useEffect hook to auto-enable word timestamps when diarization is enabled
+      - Updated toggle label to show "(required for diarization)" when diarization is active
+      - Disabled word timestamps toggle when diarization is enabled
+    - **User Experience**: Clearer relationship between diarization and word timestamps - no confusion about why transcription might not appear
+
+22. **UI Improvements: Models Display and Diarization Toggle** *(January 2026)*
+    - **Models List Display**: Fixed inline model display in native dashboards
+      - KDE Dashboard ([dashboard.py:1489-1493](dashboard/src/dashboard/kde/dashboard.py#L1489-L1493)): Changed from inline comma-separated to vertical list with bullet points
+      - GNOME Dashboard ([dashboard.py:1201-1219](dashboard/src/dashboard/gnome/dashboard.py#L1201-L1219)): Added models list display (was previously missing)
+      - Both dashboards now show downloaded models in consistent vertical format with bullet points
+    - **Diarization Toggle Auto-Enable in DayView**: Applied ImportView fix to DayView ([DayView.tsx:72-76](server/frontend/src/views/DayView.tsx#L72-L76), [DayView.tsx:1131-1138](server/frontend/src/views/DayView.tsx#L1131-L1138))
+      - Added useEffect hook to auto-enable word timestamps when diarization is enabled
+      - Word timestamps toggle now disables when diarization is active
+      - Label changes to "(required for diarization)" when diarization is enabled
+      - Ensures consistent UX across both ImportView and DayView
+
+23. **Bug Fix: WebSocket Port Mismatch in Development** *(January 2026)*
+    - **Issue**: Long-form recording failed when accessing web UI locally at `localhost:1420` (development mode)
+    - **Root Cause**: WebSocket URL construction in [useWebSocket.ts:22-27](server/frontend/src/hooks/useWebSocket.ts#L22-L27) used `window.location.port` which returns `1420` (Vite dev server port) instead of `8000` (backend port)
+    - **Impact**: WebSocket connections attempted to connect to `ws://localhost:1420/ws` instead of `ws://localhost:8000/ws`, causing all recording attempts to fail
+    - **Solution**: Added development mode detection using `import.meta.env.DEV` to use port `8000` in development and the current page's port in production
+    - **Frontend Changes** ([useWebSocket.ts:24-34](server/frontend/src/hooks/useWebSocket.ts#L24-L34)):
+      - Updated `getWsUrl()` to check `import.meta.env.DEV` and use backend port `8000` when in development
+      - Production behavior unchanged (uses same port as page)
+      - Matches the pattern used for HTTP API requests in `RecordView.tsx`
+    - **Documentation**: Updated README_DEV.md Frontend Development section to document port configuration and fix incorrect port number (1421 → 1420)
 
 #### Security Analysis Summary
 
@@ -2232,16 +2273,19 @@ The server includes a React frontend for web access:
 ```bash
 cd server/frontend
 npm install
-npm run dev  # Starts dev server on http://localhost:1421
+npm run dev  # Starts dev server on http://localhost:1420
 ```
 
 **API integration:**
 
 The frontend expects the backend API at `http://localhost:8000` by default. During development:
 
-1. Run the backend server on port 8000
-2. Run frontend dev server on port 1421
-3. Vite will proxy API requests to avoid CORS issues
+1. Run the backend server on port 8000 (Docker or native)
+2. Run frontend dev server on port 1420
+3. The frontend uses `import.meta.env.DEV` to detect development mode and route requests correctly:
+   - HTTP API requests: `http://localhost:8000/api` (see `RecordView.tsx`)
+   - WebSocket connections: `ws://localhost:8000/ws` (see `useWebSocket.ts`)
+4. In production, both HTTP and WebSocket use the same origin as the page
 
 **Building for production:**
 

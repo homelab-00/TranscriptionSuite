@@ -326,12 +326,16 @@ async def upload_and_transcribe(
         # Get transcription engine
         engine = model_manager.transcription_engine
 
+        # Force word timestamps if diarization is enabled
+        # (needed for proper text-to-speaker alignment, even if user doesn't want to save words)
+        need_word_timestamps = enable_word_timestamps or enable_diarization
+
         # Transcribe
         logger.info(f"Transcribing uploaded file for notebook: {file.filename}")
         result = engine.transcribe_file(
             str(tmp_path),
             language=None,
-            word_timestamps=enable_word_timestamps,
+            word_timestamps=need_word_timestamps,
         )
 
         # Run diarization if enabled
@@ -403,11 +407,13 @@ async def upload_and_transcribe(
         convert_to_mp3(str(tmp_path), str(dest_path))
 
         # Extract word timestamps from segments
+        # Diarization automatically enables word timestamps (they're needed for alignment anyway)
         word_timestamps_list = None
-        if enable_word_timestamps:
+
+        # Extract words from segments if they were computed
+        if result.segments and "words" in result.segments[0]:
             word_timestamps_list = []
             for seg in result.segments:
-                # seg is a dict, and words are already dicts (no need for .to_dict())
                 if "words" in seg:
                     word_timestamps_list.extend(seg["words"])
 

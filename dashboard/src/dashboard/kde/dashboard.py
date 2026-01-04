@@ -1486,10 +1486,11 @@ class DashboardWindow(QMainWindow):
             if is_running:
                 models = self._docker_manager.list_downloaded_models()
                 if models:
-                    models_text = ", ".join(
-                        [f"{m['name']} ({m['size']})" for m in models]
-                    )
-                    self._models_list_label.setText(f"Downloaded: {models_text}")
+                    models_lines = [
+                        f"  • {m['name']} ({m['size']})" for m in models
+                    ]
+                    models_text = "Downloaded:\n" + "\n".join(models_lines)
+                    self._models_list_label.setText(models_text)
                     self._models_list_label.setVisible(True)
                 else:
                     self._models_list_label.setText("No models downloaded yet")

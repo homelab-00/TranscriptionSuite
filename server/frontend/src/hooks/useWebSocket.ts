@@ -18,11 +18,19 @@ export type WebSocketStatus =
   | 'busy'
   | 'error';
 
-// Get WebSocket URL (same port as current page, /ws endpoint)
+// Get WebSocket URL
+// In development mode, use backend port 8000
+// In production, use same port as the page (frontend and backend are served together)
 const getWsUrl = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.hostname;
-  const port = window.location.port || '8443';
+
+  // In development, frontend runs on port 1420 (Vite) but backend is on port 8000
+  // In production, frontend and backend are served from the same port
+  const port = import.meta.env.DEV
+    ? '8000'
+    : (window.location.port || '8443');
+
   return `${protocol}//${host}:${port}/ws`;
 };
 

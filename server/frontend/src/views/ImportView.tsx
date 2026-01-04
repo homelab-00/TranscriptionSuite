@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Upload, FileAudio, CheckCircle, XCircle, Loader2, Play, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { ImportJob } from '../types';
@@ -19,6 +19,14 @@ export default function ImportView() {
   const [dragActive, setDragActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-enable word timestamps when diarization is enabled
+  // (diarization requires word-level data for proper speaker-text alignment)
+  useEffect(() => {
+    if (enableDiarization && !enableWordTimestamps) {
+      setEnableWordTimestamps(true);
+    }
+  }, [enableDiarization, enableWordTimestamps]);
 
   // Open HTML file picker
   const openFilePicker = () => {
@@ -230,8 +238,10 @@ export default function ImportView() {
           <Toggle
             checked={enableWordTimestamps}
             onChange={setEnableWordTimestamps}
-            label="Enable word-level timestamps (clickable words in transcript)"
-            disabled={isProcessing}
+            label={enableDiarization
+              ? "Enable word-level timestamps (required for diarization)"
+              : "Enable word-level timestamps (clickable words in transcript)"}
+            disabled={isProcessing || enableDiarization}
           />
           <Toggle
             checked={enableDiarization}
