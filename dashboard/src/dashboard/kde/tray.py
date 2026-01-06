@@ -106,6 +106,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.stop_action: QAction | None = None
         self.cancel_action: QAction | None = None
         self.reconnect_action: QAction | None = None
+        self.toggle_models_action: QAction | None = None
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -163,6 +164,16 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             lambda: self._trigger_callback(TrayAction.TRANSCRIBE_FILE)
         )
         menu.addAction(transcribe_action)
+
+        menu.addSeparator()
+
+        # Model management (toggle unload/reload)
+        self.toggle_models_action = QAction("Unload Models", menu)
+        self.toggle_models_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.TOGGLE_MODELS)
+        )
+        self.toggle_models_action.setEnabled(False)  # Disabled until client connects
+        menu.addAction(self.toggle_models_action)
 
         menu.addSeparator()
 
@@ -249,6 +260,19 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             }
             self.cancel_action.setEnabled(state in cancellable_states)
 
+        # Toggle models is only enabled when connected (not IDLE, not DISCONNECTED)
+        # and not during recording/transcription
+        if self.toggle_models_action:
+            if state == TrayState.IDLE or state == TrayState.DISCONNECTED:
+                self.toggle_models_action.setEnabled(False)
+            else:
+                busy_states = {
+                    TrayState.RECORDING,
+                    TrayState.UPLOADING,
+                    TrayState.TRANSCRIBING,
+                }
+                self.toggle_models_action.setEnabled(state not in busy_states)
+
     def _get_logo_icon(self) -> QIcon:
         """Get the app logo icon for IDLE state."""
         if self.LOGO_PATH.exists():
@@ -260,6 +284,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
     def show_notification(self, title: str, message: str) -> None:
         """Show a system notification (thread-safe)."""
+        # Check if notifications are enabled
+        if self.config and not self.config.get("ui", "notifications", default=True):
+            return
         self._signals.notification_requested.emit(title, message)
 
     def _do_show_notification(self, title: str, message: str) -> None:
@@ -277,6 +304,14 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
     def quit(self) -> None:
         """Exit the application."""
+        # Stop Docker server if running and setting enabled
+        if self.config and self.config.get(
+            "dashboard", "stop_server_on_quit", default=True
+        ):
+            if self._docker_manager.get_server_status() == ServerStatus.RUNNING:
+                logger.info("Stopping Docker server on quit")
+                self._docker_manager.stop_server()
+
         self._trigger_callback(TrayAction.QUIT)
         self.cleanup()
         self.tray.hide()
@@ -293,6 +328,17 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
     def update_tooltip(self, text: str) -> None:
         """Update the tray icon tooltip."""
         self.tray.setToolTip(text)
+
+    def update_models_menu_state(self, models_loaded: bool) -> None:
+        """
+        Update the toggle models menu item text based on current state.
+
+        Args:
+            models_loaded: True if models are loaded, False if unloaded
+        """
+        if self.toggle_models_action:
+            text = "Reload Models" if not models_loaded else "Unload Models"
+            self.toggle_models_action.setText(text)
 
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""
@@ -382,6 +428,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
     def _on_dashboard_stop_client(self) -> None:
         """Handle stop client request from Dashboard."""
         logger.info("Dashboard requested client stop")
+        # Disconnect from server to properly clean up resources
+        self._trigger_callback(TrayAction.DISCONNECT)
         # Set tray state to IDLE (client not running)
         self.set_state(TrayState.IDLE)
         # Update Dashboard

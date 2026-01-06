@@ -57,6 +57,7 @@ class DockerManager:
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
     CONTAINER_NAME = "transcription-suite"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
+    LAST_SERVER_STOP_FILE = "last_server_stop_timestamp.txt"
 
     def __init__(self, config_dir: Path | None = None):
         """
@@ -203,17 +204,23 @@ class DockerManager:
             return compose_file
         return None
 
-    def _parse_tls_paths_from_config(self, config_path: Path) -> tuple[str | None, str | None]:
+    def _parse_tls_paths_from_config(
+        self, config_path: Path
+    ) -> tuple[str | None, str | None]:
         """Parse TLS certificate paths from config.yaml."""
         try:
             content = config_path.read_text()
 
             # Extract host_cert_path
-            cert_match = re.search(r'host_cert_path:\s*[\'"]?([^\'"#\r\n]+)[\'"]?', content)
+            cert_match = re.search(
+                r'host_cert_path:\s*[\'"]?([^\'"#\r\n]+)[\'"]?', content
+            )
             cert_path = cert_match.group(1).strip() if cert_match else None
 
             # Extract host_key_path
-            key_match = re.search(r'host_key_path:\s*[\'"]?([^\'"#\r\n]+)[\'"]?', content)
+            key_match = re.search(
+                r'host_key_path:\s*[\'"]?([^\'"#\r\n]+)[\'"]?', content
+            )
             key_path = key_match.group(1).strip() if key_match else None
 
             # Expand ~ to home directory
@@ -295,7 +302,14 @@ class DockerManager:
         """
         try:
             result = self._run_command(
-                ["docker", "volume", "inspect", volume_name, "--format", "{{.Mountpoint}}"]
+                [
+                    "docker",
+                    "volume",
+                    "inspect",
+                    volume_name,
+                    "--format",
+                    "{{.Mountpoint}}",
+                ]
             )
             if result.returncode != 0:
                 return None
@@ -306,13 +320,11 @@ class DockerManager:
 
             # Use du command to get directory size
             # We need to run this with sudo privileges on Linux
-            du_result = self._run_command(
-                ["du", "-sh", mountpoint]
-            )
+            du_result = self._run_command(["du", "-sh", mountpoint])
 
             if du_result.returncode == 0:
                 # Parse output like "1.5G\t/path/to/volume"
-                size = du_result.stdout.strip().split('\t')[0]
+                size = du_result.stdout.strip().split("\t")[0]
                 return size
             return None
         except Exception:
@@ -349,16 +361,21 @@ class DockerManager:
                 return []
 
             # Use docker exec to list models from inside the container
-            result = self._run_command([
-                "docker", "exec", self.CONTAINER_NAME,
-                "sh", "-c",
-                'for d in /models/hub/models--*/; do '
-                'if [ -d "$d" ]; then '
-                'name=$(basename "$d"); '
-                'size=$(du -sh "$d" 2>/dev/null | cut -f1); '
-                'echo "$name|$size"; '
-                'fi; done'
-            ])
+            result = self._run_command(
+                [
+                    "docker",
+                    "exec",
+                    self.CONTAINER_NAME,
+                    "sh",
+                    "-c",
+                    "for d in /models/hub/models--*/; do "
+                    'if [ -d "$d" ]; then '
+                    'name=$(basename "$d"); '
+                    'size=$(du -sh "$d" 2>/dev/null | cut -f1); '
+                    'echo "$name|$size"; '
+                    "fi; done",
+                ]
+            )
 
             if result.returncode == 0 and result.stdout.strip():
                 for line in result.stdout.strip().split("\n"):
@@ -371,10 +388,12 @@ class DockerManager:
                             display_name = f"{name_parts[0]}/{name_parts[1]}"
                         else:
                             display_name = raw_name
-                        models.append({
-                            "name": display_name,
-                            "size": parts[1] if len(parts) > 1 else "?"
-                        })
+                        models.append(
+                            {
+                                "name": display_name,
+                                "size": parts[1] if len(parts) > 1 else "?",
+                            }
+                        )
             return models
         except Exception as e:
             logger.error(f"Failed to list models: {e}")
@@ -421,7 +440,9 @@ class DockerManager:
             result = self._run_command(["docker", "rm", self.CONTAINER_NAME])
 
         if result.returncode == 0:
-            return DockerResult(True, "Container removed. You can now start fresh from the image.")
+            return DockerResult(
+                True, "Container removed. You can now start fresh from the image."
+            )
         else:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
             return DockerResult(False, f"Failed to remove container: {error_msg}")
@@ -515,17 +536,16 @@ class DockerManager:
             if progress_callback:
                 progress_callback(msg)
 
-        # Check if container is running
+        # Check if container exists
         status = self.get_server_status()
-        if status == ServerStatus.RUNNING:
+        if status != ServerStatus.NOT_FOUND:
             return DockerResult(
                 False,
-                "Container must be stopped before removing volumes. Stop server first.",
+                "Container must be removed before deleting volumes. Remove the container first.",
             )
 
         volume_name = "transcription-suite-data"
         log(f"Removing data volume {volume_name}...")
-        log("WARNING: This will delete all server data including the database!")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
 
@@ -559,17 +579,16 @@ class DockerManager:
             if progress_callback:
                 progress_callback(msg)
 
-        # Check if container is running
+        # Check if container exists
         status = self.get_server_status()
-        if status == ServerStatus.RUNNING:
+        if status != ServerStatus.NOT_FOUND:
             return DockerResult(
                 False,
-                "Container must be stopped before removing volumes. Stop server first.",
+                "Container must be removed before deleting volumes. Remove the container first.",
             )
 
         volume_name = "transcription-suite-models"
         log(f"Removing models volume {volume_name}...")
-        log("WARNING: This will delete all downloaded Whisper models!")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
 
@@ -667,14 +686,19 @@ class DockerManager:
             env["TLS_CERT_PATH"] = cert_path
             env["TLS_KEY_PATH"] = key_path
         else:
-            log("Using config: " + (str(config_file) if config_file else "container defaults"))
+            log(
+                "Using config: "
+                + (str(config_file) if config_file else "container defaults")
+            )
 
         # Check for existing container with mode conflict
         current_status = self.get_server_status()
         if current_status in (ServerStatus.RUNNING, ServerStatus.STOPPED):
             current_mode = self.get_current_mode()
             if current_mode and current_mode != mode:
-                log(f"Mode conflict: container is in {current_mode.value} mode, switching to {mode.value}")
+                log(
+                    f"Mode conflict: container is in {current_mode.value} mode, switching to {mode.value}"
+                )
                 log("Removing existing container...")
                 self._run_command(
                     ["docker", "compose", "down"],
@@ -770,12 +794,13 @@ class DockerManager:
             ServerStatus.STOPPED,
         )
 
-    def get_logs(self, lines: int = 50) -> str:
+    def get_logs(self, lines: int = 50, filter_since_last_stop: bool = False) -> str:
         """
         Get recent server logs.
 
         Args:
             lines: Number of log lines to retrieve
+            filter_since_last_stop: If True, only return logs after the last server stop timestamp
 
         Returns:
             Log output as string
@@ -789,9 +814,106 @@ class DockerManager:
                 ["docker", "compose", "logs", "--tail", str(lines)],
                 cwd=self.config_dir,
             )
-            return result.stdout if result.returncode == 0 else result.stderr
+            logs = result.stdout if result.returncode == 0 else result.stderr
+
+            # Filter logs if requested
+            if filter_since_last_stop:
+                logs = self._filter_logs_since_last_stop(logs)
+
+            return logs
         except Exception as e:
             return f"Failed to get logs: {e}"
+
+    def _filter_logs_since_last_stop(self, logs: str) -> str:
+        """
+        Filter logs to only include entries after the last server stop timestamp.
+
+        Args:
+            logs: Raw log output
+
+        Returns:
+            Filtered log output
+        """
+        last_stop = self.load_last_server_stop_timestamp()
+        if not last_stop:
+            return logs  # No filter if no timestamp saved
+
+        filtered_lines = []
+        for line in logs.split("\n"):
+            # Parse timestamp from server log format: container | YYYY-MM-DD HH:MM:SS | ...
+            match = re.search(
+                r"\|(\s*)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\s*\|", line
+            )
+            if match:
+                log_timestamp = f"{match.group(2)} {match.group(3)}"
+                if log_timestamp > last_stop:
+                    filtered_lines.append(line)
+            elif line.strip():  # Keep non-timestamped lines (like startup messages)
+                # Check if we've already started including lines
+                if filtered_lines:
+                    filtered_lines.append(line)
+
+        return "\n".join(filtered_lines)
+
+    def save_last_server_stop_timestamp(self) -> None:
+        """
+        Save the current timestamp as the last server stop time.
+        This is used to filter logs to only show entries from the current session.
+        """
+        from datetime import datetime
+
+        try:
+            # Get the timestamp of the last log entry
+            logs = self.get_logs(lines=10, filter_since_last_stop=False)
+            last_timestamp = None
+
+            for line in reversed(logs.split("\n")):
+                # Parse timestamp from server log format: container | YYYY-MM-DD HH:MM:SS | ...
+                match = re.search(
+                    r"\|(\s*)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\s*\|", line
+                )
+                if match:
+                    last_timestamp = f"{match.group(2)} {match.group(3)}"
+                    break
+
+            if last_timestamp:
+                timestamp_file = self.config_dir / self.LAST_SERVER_STOP_FILE
+                timestamp_file.write_text(last_timestamp)
+                logger.info(f"Saved last server stop timestamp: {last_timestamp}")
+            else:
+                logger.debug("No timestamped log entries found to save")
+        except Exception as e:
+            logger.error(f"Failed to save last server stop timestamp: {e}")
+
+    def load_last_server_stop_timestamp(self) -> str | None:
+        """
+        Load the last server stop timestamp.
+
+        Returns:
+            Timestamp string (YYYY-MM-DD HH:MM:SS) or None if not found
+        """
+        try:
+            timestamp_file = self.config_dir / self.LAST_SERVER_STOP_FILE
+            if timestamp_file.exists():
+                timestamp = timestamp_file.read_text().strip()
+                if timestamp:
+                    return timestamp
+        except Exception as e:
+            logger.error(f"Failed to load last server stop timestamp: {e}")
+        return None
+
+    def clear_last_server_stop_timestamp(self) -> None:
+        """
+        Clear the saved last server stop timestamp.
+        Call this when the container is removed (logs are cleared by Docker).
+        """
+        try:
+            timestamp_file = self.config_dir / self.LAST_SERVER_STOP_FILE
+            if timestamp_file.exists():
+                timestamp_file.unlink()
+                logger.info("Cleared last server stop timestamp")
+        except Exception as e:
+            logger.error(f"Failed to clear last server stop timestamp: {e}")
 
     def get_admin_token(self, check_logs: bool = True) -> str | None:
         """
@@ -815,7 +937,7 @@ class DockerManager:
 
         # If requested, check logs for new token
         if check_logs:
-            logs = self.get_logs(lines=100)
+            logs = self.get_logs(lines=1000)
             for line in logs.split("\n"):
                 if "Admin Token:" in line:
                     # Extract token after "Admin Token:"
@@ -842,7 +964,7 @@ class DockerManager:
         self._cached_auth_token = None
 
         # Check logs for token
-        logs = self.get_logs(lines=100)
+        logs = self.get_logs(lines=1000)
         for line in logs.split("\n"):
             if "Admin Token:" in line:
                 match = re.search(r"Admin Token:\s*(\S+)", line)
@@ -918,21 +1040,23 @@ class DockerManager:
             if self.system == "Linux":
                 # Try common Linux file managers (check if they exist first)
                 file_managers = [
-                    "xdg-open",   # Standard
-                    "dolphin",    # KDE
-                    "nautilus",   # GNOME
-                    "thunar",     # XFCE
-                    "nemo",       # Cinnamon
-                    "caja",       # MATE
-                    "pcmanfm",    # LXDE
+                    "xdg-open",  # Standard
+                    "dolphin",  # KDE
+                    "nautilus",  # GNOME
+                    "thunar",  # XFCE
+                    "nemo",  # Cinnamon
+                    "caja",  # MATE
+                    "pcmanfm",  # LXDE
                 ]
 
                 for fm in file_managers:
                     if shutil.which(fm):
                         try:
-                            subprocess.Popen([fm, str(volumes_path)],
-                                           stdout=subprocess.DEVNULL,
-                                           stderr=subprocess.DEVNULL)
+                            subprocess.Popen(
+                                [fm, str(volumes_path)],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
                             logger.info(f"Opened volumes location with {fm}")
                             return True
                         except Exception as e:

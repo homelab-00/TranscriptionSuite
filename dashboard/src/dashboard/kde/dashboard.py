@@ -15,8 +15,17 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QPainter, QPainterPath, QPixmap
+from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal
+from PyQt6.QtGui import (
+    QFont,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+    QColor,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+)
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -141,11 +150,184 @@ class View(Enum):
     CLIENT = auto()
 
 
+class LogSyntaxHighlighter(QSyntaxHighlighter):
+    """Syntax highlighter for log messages with color-coded log levels."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # Define text formats for different log levels
+        self.formats = {}
+
+        # DEBUG - Gray
+        debug_format = QTextCharFormat()
+        debug_format.setForeground(QColor("#808080"))
+        self.formats["DEBUG"] = debug_format
+
+        # INFO - Cyan
+        info_format = QTextCharFormat()
+        info_format.setForeground(QColor("#4EC9B0"))
+        self.formats["INFO"] = info_format
+
+        # WARNING - Yellow
+        warning_format = QTextCharFormat()
+        warning_format.setForeground(QColor("#DCDCAA"))
+        self.formats["WARNING"] = warning_format
+
+        # ERROR - Red
+        error_format = QTextCharFormat()
+        error_format.setForeground(QColor("#F48771"))
+        error_format.setFontWeight(QFont.Weight.Bold)
+        self.formats["ERROR"] = error_format
+
+        # CRITICAL - Bright Red + Bold
+        critical_format = QTextCharFormat()
+        critical_format.setForeground(QColor("#FF6B6B"))
+        critical_format.setFontWeight(QFont.Weight.Bold)
+        self.formats["CRITICAL"] = critical_format
+
+        # Date format - Cyan
+        self.date_format = QTextCharFormat()
+        self.date_format.setForeground(QColor("#4EC9B0"))
+
+        # Time format - Light blue
+        self.time_format = QTextCharFormat()
+        self.time_format.setForeground(QColor("#9CDCFE"))
+
+        # Milliseconds format - Gray/blue
+        self.milliseconds_format = QTextCharFormat()
+        self.milliseconds_format.setForeground(QColor("#6A9FB5"))
+
+        # Brackets format - Dim gray
+        self.bracket_format = QTextCharFormat()
+        self.bracket_format.setForeground(QColor("#808080"))
+
+        # Module/file names - Light blue
+        self.module_format = QTextCharFormat()
+        self.module_format.setForeground(QColor("#9CDCFE"))
+
+        # Separator (pipes, dashes) - Dim
+        self.separator_format = QTextCharFormat()
+        self.separator_format.setForeground(QColor("#6A6A6A"))
+
+        # Container name - Purple
+        self.container_format = QTextCharFormat()
+        self.container_format.setForeground(QColor("#C586C0"))
+
+    def highlightBlock(self, text):
+        """Apply syntax highlighting to a block of text."""
+        if not text:
+            return
+
+        import re
+
+        # Highlight container name first (if present at start)
+        # Server format: container-name | ...
+        container_match = re.match(r"^([\w-]+)\s*(\|)", text)
+        if container_match:
+            # Container name
+            self.setFormat(
+                container_match.start(1),
+                len(container_match.group(1)),
+                self.container_format,
+            )
+            # First pipe
+            self.setFormat(container_match.start(2), 1, self.separator_format)
+
+        # Highlight timestamp patterns
+        # Client format: [2026-01-07 15:35:24,321]
+        # Server format: container | 2026-01-07 13:27:12 | INFO | main | ...
+
+        # Pattern for bracketed timestamp with milliseconds [YYYY-MM-DD HH:MM:SS,mmm]
+        bracket_ts_match = re.match(
+            r"^(\[)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(,\d{3})?(\])", text
+        )
+        if bracket_ts_match:
+            # Opening bracket
+            self.setFormat(bracket_ts_match.start(1), 1, self.bracket_format)
+            # Date
+            self.setFormat(
+                bracket_ts_match.start(2),
+                len(bracket_ts_match.group(2)),
+                self.date_format,
+            )
+            # Time
+            self.setFormat(
+                bracket_ts_match.start(3),
+                len(bracket_ts_match.group(3)),
+                self.time_format,
+            )
+            # Milliseconds (if present)
+            if bracket_ts_match.group(4):
+                self.setFormat(
+                    bracket_ts_match.start(4),
+                    len(bracket_ts_match.group(4)),
+                    self.milliseconds_format,
+                )
+            # Closing bracket
+            self.setFormat(bracket_ts_match.start(5), 1, self.bracket_format)
+
+        # Pattern for date/time in server logs: YYYY-MM-DD HH:MM:SS
+        # This will match timestamps after the container name
+        datetime_match = re.search(r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})", text)
+        if datetime_match:
+            # Date
+            self.setFormat(
+                datetime_match.start(1),
+                len(datetime_match.group(1)),
+                self.date_format,
+            )
+            # Time
+            self.setFormat(
+                datetime_match.start(2),
+                len(datetime_match.group(2)),
+                self.time_format,
+            )
+
+        # Highlight all pipe separators
+        for match in re.finditer(r"\|", text):
+            self.setFormat(match.start(), 1, self.separator_format)
+
+        # Highlight log level
+        for level_name, level_format in self.formats.items():
+            # Match level as a standalone word
+            for match in re.finditer(rf"\b{level_name}\b", text):
+                self.setFormat(match.start(), len(level_name), level_format)
+
+        # Highlight module names (text after " - " before ":")
+        # Pattern: [timestamp] LEVEL - module.name: message
+        if " - " in text:
+            parts = text.split(" - ")
+            if len(parts) >= 2:
+                module_part = parts[1]
+                if ":" in module_part:
+                    module_name = module_part.split(":")[0].strip()
+                    module_idx = text.index(module_name)
+                    self.setFormat(module_idx, len(module_name), self.module_format)
+
+
+class LineNumberArea(QWidget):
+    """Widget to display line numbers for a QPlainTextEdit."""
+
+    def __init__(self, log_window):
+        super().__init__(log_window._log_view)
+        self.log_window = log_window
+
+    def sizeHint(self):
+        """Return the size hint for the line number area."""
+        return self.log_window.lineNumberAreaWidth()
+
+    def paintEvent(self, event):
+        """Paint the line numbers."""
+        self.log_window.lineNumberAreaPaintEvent(event)
+
+
 class LogWindow(QMainWindow):
     """
     Separate window for displaying logs.
 
-    This window displays logs in a terminal-like view with CaskydiaCove Nerd Font.
+    This window displays logs in a terminal-like view with CaskydiaCove Nerd Font,
+    syntax highlighting, and line numbers.
     """
 
     def __init__(self, title: str, parent: QWidget | None = None):
@@ -160,45 +342,190 @@ class LogWindow(QMainWindow):
         self.setWindowTitle(title)
         self.resize(800, 600)
 
+        # Track displayed content to avoid unnecessary redraws
+        self._current_line_count = 0
+        self._current_content_hash = 0
+
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Log view
+        # Log view with line numbers
         self._log_view = QPlainTextEdit()
         self._log_view.setReadOnly(True)
+        self._log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
 
-        # Set font to CaskydiaCove Nerd Font 12pt
-        font = QFont("CaskydiaCove Nerd Font", 12)
+        # Set font to CaskydiaCove Nerd Font 9pt
+        font = QFont("CaskydiaCove Nerd Font", 9)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self._log_view.setFont(font)
+
+        # Setup line number area
+        self._line_number_area = LineNumberArea(self)
+
+        # Connect signals for line number updates
+        self._log_view.blockCountChanged.connect(self._update_line_number_area_width)
+        self._log_view.updateRequest.connect(self._update_line_number_area)
+
+        self._update_line_number_area_width(0)
+
+        # Setup syntax highlighter
+        self._highlighter = LogSyntaxHighlighter(self._log_view.document())
 
         layout.addWidget(self._log_view)
 
         # Apply dark theme styling
         self._apply_styles()
 
+        # Update line number area geometry after everything is set up
+        self._update_line_number_area_geometry()
+
+    def lineNumberAreaWidth(self):
+        """Calculate the width needed for the line number area."""
+        digits = 1
+        max_num = max(1, self._log_view.blockCount())
+        while max_num >= 10:
+            max_num //= 10
+            digits += 1
+
+        space = 10 + self._log_view.fontMetrics().horizontalAdvance("9") * digits
+        return space
+
+    def _update_line_number_area_width(self, _):
+        """Update the viewport margins to make room for line numbers."""
+        self._log_view.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def _update_line_number_area(self, rect, dy):
+        """Update the line number area when scrolling or text changes."""
+        if dy:
+            self._line_number_area.scroll(0, dy)
+        else:
+            self._line_number_area.update(
+                0, rect.y(), self._line_number_area.width(), rect.height()
+            )
+
+        if rect.contains(self._log_view.viewport().rect()):
+            self._update_line_number_area_width(0)
+
+        # Update geometry to ensure it stays aligned
+        self._update_line_number_area_geometry()
+
+    def _update_line_number_area_geometry(self):
+        """Update the geometry of the line number area to match the text view."""
+        cr = self._log_view.contentsRect()
+        self._line_number_area.setGeometry(
+            QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height())
+        )
+
+    def lineNumberAreaPaintEvent(self, event):
+        """Paint the line numbers in the line number area."""
+        painter = QPainter(self._line_number_area)
+        painter.fillRect(
+            event.rect(), QColor("#252526")
+        )  # Darker background for line numbers
+
+        block = self._log_view.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = int(
+            self._log_view.blockBoundingGeometry(block)
+            .translated(self._log_view.contentOffset())
+            .top()
+        )
+        bottom = top + int(self._log_view.blockBoundingRect(block).height())
+
+        painter.setPen(QColor("#858585"))  # Gray color for line numbers
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                painter.drawText(
+                    0,
+                    top,
+                    self._line_number_area.width() - 5,
+                    self._log_view.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight,
+                    number,
+                )
+
+            block = block.next()
+            top = bottom
+            bottom = top + int(self._log_view.blockBoundingRect(block).height())
+            block_number += 1
+
+    def resizeEvent(self, event):
+        """Handle resize events to update line number area."""
+        super().resizeEvent(event)
+        self._update_line_number_area_geometry()
+
     def append_log(self, message: str) -> None:
-        """Append a log message to the view."""
-        self._log_view.appendPlainText(message)
-        # Auto-scroll to bottom
+        """Append a log message to the view while preserving scroll position."""
+        # Save current scroll position
         scrollbar = self._log_view.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
+        old_value = scrollbar.value()
+        was_at_bottom = old_value == scrollbar.maximum()
+
+        # Append the message
+        self._log_view.appendPlainText(message)
+
+        # Restore scroll position (unless user was at bottom)
+        if not was_at_bottom:
+            scrollbar.setValue(old_value)
 
     def set_logs(self, logs: str) -> None:
-        """Set the entire log content (replaces existing)."""
-        self._log_view.setPlainText(logs)
-        # Auto-scroll to bottom
+        """Set the entire log content, only updating if content changed."""
+        # Check if content actually changed using hash
+        new_hash = hash(logs)
+        if new_hash == self._current_content_hash:
+            return  # No change, skip update entirely
+
+        # Split into lines for comparison
+        new_lines = logs.rstrip("\n").split("\n") if logs.strip() else []
+        new_line_count = len(new_lines)
+
+        # If new content has more lines and starts with same content, just append
+        if new_line_count > self._current_line_count and self._current_line_count > 0:
+            current_text = self._log_view.toPlainText()
+            current_lines = (
+                current_text.rstrip("\n").split("\n") if current_text.strip() else []
+            )
+
+            # Check if current content matches the beginning of new content
+            if new_lines[: len(current_lines)] == current_lines:
+                # Just append the new lines
+                lines_to_add = new_lines[len(current_lines) :]
+                for line in lines_to_add:
+                    self.append_log(line)
+                self._current_line_count = new_line_count
+                self._current_content_hash = new_hash
+                return
+
+        # Content changed significantly - need full replacement
+        # Save scroll position
         scrollbar = self._log_view.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
+        old_value = scrollbar.value()
+
+        # Block signals to prevent unnecessary repaints during update
+        self._log_view.blockSignals(True)
+        self._log_view.setPlainText(logs)
+        self._log_view.blockSignals(False)
+
+        # Restore scroll position
+        scrollbar.setValue(old_value)
+
+        # Update tracking
+        self._current_line_count = new_line_count
+        self._current_content_hash = new_hash
+
+        # Force single repaint of line numbers
+        self._line_number_area.update()
 
     def clear_logs(self) -> None:
         """Clear all logs."""
         self._log_view.clear()
+        self._current_line_count = 0
+        self._current_content_hash = 0
 
     def _apply_styles(self) -> None:
         """Apply dark theme matching the Dashboard UI."""
@@ -250,6 +577,9 @@ class DashboardWindow(QMainWindow):
 
         # Client state tracking
         self._client_running = False
+
+        # Model state tracking (assume loaded initially)
+        self._models_loaded = True
 
         self._setup_ui()
         self._apply_styles()
@@ -330,27 +660,17 @@ class DashboardWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Help button with icon
-        self._nav_help_btn = QPushButton("  Help")
-        self._nav_help_btn.setObjectName("navButton")
-        help_icon = QIcon.fromTheme("help-contents")
-        if help_icon.isNull():
-            help_icon = QIcon.fromTheme("help-about")
-        if not help_icon.isNull():
-            self._nav_help_btn.setIcon(help_icon)
-        self._nav_help_btn.clicked.connect(self._show_help_menu)
-        layout.addWidget(self._nav_help_btn)
-
-        # About button with icon
-        self._nav_about_btn = QPushButton("  About")
-        self._nav_about_btn.setObjectName("navButton")
-        about_icon = QIcon.fromTheme("help-about")
-        if about_icon.isNull():
-            about_icon = QIcon.fromTheme("dialog-information")
-        if not about_icon.isNull():
-            self._nav_about_btn.setIcon(about_icon)
-        self._nav_about_btn.clicked.connect(self._show_about_dialog)
-        layout.addWidget(self._nav_about_btn)
+        # Hamburger menu button (☰)
+        self._nav_menu_btn = QPushButton("  ☰")
+        self._nav_menu_btn.setObjectName("navButton")
+        menu_icon = QIcon.fromTheme("application-menu")
+        if menu_icon.isNull():
+            menu_icon = QIcon.fromTheme("open-menu-symbolic")
+        if not menu_icon.isNull():
+            self._nav_menu_btn.setIcon(menu_icon)
+            self._nav_menu_btn.setText("")  # Remove text if icon is available
+        self._nav_menu_btn.clicked.connect(self._show_hamburger_menu)
+        layout.addWidget(self._nav_menu_btn)
 
         return nav
 
@@ -360,10 +680,11 @@ class DashboardWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         view = QWidget()
+        view.setMinimumWidth(450)  # Ensure minimum width for home view content
         layout = QVBoxLayout(view)
         layout.setContentsMargins(40, 30, 40, 30)
 
@@ -545,10 +866,11 @@ class DashboardWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         view = QWidget()
+        view.setMinimumWidth(550)  # Ensure minimum width for server view content
         layout = QVBoxLayout(view)
         layout.setContentsMargins(40, 30, 40, 30)
 
@@ -611,11 +933,18 @@ class DashboardWindow(QMainWindow):
         self._server_token_field.setReadOnly(True)
         self._server_token_field.setText("Not saved yet")
         self._server_token_field.setFrame(False)
-        self._server_token_field.setStyleSheet("background: transparent; border: none;")
-        self._server_token_field.setMinimumWidth(320)  # Wider for full token visibility
+        self._server_token_field.setStyleSheet(
+            "background: transparent; border: none; font-family: monospace;"
+        )
+        # Set exact width for 32 characters (token length) - monospace font ~8.5px per char
+        self._server_token_field.setFixedWidth(272)  # 32 chars * 8.5px ≈ 272px
         token_row.addWidget(self._server_token_field)
-        token_note = QLabel("(for remote)")
+        token_row.setSpacing(0)  # Remove spacing between widgets
+        token_note = QLabel(" (for remote)")  # Leading space for minimal separation
         token_note.setObjectName("statusDateInline")
+        token_note.setStyleSheet(
+            "margin-left: 0px;"
+        )  # No margin - glued to token field
         token_row.addWidget(token_note)
         token_row.addStretch()
         status_layout.addLayout(token_row)
@@ -804,19 +1133,16 @@ class DashboardWindow(QMainWindow):
 
         layout.addSpacing(15)
 
-        # Settings button (centered, standalone)
-        self._open_server_settings_btn = QPushButton("Settings")
-        self._open_server_settings_btn.setObjectName("secondaryButton")
-        self._open_server_settings_btn.clicked.connect(self._on_open_server_settings)
-        layout.addWidget(
-            self._open_server_settings_btn, alignment=Qt.AlignmentFlag.AlignCenter
-        )
-
-        layout.addSpacing(15)
-
         # Show logs button (centered)
         self._show_server_logs_btn = QPushButton("Show Logs")
         self._show_server_logs_btn.setObjectName("secondaryButton")
+        logs_icon = QIcon.fromTheme("text-x-log")
+        if logs_icon.isNull():
+            logs_icon = QIcon.fromTheme("text-x-generic")
+        if logs_icon.isNull():
+            logs_icon = QIcon.fromTheme("utilities-log-viewer")
+        if not logs_icon.isNull():
+            self._show_server_logs_btn.setIcon(logs_icon)
         self._show_server_logs_btn.clicked.connect(self._toggle_server_logs)
         layout.addWidget(
             self._show_server_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
@@ -833,10 +1159,11 @@ class DashboardWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         view = QWidget()
+        view.setMinimumWidth(450)  # Ensure minimum width for client view content
         layout = QVBoxLayout(view)
         layout.setContentsMargins(40, 30, 40, 30)
 
@@ -905,23 +1232,36 @@ class DashboardWindow(QMainWindow):
 
         layout.addSpacing(15)
 
-        # Secondary actions (centered)
-        secondary_container = QWidget()
-        secondary_layout = QHBoxLayout(secondary_container)
-        secondary_layout.setSpacing(12)
-
-        settings_btn = QPushButton("⚙ Settings")
-        settings_btn.setObjectName("secondaryButton")
-        settings_btn.clicked.connect(self._on_show_settings)
-        secondary_layout.addWidget(settings_btn)
-
-        layout.addWidget(secondary_container, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Model management button (centered) - placed above settings
+        self._unload_models_btn = QPushButton("Unload All Models")
+        self._unload_models_btn.setObjectName("secondaryButton")
+        self._unload_models_btn.setToolTip(
+            "Unload transcription models to free GPU memory"
+        )
+        # Start disabled (gray) until server is healthy
+        self._unload_models_btn.setEnabled(False)
+        # Use dark gray disabled state
+        self._unload_models_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; border-radius: 6px; color: #606060; padding: 10px 20px; }"
+            "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
+        )
+        self._unload_models_btn.clicked.connect(self._on_toggle_models)
+        layout.addWidget(
+            self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
 
         layout.addSpacing(15)
 
         # Show logs button (centered)
         self._show_client_logs_btn = QPushButton("Show Logs")
         self._show_client_logs_btn.setObjectName("secondaryButton")
+        logs_icon = QIcon.fromTheme("text-x-log")
+        if logs_icon.isNull():
+            logs_icon = QIcon.fromTheme("text-x-generic")
+        if logs_icon.isNull():
+            logs_icon = QIcon.fromTheme("utilities-log-viewer")
+        if not logs_icon.isNull():
+            self._show_client_logs_btn.setIcon(logs_icon)
         self._show_client_logs_btn.clicked.connect(self._toggle_client_logs)
         layout.addWidget(
             self._show_client_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
@@ -1387,7 +1727,8 @@ class DashboardWindow(QMainWindow):
         if status == ServerStatus.RUNNING:
             # Force check logs for latest token (clears cache first)
             import re
-            logs = self._docker_manager.get_logs(lines=100)
+
+            logs = self._docker_manager.get_logs(lines=1000)
             new_token = None
             for line in logs.split("\n"):
                 if "Admin Token:" in line:
@@ -1468,6 +1809,9 @@ class DashboardWindow(QMainWindow):
                 self._server_health_timer.stop()
                 self._server_health_timer = None
 
+        # Update models button state when server status changes
+        self._update_models_button_state()
+
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
             "transcription-suite-data"
@@ -1504,9 +1848,7 @@ class DashboardWindow(QMainWindow):
             if is_running:
                 models = self._docker_manager.list_downloaded_models()
                 if models:
-                    models_lines = [
-                        f"  • {m['name']} ({m['size']})" for m in models
-                    ]
+                    models_lines = [f"  • {m['name']} ({m['size']})" for m in models]
                     models_text = "Downloaded:\n" + "\n".join(models_lines)
                     self._models_list_label.setText(models_text)
                     self._models_list_label.setVisible(True)
@@ -1581,6 +1923,11 @@ class DashboardWindow(QMainWindow):
 
         if result.success:
             progress(result.message)
+            # Save the last log timestamp before clearing
+            self._docker_manager.save_last_server_stop_timestamp()
+            # Clear server logs window when server is stopped
+            if self._server_log_window is not None:
+                self._server_log_window.clear_logs()
         else:
             progress(f"Error: {result.message}")
 
@@ -1623,6 +1970,11 @@ class DashboardWindow(QMainWindow):
 
         if result.success:
             progress(result.message)
+            # Clear timestamp file since container (and its logs) are gone
+            self._docker_manager.clear_last_server_stop_timestamp()
+            # Clear server logs window when container is removed
+            if self._server_log_window is not None:
+                self._server_log_window.clear_logs()
         else:
             progress(f"Error: {result.message}")
 
@@ -1709,6 +2061,23 @@ class DashboardWindow(QMainWindow):
         """Remove the data volume."""
         from PyQt6.QtWidgets import QMessageBox
 
+        # Check if container exists first
+        from dashboard.common.docker_manager import ServerStatus
+
+        status = self._docker_manager.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cannot Remove Volume")
+            msg_box.setText("Container must be removed first")
+            msg_box.setInformativeText(
+                "Docker volumes cannot be removed while the container exists.\n\n"
+                "Please remove the container first, then try removing the volume again."
+            )
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+            return
+
         # Confirm with user - this is destructive!
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Remove Data Volume")
@@ -1718,7 +2087,7 @@ class DashboardWindow(QMainWindow):
             "• The SQLite database\n"
             "• All user data and transcription history\n"
             "• Server authentication token\n\n"
-            "The server must be stopped first. This action cannot be undone!"
+            "This action cannot be undone!"
         )
         msg_box.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1749,13 +2118,29 @@ class DashboardWindow(QMainWindow):
         """Remove the models volume."""
         from PyQt6.QtWidgets import QMessageBox
 
+        # Check if container exists first
+        from dashboard.common.docker_manager import ServerStatus
+
+        status = self._docker_manager.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cannot Remove Volume")
+            msg_box.setText("Container must be removed first")
+            msg_box.setInformativeText(
+                "Docker volumes cannot be removed while the container exists.\n\n"
+                "Please remove the container first, then try removing the volume again."
+            )
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+            return
+
         # Confirm with user
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Remove Models Volume")
         msg_box.setText("WARNING: This will DELETE ALL DOWNLOADED MODELS!")
         msg_box.setInformativeText(
             "This will permanently delete all downloaded Whisper models. "
-            "The server must be stopped first. "
             "Models will need to be re-downloaded when needed (may take time)."
         )
         msg_box.setStandardButtons(
@@ -1783,41 +2168,6 @@ class DashboardWindow(QMainWindow):
 
         QTimer.singleShot(1000, self._refresh_server_status)
 
-    def _on_open_server_settings(self) -> None:
-        """Open the server config.yaml file."""
-        from PyQt6.QtWidgets import QMessageBox
-
-        config_file = self._docker_manager._find_config_file()
-        success = self._docker_manager.open_config_file()
-
-        if not success:
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Cannot Open Settings")
-
-            if not config_file:
-                msg_box.setText("Configuration file not found")
-                msg_box.setInformativeText(
-                    "The config.yaml file doesn't exist yet.\n\n"
-                    "To create it:\n"
-                    f"  1. Run first-time setup from terminal:\n"
-                    f"     transcription-suite-setup\n\n"
-                    f"  2. Or create it manually at:\n"
-                    f"     {self._docker_manager.config_dir}/config.yaml"
-                )
-            else:
-                msg_box.setText("Failed to open config.yaml")
-                msg_box.setInformativeText(
-                    f"The file exists but no editor was found.\n\n"
-                    f"Location: {config_file}\n\n"
-                    f"To edit manually, try:\n"
-                    f"  • kate {config_file}\n"
-                    f"  • gedit {config_file}\n"
-                    f"  • nano {config_file}"
-                )
-
-            msg_box.setIcon(QMessageBox.Icon.Warning)
-            msg_box.exec()
-
     def _toggle_server_logs(self) -> None:
         """Open server logs in a separate window."""
         if self._server_log_window is None:
@@ -1838,7 +2188,7 @@ class DashboardWindow(QMainWindow):
         """Refresh server logs."""
         if self._server_log_window is None:
             return
-        logs = self._docker_manager.get_logs(lines=100)
+        logs = self._docker_manager.get_logs(lines=1000, filter_since_last_stop=True)
         self._server_log_window.set_logs(logs)
 
     # =========================================================================
@@ -1865,6 +2215,45 @@ class DashboardWindow(QMainWindow):
         self._start_client_local_btn.setEnabled(not self._client_running)
         self._start_client_remote_btn.setEnabled(not self._client_running)
         self._stop_client_btn.setEnabled(self._client_running)
+
+        # Update models button based on server health
+        self._update_models_button_state()
+
+        # Update models button based on server health
+        self._update_models_button_state()
+
+    def _update_models_button_state(self) -> None:
+        """Update the models button state based on server health."""
+        # Check if server is running and healthy
+        status = self._docker_manager.get_server_status()
+        health = self._docker_manager.get_container_health()
+
+        is_healthy = status == ServerStatus.RUNNING and (
+            health is None or health == "healthy"
+        )
+
+        if is_healthy:
+            # Server is healthy, enable button with appropriate color
+            self._unload_models_btn.setEnabled(True)
+            if self._models_loaded:
+                # Light blue (models loaded, ready to unload) - color 2
+                self._unload_models_btn.setStyleSheet(
+                    "QPushButton { background-color: #90caf9; border: none; border-radius: 6px; color: #121212; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton:hover { background-color: #42a5f5; }"
+                )
+            else:
+                # Red (models unloaded, ready to reload) - color 3
+                self._unload_models_btn.setStyleSheet(
+                    "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton:hover { background-color: #d32f2f; }"
+                )
+        else:
+            # Server not healthy, disable button with dark gray style
+            self._unload_models_btn.setEnabled(False)
+            self._unload_models_btn.setStyleSheet(
+                "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; border-radius: 6px; color: #606060; padding: 10px 20px; }"
+                "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
+            )
 
     def _validate_remote_settings(self) -> tuple[bool, str]:
         """
@@ -1956,6 +2345,24 @@ class DashboardWindow(QMainWindow):
         if self._client_log_window is None:
             self._client_log_window = LogWindow("Client Logs", self)
 
+        # Read client logs from the unified log file
+        try:
+            from dashboard.common.logging_config import get_log_file
+
+            log_file = get_log_file()
+            if log_file.exists():
+                # Read last 200 lines
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    last_lines = lines[-200:] if len(lines) > 200 else lines
+                    logs = "".join(last_lines)
+            else:
+                logs = "No log file found"
+        except Exception as e:
+            logger.error(f"Failed to read client logs: {e}")
+            logs = f"Error reading logs: {e}"
+
+        self._client_log_window.set_logs(logs)
         self._client_log_window.show()
         self._client_log_window.raise_()
         self._client_log_window.activateWindow()
@@ -1972,9 +2379,188 @@ class DashboardWindow(QMainWindow):
         if self._current_view == View.CLIENT:
             self._refresh_client_status()
 
+    def _on_toggle_models(self) -> None:
+        """Toggle model loading state - unload to free GPU memory or reload."""
+        import asyncio
+
+        from dashboard.common.api_client import APIClient
+
+        # Get server connection settings
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            self._show_notification("Error", "No server host configured")
+            return
+
+        # Create temporary API client for this operation
+        api_client = APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
+
+        async def do_toggle():
+            try:
+                if self._models_loaded:
+                    result = await api_client.unload_models()
+                else:
+                    result = await api_client.reload_models()
+                return result
+            finally:
+                await api_client.close()
+
+        # Run async operation
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(do_toggle())
+            loop.close()
+
+            if result.get("success"):
+                self._models_loaded = not self._models_loaded
+                if self._models_loaded:
+                    self._unload_models_btn.setText("Unload All Models")
+                    self._unload_models_btn.setToolTip(
+                        "Unload transcription models to free GPU memory"
+                    )
+                    # Light blue background (models loaded) - color 2
+                    self._unload_models_btn.setStyleSheet(
+                        "QPushButton { background-color: #90caf9; border: none; border-radius: 6px; color: #121212; padding: 10px 20px; font-weight: 500; }"
+                        "QPushButton:hover { background-color: #42a5f5; }"
+                    )
+                    self._show_notification(
+                        "Models Loaded", "Models ready for transcription"
+                    )
+                else:
+                    self._unload_models_btn.setText("Reload Models")
+                    self._unload_models_btn.setToolTip(
+                        "Reload transcription models for use"
+                    )
+                    # Red background (models unloaded) - color 3
+                    self._unload_models_btn.setStyleSheet(
+                        "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
+                        "QPushButton:hover { background-color: #d32f2f; }"
+                    )
+                    self._show_notification(
+                        "Models Unloaded",
+                        "GPU memory freed. Click 'Reload Models' to restore.",
+                    )
+            else:
+                self._show_notification(
+                    "Operation Failed", result.get("message", "Unknown error")
+                )
+        except Exception as e:
+            logger.error(f"Model toggle failed: {e}")
+            self._show_notification("Error", f"Failed to toggle models: {e}")
+
+    def _show_notification(self, title: str, message: str) -> None:
+        """Show a desktop notification."""
+        # Check if notifications are enabled in settings
+        if not self.config.get("ui", "notifications", default=True):
+            logger.debug("Notifications disabled in settings")
+            return
+
+        try:
+            import subprocess
+
+            subprocess.run(
+                ["notify-send", "-a", "TranscriptionSuite", title, message],
+                check=False,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            logger.debug("notify-send not found - cannot show desktop notifications")
+
     # =========================================================================
-    # Help and About
+    # Hamburger Menu, Help and About
     # =========================================================================
+
+    def _show_hamburger_menu(self) -> None:
+        """Show hamburger menu with Settings, Help, and About options."""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                color: #ffffff;
+                padding: 8px 12px 8px 8px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2d2d2d;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #2d2d2d;
+                margin: 4px 8px;
+            }
+            QMenu::icon {
+                padding-left: 20px;
+                padding-right: -6px;
+            }
+        """)
+
+        # Settings action with white icon (symbolic only for monochrome appearance)
+        settings_icon = QIcon.fromTheme("configure-symbolic")
+        if settings_icon.isNull():
+            settings_icon = QIcon.fromTheme("settings-configure-symbolic")
+        if settings_icon.isNull():
+            settings_icon = QIcon.fromTheme("preferences-system-symbolic")
+        settings_action = menu.addAction(settings_icon, "Settings")
+        settings_action.triggered.connect(self._on_show_settings)
+
+        menu.addSeparator()
+
+        # Help submenu
+        help_icon = QIcon.fromTheme("help-contents")
+        if help_icon.isNull():
+            help_icon = QIcon.fromTheme("help-about")
+        help_menu = menu.addMenu(help_icon, "Help")
+        help_menu.setStyleSheet(menu.styleSheet())
+
+        # User Guide
+        user_guide_icon = QIcon.fromTheme("x-office-document")
+        if user_guide_icon.isNull():
+            user_guide_icon = QIcon.fromTheme("document-properties")
+        readme_action = help_menu.addAction(user_guide_icon, "User Guide (README)")
+        readme_action.triggered.connect(lambda: self._show_readme_viewer(dev=False))
+
+        # Developer Guide
+        dev_guide_icon = QIcon.fromTheme("text-x-script")
+        if dev_guide_icon.isNull():
+            dev_guide_icon = QIcon.fromTheme("text-x-source")
+        readme_dev_action = help_menu.addAction(
+            dev_guide_icon, "Developer Guide (README_DEV)"
+        )
+        readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
+
+        # About action
+        about_icon = QIcon.fromTheme("help-about")
+        if about_icon.isNull():
+            about_icon = QIcon.fromTheme("dialog-information")
+        about_action = menu.addAction(about_icon, "About")
+        about_action.triggered.connect(self._show_about_dialog)
+
+        # Show menu below the hamburger button
+        menu.exec(
+            self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().bottomLeft())
+        )
 
     def _show_help_menu(self) -> None:
         """Show help menu with README options."""

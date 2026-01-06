@@ -90,8 +90,14 @@ class SettingsDialog:
 
         self.dialog.destroy()
 
-    def _create_connection_tab(self) -> Gtk.Box:
+    def _create_connection_tab(self) -> Gtk.ScrolledWindow:
         """Create the Connection settings tab."""
+        # Create scrolled window
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(300)
+
+        # Create content box
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_margin_start(8)
         box.set_margin_end(8)
@@ -216,10 +222,17 @@ class SettingsDialog:
         host_help_label.set_xalign(0)
         box.pack_start(host_help_label, False, False, 0)
 
-        return box
+        scrolled.add(box)
+        return scrolled
 
-    def _create_audio_tab(self) -> Gtk.Box:
+    def _create_audio_tab(self) -> Gtk.ScrolledWindow:
         """Create the Audio settings tab."""
+        # Create scrolled window
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(300)
+
+        # Create content box
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_margin_start(8)
         box.set_margin_end(8)
@@ -255,10 +268,17 @@ class SettingsDialog:
         sample_rate_label.set_xalign(0)
         box.pack_start(sample_rate_label, False, False, 0)
 
-        return box
+        scrolled.add(box)
+        return scrolled
 
-    def _create_behavior_tab(self) -> Gtk.Box:
+    def _create_behavior_tab(self) -> Gtk.ScrolledWindow:
         """Create the Behavior settings tab."""
+        # Create scrolled window
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(300)
+
+        # Create content box
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_margin_start(8)
         box.set_margin_end(8)
@@ -298,7 +318,8 @@ class SettingsDialog:
         notifications_frame.add(notifications_box)
         box.pack_start(notifications_frame, False, False, 0)
 
-        return box
+        scrolled.add(box)
+        return scrolled
 
     def _on_toggle_token_visibility(self, button: Gtk.ToggleButton) -> None:
         """Toggle token visibility."""

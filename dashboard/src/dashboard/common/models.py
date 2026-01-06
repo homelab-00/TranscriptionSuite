@@ -31,8 +31,10 @@ class TrayAction(Enum):
     CANCEL_RECORDING = "cancel_recording"
     OPEN_AUDIO_NOTEBOOK = "open_audio_notebook"
     TRANSCRIBE_FILE = "transcribe_file"
+    TOGGLE_MODELS = "toggle_models"
     SETTINGS = "settings"
     RECONNECT = "reconnect"
+    DISCONNECT = "disconnect"
     QUIT = "quit"
     # Docker server control actions
     SERVER_START_LOCAL = "server_start_local"

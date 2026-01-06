@@ -3,12 +3,10 @@ import {
   MessageSquare,
   Plus,
   Send,
-  Loader2,
   Trash2,
   Edit2,
   Check,
   X,
-  PowerOff,
   ChevronRight,
   ChevronDown,
   RefreshCw,
@@ -62,14 +60,11 @@ interface ChatPanelProps {
 export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelProps) {
   // LLM Status
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
-  const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
 
   // Model selection
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [showModelSelector, setShowModelSelector] = useState(false);
-  const [modelLoading, setModelLoading] = useState(false);
 
   // Conversations
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -127,9 +122,6 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
     try {
       const status = await api.getLLMStatus();
       setLlmStatus(status);
-      if (status.model) {
-        setSelectedModelId(status.model);
-      }
     } catch {
       setLlmStatus({ available: false, base_url: '', model: null, error: 'Failed to check status' });
     }
@@ -155,48 +147,6 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
       }
     } catch (error) {
       console.error('Failed to load conversations:', error);
-    }
-  };
-
-  const handleStopLLM = async () => {
-    setLlmLoading(true);
-    setLlmError(null);
-    try {
-      const result = await api.unloadModel(true);
-      if (!result.success) {
-        setLlmError(result.message);
-      }
-      await checkLLMStatus();
-      await loadAvailableModels();
-    } catch (error) {
-      setLlmError((error as Error).message);
-    } finally {
-      setLlmLoading(false);
-    }
-  };
-
-  const handleLoadModel = async (modelId: string) => {
-    setModelLoading(true);
-    setLlmError(null);
-    try {
-      // If a different model is loaded, unload first
-      if (llmStatus?.available && llmStatus.model !== modelId) {
-        await api.unloadModel(true);
-      }
-
-      const result = await api.loadModel({ model_id: modelId });
-      if (!result.success) {
-        setLlmError(result.message);
-      } else {
-        setSelectedModelId(modelId);
-        setShowModelSelector(false);
-      }
-      await checkLLMStatus();
-      await loadAvailableModels();
-    } catch (error) {
-      setLlmError((error as Error).message);
-    } finally {
-      setModelLoading(false);
     }
   };
 
@@ -373,9 +323,8 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
               onClick={() => { checkLLMStatus(); loadAvailableModels(); }}
               className="btn-icon p-1.5 rounded hover:bg-surface-light"
               title="Refresh"
-              disabled={llmLoading}
             >
-              <RefreshCw size={16} className={llmLoading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} />
             </button>
           </div>
         </div>
@@ -388,16 +337,7 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
               {llmStatus?.model || 'No model loaded'}
             </span>
           </div>
-          {llmStatus?.available ? (
-            <button
-              onClick={handleStopLLM}
-              className="btn-ghost text-red-400 hover:text-red-300 text-xs flex items-center gap-1 px-2 py-1"
-              disabled={llmLoading}
-            >
-              <PowerOff size={14} />
-              Unload
-            </button>
-          ) : (
+          {!llmStatus?.available && (
             <p className="text-xs text-yellow-400">
               Start LM Studio and load a model to enable chat
             </p>
@@ -421,12 +361,11 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
                 <div
                   key={model.id}
                   className={`
-                    flex items-center justify-between p-2 rounded cursor-pointer
-                    ${model.state === 'loaded' 
-                      ? 'bg-green-900/30 border border-green-500/30' 
-                      : 'hover:bg-surface-light border border-transparent'}
+                    flex items-center justify-between p-2 rounded
+                    ${model.state === 'loaded'
+                      ? 'bg-green-900/30 border border-green-500/30'
+                      : 'border border-transparent'}
                   `}
-                  onClick={() => model.state !== 'loaded' && handleLoadModel(model.id)}
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white truncate">{model.id}</p>
@@ -434,17 +373,8 @@ export default function ChatPanel({ recordingId, isOpen, onClose }: ChatPanelPro
                       {model.quantization} • {model.arch} • {Math.round((model.max_context_length || 0) / 1024)}K ctx
                     </p>
                   </div>
-                  {model.state === 'loaded' ? (
+                  {model.state === 'loaded' && (
                     <span className="text-xs text-green-400 ml-2">Loaded</span>
-                  ) : modelLoading && selectedModelId === model.id ? (
-                    <Loader2 size={14} className="animate-spin text-purple-400 ml-2" />
-                  ) : (
-                    <button
-                      className="text-xs text-purple-400 hover:text-purple-300 ml-2"
-                      onClick={(e) => { e.stopPropagation(); handleLoadModel(model.id); }}
-                    >
-                      Load
-                    </button>
                   )}
                 </div>
               ))

@@ -169,7 +169,7 @@ def _get_log_window_base():
 
 
 class LogWindow(_get_log_window_base()):
-    """Separate window for displaying logs."""
+    """Separate window for displaying logs with syntax highlighting and line numbers."""
 
     def __init__(self, title: str, app: Any = None):
         if not HAS_GTK4:
@@ -179,6 +179,10 @@ class LogWindow(_get_log_window_base()):
         if app:
             self.set_application(app)
         self.set_default_size(800, 600)
+
+        # Track displayed content to avoid unnecessary redraws
+        self._current_line_count = 0
+        self._current_content_hash = 0
 
         # Main content
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -197,7 +201,12 @@ class LogWindow(_get_log_window_base()):
         self._text_view.set_editable(False)
         self._text_view.set_monospace(True)
         self._text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._text_view.set_show_line_numbers(True)  # Enable line numbers
         self._text_view.add_css_class("log-view")
+
+        # Setup text tags for syntax highlighting
+        self._buffer = self._text_view.get_buffer()
+        self._setup_text_tags()
 
         scrolled.set_child(self._text_view)
         content.append(scrolled)
@@ -205,27 +214,203 @@ class LogWindow(_get_log_window_base()):
         self.set_content(content)
         self._apply_styles()
 
+    def _setup_text_tags(self) -> None:
+        """Create text tags for syntax highlighting."""
+        tag_table = self._buffer.get_tag_table()
+
+        # DEBUG - Gray
+        debug_tag = self._buffer.create_tag("DEBUG", foreground="#808080")
+
+        # INFO - Cyan
+        info_tag = self._buffer.create_tag("INFO", foreground="#4EC9B0")
+
+        # WARNING - Yellow
+        warning_tag = self._buffer.create_tag("WARNING", foreground="#DCDCAA")
+
+        # ERROR - Red + Bold
+        error_tag = self._buffer.create_tag("ERROR", foreground="#F48771", weight=700)
+
+        # CRITICAL - Bright Red + Bold
+        critical_tag = self._buffer.create_tag(
+            "CRITICAL", foreground="#FF6B6B", weight=700
+        )
+
+        # Date format - Cyan
+        date_tag = self._buffer.create_tag("date", foreground="#4EC9B0")
+
+        # Time format - Light blue
+        time_tag = self._buffer.create_tag("time", foreground="#9CDCFE")
+
+        # Milliseconds format - Gray/blue
+        milliseconds_tag = self._buffer.create_tag("milliseconds", foreground="#6A9FB5")
+
+        # Brackets format - Dim gray
+        bracket_tag = self._buffer.create_tag("bracket", foreground="#808080")
+
+        # Module names - Light blue
+        module_tag = self._buffer.create_tag("module", foreground="#9CDCFE")
+
+        # Separator (pipes) - Dim
+        separator_tag = self._buffer.create_tag("separator", foreground="#6A6A6A")
+
+        # Container name - Purple
+        container_tag = self._buffer.create_tag("container", foreground="#C586C0")
+
+    def _apply_highlighting(self, start_iter, text: str) -> None:
+        """Apply syntax highlighting to newly added text."""
+        if not text:
+            return
+
+        import re
+
+        # Helper to apply tag at specific position
+        def apply_tag(tag_name: str, start_pos: int, length: int) -> None:
+            tag_start = start_iter.copy()
+            tag_start.forward_chars(start_pos)
+            tag_end = tag_start.copy()
+            tag_end.forward_chars(length)
+            self._buffer.apply_tag_by_name(tag_name, tag_start, tag_end)
+
+        # Highlight container name first (if present at start)
+        # Server format: container-name | ...
+        container_match = re.match(r"^([\w-]+)\s*(\|)", text)
+        if container_match:
+            # Container name
+            apply_tag(
+                "container", container_match.start(1), len(container_match.group(1))
+            )
+            # First pipe
+            apply_tag("separator", container_match.start(2), 1)
+
+        # Pattern for bracketed timestamp with milliseconds [YYYY-MM-DD HH:MM:SS,mmm]
+        bracket_ts_match = re.match(
+            r"^(\[)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(,\d{3})?(\])", text
+        )
+        if bracket_ts_match:
+            # Opening bracket
+            apply_tag("bracket", bracket_ts_match.start(1), 1)
+            # Date
+            apply_tag("date", bracket_ts_match.start(2), len(bracket_ts_match.group(2)))
+            # Time
+            apply_tag("time", bracket_ts_match.start(3), len(bracket_ts_match.group(3)))
+            # Milliseconds (if present)
+            if bracket_ts_match.group(4):
+                apply_tag(
+                    "milliseconds",
+                    bracket_ts_match.start(4),
+                    len(bracket_ts_match.group(4)),
+                )
+            # Closing bracket
+            apply_tag("bracket", bracket_ts_match.start(5), 1)
+
+        # Pattern for date/time in server logs: YYYY-MM-DD HH:MM:SS
+        # This will match timestamps after the container name
+        datetime_match = re.search(r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})", text)
+        if datetime_match:
+            # Date
+            apply_tag("date", datetime_match.start(1), len(datetime_match.group(1)))
+            # Time
+            apply_tag("time", datetime_match.start(2), len(datetime_match.group(2)))
+
+        # Highlight all pipe separators
+        for match in re.finditer(r"\|", text):
+            apply_tag("separator", match.start(), 1)
+
+        # Highlight log level
+        for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
+            for match in re.finditer(rf"\b{level}\b", text):
+                apply_tag(level, match.start(), len(level))
+
+        # Highlight module names (text after " - ", before ":")
+        if " - " in text:
+            parts = text.split(" - ")
+            if len(parts) >= 2:
+                module_part = parts[1]
+                if ":" in module_part:
+                    module_name = module_part.split(":")[0].strip()
+                    module_idx = text.index(module_name)
+                    apply_tag("module", module_idx, len(module_name))
+
     def append_log(self, message: str) -> None:
-        """Append a log message to the view."""
-        buffer = self._text_view.get_buffer()
-        end_iter = buffer.get_end_iter()
-        buffer.insert(end_iter, message + "\n")
-        # Auto-scroll to bottom
-        mark = buffer.create_mark(None, buffer.get_end_iter(), False)
-        self._text_view.scroll_to_mark(mark, 0, False, 0, 0)
+        """Append a log message to the view with syntax highlighting while preserving scroll position."""
+        # Get scroll position
+        vadj = self._text_view.get_vadjustment()
+        old_value = vadj.get_value()
+        old_upper = vadj.get_upper()
+        was_at_bottom = old_value >= (old_upper - vadj.get_page_size() - 1)
+
+        # Insert text
+        end_iter = self._buffer.get_end_iter()
+        start_offset = end_iter.get_offset()
+        self._buffer.insert(end_iter, message + "\n")
+
+        # Apply highlighting to the newly added text
+        start_iter = self._buffer.get_iter_at_offset(start_offset)
+        self._apply_highlighting(start_iter, message)
+
+        # Restore scroll position (unless user was at bottom)
+        if not was_at_bottom:
+            vadj.set_value(old_value)
 
     def set_logs(self, logs: str) -> None:
-        """Set the entire log content."""
-        buffer = self._text_view.get_buffer()
-        buffer.set_text(logs)
-        # Auto-scroll to bottom
-        mark = buffer.create_mark(None, buffer.get_end_iter(), False)
-        self._text_view.scroll_to_mark(mark, 0, False, 0, 0)
+        """Set the entire log content, only updating if content changed."""
+        # Check if content actually changed using hash
+        new_hash = hash(logs)
+        if new_hash == self._current_content_hash:
+            return  # No change, skip update entirely
+
+        # Split into lines for comparison
+        new_lines = logs.rstrip("\n").split("\n") if logs.strip() else []
+        new_line_count = len(new_lines)
+
+        # If new content has more lines and starts with same content, just append
+        if new_line_count > self._current_line_count and self._current_line_count > 0:
+            current_text = self._buffer.get_text(
+                self._buffer.get_start_iter(), self._buffer.get_end_iter(), False
+            )
+            current_lines = (
+                current_text.rstrip("\n").split("\n") if current_text.strip() else []
+            )
+
+            # Check if current content matches the beginning of new content
+            if new_lines[: len(current_lines)] == current_lines:
+                # Just append the new lines
+                lines_to_add = new_lines[len(current_lines) :]
+                for line in lines_to_add:
+                    self.append_log(line)
+                self._current_line_count = new_line_count
+                self._current_content_hash = new_hash
+                return
+
+        # Content changed significantly - need full replacement
+        # Save scroll position
+        vadj = self._text_view.get_vadjustment()
+        old_value = vadj.get_value()
+
+        # Clear and set new content
+        self._buffer.set_text("")
+
+        # Split by lines and apply highlighting to each
+        for line in logs.split("\n"):
+            if line:
+                end_iter = self._buffer.get_end_iter()
+                start_offset = end_iter.get_offset()
+                self._buffer.insert(end_iter, line + "\n")
+                start_iter = self._buffer.get_iter_at_offset(start_offset)
+                self._apply_highlighting(start_iter, line)
+
+        # Restore scroll position
+        vadj.set_value(old_value)
+
+        # Update tracking
+        self._current_line_count = new_line_count
+        self._current_content_hash = new_hash
 
     def clear_logs(self) -> None:
         """Clear all logs."""
-        buffer = self._text_view.get_buffer()
-        buffer.set_text("")
+        self._buffer.set_text("")
+        self._current_line_count = 0
+        self._current_content_hash = 0
 
     def _apply_styles(self) -> None:
         """Apply dark theme styling."""
@@ -234,7 +419,10 @@ class LogWindow(_get_log_window_base()):
             background-color: #1e1e1e;
             color: #d4d4d4;
             font-family: "CaskaydiaCove Nerd Font", monospace;
-            font-size: 12pt;
+            font-size: 9pt;
+        }
+        .log-view:selected {
+            background-color: #264f78;
         }
         """
         provider = Gtk.CssProvider()
@@ -294,6 +482,9 @@ class DashboardWindow(_get_dashboard_base()):
         # Client state tracking
         self._client_running = False
 
+        # Model state tracking (assume loaded initially)
+        self._models_loaded = True
+
         # Status update timers
         self._status_timer_id: int | None = None
 
@@ -321,6 +512,7 @@ class DashboardWindow(_get_dashboard_base()):
         self._start_client_local_btn: Any = None
         self._start_client_remote_btn: Any = None
         self._stop_client_btn: Any = None
+        self._unload_models_btn: Any = None
 
         self._setup_ui()
         self._apply_styles()
@@ -446,13 +638,14 @@ class DashboardWindow(_get_dashboard_base()):
     def _create_welcome_view(self) -> Any:
         """Create the welcome/home view."""
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
         box.set_margin_top(30)
         box.set_margin_bottom(30)
         box.set_margin_start(40)
         box.set_margin_end(40)
+        box.set_size_request(450, -1)  # Minimum width for home view
 
         # Welcome title
         title = Gtk.Label(label="Welcome to TranscriptionSuite")
@@ -551,19 +744,30 @@ class DashboardWindow(_get_dashboard_base()):
         web_note.add_css_class("caption")
         box.append(web_note)
 
+        # Dashboard settings button
+        dashboard_settings_btn = Gtk.Button(label="Dashboard Settings")
+        dashboard_settings_btn.add_css_class("secondary-button")
+        dashboard_settings_btn.set_margin_top(16)
+        dashboard_settings_btn.set_halign(Gtk.Align.CENTER)
+        dashboard_settings_btn.connect(
+            "clicked", lambda _: self._show_dashboard_settings()
+        )
+        box.append(dashboard_settings_btn)
+
         scrolled.set_child(box)
         return scrolled
 
     def _create_server_view(self) -> Any:
         """Create the server management view."""
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         box.set_margin_top(30)
         box.set_margin_bottom(30)
         box.set_margin_start(40)
         box.set_margin_end(40)
+        box.set_size_request(550, -1)  # Minimum width for server view
 
         # Title
         title = Gtk.Label(label="Docker Server")
@@ -787,6 +991,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Settings button
         settings_btn = Gtk.Button(label="Settings")
+        settings_btn.set_icon_name("preferences-system-symbolic")
         settings_btn.add_css_class("secondary-button")
         settings_btn.set_halign(Gtk.Align.CENTER)
         settings_btn.set_margin_top(16)
@@ -795,6 +1000,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Show logs button
         logs_btn = Gtk.Button(label="Show Logs")
+        logs_btn.set_icon_name("utilities-log-viewer-symbolic")
         logs_btn.add_css_class("secondary-button")
         logs_btn.set_halign(Gtk.Align.CENTER)
         logs_btn.set_margin_top(8)
@@ -807,13 +1013,14 @@ class DashboardWindow(_get_dashboard_base()):
     def _create_client_view(self) -> Any:
         """Create the client management view."""
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         box.set_margin_top(30)
         box.set_margin_bottom(30)
         box.set_margin_start(40)
         box.set_margin_end(40)
+        box.set_size_request(450, -1)  # Minimum width for client view
 
         # Title
         title = Gtk.Label(label="Client")
@@ -877,16 +1084,31 @@ class DashboardWindow(_get_dashboard_base()):
 
         box.append(btn_box)
 
+        # Model management button - placed above settings
+        self._unload_models_btn = Gtk.Button(label="Unload All Models")
+        self._unload_models_btn.add_css_class("secondary-button")
+        # Start disabled (gray) until server is healthy
+        self._unload_models_btn.set_sensitive(False)
+        self._unload_models_btn.set_halign(Gtk.Align.CENTER)
+        self._unload_models_btn.set_margin_top(16)
+        self._unload_models_btn.set_tooltip_text(
+            "Unload transcription models to free GPU memory"
+        )
+        self._unload_models_btn.connect("clicked", lambda _: self._on_toggle_models())
+        box.append(self._unload_models_btn)
+
         # Settings button
-        settings_btn = Gtk.Button(label="⚙ Settings")
+        settings_btn = Gtk.Button(label="Settings")
+        settings_btn.set_icon_name("preferences-system-symbolic")
         settings_btn.add_css_class("secondary-button")
         settings_btn.set_halign(Gtk.Align.CENTER)
-        settings_btn.set_margin_top(16)
+        settings_btn.set_margin_top(8)
         settings_btn.connect("clicked", lambda _: self._on_show_client_settings())
         box.append(settings_btn)
 
         # Show logs button
         logs_btn = Gtk.Button(label="Show Logs")
+        logs_btn.set_icon_name("utilities-log-viewer-symbolic")
         logs_btn.add_css_class("secondary-button")
         logs_btn.set_halign(Gtk.Align.CENTER)
         logs_btn.set_margin_top(8)
@@ -953,6 +1175,11 @@ class DashboardWindow(_get_dashboard_base()):
             background: #3d3d3d;
             border-color: #4d4d4d;
         }
+        .secondary-button:disabled {
+            background: #1e3a5f;
+            border-color: #2d4d6f;
+            color: #7090b0;
+        }
 
         /* Web button with green-aquamarine accent */
         .secondary-button.web-accent {
@@ -960,6 +1187,22 @@ class DashboardWindow(_get_dashboard_base()):
         }
         .secondary-button.web-accent:hover {
             border-color: #80DEEA;
+        }
+
+        /* Model management button states */
+        .models-loaded {
+            background: #1e3a5f;
+            border-color: #90caf9;
+        }
+        .models-loaded:hover {
+            background: #2e4a6f;
+        }
+        .models-unloaded {
+            background: #5d1f1f;
+            border-color: #f44336;
+        }
+        .models-unloaded:hover {
+            background: #6d2f2f;
         }
 
         /* Primary button (suggested-action style) */
@@ -1220,9 +1463,7 @@ class DashboardWindow(_get_dashboard_base()):
             if models_volume_exists and status == ServerStatus.RUNNING:
                 models = self._docker_manager.list_downloaded_models()
                 if models:
-                    models_lines = [
-                        f"  • {m['name']} ({m['size']})" for m in models
-                    ]
+                    models_lines = [f"  • {m['name']} ({m['size']})" for m in models]
                     models_text = "Downloaded:\n" + "\n".join(models_lines)
                     self._models_list_label.set_text(models_text)
                     self._models_list_label.set_visible(True)
@@ -1240,7 +1481,8 @@ class DashboardWindow(_get_dashboard_base()):
             if status == ServerStatus.RUNNING:
                 # Force check logs for latest token
                 import re
-                logs = self._docker_manager.get_logs(lines=100)
+
+                logs = self._docker_manager.get_logs(lines=1000)
                 new_token = None
                 for line in logs.split("\n"):
                     if "Admin Token:" in line:
@@ -1254,7 +1496,9 @@ class DashboardWindow(_get_dashboard_base()):
                                 logger.info("Detected new admin token from logs")
 
                 # Display the token (either new or cached)
-                token = new_token or self._docker_manager.get_admin_token(check_logs=False)
+                token = new_token or self._docker_manager.get_admin_token(
+                    check_logs=False
+                )
             else:
                 # When not running, just use cached token
                 token = self._docker_manager.get_admin_token(check_logs=False)
@@ -1263,6 +1507,9 @@ class DashboardWindow(_get_dashboard_base()):
                 self._server_token_entry.set_text(token)
             else:
                 self._server_token_entry.set_text("Not saved yet")
+
+        # Update models button state when server status changes
+        self._update_models_button_state()
 
     def _refresh_client_status(self) -> None:
         """Refresh client view status."""
@@ -1283,6 +1530,42 @@ class DashboardWindow(_get_dashboard_base()):
             else:
                 port = self.config.get("server", "port", default=8000)
                 self._connection_info_label.set_text(f"localhost:{port}")
+
+        # Update models button based on server health
+        self._update_models_button_state()
+
+        # Update models button based on server health
+        self._update_models_button_state()
+
+    def _update_models_button_state(self) -> None:
+        """Update the models button state based on server health."""
+        if not self._unload_models_btn:
+            return
+
+        # Check if server is running and healthy
+        status = self._docker_manager.get_server_status()
+        health = self._docker_manager.get_container_health()
+
+        is_healthy = status == ServerStatus.RUNNING and (
+            health is None or health == "healthy"
+        )
+
+        if is_healthy:
+            # Server is healthy, enable button with appropriate color
+            self._unload_models_btn.set_sensitive(True)
+            if self._models_loaded:
+                # Light blue (models loaded, ready to unload)
+                self._unload_models_btn.remove_css_class("models-unloaded")
+                self._unload_models_btn.add_css_class("models-loaded")
+            else:
+                # Red (models unloaded, ready to reload)
+                self._unload_models_btn.remove_css_class("models-loaded")
+                self._unload_models_btn.add_css_class("models-unloaded")
+        else:
+            # Server not healthy, disable button (gray)
+            self._unload_models_btn.set_sensitive(False)
+            self._unload_models_btn.remove_css_class("models-loaded")
+            self._unload_models_btn.remove_css_class("models-unloaded")
 
     def set_client_running(self, running: bool) -> None:
         """Update client running state."""
@@ -1317,10 +1600,15 @@ class DashboardWindow(_get_dashboard_base()):
 
     def _on_stop_server(self) -> None:
         """Stop the server."""
+        # Save the last log timestamp before stopping
+        self._docker_manager.save_last_server_stop_timestamp()
         self._run_server_operation(
             lambda: self._docker_manager.stop_server(),
             "Stopping server...",
         )
+        # Clear server logs when server is stopped
+        if self._server_log_window is not None:
+            self._server_log_window.clear_logs()
 
     def _on_remove_container(self) -> None:
         """Remove the Docker container."""
@@ -1328,6 +1616,11 @@ class DashboardWindow(_get_dashboard_base()):
             lambda: self._docker_manager.remove_container(),
             "Removing container...",
         )
+        # Clear timestamp file since container (and its logs) are gone
+        self._docker_manager.clear_last_server_stop_timestamp()
+        # Clear server logs when container is removed
+        if self._server_log_window is not None:
+            self._server_log_window.clear_logs()
 
     def _on_remove_image(self) -> None:
         """Remove the Docker image."""
@@ -1346,14 +1639,14 @@ class DashboardWindow(_get_dashboard_base()):
     def _on_remove_data_volume(self) -> None:
         """Remove data volume."""
         self._run_server_operation(
-            lambda: self._docker_manager.remove_volume("data"),
+            lambda: self._docker_manager.remove_data_volume(),
             "Removing data volume...",
         )
 
     def _on_remove_models_volume(self) -> None:
         """Remove models volume."""
         self._run_server_operation(
-            lambda: self._docker_manager.remove_volume("models"),
+            lambda: self._docker_manager.remove_models_volume(),
             "Removing models volume...",
         )
 
@@ -1386,7 +1679,7 @@ class DashboardWindow(_get_dashboard_base()):
         if self._server_log_window is None:
             self._server_log_window = LogWindow("Server Logs")
 
-        logs = self._docker_manager.get_logs(lines=200)
+        logs = self._docker_manager.get_logs(lines=1000, filter_since_last_stop=True)
         self._server_log_window.set_logs(logs)
         self._server_log_window.present()
 
@@ -1452,6 +1745,90 @@ class DashboardWindow(_get_dashboard_base()):
         self._client_log_window.set_logs(logs)
         self._client_log_window.present()
 
+    def _on_toggle_models(self) -> None:
+        """Toggle model loading state - unload to free GPU memory or reload."""
+        import asyncio
+
+        from dashboard.common.api_client import APIClient
+
+        # Get server connection settings
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            self._show_notification("Error", "No server host configured")
+            return
+
+        # Create temporary API client for this operation
+        api_client = APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
+
+        async def do_toggle():
+            try:
+                if self._models_loaded:
+                    result = await api_client.unload_models()
+                else:
+                    result = await api_client.reload_models()
+                return result
+            finally:
+                await api_client.close()
+
+        # Run async operation
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(do_toggle())
+            loop.close()
+
+            if result.get("success"):
+                self._models_loaded = not self._models_loaded
+                if self._models_loaded:
+                    if self._unload_models_btn:
+                        self._unload_models_btn.set_label("Unload All Models")
+                        self._unload_models_btn.set_tooltip_text(
+                            "Unload transcription models to free GPU memory"
+                        )
+                        # Change to light blue styling (models loaded)
+                        self._unload_models_btn.remove_css_class("models-unloaded")
+                        self._unload_models_btn.add_css_class("models-loaded")
+                    self._show_notification(
+                        "Models Loaded", "Models ready for transcription"
+                    )
+                else:
+                    if self._unload_models_btn:
+                        self._unload_models_btn.set_label("Reload Models")
+                        self._unload_models_btn.set_tooltip_text(
+                            "Reload transcription models for use"
+                        )
+                        # Change to red styling (models unloaded)
+                        self._unload_models_btn.remove_css_class("models-loaded")
+                        self._unload_models_btn.add_css_class("models-unloaded")
+                    self._show_notification(
+                        "Models Unloaded",
+                        "GPU memory freed. Click 'Reload Models' to restore.",
+                    )
+            else:
+                self._show_notification(
+                    "Operation Failed", result.get("message", "Unknown error")
+                )
+        except Exception as e:
+            logger.error(f"Model toggle failed: {e}")
+            self._show_notification("Error", f"Failed to toggle models: {e}")
+
     # =========================================================================
     # Web Client
     # =========================================================================
@@ -1473,6 +1850,54 @@ class DashboardWindow(_get_dashboard_base()):
 
         logger.info(f"Opening web client: {url}")
         webbrowser.open(url)
+
+    def _show_dashboard_settings(self) -> None:
+        """Show Dashboard settings dialog (styled like client settings)."""
+        dialog = Adw.MessageDialog.new(
+            self, "Dashboard Settings", "Configure dashboard behavior"
+        )
+
+        # Create content box
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content_box.set_margin_start(12)
+        content_box.set_margin_end(12)
+        content_box.set_margin_top(6)
+        content_box.set_margin_bottom(6)
+
+        # Docker server section
+        docker_label = Gtk.Label(label="Docker Server")
+        docker_label.add_css_class("heading")
+        docker_label.set_halign(Gtk.Align.START)
+        content_box.append(docker_label)
+
+        # Stop server checkbox
+        stop_server_check = Gtk.CheckButton(label="Stop server when quitting dashboard")
+        stop_server_check.set_active(
+            self.config.get("dashboard", "stop_server_on_quit", default=True)
+        )
+        content_box.append(stop_server_check)
+
+        dialog.set_extra_child(content_box)
+
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+
+        def on_response(dlg, response):
+            if response == "save":
+                self.config.set(
+                    "dashboard",
+                    "stop_server_on_quit",
+                    value=stop_server_check.get_active(),
+                )
+                if self.config.save():
+                    logger.info("Dashboard settings saved")
+                else:
+                    logger.error("Failed to save dashboard settings")
+
+        dialog.connect("response", on_response)
+        dialog.present()
 
     # =========================================================================
     # Help & About
@@ -1765,6 +2190,11 @@ class DashboardWindow(_get_dashboard_base()):
 
     def _show_notification(self, title: str, message: str) -> None:
         """Show a desktop notification."""
+        # Check if notifications are enabled in settings
+        if not self._config.get("ui", "notifications", default=True):
+            logger.debug("Notifications disabled in settings")
+            return
+
         try:
             subprocess.run(
                 ["notify-send", "-a", "TranscriptionSuite", title, message],

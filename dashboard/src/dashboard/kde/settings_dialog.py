@@ -1,22 +1,30 @@
 """
-Settings dialog for TranscriptionSuite client.
+Settings dialog for TranscriptionSuite.
 
-Provides a tabbed dialog for configuring client settings.
+Provides a unified tabbed dialog for configuring all settings.
 Styled to match the Dashboard UI design language.
+
+Tabs:
+- App: Clipboard, notifications, stop server on quit behavior
+- Client: Audio input device + connection settings
+- Server: Open config.yaml button + path display
 """
 
 import logging
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -24,26 +32,28 @@ from PyQt6.QtWidgets import (
 )
 
 from dashboard.common.audio_recorder import AudioRecorder
-from dashboard.common.config import ClientConfig
+from dashboard.common.config import ClientConfig, get_config_dir
+from dashboard.common.docker_manager import DockerManager
 
 logger = logging.getLogger(__name__)
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog with tabbed interface matching Dashboard design language."""
+    """Unified settings dialog with tabbed interface matching Dashboard design."""
 
     def __init__(self, config: ClientConfig, parent: QWidget | None = None):
         super().__init__(parent)
         self.config = config
+        self._docker_manager = DockerManager()
 
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(520)
-        self.setMinimumHeight(420)
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(520)
 
         # Set window icon from system theme
         icon = QIcon.fromTheme("preferences-system")
         if icon.isNull():
-            icon = QIcon.fromTheme("audio-input-microphone")
+            icon = QIcon.fromTheme("configure")
         if not icon.isNull():
             self.setWindowIcon(icon)
 
@@ -56,10 +66,10 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        # Create tabs
-        self._create_connection_tab()
-        self._create_audio_tab()
-        self._create_behavior_tab()
+        # Create tabs in order: App, Client, Server
+        self._create_app_tab()
+        self._create_client_tab()
+        self._create_server_tab()
 
         # Button container
         btn_container = QWidget()
@@ -96,13 +106,13 @@ class SettingsDialog(QDialog):
             QDialog {
                 background-color: #121212;
             }
-            
+
             QTabWidget::pane {
                 background-color: #121212;
                 border: none;
                 border-top: 1px solid #2d2d2d;
             }
-            
+
             QTabBar::tab {
                 background-color: #1e1e1e;
                 color: #a0a0a0;
@@ -111,37 +121,50 @@ class SettingsDialog(QDialog):
                 border-bottom: 2px solid transparent;
                 font-size: 13px;
             }
-            
+
             QTabBar::tab:selected {
                 color: #90caf9;
                 border-bottom: 2px solid #90caf9;
             }
-            
+
             QTabBar::tab:hover:!selected {
                 color: #ffffff;
                 background-color: #2d2d2d;
             }
-            
+
             QWidget#tabContent {
                 background-color: #121212;
             }
-            
+
             QLabel {
                 color: #a0a0a0;
                 font-size: 13px;
             }
-            
+
             QLabel#fieldLabel {
                 color: #a0a0a0;
                 font-size: 13px;
                 min-width: 100px;
             }
-            
+
+            QLabel#sectionHeader {
+                color: #90caf9;
+                font-size: 14px;
+                font-weight: bold;
+                padding-bottom: 4px;
+            }
+
             QLabel#helpText {
                 color: #6c757d;
                 font-size: 11px;
             }
-            
+
+            QLabel#pathLabel {
+                color: #6c757d;
+                font-size: 12px;
+                font-family: monospace;
+            }
+
             QLineEdit {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
@@ -150,16 +173,16 @@ class SettingsDialog(QDialog):
                 padding: 8px 12px;
                 font-size: 13px;
             }
-            
+
             QLineEdit:focus {
                 border-color: #90caf9;
             }
-            
+
             QLineEdit:disabled {
                 background-color: #1a1a1a;
                 color: #606060;
             }
-            
+
             QSpinBox {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
@@ -168,21 +191,21 @@ class SettingsDialog(QDialog):
                 padding: 8px 12px;
                 font-size: 13px;
             }
-            
+
             QSpinBox:focus {
                 border-color: #90caf9;
             }
-            
+
             QSpinBox::up-button, QSpinBox::down-button {
                 background-color: #2d2d2d;
                 border: none;
                 width: 20px;
             }
-            
+
             QSpinBox::up-button:hover, QSpinBox::down-button:hover {
                 background-color: #3d3d3d;
             }
-            
+
             QComboBox {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
@@ -192,16 +215,16 @@ class SettingsDialog(QDialog):
                 font-size: 13px;
                 min-width: 200px;
             }
-            
+
             QComboBox:focus {
                 border-color: #90caf9;
             }
-            
+
             QComboBox::drop-down {
                 border: none;
                 width: 24px;
             }
-            
+
             QComboBox::down-arrow {
                 image: none;
                 border-left: 5px solid transparent;
@@ -209,7 +232,7 @@ class SettingsDialog(QDialog):
                 border-top: 6px solid #a0a0a0;
                 margin-right: 8px;
             }
-            
+
             QComboBox QAbstractItemView {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
@@ -218,13 +241,13 @@ class SettingsDialog(QDialog):
                 selection-background-color: #2d2d2d;
                 selection-color: #90caf9;
             }
-            
+
             QCheckBox {
                 color: #ffffff;
                 font-size: 13px;
                 spacing: 8px;
             }
-            
+
             QCheckBox::indicator {
                 width: 16px;
                 height: 16px;
@@ -232,23 +255,23 @@ class SettingsDialog(QDialog):
                 border: 2px solid #505050;
                 background-color: #1e1e1e;
             }
-            
+
             QCheckBox::indicator:checked {
                 background-color: #90caf9;
                 border-color: #90caf9;
                 image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxMjEyMTIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
             }
-            
+
             QCheckBox::indicator:unchecked:hover {
                 border-color: #707070;
                 background-color: #252525;
             }
-            
+
             QCheckBox::indicator:checked:hover {
                 background-color: #42a5f5;
                 border-color: #42a5f5;
             }
-            
+
             #primaryButton {
                 background-color: #90caf9;
                 border: none;
@@ -259,11 +282,11 @@ class SettingsDialog(QDialog):
                 font-weight: 500;
                 min-width: 80px;
             }
-            
+
             #primaryButton:hover {
                 background-color: #42a5f5;
             }
-            
+
             #secondaryButton {
                 background-color: #2d2d2d;
                 border: 1px solid #3d3d3d;
@@ -273,12 +296,12 @@ class SettingsDialog(QDialog):
                 font-size: 13px;
                 min-width: 80px;
             }
-            
+
             #secondaryButton:hover {
                 background-color: #3d3d3d;
                 border-color: #4d4d4d;
             }
-            
+
             #smallButton {
                 background-color: #2d2d2d;
                 border: 1px solid #3d3d3d;
@@ -287,16 +310,16 @@ class SettingsDialog(QDialog):
                 padding: 6px 12px;
                 font-size: 12px;
             }
-            
+
             #smallButton:hover {
                 background-color: #3d3d3d;
             }
-            
+
             #buttonContainer {
                 background-color: #1e1e1e;
                 border-top: 1px solid #2d2d2d;
             }
-            
+
             QGroupBox {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
@@ -308,7 +331,7 @@ class SettingsDialog(QDialog):
                 font-weight: bold;
                 color: #90caf9;
             }
-            
+
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
@@ -317,22 +340,149 @@ class SettingsDialog(QDialog):
                 background-color: #1e1e1e;
                 color: #90caf9;
             }
-            
+
             QFrame#settingsCard {
                 background-color: #1e1e1e;
                 border: 1px solid #2d2d2d;
                 border-radius: 8px;
             }
+
+            QFrame#sectionSeparator {
+                background-color: #2d2d2d;
+                max-height: 1px;
+                margin: 8px 0;
+            }
+
+            QScrollArea {
+                background-color: #121212;
+                border: none;
+            }
+
+            QScrollBar:vertical {
+                background-color: #1e1e1e;
+                width: 10px;
+                margin: 0;
+            }
+
+            QScrollBar::handle:vertical {
+                background-color: #3d3d3d;
+                min-height: 30px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background-color: #4d4d4d;
+            }
+
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
         """)
 
-    def _create_connection_tab(self) -> None:
-        """Create the Connection settings tab."""
+    def _create_app_tab(self) -> None:
+        """Create the App settings tab (clipboard, notifications, docker behavior)."""
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Create content widget
         tab = QWidget()
         tab.setObjectName("tabContent")
-        tab.setMinimumHeight(600)  # Minimum height for connection panel
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
+
+        # === Clipboard Section ===
+        clipboard_group = QGroupBox("Clipboard")
+        clipboard_layout = QVBoxLayout(clipboard_group)
+
+        self.auto_copy_check = QCheckBox(
+            "Automatically copy transcription to clipboard"
+        )
+        clipboard_layout.addWidget(self.auto_copy_check)
+
+        layout.addWidget(clipboard_group)
+
+        # === Notifications Section ===
+        notifications_group = QGroupBox("Notifications")
+        notifications_layout = QVBoxLayout(notifications_group)
+
+        self.notifications_check = QCheckBox("Show desktop notifications")
+        notifications_layout.addWidget(self.notifications_check)
+
+        layout.addWidget(notifications_group)
+
+        # === Docker Server Section ===
+        docker_group = QGroupBox("Docker Server")
+        docker_layout = QVBoxLayout(docker_group)
+
+        self.stop_server_check = QCheckBox("Stop server when quitting dashboard")
+        docker_layout.addWidget(self.stop_server_check)
+
+        layout.addWidget(docker_group)
+
+        layout.addStretch()
+
+        scroll.setWidget(tab)
+        self.tabs.addTab(scroll, "App")
+
+    def _create_client_tab(self) -> None:
+        """Create the Client settings tab (audio + connection in one tab)."""
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Create content widget
+        tab = QWidget()
+        tab.setObjectName("tabContent")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        # === Audio Section ===
+        audio_group = QGroupBox("Audio")
+        audio_layout = QVBoxLayout(audio_group)
+
+        # Device selector row
+        device_row = QHBoxLayout()
+        device_label = QLabel("Input Device:")
+        device_label.setObjectName("fieldLabel")
+        device_row.addWidget(device_label)
+
+        self.device_combo = QComboBox()
+        device_row.addWidget(self.device_combo, 1)
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setObjectName("smallButton")
+        refresh_btn.clicked.connect(self._refresh_devices)
+        device_row.addWidget(refresh_btn)
+
+        audio_layout.addLayout(device_row)
+
+        # Sample rate info
+        sample_rate_label = QLabel("Sample Rate: 16000 Hz (fixed for Whisper)")
+        sample_rate_label.setObjectName("helpText")
+        audio_layout.addWidget(sample_rate_label)
+
+        layout.addWidget(audio_group)
+
+        # Populate devices
+        self._refresh_devices()
+
+        # === Connection Section ===
+        connection_group = QGroupBox("Connection")
+        connection_layout = QVBoxLayout(connection_group)
+        connection_layout.setSpacing(10)
 
         # Local host row
         local_row = QHBoxLayout()
@@ -342,7 +492,7 @@ class SettingsDialog(QDialog):
         self.host_edit = QLineEdit()
         self.host_edit.setPlaceholderText("localhost")
         local_row.addWidget(self.host_edit, 1)
-        layout.addLayout(local_row)
+        connection_layout.addLayout(local_row)
 
         # Remote host row
         remote_row = QHBoxLayout()
@@ -352,11 +502,21 @@ class SettingsDialog(QDialog):
         self.remote_host_edit = QLineEdit()
         self.remote_host_edit.setPlaceholderText("e.g., my-desktop.tail1234.ts.net")
         remote_row.addWidget(self.remote_host_edit, 1)
-        layout.addLayout(remote_row)
+        connection_layout.addLayout(remote_row)
+
+        # Help text for host settings
+        host_help = QLabel(
+            "Enter ONLY the hostname (no http://, no port). Examples:\n"
+            "• Local: localhost or 127.0.0.1\n"
+            "• Remote: my-machine.tail1234.ts.net or 100.101.102.103"
+        )
+        host_help.setObjectName("helpText")
+        host_help.setWordWrap(True)
+        connection_layout.addWidget(host_help)
 
         # Use remote checkbox
         self.use_remote_check = QCheckBox("Use remote server instead of local")
-        layout.addWidget(self.use_remote_check)
+        connection_layout.addWidget(self.use_remote_check)
 
         # Help text for remote
         remote_help = QLabel(
@@ -364,9 +524,13 @@ class SettingsDialog(QDialog):
         )
         remote_help.setObjectName("helpText")
         remote_help.setWordWrap(True)
-        layout.addWidget(remote_help)
+        connection_layout.addWidget(remote_help)
 
-        layout.addSpacing(8)
+        # Separator
+        separator = QFrame()
+        separator.setObjectName("sectionSeparator")
+        separator.setFrameShape(QFrame.Shape.HLine)
+        connection_layout.addWidget(separator)
 
         # Token row
         token_row = QHBoxLayout()
@@ -386,7 +550,7 @@ class SettingsDialog(QDialog):
         self.show_token_btn.toggled.connect(self._toggle_token_visibility)
         token_row.addWidget(self.show_token_btn)
 
-        layout.addLayout(token_row)
+        connection_layout.addLayout(token_row)
 
         # Port row
         port_row = QHBoxLayout()
@@ -399,15 +563,13 @@ class SettingsDialog(QDialog):
         self.port_spin.setFixedWidth(100)
         port_row.addWidget(self.port_spin)
         port_row.addStretch()
-        layout.addLayout(port_row)
+        connection_layout.addLayout(port_row)
 
         # HTTPS checkbox
         self.https_check = QCheckBox("Use HTTPS")
-        layout.addWidget(self.https_check)
+        connection_layout.addWidget(self.https_check)
 
-        layout.addSpacing(8)
-
-        # === Advanced TLS Options Section ===
+        # === Advanced TLS Options Sub-section ===
         tls_group = QGroupBox("Advanced TLS Options")
         tls_layout = QVBoxLayout(tls_group)
 
@@ -429,95 +591,76 @@ class SettingsDialog(QDialog):
         )
         tls_layout.addWidget(self.allow_insecure_http_check)
 
-        layout.addWidget(tls_group)
+        connection_layout.addWidget(tls_group)
 
-        layout.addSpacing(8)
-
-        # Help text for host settings
-        host_help = QLabel(
-            "Enter ONLY the hostname (no http://, no port). Examples:\n"
-            "• Local: localhost or 127.0.0.1\n"
-            "• Remote: my-machine.tail1234.ts.net or 100.101.102.103"
-        )
-        host_help.setObjectName("helpText")
-        host_help.setWordWrap(True)
-        layout.addWidget(host_help)
+        layout.addWidget(connection_group)
 
         layout.addStretch()
 
-        self.tabs.addTab(tab, "Connection")
+        scroll.setWidget(tab)
+        self.tabs.addTab(scroll, "Client")
 
-    def _create_audio_tab(self) -> None:
-        """Create the Audio settings tab."""
+    def _create_server_tab(self) -> None:
+        """Create the Server settings tab (open config.yaml + path info)."""
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Create content widget
         tab = QWidget()
         tab.setObjectName("tabContent")
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        # Device selector row
-        device_row = QHBoxLayout()
-        device_label = QLabel("Input Device:")
-        device_label.setObjectName("fieldLabel")
-        device_row.addWidget(device_label)
+        # === Server Configuration Section ===
+        config_group = QGroupBox("Server Configuration")
+        config_layout = QVBoxLayout(config_group)
+        config_layout.setSpacing(12)
 
-        self.device_combo = QComboBox()
-        device_row.addWidget(self.device_combo, 1)
-
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setObjectName("smallButton")
-        refresh_btn.clicked.connect(self._refresh_devices)
-        device_row.addWidget(refresh_btn)
-
-        layout.addLayout(device_row)
-
-        # Sample rate info
-        sample_rate_label = QLabel("Sample Rate: 16000 Hz (fixed for Whisper)")
-        sample_rate_label.setObjectName("helpText")
-        layout.addWidget(sample_rate_label)
-
-        # Populate devices
-        self._refresh_devices()
-
-        layout.addStretch()
-
-        self.tabs.addTab(tab, "Audio")
-
-    def _create_behavior_tab(self) -> None:
-        """Create the Behavior settings tab."""
-        tab = QWidget()
-        tab.setObjectName("tabContent")
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-
-        # === Clipboard Section ===
-        clipboard_group = QGroupBox("Clipboard")
-        clipboard_group.setObjectName("settingsGroup")
-        clipboard_layout = QVBoxLayout(clipboard_group)
-
-        self.auto_copy_check = QCheckBox(
-            "Automatically copy transcription to clipboard"
+        # Description
+        desc_label = QLabel(
+            "Server settings are stored in config.yaml. Click below to open "
+            "it in your default text editor."
         )
-        clipboard_layout.addWidget(self.auto_copy_check)
+        desc_label.setWordWrap(True)
+        config_layout.addWidget(desc_label)
 
-        layout.addWidget(clipboard_group)
+        # Open config button
+        open_config_btn = QPushButton("Open config.yaml in Text Editor")
+        open_config_btn.setObjectName("primaryButton")
+        open_config_btn.clicked.connect(self._on_open_config_file)
+        config_layout.addWidget(open_config_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        layout.addSpacing(8)
+        # Separator
+        separator = QFrame()
+        separator.setObjectName("sectionSeparator")
+        separator.setFrameShape(QFrame.Shape.HLine)
+        config_layout.addWidget(separator)
 
-        # === Notifications Section ===
-        notifications_group = QGroupBox("Notifications")
-        notifications_group.setObjectName("settingsGroup")
-        notifications_layout = QVBoxLayout(notifications_group)
+        # Path info
+        config_dir = get_config_dir()
+        config_path = config_dir / "config.yaml"
 
-        self.notifications_check = QCheckBox("Show desktop notifications")
-        notifications_layout.addWidget(self.notifications_check)
+        path_info_label = QLabel("You can also edit the config file directly at:")
+        path_info_label.setObjectName("helpText")
+        config_layout.addWidget(path_info_label)
 
-        layout.addWidget(notifications_group)
+        path_label = QLabel(str(config_path))
+        path_label.setObjectName("pathLabel")
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        path_label.setWordWrap(True)
+        config_layout.addWidget(path_label)
+
+        layout.addWidget(config_group)
 
         layout.addStretch()
 
-        self.tabs.addTab(tab, "Behavior")
+        scroll.setWidget(tab)
+        self.tabs.addTab(scroll, "Server")
 
     def _toggle_token_visibility(self, checked: bool) -> None:
         """Toggle token visibility."""
@@ -544,9 +687,65 @@ class SettingsDialog(QDialog):
         except Exception as e:
             logger.warning(f"Failed to list audio devices: {e}")
 
+    def _on_open_config_file(self) -> None:
+        """Open the server config.yaml file in default text editor."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        config_file = self._docker_manager._find_config_file()
+        success = self._docker_manager.open_config_file()
+
+        if not success:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cannot Open Settings")
+
+            if not config_file:
+                msg_box.setText("Configuration file not found")
+                msg_box.setInformativeText(
+                    "The config.yaml file doesn't exist yet.\n\n"
+                    "To create it:\n"
+                    f"  1. Run first-time setup from terminal:\n"
+                    f"     transcription-suite-setup\n\n"
+                    f"  2. Or create it manually at:\n"
+                    f"     {self._docker_manager.config_dir}/config.yaml"
+                )
+            else:
+                msg_box.setText("Failed to open config.yaml")
+                msg_box.setInformativeText(
+                    f"The file exists but no editor was found.\n\n"
+                    f"Location: {config_file}\n\n"
+                    f"To edit manually, try:\n"
+                    f"  • kate {config_file}\n"
+                    f"  • gedit {config_file}\n"
+                    f"  • nano {config_file}"
+                )
+
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+
     def _load_values(self) -> None:
         """Load current configuration values into the dialog."""
-        # Connection tab
+        # App tab
+        self.auto_copy_check.setChecked(
+            self.config.get("clipboard", "auto_copy", default=True)
+        )
+        self.notifications_check.setChecked(
+            self.config.get("ui", "notifications", default=True)
+        )
+        self.stop_server_check.setChecked(
+            self.config.get("dashboard", "stop_server_on_quit", default=True)
+        )
+
+        # Client tab - Audio
+        current_device = self.config.get("recording", "device_index")
+        if current_device is None:
+            self.device_combo.setCurrentIndex(0)  # Default
+        else:
+            for i in range(self.device_combo.count()):
+                if self.device_combo.itemData(i) == current_device:
+                    self.device_combo.setCurrentIndex(i)
+                    break
+
+        # Client tab - Connection
         self.host_edit.setText(self.config.get("server", "host", default="localhost"))
         self.port_spin.setValue(self.config.get("server", "port", default=8000))
         self.https_check.setChecked(
@@ -569,27 +768,24 @@ class SettingsDialog(QDialog):
             self.config.get("server", "allow_insecure_http", default=False)
         )
 
-        # Audio tab - select current device
-        current_device = self.config.get("recording", "device_index")
-        if current_device is None:
-            self.device_combo.setCurrentIndex(0)  # Default
-        else:
-            for i in range(self.device_combo.count()):
-                if self.device_combo.itemData(i) == current_device:
-                    self.device_combo.setCurrentIndex(i)
-                    break
-
-        # Behavior tab
-        self.auto_copy_check.setChecked(
-            self.config.get("clipboard", "auto_copy", default=True)
-        )
-        self.notifications_check.setChecked(
-            self.config.get("ui", "notifications", default=True)
-        )
-
     def _save_and_close(self) -> None:
         """Save settings and close the dialog."""
-        # Connection tab
+        # App tab
+        self.config.set(
+            "clipboard", "auto_copy", value=self.auto_copy_check.isChecked()
+        )
+        self.config.set(
+            "ui", "notifications", value=self.notifications_check.isChecked()
+        )
+        self.config.set(
+            "dashboard", "stop_server_on_quit", value=self.stop_server_check.isChecked()
+        )
+
+        # Client tab - Audio
+        device_index = self.device_combo.currentData()
+        self.config.set("recording", "device_index", value=device_index)
+
+        # Client tab - Connection
         self.config.set(
             "server", "host", value=self.host_edit.text().strip() or "localhost"
         )
@@ -607,18 +803,6 @@ class SettingsDialog(QDialog):
             "server",
             "allow_insecure_http",
             value=self.allow_insecure_http_check.isChecked(),
-        )
-
-        # Audio tab
-        device_index = self.device_combo.currentData()
-        self.config.set("recording", "device_index", value=device_index)
-
-        # Behavior tab
-        self.config.set(
-            "clipboard", "auto_copy", value=self.auto_copy_check.isChecked()
-        )
-        self.config.set(
-            "ui", "notifications", value=self.notifications_check.isChecked()
         )
 
         # Save to file

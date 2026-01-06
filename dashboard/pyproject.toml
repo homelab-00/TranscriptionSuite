@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcription-suite-dashboard"
-version = "0.3.2"
+version = "0.3.3"
 description = "TranscriptionSuite Dashboard for desktop integration"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "aiohttp>=3.13.2",
+    "aiohttp>=3.13.3",
     "numpy>=2.3.5",
     "pyyaml>=6.0.3",
     "requests>=2.32.0",

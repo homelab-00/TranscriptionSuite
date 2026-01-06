@@ -77,6 +77,9 @@ def get_default_config() -> dict[str, Any]:
         "behavior": {
             "auto_start_client": False,  # Start client when app launches
         },
+        "dashboard": {
+            "stop_server_on_quit": True,  # Stop Docker server when quitting
+        },
     }
 
 

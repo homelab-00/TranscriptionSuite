@@ -17,7 +17,6 @@ def get_lock_file_path() -> Path:
     """Get the path to the lock file."""
     if sys.platform == "win32":
         # Windows: Use AppData
-        import os
         appdata = os.environ.get("APPDATA", "")
         if appdata:
             lock_dir = Path(appdata) / "TranscriptionSuite"
@@ -26,66 +25,68 @@ def get_lock_file_path() -> Path:
     else:
         # Linux/macOS: Use XDG config directory
         lock_dir = Path.home() / ".config" / "TranscriptionSuite"
-    
+
     lock_dir.mkdir(parents=True, exist_ok=True)
-    return lock_dir / "client.lock"
+    return lock_dir / "dashboard.lock"
 
 
 def acquire_instance_lock() -> Optional[object]:
     """
     Acquire an exclusive lock to ensure single instance.
-    
+
     Returns:
         Lock file descriptor/handle if successful, None if another instance is running
     """
     lock_file = get_lock_file_path()
-    
+
     if sys.platform == "win32":
         # Windows: Use ctypes to create a named mutex
         try:
             import ctypes
             from ctypes import wintypes
-            
+
             # Create kernel32 reference
             kernel32 = ctypes.windll.kernel32
-            
+
             # Define CreateMutex
             CreateMutexW = kernel32.CreateMutexW
             CreateMutexW.argtypes = [
                 wintypes.LPVOID,  # lpMutexAttributes
-                wintypes.BOOL,    # bInitialOwner
-                wintypes.LPCWSTR  # lpName
+                wintypes.BOOL,  # bInitialOwner
+                wintypes.LPCWSTR,  # lpName
             ]
             CreateMutexW.restype = wintypes.HANDLE
-            
+
             # Define GetLastError
             GetLastError = kernel32.GetLastError
             GetLastError.argtypes = []
             GetLastError.restype = wintypes.DWORD
-            
+
             # Create named mutex
-            mutex_name = "Global\\TranscriptionSuite-Client-Instance-Lock"
+            mutex_name = "Global\\TranscriptionSuite-Dashboard-Instance-Lock"
             mutex_handle = CreateMutexW(None, True, mutex_name)
-            
+
             ERROR_ALREADY_EXISTS = 183
             if GetLastError() == ERROR_ALREADY_EXISTS:
                 logger.info("Another instance is already running (Windows mutex)")
                 return None
-            
+
             logger.debug(f"Acquired instance lock via Windows mutex: {mutex_name}")
             return mutex_handle
-            
+
         except Exception as e:
-            logger.warning(f"Failed to create Windows mutex, falling back to file lock: {e}")
+            logger.warning(
+                f"Failed to create Windows mutex, falling back to file lock: {e}"
+            )
             # Fall through to file-based locking
-    
+
     # Linux/macOS: Use fcntl file locking
     try:
         import fcntl
-        
+
         # Open lock file
-        fd = open(lock_file, 'w')
-        
+        fd = open(lock_file, "w")
+
         # Try to acquire exclusive lock (non-blocking)
         try:
             fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -98,7 +99,7 @@ def acquire_instance_lock() -> Optional[object]:
             logger.info(f"Another instance is already running (fcntl lock): {e}")
             fd.close()
             return None
-            
+
     except Exception as e:
         logger.error(f"Failed to acquire instance lock: {e}")
         return None
@@ -107,17 +108,18 @@ def acquire_instance_lock() -> Optional[object]:
 def release_instance_lock(lock_fd: Optional[object]) -> None:
     """
     Release the instance lock.
-    
+
     Args:
         lock_fd: Lock file descriptor/handle from acquire_instance_lock()
     """
     if lock_fd is None:
         return
-    
+
     if sys.platform == "win32":
         # Windows: Close mutex handle
         try:
             import ctypes
+
             kernel32 = ctypes.windll.kernel32
             kernel32.CloseHandle(lock_fd)
             logger.debug("Released instance lock (Windows mutex)")
@@ -126,7 +128,7 @@ def release_instance_lock(lock_fd: Optional[object]) -> None:
     else:
         # Linux/macOS: Close file descriptor (releases fcntl lock)
         try:
-            if hasattr(lock_fd, 'close'):
+            if hasattr(lock_fd, "close"):
                 lock_fd.close()
             logger.debug("Released instance lock (fcntl)")
         except Exception as e:

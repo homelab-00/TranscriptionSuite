@@ -4,25 +4,75 @@ Technical documentation for developing and building TranscriptionSuite.
 
 ## Table of Contents
 
-- [Quick Reference](#quick-reference)
-- [Architecture Overview](#architecture-overview)
-- [Project Structure](#project-structure)
-- [Development Workflow](#development-workflow)
-- [Build Workflow](#build-workflow)
-- [Docker Reference](#docker-reference)
-- [API Reference](#api-reference)
-- [Backend Development](#backend-development)
-- [Dashboard Development](#dashboard-development)
-- [Configuration Reference](#configuration-reference)
-- [Data Storage](#data-storage)
-- [Troubleshooting](#troubleshooting)
-- [Dependencies](#dependencies)
+- [1. Quick Reference](#1-quick-reference)
+  - [1.1 Development Commands](#11-development-commands)
+  - [1.2 Running from Source (Development)](#12-running-from-source-development)
+  - [1.3 Build Commands](#13-build-commands)
+  - [1.4 Common Tasks](#14-common-tasks)
+- [2. Architecture Overview](#2-architecture-overview)
+  - [2.1 Design Principles](#21-design-principles)
+  - [2.2 Platform Architectures](#22-platform-architectures)
+  - [2.3 Security Model](#23-security-model)
+- [3. Project Structure](#3-project-structure)
+  - [3.1 pyproject.toml Files](#31-pyprojecttoml-files)
+  - [3.2 Version Management](#32-version-management)
+- [4. Development Workflow](#4-development-workflow)
+  - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
+  - [4.2 Step 2: Build Docker Image](#42-step-2-build-docker-image)
+  - [4.3 Step 3: Run Dashboard Locally](#43-step-3-run-dashboard-locally)
+  - [4.4 Step 4: Run Dashboard Remotely (Tailscale)](#44-step-4-run-dashboard-remotely-tailscale)
+  - [4.5 Publishing Docker Images](#45-publishing-docker-images)
+- [5. Build Workflow](#5-build-workflow)
+  - [5.1 Prerequisites](#51-prerequisites)
+  - [5.2 Build Matrix](#52-build-matrix)
+  - [5.3 KDE AppImage (Linux)](#53-kde-appimage-linux)
+  - [5.4 GNOME AppImage (Linux)](#54-gnome-appimage-linux)
+  - [5.5 Windows Executable](#55-windows-executable)
+  - [5.6 Build Assets](#56-build-assets)
+- [6. Docker Reference](#6-docker-reference)
+  - [6.1 Local vs Remote Mode](#61-local-vs-remote-mode)
+  - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
+  - [6.3 Docker Volume Structure](#63-docker-volume-structure)
+- [7. API Reference](#7-api-reference)
+  - [7.1 Web UI Routes](#71-web-ui-routes)
+  - [7.2 API Endpoints](#72-api-endpoints)
+  - [7.3 WebSocket Protocol](#73-websocket-protocol)
+- [8. Backend Development](#8-backend-development)
+  - [8.1 Backend Structure](#81-backend-structure)
+  - [8.2 Running the Server Locally](#82-running-the-server-locally)
+  - [8.3 Configuration System](#83-configuration-system)
+  - [8.4 Frontend Development](#84-frontend-development)
+  - [8.5 Testing](#85-testing)
+- [9. Dashboard Development](#9-dashboard-development)
+  - [9.1 Running from Source](#91-running-from-source)
+  - [9.2 Verbose Logging](#92-verbose-logging)
+  - [9.3 Key Modules](#93-key-modules)
+  - [9.4 Server Busy Handling](#94-server-busy-handling)
+  - [9.5 Model Management](#95-model-management)
+- [10. Configuration Reference](#10-configuration-reference)
+  - [10.1 Server Configuration](#101-server-configuration)
+  - [10.2 Dashboard Configuration](#102-dashboard-configuration)
+- [11. Data Storage](#11-data-storage)
+  - [11.1 Database Schema](#111-database-schema)
+  - [11.2 Database Migrations](#112-database-migrations)
+  - [11.3 Automatic Backups](#113-automatic-backups)
+- [12. Troubleshooting](#12-troubleshooting)
+  - [12.1 Docker GPU Access](#121-docker-gpu-access)
+  - [12.2 Health Check Issues](#122-health-check-issues)
+  - [12.3 Tailscale DNS Resolution](#123-tailscale-dns-resolution)
+  - [12.4 Model Loading](#124-model-loading)
+  - [12.5 cuDNN Library Errors](#125-cudnn-library-errors)
+  - [12.6 GNOME Tray Not Showing](#126-gnome-tray-not-showing)
+  - [12.7 AppImage Startup Failures](#127-appimage-startup-failures)
+- [13. Dependencies](#13-dependencies)
+  - [13.1 Server (Docker)](#131-server-docker)
+  - [13.2 Dashboard](#132-dashboard)
 
 ---
 
-## Quick Reference
+## 1. Quick Reference
 
-### Development Commands
+### 1.1 Development Commands
 
 ```bash
 # 1. Setup virtual environments
@@ -39,7 +89,33 @@ cd server/docker && docker compose build && docker compose up -d
 cd dashboard && uv run transcription-dashboard --host localhost --port 8000
 ```
 
-### Build Commands
+### 1.2 Running from Source (Development)
+
+```bash
+# 1. Run backend server (native Python)
+cd server/backend
+uv venv --python 3.12 && uv sync
+uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# 2. Run frontend dev server (in a separate terminal)
+cd server/frontend
+npm install
+npm run dev  # Starts on http://localhost:1420
+
+# 3. Run dashboard (in a separate terminal)
+cd dashboard
+uv venv --python 3.12 && uv sync --extra kde  # or --extra gnome / --extra windows
+uv run transcription-dashboard --host localhost --port 8000
+```
+
+**Notes:**
+- Backend runs on port 8000, frontend dev server on port 1420
+- Frontend auto-detects dev mode and proxies API calls to backend
+- Dashboard connects directly to backend API on port 8000
+- Backend must be running for dashboard to function
+- This setup enables hot-reload for both backend and frontend
+
+### 1.3 Build Commands
 
 ```bash
 # KDE AppImage (Linux)
@@ -55,7 +131,7 @@ cd dashboard && uv run transcription-dashboard --host localhost --port 8000
 # Output: build\dist\TranscriptionSuite.exe
 ```
 
-### Common Tasks
+### 1.4 Common Tasks
 
 | Task | Command |
 |------|---------|
@@ -73,7 +149,7 @@ cd dashboard && uv run transcription-dashboard --host localhost --port 8000
 
 ---
 
-## Architecture Overview
+## 2. Architecture Overview
 
 TranscriptionSuite uses a **client-server architecture**:
 
@@ -105,7 +181,7 @@ TranscriptionSuite uses a **client-server architecture**:
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Design Principles
+### 2.1 Design Principles
 
 - **Server in Docker**: All ML/GPU operations run in Docker for reproducibility
 - **Dashboard as command center**: Native application manages server control, client control, and configuration
@@ -114,7 +190,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
 
-### Platform Architectures
+### 2.2 Platform Architectures
 
 | Platform | Architecture | UI Toolkit | Notes |
 |----------|--------------|------------|-------|
@@ -124,7 +200,7 @@ TranscriptionSuite uses a **client-server architecture**:
 
 **GNOME Dual-Process Design**: GTK3 and GTK4 cannot coexist in the same Python process (GObject Introspection limitation). The tray uses GTK3 + AppIndicator3, while the Dashboard uses GTK4 + libadwaita. They communicate via D-Bus (`com.transcriptionsuite.Dashboard`).
 
-### Security Model
+### 2.3 Security Model
 
 TranscriptionSuite uses layered security for remote access:
 
@@ -140,7 +216,7 @@ TranscriptionSuite uses layered security for remote access:
 
 ---
 
-## Project Structure
+## 3. Project Structure
 
 ```
 TranscriptionSuite/
@@ -174,7 +250,7 @@ TranscriptionSuite/
 │   └── config.yaml               # Server configuration template
 ```
 
-### pyproject.toml Files
+### 3.1 pyproject.toml Files
 
 | File | Purpose |
 |------|---------|
@@ -182,15 +258,17 @@ TranscriptionSuite/
 | `build/pyproject.toml` | All dev/build tools (ruff, pyright, pytest, pyinstaller) |
 | `server/backend/pyproject.toml` | Server deps with pinned versions for reproducible Docker builds |
 
-### Version Management
+### 3.2 Version Management
 
 Each `pyproject.toml` defines its component's version. All version strings are dynamically sourced from these files - update the version in one place.
 
+*Note: The tags and releases version numbers always refer to the Dashboard toml's version.*
+
 ---
 
-## Development Workflow
+## 4. Development Workflow
 
-### Step 1: Environment Setup
+### 4.1 Step 1: Environment Setup
 
 ```bash
 # Dashboard virtual environment
@@ -209,7 +287,7 @@ cd ..
 cd server/frontend && npm ci && npm audit && cd ../..
 ```
 
-### Step 2: Build Docker Image
+### 4.2 Step 2: Build Docker Image
 
 ```bash
 cd server/docker
@@ -226,7 +304,7 @@ docker compose build
 docker compose build --no-cache
 ```
 
-### Step 3: Run Dashboard Locally
+### 4.3 Step 3: Run Dashboard Locally
 
 ```bash
 # Start the server
@@ -236,7 +314,7 @@ cd server/docker && docker compose up -d
 cd dashboard && uv run transcription-dashboard --host localhost --port 8000
 ```
 
-### Step 4: Run Dashboard Remotely (Tailscale)
+### 4.4 Step 4: Run Dashboard Remotely (Tailscale)
 
 ```bash
 # Server side: Enable HTTPS
@@ -251,7 +329,7 @@ cd dashboard
 uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443 --https
 ```
 
-### Publishing Docker Images
+### 4.5 Publishing Docker Images
 
 ```bash
 # Build and push as 'latest'
@@ -270,9 +348,9 @@ uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443
 
 ---
 
-## Build Workflow
+## 5. Build Workflow
 
-### Prerequisites
+### 5.1 Prerequisites
 
 ```bash
 cd build
@@ -280,7 +358,7 @@ uv venv --python 3.12
 uv sync    # Installs PyInstaller, build, ruff, pytest
 ```
 
-### Build Matrix
+### 5.2 Build Matrix
 
 | Platform | Method | Output | Target Requirements |
 |----------|--------|--------|---------------------|
@@ -288,14 +366,14 @@ uv sync    # Installs PyInstaller, build, ruff, pytest
 | **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.12+, GTK3, AppIndicator3 |
 | **Windows** | PyInstaller | Fully standalone | None |
 
-### KDE AppImage (Linux)
+### 5.3 KDE AppImage (Linux)
 
 ```bash
 ./build/build-appimage-kde.sh
 # Output: build/dist/TranscriptionSuite-KDE-x86_64.AppImage
 ```
 
-### GNOME AppImage (Linux)
+### 5.4 GNOME AppImage (Linux)
 
 ```bash
 ./build/build-appimage-gnome.sh
@@ -311,7 +389,7 @@ sudo pacman -S python gtk3 libappindicator-gtk3 python-gobject python-numpy pyth
 sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio python3-numpy python3-aiohttp
 ```
 
-### Windows Executable
+### 5.5 Windows Executable
 
 **Prerequisites (on Windows):**
 ```powershell
@@ -337,7 +415,7 @@ magick build\assets\logo.png -background transparent -define icon:auto-resize=25
 # Output: build\dist\TranscriptionSuite.exe
 ```
 
-### Build Assets
+### 5.6 Build Assets
 
 **Source files (manually maintained in `build/assets/`):**
 - `logo.svg` (1024×1024) - Master vector logo
@@ -350,9 +428,9 @@ magick build\assets\logo.png -background transparent -define icon:auto-resize=25
 
 ---
 
-## Docker Reference
+## 6. Docker Reference
 
-### Local vs Remote Mode
+### 6.1 Local vs Remote Mode
 
 ```bash
 # Local mode (default)
@@ -369,7 +447,7 @@ docker compose up -d
 - `8000` — HTTP API (always available)
 - `8443` — HTTPS (only when `TLS_ENABLED=true`)
 
-### Tailscale HTTPS Setup
+### 6.2 Tailscale HTTPS Setup
 
 1. **Install and authenticate Tailscale:**
    ```bash
@@ -397,7 +475,7 @@ docker compose up -d
    docker compose up -d
    ```
 
-### Docker Volume Structure
+### 6.3 Docker Volume Structure
 
 **`transcription-suite-data`** (mounted to `/data`):
 
@@ -420,9 +498,9 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 
 ---
 
-## API Reference
+## 7. API Reference
 
-### Web UI Routes
+### 7.1 Web UI Routes
 
 | URL Path | Description |
 |----------|-------------|
@@ -431,7 +509,7 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 | `/record` | File upload, recording, admin panel |
 | `/notebook` | Calendar view, search, audio playback |
 
-### API Endpoints
+### 7.2 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -439,6 +517,8 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 | `/api/status` | GET | Server status, GPU info |
 | `/api/auth/login` | POST | Authenticate with token |
 | `/api/auth/tokens` | GET/POST | Token management (admin only) |
+| `/api/admin/models/load` | POST | Load transcription models (admin only) |
+| `/api/admin/models/unload` | POST | Unload models to free GPU memory (admin only) |
 | `/api/transcribe/audio` | POST | Transcribe uploaded audio |
 | `/api/transcribe/cancel` | POST | Cancel running transcription |
 | `/ws` | WebSocket | Real-time audio streaming |
@@ -448,7 +528,7 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 | `/api/search` | GET | Full-text search |
 | `/api/llm/chat` | POST | LLM chat integration |
 
-### WebSocket Protocol
+### 7.3 WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws`
@@ -465,9 +545,9 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 
 ---
 
-## Backend Development
+## 8. Backend Development
 
-### Backend Structure
+### 8.1 Backend Structure
 
 ```
 server/backend/
@@ -488,7 +568,7 @@ server/backend/
 └── config.py                     # Configuration management
 ```
 
-### Running the Server Locally
+### 8.2 Running the Server Locally
 
 ```bash
 cd server/backend
@@ -499,7 +579,7 @@ uv sync
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Configuration System
+### 8.3 Configuration System
 
 All modules use `get_config()` from `server.config`. Configuration is loaded with priority:
 
@@ -508,7 +588,7 @@ All modules use `get_config()` from `server.config`. Configuration is loaded wit
 3. `/app/config.yaml` (Docker default)
 4. `server/config.yaml` (native development)
 
-### Frontend Development
+### 8.4 Frontend Development
 
 ```bash
 cd server/frontend
@@ -520,7 +600,7 @@ The frontend uses `import.meta.env.DEV` to detect development mode:
 - HTTP API requests: `http://localhost:8000/api`
 - WebSocket connections: `ws://localhost:8000/ws`
 
-### Testing
+### 8.5 Testing
 
 ```bash
 ./build/.venv/bin/pytest server/backend/tests
@@ -528,9 +608,9 @@ The frontend uses `import.meta.env.DEV` to detect development mode:
 
 ---
 
-## Dashboard Development
+## 9. Dashboard Development
 
-### Running from Source
+### 9.1 Running from Source
 
 ```bash
 cd dashboard
@@ -544,7 +624,7 @@ uv run transcription-dashboard --host localhost --port 8000
 uv run transcription-dashboard --host <tailscale-hostname> --port 8443 --https
 ```
 
-### Verbose Logging
+### 9.2 Verbose Logging
 
 ```bash
 uv run transcription-dashboard --verbose
@@ -557,7 +637,7 @@ uv run transcription-dashboard --verbose
 | Windows | `%APPDATA%\TranscriptionSuite\dashboard.log` |
 | macOS | `~/Library/Application Support/TranscriptionSuite/dashboard.log` |
 
-### Key Modules
+### 9.3 Key Modules
 
 | Module | Purpose |
 |--------|---------|
@@ -567,17 +647,24 @@ uv run transcription-dashboard --verbose
 | `common/setup_wizard.py` | First-time setup |
 | `common/tailscale_resolver.py` | Tailscale IP fallback when DNS fails |
 
-### Server Busy Handling
+### 9.4 Server Busy Handling
 
 The dashboard handles server busy conditions automatically:
 - HTTP transcription: Server returns 409, dashboard shows "Server Busy" notification
 - WebSocket recording: Server sends `session_busy` message, dashboard shows error
 
+### 9.5 Model Management
+
+The dashboard provides a convenient way to manage GPU memory via the system tray and client view:
+- Automatically disabled when server is stopped or becomes unhealthy
+- Checks server for active transcriptions before unloading
+- Returns HTTP 409 if server is busy
+
 ---
 
-## Configuration Reference
+## 10. Configuration Reference
 
-### Server Configuration
+### 10.1 Server Configuration
 
 Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `Documents\TranscriptionSuite\config.yaml` (Windows)
 
@@ -600,7 +687,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `Documents\Tr
 | `TLS_CERT_PATH` | Path to TLS certificate |
 | `TLS_KEY_PATH` | Path to TLS private key |
 
-### Dashboard Configuration
+### 10.2 Dashboard Configuration
 
 Config file: `~/.config/TranscriptionSuite/dashboard.yaml`
 
@@ -630,9 +717,9 @@ ui:
 
 ---
 
-## Data Storage
+## 11. Data Storage
 
-### Database Schema
+### 11.1 Database Schema
 
 | Table | Description |
 |-------|-------------|
@@ -643,7 +730,7 @@ ui:
 | `messages` | Individual chat messages |
 | `words_fts` | FTS5 virtual table for full-text search |
 
-### Database Migrations
+### 11.2 Database Migrations
 
 TranscriptionSuite uses Alembic for schema versioning. Migrations run automatically on server startup via the `run_migrations()` function in `database.py`.
 
@@ -654,7 +741,7 @@ TranscriptionSuite uses Alembic for schema versioning. Migrations run automatica
 2. Follow the pattern in `001_initial_schema.py`
 3. Use `op.batch_alter_table()` for SQLite compatibility
 
-### Automatic Backups
+### 11.3 Automatic Backups
 
 Backups are created on server startup using SQLite's backup API.
 
@@ -670,9 +757,9 @@ backup:
 
 ---
 
-## Troubleshooting
+## 12. Troubleshooting
 
-### Docker GPU Access
+### 12.1 Docker GPU Access
 
 ```bash
 # Verify GPU is accessible
@@ -682,7 +769,7 @@ docker run --rm --gpus all nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 nvidia-s
 docker compose logs -f
 ```
 
-### Health Check Issues
+### 12.2 Health Check Issues
 
 ```bash
 # Check health status
@@ -693,7 +780,7 @@ docker inspect transcription-suite | grep Health -A 10
 docker compose exec transcription-suite curl -f http://localhost:8000/health
 ```
 
-### Tailscale DNS Resolution
+### 12.3 Tailscale DNS Resolution
 
 If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses.
 
@@ -708,7 +795,7 @@ getent hosts <your-machine>.tail1234.ts.net
 sudo systemctl restart tailscaled
 ```
 
-### Model Loading
+### 12.4 Model Loading
 
 First startup takes ~9 seconds:
 - 0.9s: Module loading
@@ -717,7 +804,7 @@ First startup takes ~9 seconds:
 
 First transcription may take 2-5 minutes if models need to be downloaded.
 
-### cuDNN Library Errors
+### 12.5 cuDNN Library Errors
 
 The Dockerfile uses `ubuntu:22.04` and relies on PyTorch's bundled CUDA/cuDNN libraries. If you see cuDNN errors:
 
@@ -727,11 +814,11 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-### GNOME Tray Not Showing
+### 12.6 GNOME Tray Not Showing
 
 Install the [AppIndicator Support extension](https://extensions.gnome.org/extension/615/appindicator-support/).
 
-### AppImage Startup Failures
+### 12.7 AppImage Startup Failures
 
 ```bash
 # Run from terminal to see errors
@@ -744,9 +831,9 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 
 ---
 
-## Dependencies
+## 13. Dependencies
 
-### Server (Docker)
+### 13.1 Server (Docker)
 
 - Python 3.12
 - FastAPI + Uvicorn
@@ -756,7 +843,7 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 - SQLite with FTS5
 - NVIDIA GPU with CUDA support
 
-### Dashboard
+### 13.2 Dashboard
 
 - Python 3.12
 - aiohttp (async HTTP client)

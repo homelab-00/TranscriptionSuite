@@ -7,7 +7,51 @@ architecture. Written in Python, utilizing faster_whisper with
 GPU acceleration.
 </pre>
 
-## Features
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Prerequisites](#2-prerequisites)
+  - [2.1 Docker](#21-docker)
+  - [2.2 Git](#22-git)
+  - [2.3 Verify GPU Support](#23-verify-gpu-support)
+- [3. Installation](#3-installation)
+  - [3.1 Step 1: Clone the Repository](#31-step-1-clone-the-repository)
+  - [3.2 Step 2: Run Setup Script](#32-step-2-run-setup-script)
+  - [3.3 Step 3: Configure HuggingFace Token (Optional)](#33-step-3-configure-huggingface-token-optional)
+  - [3.4 Step 4: Start the Server (Local Mode)](#34-step-4-start-the-server-local-mode)
+  - [3.5 Stop the Server](#35-stop-the-server)
+- [4. Remote Access (Optional)](#4-remote-access-optional)
+  - [4.1 Step 1: Set Up Tailscale](#41-step-1-set-up-tailscale)
+  - [4.2 Step 2: Generate Certificates](#42-step-2-generate-certificates)
+  - [4.3 Step 3: Configure TLS Paths](#43-step-3-configure-tls-paths)
+  - [4.4 Step 4: Start Server (Remote Mode)](#44-step-4-start-server-remote-mode)
+  - [4.5 Step 5: Save the Admin Token (First Run Only)](#45-step-5-save-the-admin-token-first-run-only)
+- [5. Remote Access Without MagicDNS](#5-remote-access-without-magicdns)
+  - [5.1 Option 1: IP-Only Mode (Recommended)](#51-option-1-ip-only-mode-recommended)
+  - [5.2 Option 2: Self-Signed Certificates](#52-option-2-self-signed-certificates)
+  - [5.3 Why MagicDNS is Recommended](#53-why-magicdns-is-recommended)
+- [6. Dashboard](#6-dashboard)
+  - [6.1 First-Time Setup](#61-first-time-setup)
+  - [6.2 GNOME Dashboard Dependencies](#62-gnome-dashboard-dependencies)
+  - [6.3 KDE Client Dependencies](#63-kde-client-dependencies)
+  - [6.4 Usage](#64-usage)
+  - [6.5 Docker Server Control](#65-docker-server-control)
+  - [6.6 Tray Icon Colors](#66-tray-icon-colors)
+  - [6.7 Client Configuration](#67-client-configuration)
+- [7. Web Interface](#7-web-interface)
+- [8. Database & Backups](#8-database--backups)
+- [9. Troubleshooting](#9-troubleshooting)
+  - [9.1 Server Won't Start](#91-server-wont-start)
+  - [9.2 GPU Not Detected](#92-gpu-not-detected)
+  - [9.3 GNOME Tray Icon Not Showing](#93-gnome-tray-icon-not-showing)
+  - [9.4 Connection Issues (Remote Mode)](#94-connection-issues-remote-mode)
+- [10. Security](#10-security)
+- [11. License](#11-license)
+- [12. Acknowledgments](#12-acknowledgments)
+
+---
+
+## 1. Features
 
 - **Multilingual**: Supports [90+ languages](https://platform.openai.com/docs/guides/speech-to-text/supported-languages)
 - **GPU Accelerated**: NVIDIA GPU support via PyTorch bundled CUDA/cuDNN
@@ -17,14 +61,15 @@ GPU acceleration.
 - **Audio Notebook**: Calendar-based audio notes with full-text search, AI chat about your notes via LM Studio
 - **Remote Access**: Secure access via Tailscale + TLS from anywhere
 - **Cross-Platform Clients**: Native system tray apps for KDE, GNOME, and Windows
+- **GPU Memory Management**: Toggle models on/off from tray menu to free VRAM when not in use
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
 ---
 
-## Prerequisites
+## 2. Prerequisites
 
-### Docker
+### 2.1 Docker
 
 **Linux:**
 ```bash
@@ -39,7 +84,7 @@ GPU acceleration.
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend
 2. Install NVIDIA GPU driver with WSL support
 
-### Git
+### 2.2 Git
 
 **Linux:**
 ```bash
@@ -53,7 +98,7 @@ sudo pacman -S git
 **Windows:**
 Download and install [Git for Windows](https://git-scm.com/download/win)
 
-### Verify GPU Support
+### 2.3 Verify GPU Support
 
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
@@ -61,9 +106,9 @@ docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 
 ---
 
-## Installation
+## 3. Installation
 
-### Step 1: Clone the Repository
+### 3.1 Step 1: Clone the Repository
 
 **From GitHub:**
 ```bash
@@ -78,7 +123,7 @@ git clone https://gitlab.com/bluemoon7/transcription-suite.git
 cd transcription-suite
 ```
 
-### Step 2: Run Setup Script
+### 3.2 Step 2: Run Setup Script
 
 **Linux:**
 ```bash
@@ -97,7 +142,7 @@ The setup script will:
 2. Create the config directory with all necessary files
 3. Pull the Docker image from GitHub Container Registry
 
-### Step 3: Configure HuggingFace Token (Optional)
+### 3.3 Step 3: Configure HuggingFace Token (Optional)
 
 For speaker diarization, you need a HuggingFace token:
 
@@ -117,7 +162,7 @@ notepad "$env:USERPROFILE\Documents\TranscriptionSuite\.env"
 # Add: HUGGINGFACE_TOKEN=hf_your_token_here
 ```
 
-### Step 4: Start the Server (Local Mode)
+### 3.4 Step 4: Start the Server (Local Mode)
 
 **Linux:**
 ```bash
@@ -133,7 +178,7 @@ cd "$env:USERPROFILE\Documents\TranscriptionSuite"
 
 Access the web interface at **http://localhost:8000**
 
-### Stop the Server
+### 3.5 Stop the Server
 
 **Linux:**
 ```bash
@@ -149,7 +194,7 @@ cd "$env:USERPROFILE\Documents\TranscriptionSuite"
 
 ---
 
-## Remote Access (Optional)
+## 4. Remote Access (Optional)
 
 TranscriptionSuite uses a **layered security model** for remote access:
 
@@ -159,7 +204,7 @@ TranscriptionSuite uses a **layered security model** for remote access:
 | **TLS/HTTPS** | All traffic encrypted with Tailscale certificates |
 | **Token Authentication** | Required for all API requests in remote mode |
 
-### Step 1: Set Up Tailscale
+### 4.1 Step 1: Set Up Tailscale
 
 1. Install Tailscale: [tailscale.com/download](https://tailscale.com/download)
 2. Authenticate: `tailscale up` (Linux) or via the app (Windows)
@@ -170,7 +215,7 @@ Your DNS settings should look like this:
 
 ![Tailscale DNS Settings](./build/assets/tailscale-dns-settings.png)
 
-### Step 2: Generate Certificates
+### 4.2 Step 2: Generate Certificates
 
 ```bash
 # Generate certificate for your machine
@@ -195,7 +240,7 @@ mv your-machine.your-tailnet.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my
 mv your-machine.your-tailnet.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
 ```
 
-### Step 3: Configure TLS Paths
+### 4.3 Step 3: Configure TLS Paths
 
 Edit your config file to set the certificate paths:
 
@@ -217,7 +262,7 @@ remote_server:
     host_key_path: "~/.config/Tailscale/my-machine.key"
 ```
 
-### Step 4: Start Server (Remote Mode)
+### 4.4 Step 4: Start Server (Remote Mode)
 
 **Linux:**
 ```bash
@@ -231,7 +276,7 @@ cd "$env:USERPROFILE\Documents\TranscriptionSuite"
 .\start-remote.ps1
 ```
 
-### Step 5: Save the Admin Token (First Run Only)
+### 4.5 Step 5: Save the Admin Token (First Run Only)
 
 On first startup, an admin token is automatically generated. **Save this token!**
 
@@ -244,11 +289,11 @@ Use this token to log in at `https://your-machine.your-tailnet.ts.net:8443`
 
 ---
 
-## Remote Access Without MagicDNS
+## 5. Remote Access Without MagicDNS
 
 If you cannot or prefer not to use Tailscale MagicDNS, you have alternative options.
 
-### Option 1: IP-Only Mode (Recommended)
+### 5.1 Option 1: IP-Only Mode (Recommended)
 
 Use Tailscale IPs directly with HTTP. WireGuard encrypts all traffic at the network layer.
 
@@ -264,7 +309,7 @@ Use Tailscale IPs directly with HTTP. WireGuard encrypts all traffic at the netw
 
 **Security:** WireGuard encrypts all Tailscale traffic. HTTP over Tailscale is secure for single-user setups.
 
-### Option 2: Self-Signed Certificates
+### 5.2 Option 2: Self-Signed Certificates
 
 For HTTPS without MagicDNS:
 
@@ -282,7 +327,7 @@ For HTTPS without MagicDNS:
    - HTTPS: On
    - Settings → Advanced TLS Options: Uncheck "Verify TLS certificates"
 
-### Why MagicDNS is Recommended
+### 5.3 Why MagicDNS is Recommended
 
 Tailscale HTTPS certificates require MagicDNS because:
 - Certificates are issued for `.ts.net` hostnames, not IP addresses
@@ -292,7 +337,7 @@ Enable MagicDNS in [Tailscale Admin Console](https://login.tailscale.com/admin/d
 
 ---
 
-## Dashboard
+## 6. Dashboard
 
 Download the Dashboard for your platform:
 
@@ -302,7 +347,7 @@ Download the Dashboard for your platform:
 | **GNOME** | `TranscriptionSuite-GNOME-x86_64.AppImage` | Requires system packages (see below) |
 | **Windows** | `TranscriptionSuite.exe` | Standalone, no dependencies |
 
-### First-Time Setup
+### 6.1 First-Time Setup
 
 On first run, the Dashboard automatically performs initial setup:
 1. Checks Docker availability
@@ -311,7 +356,7 @@ On first run, the Dashboard automatically performs initial setup:
 
 This replaces the manual `setup.sh`/`setup.ps1` script execution for most users.
 
-### GNOME Dashboard Dependencies
+### 6.2 GNOME Dashboard Dependencies
 
 The GNOME Dashboard uses a **dual-process architecture** because GTK3 (AppIndicator3 for the tray) and GTK4 (libadwaita for the Dashboard window) cannot coexist in the same Python process. The tray and Dashboard communicate via D-Bus.
 
@@ -337,7 +382,7 @@ sudo pacman -S python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
     python-numpy python-aiohttp libadwaita gtk4
 ```
 
-### KDE Client Dependencies
+### 6.3 KDE Client Dependencies
 
 The KDE client is a self-contained AppImage on Linux and a standalone executable on Windows. No additional system packages are required.
 
@@ -351,7 +396,7 @@ sudo pacman -S python python-pyqt6 python-pyaudio python-numpy python-aiohttp
 sudo dnf install python3 python3-qt6 python3-pyaudio python3-numpy python3-aiohttp
 ```
 
-### Usage
+### 6.4 Usage
 
 1. Run the AppImage or executable
 2. The tray icon appears in your system tray
@@ -359,7 +404,7 @@ sudo dnf install python3 python3-qt6 python3-pyaudio python3-numpy python3-aioht
 4. **Middle-click** to stop and transcribe
 5. Result is automatically copied to clipboard
 
-### Docker Server Control
+### 6.5 Docker Server Control
 
 The client includes a full Docker management GUI. Click the tray icon and select "Show App" to open the Dashboard window, which provides:
 
@@ -383,7 +428,7 @@ The tray menu also provides quick access:
 
 This eliminates the need to run scripts manually from the command line.
 
-### Tray Icon Colors
+### 6.6 Tray Icon Colors
 
 | Color | State |
 |-------|-------|
@@ -394,7 +439,7 @@ This eliminates the need to run scripts manually from the command line.
 | Orange | Transcribing |
 | Red | Error |
 
-### Client Configuration
+### 6.7 Client Configuration
 
 On first connection, enter the server details:
 - **Local mode**: Host `localhost`, Port `8000`, HTTPS off
@@ -406,7 +451,7 @@ Settings are saved to:
 
 ---
 
-## Web Interface
+## 7. Web Interface
 
 Access the web interface at your server's address:
 - **Local**: http://localhost:8000
@@ -421,7 +466,7 @@ Access the web interface at your server's address:
 
 ---
 
-## Database & Backups
+## 8. Database & Backups
 
 TranscriptionSuite automatically backs up the SQLite database on server startup:
 
@@ -453,27 +498,27 @@ docker compose up -d
 
 ---
 
-## Troubleshooting
+## 9. Troubleshooting
 
-### Server Won't Start
+### 9.1 Server Won't Start
 
 Check Docker logs:
 ```bash
 docker compose logs -f
 ```
 
-### GPU Not Detected
+### 9.2 GPU Not Detected
 
 Verify NVIDIA Container Toolkit is installed:
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 ```
 
-### GNOME Tray Icon Not Showing
+### 9.3 GNOME Tray Icon Not Showing
 
 Install the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/).
 
-### Connection Issues (Remote Mode)
+### 9.4 Connection Issues (Remote Mode)
 
 1. Verify Tailscale is connected: `tailscale status`
 2. Check certificate paths in `config.yaml`
@@ -491,7 +536,7 @@ See [README_DEV.md](README_DEV.md#tailscale-dns-resolution-issues) for detailed 
 
 ---
 
-## Security
+## 10. Security
 
 TranscriptionSuite uses a layered security model (see [Security Model](README_DEV.md#security-model) in README_DEV.md):
 - **Network isolation** via Tailscale VPN
@@ -505,11 +550,11 @@ The project undergoes continuous security analysis:
 
 ---
 
-## License
+## 11. License
 
 MIT License — See [LICENSE](LICENSE).
 
-## Acknowledgments
+## 12. Acknowledgments
 
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)

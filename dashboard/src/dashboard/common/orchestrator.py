@@ -71,6 +71,9 @@ class ClientOrchestrator:
         self._state_lock = threading.Lock()
         self.is_recording = False
         self.is_transcribing = False  # Track if transcription is in progress
+        self.models_loaded = (
+            True  # Track if models are loaded (assume loaded initially)
+        )
         self.last_transcription: str | None = None
         self._reconnect_task: concurrent.futures.Future[Any] | None = None
         self._is_initial_connection = (
@@ -121,11 +124,13 @@ class ClientOrchestrator:
         self.tray.register_callback(
             TrayAction.TRANSCRIBE_FILE, self._on_transcribe_file
         )
+        self.tray.register_callback(TrayAction.TOGGLE_MODELS, self._on_toggle_models)
         self.tray.register_callback(
             TrayAction.OPEN_AUDIO_NOTEBOOK, self._on_open_notebook
         )
         self.tray.register_callback(TrayAction.SETTINGS, self._on_settings)
         self.tray.register_callback(TrayAction.RECONNECT, self._on_reconnect)
+        self.tray.register_callback(TrayAction.DISCONNECT, self._on_disconnect)
         self.tray.register_callback(TrayAction.QUIT, self._on_quit)
 
     def _run_async_loop(self) -> None:
@@ -149,6 +154,12 @@ class ClientOrchestrator:
         """Connect to the container server."""
         if self.tray:
             self.tray.set_state(TrayState.CONNECTING)
+
+        # Close existing API client if present
+        if self.api_client:
+            logger.debug("Closing existing API client before reconnecting")
+            await self.api_client.close()
+            self.api_client = None
 
         # Create API client
         self.api_client = APIClient(
@@ -598,6 +609,86 @@ class ClientOrchestrator:
     # Other Actions
     # =========================================================================
 
+    def _on_toggle_models(self) -> None:
+        """Handle toggle models (unload/reload) action."""
+        with self._state_lock:
+            # Check if we're busy
+            if self.is_recording or self.is_transcribing:
+                if self.tray:
+                    self.tray.show_notification(
+                        "Cannot Toggle Models",
+                        "Please wait until recording/transcription is complete",
+                    )
+                return
+
+            models_loaded = self.models_loaded
+
+        if models_loaded:
+            # Unload models
+            self._schedule_async(self._unload_models())
+        else:
+            # Reload models
+            self._schedule_async(self._reload_models())
+
+    async def _unload_models(self) -> None:
+        """Unload all models on the server."""
+        if not self.api_client:
+            if self.tray:
+                self.tray.show_notification("Not Connected", "Connect to server first")
+            return
+
+        logger.info("Requesting model unload...")
+        result = await self.api_client.unload_models()
+
+        if result.get("success"):
+            with self._state_lock:
+                self.models_loaded = False
+
+            logger.info("Models unloaded successfully")
+            if self.tray:
+                self.tray.show_notification(
+                    "Models Unloaded",
+                    "GPU memory freed. Use 'Toggle Models' to reload.",
+                )
+                # Update menu to reflect new state
+                if hasattr(self.tray, "update_models_menu_state"):
+                    self.tray.update_models_menu_state(False)
+        else:
+            logger.error(f"Failed to unload models: {result.get('message')}")
+            if self.tray:
+                self.tray.show_notification(
+                    "Unload Failed", result.get("message", "Unknown error")
+                )
+
+    async def _reload_models(self) -> None:
+        """Reload models on the server."""
+        if not self.api_client:
+            if self.tray:
+                self.tray.show_notification("Not Connected", "Connect to server first")
+            return
+
+        logger.info("Requesting model reload...")
+        result = await self.api_client.reload_models()
+
+        if result.get("success"):
+            with self._state_lock:
+                self.models_loaded = True
+
+            logger.info("Models reloaded successfully")
+            if self.tray:
+                self.tray.show_notification(
+                    "Models Loaded", "Models ready for transcription"
+                )
+                # Update menu to reflect new state
+                if hasattr(self.tray, "update_models_menu_state"):
+                    self.tray.update_models_menu_state(True)
+        else:
+            logger.error(f"Failed to reload models: {result.get('message')}")
+            if self.tray:
+                self.tray.show_notification(
+                    "Reload Failed", result.get("message", "Unknown error")
+                )
+
     def _on_open_notebook(self) -> None:
         """Open Audio Notebook in browser."""
         scheme = "https" if self.config.use_https else "http"
@@ -618,6 +709,44 @@ class ClientOrchestrator:
         if self.tray:
             self.tray.set_state(TrayState.CONNECTING)
         self._schedule_async(self._connect_to_server())
+
+    def _on_disconnect(self) -> None:
+        """Handle disconnect action - stop client and clean up resources."""
+        logger.info("Disconnecting client...")
+        self._schedule_async(self._disconnect_from_server())
+
+    async def _disconnect_from_server(self) -> None:
+        """Disconnect from server and clean up resources."""
+        # Stop any active recording
+        with self._state_lock:
+            is_recording = self.is_recording
+
+        if self.recorder and is_recording:
+            try:
+                self.recorder.cancel()
+                logger.debug("Recording cancelled during disconnect")
+            except Exception:
+                logger.debug("Failed to cancel recorder during disconnect")
+            self.recorder = None
+            with self._state_lock:
+                self.is_recording = False
+
+        # Cancel reconnect task if running
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            self._reconnect_task = None
+            logger.debug("Cancelled reconnect task")
+
+        # Close API client
+        if self.api_client:
+            logger.debug("Closing API client")
+            await self.api_client.close()
+            self.api_client = None
+
+        # Update tray state
+        if self.tray:
+            self.tray.set_state(TrayState.IDLE)
+            logger.info("Client disconnected")
 
     def _on_quit(self) -> None:
         """Handle quit action."""

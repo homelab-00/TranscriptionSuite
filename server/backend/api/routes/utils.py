@@ -2,9 +2,14 @@
 Shared utilities for API routes.
 """
 
+import os
+
 from fastapi import Request
 
 from server.core.token_store import get_token_store
+
+# Check if TLS mode is enabled
+TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
 
 
 def get_client_name(request: Request) -> str:
@@ -55,8 +60,18 @@ def require_admin(request: Request) -> bool:
     """
     Check if the request is from an admin user.
 
+    In local mode (TLS disabled), localhost requests are treated as admin.
+    In TLS mode, a valid admin token is required.
+
     Returns True if authenticated as admin, False otherwise.
     """
+    # In local mode, allow localhost requests as admin
+    if not TLS_MODE:
+        client_host = request.client.host if request.client else None
+        if client_host in ("127.0.0.1", "::1", "localhost"):
+            return True
+
+    # Check for valid admin token
     stored_token = get_authenticated_token(request)
     return stored_token is not None and stored_token.is_admin
 

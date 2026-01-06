@@ -139,11 +139,11 @@ async def get_llm_status():
                 data = response.json()
                 models = data.get("data", [])
 
-                # Find loaded LLM models
+                # Find loaded LLM/VLM models (VLMs can also do text chat)
                 loaded_models = [
                     m
                     for m in models
-                    if m.get("type") == "llm" and m.get("state") == "loaded"
+                    if m.get("type") in ("llm", "vlm") and m.get("state") == "loaded"
                 ]
 
                 if loaded_models:
@@ -627,9 +627,26 @@ async def load_model(request: ModelLoadRequest):
     """
     Load a model into LM Studio.
 
+    NOTE: LM Studio does not currently support loading models via HTTP API.
+    This endpoint requires the 'lms' CLI tool, which is not available when
+    running in Docker. Please load models manually through the LM Studio UI.
+
     If model_id is not provided, uses the model from config.yaml,
     or the first available LLM model.
     """
+    # Check if lms CLI is available
+    if not _check_lms_cli():
+        return ServerControlResponse(
+            success=False,
+            message="Model loading not available - lms CLI not found",
+            detail=(
+                "LM Studio does not currently support loading models via HTTP API. "
+                "When running the server in Docker, please load models manually through "
+                "the LM Studio UI on your host machine. "
+                "See: https://lmstudio.ai/docs/developer/rest/endpoints"
+            ),
+        )
+
     config = get_llm_config()
     model_id = request.model_id or config.get("model")
 
@@ -709,9 +726,27 @@ async def unload_model(unload_all: bool = False):
     """
     Unload the currently loaded model(s) to free VRAM.
 
+    NOTE: LM Studio does not currently support unloading models via HTTP API.
+    This endpoint requires the 'lms' CLI tool, which is not available when
+    running in Docker. Please unload models manually through the LM Studio UI.
+
     Args:
         unload_all: If True, unload all models. Otherwise unload current model.
     """
+    # Check if lms CLI is available
+    if not _check_lms_cli():
+        return ServerControlResponse(
+            success=False,
+            message="Model unloading not available - lms CLI not found",
+            detail=(
+                "LM Studio does not currently support unloading models via HTTP API. "
+                "When running the server in Docker, please unload models manually through "
+                "the LM Studio UI on your host machine. "
+                "Alternatively, loaded models will auto-unload after their TTL expires. "
+                "See: https://lmstudio.ai/docs/developer/rest/endpoints"
+            ),
+        )
+
     logger.info(f"Unloading model(s) (all={unload_all})...")
 
     cmd_args = ["unload"]

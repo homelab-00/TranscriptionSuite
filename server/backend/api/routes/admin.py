@@ -87,8 +87,19 @@ async def unload_models(request: Request) -> Dict[str, str]:
 
     try:
         model_manager = request.app.state.model_manager
+
+        # Check if server is busy with a transcription
+        is_busy, active_user = model_manager.job_tracker.is_busy()
+        if is_busy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot unload models - transcription in progress for {active_user}",
+            )
+
         model_manager.unload_all()
         return {"status": "unloaded"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to unload models: {e}")
         raise HTTPException(status_code=500, detail=str(e))

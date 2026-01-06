@@ -96,6 +96,21 @@ class APIClient:
         if use_https:
             logger.debug(f"HTTPS mode enabled for host: {host}")
 
+    def __del__(self):
+        """Cleanup method to ensure session is closed."""
+        if self._session and not self._session.closed:
+            logger.warning(
+                "APIClient being destroyed with unclosed session. "
+                "Please call close() explicitly."
+            )
+            # Note: We can't await in __del__, but we can close the session synchronously
+            # This will trigger the asyncio warning but prevents resource leaks
+            try:
+                if self._session.connector:
+                    self._session.connector._close()
+            except Exception:
+                pass
+
     @property
     def base_url(self) -> str:
         """Get the base URL for API requests."""
@@ -189,6 +204,7 @@ class APIClient:
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
+        self._connected = False
 
     async def update_connection(
         self,
@@ -604,6 +620,73 @@ class APIClient:
         except Exception as e:
             logger.error(f"Model preload failed: {e}")
             return False
+
+    async def unload_models(self) -> dict[str, Any]:
+        """
+        Request server to unload all transcription models to free GPU memory.
+
+        Returns:
+            Dict with 'success' and 'message' keys
+        """
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/api/admin/models/unload",
+                headers=self._get_headers(),
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {
+                        "success": True,
+                        "message": "Models unloaded successfully",
+                        "status": data.get("status", "unloaded"),
+                    }
+                elif resp.status == 409:
+                    # Server is busy
+                    data = await resp.json()
+                    return {
+                        "success": False,
+                        "message": data.get("detail", "Server is busy"),
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Unload failed (HTTP {resp.status})",
+                    }
+        except Exception as e:
+            logger.error(f"Model unload failed: {e}")
+            return {"success": False, "message": str(e)}
+
+    async def reload_models(self) -> dict[str, Any]:
+        """
+        Request server to reload the transcription models.
+
+        Returns:
+            Dict with 'success' and 'message' keys
+        """
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.base_url}/api/admin/models/load",
+                headers=self._get_headers(),
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {
+                        "success": True,
+                        "message": "Models loaded successfully",
+                        "status": data.get("status", "loaded"),
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Reload failed (HTTP {resp.status})",
+                    }
+        except Exception as e:
+            logger.error(f"Model reload failed: {e}")
+            return {"success": False, "message": str(e)}
 
     async def cancel_transcription(self) -> dict[str, Any]:
         """

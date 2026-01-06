@@ -1857,7 +1857,7 @@ wheels = [
 
 [[package]]
 name = "transcription-suite-server"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1888,30 +1888,30 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = "==3.13.2" },
-    { name = "aiosqlite", specifier = "==0.22.1" },
-    { name = "alembic", specifier = "==1.17.1" },
-    { name = "ctranslate2", specifier = "==4.6.2" },
-    { name = "fastapi", specifier = "==0.128.0" },
-    { name = "faster-whisper", specifier = "==1.2.1" },
-    { name = "ffmpeg-python", specifier = "==0.2.0" },
-    { name = "filelock", specifier = "==3.20.1" },
-    { name = "httpx", specifier = "==0.28.1" },
-    { name = "numpy", specifier = "==2.4.0" },
-    { name = "psutil", specifier = "==7.2.0" },
-    { name = "pyannote-audio", specifier = "==4.0.3" },
-    { name = "pydantic", specifier = "==2.12.5" },
-    { name = "python-multipart", specifier = "==0.0.21" },
-    { name = "pyyaml", specifier = "==6.0.3" },
-    { name = "scipy", specifier = "==1.16.3" },
-    { name = "silero-vad", specifier = "==6.2.0" },
-    { name = "soundfile", specifier = "==0.13.1" },
-    { name = "sqlalchemy", specifier = "==2.0.45" },
+    { name = "aiohttp", specifier = ">=3.13.2" },
+    { name = "aiosqlite", specifier = ">=0.22.1" },
+    { name = "alembic", specifier = ">=1.17.1" },
+    { name = "ctranslate2", specifier = ">=4.6.2" },
+    { name = "fastapi", specifier = ">=0.128.0" },
+    { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "ffmpeg-python", specifier = ">=0.2.0" },
+    { name = "filelock", specifier = ">=3.20.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "numpy", specifier = ">=2.4.0" },
+    { name = "psutil", specifier = ">=7.2.0" },
+    { name = "pyannote-audio", specifier = ">=4.0.3" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "python-multipart", specifier = ">=0.0.21" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "scipy", specifier = ">=1.16.3" },
+    { name = "silero-vad", specifier = ">=6.2.0" },
+    { name = "soundfile", specifier = ">=0.13.1" },
+    { name = "sqlalchemy", specifier = ">=2.0.45" },
     { name = "torch", specifier = "==2.8.0" },
     { name = "torchaudio", specifier = "==2.8.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = "==0.40.0" },
-    { name = "webrtcvad", specifier = "==2.0.10" },
-    { name = "websockets", specifier = "==15.0.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.40.0" },
+    { name = "webrtcvad", specifier = ">=2.0.10" },
+    { name = "websockets", specifier = ">=15.0.1" },
 ]
 
 [[package]]
