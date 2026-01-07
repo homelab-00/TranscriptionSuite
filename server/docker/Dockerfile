@@ -78,6 +78,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install only runtime dependencies (no build-essential, no python-dev)
+# gosu is used to drop privileges from root to appuser after TLS cert setup
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.12 \
     python3.12-venv \
@@ -91,6 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswresample-dev \
     libsndfile1 \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -112,6 +114,8 @@ COPY --from=python-builder /app/.venv /app/.venv
 # Copy server application code
 COPY server/backend/ ./server/
 COPY server/docker/entrypoint.py ./docker/
+COPY server/docker/docker-entrypoint.sh ./docker/
+RUN chmod +x ./docker/docker-entrypoint.sh
 
 # Copy built frontend to static serving location (unified UI)
 COPY --from=frontend-builder /build/frontend/dist ./static/frontend
@@ -121,7 +125,8 @@ COPY server/config.yaml ./config.yaml
 
 # Create data directories with correct permissions
 # /user-config is for user-mounted config and logs (optional)
-RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /models /user-config && \
+# /certs is for bind-mounted TLS certificates (source, read-only)
+RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /data/certs /models /user-config /certs && \
     chown -R appuser:appuser /data /app /models /user-config
 
 # Environment variables
@@ -140,10 +145,11 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Switch to non-root user
-USER appuser
+# NOTE: We don't use USER directive here because the shell entrypoint needs
+# to run as root initially to copy TLS certificates with proper permissions.
+# The docker-entrypoint.sh script uses su-exec to drop to appuser before
+# running the Python application.
 
-# Entrypoint with first-run setup support
-# Use --setup for interactive configuration, or provide env vars
-ENTRYPOINT ["python", "docker/entrypoint.py"]
+# Shell entrypoint handles TLS cert permissions then drops to appuser
+ENTRYPOINT ["./docker/docker-entrypoint.sh"]
 CMD []

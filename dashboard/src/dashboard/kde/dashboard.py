@@ -1923,8 +1923,6 @@ class DashboardWindow(QMainWindow):
 
         if result.success:
             progress(result.message)
-            # Save the last log timestamp before clearing
-            self._docker_manager.save_last_server_stop_timestamp()
             # Clear server logs window when server is stopped
             if self._server_log_window is not None:
                 self._server_log_window.clear_logs()
@@ -1970,8 +1968,6 @@ class DashboardWindow(QMainWindow):
 
         if result.success:
             progress(result.message)
-            # Clear timestamp file since container (and its logs) are gone
-            self._docker_manager.clear_last_server_stop_timestamp()
             # Clear server logs window when container is removed
             if self._server_log_window is not None:
                 self._server_log_window.clear_logs()
@@ -2059,7 +2055,7 @@ class DashboardWindow(QMainWindow):
 
     def _on_remove_data_volume(self) -> None:
         """Remove the data volume."""
-        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtWidgets import QCheckBox, QMessageBox
 
         # Check if container exists first
         from dashboard.common.docker_manager import ServerStatus
@@ -2089,6 +2085,15 @@ class DashboardWindow(QMainWindow):
             "• Server authentication token\n\n"
             "This action cannot be undone!"
         )
+
+        # Add checkbox for also removing config directory
+        config_checkbox = QCheckBox("Also remove config directory")
+        config_checkbox.setToolTip(
+            f"Remove {self._docker_manager.config_dir}\n"
+            "(contains dashboard.yaml, docker-compose.yml, etc.)"
+        )
+        msg_box.setCheckBox(config_checkbox)
+
         msg_box.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -2098,6 +2103,7 @@ class DashboardWindow(QMainWindow):
         if msg_box.exec() != QMessageBox.StandardButton.Yes:
             return
 
+        also_remove_config = config_checkbox.isChecked()
         self._remove_data_volume_btn.setEnabled(False)
 
         def progress(msg: str) -> None:
@@ -2105,7 +2111,10 @@ class DashboardWindow(QMainWindow):
             if self._show_server_logs_btn.isChecked():
                 self._server_log_view.appendPlainText(msg)
 
-        result = self._docker_manager.remove_data_volume(progress_callback=progress)
+        result = self._docker_manager.remove_data_volume(
+            progress_callback=progress,
+            also_remove_config=also_remove_config,
+        )
 
         if result.success:
             progress(result.message)
@@ -2188,7 +2197,7 @@ class DashboardWindow(QMainWindow):
         """Refresh server logs."""
         if self._server_log_window is None:
             return
-        logs = self._docker_manager.get_logs(lines=1000, filter_since_last_stop=True)
+        logs = self._docker_manager.get_logs(lines=300)
         self._server_log_window.set_logs(logs)
 
     # =========================================================================

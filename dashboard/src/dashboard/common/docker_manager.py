@@ -57,7 +57,6 @@ class DockerManager:
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
     CONTAINER_NAME = "transcription-suite"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
-    LAST_SERVER_STOP_FILE = "last_server_stop_timestamp.txt"
 
     def __init__(self, config_dir: Path | None = None):
         """
@@ -520,12 +519,14 @@ class DockerManager:
     def remove_data_volume(
         self,
         progress_callback: Callable[[str], None] | None = None,
+        also_remove_config: bool = False,
     ) -> DockerResult:
         """
         Remove the data volume (contains server data and SQLite database).
 
         Args:
             progress_callback: Optional callback for progress messages
+            also_remove_config: If True, also remove the config directory
 
         Returns:
             DockerResult with success status and message
@@ -549,16 +550,63 @@ class DockerManager:
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
 
+        messages = []
         if result.returncode == 0:
             # Clear the cached auth token since data is being deleted
             self.clear_server_auth_token()
-            return DockerResult(True, "Data volume removed successfully.")
+            messages.append("Data volume removed successfully.")
         else:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
             # Volume might not exist
             if "No such volume" in error_msg or "not found" in error_msg.lower():
-                return DockerResult(True, "Data volume does not exist.")
-            return DockerResult(False, f"Failed to remove data volume: {error_msg}")
+                messages.append("Data volume does not exist.")
+            else:
+                return DockerResult(False, f"Failed to remove data volume: {error_msg}")
+
+        # Also remove config directory if requested
+        if also_remove_config:
+            config_result = self.remove_config_directory(progress_callback)
+            messages.append(config_result.message)
+
+        return DockerResult(True, " ".join(messages))
+
+    def remove_config_directory(
+        self,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> DockerResult:
+        """
+        Remove the TranscriptionSuite config directory.
+
+        This removes:
+        - Linux: ~/.config/TranscriptionSuite/
+        - Windows: ~/Documents/TranscriptionSuite/
+        - macOS: ~/Library/Application Support/TranscriptionSuite/
+
+        Args:
+            progress_callback: Optional callback for progress messages
+
+        Returns:
+            DockerResult with success status and message
+        """
+        import shutil
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        log(f"Removing config directory {self.config_dir}...")
+
+        try:
+            if self.config_dir.exists():
+                shutil.rmtree(self.config_dir)
+                return DockerResult(True, "Config directory removed successfully.")
+            else:
+                return DockerResult(True, "Config directory does not exist.")
+        except PermissionError as e:
+            return DockerResult(False, f"Permission denied: {e}")
+        except Exception as e:
+            return DockerResult(False, f"Failed to remove config directory: {e}")
 
     def remove_models_volume(
         self,
@@ -794,13 +842,12 @@ class DockerManager:
             ServerStatus.STOPPED,
         )
 
-    def get_logs(self, lines: int = 50, filter_since_last_stop: bool = False) -> str:
+    def get_logs(self, lines: int = 300) -> str:
         """
         Get recent server logs.
 
         Args:
-            lines: Number of log lines to retrieve
-            filter_since_last_stop: If True, only return logs after the last server stop timestamp
+            lines: Number of log lines to retrieve (default: 300)
 
         Returns:
             Log output as string
@@ -814,106 +861,9 @@ class DockerManager:
                 ["docker", "compose", "logs", "--tail", str(lines)],
                 cwd=self.config_dir,
             )
-            logs = result.stdout if result.returncode == 0 else result.stderr
-
-            # Filter logs if requested
-            if filter_since_last_stop:
-                logs = self._filter_logs_since_last_stop(logs)
-
-            return logs
+            return result.stdout if result.returncode == 0 else result.stderr
         except Exception as e:
             return f"Failed to get logs: {e}"
-
-    def _filter_logs_since_last_stop(self, logs: str) -> str:
-        """
-        Filter logs to only include entries after the last server stop timestamp.
-
-        Args:
-            logs: Raw log output
-
-        Returns:
-            Filtered log output
-        """
-        last_stop = self.load_last_server_stop_timestamp()
-        if not last_stop:
-            return logs  # No filter if no timestamp saved
-
-        filtered_lines = []
-        for line in logs.split("\n"):
-            # Parse timestamp from server log format: container | YYYY-MM-DD HH:MM:SS | ...
-            match = re.search(
-                r"\|(\s*)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\s*\|", line
-            )
-            if match:
-                log_timestamp = f"{match.group(2)} {match.group(3)}"
-                if log_timestamp > last_stop:
-                    filtered_lines.append(line)
-            elif line.strip():  # Keep non-timestamped lines (like startup messages)
-                # Check if we've already started including lines
-                if filtered_lines:
-                    filtered_lines.append(line)
-
-        return "\n".join(filtered_lines)
-
-    def save_last_server_stop_timestamp(self) -> None:
-        """
-        Save the current timestamp as the last server stop time.
-        This is used to filter logs to only show entries from the current session.
-        """
-        from datetime import datetime
-
-        try:
-            # Get the timestamp of the last log entry
-            logs = self.get_logs(lines=10, filter_since_last_stop=False)
-            last_timestamp = None
-
-            for line in reversed(logs.split("\n")):
-                # Parse timestamp from server log format: container | YYYY-MM-DD HH:MM:SS | ...
-                match = re.search(
-                    r"\|(\s*)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\s*\|", line
-                )
-                if match:
-                    last_timestamp = f"{match.group(2)} {match.group(3)}"
-                    break
-
-            if last_timestamp:
-                timestamp_file = self.config_dir / self.LAST_SERVER_STOP_FILE
-                timestamp_file.write_text(last_timestamp)
-                logger.info(f"Saved last server stop timestamp: {last_timestamp}")
-            else:
-                logger.debug("No timestamped log entries found to save")
-        except Exception as e:
-            logger.error(f"Failed to save last server stop timestamp: {e}")
-
-    def load_last_server_stop_timestamp(self) -> str | None:
-        """
-        Load the last server stop timestamp.
-
-        Returns:
-            Timestamp string (YYYY-MM-DD HH:MM:SS) or None if not found
-        """
-        try:
-            timestamp_file = self.config_dir / self.LAST_SERVER_STOP_FILE
-            if timestamp_file.exists():
-                timestamp = timestamp_file.read_text().strip()
-                if timestamp:
-                    return timestamp
-        except Exception as e:
-            logger.error(f"Failed to load last server stop timestamp: {e}")
-        return None
-
-    def clear_last_server_stop_timestamp(self) -> None:
-        """
-        Clear the saved last server stop timestamp.
-        Call this when the container is removed (logs are cleared by Docker).
-        """
-        try:
-            timestamp_file = self.config_dir / self.LAST_SERVER_STOP_FILE
-            if timestamp_file.exists():
-                timestamp_file.unlink()
-                logger.info("Cleared last server stop timestamp")
-        except Exception as e:
-            logger.error(f"Failed to clear last server stop timestamp: {e}")
 
     def get_admin_token(self, check_logs: bool = True) -> str | None:
         """

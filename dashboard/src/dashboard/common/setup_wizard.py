@@ -38,7 +38,7 @@ class SetupResult:
 
 
 # Embedded file contents
-DOCKER_COMPOSE_YML = '''# TranscriptionSuite Docker Compose Configuration
+DOCKER_COMPOSE_YML = """# TranscriptionSuite Docker Compose Configuration
 # Unified local + remote deployment with GPU support
 #
 # Build:
@@ -140,9 +140,9 @@ volumes:
     name: transcription-suite-data
   huggingface-models:
     name: transcription-suite-models
-'''
+"""
 
-ENV_EXAMPLE = '''# TranscriptionSuite - Environment variables
+ENV_EXAMPLE = """# TranscriptionSuite - Environment variables
 # =====================================================
 #
 # Fill in your values below and then rename this file
@@ -162,7 +162,7 @@ HUGGINGFACE_TOKEN=
 # Options: DEBUG, INFO, WARNING, ERROR
 # Default: INFO
 # LOG_LEVEL=INFO
-'''
+"""
 
 # GitHub raw URL for downloading config.yaml
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/homelab-00/TranscriptionSuite/main"
@@ -266,7 +266,10 @@ class SetupWizard:
             result = self._run_command(["docker", "info"], timeout=10)
             if result.returncode != 0:
                 if self.system == "Windows":
-                    return False, "Docker daemon is not running.\n\nPlease start Docker Desktop."
+                    return (
+                        False,
+                        "Docker daemon is not running.\n\nPlease start Docker Desktop.",
+                    )
                 else:
                     return False, (
                         "Docker daemon is not running.\n\n"
@@ -298,7 +301,10 @@ class SetupWizard:
 
             # Check if nvidia-container-toolkit is configured
             docker_info = self._run_command(["docker", "info"], timeout=10)
-            if docker_info.returncode == 0 and "nvidia" not in docker_info.stdout.lower():
+            if (
+                docker_info.returncode == 0
+                and "nvidia" not in docker_info.stdout.lower()
+            ):
                 return True, (
                     "NVIDIA GPU detected, but nvidia-container-toolkit might not be configured.\n"
                     "GPU acceleration may not work until toolkit is installed."
@@ -375,6 +381,7 @@ class SetupWizard:
     ) -> tuple[bool, str]:
         """
         Pull the Docker image from GitHub Container Registry.
+        First checks if image exists locally before attempting to pull.
 
         Args:
             progress_callback: Optional callback for progress messages
@@ -387,6 +394,23 @@ class SetupWizard:
             logger.info(msg)
             if progress_callback:
                 progress_callback(msg)
+
+        # Check if image already exists locally
+        try:
+            result = self._run_command(
+                ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"],
+                capture_output=True,
+                timeout=10,
+            )
+
+            if result.returncode == 0:
+                images = result.stdout.strip().split("\n")
+                if DOCKER_IMAGE in images:
+                    log(f"Using existing local image: {DOCKER_IMAGE}")
+                    return True, "Using existing local Docker image"
+        except Exception as e:
+            logger.warning(f"Could not check for local image: {e}")
+            # Continue to pull attempt
 
         log(f"Pulling Docker image: {DOCKER_IMAGE}")
         log("This may take a few minutes on first run...")
@@ -408,7 +432,10 @@ class SetupWizard:
                     "You can build locally instead if you have the source code."
                 )
         except subprocess.TimeoutExpired:
-            return False, "Docker pull timed out. Please try again or check your internet connection."
+            return (
+                False,
+                "Docker pull timed out. Please try again or check your internet connection.",
+            )
         except Exception as e:
             return False, f"Docker pull failed: {e}"
 
@@ -448,7 +475,9 @@ class SetupWizard:
         # Create config directory
         log(f"Creating config directory: {self.config_dir}")
         if not self.create_config_directory():
-            return SetupResult(False, f"Failed to create config directory: {self.config_dir}")
+            return SetupResult(
+                False, f"Failed to create config directory: {self.config_dir}"
+            )
 
         # Create docker-compose.yml
         log("Setting up Docker files...")

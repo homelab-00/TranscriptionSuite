@@ -21,6 +21,7 @@ _start_time = time.perf_counter()
 def _log_time(msg: str) -> None:
     print(f"[TIMING] {time.perf_counter() - _start_time:.3f}s - {msg}", flush=True)
 
+
 # Suppress pkg_resources deprecation warning from webrtcvad (global filter)
 warnings.filterwarnings(
     "ignore",
@@ -65,7 +66,7 @@ def setup_directories() -> tuple[Path, Path]:
     data_dir = Path(os.environ.get("DATA_DIR", "/data"))
 
     # Create required subdirectories
-    subdirs = ["database", "audio", "logs", "tokens"]
+    subdirs = ["database", "audio", "logs", "tokens", "certs"]
     for subdir in subdirs:
         (data_dir / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -79,6 +80,54 @@ def setup_directories() -> tuple[Path, Path]:
         log_dir = data_dir / "logs"
 
     return data_dir, log_dir
+
+
+def prepare_tls_certs(data_dir: Path) -> tuple[str | None, str | None]:
+    """
+    Get TLS certificate paths from environment.
+
+    The docker-entrypoint.sh script handles copying certificates with proper
+    permissions before this Python script runs. This function just validates
+    that the certificates exist and are readable.
+
+    Returns:
+        Tuple of (cert_path, key_path) that uvicorn should use, or (None, None)
+        if TLS is not enabled.
+    """
+    tls_enabled = os.environ.get("TLS_ENABLED", "false").lower() == "true"
+    if not tls_enabled:
+        return None, None
+
+    cert_path = os.environ.get("TLS_CERT_FILE")
+    key_path = os.environ.get("TLS_KEY_FILE")
+
+    if not cert_path or not key_path:
+        print("ERROR: TLS_CERT_FILE or TLS_KEY_FILE not set")
+        return None, None
+
+    cert_file = Path(cert_path)
+    key_file = Path(key_path)
+
+    if not cert_file.exists():
+        print(f"ERROR: TLS cert not found at {cert_path}")
+        return None, None
+    if not key_file.exists():
+        print(f"ERROR: TLS key not found at {key_path}")
+        return None, None
+
+    # Verify we can read the files
+    try:
+        cert_file.read_bytes()
+        key_file.read_bytes()
+    except PermissionError as e:
+        print(f"ERROR: Cannot read TLS files: {e}")
+        return None, None
+
+    print(f"Using TLS certificates:")
+    print(f"  Cert: {cert_path}")
+    print(f"  Key:  {key_path}")
+
+    return str(cert_path), str(key_path)
 
 
 def print_banner(
@@ -134,10 +183,19 @@ def main() -> None:
     port = int(os.environ.get("SERVER_PORT", "8000"))
     log_level = os.environ.get("LOG_LEVEL", "info").lower()
 
-    # TLS configuration
+    # TLS configuration - prepare certs before printing banner
     tls_enabled = os.environ.get("TLS_ENABLED", "false").lower() == "true"
-    tls_cert = os.environ.get("TLS_CERT_FILE")
-    tls_key = os.environ.get("TLS_KEY_FILE")
+    tls_cert: str | None = None
+    tls_key: str | None = None
+
+    if tls_enabled:
+        # Copy certs to readable location (handles permission issues with bind mounts)
+        tls_cert, tls_key = prepare_tls_certs(data_dir)
+        if not tls_cert or not tls_key:
+            # Cert preparation failed - exit with helpful error
+            print("ERROR: TLS_ENABLED=true but certificates could not be prepared")
+            print("Check that the certificate files exist and are readable.")
+            sys.exit(1)
 
     # Print banner
     print_banner(data_dir, log_dir, port, tls_enabled)
@@ -145,6 +203,7 @@ def main() -> None:
     # Initialize database
     _log_time("importing database module...")
     from server.database.database import init_db, set_data_directory
+
     _log_time("database module imported")
 
     set_data_directory(data_dir)
@@ -162,16 +221,7 @@ def main() -> None:
     }
 
     # Enable TLS if configured
-    if tls_enabled:
-        if not tls_cert or not Path(tls_cert).exists():
-            print(f"ERROR: TLS_ENABLED=true but cert not found: {tls_cert}")
-            print("Set TLS_CERT_FILE environment variable to cert path")
-            sys.exit(1)
-        if not tls_key or not Path(tls_key).exists():
-            print(f"ERROR: TLS_ENABLED=true but key not found: {tls_key}")
-            print("Set TLS_KEY_FILE environment variable to key path")
-            sys.exit(1)
-
+    if tls_enabled and tls_cert and tls_key:
         uvicorn_config["port"] = 8443
         uvicorn_config["ssl_certfile"] = tls_cert
         uvicorn_config["ssl_keyfile"] = tls_key

@@ -617,11 +617,7 @@ cd dashboard
 uv venv --python 3.12
 uv sync --extra kde    # or --extra gnome / --extra windows
 
-# Local mode
-uv run transcription-dashboard --host localhost --port 8000
-
-# Remote mode
-uv run transcription-dashboard --host <tailscale-hostname> --port 8443 --https
+uv run transcription-dashboard
 ```
 
 ### 9.2 Verbose Logging

@@ -1648,8 +1648,6 @@ class DashboardWindow(_get_dashboard_base()):
 
     def _on_stop_server(self) -> None:
         """Stop the server."""
-        # Save the last log timestamp before stopping
-        self._docker_manager.save_last_server_stop_timestamp()
         self._run_server_operation(
             lambda: self._docker_manager.stop_server(),
             "Stopping server...",
@@ -1664,8 +1662,6 @@ class DashboardWindow(_get_dashboard_base()):
             lambda: self._docker_manager.remove_container(),
             "Removing container...",
         )
-        # Clear timestamp file since container (and its logs) are gone
-        self._docker_manager.clear_last_server_stop_timestamp()
         # Clear server logs when container is removed
         if self._server_log_window is not None:
             self._server_log_window.clear_logs()
@@ -1685,11 +1681,55 @@ class DashboardWindow(_get_dashboard_base()):
         )
 
     def _on_remove_data_volume(self) -> None:
-        """Remove data volume."""
-        self._run_server_operation(
-            lambda: self._docker_manager.remove_data_volume(),
-            "Removing data volume...",
+        """Remove data volume with confirmation dialog."""
+        # Check if container exists first
+        status = self._docker_manager.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            self._show_notification(
+                "Cannot Remove Volume",
+                "Container must be removed first. Remove the container, then try again.",
+            )
+            return
+
+        # Show confirmation dialog with checkbox for config removal
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="Remove Data Volume",
+            body=(
+                "WARNING: This will DELETE ALL SERVER DATA!\n\n"
+                "This will permanently delete:\n"
+                "• The SQLite database\n"
+                "• All user data and transcription history\n"
+                "• Server authentication token\n\n"
+                "This action cannot be undone!"
+            ),
         )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        # Add checkbox for config directory removal
+        checkbox = Gtk.CheckButton(label="Also remove config directory")
+        checkbox.set_tooltip_text(
+            f"Remove {self._docker_manager.config_dir}\n"
+            "(contains dashboard.yaml, docker-compose.yml, etc.)"
+        )
+        dialog.set_extra_child(checkbox)
+
+        def on_response(dialog: Adw.MessageDialog, response: str) -> None:
+            if response == "delete":
+                also_remove_config = checkbox.get_active()
+                self._run_server_operation(
+                    lambda: self._docker_manager.remove_data_volume(
+                        also_remove_config=also_remove_config
+                    ),
+                    "Removing data volume...",
+                )
+
+        dialog.connect("response", on_response)
+        dialog.present()
 
     def _on_remove_models_volume(self) -> None:
         """Remove models volume."""
@@ -1715,7 +1755,7 @@ class DashboardWindow(_get_dashboard_base()):
         if self._server_log_window is None:
             self._server_log_window = LogWindow("Server Logs")
 
-        logs = self._docker_manager.get_logs(lines=1000, filter_since_last_stop=True)
+        logs = self._docker_manager.get_logs(lines=300)
         self._server_log_window.set_logs(logs)
         self._server_log_window.present()
 
@@ -2224,10 +2264,25 @@ def run_dashboard(config_path: Path | None = None) -> int:
         )
 
     # Create and run the application
-    app = Adw.Application(application_id="com.transcriptionsuite.dashboard")
+    # GApplication with a unique application_id provides single-instance behavior:
+    # When a second instance tries to start, the existing instance receives
+    # an "activate" signal instead of a new instance starting.
+    app = Adw.Application(
+        application_id="com.transcriptionsuite.dashboard",
+        flags=Gio.ApplicationFlags.FLAGS_NONE,
+    )
+
+    # Store the window reference to reuse on subsequent activations
+    main_window: DashboardWindow | None = None
 
     def on_activate(application: Adw.Application) -> None:
-        """Create and present the main window."""
+        """Create and present the main window, or present existing window."""
+        nonlocal main_window
+
+        # If window already exists, just present it (handles single-instance)
+        if main_window is not None:
+            main_window.present()
+            return
 
         # Wrap D-Bus client methods for use as callbacks
         def on_start_client(use_remote: bool) -> None:
@@ -2254,7 +2309,7 @@ def run_dashboard(config_path: Path | None = None) -> int:
             dialog = SettingsDialog(config, parent=None)
             dialog.show()
 
-        window = DashboardWindow(
+        main_window = DashboardWindow(
             config=config,
             app=application,
             on_start_client=on_start_client if tray_connected else None,
@@ -2264,12 +2319,12 @@ def run_dashboard(config_path: Path | None = None) -> int:
 
         # If tray not connected, show a warning banner
         if not tray_connected:
-            window._show_notification(
+            main_window._show_notification(
                 "Limited Mode",
                 "Client control unavailable. Start the tray first for full functionality.",
             )
 
-        window.present()
+        main_window.present()
 
     app.connect("activate", on_activate)
     return app.run(sys.argv)
