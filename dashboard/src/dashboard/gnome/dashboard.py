@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Import GTK4 and Adwaita
 HAS_GTK4 = False
+HAS_GTKSOURCEVIEW = False
 try:
     import gi
 
@@ -36,6 +37,16 @@ try:
 
     HAS_GTK4 = True
 
+    # Try to import GtkSourceView for line numbers in log viewer
+    try:
+        gi.require_version("GtkSource", "5")
+        from gi.repository import GtkSource
+
+        HAS_GTKSOURCEVIEW = True
+    except (ImportError, ValueError) as e:
+        logger.debug(f"GtkSourceView not available, line numbers disabled: {e}")
+        GtkSource = None  # type: ignore
+
 except (ImportError, ValueError) as e:
     logger.warning(f"GTK4/Adwaita not available: {e}")
     Adw = None  # type: ignore
@@ -44,6 +55,7 @@ except (ImportError, ValueError) as e:
     Gio = None  # type: ignore
     GLib = None  # type: ignore
     Gtk = None  # type: ignore
+    GtkSource = None  # type: ignore
 
 if TYPE_CHECKING:
     from dashboard.common.config import ClientConfig
@@ -197,15 +209,23 @@ class LogWindow(_get_log_window_base()):
         scrolled.set_vexpand(True)
         scrolled.set_hexpand(True)
 
-        self._text_view = Gtk.TextView()
+        # Use GtkSourceView if available (for line numbers), otherwise fallback to TextView
+        if HAS_GTKSOURCEVIEW and GtkSource:
+            self._text_view = GtkSource.View()
+            self._text_view.set_show_line_numbers(True)
+            self._text_view.set_background_pattern(GtkSource.BackgroundPatternType.NONE)
+            # Get buffer from source view
+            self._buffer = self._text_view.get_buffer()
+        else:
+            self._text_view = Gtk.TextView()
+            self._buffer = self._text_view.get_buffer()
+
         self._text_view.set_editable(False)
         self._text_view.set_monospace(True)
         self._text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._text_view.set_show_line_numbers(True)  # Enable line numbers
         self._text_view.add_css_class("log-view")
 
         # Setup text tags for syntax highlighting
-        self._buffer = self._text_view.get_buffer()
         self._setup_text_tags()
 
         scrolled.set_child(self._text_view)
@@ -424,6 +444,18 @@ class LogWindow(_get_log_window_base()):
         .log-view:selected {
             background-color: #264f78;
         }
+        .log-view text {
+            background-color: #1e1e1e;
+        }
+        .log-view border {
+            background-color: #252526;
+        }
+        .log-view .line-numbers {
+            background-color: #252526;
+            color: #858585;
+            padding-left: 4px;
+            padding-right: 8px;
+        }
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(css)
@@ -618,20 +650,54 @@ class DashboardWindow(_get_dashboard_base()):
         client_btn.connect("clicked", lambda _: self._navigate_to(View.CLIENT))
         header.pack_start(client_btn)
 
-        # Right side: Help, About buttons
-        help_btn = Gtk.Button()
-        help_btn.set_icon_name("help-contents-symbolic")
-        help_btn.set_tooltip_text("Help")
-        help_btn.add_css_class("nav-button")
-        help_btn.connect("clicked", self._show_help_menu)
-        header.pack_end(help_btn)
+        # Right side: Hamburger menu button (☰) with Settings, Help, About
+        self._menu_btn = Gtk.MenuButton()
+        self._menu_btn.set_icon_name("open-menu-symbolic")
+        self._menu_btn.set_tooltip_text("Menu")
+        self._menu_btn.add_css_class("nav-button")
 
-        about_btn = Gtk.Button()
-        about_btn.set_icon_name("help-about-symbolic")
-        about_btn.set_tooltip_text("About")
-        about_btn.add_css_class("nav-button")
-        about_btn.connect("clicked", lambda _: self._show_about_dialog())
-        header.pack_end(about_btn)
+        # Create menu model
+        menu = Gio.Menu()
+
+        # Settings item
+        menu.append("Settings", "win.show-settings")
+
+        # Separator
+        help_section = Gio.Menu()
+
+        # Help submenu
+        help_submenu = Gio.Menu()
+        help_submenu.append("User Guide (README)", "win.help-user")
+        help_submenu.append("Developer Guide (README_DEV)", "win.help-dev")
+        help_section.append_submenu("Help", help_submenu)
+
+        # About item
+        help_section.append("About", "win.show-about")
+
+        menu.append_section(None, help_section)
+
+        # Create popover menu
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        self._menu_btn.set_popover(popover)
+
+        # Add actions
+        settings_action = Gio.SimpleAction.new("show-settings", None)
+        settings_action.connect("activate", lambda a, p: self._trigger_show_settings())
+        self.add_action(settings_action)
+
+        help_user_action = Gio.SimpleAction.new("help-user", None)
+        help_user_action.connect("activate", lambda a, p: self._show_readme(dev=False))
+        self.add_action(help_user_action)
+
+        help_dev_action = Gio.SimpleAction.new("help-dev", None)
+        help_dev_action.connect("activate", lambda a, p: self._show_readme(dev=True))
+        self.add_action(help_dev_action)
+
+        about_action = Gio.SimpleAction.new("show-about", None)
+        about_action.connect("activate", lambda a, p: self._show_about_dialog())
+        self.add_action(about_action)
+
+        header.pack_end(self._menu_btn)
 
         return header
 
@@ -743,16 +809,6 @@ class DashboardWindow(_get_dashboard_base()):
         web_note.add_css_class("dim-label")
         web_note.add_css_class("caption")
         box.append(web_note)
-
-        # Dashboard settings button
-        dashboard_settings_btn = Gtk.Button(label="Dashboard Settings")
-        dashboard_settings_btn.add_css_class("secondary-button")
-        dashboard_settings_btn.set_margin_top(16)
-        dashboard_settings_btn.set_halign(Gtk.Align.CENTER)
-        dashboard_settings_btn.connect(
-            "clicked", lambda _: self._show_dashboard_settings()
-        )
-        box.append(dashboard_settings_btn)
 
         scrolled.set_child(box)
         return scrolled
@@ -989,18 +1045,14 @@ class DashboardWindow(_get_dashboard_base()):
         volumes_frame.set_child(volumes_box)
         box.append(volumes_frame)
 
-        # Settings button
-        settings_btn = Gtk.Button(label="Settings")
-        settings_btn.set_icon_name("preferences-system-symbolic")
-        settings_btn.add_css_class("secondary-button")
-        settings_btn.set_halign(Gtk.Align.CENTER)
-        settings_btn.set_margin_top(16)
-        settings_btn.connect("clicked", lambda _: self._on_open_server_settings())
-        box.append(settings_btn)
-
-        # Show logs button
-        logs_btn = Gtk.Button(label="Show Logs")
-        logs_btn.set_icon_name("utilities-log-viewer-symbolic")
+        # Show logs button with icon and text
+        logs_btn = Gtk.Button()
+        logs_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        logs_btn_icon = Gtk.Image.new_from_icon_name("utilities-log-viewer-symbolic")
+        logs_btn_box.append(logs_btn_icon)
+        logs_btn_label = Gtk.Label(label="Show Logs")
+        logs_btn_box.append(logs_btn_label)
+        logs_btn.set_child(logs_btn_box)
         logs_btn.add_css_class("secondary-button")
         logs_btn.set_halign(Gtk.Align.CENTER)
         logs_btn.set_margin_top(8)
@@ -1097,18 +1149,14 @@ class DashboardWindow(_get_dashboard_base()):
         self._unload_models_btn.connect("clicked", lambda _: self._on_toggle_models())
         box.append(self._unload_models_btn)
 
-        # Settings button
-        settings_btn = Gtk.Button(label="Settings")
-        settings_btn.set_icon_name("preferences-system-symbolic")
-        settings_btn.add_css_class("secondary-button")
-        settings_btn.set_halign(Gtk.Align.CENTER)
-        settings_btn.set_margin_top(8)
-        settings_btn.connect("clicked", lambda _: self._on_show_client_settings())
-        box.append(settings_btn)
-
-        # Show logs button
-        logs_btn = Gtk.Button(label="Show Logs")
-        logs_btn.set_icon_name("utilities-log-viewer-symbolic")
+        # Show logs button with icon and text
+        logs_btn = Gtk.Button()
+        logs_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        logs_btn_icon = Gtk.Image.new_from_icon_name("utilities-log-viewer-symbolic")
+        logs_btn_box.append(logs_btn_icon)
+        logs_btn_label = Gtk.Label(label="Show Logs")
+        logs_btn_box.append(logs_btn_label)
+        logs_btn.set_child(logs_btn_box)
         logs_btn.add_css_class("secondary-button")
         logs_btn.set_halign(Gtk.Align.CENTER)
         logs_btn.set_margin_top(8)
@@ -1662,18 +1710,6 @@ class DashboardWindow(_get_dashboard_base()):
             logger.error(f"Server operation failed: {e}")
             self._show_notification("Docker Server", f"Error: {e}")
 
-    def _on_open_server_settings(self) -> None:
-        """Open server settings file."""
-        try:
-            from dashboard.common.config import get_config_dir
-
-            config_dir = get_config_dir()
-            config_file = config_dir / "config.yaml"
-            if config_file.exists():
-                subprocess.run(["xdg-open", str(config_file)], check=False)
-        except Exception as e:
-            logger.error(f"Failed to open server settings: {e}")
-
     def _toggle_server_logs(self) -> None:
         """Toggle server log window."""
         if self._server_log_window is None:
@@ -1714,11 +1750,6 @@ class DashboardWindow(_get_dashboard_base()):
         if self._on_stop_client:
             self._on_stop_client()
         self.set_client_running(False)
-
-    def _on_show_client_settings(self) -> None:
-        """Show client settings dialog."""
-        if self._on_show_settings:
-            self._on_show_settings()
 
     def _toggle_client_logs(self) -> None:
         """Toggle client log window."""
@@ -1851,77 +1882,14 @@ class DashboardWindow(_get_dashboard_base()):
         logger.info(f"Opening web client: {url}")
         webbrowser.open(url)
 
-    def _show_dashboard_settings(self) -> None:
-        """Show Dashboard settings dialog (styled like client settings)."""
-        dialog = Adw.MessageDialog.new(
-            self, "Dashboard Settings", "Configure dashboard behavior"
-        )
-
-        # Create content box
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        content_box.set_margin_start(12)
-        content_box.set_margin_end(12)
-        content_box.set_margin_top(6)
-        content_box.set_margin_bottom(6)
-
-        # Docker server section
-        docker_label = Gtk.Label(label="Docker Server")
-        docker_label.add_css_class("heading")
-        docker_label.set_halign(Gtk.Align.START)
-        content_box.append(docker_label)
-
-        # Stop server checkbox
-        stop_server_check = Gtk.CheckButton(label="Stop server when quitting dashboard")
-        stop_server_check.set_active(
-            self.config.get("dashboard", "stop_server_on_quit", default=True)
-        )
-        content_box.append(stop_server_check)
-
-        dialog.set_extra_child(content_box)
-
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("save", "Save")
-        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("save")
-
-        def on_response(dlg, response):
-            if response == "save":
-                self.config.set(
-                    "dashboard",
-                    "stop_server_on_quit",
-                    value=stop_server_check.get_active(),
-                )
-                if self.config.save():
-                    logger.info("Dashboard settings saved")
-                else:
-                    logger.error("Failed to save dashboard settings")
-
-        dialog.connect("response", on_response)
-        dialog.present()
-
     # =========================================================================
     # Help & About
     # =========================================================================
 
-    def _show_help_menu(self, button) -> None:
-        """Show help menu."""
-        menu = Gio.Menu()
-        menu.append("User Guide", "win.help-user")
-        menu.append("Developer Guide", "win.help-dev")
-
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(button)
-
-        # Add actions
-        action_user = Gio.SimpleAction.new("help-user", None)
-        action_user.connect("activate", lambda a, p: self._show_readme(dev=False))
-        self.add_action(action_user)
-
-        action_dev = Gio.SimpleAction.new("help-dev", None)
-        action_dev.connect("activate", lambda a, p: self._show_readme(dev=True))
-        self.add_action(action_dev)
-
-        popover.popup()
+    def _trigger_show_settings(self) -> None:
+        """Trigger the settings callback if set."""
+        if self._on_show_settings:
+            self._on_show_settings()
 
     def _show_readme(self, dev: bool = False) -> None:
         """Show README in a dialog with plain text display.
@@ -2279,17 +2247,19 @@ def run_dashboard(config_path: Path | None = None) -> int:
                 logger.warning("Cannot stop client: tray not connected")
 
         def on_show_settings() -> None:
-            if tray_connected:
-                dbus_client.show_settings()
-            else:
-                logger.warning("Cannot show settings: tray not connected")
+            # Always show settings directly from Dashboard (GTK4)
+            # No need to go through D-Bus/tray
+            from dashboard.gnome.settings_dialog import SettingsDialog
+
+            dialog = SettingsDialog(config, parent=None)
+            dialog.show()
 
         window = DashboardWindow(
             config=config,
             app=application,
             on_start_client=on_start_client if tray_connected else None,
             on_stop_client=on_stop_client if tray_connected else None,
-            on_show_settings=on_show_settings if tray_connected else None,
+            on_show_settings=on_show_settings,
         )
 
         # If tray not connected, show a warning banner

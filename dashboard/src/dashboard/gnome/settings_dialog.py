@@ -1,200 +1,525 @@
 """
-Settings dialog for TranscriptionSuite GNOME client.
+Settings dialog for TranscriptionSuite GNOME Dashboard.
 
-Provides a GTK3 tabbed dialog for configuring client settings.
+Provides a unified tabbed dialog for configuring all settings.
+Supports both GTK4/Adwaita (for Dashboard) and GTK3 (for tray fallback).
+Styled to match the Dashboard UI design language.
+
+Tabs:
+- App: Clipboard, notifications, stop server on quit behavior
+- Client: Audio input device + connection settings
+- Server: Open config.yaml button + path display
 """
 
 import logging
 from typing import Any
 
 from dashboard.common.audio_recorder import AudioRecorder
-from dashboard.common.config import ClientConfig
+from dashboard.common.config import ClientConfig, get_config_dir
+from dashboard.common.docker_manager import DockerManager
 
 logger = logging.getLogger(__name__)
 
-# Import GTK
+# Try to import GTK4 first (preferred), fall back to GTK3
+HAS_GTK4 = False
+HAS_GTK3 = False
+Adw = None
+Gdk = None
+Gtk = None
+
 try:
     import gi
 
-    gi.require_version("Gtk", "3.0")
-    from gi.repository import Gtk
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw, Gdk, Gtk
+
+    HAS_GTK4 = True
+    logger.debug("Using GTK4/Adwaita for settings dialog")
 except (ImportError, ValueError):
-    Gtk = None  # type: ignore
+    try:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gdk, Gtk
+
+        HAS_GTK3 = True
+        logger.debug("Using GTK3 for settings dialog")
+    except (ImportError, ValueError) as e:
+        logger.warning(f"Neither GTK4 nor GTK3 available: {e}")
 
 
 class SettingsDialog:
-    """GTK3 Settings dialog with tabbed interface."""
+    """Settings dialog with tabbed interface matching KDE design.
+
+    Supports GTK4/Adwaita (for Dashboard) and GTK3 (for tray fallback).
+    """
 
     def __init__(self, config: ClientConfig, parent: Any = None):
-        if Gtk is None:
-            raise ImportError("GTK3 is required for the settings dialog")
+        if not HAS_GTK4 and not HAS_GTK3:
+            raise ImportError("Neither GTK4 nor GTK3 is available")
 
         self.config = config
-        self.dialog: Gtk.Dialog | None = None
+        self.parent = parent
+        self._docker_manager = DockerManager()
+        self.dialog: Any = None
 
         # Widgets that need to be accessed later
-        self.port_spin: Gtk.SpinButton | None = None
-        self.https_check: Gtk.CheckButton | None = None
-        self.token_entry: Gtk.Entry | None = None
-        self.use_remote_check: Gtk.CheckButton | None = None
-        self.host_entry: Gtk.Entry | None = None
-        self.remote_host_entry: Gtk.Entry | None = None
-        self.device_combo: Gtk.ComboBoxText | None = None
-        self.auto_copy_check: Gtk.CheckButton | None = None
-        self.notifications_check: Gtk.CheckButton | None = None
-        self.tls_verify_check: Gtk.CheckButton | None = None
-        self.allow_insecure_http_check: Gtk.CheckButton | None = None
+        # App tab
+        self.auto_copy_check: Any = None
+        self.notifications_check: Any = None
+        self.stop_server_check: Any = None
+
+        # Client tab - Audio
+        self.device_combo: Any = None
+
+        # Client tab - Connection
+        self.host_entry: Any = None
+        self.remote_host_entry: Any = None
+        self.use_remote_check: Any = None
+        self.token_entry: Any = None
+        self.show_token_btn: Any = None
+        self.port_spin: Any = None
+        self.https_check: Any = None
+        self.tls_verify_check: Any = None
+        self.allow_insecure_http_check: Any = None
 
     def show(self) -> None:
         """Create and show the settings dialog."""
-        self.dialog = Gtk.Dialog(
-            title="Settings",
-            flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-        )
-        self.dialog.set_default_size(450, 400)
+        if HAS_GTK4:
+            self._show_gtk4()
+        elif HAS_GTK3:
+            self._show_gtk3()
+        else:
+            logger.error("No GTK available for settings dialog")
 
-        # Set window icon from system theme
-        self.dialog.set_icon_name("audio-input-microphone-symbolic")
+    def _show_gtk4(self) -> None:
+        """Show GTK4/Adwaita settings dialog."""
+        self.dialog = Adw.Window()
+        self.dialog.set_title("Settings")
+        self.dialog.set_default_size(540, 580)
+        if self.parent:
+            self.dialog.set_transient_for(self.parent)
+        self.dialog.set_modal(True)
 
-        # Add buttons
-        self.dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
-        self.dialog.add_button("Save", Gtk.ResponseType.OK)
+        # Main layout
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        # Create notebook (tab container)
-        notebook = Gtk.Notebook()
-        content_area = self.dialog.get_content_area()
-        content_area.set_spacing(8)
-        content_area.set_margin_start(8)
-        content_area.set_margin_end(8)
-        content_area.set_margin_top(8)
-        content_area.set_margin_bottom(8)
-        content_area.pack_start(notebook, True, True, 0)
+        # Header bar
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(True)
+
+        main_box.append(header)
+
+        # Tab view using Adw.ViewStack with Adw.ViewSwitcher
+        self._stack = Adw.ViewStack()
 
         # Create tabs
-        notebook.append_page(
-            self._create_connection_tab(), Gtk.Label(label="Connection")
-        )
-        notebook.append_page(self._create_audio_tab(), Gtk.Label(label="Audio"))
-        notebook.append_page(self._create_behavior_tab(), Gtk.Label(label="Behavior"))
+        self._create_app_tab()
+        self._create_client_tab()
+        self._create_server_tab()
+
+        # View switcher in header
+        switcher = Adw.ViewSwitcher()
+        switcher.set_stack(self._stack)
+        switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        header.set_title_widget(switcher)
+
+        main_box.append(self._stack)
+
+        # Bottom button bar
+        button_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        button_bar.set_halign(Gtk.Align.END)
+        button_bar.set_margin_top(12)
+        button_bar.set_margin_bottom(12)
+        button_bar.set_margin_start(16)
+        button_bar.set_margin_end(16)
+
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda _: self.dialog.close())
+        button_bar.append(cancel_btn)
+
+        save_btn = Gtk.Button(label="Save")
+        save_btn.add_css_class("suggested-action")
+        save_btn.connect("clicked", lambda _: self._save_and_close())
+        button_bar.append(save_btn)
+
+        main_box.append(button_bar)
+
+        self.dialog.set_content(main_box)
+
+        # Apply styling
+        self._apply_styles()
 
         # Load current values
         self._load_values()
 
-        # Show all widgets
-        self.dialog.show_all()
+        # Show dialog
+        self.dialog.present()
 
-        # Run dialog
-        response = self.dialog.run()
-        if response == Gtk.ResponseType.OK:
-            self._save_values()
+    def _apply_styles(self) -> None:
+        """Apply dark theme styling matching Dashboard UI."""
+        css = b"""
+        /* Settings dialog styling */
+        .settings-section {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 4px 0;
+        }
 
-        self.dialog.destroy()
+        .settings-section-title {
+            color: #90caf9;
+            font-weight: bold;
+            font-size: 14px;
+        }
 
-    def _create_connection_tab(self) -> Gtk.ScrolledWindow:
-        """Create the Connection settings tab."""
-        # Create scrolled window
+        .settings-help-text {
+            color: #6c757d;
+            font-size: 11px;
+        }
+
+        .settings-path-label {
+            color: #6c757d;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        entry {
+            background-color: #1e1e1e;
+            border: 1px solid #2d2d2d;
+            border-radius: 6px;
+            color: #ffffff;
+            padding: 8px 12px;
+        }
+
+        entry:focus {
+            border-color: #90caf9;
+        }
+
+        spinbutton {
+            background-color: #1e1e1e;
+            border: 1px solid #2d2d2d;
+            border-radius: 6px;
+            color: #ffffff;
+        }
+
+        spinbutton:focus {
+            border-color: #90caf9;
+        }
+
+        combobox button {
+            background-color: #1e1e1e;
+            border: 1px solid #2d2d2d;
+            border-radius: 6px;
+            color: #ffffff;
+            padding: 8px 12px;
+        }
+
+        combobox button:focus {
+            border-color: #90caf9;
+        }
+
+        checkbutton {
+            color: #ffffff;
+        }
+
+        checkbutton check {
+            background-color: #1e1e1e;
+            border: 2px solid #505050;
+            border-radius: 3px;
+        }
+
+        checkbutton check:checked {
+            background-color: #90caf9;
+            border-color: #90caf9;
+        }
+
+        .small-button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        """
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
+    def _create_app_tab(self) -> None:
+        """Create the App settings tab (clipboard, notifications, docker behavior)."""
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_min_content_height(300)
+        scrolled.set_vexpand(True)
 
-        # Create content box
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
 
-        # Local host
-        host_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        host_label = Gtk.Label(label="Local Host:")
-        host_label.set_xalign(0)
-        host_label.set_size_request(100, -1)
-        host_box.pack_start(host_label, False, False, 0)
+        # === Clipboard Section ===
+        clipboard_frame = Gtk.Frame()
+        clipboard_frame.add_css_class("settings-section")
+        clipboard_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        clipboard_box.set_margin_start(12)
+        clipboard_box.set_margin_end(12)
+        clipboard_box.set_margin_top(8)
+        clipboard_box.set_margin_bottom(8)
+
+        clipboard_label = Gtk.Label(label="Clipboard")
+        clipboard_label.add_css_class("settings-section-title")
+        clipboard_label.set_halign(Gtk.Align.START)
+        clipboard_box.append(clipboard_label)
+
+        self.auto_copy_check = Gtk.CheckButton(
+            label="Automatically copy transcription to clipboard"
+        )
+        clipboard_box.append(self.auto_copy_check)
+
+        clipboard_frame.set_child(clipboard_box)
+        content.append(clipboard_frame)
+
+        # === Notifications Section ===
+        notifications_frame = Gtk.Frame()
+        notifications_frame.add_css_class("settings-section")
+        notifications_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        notifications_box.set_margin_start(12)
+        notifications_box.set_margin_end(12)
+        notifications_box.set_margin_top(8)
+        notifications_box.set_margin_bottom(8)
+
+        notifications_label = Gtk.Label(label="Notifications")
+        notifications_label.add_css_class("settings-section-title")
+        notifications_label.set_halign(Gtk.Align.START)
+        notifications_box.append(notifications_label)
+
+        self.notifications_check = Gtk.CheckButton(label="Show desktop notifications")
+        notifications_box.append(self.notifications_check)
+
+        notifications_frame.set_child(notifications_box)
+        content.append(notifications_frame)
+
+        # === Docker Server Section ===
+        docker_frame = Gtk.Frame()
+        docker_frame.add_css_class("settings-section")
+        docker_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        docker_box.set_margin_start(12)
+        docker_box.set_margin_end(12)
+        docker_box.set_margin_top(8)
+        docker_box.set_margin_bottom(8)
+
+        docker_label = Gtk.Label(label="Docker Server")
+        docker_label.add_css_class("settings-section-title")
+        docker_label.set_halign(Gtk.Align.START)
+        docker_box.append(docker_label)
+
+        self.stop_server_check = Gtk.CheckButton(
+            label="Stop server when quitting dashboard"
+        )
+        docker_box.append(self.stop_server_check)
+
+        docker_frame.set_child(docker_box)
+        content.append(docker_frame)
+
+        scrolled.set_child(content)
+        self._stack.add_titled_with_icon(
+            scrolled, "app", "App", "preferences-system-symbolic"
+        )
+
+    def _create_client_tab(self) -> None:
+        """Create the Client settings tab (audio + connection in one tab)."""
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+
+        # === Audio Section ===
+        audio_frame = Gtk.Frame()
+        audio_frame.add_css_class("settings-section")
+        audio_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        audio_box.set_margin_start(12)
+        audio_box.set_margin_end(12)
+        audio_box.set_margin_top(8)
+        audio_box.set_margin_bottom(8)
+
+        audio_label = Gtk.Label(label="Audio")
+        audio_label.add_css_class("settings-section-title")
+        audio_label.set_halign(Gtk.Align.START)
+        audio_box.append(audio_label)
+
+        # Device selector row
+        device_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        device_label = Gtk.Label(label="Input Device:")
+        device_label.set_size_request(100, -1)
+        device_label.set_halign(Gtk.Align.START)
+        device_row.append(device_label)
+
+        self.device_combo = Gtk.ComboBoxText()
+        self.device_combo.set_hexpand(True)
+        device_row.append(self.device_combo)
+
+        refresh_btn = Gtk.Button(label="Refresh")
+        refresh_btn.add_css_class("small-button")
+        refresh_btn.connect("clicked", lambda _: self._refresh_devices())
+        device_row.append(refresh_btn)
+
+        audio_box.append(device_row)
+
+        # Sample rate info
+        sample_rate_label = Gtk.Label(label="Sample Rate: 16000 Hz (fixed for Whisper)")
+        sample_rate_label.add_css_class("settings-help-text")
+        sample_rate_label.set_halign(Gtk.Align.START)
+        audio_box.append(sample_rate_label)
+
+        audio_frame.set_child(audio_box)
+        content.append(audio_frame)
+
+        # Populate devices
+        self._refresh_devices()
+
+        # === Connection Section ===
+        connection_frame = Gtk.Frame()
+        connection_frame.add_css_class("settings-section")
+        connection_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        connection_box.set_margin_start(12)
+        connection_box.set_margin_end(12)
+        connection_box.set_margin_top(8)
+        connection_box.set_margin_bottom(8)
+
+        connection_label = Gtk.Label(label="Connection")
+        connection_label.add_css_class("settings-section-title")
+        connection_label.set_halign(Gtk.Align.START)
+        connection_box.append(connection_label)
+
+        # Local host row
+        local_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        local_label = Gtk.Label(label="Local Host:")
+        local_label.set_size_request(100, -1)
+        local_label.set_halign(Gtk.Align.START)
+        local_row.append(local_label)
 
         self.host_entry = Gtk.Entry()
         self.host_entry.set_placeholder_text("localhost")
-        host_box.pack_start(self.host_entry, True, True, 0)
-        box.pack_start(host_box, False, False, 0)
+        self.host_entry.set_hexpand(True)
+        local_row.append(self.host_entry)
+        connection_box.append(local_row)
 
-        # Remote host
-        remote_host_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        remote_host_label = Gtk.Label(label="Remote Host:")
-        remote_host_label.set_xalign(0)
-        remote_host_label.set_size_request(100, -1)
-        remote_host_box.pack_start(remote_host_label, False, False, 0)
+        # Remote host row
+        remote_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        remote_label = Gtk.Label(label="Remote Host:")
+        remote_label.set_size_request(100, -1)
+        remote_label.set_halign(Gtk.Align.START)
+        remote_row.append(remote_label)
 
         self.remote_host_entry = Gtk.Entry()
         self.remote_host_entry.set_placeholder_text("e.g., my-desktop.tail1234.ts.net")
-        remote_host_box.pack_start(self.remote_host_entry, True, True, 0)
-        box.pack_start(remote_host_box, False, False, 0)
+        self.remote_host_entry.set_hexpand(True)
+        remote_row.append(self.remote_host_entry)
+        connection_box.append(remote_row)
 
-        # Use remote toggle
+        # Help text for host settings
+        host_help = Gtk.Label(
+            label="Enter ONLY the hostname (no http://, no port). Examples:\n"
+            "• Local: localhost or 127.0.0.1\n"
+            "• Remote: my-machine.tail1234.ts.net or 100.101.102.103"
+        )
+        host_help.add_css_class("settings-help-text")
+        host_help.set_halign(Gtk.Align.START)
+        host_help.set_wrap(True)
+        connection_box.append(host_help)
+
+        # Use remote checkbox
         self.use_remote_check = Gtk.CheckButton(
             label="Use remote server instead of local"
         )
-        box.pack_start(self.use_remote_check, False, False, 0)
+        connection_box.append(self.use_remote_check)
 
-        # Help text for remote usage
-        remote_help_label = Gtk.Label()
-        remote_help_label.set_markup(
-            '<span size="small" foreground="gray">'
-            "Don't forget to enable HTTPS and switch port to 8443 if using remote server"
-            "</span>"
+        # Help text for remote
+        remote_help = Gtk.Label(
+            label="Don't forget to enable HTTPS and switch port to 8443 if using remote server"
         )
-        remote_help_label.set_line_wrap(True)
-        remote_help_label.set_xalign(0)
-        box.pack_start(remote_help_label, False, False, 0)
+        remote_help.add_css_class("settings-help-text")
+        remote_help.set_halign(Gtk.Align.START)
+        remote_help.set_wrap(True)
+        connection_box.append(remote_help)
 
-        # Token
-        token_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        # Separator
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        separator.set_margin_top(8)
+        separator.set_margin_bottom(8)
+        connection_box.append(separator)
+
+        # Token row
+        token_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         token_label = Gtk.Label(label="Auth Token:")
-        token_label.set_xalign(0)
         token_label.set_size_request(100, -1)
-        token_box.pack_start(token_label, False, False, 0)
+        token_label.set_halign(Gtk.Align.START)
+        token_row.append(token_label)
 
         self.token_entry = Gtk.Entry()
         self.token_entry.set_visibility(False)
         self.token_entry.set_placeholder_text("Authentication token")
-        token_box.pack_start(self.token_entry, True, True, 0)
+        self.token_entry.set_hexpand(True)
+        token_row.append(self.token_entry)
 
-        show_token_btn = Gtk.ToggleButton(label="Show")
-        show_token_btn.connect("toggled", self._on_toggle_token_visibility)
-        token_box.pack_start(show_token_btn, False, False, 0)
-        box.pack_start(token_box, False, False, 0)
+        self.show_token_btn = Gtk.ToggleButton(label="Show")
+        self.show_token_btn.add_css_class("small-button")
+        self.show_token_btn.connect("toggled", self._on_toggle_token_visibility)
+        token_row.append(self.show_token_btn)
 
-        # Port
-        port_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        connection_box.append(token_row)
+
+        # Port row
+        port_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         port_label = Gtk.Label(label="Port:")
-        port_label.set_xalign(0)
         port_label.set_size_request(100, -1)
-        port_box.pack_start(port_label, False, False, 0)
+        port_label.set_halign(Gtk.Align.START)
+        port_row.append(port_label)
 
-        adjustment = Gtk.Adjustment(value=8000, lower=1, upper=65535, step_increment=1)
+        adjustment = Gtk.Adjustment(
+            value=8000, lower=1, upper=65535, step_increment=1, page_increment=10
+        )
         self.port_spin = Gtk.SpinButton()
         self.port_spin.set_adjustment(adjustment)
         self.port_spin.set_numeric(True)
-        port_box.pack_start(self.port_spin, True, True, 0)
-        box.pack_start(port_box, False, False, 0)
+        self.port_spin.set_size_request(100, -1)
+        port_row.append(self.port_spin)
+
+        connection_box.append(port_row)
 
         # HTTPS checkbox
         self.https_check = Gtk.CheckButton(label="Use HTTPS")
-        box.pack_start(self.https_check, False, False, 0)
+        connection_box.append(self.https_check)
 
-        # === Advanced TLS Options Frame ===
-        tls_frame = Gtk.Frame(label="Advanced TLS Options")
+        # === Advanced TLS Options Sub-section ===
+        tls_frame = Gtk.Frame()
         tls_frame.set_margin_top(8)
-        tls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        tls_box.set_margin_start(8)
-        tls_box.set_margin_end(8)
+        tls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        tls_box.set_margin_start(12)
+        tls_box.set_margin_end(12)
         tls_box.set_margin_top(8)
         tls_box.set_margin_bottom(8)
+
+        tls_label = Gtk.Label(label="Advanced TLS Options")
+        tls_label.add_css_class("settings-section-title")
+        tls_label.set_halign(Gtk.Align.START)
+        tls_box.append(tls_label)
 
         # TLS Verify checkbox
         self.tls_verify_check = Gtk.CheckButton(label="Verify TLS certificates")
         self.tls_verify_check.set_tooltip_text(
             "Disable for self-signed certificates.\nConnection is still encrypted."
         )
-        tls_box.pack_start(self.tls_verify_check, False, False, 0)
+        tls_box.append(self.tls_verify_check)
 
         # Allow HTTP to remote hosts
         self.allow_insecure_http_check = Gtk.CheckButton(
@@ -204,122 +529,92 @@ class SettingsDialog:
             "Enable for Tailscale without MagicDNS.\n"
             "Use Tailscale IP (e.g., 100.x.y.z) with port 8000."
         )
-        tls_box.pack_start(self.allow_insecure_http_check, False, False, 0)
+        tls_box.append(self.allow_insecure_http_check)
 
-        tls_frame.add(tls_box)
-        box.pack_start(tls_frame, False, False, 0)
+        tls_frame.set_child(tls_box)
+        connection_box.append(tls_frame)
 
-        # Help text
-        host_help_label = Gtk.Label()
-        host_help_label.set_markup(
-            '<span size="small" foreground="gray">'
-            "Enter ONLY the hostname (no http://, no port). Examples:\n"
-            "  - Local: localhost or 127.0.0.1\n"
-            "  - Remote: my-machine.tail1234.ts.net or 100.101.102.103"
-            "</span>"
+        connection_frame.set_child(connection_box)
+        content.append(connection_frame)
+
+        scrolled.set_child(content)
+        self._stack.add_titled_with_icon(
+            scrolled, "client", "Client", "audio-input-microphone-symbolic"
         )
-        host_help_label.set_line_wrap(True)
-        host_help_label.set_xalign(0)
-        box.pack_start(host_help_label, False, False, 0)
 
-        scrolled.add(box)
-        return scrolled
-
-    def _create_audio_tab(self) -> Gtk.ScrolledWindow:
-        """Create the Audio settings tab."""
-        # Create scrolled window
+    def _create_server_tab(self) -> None:
+        """Create the Server settings tab (open config.yaml + path info)."""
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_min_content_height(300)
+        scrolled.set_vexpand(True)
 
-        # Create content box
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
 
-        # Device selector
-        device_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        device_label = Gtk.Label(label="Input Device:")
-        device_label.set_xalign(0)
-        device_label.set_size_request(100, -1)
-        device_box.pack_start(device_label, False, False, 0)
+        # === Server Configuration Section ===
+        config_frame = Gtk.Frame()
+        config_frame.add_css_class("settings-section")
+        config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        config_box.set_margin_start(12)
+        config_box.set_margin_end(12)
+        config_box.set_margin_top(8)
+        config_box.set_margin_bottom(8)
 
-        self.device_combo = Gtk.ComboBoxText()
-        self.device_combo.set_hexpand(True)
-        device_box.pack_start(self.device_combo, True, True, 0)
+        config_label = Gtk.Label(label="Server Configuration")
+        config_label.add_css_class("settings-section-title")
+        config_label.set_halign(Gtk.Align.START)
+        config_box.append(config_label)
 
-        refresh_btn = Gtk.Button(label="Refresh")
-        refresh_btn.connect("clicked", self._on_refresh_devices)
-        device_box.pack_start(refresh_btn, False, False, 0)
-        box.pack_start(device_box, False, False, 0)
-
-        # Populate devices
-        self._refresh_devices()
-
-        # Sample rate info
-        sample_rate_label = Gtk.Label()
-        sample_rate_label.set_markup(
-            '<span size="small" foreground="gray">'
-            "Sample Rate: 16000 Hz (fixed for Whisper)"
-            "</span>"
+        # Description
+        desc_label = Gtk.Label(
+            label="Server settings are stored in config.yaml. Click below to open "
+            "it in your default text editor."
         )
-        sample_rate_label.set_xalign(0)
-        box.pack_start(sample_rate_label, False, False, 0)
+        desc_label.set_wrap(True)
+        desc_label.set_halign(Gtk.Align.START)
+        config_box.append(desc_label)
 
-        scrolled.add(box)
-        return scrolled
+        # Open config button
+        open_config_btn = Gtk.Button(label="Open config.yaml in Text Editor")
+        open_config_btn.add_css_class("suggested-action")
+        open_config_btn.set_halign(Gtk.Align.START)
+        open_config_btn.connect("clicked", lambda _: self._on_open_config_file())
+        config_box.append(open_config_btn)
 
-    def _create_behavior_tab(self) -> Gtk.ScrolledWindow:
-        """Create the Behavior settings tab."""
-        # Create scrolled window
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_min_content_height(300)
+        # Separator
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        separator.set_margin_top(8)
+        separator.set_margin_bottom(8)
+        config_box.append(separator)
 
-        # Create content box
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
+        # Path info
+        config_dir = get_config_dir()
+        config_path = config_dir / "config.yaml"
 
-        # === Clipboard Section ===
-        clipboard_frame = Gtk.Frame(label="Clipboard")
-        clipboard_frame.set_margin_bottom(8)
-        clipboard_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        clipboard_box.set_margin_start(8)
-        clipboard_box.set_margin_end(8)
-        clipboard_box.set_margin_top(8)
-        clipboard_box.set_margin_bottom(8)
-
-        # Auto-copy to clipboard
-        self.auto_copy_check = Gtk.CheckButton(
-            label="Automatically copy transcription to clipboard"
+        path_info_label = Gtk.Label(
+            label="You can also edit the config file directly at:"
         )
-        clipboard_box.pack_start(self.auto_copy_check, False, False, 0)
+        path_info_label.add_css_class("settings-help-text")
+        path_info_label.set_halign(Gtk.Align.START)
+        config_box.append(path_info_label)
 
-        clipboard_frame.add(clipboard_box)
-        box.pack_start(clipboard_frame, False, False, 0)
+        path_label = Gtk.Label(label=str(config_path))
+        path_label.add_css_class("settings-path-label")
+        path_label.set_selectable(True)
+        path_label.set_wrap(True)
+        path_label.set_halign(Gtk.Align.START)
+        config_box.append(path_label)
 
-        # === Notifications Section ===
-        notifications_frame = Gtk.Frame(label="Notifications")
-        notifications_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        notifications_box.set_margin_start(8)
-        notifications_box.set_margin_end(8)
-        notifications_box.set_margin_top(8)
-        notifications_box.set_margin_bottom(8)
+        config_frame.set_child(config_box)
+        content.append(config_frame)
 
-        # Notifications
-        self.notifications_check = Gtk.CheckButton(label="Show desktop notifications")
-        notifications_box.pack_start(self.notifications_check, False, False, 0)
-
-        notifications_frame.add(notifications_box)
-        box.pack_start(notifications_frame, False, False, 0)
-
-        scrolled.add(box)
-        return scrolled
+        scrolled.set_child(content)
+        self._stack.add_titled_with_icon(
+            scrolled, "server", "Server", "network-server-symbolic"
+        )
 
     def _on_toggle_token_visibility(self, button: Gtk.ToggleButton) -> None:
         """Toggle token visibility."""
@@ -327,12 +622,8 @@ class SettingsDialog:
             self.token_entry.set_visibility(button.get_active())
             button.set_label("Hide" if button.get_active() else "Show")
 
-    def _on_refresh_devices(self, button: Gtk.Button | None = None) -> None:
-        """Refresh the audio device list."""
-        self._refresh_devices()
-
     def _refresh_devices(self) -> None:
-        """Populate the device combo box."""
+        """Refresh the audio device list."""
         if not self.device_combo:
             return
 
@@ -347,9 +638,67 @@ class SettingsDialog:
         except Exception as e:
             logger.warning(f"Failed to list audio devices: {e}")
 
+    def _on_open_config_file(self) -> None:
+        """Open the server config.yaml file in default text editor."""
+        config_file = self._docker_manager._find_config_file()
+        success = self._docker_manager.open_config_file()
+
+        if not success:
+            # Show error dialog
+            if self.dialog:
+                error_dialog = Adw.MessageDialog.new(
+                    self.dialog,
+                    "Cannot Open Settings",
+                    "",
+                )
+
+                if not config_file:
+                    error_dialog.set_body(
+                        "The config.yaml file doesn't exist yet.\n\n"
+                        "To create it:\n"
+                        "1. Run first-time setup from terminal:\n"
+                        "   transcription-suite-setup\n\n"
+                        f"2. Or create it manually at:\n"
+                        f"   {self._docker_manager.config_dir}/config.yaml"
+                    )
+                else:
+                    error_dialog.set_body(
+                        f"The file exists but no editor was found.\n\n"
+                        f"Location: {config_file}\n\n"
+                        f"To edit manually, try:\n"
+                        f"• kate {config_file}\n"
+                        f"• gedit {config_file}\n"
+                        f"• nano {config_file}"
+                    )
+
+                error_dialog.add_response("ok", "OK")
+                error_dialog.present()
+
     def _load_values(self) -> None:
         """Load current configuration values into the dialog."""
-        # Connection tab
+        # App tab
+        if self.auto_copy_check:
+            self.auto_copy_check.set_active(
+                self.config.get("clipboard", "auto_copy", default=True)
+            )
+        if self.notifications_check:
+            self.notifications_check.set_active(
+                self.config.get("ui", "notifications", default=True)
+            )
+        if self.stop_server_check:
+            self.stop_server_check.set_active(
+                self.config.get("dashboard", "stop_server_on_quit", default=True)
+            )
+
+        # Client tab - Audio
+        if self.device_combo:
+            current_device = self.config.get("recording", "device_index")
+            if current_device is None:
+                self.device_combo.set_active_id("default")
+            else:
+                self.device_combo.set_active_id(str(current_device))
+
+        # Client tab - Connection
         if self.host_entry:
             self.host_entry.set_text(
                 self.config.get("server", "host", default="localhost")
@@ -382,27 +731,36 @@ class SettingsDialog:
                 self.config.get("server", "allow_insecure_http", default=False)
             )
 
-        # Audio tab - select current device
-        if self.device_combo:
-            current_device = self.config.get("recording", "device_index")
-            if current_device is None:
-                self.device_combo.set_active_id("default")
-            else:
-                self.device_combo.set_active_id(str(current_device))
-
-        # Behavior tab
+    def _save_and_close(self) -> None:
+        """Save settings and close the dialog."""
+        # App tab
         if self.auto_copy_check:
-            self.auto_copy_check.set_active(
-                self.config.get("clipboard", "auto_copy", default=True)
+            self.config.set(
+                "clipboard", "auto_copy", value=self.auto_copy_check.get_active()
             )
         if self.notifications_check:
-            self.notifications_check.set_active(
-                self.config.get("ui", "notifications", default=True)
+            self.config.set(
+                "ui", "notifications", value=self.notifications_check.get_active()
+            )
+        if self.stop_server_check:
+            self.config.set(
+                "dashboard",
+                "stop_server_on_quit",
+                value=self.stop_server_check.get_active(),
             )
 
-    def _save_values(self) -> None:
-        """Save settings from the dialog."""
-        # Connection tab
+        # Client tab - Audio
+        if self.device_combo:
+            device_id = self.device_combo.get_active_id()
+            if device_id == "default":
+                self.config.set("recording", "device_index", value=None)
+            else:
+                try:
+                    self.config.set("recording", "device_index", value=int(device_id))
+                except (ValueError, TypeError):
+                    self.config.set("recording", "device_index", value=None)
+
+        # Client tab - Connection
         if self.host_entry:
             self.config.set(
                 "server",
@@ -423,7 +781,9 @@ class SettingsDialog:
             )
         if self.remote_host_entry:
             self.config.set(
-                "server", "remote_host", value=self.remote_host_entry.get_text().strip()
+                "server",
+                "remote_host",
+                value=self.remote_host_entry.get_text().strip(),
             )
 
         # Advanced TLS options
@@ -438,7 +798,377 @@ class SettingsDialog:
                 value=self.allow_insecure_http_check.get_active(),
             )
 
-        # Audio tab
+        # Save to file
+        if self.config.save():
+            logger.info("Settings saved successfully")
+        else:
+            logger.error("Failed to save settings")
+
+        # Close dialog
+        if self.dialog:
+            if HAS_GTK4:
+                self.dialog.close()
+            elif HAS_GTK3:
+                self.dialog.destroy()
+
+    # =========================================================================
+    # GTK3 Fallback Implementation (for tray direct access)
+    # =========================================================================
+
+    def _show_gtk3(self) -> None:
+        """Show GTK3 settings dialog (fallback for tray)."""
+        self.dialog = Gtk.Dialog(
+            title="Settings",
+            flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+        )
+        if self.parent:
+            self.dialog.set_transient_for(self.parent)
+        self.dialog.set_default_size(500, 550)
+
+        # Set window icon from system theme
+        self.dialog.set_icon_name("preferences-system")
+
+        # Add buttons
+        self.dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.dialog.add_button("Save", Gtk.ResponseType.OK)
+
+        # Create notebook (tab container)
+        notebook = Gtk.Notebook()
+        content_area = self.dialog.get_content_area()
+        content_area.set_spacing(8)
+        content_area.set_margin_start(8)
+        content_area.set_margin_end(8)
+        content_area.set_margin_top(8)
+        content_area.set_margin_bottom(8)
+        content_area.pack_start(notebook, True, True, 0)
+
+        # Create tabs in order: App, Client, Server
+        notebook.append_page(self._create_app_tab_gtk3(), Gtk.Label(label="App"))
+        notebook.append_page(self._create_client_tab_gtk3(), Gtk.Label(label="Client"))
+        notebook.append_page(self._create_server_tab_gtk3(), Gtk.Label(label="Server"))
+
+        # Load current values
+        self._load_values()
+
+        # Show all widgets
+        self.dialog.show_all()
+
+        # Run dialog
+        response = self.dialog.run()
+        if response == Gtk.ResponseType.OK:
+            self._save_and_close_gtk3()
+
+        self.dialog.destroy()
+
+    def _create_app_tab_gtk3(self) -> Gtk.ScrolledWindow:
+        """Create the App settings tab for GTK3."""
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+
+        # === Clipboard Section ===
+        clipboard_frame = Gtk.Frame(label="Clipboard")
+        clipboard_frame.set_margin_bottom(8)
+        clipboard_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        clipboard_box.set_margin_start(8)
+        clipboard_box.set_margin_end(8)
+        clipboard_box.set_margin_top(8)
+        clipboard_box.set_margin_bottom(8)
+
+        self.auto_copy_check = Gtk.CheckButton(
+            label="Automatically copy transcription to clipboard"
+        )
+        clipboard_box.pack_start(self.auto_copy_check, False, False, 0)
+
+        clipboard_frame.add(clipboard_box)
+        box.pack_start(clipboard_frame, False, False, 0)
+
+        # === Notifications Section ===
+        notifications_frame = Gtk.Frame(label="Notifications")
+        notifications_frame.set_margin_bottom(8)
+        notifications_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        notifications_box.set_margin_start(8)
+        notifications_box.set_margin_end(8)
+        notifications_box.set_margin_top(8)
+        notifications_box.set_margin_bottom(8)
+
+        self.notifications_check = Gtk.CheckButton(label="Show desktop notifications")
+        notifications_box.pack_start(self.notifications_check, False, False, 0)
+
+        notifications_frame.add(notifications_box)
+        box.pack_start(notifications_frame, False, False, 0)
+
+        # === Docker Server Section ===
+        docker_frame = Gtk.Frame(label="Docker Server")
+        docker_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        docker_box.set_margin_start(8)
+        docker_box.set_margin_end(8)
+        docker_box.set_margin_top(8)
+        docker_box.set_margin_bottom(8)
+
+        self.stop_server_check = Gtk.CheckButton(
+            label="Stop server when quitting dashboard"
+        )
+        docker_box.pack_start(self.stop_server_check, False, False, 0)
+
+        docker_frame.add(docker_box)
+        box.pack_start(docker_frame, False, False, 0)
+
+        scrolled.add(box)
+        return scrolled
+
+    def _create_client_tab_gtk3(self) -> Gtk.ScrolledWindow:
+        """Create the Client settings tab for GTK3."""
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+
+        # === Audio Section ===
+        audio_frame = Gtk.Frame(label="Audio")
+        audio_frame.set_margin_bottom(8)
+        audio_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        audio_box.set_margin_start(8)
+        audio_box.set_margin_end(8)
+        audio_box.set_margin_top(8)
+        audio_box.set_margin_bottom(8)
+
+        # Device selector row
+        device_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        device_label = Gtk.Label(label="Input Device:")
+        device_label.set_xalign(0)
+        device_label.set_size_request(100, -1)
+        device_row.pack_start(device_label, False, False, 0)
+
+        self.device_combo = Gtk.ComboBoxText()
+        self.device_combo.set_hexpand(True)
+        device_row.pack_start(self.device_combo, True, True, 0)
+
+        refresh_btn = Gtk.Button(label="Refresh")
+        refresh_btn.connect("clicked", lambda _: self._refresh_devices_gtk3())
+        device_row.pack_start(refresh_btn, False, False, 0)
+
+        audio_box.pack_start(device_row, False, False, 0)
+
+        # Sample rate info
+        sample_rate_label = Gtk.Label()
+        sample_rate_label.set_markup(
+            '<span size="small" foreground="gray">'
+            "Sample Rate: 16000 Hz (fixed for Whisper)"
+            "</span>"
+        )
+        sample_rate_label.set_xalign(0)
+        audio_box.pack_start(sample_rate_label, False, False, 0)
+
+        audio_frame.add(audio_box)
+        box.pack_start(audio_frame, False, False, 0)
+
+        # Populate devices
+        self._refresh_devices_gtk3()
+
+        # === Connection Section ===
+        connection_frame = Gtk.Frame(label="Connection")
+        connection_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        connection_box.set_margin_start(8)
+        connection_box.set_margin_end(8)
+        connection_box.set_margin_top(8)
+        connection_box.set_margin_bottom(8)
+
+        # Local host
+        host_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        host_label = Gtk.Label(label="Local Host:")
+        host_label.set_xalign(0)
+        host_label.set_size_request(100, -1)
+        host_row.pack_start(host_label, False, False, 0)
+        self.host_entry = Gtk.Entry()
+        self.host_entry.set_placeholder_text("localhost")
+        host_row.pack_start(self.host_entry, True, True, 0)
+        connection_box.pack_start(host_row, False, False, 0)
+
+        # Remote host
+        remote_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        remote_label = Gtk.Label(label="Remote Host:")
+        remote_label.set_xalign(0)
+        remote_label.set_size_request(100, -1)
+        remote_row.pack_start(remote_label, False, False, 0)
+        self.remote_host_entry = Gtk.Entry()
+        self.remote_host_entry.set_placeholder_text("e.g., my-desktop.tail1234.ts.net")
+        remote_row.pack_start(self.remote_host_entry, True, True, 0)
+        connection_box.pack_start(remote_row, False, False, 0)
+
+        # Use remote checkbox
+        self.use_remote_check = Gtk.CheckButton(
+            label="Use remote server instead of local"
+        )
+        connection_box.pack_start(self.use_remote_check, False, False, 0)
+
+        # Token
+        token_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        token_label = Gtk.Label(label="Auth Token:")
+        token_label.set_xalign(0)
+        token_label.set_size_request(100, -1)
+        token_row.pack_start(token_label, False, False, 0)
+        self.token_entry = Gtk.Entry()
+        self.token_entry.set_visibility(False)
+        self.token_entry.set_placeholder_text("Authentication token")
+        token_row.pack_start(self.token_entry, True, True, 0)
+        self.show_token_btn = Gtk.ToggleButton(label="Show")
+        self.show_token_btn.connect("toggled", self._on_toggle_token_visibility_gtk3)
+        token_row.pack_start(self.show_token_btn, False, False, 0)
+        connection_box.pack_start(token_row, False, False, 0)
+
+        # Port
+        port_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        port_label = Gtk.Label(label="Port:")
+        port_label.set_xalign(0)
+        port_label.set_size_request(100, -1)
+        port_row.pack_start(port_label, False, False, 0)
+        adjustment = Gtk.Adjustment(value=8000, lower=1, upper=65535, step_increment=1)
+        self.port_spin = Gtk.SpinButton()
+        self.port_spin.set_adjustment(adjustment)
+        self.port_spin.set_numeric(True)
+        port_row.pack_start(self.port_spin, True, True, 0)
+        connection_box.pack_start(port_row, False, False, 0)
+
+        # HTTPS checkbox
+        self.https_check = Gtk.CheckButton(label="Use HTTPS")
+        connection_box.pack_start(self.https_check, False, False, 0)
+
+        # TLS Options frame
+        tls_frame = Gtk.Frame(label="Advanced TLS Options")
+        tls_frame.set_margin_top(8)
+        tls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        tls_box.set_margin_start(8)
+        tls_box.set_margin_end(8)
+        tls_box.set_margin_top(8)
+        tls_box.set_margin_bottom(8)
+
+        self.tls_verify_check = Gtk.CheckButton(label="Verify TLS certificates")
+        self.tls_verify_check.set_tooltip_text(
+            "Disable for self-signed certificates.\nConnection is still encrypted."
+        )
+        tls_box.pack_start(self.tls_verify_check, False, False, 0)
+
+        self.allow_insecure_http_check = Gtk.CheckButton(
+            label="Allow HTTP to remote hosts (WireGuard encrypts traffic)"
+        )
+        self.allow_insecure_http_check.set_tooltip_text(
+            "Enable for Tailscale without MagicDNS.\n"
+            "Use Tailscale IP (e.g., 100.x.y.z) with port 8000."
+        )
+        tls_box.pack_start(self.allow_insecure_http_check, False, False, 0)
+
+        tls_frame.add(tls_box)
+        connection_box.pack_start(tls_frame, False, False, 0)
+
+        connection_frame.add(connection_box)
+        box.pack_start(connection_frame, False, False, 0)
+
+        scrolled.add(box)
+        return scrolled
+
+    def _create_server_tab_gtk3(self) -> Gtk.ScrolledWindow:
+        """Create the Server settings tab for GTK3."""
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(16)
+        box.set_margin_end(16)
+        box.set_margin_top(16)
+        box.set_margin_bottom(16)
+
+        # === Server Configuration Section ===
+        config_frame = Gtk.Frame(label="Server Configuration")
+        config_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        config_box.set_margin_start(8)
+        config_box.set_margin_end(8)
+        config_box.set_margin_top(8)
+        config_box.set_margin_bottom(8)
+
+        # Description
+        desc_label = Gtk.Label(
+            label="Server settings are stored in config.yaml. Click below to open "
+            "it in your default text editor."
+        )
+        desc_label.set_line_wrap(True)
+        desc_label.set_xalign(0)
+        config_box.pack_start(desc_label, False, False, 0)
+
+        # Open config button
+        open_config_btn = Gtk.Button(label="Open config.yaml in Text Editor")
+        open_config_btn.connect("clicked", lambda _: self._on_open_config_file())
+        config_box.pack_start(open_config_btn, False, False, 0)
+
+        # Path info
+        config_dir = get_config_dir()
+        config_path = config_dir / "config.yaml"
+
+        path_info_label = Gtk.Label()
+        path_info_label.set_markup(
+            f'<span size="small" foreground="gray">Config path: {config_path}</span>'
+        )
+        path_info_label.set_line_wrap(True)
+        path_info_label.set_xalign(0)
+        path_info_label.set_selectable(True)
+        config_box.pack_start(path_info_label, False, False, 0)
+
+        config_frame.add(config_box)
+        box.pack_start(config_frame, False, False, 0)
+
+        scrolled.add(box)
+        return scrolled
+
+    def _on_toggle_token_visibility_gtk3(self, button) -> None:
+        """Toggle token visibility (GTK3)."""
+        if self.token_entry:
+            self.token_entry.set_visibility(button.get_active())
+            button.set_label("Hide" if button.get_active() else "Show")
+
+    def _refresh_devices_gtk3(self) -> None:
+        """Refresh the audio device list (GTK3)."""
+        if not self.device_combo:
+            return
+
+        self.device_combo.remove_all()
+        self.device_combo.append("default", "Default Device")
+
+        try:
+            devices = AudioRecorder.list_devices()
+            for device in devices:
+                name = device.get("name", f"Device {device['index']}")
+                self.device_combo.append(str(device["index"]), name)
+        except Exception as e:
+            logger.warning(f"Failed to list audio devices: {e}")
+
+    def _save_and_close_gtk3(self) -> None:
+        """Save settings (GTK3 version - dialog destroyed by caller)."""
+        # App tab
+        if self.auto_copy_check:
+            self.config.set(
+                "clipboard", "auto_copy", value=self.auto_copy_check.get_active()
+            )
+        if self.notifications_check:
+            self.config.set(
+                "ui", "notifications", value=self.notifications_check.get_active()
+            )
+        if self.stop_server_check:
+            self.config.set(
+                "dashboard",
+                "stop_server_on_quit",
+                value=self.stop_server_check.get_active(),
+            )
+
+        # Client tab - Audio
         if self.device_combo:
             device_id = self.device_combo.get_active_id()
             if device_id == "default":
@@ -449,14 +1179,42 @@ class SettingsDialog:
                 except (ValueError, TypeError):
                     self.config.set("recording", "device_index", value=None)
 
-        # Behavior tab
-        if self.auto_copy_check:
+        # Client tab - Connection
+        if self.host_entry:
             self.config.set(
-                "clipboard", "auto_copy", value=self.auto_copy_check.get_active()
+                "server",
+                "host",
+                value=self.host_entry.get_text().strip() or "localhost",
             )
-        if self.notifications_check:
+        if self.port_spin:
+            self.config.set("server", "port", value=int(self.port_spin.get_value()))
+        if self.https_check:
+            self.config.set("server", "use_https", value=self.https_check.get_active())
+        if self.token_entry:
             self.config.set(
-                "ui", "notifications", value=self.notifications_check.get_active()
+                "server", "token", value=self.token_entry.get_text().strip()
+            )
+        if self.use_remote_check:
+            self.config.set(
+                "server", "use_remote", value=self.use_remote_check.get_active()
+            )
+        if self.remote_host_entry:
+            self.config.set(
+                "server",
+                "remote_host",
+                value=self.remote_host_entry.get_text().strip(),
+            )
+
+        # Advanced TLS options
+        if self.tls_verify_check:
+            self.config.set(
+                "server", "tls_verify", value=self.tls_verify_check.get_active()
+            )
+        if self.allow_insecure_http_check:
+            self.config.set(
+                "server",
+                "allow_insecure_http",
+                value=self.allow_insecure_http_check.get_active(),
             )
 
         # Save to file

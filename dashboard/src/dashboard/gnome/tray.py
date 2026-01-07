@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from dashboard.common.docker_manager import DockerManager, ServerStatus
@@ -24,6 +25,38 @@ if TYPE_CHECKING:
     from dashboard.common.config import ClientConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _get_assets_path() -> Path:
+    """Resolve the assets directory across dev, AppImage, and bundled builds."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        return bundle_dir / "build" / "assets"
+
+    if "APPDIR" in os.environ:
+        appdir = Path(os.environ["APPDIR"])
+        candidate = appdir / "usr" / "share" / "transcriptionsuite" / "assets"
+        if candidate.exists():
+            return candidate
+
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "README.md").exists():
+            return parent / "build" / "assets"
+    return current.parent.parent.parent.parent.parent / "build" / "assets"
+
+
+def _resolve_logo_icon() -> tuple[Optional[str], Optional[Path]]:
+    try:
+        assets_path = _get_assets_path()
+        logo_path = assets_path / "logo.png"
+        if logo_path.exists():
+            return "logo", logo_path
+        logger.warning(f"App logo not found at {logo_path}")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.debug(f"Failed to resolve tray logo: {exc}")
+    return None, None
+
 
 # Try to import GTK3 for tray (AppIndicator3 requires GTK3)
 HAS_GTK = False
@@ -73,12 +106,21 @@ class GtkTray(ServerControlMixin, AbstractTray):
         super().__init__(app_name)
         self.config = config
 
+        self._logo_icon_name: Optional[str]
+        self._logo_icon_path: Optional[Path]
+        self._logo_icon_name, self._logo_icon_path = _resolve_logo_icon()
+
+        indicator_icon = self._logo_icon_name or self.ICON_NAMES[TrayState.DISCONNECTED]
+
         # Create AppIndicator
         self.indicator = AppIndicator3.Indicator.new(
             "transcription-suite",
-            self.ICON_NAMES[TrayState.DISCONNECTED],
+            indicator_icon,
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
+        if self._logo_icon_path and self._logo_icon_name:
+            self.indicator.set_icon_theme_path(str(self._logo_icon_path.parent))
+            self.indicator.set_icon(self._logo_icon_name)
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         self.indicator.set_title(app_name)
 
@@ -172,8 +214,11 @@ class GtkTray(ServerControlMixin, AbstractTray):
     def _do_set_state(self, state: TrayState) -> bool:
         """Actually update the state (called on main thread)."""
         self.state = state
-        icon_name = self.ICON_NAMES.get(state, "dialog-question-symbolic")
-        self.indicator.set_icon(icon_name)
+        if self._logo_icon_name:
+            self.indicator.set_icon(self._logo_icon_name)
+        else:
+            icon_name = self.ICON_NAMES.get(state, "dialog-question-symbolic")
+            self.indicator.set_icon(icon_name)
 
         # Update menu sensitivity
         if self.start_item and self.stop_item:

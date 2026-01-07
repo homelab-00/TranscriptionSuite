@@ -589,10 +589,10 @@ class DashboardWindow(QMainWindow):
         self.setWindowTitle("TranscriptionSuite")
         self.setMinimumSize(700, 500)
 
-        # Set window icon
-        icon = QIcon.fromTheme("audio-input-microphone")
-        if not icon.isNull():
-            self.setWindowIcon(icon)
+        # Set window icon from app logo
+        logo_path = _get_assets_path() / "logo.png"
+        if logo_path.exists():
+            self.setWindowIcon(QIcon(str(logo_path)))
 
         # Central widget
         central = QWidget()

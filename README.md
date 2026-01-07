@@ -367,19 +367,19 @@ You also need the [AppIndicator extension](https://extensions.gnome.org/extensio
 **Ubuntu 24.04 (GNOME):**
 ```bash
 sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio \
-    python3-numpy python3-aiohttp gir1.2-adw-1 gir1.2-gtk-4.0
+    python3-numpy python3-aiohttp gir1.2-adw-1 gir1.2-gtk-4.0 gir1.2-gtksource-5
 ```
 
 **Fedora (GNOME):**
 ```bash
 sudo dnf install python3 python3-gobject gtk3 libappindicator-gtk3 python3-pyaudio \
-    python3-numpy python3-aiohttp libadwaita gtk4
+    python3-numpy python3-aiohttp libadwaita gtk4 gtksourceview5
 ```
 
 **Arch Linux (GNOME):**
 ```bash
 sudo pacman -S python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
-    python-numpy python-aiohttp libadwaita gtk4
+    python-numpy python-aiohttp libadwaita gtk4 gtksourceview5
 ```
 
 ### 6.3 KDE Client Dependencies
