@@ -25,7 +25,7 @@ dependencies = [
     "uvicorn[standard]>=0.40.0",
     "python-multipart>=0.0.21",
     "pydantic>=2.12.5",
-    "aiohttp>=3.13.2",
+    "aiohttp>=3.13.3",
     "httpx>=0.28.1",
     "websockets>=15.0.1",
 

@@ -160,7 +160,7 @@ def main() -> int:
 
         wizard = SetupWizard()
         result = wizard.run_setup(
-            pull_image=True,
+            pull_image=False,
             progress_callback=lambda msg: print(f"  {msg}"),
         )
 
