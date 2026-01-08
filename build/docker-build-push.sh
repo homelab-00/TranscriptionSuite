@@ -7,15 +7,14 @@
 # Prerequisites:
 #   1. Docker installed and running
 #   2. Logged into GHCR: docker login ghcr.io -u <username>
-#   3. Run from project root directory
 #
 # Usage:
-#   ./build/docker-build-push.sh [TAG]
+#   ./docker-build-push.sh [TAG]
 #
 # Examples:
-#   ./build/docker-build-push.sh           # Builds and pushes as 'latest'
-#   ./build/docker-build-push.sh v0.3.0    # Builds and pushes as 'v0.3.0' and 'latest'
-#   ./build/docker-build-push.sh dev       # Builds and pushes as 'dev'
+#   ./docker-build-push.sh           # Builds and pushes as 'latest'
+#   ./docker-build-push.sh v0.3.0    # Builds and pushes as 'v0.3.0' and 'latest'
+#   ./docker-build-push.sh dev       # Builds and pushes as 'dev'
 
 set -euo pipefail
 

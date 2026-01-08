@@ -138,6 +138,10 @@ class DockerManager:
                         return ServerStatus.STOPPED
 
             return ServerStatus.NOT_FOUND
+        except FileNotFoundError:
+            # Docker not installed - log at debug level to avoid spam
+            logger.debug("Docker command not found (not installed)")
+            return ServerStatus.NOT_FOUND
         except Exception as e:
             logger.error(f"Failed to get server status: {e}")
             return ServerStatus.ERROR

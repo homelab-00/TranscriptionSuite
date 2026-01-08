@@ -205,6 +205,11 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             # Middle-click: Stop recording and transcribe (if recording)
             if self.state == TrayState.RECORDING:
                 self._trigger_callback(TrayAction.STOP_RECORDING)
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            # Double-click: Also stop recording (fallback for Windows where
+            # middle-click may not work on system tray icons)
+            if self.state == TrayState.RECORDING:
+                self._trigger_callback(TrayAction.STOP_RECORDING)
 
     def _create_icon(self, color: tuple[int, int, int]) -> QIcon:
         """Create a colored circle icon."""

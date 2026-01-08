@@ -553,20 +553,20 @@ class GtkTray(ServerControlMixin, AbstractTray):
         """
         Actually copy to clipboard (called on main thread).
 
+        On Wayland, we prefer wl-copy as it's more reliable than GTK3's clipboard.
+        GTK3's Clipboard.store() doesn't persist well when using AppIndicator3.
+
         Args:
             text: Text to copy
 
         Returns:
             False to not repeat the idle callback
         """
-        try:
-            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(text, -1)
-            clipboard.store()
-            logger.debug(f"Copied to clipboard via GTK: {len(text)} characters")
-        except Exception as e:
-            logger.warning(f"GTK clipboard copy failed: {e}")
-            # Try wl-copy fallback on Wayland
+        # Check if running on Wayland
+        is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland"
+
+        if is_wayland:
+            # On Wayland, try wl-copy first as it's more reliable
             try:
                 subprocess.run(
                     ["wl-copy"],
@@ -576,12 +576,42 @@ class GtkTray(ServerControlMixin, AbstractTray):
                     timeout=2,
                 )
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
-            except (
-                FileNotFoundError,
-                subprocess.TimeoutExpired,
-                subprocess.CalledProcessError,
-            ) as wl_err:
-                logger.error(f"wl-copy fallback also failed: {wl_err}")
+                return False
+            except FileNotFoundError:
+                logger.debug("wl-copy not found, falling back to GTK clipboard")
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+                logger.warning(f"wl-copy failed: {e}, falling back to GTK clipboard")
+
+        # Try GTK clipboard (works on X11, may work on some Wayland setups)
+        try:
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_text(text, -1)
+            clipboard.store()
+            logger.debug(f"Copied to clipboard via GTK: {len(text)} characters")
+        except Exception as e:
+            logger.warning(f"GTK clipboard copy failed: {e}")
+            # Last resort: try xclip for X11
+            if not is_wayland:
+                try:
+                    subprocess.run(
+                        ["xclip", "-selection", "clipboard"],
+                        input=text.encode("utf-8"),
+                        check=True,
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    logger.info(
+                        f"Copied to clipboard via xclip: {len(text)} characters"
+                    )
+                except (
+                    FileNotFoundError,
+                    subprocess.TimeoutExpired,
+                    subprocess.CalledProcessError,
+                ) as xclip_err:
+                    logger.error(
+                        f"All clipboard methods failed. xclip error: {xclip_err}"
+                    )
+
         return False
 
     # Server control methods are provided by ServerControlMixin

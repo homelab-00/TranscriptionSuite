@@ -43,23 +43,28 @@ class IconLoader:
     # - theme_names: List of FreeDesktop icon theme names to try (Linux)
     # - standard_pixmap: QStyle.StandardPixmap fallback (all platforms)
     # - bundled_name: Optional bundled asset filename (if no standard pixmap fits)
+    #
+    # NOTE: Some icons have no good StandardPixmap equivalent on Windows.
+    # For these, we set standard_pixmap to None and the UI should handle
+    # missing icons gracefully (e.g., by showing text labels).
     ICON_MAP: dict[str, dict] = {
-        # Navigation icons
+        # Navigation icons - these have no good Windows equivalents
+        # UI should show text labels when icons are null
         "home": {
             "theme_names": ["go-home", "user-home"],
-            "standard_pixmap": QStyle.StandardPixmap.SP_DirHomeIcon,
+            "standard_pixmap": None,  # No good Windows equivalent
         },
         "server": {
             "theme_names": ["server-database", "network-server", "computer"],
-            "standard_pixmap": QStyle.StandardPixmap.SP_ComputerIcon,
+            "standard_pixmap": QStyle.StandardPixmap.SP_DriveNetIcon,
         },
         "client": {
             "theme_names": ["audio-input-microphone", "microphone"],
-            "standard_pixmap": QStyle.StandardPixmap.SP_MediaVolume,
+            "standard_pixmap": None,  # No good Windows equivalent
         },
         "menu": {
             "theme_names": ["application-menu", "open-menu-symbolic", "view-more"],
-            "standard_pixmap": QStyle.StandardPixmap.SP_TitleBarMenuButton,
+            "standard_pixmap": None,  # Use hamburger text ☰ instead
         },
         # Action icons
         "settings": {

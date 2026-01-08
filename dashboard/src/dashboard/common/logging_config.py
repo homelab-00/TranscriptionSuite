@@ -75,14 +75,20 @@ def setup_logging(
         root_logger.addHandler(console_handler)
 
     # File handler (shared log file)
+    try:
+        log_file = get_log_file()
+
+        # Wipe log file on startup for clean logs each session
+        # Do this BEFORE checking for existing handler to ensure it happens
+        if wipe_on_startup and log_file.exists():
+            log_file.unlink()
+
+    except Exception as e:
+        print(f"Warning: Could not wipe log file: {e}")
+
     if not has_file_handler:
         try:
             log_file = get_log_file()
-
-            # Wipe log file on startup for clean logs each session
-            # Only the first caller should wipe
-            if wipe_on_startup and log_file.exists():
-                log_file.unlink()
 
             # Simple file handler
             file_handler = logging.FileHandler(
