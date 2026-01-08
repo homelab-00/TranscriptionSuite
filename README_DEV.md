@@ -383,7 +383,7 @@ uv sync    # Installs PyInstaller, build, ruff, pytest
 **Target system dependencies:**
 ```bash
 # Arch Linux
-sudo pacman -S python gtk3 libappindicator-gtk3 python-gobject python-numpy python-aiohttp gtksourceview5
+sudo pacman -S --needed python gtk3 libappindicator-gtk3 python-gobject python-numpy python-aiohttp gtksourceview5
 
 # Ubuntu/Debian
 sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio python3-numpy python3-aiohttp gir1.2-gtksource-5

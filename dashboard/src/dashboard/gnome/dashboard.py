@@ -499,9 +499,9 @@ class DashboardWindow(_get_dashboard_base()):
         self._docker_manager = DockerManager()
 
         # Callbacks for client operations
-        self._on_start_client = on_start_client
-        self._on_stop_client = on_stop_client
-        self._on_show_settings = on_show_settings
+        self._start_client_callback = on_start_client
+        self._stop_client_callback = on_stop_client
+        self._show_settings_callback = on_show_settings
 
         # View history for navigation
         self._view_history: list[View] = []
@@ -1770,8 +1770,8 @@ class DashboardWindow(_get_dashboard_base()):
         self.config.set("server", "port", value=8000)
         self.config.save()
 
-        if self._on_start_client:
-            self._on_start_client(False)
+        if self._start_client_callback:
+            self._start_client_callback(False)
         self.set_client_running(True)
 
     def _on_start_client_remote(self) -> None:
@@ -1781,14 +1781,14 @@ class DashboardWindow(_get_dashboard_base()):
         self.config.set("server", "port", value=8443)
         self.config.save()
 
-        if self._on_start_client:
-            self._on_start_client(True)
+        if self._start_client_callback:
+            self._start_client_callback(True)
         self.set_client_running(True)
 
     def _on_stop_client(self) -> None:
         """Stop the client."""
-        if self._on_stop_client:
-            self._on_stop_client()
+        if self._stop_client_callback:
+            self._stop_client_callback()
         self.set_client_running(False)
 
     def _toggle_client_logs(self) -> None:
@@ -1928,8 +1928,8 @@ class DashboardWindow(_get_dashboard_base()):
 
     def _trigger_show_settings(self) -> None:
         """Trigger the settings callback if set."""
-        if self._on_show_settings:
-            self._on_show_settings()
+        if self._show_settings_callback:
+            self._show_settings_callback()
 
     def _show_readme(self, dev: bool = False) -> None:
         """Show README in a dialog with plain text display.

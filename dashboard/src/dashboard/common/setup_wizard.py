@@ -230,11 +230,19 @@ class SetupWizard:
         timeout: int = 300,
     ) -> subprocess.CompletedProcess:
         """Run a command and return the result."""
+        # Hide console window on Windows
+        startupinfo = None
+        if self.system == "Windows":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
         return subprocess.run(
             args,
             capture_output=capture_output,
             text=True,
             timeout=timeout,
+            startupinfo=startupinfo,
         )
 
     def check_docker(self) -> tuple[bool, str]:

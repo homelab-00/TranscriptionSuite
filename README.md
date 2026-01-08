@@ -92,7 +92,7 @@ GPU acceleration.
 sudo apt install git
 
 # Arch Linux
-sudo pacman -S git
+sudo pacman -S --needed git
 ```
 
 **Windows:**
@@ -378,7 +378,7 @@ sudo dnf install python3 python3-gobject gtk3 libappindicator-gtk3 python3-pyaud
 
 **Arch Linux (GNOME):**
 ```bash
-sudo pacman -S python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
+sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
     python-numpy python-aiohttp libadwaita gtk4 gtksourceview5
 ```
 
@@ -388,7 +388,7 @@ The KDE client is a self-contained AppImage on Linux and a standalone executable
 
 **Arch Linux (KDE Plasma) - from source only:**
 ```bash
-sudo pacman -S python python-pyqt6 python-pyaudio python-numpy python-aiohttp
+sudo pacman -S --needed python python-pyqt6 python-pyaudio python-numpy python-aiohttp
 ```
 
 **Fedora (KDE Plasma) - from source only:**
@@ -507,11 +507,14 @@ Check Docker logs:
 docker compose logs -f
 ```
 
+Alternatively install `lazydocker`, it's an excellent cli tool to manage docker.
+*(Then simply run it by running `lazydocker` in your terminal. Select your container on the left and you'll see its logs on the right.)*
+
 ### 9.2 GPU Not Detected
 
 Verify NVIDIA Container Toolkit is installed:
 ```bash
-docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 nvidia-smi
 ```
 
 ### 9.3 GNOME Tray Icon Not Showing

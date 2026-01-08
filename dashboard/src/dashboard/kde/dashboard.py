@@ -38,11 +38,13 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedWidget,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
 from dashboard.common.docker_manager import DockerManager, ServerMode, ServerStatus
+from dashboard.common.icon_loader import IconLoader
 
 if TYPE_CHECKING:
     from dashboard.common.config import ClientConfig
@@ -561,6 +563,9 @@ class DashboardWindow(QMainWindow):
         self.config = config
         self._docker_manager = DockerManager()
 
+        # Initialize icon loader for cross-platform icon support
+        self._icon_loader = IconLoader(self, assets_path=_get_assets_path())
+
         # View history for back navigation
         self._view_history: list[View] = []
         self._current_view: View = View.WELCOME
@@ -632,7 +637,7 @@ class DashboardWindow(QMainWindow):
         # Home button with icon
         self._nav_home_btn = QPushButton("  Home")
         self._nav_home_btn.setObjectName("navButton")
-        home_icon = QIcon.fromTheme("go-home")
+        home_icon = self._icon_loader.get_icon("home")
         if not home_icon.isNull():
             self._nav_home_btn.setIcon(home_icon)
         self._nav_home_btn.clicked.connect(self._go_home)
@@ -641,9 +646,7 @@ class DashboardWindow(QMainWindow):
         # Server button with icon
         self._nav_server_btn = QPushButton("  Server")
         self._nav_server_btn.setObjectName("navButton")
-        server_icon = QIcon.fromTheme("server-database")
-        if server_icon.isNull():
-            server_icon = QIcon.fromTheme("network-server")
+        server_icon = self._icon_loader.get_icon("server")
         if not server_icon.isNull():
             self._nav_server_btn.setIcon(server_icon)
         self._nav_server_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
@@ -652,7 +655,7 @@ class DashboardWindow(QMainWindow):
         # Client button with icon
         self._nav_client_btn = QPushButton("  Client")
         self._nav_client_btn.setObjectName("navButton")
-        client_icon = QIcon.fromTheme("audio-input-microphone")
+        client_icon = self._icon_loader.get_icon("client")
         if not client_icon.isNull():
             self._nav_client_btn.setIcon(client_icon)
         self._nav_client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
@@ -663,9 +666,7 @@ class DashboardWindow(QMainWindow):
         # Hamburger menu button (☰)
         self._nav_menu_btn = QPushButton("  ☰")
         self._nav_menu_btn.setObjectName("navButton")
-        menu_icon = QIcon.fromTheme("application-menu")
-        if menu_icon.isNull():
-            menu_icon = QIcon.fromTheme("open-menu-symbolic")
+        menu_icon = self._icon_loader.get_icon("menu")
         if not menu_icon.isNull():
             self._nav_menu_btn.setIcon(menu_icon)
             self._nav_menu_btn.setText("")  # Remove text if icon is available
@@ -762,9 +763,7 @@ class DashboardWindow(QMainWindow):
         server_btn.setObjectName("welcomeButton")
         server_btn.setProperty("accent", "server")
         server_btn.setFixedSize(180, 90)
-        server_icon = QIcon.fromTheme("server-database")
-        if server_icon.isNull():
-            server_icon = QIcon.fromTheme("network-server")
+        server_icon = self._icon_loader.get_icon("server")
         if not server_icon.isNull():
             server_btn.setIcon(server_icon)
             server_btn.setIconSize(server_btn.size() * 0.3)  # 30% of button size
@@ -776,7 +775,7 @@ class DashboardWindow(QMainWindow):
         client_btn.setObjectName("welcomeButton")
         client_btn.setProperty("accent", "client")
         client_btn.setFixedSize(180, 90)
-        client_icon = QIcon.fromTheme("audio-input-microphone")
+        client_icon = self._icon_loader.get_icon("client")
         if not client_icon.isNull():
             client_btn.setIcon(client_icon)
             client_btn.setIconSize(client_btn.size() * 0.3)  # 30% of button size
@@ -1136,11 +1135,7 @@ class DashboardWindow(QMainWindow):
         # Show logs button (centered)
         self._show_server_logs_btn = QPushButton("Show Logs")
         self._show_server_logs_btn.setObjectName("secondaryButton")
-        logs_icon = QIcon.fromTheme("text-x-log")
-        if logs_icon.isNull():
-            logs_icon = QIcon.fromTheme("text-x-generic")
-        if logs_icon.isNull():
-            logs_icon = QIcon.fromTheme("utilities-log-viewer")
+        logs_icon = self._icon_loader.get_icon("logs")
         if not logs_icon.isNull():
             self._show_server_logs_btn.setIcon(logs_icon)
         self._show_server_logs_btn.clicked.connect(self._toggle_server_logs)
@@ -1255,11 +1250,7 @@ class DashboardWindow(QMainWindow):
         # Show logs button (centered)
         self._show_client_logs_btn = QPushButton("Show Logs")
         self._show_client_logs_btn.setObjectName("secondaryButton")
-        logs_icon = QIcon.fromTheme("text-x-log")
-        if logs_icon.isNull():
-            logs_icon = QIcon.fromTheme("text-x-generic")
-        if logs_icon.isNull():
-            logs_icon = QIcon.fromTheme("utilities-log-viewer")
+        logs_icon = self._icon_loader.get_icon("logs")
         if not logs_icon.isNull():
             self._show_client_logs_btn.setIcon(logs_icon)
         self._show_client_logs_btn.clicked.connect(self._toggle_client_logs)
@@ -2526,43 +2517,31 @@ class DashboardWindow(QMainWindow):
         """)
 
         # Settings action with white icon (symbolic only for monochrome appearance)
-        settings_icon = QIcon.fromTheme("configure-symbolic")
-        if settings_icon.isNull():
-            settings_icon = QIcon.fromTheme("settings-configure-symbolic")
-        if settings_icon.isNull():
-            settings_icon = QIcon.fromTheme("preferences-system-symbolic")
+        settings_icon = self._icon_loader.get_icon("settings")
         settings_action = menu.addAction(settings_icon, "Settings")
         settings_action.triggered.connect(self._on_show_settings)
 
         menu.addSeparator()
 
         # Help submenu
-        help_icon = QIcon.fromTheme("help-contents")
-        if help_icon.isNull():
-            help_icon = QIcon.fromTheme("help-about")
+        help_icon = self._icon_loader.get_icon("help")
         help_menu = menu.addMenu(help_icon, "Help")
         help_menu.setStyleSheet(menu.styleSheet())
 
         # User Guide
-        user_guide_icon = QIcon.fromTheme("x-office-document")
-        if user_guide_icon.isNull():
-            user_guide_icon = QIcon.fromTheme("document-properties")
+        user_guide_icon = self._icon_loader.get_icon("document")
         readme_action = help_menu.addAction(user_guide_icon, "User Guide (README)")
         readme_action.triggered.connect(lambda: self._show_readme_viewer(dev=False))
 
         # Developer Guide
-        dev_guide_icon = QIcon.fromTheme("text-x-script")
-        if dev_guide_icon.isNull():
-            dev_guide_icon = QIcon.fromTheme("text-x-source")
+        dev_guide_icon = self._icon_loader.get_icon("script")
         readme_dev_action = help_menu.addAction(
             dev_guide_icon, "Developer Guide (README_DEV)"
         )
         readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
 
         # About action
-        about_icon = QIcon.fromTheme("help-about")
-        if about_icon.isNull():
-            about_icon = QIcon.fromTheme("dialog-information")
+        about_icon = self._icon_loader.get_icon("about")
         about_action = menu.addAction(about_icon, "About")
         about_action.triggered.connect(self._show_about_dialog)
 

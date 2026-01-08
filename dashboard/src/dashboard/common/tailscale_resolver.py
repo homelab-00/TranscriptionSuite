@@ -19,6 +19,8 @@ import asyncio
 import json
 import logging
 import re
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +59,20 @@ class TailscaleResolver:
             Parsed JSON dict or None if tailscale CLI not available/failed
         """
         try:
+            # Hide console window on Windows
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
             proc = await asyncio.create_subprocess_exec(
                 "tailscale",
                 "status",
                 "--json",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                startupinfo=startupinfo,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
 

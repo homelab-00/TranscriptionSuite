@@ -81,6 +81,13 @@ class DockerManager:
         if env:
             full_env.update(env)
 
+        # Hide console window on Windows
+        startupinfo = None
+        if self.system == "Windows":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
         return subprocess.run(
             args,
             cwd=cwd,
@@ -88,6 +95,7 @@ class DockerManager:
             capture_output=capture_output,
             text=True,
             timeout=60,
+            startupinfo=startupinfo,
         )
 
     def is_docker_available(self) -> tuple[bool, str]:
