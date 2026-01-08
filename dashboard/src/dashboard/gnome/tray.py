@@ -578,40 +578,49 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
                 return False
             except FileNotFoundError:
-                logger.debug("wl-copy not found, falling back to GTK clipboard")
+                logger.warning(
+                    "wl-copy not found, clipboard may not work. Install wl-clipboard package."
+                )
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
-                logger.warning(f"wl-copy failed: {e}, falling back to GTK clipboard")
+                logger.warning(f"wl-copy failed: {e}")
 
-        # Try GTK clipboard (works on X11, may work on some Wayland setups)
+        # Try GTK clipboard (works on X11, less reliable on Wayland)
+        # Note: On Wayland with AppIndicator, this often fails to persist
         try:
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_text(text, -1)
+            # Force clipboard to persist - critical for AppIndicator
             clipboard.store()
-            logger.debug(f"Copied to clipboard via GTK: {len(text)} characters")
+            # Also trigger clipboard owner change to help persistence
+            Gtk.main_iteration_do(False)
+            logger.info(f"Copied to clipboard via GTK: {len(text)} characters")
+            return False
         except Exception as e:
             logger.warning(f"GTK clipboard copy failed: {e}")
-            # Last resort: try xclip for X11
-            if not is_wayland:
-                try:
-                    subprocess.run(
-                        ["xclip", "-selection", "clipboard"],
-                        input=text.encode("utf-8"),
-                        check=True,
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    logger.info(
-                        f"Copied to clipboard via xclip: {len(text)} characters"
-                    )
-                except (
-                    FileNotFoundError,
-                    subprocess.TimeoutExpired,
-                    subprocess.CalledProcessError,
-                ) as xclip_err:
-                    logger.error(
-                        f"All clipboard methods failed. xclip error: {xclip_err}"
-                    )
 
+        # Last resort: try xclip for X11
+        if not is_wayland:
+            try:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=text.encode("utf-8"),
+                    check=True,
+                    capture_output=True,
+                    timeout=2,
+                )
+                logger.info(f"Copied to clipboard via xclip: {len(text)} characters")
+                return False
+            except FileNotFoundError:
+                logger.error(
+                    "xclip not found. Install xclip package for clipboard support."
+                )
+            except (
+                subprocess.TimeoutExpired,
+                subprocess.CalledProcessError,
+            ) as xclip_err:
+                logger.error(f"xclip failed: {xclip_err}")
+
+        logger.error("All clipboard methods failed. No text copied.")
         return False
 
     # Server control methods are provided by ServerControlMixin

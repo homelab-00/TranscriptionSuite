@@ -14,7 +14,7 @@ GPU acceleration.
   - [2.1 Docker](#21-docker)
   - [2.2 Git](#22-git)
   - [2.3 Verify GPU Support](#23-verify-gpu-support)
-- [3. Installation](#3-installation)
+- [3. Installation](#3-installation--usage)
   - [3.1 First-Time Setup](#31-first-time-setup)
   - [3.2 KDE Client Dependencies](#32-kde-client-dependencies)
   - [3.3 GNOME Dashboard Dependencies](#33-gnome-dashboard-dependencies)
@@ -94,9 +94,9 @@ docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 
 ---
 
-## 3. Installation
+## 3. Installation & Usage
 
-Download the Dashboard for your platform:
+Download the Dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page:
 
 | Platform | Download | Notes |
 |----------|----------|-------|
@@ -143,11 +143,19 @@ sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-p
 
 ### 3.3 Usage
 
-1. Run the AppImage or executable
-2. The tray icon appears in your system tray
-3. **Left-click** to start recording *(only for KDE, Windows)*
-4. **Middle-click** to stop and transcribe *(only for KDE, Windows)*
-5. Result is automatically copied to clipboard
+* Run the AppImage or executable
+* The tray icon appears in your system tray
+* **Longform transcription**
+  * To start recording:
+    * On KDE & Windows left click on the system tray icon
+    * On GNOME left click on the system tray icon and the select 'Start Recording'
+  * To stop and transcribe:
+    * On KDE middle click on the system tray icon
+    * On Windows double click on the system tray icon
+    * On GNOME left click on the system tray icon and the select 'Stop Recording'
+* **Static transcription**
+  Right click on the system tray and select 'Transcribe File...'
+* Result is automatically copied to clipboard
 
 #### 3.3.1 Tray Icon Colors
 

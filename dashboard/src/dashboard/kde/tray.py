@@ -203,11 +203,13 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
                 self._trigger_callback(TrayAction.START_RECORDING)
         elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
             # Middle-click: Stop recording and transcribe (if recording)
+            # Note: Windows often doesn't emit MiddleClick for system tray icons
             if self.state == TrayState.RECORDING:
                 self._trigger_callback(TrayAction.STOP_RECORDING)
         elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            # Double-click: Also stop recording (fallback for Windows where
-            # middle-click may not work on system tray icons)
+            # Double-click: Stop recording (primary method for Windows)
+            # On Windows, middle-click events are unreliable/unsupported for system
+            # tray icons, so double-click is the standard alternative
             if self.state == TrayState.RECORDING:
                 self._trigger_callback(TrayAction.STOP_RECORDING)
 

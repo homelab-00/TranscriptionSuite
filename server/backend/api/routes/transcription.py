@@ -38,9 +38,9 @@ class TranscriptionResponse(BaseModel):
     text: str
     segments: List[Dict[str, Any]]
     words: List[Dict[str, Any]]
-    language: str
-    language_probability: float
-    duration: float
+    language: Optional[str] = None
+    language_probability: float = 0.0
+    duration: float = 0.0
     num_speakers: int = 0
 
 
