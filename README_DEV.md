@@ -60,10 +60,8 @@ Technical documentation for developing and building TranscriptionSuite.
   - [12.1 Docker GPU Access](#121-docker-gpu-access)
   - [12.2 Health Check Issues](#122-health-check-issues)
   - [12.3 Tailscale DNS Resolution](#123-tailscale-dns-resolution)
-  - [12.4 Model Loading](#124-model-loading)
-  - [12.5 cuDNN Library Errors](#125-cudnn-library-errors)
-  - [12.6 GNOME Tray Not Showing](#126-gnome-tray-not-showing)
-  - [12.7 AppImage Startup Failures](#127-appimage-startup-failures)
+  - [12.4 GNOME Tray Not Showing](#124-gnome-tray-not-showing)
+  - [12.5 AppImage Startup Failures](#125-appimage-startup-failures)
 - [13. Dependencies](#13-dependencies)
   - [13.1 Server (Docker)](#131-server-docker)
   - [13.2 Dashboard](#132-dashboard)
@@ -759,7 +757,7 @@ backup:
 
 ```bash
 # Verify GPU is accessible
-docker run --rm --gpus all nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi
 
 # Check container logs
 docker compose logs -f
@@ -791,30 +789,11 @@ getent hosts <your-machine>.tail1234.ts.net
 sudo systemctl restart tailscaled
 ```
 
-### 12.4 Model Loading
-
-First startup takes ~9 seconds:
-- 0.9s: Module loading
-- 2.3s: PyTorch import for GPU detection
-- 6s: Whisper model loading (~3GB VRAM)
-
-First transcription may take 2-5 minutes if models need to be downloaded.
-
-### 12.5 cuDNN Library Errors
-
-The Dockerfile uses `ubuntu:22.04` and relies on PyTorch's bundled CUDA/cuDNN libraries. If you see cuDNN errors:
-
-```bash
-cd server/docker
-docker compose build --no-cache
-docker compose up -d
-```
-
-### 12.6 GNOME Tray Not Showing
+### 12.4 GNOME Tray Not Showing
 
 Install the [AppIndicator Support extension](https://extensions.gnome.org/extension/615/appindicator-support/).
 
-### 12.7 AppImage Startup Failures
+### 12.5 AppImage Startup Failures
 
 ```bash
 # Run from terminal to see errors
