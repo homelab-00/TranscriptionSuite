@@ -1004,6 +1004,22 @@ class DashboardWindow(QMainWindow):
         self._stop_server_btn.clicked.connect(self._on_stop_server)
         btn_layout.addWidget(self._stop_server_btn)
 
+        # Model management button (unload/reload)
+        self._unload_models_btn = QPushButton("Unload All Models")
+        self._unload_models_btn.setObjectName("secondaryButton")
+        self._unload_models_btn.setToolTip(
+            "Unload transcription models to free GPU memory"
+        )
+        # Start disabled (gray) until server is healthy
+        self._unload_models_btn.setEnabled(False)
+        # Use dark gray disabled state
+        self._unload_models_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; border-radius: 6px; color: #606060; padding: 10px 20px; }"
+            "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
+        )
+        self._unload_models_btn.clicked.connect(self._on_toggle_models)
+        btn_layout.addWidget(self._unload_models_btn)
+
         layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addSpacing(20)
@@ -1264,26 +1280,6 @@ class DashboardWindow(QMainWindow):
         btn_layout.addWidget(self._stop_client_btn)
 
         layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        layout.addSpacing(15)
-
-        # Model management button (centered) - placed above settings
-        self._unload_models_btn = QPushButton("Unload All Models")
-        self._unload_models_btn.setObjectName("secondaryButton")
-        self._unload_models_btn.setToolTip(
-            "Unload transcription models to free GPU memory"
-        )
-        # Start disabled (gray) until server is healthy
-        self._unload_models_btn.setEnabled(False)
-        # Use dark gray disabled state
-        self._unload_models_btn.setStyleSheet(
-            "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; border-radius: 6px; color: #606060; padding: 10px 20px; }"
-            "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
-        )
-        self._unload_models_btn.clicked.connect(self._on_toggle_models)
-        layout.addWidget(
-            self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter
-        )
 
         layout.addSpacing(15)
 
@@ -2326,9 +2322,6 @@ class DashboardWindow(QMainWindow):
         self._start_client_local_btn.setEnabled(not self._client_running)
         self._start_client_remote_btn.setEnabled(not self._client_running)
         self._stop_client_btn.setEnabled(self._client_running)
-
-        # Update models button based on server health
-        self._update_models_button_state()
 
         # Update models button based on server health
         self._update_models_button_state()

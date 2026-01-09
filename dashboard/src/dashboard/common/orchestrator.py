@@ -124,7 +124,6 @@ class ClientOrchestrator:
         self.tray.register_callback(
             TrayAction.TRANSCRIBE_FILE, self._on_transcribe_file
         )
-        self.tray.register_callback(TrayAction.TOGGLE_MODELS, self._on_toggle_models)
         self.tray.register_callback(
             TrayAction.OPEN_AUDIO_NOTEBOOK, self._on_open_notebook
         )
@@ -608,86 +607,6 @@ class ClientOrchestrator:
     # =========================================================================
     # Other Actions
     # =========================================================================
-
-    def _on_toggle_models(self) -> None:
-        """Handle toggle models (unload/reload) action."""
-        with self._state_lock:
-            # Check if we're busy
-            if self.is_recording or self.is_transcribing:
-                if self.tray:
-                    self.tray.show_notification(
-                        "Cannot Toggle Models",
-                        "Please wait until recording/transcription is complete",
-                    )
-                return
-
-            models_loaded = self.models_loaded
-
-        if models_loaded:
-            # Unload models
-            self._schedule_async(self._unload_models())
-        else:
-            # Reload models
-            self._schedule_async(self._reload_models())
-
-    async def _unload_models(self) -> None:
-        """Unload all models on the server."""
-        if not self.api_client:
-            if self.tray:
-                self.tray.show_notification("Not Connected", "Connect to server first")
-            return
-
-        logger.info("Requesting model unload...")
-        result = await self.api_client.unload_models()
-
-        if result.get("success"):
-            with self._state_lock:
-                self.models_loaded = False
-
-            logger.info("Models unloaded successfully")
-            if self.tray:
-                self.tray.show_notification(
-                    "Models Unloaded",
-                    "GPU memory freed. Use 'Toggle Models' to reload.",
-                )
-                # Update menu to reflect new state
-                if hasattr(self.tray, "update_models_menu_state"):
-                    self.tray.update_models_menu_state(False)
-        else:
-            logger.error(f"Failed to unload models: {result.get('message')}")
-            if self.tray:
-                self.tray.show_notification(
-                    "Unload Failed", result.get("message", "Unknown error")
-                )
-
-    async def _reload_models(self) -> None:
-        """Reload models on the server."""
-        if not self.api_client:
-            if self.tray:
-                self.tray.show_notification("Not Connected", "Connect to server first")
-            return
-
-        logger.info("Requesting model reload...")
-        result = await self.api_client.reload_models()
-
-        if result.get("success"):
-            with self._state_lock:
-                self.models_loaded = True
-
-            logger.info("Models reloaded successfully")
-            if self.tray:
-                self.tray.show_notification(
-                    "Models Loaded", "Models ready for transcription"
-                )
-                # Update menu to reflect new state
-                if hasattr(self.tray, "update_models_menu_state"):
-                    self.tray.update_models_menu_state(True)
-        else:
-            logger.error(f"Failed to reload models: {result.get('message')}")
-            if self.tray:
-                self.tray.show_notification(
-                    "Reload Failed", result.get("message", "Unknown error")
-                )
 
     def _on_open_notebook(self) -> None:
         """Open Audio Notebook in browser."""

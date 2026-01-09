@@ -128,7 +128,6 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.start_item: Optional[Any] = None
         self.stop_item: Optional[Any] = None
         self.cancel_item: Optional[Any] = None
-        self.toggle_models_item: Optional[Any] = None
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -181,16 +180,6 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Model management (toggle unload/reload)
-        self.toggle_models_item = Gtk.MenuItem(label="Unload Models")
-        self.toggle_models_item.connect(
-            "activate", lambda _: self._trigger_callback(TrayAction.TOGGLE_MODELS)
-        )
-        self.toggle_models_item.set_sensitive(False)  # Disabled until client connects
-        menu.append(self.toggle_models_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
         # Show App (opens Dashboard window)
         show_app_item = Gtk.MenuItem(label="Show App")
         show_app_item.connect("activate", lambda _: self._show_dashboard())
@@ -238,19 +227,6 @@ class GtkTray(ServerControlMixin, AbstractTray):
             }
             self.cancel_item.set_sensitive(state in cancellable_states)
 
-        # Toggle models is only enabled when connected (not DISCONNECTED)
-        # and not during recording/transcription
-        if self.toggle_models_item:
-            if state == TrayState.DISCONNECTED:
-                self.toggle_models_item.set_sensitive(False)
-            else:
-                busy_states = {
-                    TrayState.RECORDING,
-                    TrayState.UPLOADING,
-                    TrayState.TRANSCRIBING,
-                }
-                self.toggle_models_item.set_sensitive(state not in busy_states)
-
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
             try:
@@ -283,18 +259,10 @@ class GtkTray(ServerControlMixin, AbstractTray):
         """
         Update the toggle models menu item text based on current state.
 
-        Args:
-            models_loaded: True if models are loaded, False if unloaded
+        Note: Menu item removed; button now in Dashboard Server view.
+        Method kept for interface compatibility.
         """
-        if self.toggle_models_item:
-            label = "Reload Models" if not models_loaded else "Unload Models"
-            GLib.idle_add(self._do_update_models_menu, label)
-
-    def _do_update_models_menu(self, label: str) -> bool:
-        """Actually update the menu label (called on main thread)."""
-        if self.toggle_models_item:
-            self.toggle_models_item.set_label(label)
-        return False
+        pass
 
     def run(self) -> None:
         """Start the GTK main loop."""

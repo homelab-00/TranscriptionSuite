@@ -922,6 +922,17 @@ class DashboardWindow(_get_dashboard_base()):
         self._stop_server_btn.connect("clicked", lambda _: self._on_stop_server())
         btn_box.append(self._stop_server_btn)
 
+        # Model management button (unload/reload)
+        self._unload_models_btn = Gtk.Button(label="Unload All Models")
+        self._unload_models_btn.add_css_class("secondary-button")
+        # Start disabled (gray) until server is healthy
+        self._unload_models_btn.set_sensitive(False)
+        self._unload_models_btn.set_tooltip_text(
+            "Unload transcription models to free GPU memory"
+        )
+        self._unload_models_btn.connect("clicked", lambda _: self._on_toggle_models())
+        btn_box.append(self._unload_models_btn)
+
         box.append(btn_box)
 
         # Management section
@@ -1144,19 +1155,6 @@ class DashboardWindow(_get_dashboard_base()):
         btn_box.append(self._stop_client_btn)
 
         box.append(btn_box)
-
-        # Model management button - placed above settings
-        self._unload_models_btn = Gtk.Button(label="Unload All Models")
-        self._unload_models_btn.add_css_class("secondary-button")
-        # Start disabled (gray) until server is healthy
-        self._unload_models_btn.set_sensitive(False)
-        self._unload_models_btn.set_halign(Gtk.Align.CENTER)
-        self._unload_models_btn.set_margin_top(16)
-        self._unload_models_btn.set_tooltip_text(
-            "Unload transcription models to free GPU memory"
-        )
-        self._unload_models_btn.connect("clicked", lambda _: self._on_toggle_models())
-        box.append(self._unload_models_btn)
 
         # Show logs button with icon and text
         logs_btn = Gtk.Button()

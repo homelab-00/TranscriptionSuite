@@ -676,6 +676,11 @@ class SettingsDialog:
 
     def _load_values(self) -> None:
         """Load current configuration values into the dialog."""
+        # Force reload from disk to get latest values
+        # This prevents race conditions when tray and dashboard processes
+        # both access the same config file
+        self.config._load()
+
         # App tab
         if self.auto_copy_check:
             self.auto_copy_check.set_active(

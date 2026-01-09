@@ -106,7 +106,6 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.stop_action: QAction | None = None
         self.cancel_action: QAction | None = None
         self.reconnect_action: QAction | None = None
-        self.toggle_models_action: QAction | None = None
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -164,16 +163,6 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             lambda: self._trigger_callback(TrayAction.TRANSCRIBE_FILE)
         )
         menu.addAction(transcribe_action)
-
-        menu.addSeparator()
-
-        # Model management (toggle unload/reload)
-        self.toggle_models_action = QAction("Unload Models", menu)
-        self.toggle_models_action.triggered.connect(
-            lambda: self._trigger_callback(TrayAction.TOGGLE_MODELS)
-        )
-        self.toggle_models_action.setEnabled(False)  # Disabled until client connects
-        menu.addAction(self.toggle_models_action)
 
         menu.addSeparator()
 
@@ -267,19 +256,6 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             }
             self.cancel_action.setEnabled(state in cancellable_states)
 
-        # Toggle models is only enabled when connected (not IDLE, not DISCONNECTED)
-        # and not during recording/transcription
-        if self.toggle_models_action:
-            if state == TrayState.IDLE or state == TrayState.DISCONNECTED:
-                self.toggle_models_action.setEnabled(False)
-            else:
-                busy_states = {
-                    TrayState.RECORDING,
-                    TrayState.UPLOADING,
-                    TrayState.TRANSCRIBING,
-                }
-                self.toggle_models_action.setEnabled(state not in busy_states)
-
     def _get_logo_icon(self) -> QIcon:
         """Get the app logo icon for IDLE state."""
         if self.LOGO_PATH.exists():
@@ -340,12 +316,10 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         """
         Update the toggle models menu item text based on current state.
 
-        Args:
-            models_loaded: True if models are loaded, False if unloaded
+        Note: Menu item removed; button now in Dashboard Server view.
+        Method kept for interface compatibility.
         """
-        if self.toggle_models_action:
-            text = "Reload Models" if not models_loaded else "Unload Models"
-            self.toggle_models_action.setText(text)
+        pass
 
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""

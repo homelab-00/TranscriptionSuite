@@ -4,6 +4,10 @@ Client configuration management for TranscriptionSuite.
 Handles loading and saving client configuration from:
 - Platform-specific config directories
 - Command line arguments
+
+Thread/process safety:
+- Uses file locking (fcntl on Linux, skipped on Windows)
+- Uses atomic writes (write to temp file, then rename)
 """
 
 import os
@@ -12,6 +16,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+# File locking support (Linux/Unix only)
+# Windows doesn't have fcntl - skip locking there
+# (Windows uses single-process PyQt6, so no race condition)
+fcntl = None  # type: ignore[assignment]
+try:
+    import fcntl as _fcntl
+
+    fcntl = _fcntl
+except ImportError:
+    pass
 
 
 def get_config_dir() -> Path:
@@ -102,12 +117,19 @@ class ClientConfig:
         self._load()
 
     def _load(self) -> None:
-        """Load configuration from file."""
+        """Load configuration from file with shared lock for thread/process safety."""
         if self.config_path.exists():
             try:
                 with open(self.config_path) as f:
-                    loaded = yaml.safe_load(f) or {}
-                self._deep_merge(self.config, loaded)
+                    # Acquire shared lock for reading (Linux only)
+                    if fcntl is not None:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        loaded = yaml.safe_load(f) or {}
+                        self._deep_merge(self.config, loaded)
+                    finally:
+                        if fcntl is not None:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
             except Exception as e:
                 print(f"Warning: Could not load config: {e}")
 
@@ -120,14 +142,39 @@ class ClientConfig:
                 base[key] = value
 
     def save(self) -> bool:
-        """Save configuration to file."""
+        """
+        Save configuration to file with exclusive lock and atomic write.
+
+        Uses atomic write pattern (write to temp file, then rename) to prevent
+        file corruption if the process is interrupted during write.
+        """
+        tmp_path = None
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, "w") as f:
-                yaml.dump(self.config, f, default_flow_style=False)
+
+            # Write to temp file first for atomic write
+            tmp_path = self.config_path.with_suffix(".tmp")
+            with open(tmp_path, "w") as f:
+                # Acquire exclusive lock for writing (Linux only)
+                if fcntl is not None:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    yaml.dump(self.config, f, default_flow_style=False)
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            # Atomic rename (overwrites existing file)
+            os.replace(tmp_path, self.config_path)
             return True
         except Exception as e:
             print(f"Error saving config: {e}")
+            # Clean up temp file if it exists
+            if tmp_path and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
             return False
 
     def get(self, *keys: str, default: Any = None) -> Any:
