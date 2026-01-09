@@ -116,19 +116,27 @@ class DockerPullWorker(threading.Thread):
 
             # Stream output line by line
             if self._process.stdout:
-                for line in iter(self._process.stdout.readline, ""):
-                    if self._cancelled:
-                        break
+                try:
+                    for line in iter(self._process.stdout.readline, ""):
+                        if self._cancelled:
+                            break
 
-                    line = line.strip()
-                    if line:
-                        # Parse and report progress
-                        parsed = self._parse_docker_output(line)
-                        if parsed:
-                            self._progress_callback(parsed)
+                        line = line.strip()
+                        if line:
+                            # Parse and report progress
+                            parsed = self._parse_docker_output(line)
+                            if parsed:
+                                self._progress_callback(parsed)
+                except ValueError:
+                    # stdout was closed during cancel - this is expected
+                    logger.debug("stdout closed during read (cancel requested)")
 
-            # Wait for completion
-            returncode = self._process.wait()
+            # Wait for completion (if not already terminated)
+            try:
+                returncode = self._process.wait()
+            except Exception:
+                # Process already terminated
+                returncode = -1
 
             with self._lock:
                 if self._cancelled:
@@ -173,8 +181,8 @@ class DockerPullWorker(threading.Thread):
         if not line:
             return None
 
-        # Skip certain noisy lines
-        if line.startswith("Digest:") or line.startswith("docker.io/"):
+        # Skip certain noisy lines (Digest lines are not useful progress info)
+        if line.startswith("Digest:"):
             return None
 
         # Extract meaningful progress from download lines
@@ -224,12 +232,28 @@ class DockerPullWorker(threading.Thread):
             if self._process and self._process.poll() is None:
                 logger.info("Cancelling Docker pull operation...")
                 try:
+                    # Close stdout to unblock the readline() loop in the thread
+                    if self._process.stdout:
+                        try:
+                            self._process.stdout.close()
+                        except Exception:
+                            pass
+
+                    # Terminate the process
                     self._process.terminate()
+
                     # Give it a moment to terminate gracefully
                     try:
-                        self._process.wait(timeout=5)
+                        self._process.wait(timeout=3)
                     except subprocess.TimeoutExpired:
+                        # Force kill if it didn't terminate
+                        logger.warning("Docker pull didn't terminate, killing...")
                         self._process.kill()
+                        # Wait for kill to complete
+                        try:
+                            self._process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            logger.error("Failed to kill Docker pull process")
                 except Exception as e:
                     logger.warning(f"Error terminating Docker pull: {e}")
 

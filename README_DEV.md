@@ -64,8 +64,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
-  - [13.4 GNOME Tray Not Showing](#134-gnome-tray-not-showing)
-  - [13.5 AppImage Startup Failures](#135-appimage-startup-failures)
+  - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
@@ -873,11 +872,7 @@ getent hosts <your-machine>.tail1234.ts.net
 sudo systemctl restart tailscaled
 ```
 
-### 13.4 GNOME Tray Not Showing
-
-Install the [AppIndicator Support extension](https://extensions.gnome.org/extension/615/appindicator-support/).
-
-### 13.5 AppImage Startup Failures
+### 13.4 AppImage Startup Failures
 
 ```bash
 # Run from terminal to see errors

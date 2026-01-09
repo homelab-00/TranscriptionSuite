@@ -564,6 +564,10 @@ class DashboardWindow(QMainWindow):
     stop_client_requested = pyqtSignal()
     show_settings_requested = pyqtSignal()
 
+    # Signals for Docker pull progress (thread-safe cross-thread communication)
+    _pull_progress_signal = pyqtSignal(str)
+    _pull_complete_signal = pyqtSignal(object)  # DockerResult
+
     def __init__(self, config: "ClientConfig", parent: QWidget | None = None):
         super().__init__(parent)
         self.config = config
@@ -585,6 +589,7 @@ class DashboardWindow(QMainWindow):
         self._client_log_timer: QTimer | None = None
 
         self._server_health_timer: QTimer | None = None
+        self._home_status_timer: QTimer | None = None
 
         # Client state tracking
         self._client_running = False
@@ -597,6 +602,24 @@ class DashboardWindow(QMainWindow):
 
         self._setup_ui()
         self._apply_styles()
+
+        # Connect Docker pull signals (thread-safe cross-thread communication)
+        self._pull_progress_signal.connect(self._update_pull_progress)
+        self._pull_complete_signal.connect(self._on_pull_complete)
+
+        # Start home status auto-refresh timer
+        self._start_home_status_timer()
+
+    def _start_home_status_timer(self) -> None:
+        """Start the timer for auto-refreshing home view status."""
+        if self._home_status_timer is None:
+            self._home_status_timer = QTimer()
+            self._home_status_timer.timeout.connect(self._refresh_home_status)
+            self._home_status_timer.start(3000)  # Refresh every 3 seconds
+            logger.debug("Home status auto-refresh timer started")
+
+        # Do an immediate refresh
+        self._refresh_home_status()
 
     def _setup_ui(self) -> None:
         """Set up the main UI structure."""
@@ -2055,19 +2078,14 @@ class DashboardWindow(QMainWindow):
         self._pull_image_btn.setEnabled(False)
         self._pull_cancel_btn.setVisible(True)
 
-        # Open log view so user can see progress
-        if not self._show_server_logs_btn.isChecked():
-            self._show_server_logs_btn.setChecked(True)
-            self._server_log_container.setVisible(True)
-
         def on_progress(msg: str) -> None:
-            """Called from worker thread - schedule UI update on main thread."""
-            # Use QTimer.singleShot with 0 delay for thread-safe UI update
-            QTimer.singleShot(0, lambda: self._update_pull_progress(msg))
+            """Called from worker thread - emit signal for thread-safe UI update."""
+            self._pull_progress_signal.emit(msg)
 
         def on_complete(result: DockerResult) -> None:
-            """Called from worker thread - schedule UI update on main thread."""
-            QTimer.singleShot(0, lambda: self._on_pull_complete(result))
+            """Called from worker thread - emit signal for thread-safe UI update."""
+            logger.debug(f"Emitting pull complete signal: {result.message}")
+            self._pull_complete_signal.emit(result)
 
         # Start async pull
         self._pull_worker = self._docker_manager.start_pull_worker(
@@ -2081,25 +2099,30 @@ class DashboardWindow(QMainWindow):
         logger.info(msg)
         # Update status label with latest message
         self._image_status_label.setText(f"Pulling: {msg[:50]}...")
-        # Append to log view
-        self._server_log_view.appendPlainText(msg)
 
     def _on_pull_complete(self, result: DockerResult) -> None:
         """Handle pull completion (called on main thread)."""
+        logger.info(
+            f"Pull complete callback: success={result.success}, message={result.message}"
+        )
         self._pull_worker = None
 
-        # Reset UI state
+        # Reset UI state - ALWAYS do this regardless of result
         self._pull_image_btn.setEnabled(True)
         self._pull_cancel_btn.setVisible(False)
+        self._pull_cancel_btn.setEnabled(True)  # Re-enable for next time
 
         if result.success:
-            self._server_log_view.appendPlainText(result.message)
             self._image_status_label.setText("Pull complete!")
             logger.info("Docker image pull completed successfully")
         else:
-            self._server_log_view.appendPlainText(f"Error: {result.message}")
-            self._image_status_label.setText("Pull failed")
-            logger.error(f"Docker image pull failed: {result.message}")
+            # Show more specific message for cancellation
+            if "cancelled" in result.message.lower():
+                self._image_status_label.setText("Pull cancelled")
+                logger.info(f"Docker image pull cancelled: {result.message}")
+            else:
+                self._image_status_label.setText("Pull failed")
+                logger.error(f"Docker image pull failed: {result.message}")
 
         # Refresh status to update image info
         QTimer.singleShot(1000, self._refresh_server_status)
@@ -2108,9 +2131,29 @@ class DashboardWindow(QMainWindow):
         """Cancel the in-progress Docker pull."""
         if self._pull_worker is not None:
             logger.info("User requested to cancel Docker pull")
-            self._pull_worker.cancel()
             self._image_status_label.setText("Cancelling...")
             self._pull_cancel_btn.setEnabled(False)
+
+            # Cancel in a separate thread to avoid blocking UI if it takes time
+            import threading
+
+            def cancel_worker():
+                try:
+                    if self._pull_worker:
+                        self._pull_worker.cancel()
+                        # Wait for worker thread to finish (with timeout)
+                        self._pull_worker.join(timeout=10)
+                        if self._pull_worker.is_alive():
+                            logger.warning(
+                                "Docker pull worker still alive after cancel"
+                            )
+                        else:
+                            logger.info("Docker pull worker terminated successfully")
+                except Exception as e:
+                    logger.error(f"Error during cancel: {e}")
+
+            cancel_thread = threading.Thread(target=cancel_worker, daemon=True)
+            cancel_thread.start()
 
     def _on_remove_data_volume(self) -> None:
         """Remove the data volume."""
