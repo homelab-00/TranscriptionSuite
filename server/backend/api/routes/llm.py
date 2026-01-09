@@ -1000,9 +1000,7 @@ async def chat_with_llm(request: ChatRequest):
                     else seg["text"]
                     for seg in transcription["segments"]
                 )
-                system_content += (
-                    f"\n\nThe following is the transcription for context:\n\n{trans_text}"
-                )
+                system_content += f"\n\nThe following is the transcription for context:\n\n{trans_text}"
 
     messages.append({"role": "system", "content": system_content})
 

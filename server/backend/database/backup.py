@@ -84,9 +84,7 @@ class DatabaseBackupManager:
         max_age = timedelta(hours=self.max_age_hours)
 
         if age > max_age:
-            logger.info(
-                f"Latest backup is {age} old (max: {max_age}) - backup needed"
-            )
+            logger.info(f"Latest backup is {age} old (max: {max_age}) - backup needed")
             return True
 
         logger.info(f"Latest backup is {age} old - no backup needed")
@@ -156,7 +154,9 @@ class DatabaseBackupManager:
                 try:
                     backup_path.unlink()
                 except Exception:
-                    logger.debug(f"Failed to cleanup partial backup file: {backup_path}")
+                    logger.debug(
+                        f"Failed to cleanup partial backup file: {backup_path}"
+                    )
 
             return None
 
@@ -233,9 +233,7 @@ async def run_backup_if_needed(
 
     if backup_path:
         # Optionally verify the backup
-        is_valid = await loop.run_in_executor(
-            None, manager.verify_backup, backup_path
-        )
+        is_valid = await loop.run_in_executor(None, manager.verify_backup, backup_path)
         if not is_valid:
             logger.warning(f"Backup verification failed for {backup_path}")
 

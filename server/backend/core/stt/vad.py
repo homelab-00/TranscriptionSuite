@@ -275,7 +275,9 @@ class VoiceActivityDetector:
         if self.use_silero_deactivity:
             return self.is_speech_silero(chunk, sample_rate)
         else:
-            return self.is_speech_webrtc(chunk, sample_rate, all_frames_must_be_true=True)
+            return self.is_speech_webrtc(
+                chunk, sample_rate, all_frames_must_be_true=True
+            )
 
 
 def create_vad(

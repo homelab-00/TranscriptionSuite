@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 class TranscriptionCancelledError(Exception):
     """Raised when a transcription job is cancelled."""
+
     pass
 
 
@@ -84,7 +85,9 @@ class TranscriptionJobTracker:
         """
         with self._lock:
             if self._active_job_id == job_id:
-                logger.info(f"Ended transcription job {job_id[:8]} for user '{self._active_user}'")
+                logger.info(
+                    f"Ended transcription job {job_id[:8]} for user '{self._active_user}'"
+                )
                 self._active_job_id = None
                 self._active_user = None
                 self._cancelled = False
@@ -104,7 +107,9 @@ class TranscriptionJobTracker:
             if self._active_job_id is not None:
                 self._cancelled = True
                 user = self._active_user
-                logger.info(f"Cancellation requested for job {self._active_job_id[:8]} (user: {user})")
+                logger.info(
+                    f"Cancellation requested for job {self._active_job_id[:8]} (user: {user})"
+                )
                 return (True, user)
             return (False, None)
 
@@ -139,7 +144,9 @@ class TranscriptionJobTracker:
             return {
                 "is_busy": self._active_job_id is not None,
                 "active_user": self._active_user,
-                "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
+                "active_job_id": self._active_job_id[:8]
+                if self._active_job_id
+                else None,
                 "cancellation_requested": self._cancelled,
             }
 
@@ -185,14 +192,18 @@ class ModelManager:
         self.gpu_available = check_cuda_available()
         if self.gpu_available:
             gpu_info = get_gpu_memory_info()
-            logger.info(f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory")
+            logger.info(
+                f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory"
+            )
         else:
             logger.warning("No GPU available, using CPU for transcription")
 
         # Check if preview is enabled in config
         self._preview_config = PreviewConfig.from_dict(config)
         if self._preview_config.enabled:
-            logger.info(f"Preview transcriber configured with model: {self._preview_config.model}")
+            logger.info(
+                f"Preview transcriber configured with model: {self._preview_config.model}"
+            )
 
     @property
     def transcription_engine(self) -> "AudioToTextRecorder":
@@ -298,10 +309,14 @@ class ModelManager:
             return self._realtime_engines[session_id]
 
         # Determine if preview should be enabled
-        enable_preview = client_type == ClientType.STANDALONE and self._preview_config.enabled
+        enable_preview = (
+            client_type == ClientType.STANDALONE and self._preview_config.enabled
+        )
 
         if enable_preview:
-            logger.info(f"Creating realtime engine with preview for session {session_id}")
+            logger.info(
+                f"Creating realtime engine with preview for session {session_id}"
+            )
         else:
             logger.info(f"Creating realtime engine for session {session_id}")
 
@@ -449,8 +464,11 @@ class ModelManager:
             },
             "preview": {
                 "enabled": self._preview_config.enabled,
-                "loaded": self._preview_engine is not None and self._preview_engine.is_loaded,
-                "model": self._preview_config.model if self._preview_config.enabled else None,
+                "loaded": self._preview_engine is not None
+                and self._preview_engine.is_loaded,
+                "model": self._preview_config.model
+                if self._preview_config.enabled
+                else None,
             },
             "realtime": {
                 "active_sessions": len(self._realtime_engines),

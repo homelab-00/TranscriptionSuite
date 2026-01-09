@@ -255,7 +255,10 @@ class TestResampling:
         audio = np.random.randn(48000).astype(np.float32) * 0.1
 
         resampled = ffmpeg_utils.resample_audio_ffmpeg(
-            audio, source_sample_rate=48000, target_sample_rate=16000, resampler="swr_linear"
+            audio,
+            source_sample_rate=48000,
+            target_sample_rate=16000,
+            resampler="swr_linear",
         )
 
         # Verify output

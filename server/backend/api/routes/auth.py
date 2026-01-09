@@ -99,7 +99,9 @@ async def list_tokens(request: Request) -> Dict[str, Any]:
                     "expires_at": t.expires_at,
                     "is_revoked": t.is_revoked,
                     "is_expired": t.is_expired(),
-                    "token": f"{t.token[:8]}..." if t.token else None,  # Show partial hash only
+                    "token": f"{t.token[:8]}..."
+                    if t.token
+                    else None,  # Show partial hash only
                 }
                 for t in tokens
             ]

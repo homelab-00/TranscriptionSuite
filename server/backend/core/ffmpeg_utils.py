@@ -209,8 +209,7 @@ def normalize_audio_ffmpeg(
     except ffmpeg.Error as e:
         error_msg = e.stderr.decode() if e.stderr else str(e)
         logger.warning(
-            f"FFmpeg normalization ({method}) failed: {error_msg}, "
-            f"using original audio"
+            f"FFmpeg normalization ({method}) failed: {error_msg}, using original audio"
         )
         return audio
     except Exception as e:

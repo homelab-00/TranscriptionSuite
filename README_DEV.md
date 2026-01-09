@@ -56,15 +56,19 @@ Technical documentation for developing and building TranscriptionSuite.
   - [11.1 Database Schema](#111-database-schema)
   - [11.2 Database Migrations](#112-database-migrations)
   - [11.3 Automatic Backups](#113-automatic-backups)
-- [12. Troubleshooting](#12-troubleshooting)
-  - [12.1 Docker GPU Access](#121-docker-gpu-access)
-  - [12.2 Health Check Issues](#122-health-check-issues)
-  - [12.3 Tailscale DNS Resolution](#123-tailscale-dns-resolution)
-  - [12.4 GNOME Tray Not Showing](#124-gnome-tray-not-showing)
-  - [12.5 AppImage Startup Failures](#125-appimage-startup-failures)
-- [13. Dependencies](#13-dependencies)
-  - [13.1 Server (Docker)](#131-server-docker)
-  - [13.2 Dashboard](#132-dashboard)
+- [12. Code Quality Checks](#12-code-quality-checks)
+  - [12.1 Python Code Quality](#121-python-code-quality)
+  - [12.2 TypeScript/JavaScript Quality](#122-typescriptjavascript-quality)
+  - [12.3 Complete Quality Check Workflow](#123-complete-quality-check-workflow)
+- [13. Troubleshooting](#13-troubleshooting)
+  - [13.1 Docker GPU Access](#131-docker-gpu-access)
+  - [13.2 Health Check Issues](#132-health-check-issues)
+  - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
+  - [13.4 GNOME Tray Not Showing](#134-gnome-tray-not-showing)
+  - [13.5 AppImage Startup Failures](#135-appimage-startup-failures)
+- [14. Dependencies](#14-dependencies)
+  - [14.1 Server (Docker)](#141-server-docker)
+  - [14.2 Dashboard](#142-dashboard)
 
 ---
 
@@ -751,9 +755,89 @@ backup:
 
 ---
 
-## 12. Troubleshooting
+## 12. Code Quality Checks
 
-### 12.1 Docker GPU Access
+### 12.1 Python Code Quality
+
+All Python code quality tools are installed in the build environment. Run these from the repository root:
+
+```bash
+# Lint check (identifies issues without fixing)
+./build/.venv/bin/ruff check .
+
+# Auto-format code (fixes style issues automatically)
+./build/.venv/bin/ruff format .
+
+# Type checking (static type analysis)
+./build/.venv/bin/pyright
+```
+
+**Check specific directories:**
+```bash
+./build/.venv/bin/ruff check server/backend/
+./build/.venv/bin/ruff format dashboard/
+./build/.venv/bin/pyright server/frontend/
+```
+
+**Preview changes without modifying files:**
+```bash
+./build/.venv/bin/ruff format --diff .
+```
+
+**Typical workflow:**
+1. Run `ruff check` to identify issues
+2. Run `ruff format` to auto-fix style issues
+3. Run `pyright` for type errors (requires manual fixes)
+
+### 12.2 TypeScript/JavaScript Quality
+
+Frontend code uses TypeScript with Vite. From `server/frontend/`:
+
+```bash
+cd server/frontend
+
+# Install dependencies
+npm ci
+
+# Security audit
+npm audit
+
+# Type checking (via TypeScript compiler)
+npm run build  # Runs tsc + vite build
+
+# Development server with hot reload
+npm run dev
+```
+
+**Note:** The `npm run build` script runs TypeScript's `tsc` compiler, which performs type checking before building.
+
+### 12.3 Complete Quality Check Workflow
+
+Run all checks across the entire codebase:
+
+```bash
+# From repository root
+
+# 1. Python checks
+./build/.venv/bin/ruff check .
+./build/.venv/bin/ruff format .
+./build/.venv/bin/pyright
+
+# 2. Frontend checks
+cd server/frontend
+npm ci && npm audit
+npm run build  # Type checks + builds
+cd ../..
+
+# 3. Python tests
+./build/.venv/bin/pytest server/backend/tests
+```
+
+---
+
+## 13. Troubleshooting
+
+### 13.1 Docker GPU Access
 
 ```bash
 # Verify GPU is accessible
@@ -763,7 +847,7 @@ docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi
 docker compose logs -f
 ```
 
-### 12.2 Health Check Issues
+### 13.2 Health Check Issues
 
 ```bash
 # Check health status
@@ -774,7 +858,7 @@ docker inspect transcription-suite | grep Health -A 10
 docker compose exec transcription-suite curl -f http://localhost:8000/health
 ```
 
-### 12.3 Tailscale DNS Resolution
+### 13.3 Tailscale DNS Resolution
 
 If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses.
 
@@ -789,11 +873,11 @@ getent hosts <your-machine>.tail1234.ts.net
 sudo systemctl restart tailscaled
 ```
 
-### 12.4 GNOME Tray Not Showing
+### 13.4 GNOME Tray Not Showing
 
 Install the [AppIndicator Support extension](https://extensions.gnome.org/extension/615/appindicator-support/).
 
-### 12.5 AppImage Startup Failures
+### 13.5 AppImage Startup Failures
 
 ```bash
 # Run from terminal to see errors
@@ -806,9 +890,9 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 
 ---
 
-## 13. Dependencies
+## 14. Dependencies
 
-### 13.1 Server (Docker)
+### 14.1 Server (Docker)
 
 - Python 3.12
 - FastAPI + Uvicorn
@@ -818,7 +902,7 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 - SQLite with FTS5
 - NVIDIA GPU with CUDA support
 
-### 13.2 Dashboard
+### 14.2 Dashboard
 
 - Python 3.12
 - aiohttp (async HTTP client)

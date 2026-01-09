@@ -122,17 +122,31 @@ class DiarizationEngine:
         cfg = get_config()
         diar_cfg = cfg.config.get("diarization", {})
 
-        self.model = model or diar_cfg.get("model", "pyannote/speaker-diarization-community-1")
-        self.hf_token = hf_token or diar_cfg.get("hf_token") or os.environ.get("HF_TOKEN")
+        self.model = model or diar_cfg.get(
+            "model", "pyannote/speaker-diarization-community-1"
+        )
+        self.hf_token = (
+            hf_token or diar_cfg.get("hf_token") or os.environ.get("HF_TOKEN")
+        )
         self.device = device or diar_cfg.get("device", "cuda")
-        self.num_speakers = num_speakers if num_speakers is not None else diar_cfg.get("num_speakers")
-        self.min_speakers = min_speakers if min_speakers is not None else diar_cfg.get("min_speakers")
-        self.max_speakers = max_speakers if max_speakers is not None else diar_cfg.get("max_speakers")
+        self.num_speakers = (
+            num_speakers if num_speakers is not None else diar_cfg.get("num_speakers")
+        )
+        self.min_speakers = (
+            min_speakers if min_speakers is not None else diar_cfg.get("min_speakers")
+        )
+        self.max_speakers = (
+            max_speakers if max_speakers is not None else diar_cfg.get("max_speakers")
+        )
         self.min_duration_on = (
-            min_duration_on if min_duration_on is not None else diar_cfg.get("min_duration_on", 0.0)
+            min_duration_on
+            if min_duration_on is not None
+            else diar_cfg.get("min_duration_on", 0.0)
         )
         self.min_duration_off = (
-            min_duration_off if min_duration_off is not None else diar_cfg.get("min_duration_off", 0.0)
+            min_duration_off
+            if min_duration_off is not None
+            else diar_cfg.get("min_duration_off", 0.0)
         )
 
         self._pipeline: Optional[Any] = None

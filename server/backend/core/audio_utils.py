@@ -299,9 +299,7 @@ def load_audio(
 
             return load_audio_ffmpeg(file_path, target_sample_rate)
         except ImportError as e:
-            logger.warning(
-                f"ffmpeg-python not available, falling back to legacy: {e}"
-            )
+            logger.warning(f"ffmpeg-python not available, falling back to legacy: {e}")
             return load_audio_legacy(file_path, target_sample_rate)
         except Exception as e:
             logger.warning(f"FFmpeg loading failed, falling back to legacy: {e}")
@@ -370,9 +368,13 @@ def normalize_audio(
     try:
         cfg = get_config()
         backend = cfg.get("audio_processing", default={}).get("backend", "ffmpeg")
-        method = cfg.get("audio_processing", default={}).get("normalization_method", "dynaudnorm")
+        method = cfg.get("audio_processing", default={}).get(
+            "normalization_method", "dynaudnorm"
+        )
     except Exception as e:
-        logger.warning(f"Could not load config, falling back to legacy normalization: {e}")
+        logger.warning(
+            f"Could not load config, falling back to legacy normalization: {e}"
+        )
         return normalize_audio_legacy(audio, target_db)
 
     if backend == "ffmpeg" and method in ["dynaudnorm", "loudnorm"]:

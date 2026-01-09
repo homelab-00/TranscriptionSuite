@@ -48,7 +48,9 @@ class PreviewConfig:
         # Support both raw dict and nested dict format
         preview_config = config.get("preview_transcriber", {})
         if not preview_config:
-            preview_config = config.get("transcription", {}).get("preview_transcriber", {})
+            preview_config = config.get("transcription", {}).get(
+                "preview_transcriber", {}
+            )
 
         # Get stt config for webrtc_sensitivity
         stt_config = config.get("stt", {})

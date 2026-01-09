@@ -98,7 +98,9 @@ class RealtimeTranscriptionEngine:
 
         # Get transcription config from passed dict or global config
         trans_config = self.config.get("transcription", {})
-        main_config = self.config.get("main_transcriber", trans_config.get("main_transcriber", {}))
+        main_config = self.config.get(
+            "main_transcriber", trans_config.get("main_transcriber", {})
+        )
 
         # Create main transcription engine
         # AudioToTextRecorder resolves defaults from config internally,
@@ -113,8 +115,12 @@ class RealtimeTranscriptionEngine:
             beam_size=main_config.get("beam_size"),
             silero_sensitivity=main_config.get("silero_sensitivity"),
             webrtc_sensitivity=main_config.get("webrtc_sensitivity"),
-            post_speech_silence_duration=main_config.get("post_speech_silence_duration"),
-            pre_recording_buffer_duration=main_config.get("pre_recording_buffer_duration"),
+            post_speech_silence_duration=main_config.get(
+                "post_speech_silence_duration"
+            ),
+            pre_recording_buffer_duration=main_config.get(
+                "pre_recording_buffer_duration"
+            ),
             faster_whisper_vad_filter=main_config.get("faster_whisper_vad_filter"),
             normalize_audio=main_config.get("normalize_audio"),
             on_recording_start=self._handle_recording_start,

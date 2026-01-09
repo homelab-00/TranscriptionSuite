@@ -14,4 +14,6 @@ for i in range(0, numdevices):
     if isinstance(max_input_channels, (int, float)) and max_input_channels > 0:
         print(f'  Index: {device_info.get("index")}, Name: "{device_info.get("name")}"')
 
-print("\nFind the device you want to use and put its 'Index' into the config.json file.")
+print(
+    "\nFind the device you want to use and put its 'Index' into the config.json file."
+)

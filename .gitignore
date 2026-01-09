@@ -1,20 +1,32 @@
-# Internal build outputs
+# BUILD
+
+## Internal build outputs
 build/dist/
 build/appimage-kde/
 build/appimage-gnome/
 build/pyinstaller-windows
 build/assets/logo.ico
 
-# Frontend web app (Node.js / npm dependencies and build outputs)
+## Frontend web app (Node.js / npm dependencies and build outputs)
 server/frontend/node_modules/
 server/frontend/dist/
 server/frontend/build/
 
-# GitHub folder (excluding everything except workflows)
-.github/instructions/
-.github/prompts/
 
-# Misc
+# MISC
+
+## .hidden folders
+.*/
+### GitHub workflows folder exception
+!.github/iworkflows/
+
+## .md files
+*.md
+### READMEs exception
+!README.md
+!README_DEV.md
+
+## etc
 __pycache__/
 *.env
 *.tmp
@@ -22,8 +34,3 @@ __pycache__/
 *.log
 *.mp3
 .directory
-.idea/
-.windsurf/
-.vscode/
-.ruff_cache/
-.claude/
