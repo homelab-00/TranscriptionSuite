@@ -688,6 +688,95 @@ class APIClient:
             logger.error(f"Model reload failed: {e}")
             return {"success": False, "message": str(e)}
 
+    async def load_models_with_progress(
+        self,
+        progress_callback: Callable[[str], None],
+    ) -> dict[str, Any]:
+        """
+        Load transcription models with streaming progress updates.
+
+        Uses WebSocket to receive real-time progress messages from the server
+        during model loading (which can take several minutes for large models
+        that need to be downloaded from HuggingFace).
+
+        Args:
+            progress_callback: Called with progress message strings.
+                              These messages come from the server and describe
+                              the current loading status.
+
+        Returns:
+            Dict with 'success' and 'message' keys
+        """
+        ws_url = f"{self.ws_url}/api/admin/models/load/stream"
+
+        try:
+            session = await self._get_session()
+
+            # Connect to WebSocket
+            async with session.ws_connect(
+                ws_url,
+                headers=self._get_headers(),
+                **self._get_ssl_kwargs(),
+            ) as ws:
+                logger.info(f"Connected to model load WebSocket: {ws_url}")
+
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        try:
+                            data = json.loads(msg.data)
+                            msg_type = data.get("type", "")
+
+                            if msg_type == "progress":
+                                # Report progress to callback
+                                message = data.get("message", "")
+                                if message:
+                                    progress_callback(message)
+
+                            elif msg_type == "complete":
+                                # Loading finished successfully
+                                logger.info("Model loading completed via WebSocket")
+                                return {
+                                    "success": True,
+                                    "message": "Models loaded successfully",
+                                    "status": data.get("status", "loaded"),
+                                }
+
+                            elif msg_type == "error":
+                                # Loading failed
+                                error_msg = data.get("message", "Unknown error")
+                                logger.error(f"Model loading error: {error_msg}")
+                                return {
+                                    "success": False,
+                                    "message": error_msg,
+                                }
+
+                        except json.JSONDecodeError:
+                            logger.warning(f"Invalid JSON from WebSocket: {msg.data}")
+
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        logger.error(f"WebSocket error: {ws.exception()}")
+                        return {
+                            "success": False,
+                            "message": f"WebSocket error: {ws.exception()}",
+                        }
+
+                    elif msg.type == aiohttp.WSMsgType.CLOSED:
+                        logger.info("WebSocket closed by server")
+                        break
+
+                # If we got here without complete/error, something went wrong
+                return {
+                    "success": False,
+                    "message": "WebSocket closed unexpectedly",
+                }
+
+        except aiohttp.ClientError as e:
+            logger.error(f"WebSocket connection failed: {e}")
+            return {"success": False, "message": f"Connection failed: {e}"}
+        except Exception as e:
+            logger.error(f"Model loading with progress failed: {e}")
+            return {"success": False, "message": str(e)}
+
     async def cancel_transcription(self) -> dict[str, Any]:
         """
         Request cancellation of the currently running transcription job.

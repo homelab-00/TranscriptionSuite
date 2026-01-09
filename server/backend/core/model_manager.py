@@ -231,13 +231,30 @@ class ModelManager:
             initial_prompt=main_cfg.get("initial_prompt"),
         )
 
-    def load_transcription_model(self) -> None:
-        """Explicitly load the transcription model."""
+    def load_transcription_model(
+        self,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> None:
+        """
+        Explicitly load the transcription model.
+
+        Args:
+            progress_callback: Optional callback for progress messages.
+                              Called with status strings during loading.
+        """
+
+        def report(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
         engine = self.transcription_engine
         if not engine.is_loaded():
-            logger.info("Loading transcription model...")
+            report("Loading transcription model...")
+            report(f"Model: {engine.model_name}")
+            report("This may take a few minutes for first-time downloads...")
             engine.load_model()
-            logger.info("Transcription model ready")
+            report("Transcription model ready")
 
     def unload_transcription_model(self) -> None:
         """Unload the transcription model to free memory."""

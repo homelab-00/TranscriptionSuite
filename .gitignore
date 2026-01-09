@@ -18,7 +18,7 @@ server/frontend/build/
 ## .hidden folders
 .*/
 ### GitHub workflows folder exception
-!.github/iworkflows/
+!.github/workflows/
 
 ## .md files
 *.md

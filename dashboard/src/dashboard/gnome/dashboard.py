@@ -21,7 +21,13 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from dashboard.common.docker_manager import DockerManager, ServerMode, ServerStatus
+from dashboard.common.docker_manager import (
+    DockerManager,
+    DockerPullWorker,
+    DockerResult,
+    ServerMode,
+    ServerStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +525,9 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Status update timers
         self._status_timer_id: int | None = None
+
+        # Docker pull worker for async image pulling
+        self._pull_worker: DockerPullWorker | None = None
 
         # UI references (typed as Any since GTK types are dynamic)
         self._stack: Any = None
@@ -1674,11 +1683,56 @@ class DashboardWindow(_get_dashboard_base()):
         )
 
     def _on_pull_fresh_image(self) -> None:
-        """Pull fresh Docker image."""
-        self._run_server_operation(
-            lambda: self._docker_manager.pull_image(),
-            "Pulling fresh image...",
+        """Pull fresh Docker image (async, non-blocking)."""
+        # Prevent starting another pull if one is already in progress
+        if self._pull_worker is not None and self._pull_worker.is_alive():
+            logger.warning("Docker pull already in progress")
+            self._show_notification(
+                "Docker Server", "Image download already in progress"
+            )
+            return
+
+        self._show_notification(
+            "Docker Server",
+            "Starting image download (~15GB). This may take a while...",
         )
+
+        def on_progress(msg: str) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            GLib.idle_add(self._update_pull_progress, msg)
+
+        def on_complete(result: DockerResult) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            GLib.idle_add(self._on_pull_complete, result)
+
+        # Start async pull
+        self._pull_worker = self._docker_manager.start_pull_worker(
+            progress_callback=on_progress,
+            complete_callback=on_complete,
+        )
+        logger.info("Started async Docker image pull")
+
+    def _update_pull_progress(self, msg: str) -> bool:
+        """Update UI with pull progress (called on main thread via GLib.idle_add)."""
+        logger.info(msg)
+        # For GNOME, we just log progress - notifications would be too spammy
+        return False  # Return False to remove from idle queue
+
+    def _on_pull_complete(self, result: DockerResult) -> bool:
+        """Handle pull completion (called on main thread via GLib.idle_add)."""
+        self._pull_worker = None
+
+        if result.success:
+            self._show_notification("Docker Server", result.message)
+            logger.info("Docker image pull completed successfully")
+        else:
+            self._show_notification("Docker Server", f"Error: {result.message}")
+            logger.error(f"Docker image pull failed: {result.message}")
+
+        # Refresh status
+        self._refresh_server_status()
+        self._refresh_home_status()
+        return False  # Return False to remove from idle queue
 
     def _on_remove_data_volume(self) -> None:
         """Remove data volume with confirmation dialog."""

@@ -8,10 +8,18 @@ Handles:
 - Model management
 """
 
+import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel
 
 from server.api.routes.utils import require_admin
@@ -77,6 +85,99 @@ async def load_models(request: Request) -> Dict[str, str]:
     except Exception as e:
         logger.error(f"Failed to load models: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.websocket("/models/load/stream")
+async def load_models_stream(websocket: WebSocket) -> None:
+    """
+    Load transcription models with streaming progress updates.
+
+    This WebSocket endpoint loads models in a background thread while
+    streaming progress messages to the client. This prevents the UI
+    from freezing during large model downloads.
+
+    Protocol:
+    - Connect to WebSocket
+    - Receive: {"type": "progress", "message": "..."} - Progress updates
+    - Receive: {"type": "complete", "status": "loaded"} - Success
+    - Receive: {"type": "error", "message": "..."} - Error
+    - Connection closes after complete/error
+    """
+    await websocket.accept()
+    logger.info("WebSocket connected for model loading with progress")
+
+    try:
+        # Get model manager from app state
+        model_manager = websocket.app.state.model_manager
+
+        # Track messages to send
+        message_queue: asyncio.Queue[Dict[str, str]] = asyncio.Queue()
+
+        async def send_progress(msg: str) -> None:
+            """Queue a progress message for sending."""
+            await message_queue.put({"type": "progress", "message": msg})
+
+        def progress_callback(msg: str) -> None:
+            """Called from model loading thread - queue message for async send."""
+            # Use run_coroutine_threadsafe to safely queue from thread
+            loop = asyncio.get_event_loop()
+            asyncio.run_coroutine_threadsafe(send_progress(msg), loop)
+
+        # Start message sender task
+        async def message_sender() -> None:
+            """Send queued messages to WebSocket."""
+            while True:
+                msg = await message_queue.get()
+                if msg.get("type") == "_done":
+                    break
+                try:
+                    await websocket.send_json(msg)
+                except Exception as e:
+                    logger.warning(f"Failed to send WebSocket message: {e}")
+                    break
+
+        sender_task = asyncio.create_task(message_sender())
+
+        # Initial progress message
+        await websocket.send_json(
+            {"type": "progress", "message": "Initializing model loader..."}
+        )
+
+        # Run model loading in thread pool
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: model_manager.load_transcription_model(
+                    progress_callback=progress_callback
+                ),
+            )
+
+            # Send completion message
+            await websocket.send_json({"type": "complete", "status": "loaded"})
+            logger.info("Model loading completed successfully via WebSocket")
+
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            await websocket.send_json({"type": "error", "message": str(e)})
+
+        # Stop the sender task
+        await message_queue.put({"type": "_done"})
+        await sender_task
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected during model loading")
+    except Exception as e:
+        logger.error(f"WebSocket error during model loading: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @router.post("/models/unload")

@@ -61,7 +61,7 @@ GPU acceleration.
 **Linux:**
 
 1. Install Docker Engine
-    * For Arch run `sudo pacman -S docker`
+    * For Arch run `sudo pacman -S --needed docker`
     * For other distros refer to the [Docker documentation](https://docs.docker.com/engine/install/)
 2. Install NVIDIA Container Toolkit (for GPU support)
     * Refer to the [NVIDIA documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)

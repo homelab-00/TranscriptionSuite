@@ -43,7 +43,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dashboard.common.docker_manager import DockerManager, ServerMode, ServerStatus
+from dashboard.common.docker_manager import (
+    DockerManager,
+    DockerPullWorker,
+    DockerResult,
+    ServerMode,
+    ServerStatus,
+)
 from dashboard.common.icon_loader import IconLoader
 
 if TYPE_CHECKING:
@@ -586,6 +592,9 @@ class DashboardWindow(QMainWindow):
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
 
+        # Docker pull worker for async image pulling
+        self._pull_worker: "DockerPullWorker | None" = None
+
         self._setup_ui()
         self._apply_styles()
 
@@ -1034,6 +1043,14 @@ class DashboardWindow(QMainWindow):
         self._pull_image_btn.setMinimumWidth(140)
         self._pull_image_btn.clicked.connect(self._on_pull_fresh_image)
         image_col_layout.addWidget(self._pull_image_btn)
+
+        # Cancel button for aborting image pull (initially hidden)
+        self._pull_cancel_btn = QPushButton("Cancel Pull")
+        self._pull_cancel_btn.setObjectName("dangerButton")
+        self._pull_cancel_btn.setMinimumWidth(140)
+        self._pull_cancel_btn.clicked.connect(self._on_cancel_pull)
+        self._pull_cancel_btn.setVisible(False)
+        image_col_layout.addWidget(self._pull_cancel_btn)
 
         mgmt_grid.addWidget(image_col)
 
@@ -2007,16 +2024,22 @@ class DashboardWindow(QMainWindow):
         QTimer.singleShot(1000, self._refresh_server_status)
 
     def _on_pull_fresh_image(self) -> None:
-        """Pull a fresh copy of the Docker server image."""
+        """Pull a fresh copy of the Docker server image (async, non-blocking)."""
         from PyQt6.QtWidgets import QMessageBox
+
+        # Prevent starting another pull if one is already in progress
+        if self._pull_worker is not None and self._pull_worker.is_alive():
+            logger.warning("Docker pull already in progress")
+            return
 
         # Inform user this may take time
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Fetch Fresh Image")
         msg_box.setText("Pull a fresh copy of the Docker image?")
         msg_box.setInformativeText(
-            "This will download the latest server image. "
-            "This may take several minutes depending on your connection speed."
+            "This will download the latest server image (~15GB). "
+            "This may take several minutes to hours depending on your connection speed.\n\n"
+            "The download runs in the background - you can continue using the app."
         )
         msg_box.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -2027,22 +2050,67 @@ class DashboardWindow(QMainWindow):
         if msg_box.exec() != QMessageBox.StandardButton.Yes:
             return
 
+        # Update UI for pull in progress
         self._image_status_label.setText("Pulling...")
         self._pull_image_btn.setEnabled(False)
+        self._pull_cancel_btn.setVisible(True)
 
-        def progress(msg: str) -> None:
-            logger.info(msg)
-            if self._show_server_logs_btn.isChecked():
-                self._server_log_view.appendPlainText(msg)
+        # Open log view so user can see progress
+        if not self._show_server_logs_btn.isChecked():
+            self._show_server_logs_btn.setChecked(True)
+            self._server_log_container.setVisible(True)
 
-        result = self._docker_manager.pull_fresh_image(progress_callback=progress)
+        def on_progress(msg: str) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            # Use QTimer.singleShot with 0 delay for thread-safe UI update
+            QTimer.singleShot(0, lambda: self._update_pull_progress(msg))
+
+        def on_complete(result: DockerResult) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            QTimer.singleShot(0, lambda: self._on_pull_complete(result))
+
+        # Start async pull
+        self._pull_worker = self._docker_manager.start_pull_worker(
+            progress_callback=on_progress,
+            complete_callback=on_complete,
+        )
+        logger.info("Started async Docker image pull")
+
+    def _update_pull_progress(self, msg: str) -> None:
+        """Update UI with pull progress (called on main thread)."""
+        logger.info(msg)
+        # Update status label with latest message
+        self._image_status_label.setText(f"Pulling: {msg[:50]}...")
+        # Append to log view
+        self._server_log_view.appendPlainText(msg)
+
+    def _on_pull_complete(self, result: DockerResult) -> None:
+        """Handle pull completion (called on main thread)."""
+        self._pull_worker = None
+
+        # Reset UI state
+        self._pull_image_btn.setEnabled(True)
+        self._pull_cancel_btn.setVisible(False)
 
         if result.success:
-            progress(result.message)
+            self._server_log_view.appendPlainText(result.message)
+            self._image_status_label.setText("Pull complete!")
+            logger.info("Docker image pull completed successfully")
         else:
-            progress(f"Error: {result.message}")
+            self._server_log_view.appendPlainText(f"Error: {result.message}")
+            self._image_status_label.setText("Pull failed")
+            logger.error(f"Docker image pull failed: {result.message}")
 
+        # Refresh status to update image info
         QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_cancel_pull(self) -> None:
+        """Cancel the in-progress Docker pull."""
+        if self._pull_worker is not None:
+            logger.info("User requested to cancel Docker pull")
+            self._pull_worker.cancel()
+            self._image_status_label.setText("Cancelling...")
+            self._pull_cancel_btn.setEnabled(False)
 
     def _on_remove_data_volume(self) -> None:
         """Remove the data volume."""

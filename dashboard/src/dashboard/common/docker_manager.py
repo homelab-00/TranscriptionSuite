@@ -11,10 +11,14 @@ import platform
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from typing import Self
 
 from dashboard.common.config import get_config_dir
 
@@ -46,6 +50,196 @@ class DockerResult:
     status: ServerStatus | None = None
 
 
+class DockerPullWorker(threading.Thread):
+    """
+    Background worker for Docker pull operations.
+
+    Runs docker pull in a separate thread with real-time progress streaming
+    and cancellation support.
+    """
+
+    def __init__(
+        self,
+        image_name: str,
+        progress_callback: Callable[[str], None],
+        complete_callback: Callable[[DockerResult], None],
+        system: str = "Linux",
+    ):
+        """
+        Initialize the pull worker.
+
+        Args:
+            image_name: Docker image to pull
+            progress_callback: Called with progress messages (from worker thread)
+            complete_callback: Called when complete with result (from worker thread)
+            system: Operating system name for platform-specific handling
+        """
+        super().__init__(daemon=True, name="DockerPullWorker")
+        self._image_name = image_name
+        self._progress_callback = progress_callback
+        self._complete_callback = complete_callback
+        self._system = system
+        self._process: subprocess.Popen | None = None
+        self._cancelled = False
+        self._lock = threading.Lock()
+
+    def run(self) -> None:
+        """Execute pull in background thread with progress streaming."""
+        try:
+            self._progress_callback(f"Pulling Docker image {self._image_name}...")
+            self._progress_callback(
+                "This may take several minutes depending on your connection..."
+            )
+
+            # Build command
+            cmd = ["docker", "pull", self._image_name]
+
+            # Hide console window on Windows
+            startupinfo = None
+            creationflags = 0
+            if self._system == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                creationflags = subprocess.CREATE_NO_WINDOW
+
+            # Start process with pipes for output streaming
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # Line buffered
+                startupinfo=startupinfo,
+                creationflags=creationflags if self._system == "Windows" else 0,
+            )
+
+            # Stream output line by line
+            if self._process.stdout:
+                for line in iter(self._process.stdout.readline, ""):
+                    if self._cancelled:
+                        break
+
+                    line = line.strip()
+                    if line:
+                        # Parse and report progress
+                        parsed = self._parse_docker_output(line)
+                        if parsed:
+                            self._progress_callback(parsed)
+
+            # Wait for completion
+            returncode = self._process.wait()
+
+            with self._lock:
+                if self._cancelled:
+                    self._complete_callback(
+                        DockerResult(False, "Docker pull cancelled by user.")
+                    )
+                elif returncode == 0:
+                    self._progress_callback("Docker image pulled successfully!")
+                    self._complete_callback(
+                        DockerResult(True, "Fresh Docker image pulled successfully.")
+                    )
+                else:
+                    self._complete_callback(
+                        DockerResult(
+                            False, f"Docker pull failed with exit code {returncode}"
+                        )
+                    )
+
+        except FileNotFoundError:
+            self._complete_callback(
+                DockerResult(False, "Docker is not installed or not in PATH.")
+            )
+        except Exception as e:
+            logger.exception("Docker pull failed")
+            self._complete_callback(DockerResult(False, f"Docker pull error: {e}"))
+        finally:
+            self._process = None
+
+    def _parse_docker_output(self, line: str) -> str | None:
+        """
+        Parse Docker pull output into user-friendly progress messages.
+
+        Docker outputs various formats:
+        - "latest: Pulling from repo/image"
+        - "abc123: Pulling fs layer"
+        - "abc123: Downloading [==>      ] 12.5MB/100MB"
+        - "abc123: Download complete"
+        - "abc123: Pull complete"
+        - "Digest: sha256:..."
+        - "Status: Downloaded newer image for..."
+        """
+        if not line:
+            return None
+
+        # Skip certain noisy lines
+        if line.startswith("Digest:") or line.startswith("docker.io/"):
+            return None
+
+        # Extract meaningful progress from download lines
+        if "Downloading" in line and "[" in line:
+            # Parse progress bar like "[==>      ] 12.5MB/100MB"
+            try:
+                # Extract the size info
+                parts = line.split("]")
+                if len(parts) > 1:
+                    size_info = parts[1].strip()
+                    # Get layer ID (first 12 chars usually)
+                    layer_id = line.split(":")[0][:12] if ":" in line else "layer"
+                    return f"Downloading {layer_id}: {size_info}"
+            except Exception:
+                pass
+            return line
+
+        # Report status messages
+        if line.startswith("Status:"):
+            return line
+
+        # Report pull complete
+        if "Pull complete" in line:
+            layer_id = line.split(":")[0][:12] if ":" in line else "layer"
+            return f"Layer {layer_id}: complete"
+
+        # Report downloading state change
+        if "Pulling fs layer" in line:
+            layer_id = line.split(":")[0][:12] if ":" in line else "layer"
+            return f"Layer {layer_id}: starting download"
+
+        # Report extracting
+        if "Extracting" in line:
+            layer_id = line.split(":")[0][:12] if ":" in line else "layer"
+            return f"Layer {layer_id}: extracting"
+
+        # Pass through other meaningful lines
+        if "Pulling from" in line or "Already exists" in line:
+            return line
+
+        return None
+
+    def cancel(self) -> None:
+        """Cancel the pull operation."""
+        with self._lock:
+            self._cancelled = True
+            if self._process and self._process.poll() is None:
+                logger.info("Cancelling Docker pull operation...")
+                try:
+                    self._process.terminate()
+                    # Give it a moment to terminate gracefully
+                    try:
+                        self._process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self._process.kill()
+                except Exception as e:
+                    logger.warning(f"Error terminating Docker pull: {e}")
+
+    @property
+    def is_cancelled(self) -> bool:
+        """Check if cancellation was requested."""
+        with self._lock:
+            return self._cancelled
+
+
 class DockerManager:
     """
     Manages Docker server operations for TranscriptionSuite.
@@ -75,8 +269,18 @@ class DockerManager:
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
         capture_output: bool = True,
+        timeout: float | None = 60,
     ) -> subprocess.CompletedProcess:
-        """Run a command and return the result."""
+        """
+        Run a command and return the result.
+
+        Args:
+            args: Command arguments
+            cwd: Working directory
+            env: Environment variables to add
+            capture_output: Whether to capture stdout/stderr
+            timeout: Timeout in seconds (None for no timeout)
+        """
         full_env = os.environ.copy()
         if env:
             full_env.update(env)
@@ -94,7 +298,7 @@ class DockerManager:
             env=full_env,
             capture_output=capture_output,
             text=True,
-            timeout=60,
+            timeout=timeout,
             startupinfo=startupinfo,
         )
 
@@ -503,7 +707,10 @@ class DockerManager:
         progress_callback: Callable[[str], None] | None = None,
     ) -> DockerResult:
         """
-        Pull a fresh copy of the Docker server image.
+        Pull a fresh copy of the Docker server image (synchronous).
+
+        NOTE: This method blocks the calling thread. For GUI applications,
+        use start_pull_worker() instead for async operation.
 
         Args:
             progress_callback: Optional callback for progress messages
@@ -520,13 +727,62 @@ class DockerManager:
         log(f"Pulling fresh Docker image {self.DOCKER_IMAGE}...")
         log("This may take several minutes depending on your connection...")
 
-        result = self._run_command(["docker", "pull", self.DOCKER_IMAGE])
+        # No timeout - image pulls can take a very long time for large images
+        result = self._run_command(
+            ["docker", "pull", self.DOCKER_IMAGE],
+            timeout=None,  # No timeout for image pulls
+        )
 
         if result.returncode == 0:
             return DockerResult(True, "Fresh Docker image pulled successfully.")
         else:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
             return DockerResult(False, f"Failed to pull image: {error_msg}")
+
+    def start_pull_worker(
+        self,
+        progress_callback: Callable[[str], None],
+        complete_callback: Callable[[DockerResult], None],
+    ) -> DockerPullWorker:
+        """
+        Start an asynchronous Docker image pull operation.
+
+        This method starts a background thread that pulls the Docker image
+        with real-time progress reporting. The UI remains responsive during
+        the pull.
+
+        Args:
+            progress_callback: Called with progress messages (from worker thread).
+                              The caller is responsible for thread-safe UI updates.
+            complete_callback: Called when operation completes with result
+                              (from worker thread). The caller is responsible
+                              for thread-safe UI updates.
+
+        Returns:
+            DockerPullWorker instance. Call .cancel() to abort the operation.
+
+        Example (PyQt6/KDE):
+            def on_progress(msg: str) -> None:
+                # Use QMetaObject.invokeMethod for thread-safe UI update
+                QMetaObject.invokeMethod(widget, "update_status",
+                    Qt.ConnectionType.QueuedConnection, Q_ARG(str, msg))
+
+            def on_complete(result: DockerResult) -> None:
+                QMetaObject.invokeMethod(widget, "pull_finished",
+                    Qt.ConnectionType.QueuedConnection)
+
+            worker = docker_manager.start_pull_worker(on_progress, on_complete)
+            # Later: worker.cancel() to abort
+        """
+        worker = DockerPullWorker(
+            image_name=self.DOCKER_IMAGE,
+            progress_callback=progress_callback,
+            complete_callback=complete_callback,
+            system=self.system,
+        )
+        worker.start()
+        logger.info(f"Started async Docker pull for {self.DOCKER_IMAGE}")
+        return worker
 
     def remove_data_volume(
         self,
