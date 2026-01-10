@@ -128,6 +128,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.start_item: Optional[Any] = None
         self.stop_item: Optional[Any] = None
         self.cancel_item: Optional[Any] = None
+        self.transcribe_item: Optional[Any] = None
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -172,11 +173,12 @@ class GtkTray(ServerControlMixin, AbstractTray):
         menu.append(Gtk.SeparatorMenuItem())
 
         # File transcription
-        transcribe_item = Gtk.MenuItem(label="Transcribe File...")
-        transcribe_item.connect(
+        self.transcribe_item = Gtk.MenuItem(label="Transcribe File...")
+        self.transcribe_item.connect(
             "activate", lambda _: self._trigger_callback(TrayAction.TRANSCRIBE_FILE)
         )
-        menu.append(transcribe_item)
+        self.transcribe_item.set_sensitive(False)
+        menu.append(self.transcribe_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -226,6 +228,10 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 TrayState.TRANSCRIBING,
             }
             self.cancel_item.set_sensitive(state in cancellable_states)
+
+        # Transcribe File is only enabled when server is connected and ready (STANDBY)
+        if self.transcribe_item:
+            self.transcribe_item.set_sensitive(state == TrayState.STANDBY)
 
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
@@ -312,6 +318,10 @@ class GtkTray(ServerControlMixin, AbstractTray):
     def _dbus_start_client(self, use_remote: bool) -> tuple[bool, str]:
         """D-Bus callback: Start the transcription client."""
         try:
+            # Reload config from disk to get latest values saved by Dashboard
+            # This prevents overwriting remote_host/token with stale values
+            self.config._load()
+
             if use_remote:
                 self.config.set("server", "use_remote", value=True)
                 self.config.set("server", "use_https", value=True)

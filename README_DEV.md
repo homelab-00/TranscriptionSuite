@@ -86,8 +86,8 @@ cd server/frontend && npm ci && npm audit && cd ../..
 # 3. Build and run Docker server
 cd server/docker && docker compose build && docker compose up -d
 
-# 4. Run dashboard locally
-cd dashboard && uv run transcription-dashboard --host localhost --port 8000
+# 4. Run dashboard
+cd dashboard && uv run transcription-dashboard
 ```
 
 ### 1.2 Running from Source (Development)

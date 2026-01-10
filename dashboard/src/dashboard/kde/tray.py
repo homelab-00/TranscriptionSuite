@@ -105,6 +105,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.start_action: QAction | None = None
         self.stop_action: QAction | None = None
         self.cancel_action: QAction | None = None
+        self.transcribe_action: QAction | None = None
         self.reconnect_action: QAction | None = None
 
         # Docker manager for server control
@@ -158,11 +159,12 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         menu.addSeparator()
 
         # File transcription
-        transcribe_action = QAction("Transcribe File...", menu)
-        transcribe_action.triggered.connect(
+        self.transcribe_action = QAction("Transcribe File...", menu)
+        self.transcribe_action.triggered.connect(
             lambda: self._trigger_callback(TrayAction.TRANSCRIBE_FILE)
         )
-        menu.addAction(transcribe_action)
+        self.transcribe_action.setEnabled(False)
+        menu.addAction(self.transcribe_action)
 
         menu.addSeparator()
 
@@ -184,7 +186,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         """Setup click handlers for tray icon."""
         self.tray.activated.connect(self._on_tray_activated)
 
-    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+    def _on_tray_activated(self, reason: "QSystemTrayIcon.ActivationReason") -> None:
         """Handle tray icon clicks."""
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             # Left-click: Start recording (if in standby)
@@ -202,7 +204,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             if self.state == TrayState.RECORDING:
                 self._trigger_callback(TrayAction.STOP_RECORDING)
 
-    def _create_icon(self, color: tuple[int, int, int]) -> QIcon:
+    def _create_icon(self, color: tuple[int, int, int]) -> "QIcon":
         """Create a colored circle icon."""
         size = 64
         pixmap = QPixmap(size, size)
@@ -256,7 +258,11 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             }
             self.cancel_action.setEnabled(state in cancellable_states)
 
-    def _get_logo_icon(self) -> QIcon:
+        # Transcribe File is only enabled when server is connected and ready (STANDBY)
+        if self.transcribe_action:
+            self.transcribe_action.setEnabled(state == TrayState.STANDBY)
+
+    def _get_logo_icon(self) -> "QIcon":
         """Get the app logo icon for IDLE state."""
         if self.LOGO_PATH.exists():
             return QIcon(str(self.LOGO_PATH))
