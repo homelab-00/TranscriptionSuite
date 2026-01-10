@@ -20,8 +20,8 @@ venv
 env
 .env
 *.env.local
-# uv lock files not needed in container
-**/uv.lock
+# uv lock files ARE needed for reproducible builds
+# **/uv.lock
 
 # IDE
 .vscode

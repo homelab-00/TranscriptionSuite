@@ -60,6 +60,7 @@ ENV VIRTUAL_ENV="/app/.venv"
 # Copy only dependency files first for better layer caching
 COPY README.md ./
 COPY server/backend/pyproject.toml ./server/
+COPY server/backend/uv.lock ./server/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd server && \
     uv sync
