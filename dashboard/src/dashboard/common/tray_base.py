@@ -128,3 +128,17 @@ class AbstractTray(ABC):
             TrayState.ERROR: "Error",
         }
         return f"{self.app_name} - {state_names.get(state, 'Unknown')}"
+
+    def update_connection_type(self, is_local: bool) -> None:
+        """
+        Update the tray to reflect whether the connection is local or remote.
+
+        This affects which menu items are enabled (e.g., model management
+        only available for local connections).
+
+        Override with platform-specific implementation.
+
+        Args:
+            is_local: True if connected to localhost, False if remote
+        """
+        pass

@@ -106,7 +106,14 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.stop_action: QAction | None = None
         self.cancel_action: QAction | None = None
         self.transcribe_action: QAction | None = None
+        self.toggle_models_action: QAction | None = None
         self.reconnect_action: QAction | None = None
+
+        # Model state tracking (assume loaded initially)
+        self._models_loaded = True
+
+        # Connection type tracking (assume local initially)
+        self._is_local_connection = True
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -165,6 +172,16 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         )
         self.transcribe_action.setEnabled(False)
         menu.addAction(self.transcribe_action)
+
+        menu.addSeparator()
+
+        # Model management (unload/reload)
+        self.toggle_models_action = QAction("Unload All Models", menu)
+        self.toggle_models_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.TOGGLE_MODELS)
+        )
+        self.toggle_models_action.setEnabled(False)
+        menu.addAction(self.toggle_models_action)
 
         menu.addSeparator()
 
@@ -262,6 +279,13 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if self.transcribe_action:
             self.transcribe_action.setEnabled(state == TrayState.STANDBY)
 
+        # Toggle Models is only enabled when server is connected and ready (STANDBY)
+        # AND the connection is to localhost (model management unavailable for remote)
+        if self.toggle_models_action:
+            self.toggle_models_action.setEnabled(
+                state == TrayState.STANDBY and self._is_local_connection
+            )
+
     def _get_logo_icon(self) -> "QIcon":
         """Get the app logo icon for IDLE state."""
         if self.LOGO_PATH.exists():
@@ -322,10 +346,37 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         """
         Update the toggle models menu item text based on current state.
 
-        Note: Menu item removed; button now in Dashboard Server view.
-        Method kept for interface compatibility.
+        Args:
+            models_loaded: True if models are loaded, False if unloaded
         """
-        pass
+        self._models_loaded = models_loaded
+        if self.toggle_models_action:
+            if models_loaded:
+                self.toggle_models_action.setText("Unload All Models")
+            else:
+                self.toggle_models_action.setText("Reload Models")
+
+        # Also update dashboard button if dashboard window is open
+        if self._dashboard_window:
+            self._dashboard_window.set_models_loaded(models_loaded)
+
+    def update_connection_type(self, is_local: bool) -> None:
+        """
+        Update the connection type (local vs remote).
+
+        This affects which menu items are enabled - model management is only
+        available for local connections.
+
+        Args:
+            is_local: True if connected to localhost, False if remote
+        """
+        self._is_local_connection = is_local
+        # Re-trigger state update to refresh menu item states
+        self._do_set_state(self.state)
+
+        # Also update dashboard if it's open
+        if self._dashboard_window:
+            self._dashboard_window.set_connection_local(is_local)
 
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""
@@ -397,6 +448,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             )
             self._dashboard_window.show_settings_requested.connect(
                 self.show_settings_dialog
+            )
+            self._dashboard_window.models_state_changed.connect(
+                self.update_models_menu_state
             )
 
         self._dashboard_window.show()

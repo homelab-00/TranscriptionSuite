@@ -127,6 +127,7 @@ class ClientOrchestrator:
         self.tray.register_callback(
             TrayAction.OPEN_AUDIO_NOTEBOOK, self._on_open_notebook
         )
+        self.tray.register_callback(TrayAction.TOGGLE_MODELS, self._on_toggle_models)
         self.tray.register_callback(TrayAction.SETTINGS, self._on_settings)
         self.tray.register_callback(TrayAction.RECONNECT, self._on_reconnect)
         self.tray.register_callback(TrayAction.DISCONNECT, self._on_disconnect)
@@ -144,6 +145,13 @@ class ClientOrchestrator:
         if self.event_loop:
             return asyncio.run_coroutine_threadsafe(coro, self.event_loop)
         raise RuntimeError("Event loop not running")
+
+    @property
+    def is_local_connection(self) -> bool:
+        """Check if the current server connection is to localhost."""
+        if self.api_client is None:
+            return False
+        return self.api_client._is_localhost()
 
     # =========================================================================
     # Server Connection
@@ -194,6 +202,8 @@ class ClientOrchestrator:
 
             if self.tray:
                 self.tray.set_state(TrayState.STANDBY)
+                # Notify tray of connection type (local vs remote)
+                self.tray.update_connection_type(self.is_local_connection)
                 self.tray.show_notification(
                     "Connected",
                     f"Connected to TranscriptionSuite at {self.config.server_host}",
@@ -594,6 +604,66 @@ class ClientOrchestrator:
         return main_error
 
     # =========================================================================
+    # Model Management
+    # =========================================================================
+
+    def _on_toggle_models(self) -> None:
+        """Handle toggle models action from tray menu."""
+        self._schedule_async(self._toggle_models())
+
+    async def _toggle_models(self) -> None:
+        """Toggle model loading state - unload to free GPU memory or reload."""
+        if not self.api_client:
+            if self.tray:
+                self.tray.show_notification(
+                    "Error", "Not connected to server"
+                )
+            return
+
+        # Only allow toggling models on local connections
+        if not self.is_local_connection:
+            if self.tray:
+                self.tray.show_notification(
+                    "Error",
+                    "Model management only available for local connections"
+                )
+            return
+
+        try:
+            if self.models_loaded:
+                result = await self.api_client.unload_models()
+            else:
+                result = await self.api_client.reload_models()
+
+            if result.get("success"):
+                self.models_loaded = not self.models_loaded
+
+                # Update tray menu state
+                if self.tray and hasattr(self.tray, "update_models_menu_state"):
+                    self.tray.update_models_menu_state(self.models_loaded)
+
+                if self.models_loaded:
+                    if self.tray:
+                        self.tray.show_notification(
+                            "Models Loaded", "Models ready for transcription"
+                        )
+                else:
+                    if self.tray:
+                        self.tray.show_notification(
+                            "Models Unloaded",
+                            "GPU memory freed. Use menu to reload.",
+                        )
+            else:
+                if self.tray:
+                    self.tray.show_notification(
+                        "Operation Failed", result.get("message", "Unknown error")
+                    )
+        except Exception as e:
+            logger.error(f"Model toggle failed: {e}")
+            if self.tray:
+                self.tray.show_notification("Error", f"Failed to toggle models: {e}")
+
+    # =========================================================================
     # Clipboard
     # =========================================================================
 
@@ -665,6 +735,8 @@ class ClientOrchestrator:
         # Update tray state
         if self.tray:
             self.tray.set_state(TrayState.IDLE)
+            # Reset connection type
+            self.tray.update_connection_type(False)
             logger.info("Client disconnected")
 
     def _on_quit(self) -> None:

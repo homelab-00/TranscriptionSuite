@@ -129,6 +129,13 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.stop_item: Optional[Any] = None
         self.cancel_item: Optional[Any] = None
         self.transcribe_item: Optional[Any] = None
+        self.toggle_models_item: Optional[Any] = None
+
+        # Model state tracking (assume loaded initially)
+        self._models_loaded = True
+
+        # Connection type tracking (assume local initially)
+        self._is_local_connection = True
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -179,6 +186,16 @@ class GtkTray(ServerControlMixin, AbstractTray):
         )
         self.transcribe_item.set_sensitive(False)
         menu.append(self.transcribe_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        # Model management (unload/reload)
+        self.toggle_models_item = Gtk.MenuItem(label="Unload All Models")
+        self.toggle_models_item.connect(
+            "activate", lambda _: self._trigger_callback(TrayAction.TOGGLE_MODELS)
+        )
+        self.toggle_models_item.set_sensitive(False)
+        menu.append(self.toggle_models_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -233,6 +250,13 @@ class GtkTray(ServerControlMixin, AbstractTray):
         if self.transcribe_item:
             self.transcribe_item.set_sensitive(state == TrayState.STANDBY)
 
+        # Toggle Models is only enabled when server is connected and ready (STANDBY)
+        # AND the connection is to localhost (model management unavailable for remote)
+        if self.toggle_models_item:
+            self.toggle_models_item.set_sensitive(
+                state == TrayState.STANDBY and self._is_local_connection
+            )
+
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
             try:
@@ -265,10 +289,29 @@ class GtkTray(ServerControlMixin, AbstractTray):
         """
         Update the toggle models menu item text based on current state.
 
-        Note: Menu item removed; button now in Dashboard Server view.
-        Method kept for interface compatibility.
+        Args:
+            models_loaded: True if models are loaded, False if unloaded
         """
-        pass
+        self._models_loaded = models_loaded
+        if self.toggle_models_item:
+            if models_loaded:
+                self.toggle_models_item.set_label("Unload All Models")
+            else:
+                self.toggle_models_item.set_label("Reload Models")
+
+    def update_connection_type(self, is_local: bool) -> None:
+        """
+        Update the connection type (local vs remote).
+
+        This affects which menu items are enabled - model management is only
+        available for local connections.
+
+        Args:
+            is_local: True if connected to localhost, False if remote
+        """
+        self._is_local_connection = is_local
+        # Re-trigger state update to refresh menu item states
+        GLib.idle_add(self._do_set_state, self.state)
 
     def run(self) -> None:
         """Start the GTK main loop."""

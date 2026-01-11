@@ -564,6 +564,9 @@ class DashboardWindow(QMainWindow):
     stop_client_requested = pyqtSignal()
     show_settings_requested = pyqtSignal()
 
+    # Signal for model state changes
+    models_state_changed = pyqtSignal(bool)  # True = loaded, False = unloaded
+
     # Signals for Docker pull progress (thread-safe cross-thread communication)
     _pull_progress_signal = pyqtSignal(str)
     _pull_complete_signal = pyqtSignal(object)  # DockerResult
@@ -596,6 +599,9 @@ class DashboardWindow(QMainWindow):
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
+
+        # Connection type tracking (assume local initially)
+        self._is_local_connection = True
 
         # Docker pull worker for async image pulling
         self._pull_worker: "DockerPullWorker | None" = None
@@ -2327,7 +2333,7 @@ class DashboardWindow(QMainWindow):
         self._update_models_button_state()
 
     def _update_models_button_state(self) -> None:
-        """Update the models button state based on server health."""
+        """Update the models button state based on server health and connection type."""
         # Check if server is running and healthy
         status = self._docker_manager.get_server_status()
         health = self._docker_manager.get_container_health()
@@ -2336,8 +2342,9 @@ class DashboardWindow(QMainWindow):
             health is None or health == "healthy"
         )
 
-        if is_healthy:
-            # Server is healthy, enable button with appropriate color
+        # Only enable if healthy AND connected locally (model management unavailable for remote)
+        if is_healthy and self._is_local_connection:
+            # Server is healthy and local, enable button with appropriate color
             self._unload_models_btn.setEnabled(True)
             if self._models_loaded:
                 # Light blue (models loaded, ready to unload) - color 2
@@ -2483,6 +2490,48 @@ class DashboardWindow(QMainWindow):
         if self._current_view == View.CLIENT:
             self._refresh_client_status()
 
+    def set_models_loaded(self, loaded: bool) -> None:
+        """
+        Update models loaded state (called from tray when changed via menu).
+
+        Args:
+            loaded: True if models are loaded, False if unloaded
+        """
+        self._models_loaded = loaded
+        if self._current_view == View.SERVER and self._unload_models_btn:
+            if loaded:
+                self._unload_models_btn.setText("Unload All Models")
+                self._unload_models_btn.setToolTip(
+                    "Unload transcription models to free GPU memory"
+                )
+                # Light blue background (models loaded) - color 2
+                self._unload_models_btn.setStyleSheet(
+                    "QPushButton { background-color: #90caf9; border: none; border-radius: 6px; color: #121212; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton:hover { background-color: #42a5f5; }"
+                )
+            else:
+                self._unload_models_btn.setText("Reload Models")
+                self._unload_models_btn.setToolTip(
+                    "Reload transcription models for use"
+                )
+                # Red background (models unloaded) - color 3
+                self._unload_models_btn.setStyleSheet(
+                    "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton:hover { background-color: #d32f2f; }"
+                )
+
+    def set_connection_local(self, is_local: bool) -> None:
+        """
+        Update connection type (called from tray when connection changes).
+
+        Args:
+            is_local: True if connected to localhost, False if remote
+        """
+        self._is_local_connection = is_local
+        # Refresh button state with new connection type
+        if self._current_view == View.SERVER:
+            self._update_models_button_state()
+
     def _on_toggle_models(self) -> None:
         """Toggle model loading state - unload to free GPU memory or reload."""
         import asyncio
@@ -2534,6 +2583,8 @@ class DashboardWindow(QMainWindow):
 
             if result.get("success"):
                 self._models_loaded = not self._models_loaded
+                # Emit signal to notify tray of state change
+                self.models_state_changed.emit(self._models_loaded)
                 if self._models_loaded:
                     self._unload_models_btn.setText("Unload All Models")
                     self._unload_models_btn.setToolTip(

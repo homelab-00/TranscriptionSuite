@@ -523,6 +523,9 @@ class DashboardWindow(_get_dashboard_base()):
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
 
+        # Connection type tracking (assume local initially)
+        self._is_local_connection = True
+
         # Status update timers
         self._status_timer_id: int | None = None
 
@@ -1593,7 +1596,7 @@ class DashboardWindow(_get_dashboard_base()):
         self._update_models_button_state()
 
     def _update_models_button_state(self) -> None:
-        """Update the models button state based on server health."""
+        """Update the models button state based on server health and connection type."""
         if not self._unload_models_btn:
             return
 
@@ -1605,8 +1608,9 @@ class DashboardWindow(_get_dashboard_base()):
             health is None or health == "healthy"
         )
 
-        if is_healthy:
-            # Server is healthy, enable button with appropriate color
+        # Only enable if healthy AND connected locally (model management unavailable for remote)
+        if is_healthy and self._is_local_connection:
+            # Server is healthy and local, enable button with appropriate color
             self._unload_models_btn.set_sensitive(True)
             if self._models_loaded:
                 # Light blue (models loaded, ready to unload)
@@ -1621,6 +1625,17 @@ class DashboardWindow(_get_dashboard_base()):
             self._unload_models_btn.set_sensitive(False)
             self._unload_models_btn.remove_css_class("models-loaded")
             self._unload_models_btn.remove_css_class("models-unloaded")
+
+    def set_connection_local(self, is_local: bool) -> None:
+        """
+        Update connection type.
+
+        Args:
+            is_local: True if connected to localhost, False if remote
+        """
+        self._is_local_connection = is_local
+        # Refresh button state with new connection type
+        self._update_models_button_state()
 
     def set_client_running(self, running: bool) -> None:
         """Update client running state."""
