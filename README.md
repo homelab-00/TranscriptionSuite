@@ -1,11 +1,22 @@
 # TranscriptionSuite
 
-<img align="left" style="margin-right: 20px" width="90" height="90" src="./build/assets/logo.svg">
+<img align="right" width="409" height="225" src="./build/assets/logo_wide.png">
 
-<pre>A comprehensive Speech-to-Text Transcription Suite with Docker-first
-architecture. Written in Python, utilizing faster_whisper with
-GPU acceleration.
+<pre>A comprehensive Speech-to-Text audio 
+transcription application with Docker-first
+architecture. Written in Python, utilizing
+faster_whisper with Nvidia GPU acceleration.
 </pre>
+
+**OS Support:**
+
+![KDE Plasma](https://img.shields.io/badge/KDE_Plasma-%23FF7F00.svg?style=for-the-badge&logo=kde-plasma&logoColor=white) ![GNOME](https://img.shields.io/badge/GNOME-%238A2BE2.svg?style=for-the-badge&logo=gnome&logoColor=white) ![Windows 11](https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white)
+
+**GPU Hardware Support:**
+
+![NVIDIA Supported only](https://img.shields.io/badge/NVIDIA-Supported_only-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white)
+
+---
 
 ## Table of Contents
 
@@ -39,18 +50,59 @@ GPU acceleration.
 
 ## 1. Features
 
-- **Truly Multilingual**: Supports [90+ languages](https://platform.openai.com/docs/guides/speech-to-text/supported-languages)
+- **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
 - **Fully featured GUI**: Native app for KDE, GNOME, and Windows
 - **Longform Transcription**: Starts recording, listens until you press stop, then immediately starts
-  transcribing. Think of it like dictation. Optional live preview available.
+  transcribing - think of it like dictation
 - **Static File Transcription**: Transcribe an existing audio/video file
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
   (utilizing Tailscale)
-- **Speaker Diarization**: PyAnnote-based speaker identification (static transcription only)
-- **Audio Notebook**: A fully featured Audio Notebook mode, with a calendar-based view,
+- **Speaker Diarization**: PyAnnote-based speaker identification
+- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
+
+<div align="center">
+
+#### Screenshots
+
+##### Dashboard
+<table>
+  <tr>
+    <td><img src="./build/assets/shot-1.png" alt="Dashboard Home" width="400"/></td>
+    <td><img src="./build/assets/shot-2.png" alt="Server Management" width="400"/></td>
+  </tr>
+</table>
+
+##### Audio Notebook
+<table>
+  <tr>
+    <td><img src="./build/assets/shot-3.png" alt="Calendar View" width="400"/></td>
+    <td><img src="./build/assets/shot-4.png" alt="AI Summary" width="400"/></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="./build/assets/shot-5.png" alt="Speaker Diarization" width="400"/></td>
+  </tr>
+</table>
+
+</div>
+
+
+<div align="center">
+
+#### Videos
+
+Transcription demo:
+
+https://github.com/user-attachments/assets/b38955c6-12d3-4810-979d-ce1475d2b165
+
+
+Audio Notebook demo:
+
+https://github.com/user-attachments/assets/afc55551-98b9-4be6-98b2-a7f426d7025a
+
+</div>
 
 ---
 
@@ -85,6 +137,10 @@ GPU acceleration.
 ---
 
 ## 3. Installation
+
+Setup Guide/Tutorial:
+
+https://github.com/user-attachments/assets/2e5beea5-3417-4d08-afb9-815f47adf5d8
 
 Download the Dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page:
 
