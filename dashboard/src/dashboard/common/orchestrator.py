@@ -89,6 +89,7 @@ class ClientOrchestrator:
         """
         logger.info("Starting TranscriptionSuite Native Client")
         self.tray = tray
+        self.tray.orchestrator = self  # Allow tray to sync state back to orchestrator
 
         # Register callbacks
         self._register_callbacks()
@@ -662,6 +663,19 @@ class ClientOrchestrator:
             logger.error(f"Model toggle failed: {e}")
             if self.tray:
                 self.tray.show_notification("Error", f"Failed to toggle models: {e}")
+
+    def sync_models_state(self, loaded: bool) -> None:
+        """
+        Sync the models loaded state from external source (e.g., dashboard GUI).
+
+        This is called by the tray when the dashboard changes the model state,
+        ensuring the orchestrator stays in sync with the UI.
+
+        Args:
+            loaded: True if models are loaded, False if unloaded
+        """
+        self.models_loaded = loaded
+        logger.debug(f"Orchestrator models_loaded synced to: {loaded}")
 
     # =========================================================================
     # Clipboard

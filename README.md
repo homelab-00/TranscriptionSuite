@@ -1,12 +1,24 @@
 # TranscriptionSuite
 
-<img align="right" width="409" height="225" src="./build/assets/logo_wide.png">
+<img align="left" width="374" height="205" src="./build/assets/logo_wide.png">
 
-<pre>A comprehensive Speech-to-Text audio 
-transcription application with Docker-first
-architecture. Written in Python, utilizing
-faster_whisper with Nvidia GPU acceleration.
+<table>
+  <tr>
+    <td width="375px">
+<pre>
+A fully local & private Speech-To-Text app
+with cross-platform support offering
+advanced features like diarization, audio
+notebook mode and LM Studio integration.
+Focused on long-form transcription.
+Written in Python, utilizing faster-whisper
+and NVIDIA GPU acceleration. Server/client
+architecture; server is Dockerized for
+easy installation.
 </pre>
+    </td>
+  </tr>
+</table>
 
 **OS Support:**
 
@@ -50,10 +62,11 @@ faster_whisper with Nvidia GPU acceleration.
 
 ## 1. Features
 
+- **100% Local**: *Everything* runs on your own computer, the app doesn't need internet
+  beyond the initial setup
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
 - **Fully featured GUI**: Native app for KDE, GNOME, and Windows
-- **Longform Transcription**: Starts recording, listens until you press stop, then immediately starts
-  transcribing - think of it like dictation
+- **Longform Transcription**: Record as long as you want and have it transcribed in seconds
 - **Static File Transcription**: Transcribe an existing audio/video file
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
   (utilizing Tailscale)
@@ -198,11 +211,11 @@ Result is automatically copied to clipboard
 
 | Color | State |
 |-------|-------|
-| ⚫ | Disconnected |
 | 🟢 | Ready |
 | 🟡 | Recording |
-| 🔵 | Uploading |
 | 🟠 | Transcribing |
+| 🔵 | Uploading |
+| ⚫ | Disconnected / Models Unloaded |
 | 🔴 | Error |
 
 ### 4.2 Dashboard GUI

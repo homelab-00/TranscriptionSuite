@@ -9,6 +9,7 @@ providing a GUI to manage both the Docker server and the transcription client.
 """
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -248,7 +249,11 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if state == TrayState.IDLE:
             self.tray.setIcon(self._get_logo_icon())
         else:
-            color = self.COLORS.get(state, (128, 128, 128))
+            # If models are unloaded, use grey icon (same as DISCONNECTED)
+            if not self._models_loaded:
+                color = (128, 128, 128)  # Grey
+            else:
+                color = self.COLORS.get(state, (128, 128, 128))
             self.tray.setIcon(self._create_icon(color))
 
         # Update tooltip
@@ -356,9 +361,16 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             else:
                 self.toggle_models_action.setText("Reload Models")
 
+        # Update icon to grey if models unloaded
+        self._do_set_state(self.state)
+
         # Also update dashboard button if dashboard window is open
         if self._dashboard_window:
             self._dashboard_window.set_models_loaded(models_loaded)
+
+        # Sync orchestrator state (when called from dashboard signal)
+        if self.orchestrator and hasattr(self.orchestrator, "sync_models_state"):
+            self.orchestrator.sync_models_state(models_loaded)
 
     def update_connection_type(self, is_local: bool) -> None:
         """
@@ -385,30 +397,39 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
     def _do_copy_to_clipboard(self, text: str) -> None:
         """Actually copy to clipboard (must be called on main thread)."""
-        try:
-            clipboard = self.app.clipboard()
-            clipboard.setText(text)
-            # Process events to ensure clipboard is committed (critical for Wayland)
-            self.app.processEvents()
-            logger.debug(f"Copied to clipboard via Qt: {len(text)} characters")
-        except Exception as e:
-            logger.warning(f"Qt clipboard copy failed: {e}")
-            # Try wl-copy fallback on Wayland
+        # Detect Wayland - Qt clipboard is unreliable on Wayland (silently fails)
+        is_wayland = (
+            os.environ.get("XDG_SESSION_TYPE") == "wayland"
+            or os.environ.get("WAYLAND_DISPLAY") is not None
+        )
+
+        if is_wayland:
+            # On Wayland, use wl-copy as PRIMARY method (Qt clipboard is unreliable)
             try:
                 subprocess.run(
                     ["wl-copy"],
                     input=text.encode("utf-8"),
                     check=True,
                     capture_output=True,
-                    timeout=2,
+                    timeout=5,
                 )
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
-            except (
-                FileNotFoundError,
-                subprocess.TimeoutExpired,
-                subprocess.CalledProcessError,
-            ) as wl_err:
-                logger.error(f"wl-copy fallback also failed: {wl_err}")
+                return
+            except FileNotFoundError:
+                logger.warning("wl-copy not found, falling back to Qt clipboard")
+            except subprocess.TimeoutExpired:
+                logger.warning("wl-copy timed out, falling back to Qt clipboard")
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"wl-copy failed: {e}, falling back to Qt clipboard")
+
+        # X11 or Wayland fallback: use Qt clipboard
+        try:
+            clipboard = self.app.clipboard()
+            clipboard.setText(text)
+            self.app.processEvents()
+            logger.info(f"Copied to clipboard via Qt: {len(text)} characters")
+        except Exception as e:
+            logger.error(f"Qt clipboard copy failed: {e}")
 
     def show_settings_dialog(self) -> None:
         """Show the settings dialog (thread-safe)."""

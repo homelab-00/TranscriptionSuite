@@ -225,7 +225,11 @@ class GtkTray(ServerControlMixin, AbstractTray):
         if self._logo_icon_name:
             self.indicator.set_icon(self._logo_icon_name)
         else:
-            icon_name = self.ICON_NAMES.get(state, "dialog-question-symbolic")
+            # If models are unloaded, use DISCONNECTED icon (greyed out)
+            if not self._models_loaded:
+                icon_name = "network-offline-symbolic"  # Same as DISCONNECTED
+            else:
+                icon_name = self.ICON_NAMES.get(state, "dialog-question-symbolic")
             self.indicator.set_icon(icon_name)
 
         # Update menu sensitivity
@@ -298,6 +302,13 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 self.toggle_models_item.set_label("Unload All Models")
             else:
                 self.toggle_models_item.set_label("Reload Models")
+
+        # Update icon to grey if models unloaded
+        GLib.idle_add(self._do_set_state, self.state)
+
+        # Sync orchestrator state
+        if self.orchestrator and hasattr(self.orchestrator, "sync_models_state"):
+            self.orchestrator.sync_models_state(models_loaded)
 
     def update_connection_type(self, is_local: bool) -> None:
         """
@@ -584,7 +595,10 @@ class GtkTray(ServerControlMixin, AbstractTray):
             False to not repeat the idle callback
         """
         # Check if running on Wayland
-        is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland"
+        is_wayland = (
+            os.environ.get("XDG_SESSION_TYPE") == "wayland"
+            or os.environ.get("WAYLAND_DISPLAY") is not None
+        )
 
         if is_wayland:
             # On Wayland, try wl-copy first as it's more reliable
@@ -594,7 +608,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
                     input=text.encode("utf-8"),
                     check=True,
                     capture_output=True,
-                    timeout=2,
+                    timeout=5,
                 )
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
                 return False
