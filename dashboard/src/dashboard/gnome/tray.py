@@ -130,12 +130,17 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.cancel_item: Optional[Any] = None
         self.transcribe_item: Optional[Any] = None
         self.toggle_models_item: Optional[Any] = None
+        self.start_live_item: Optional[Any] = None
+        self.stop_live_item: Optional[Any] = None
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
 
         # Connection type tracking (assume local initially)
         self._is_local_connection = True
+
+        # Live Mode tracking
+        self._live_mode_active = False
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -186,6 +191,23 @@ class GtkTray(ServerControlMixin, AbstractTray):
         )
         self.transcribe_item.set_sensitive(False)
         menu.append(self.transcribe_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        # Live Mode (RealtimeSTT)
+        self.start_live_item = Gtk.MenuItem(label="Start Live Mode")
+        self.start_live_item.connect(
+            "activate", lambda _: self._trigger_callback(TrayAction.START_LIVE_MODE)
+        )
+        self.start_live_item.set_sensitive(False)
+        menu.append(self.start_live_item)
+
+        self.stop_live_item = Gtk.MenuItem(label="Stop Live Mode")
+        self.stop_live_item.connect(
+            "activate", lambda _: self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        )
+        self.stop_live_item.set_sensitive(False)
+        menu.append(self.stop_live_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -261,6 +283,13 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 state == TrayState.STANDBY and self._is_local_connection
             )
 
+        # Live Mode actions - only enabled when connected and in STANDBY
+        if self.start_live_item:
+            self.start_live_item.set_sensitive(
+                state == TrayState.STANDBY and not self._live_mode_active
+            )
+        if self.stop_live_item:
+            self.stop_live_item.set_sensitive(self._live_mode_active)
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
             try:
@@ -323,6 +352,22 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self._is_local_connection = is_local
         # Re-trigger state update to refresh menu item states
         GLib.idle_add(self._do_set_state, self.state)
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """Set Live Mode active state and update menu."""
+        self._live_mode_active = active
+        # Update menu state on main thread
+        GLib.idle_add(self._update_live_mode_menu, active)
+
+    def _update_live_mode_menu(self, active: bool) -> bool:
+        """Update Live Mode menu items (called on main thread)."""
+        if self.start_live_item:
+            self.start_live_item.set_sensitive(
+                self.state == TrayState.STANDBY and not active
+            )
+        if self.stop_live_item:
+            self.stop_live_item.set_sensitive(active)
+        return False
 
     def run(self) -> None:
         """Start the GTK main loop."""
@@ -531,6 +576,22 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self._trigger_callback(TrayAction.DISCONNECT)
         # Set tray state to IDLE (client not running)
         self.set_state(TrayState.IDLE)
+
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Forward live transcription text to dashboard for display.
+
+        Called by the orchestrator during WebSocket streaming recording
+        when live transcription updates are received.
+
+        Args:
+            text: The live transcription text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        if self._dbus_service and hasattr(self._dbus_service, "_dashboard"):
+            dashboard = self._dbus_service._dashboard
+            if dashboard and hasattr(dashboard, "update_live_transcription_text"):
+                GLib.idle_add(dashboard.update_live_transcription_text, text, append)
 
     def open_file_dialog(
         self, title: str, filetypes: list[tuple[str, str]]

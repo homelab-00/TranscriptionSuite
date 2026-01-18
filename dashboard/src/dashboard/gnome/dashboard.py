@@ -808,21 +808,6 @@ class DashboardWindow(_get_dashboard_base()):
 
         box.append(btn_box)
 
-        # Web client button
-        web_btn = Gtk.Button(label="Open Web Client")
-        web_btn.add_css_class("secondary-button")
-        web_btn.add_css_class("web-accent")
-        web_btn.set_margin_top(20)
-        web_btn.set_halign(Gtk.Align.CENTER)
-        web_btn.connect("clicked", lambda _: self._on_open_web_client())
-        box.append(web_btn)
-
-        # Web note
-        web_note = Gtk.Label(label="Opens browser based on your client settings")
-        web_note.add_css_class("dim-label")
-        web_note.add_css_class("caption")
-        box.append(web_note)
-
         scrolled.set_child(box)
         return scrolled
 
@@ -1160,6 +1145,15 @@ class DashboardWindow(_get_dashboard_base()):
 
         box.append(btn_box)
 
+        # Web client button
+        web_btn = Gtk.Button(label="Open Web Client")
+        web_btn.add_css_class("secondary-button")
+        web_btn.add_css_class("web-accent")
+        web_btn.set_margin_top(12)
+        web_btn.set_halign(Gtk.Align.CENTER)
+        web_btn.connect("clicked", lambda _: self._on_open_web_client())
+        box.append(web_btn)
+
         # Show logs button with icon and text
         logs_btn = Gtk.Button()
         logs_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1210,6 +1204,71 @@ class DashboardWindow(_get_dashboard_base()):
 
         notebook_frame.set_child(notebook_box)
         box.append(notebook_frame)
+
+        # Live Transcription section
+        preview_frame = Gtk.Frame()
+        preview_frame.add_css_class("card")
+        preview_frame.set_margin_top(16)
+        preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        preview_box.set_margin_top(12)
+        preview_box.set_margin_bottom(12)
+        preview_box.set_margin_start(16)
+        preview_box.set_margin_end(16)
+
+        # Live transcription header
+        preview_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        preview_title = Gtk.Label(label="Live Transcription")
+        preview_title.add_css_class("dim-label")
+        preview_header.append(preview_title)
+        preview_box.append(preview_header)
+
+        # Scrollable text view for live transcription history (~10 lines)
+        preview_scroll = Gtk.ScrolledWindow()
+        preview_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        preview_scroll.set_min_content_height(180)
+        preview_scroll.set_max_content_height(250)
+
+        self._live_transcription_text_view = Gtk.TextView()
+        self._live_transcription_text_view.set_editable(False)
+        self._live_transcription_text_view.set_cursor_visible(False)
+        self._live_transcription_text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._live_transcription_text_view.add_css_class("preview-text")
+        self._live_transcription_text_buffer = (
+            self._live_transcription_text_view.get_buffer()
+        )
+        self._live_transcription_text_buffer.set_text(
+            "Start Live Mode to see transcription..."
+        )
+        preview_scroll.set_child(self._live_transcription_text_view)
+        preview_box.append(preview_scroll)
+
+        # Store history of transcription lines
+        self._live_transcription_history: list[str] = []
+
+        # Auto-paste toggle row
+        paste_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        paste_row.set_margin_top(8)
+        paste_label = Gtk.Label(label="Auto-paste to cursor:")
+        paste_label.add_css_class("dim-label")
+        paste_row.append(paste_label)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        paste_row.append(spacer)
+
+        self._auto_paste_toggle_btn = Gtk.ToggleButton(label="Disabled")
+        self._auto_paste_toggle_btn.set_active(False)
+        self._auto_paste_toggle_btn.add_css_class("paste-disabled")
+        self._auto_paste_toggle_btn.set_tooltip_text(
+            "When enabled, completed sentences will be\n"
+            "automatically pasted at the system cursor position."
+        )
+        self._auto_paste_toggle_btn.connect("toggled", self._on_auto_paste_toggle)
+        paste_row.append(self._auto_paste_toggle_btn)
+        preview_box.append(paste_row)
+
+        preview_frame.set_child(preview_box)
+        box.append(preview_frame)
 
         scrolled.set_child(box)
         return scrolled
@@ -1389,6 +1448,39 @@ class DashboardWindow(_get_dashboard_base()):
         .notebook-disabled:disabled {
             background: #5d3d3d;
             color: #9a7a7a;
+        }
+
+        /* Preview text view */
+        .preview-text {
+            background: #252526;
+            color: #e0e0e0;
+            font-family: "Inter", sans-serif;
+            font-size: 13px;
+            padding: 8px;
+        }
+
+        /* Auto-paste toggle button states */
+        .paste-enabled {
+            background: #4caf50;
+            color: white;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 11px;
+            min-width: 60px;
+        }
+        .paste-enabled:hover {
+            background: #43a047;
+        }
+        .paste-disabled {
+            background: #f44336;
+            color: white;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 11px;
+            min-width: 60px;
+        }
+        .paste-disabled:hover {
+            background: #e53935;
         }
         """
         provider = Gtk.CssProvider()
@@ -2073,6 +2165,92 @@ class DashboardWindow(_get_dashboard_base()):
             # Disabled state - gray
             self._notebook_toggle_btn.remove_css_class("notebook-enabled")
             self._notebook_toggle_btn.add_css_class("notebook-disabled")
+
+    def _on_auto_paste_toggle(self, button: Any) -> None:
+        """Handle auto-paste toggle button click."""
+        is_enabled = button.get_active()
+        button.set_label("Enabled" if is_enabled else "Disabled")
+
+        if is_enabled:
+            button.remove_css_class("paste-disabled")
+            button.add_css_class("paste-enabled")
+        else:
+            button.remove_css_class("paste-enabled")
+            button.add_css_class("paste-disabled")
+
+        # Save to config
+        self.config.set("preview", "auto_paste_to_cursor", value=is_enabled)
+
+        # Update orchestrator for Live Mode auto-paste
+        if self._dbus_service and self._dbus_service.orchestrator:
+            self._dbus_service.orchestrator.set_live_mode_auto_paste(is_enabled)
+
+        logger.info(f"Auto-paste to cursor: {'enabled' if is_enabled else 'disabled'}")
+
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Update live transcription text display.
+
+        Args:
+            text: The text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        if (
+            not hasattr(self, "_live_transcription_text_buffer")
+            or not self._live_transcription_text_buffer
+        ):
+            return
+
+        if not text:
+            self._live_transcription_text_buffer.set_text("")
+            return
+
+        if append:
+            # Append text as a new line in history
+            self._live_transcription_history.append(text)
+            # Keep only last ~20 lines to prevent memory bloat
+            if len(self._live_transcription_history) > 20:
+                self._live_transcription_history = self._live_transcription_history[
+                    -20:
+                ]
+            # Update display
+            self._live_transcription_text_buffer.set_text(
+                "\n".join(self._live_transcription_history)
+            )
+        else:
+            # Real-time update: show history + current partial text
+            if self._live_transcription_history:
+                display_text = "\n".join(self._live_transcription_history) + "\n" + text
+            else:
+                display_text = text
+            self._live_transcription_text_buffer.set_text(display_text)
+
+        # Auto-scroll to bottom - schedule on idle to ensure layout is updated
+        if hasattr(self, "_live_transcription_text_view"):
+            from gi.repository import GLib
+
+            GLib.idle_add(self._scroll_live_transcription_to_bottom)
+
+    def _scroll_live_transcription_to_bottom(self) -> bool:
+        """Scroll live transcription text view to bottom."""
+        if (
+            hasattr(self, "_live_transcription_text_view")
+            and self._live_transcription_text_view
+        ):
+            adj = self._live_transcription_text_view.get_parent().get_vadjustment()
+            if adj:
+                adj.set_value(adj.get_upper() - adj.get_page_size())
+        return False  # Don't repeat
+
+    def clear_live_transcription_history(self) -> None:
+        """Clear the live transcription text history."""
+        if hasattr(self, "_live_transcription_history"):
+            self._live_transcription_history.clear()
+        if (
+            hasattr(self, "_live_transcription_text_buffer")
+            and self._live_transcription_text_buffer
+        ):
+            self._live_transcription_text_buffer.set_text("")
 
     # =========================================================================
     # Web Client

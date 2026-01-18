@@ -46,6 +46,7 @@ from server.api.routes import (
     admin,
     auth,
     health,
+    live,
     llm,
     notebook,
     search,
@@ -336,6 +337,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(websocket.router, tags=["WebSocket"])
+    app.include_router(live.router, tags=["Live Mode"])
 
     # Exception handler
     @app.exception_handler(Exception)

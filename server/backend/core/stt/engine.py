@@ -168,7 +168,7 @@ class AudioToTextRecorder:
         # Load config for default values
         cfg = get_config()
         main_cfg = cfg.get("main_transcriber", default={})
-        preview_cfg = cfg.get("preview_transcriber", default={})
+        live_transcriber_cfg = cfg.get("live_transcriber", default={})
         stt_cfg = cfg.stt
 
         self.instance_name = instance_name
@@ -186,11 +186,11 @@ class AudioToTextRecorder:
             beam_size if beam_size is not None else main_cfg.get("beam_size", 5)
         )
 
-        # VAD parameters - resolve from config (stt section is primary, preview_transcriber for silero)
+        # VAD parameters - resolve from config (stt section is primary, live_transcriber for silero)
         silero_sensitivity = (
             silero_sensitivity
             if silero_sensitivity is not None
-            else preview_cfg.get("silero_sensitivity", 0.4)
+            else live_transcriber_cfg.get("silero_sensitivity", 0.4)
         )
         webrtc_sensitivity = (
             webrtc_sensitivity

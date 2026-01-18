@@ -14,12 +14,12 @@
 transcription_options:
     # Language code for transcription (e.g., "en" for English, "el" for Greek).
     # Set to null for automatic language detection.
-    # This setting applies to both the main and preview transcribers.
+    # This setting applies to both the main and live transcribers.
     language: null
 
-    # If true, the live preview transcriber will be enabled for longform recording.
+    # If true, the live transcriber will be enabled for longform recording.
     # If false, only the main transcriber is used (saves GPU resources).
-    enable_preview_transcriber: false
+    enable_live_transcriber: false
 
 
 # ----------------------------------------------------------------------------
@@ -98,25 +98,25 @@ main_transcriber:
 
 
 # ----------------------------------------------------------------------------
-# Preview Transcriber Configuration
+# Live Transcriber Configuration
 # ----------------------------------------------------------------------------
-# The fast transcriber used for live preview during recording.
+# The fast transcriber used for live transcription during recording.
 # Only loaded when:
 #   1. enabled: true (below)
 #   2. A standalone client connects (not web browser)
-preview_transcriber:
-    # Enable/disable preview transcription.
-    # When enabled AND a standalone client connects, the preview model is loaded.
-    # Web browser clients never use preview to save GPU resources.
+live_transcriber:
+    # Enable/disable live transcription.
+    # When enabled AND a standalone client connects, the live model is loaded.
+    # Web browser clients never use live transcriber to save GPU resources.
     enabled: false
 
-    # A smaller, faster model is recommended for preview.
+    # A smaller, faster model is recommended for live transcription.
     model: "Systran/faster-whisper-medium"
     compute_type: "default"
     device: "cuda"
     gpu_device_index: 0
     batch_size: 16
-    beam_size: 3  # Smaller for faster preview
+    beam_size: 3  # Smaller for faster live transcription
 
     # VAD settings for quick sentence-by-sentence transcription.
     silero_sensitivity: 0.4

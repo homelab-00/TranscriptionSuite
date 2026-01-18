@@ -71,12 +71,12 @@ class VoiceActivityDetector:
         # Get defaults from config
         cfg = get_config()
         stt_cfg = cfg.stt
-        preview_cfg = cfg.get("preview_transcriber", default={})
+        live_transcriber_cfg = cfg.get("live_transcriber", default={})
 
         self.silero_sensitivity = (
             silero_sensitivity
             if silero_sensitivity is not None
-            else preview_cfg.get("silero_sensitivity", 0.4)
+            else live_transcriber_cfg.get("silero_sensitivity", 0.4)
         )
         self.webrtc_sensitivity = (
             webrtc_sensitivity

@@ -6,7 +6,7 @@ and the STT engine. Handles:
 - Engine lifecycle management
 - Audio feeding from WebSocket streams
 - Async transcription results
-- Preview mode support (for standalone clients)
+- Live transcriber support (for standalone clients)
 """
 
 import asyncio
@@ -31,7 +31,7 @@ class RealtimeTranscriptionResult:
     duration: float = 0.0
     words: List[Dict[str, Any]] = field(default_factory=list)
     segments: List[Dict[str, Any]] = field(default_factory=list)
-    is_preview: bool = False
+    is_live_transcription: bool = False
 
 
 class RealtimeTranscriptionEngine:
@@ -43,41 +43,46 @@ class RealtimeTranscriptionEngine:
     - Provides VAD events via callbacks
     - Returns transcription when speech ends
 
-    Can optionally run with a preview engine for standalone clients.
+    Can optionally run with a live transcriber engine for standalone clients.
     """
 
     def __init__(
         self,
         config: Dict[str, Any],
-        enable_preview: bool = False,
+        enable_live_transcriber: bool = False,
+        live_transcriber_engine: Optional[Any] = None,
         on_recording_start: Optional[Callable[[], None]] = None,
         on_recording_stop: Optional[Callable[[], None]] = None,
         on_vad_start: Optional[Callable[[], None]] = None,
         on_vad_stop: Optional[Callable[[], None]] = None,
-        on_preview_text: Optional[Callable[[str], None]] = None,
+        on_live_text: Optional[Callable[[str], None]] = None,
     ):
         """
         Initialize the real-time transcription engine.
 
         Args:
             config: Server configuration dict
-            enable_preview: Enable preview transcription (for standalone clients)
+            enable_live_transcriber: Enable live transcriber (for standalone clients)
+            live_transcriber_engine: External live transcriber engine (AudioToTextRecorder) to use
+                                     instead of creating a new one. If provided, this engine will
+                                     be used for live transcription to avoid duplicate model loading.
             on_recording_start: Callback when recording starts
             on_recording_stop: Callback when recording stops
             on_vad_start: Callback when voice activity detected
             on_vad_stop: Callback when voice activity ends
-            on_preview_text: Callback for preview transcription text
+            on_live_text: Callback for live transcription text
         """
         self.config = config
-        self.enable_preview = enable_preview
+        self.enable_live_transcriber = enable_live_transcriber
+        self._external_live_transcriber_engine = live_transcriber_engine
         self.on_recording_start = on_recording_start
         self.on_recording_stop = on_recording_stop
         self.on_vad_start = on_vad_start
         self.on_vad_stop = on_vad_stop
-        self.on_preview_text = on_preview_text
+        self.on_live_text = on_live_text
 
         self._engine: Optional[Any] = None
-        self._preview_engine: Optional[Any] = None
+        self._live_transcriber_engine: Optional[Any] = None
         self._initialized = False
         self._is_recording = False
         self._language: Optional[str] = None
@@ -129,50 +134,56 @@ class RealtimeTranscriptionEngine:
             on_vad_stop=self._handle_vad_stop,
         )
 
-        # Create preview engine if enabled
-        if self.enable_preview:
-            self._init_preview_engine()
+        # Set up live transcriber engine if enabled
+        if self.enable_live_transcriber:
+            if self._external_live_transcriber_engine is not None:
+                # Use the shared live transcriber engine (avoids duplicate model loading)
+                self._live_transcriber_engine = self._external_live_transcriber_engine
+                logger.info("Using shared live transcriber engine")
+            else:
+                # Create our own live transcriber engine (fallback)
+                self._init_live_transcriber_engine()
 
         self._initialized = True
         logger.info(
             f"RealtimeTranscriptionEngine initialized "
-            f"(preview={'enabled' if self.enable_preview else 'disabled'})"
+            f"(live_transcriber={'enabled' if self.enable_live_transcriber else 'disabled'})"
         )
 
-    def _init_preview_engine(self) -> None:
-        """Initialize the preview transcription engine."""
+    def _init_live_transcriber_engine(self) -> None:
+        """Initialize the live transcription engine."""
         from server.core.stt.engine import AudioToTextRecorder
 
-        # Get preview config from passed dict or global config
+        # Get live transcriber config from passed dict or global config
         trans_config = self.config.get("transcription", {})
-        preview_config = self.config.get(
-            "preview_transcriber", trans_config.get("preview_transcriber", {})
+        live_transcriber_config = self.config.get(
+            "live_transcriber", trans_config.get("live_transcriber", {})
         )
 
-        if not preview_config.get("enabled", True):
-            logger.info("Preview transcriber disabled in config")
+        if not live_transcriber_config.get("enabled", True):
+            logger.info("Live transcriber disabled in config")
             return
 
         # AudioToTextRecorder resolves defaults from config internally
-        self._preview_engine = AudioToTextRecorder(
-            instance_name="realtime_preview",
-            model=preview_config.get("model"),
+        self._live_transcriber_engine = AudioToTextRecorder(
+            instance_name="realtime_live_transcriber",
+            model=live_transcriber_config.get("model"),
             language=self._language or "",
-            compute_type=preview_config.get("compute_type"),
-            device=preview_config.get("device"),
-            batch_size=preview_config.get("batch_size", 8),
-            beam_size=preview_config.get("beam_size", 3),
-            # Faster response for preview
-            post_speech_silence_duration=preview_config.get(
+            compute_type=live_transcriber_config.get("compute_type"),
+            device=live_transcriber_config.get("device"),
+            batch_size=live_transcriber_config.get("batch_size", 8),
+            beam_size=live_transcriber_config.get("beam_size", 3),
+            # Faster response for live transcription
+            post_speech_silence_duration=live_transcriber_config.get(
                 "post_speech_silence_duration", 0.3
             ),
-            # Enable early transcription for preview
-            early_transcription_on_silence=preview_config.get(
+            # Enable early transcription for live transcriber
+            early_transcription_on_silence=live_transcriber_config.get(
                 "early_transcription_on_silence", 0.5
             ),
         )
 
-        logger.info("Preview transcription engine initialized")
+        logger.info("Live transcription engine initialized")
 
     def _handle_recording_start(self) -> None:
         """Handle recording start event."""
@@ -216,9 +227,9 @@ class RealtimeTranscriptionEngine:
 
         self._engine.feed_audio(audio_data, sample_rate)
 
-        # Also feed to preview engine if enabled
-        if self._preview_engine:
-            self._preview_engine.feed_audio(audio_data, sample_rate)
+        # Also feed to live transcriber engine if enabled
+        if self._live_transcriber_engine:
+            self._live_transcriber_engine.feed_audio(audio_data, sample_rate)
 
     def start_recording(self, language: Optional[str] = None) -> None:
         """
@@ -235,15 +246,15 @@ class RealtimeTranscriptionEngine:
             logger.warning("Language changed mid-session, may not take effect")
 
         self._engine.listen()
-        if self._preview_engine:
-            self._preview_engine.listen()
+        if self._live_transcriber_engine:
+            self._live_transcriber_engine.listen()
 
     def stop_recording(self) -> None:
         """Stop the current recording session."""
         if self._engine:
             self._engine.stop()
-        if self._preview_engine:
-            self._preview_engine.stop()
+        if self._live_transcriber_engine:
+            self._live_transcriber_engine.stop()
 
     async def get_transcription(self) -> RealtimeTranscriptionResult:
         """
@@ -271,25 +282,25 @@ class RealtimeTranscriptionEngine:
             duration=engine_result.duration,
             words=engine_result.words,
             segments=engine_result.segments,
-            is_preview=False,
+            is_live_transcription=False,
         )
 
-    async def get_preview_transcription(self) -> Optional[RealtimeTranscriptionResult]:
+    async def get_live_transcription(self) -> Optional[RealtimeTranscriptionResult]:
         """
-        Get preview transcription if available.
+        Get live transcription if available.
 
         Returns:
-            RealtimeTranscriptionResult or None if preview not enabled
+            RealtimeTranscriptionResult or None if live transcriber not enabled
         """
-        if not self._preview_engine:
+        if not self._live_transcriber_engine:
             return None
 
         # Run in thread pool
-        result = await asyncio.to_thread(self._preview_engine.text)
+        result = await asyncio.to_thread(self._live_transcriber_engine.text)
 
         return RealtimeTranscriptionResult(
             text=result,
-            is_preview=True,
+            is_live_transcription=True,
         )
 
     @property
@@ -308,9 +319,13 @@ class RealtimeTranscriptionEngine:
             self._engine.shutdown()
             self._engine = None
 
-        if self._preview_engine:
-            self._preview_engine.shutdown()
-            self._preview_engine = None
+        # Only shutdown the live transcriber engine if we created it (not if it's external/shared)
+        if (
+            self._live_transcriber_engine
+            and self._external_live_transcriber_engine is None
+        ):
+            self._live_transcriber_engine.shutdown()
+        self._live_transcriber_engine = None
 
         self._initialized = False
         logger.info("RealtimeTranscriptionEngine shutdown complete")
@@ -324,7 +339,8 @@ class RealtimeTranscriptionEngine:
 
 def create_realtime_engine(
     config: Dict[str, Any],
-    enable_preview: bool = False,
+    enable_live_transcriber: bool = False,
+    live_transcriber_engine: Optional[Any] = None,
     **callbacks: Any,
 ) -> RealtimeTranscriptionEngine:
     """
@@ -332,7 +348,8 @@ def create_realtime_engine(
 
     Args:
         config: Server configuration dict
-        enable_preview: Enable preview transcription
+        enable_live_transcriber: Enable live transcriber
+        live_transcriber_engine: External live transcriber engine to use (avoids duplicate model loading)
         **callbacks: Optional callback functions
 
     Returns:
@@ -340,10 +357,11 @@ def create_realtime_engine(
     """
     return RealtimeTranscriptionEngine(
         config=config,
-        enable_preview=enable_preview,
+        enable_live_transcriber=enable_live_transcriber,
+        live_transcriber_engine=live_transcriber_engine,
         on_recording_start=callbacks.get("on_recording_start"),
         on_recording_stop=callbacks.get("on_recording_stop"),
         on_vad_start=callbacks.get("on_vad_start"),
         on_vad_stop=callbacks.get("on_vad_stop"),
-        on_preview_text=callbacks.get("on_preview_text"),
+        on_live_text=callbacks.get("on_live_text"),
     )

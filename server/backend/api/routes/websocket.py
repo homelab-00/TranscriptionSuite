@@ -76,6 +76,9 @@ class TranscriptionSession:
         self._realtime_engine: Optional[Any] = None
         self._use_realtime_engine = False
 
+        # Live transcriber polling task
+        self._live_transcriber_task: Optional[asyncio.Task] = None
+
         # Job tracking for transcription
         self._current_job_id: Optional[str] = None
 
@@ -198,21 +201,36 @@ class TranscriptionSession:
             from server.core.model_manager import get_model_manager
 
             model_manager = get_model_manager()
+
+            # Capture the event loop for thread-safe callback scheduling
+            # VAD callbacks are invoked from worker threads, so we need to use
+            # run_coroutine_threadsafe instead of create_task
+            loop = asyncio.get_running_loop()
+
+            def schedule_coro(coro):
+                """Schedule a coroutine from a worker thread."""
+                asyncio.run_coroutine_threadsafe(coro, loop)
+
             self._realtime_engine = model_manager.get_realtime_engine(
                 session_id=self.session_id,
                 client_type=self.client_type,
                 language=language,
-                on_recording_start=lambda: asyncio.create_task(
+                on_recording_start=lambda: schedule_coro(
                     self._on_vad_recording_start()
                 ),
-                on_recording_stop=lambda: asyncio.create_task(
-                    self._on_vad_recording_stop()
-                ),
-                on_vad_start=lambda: asyncio.create_task(self._on_vad_start()),
-                on_vad_stop=lambda: asyncio.create_task(self._on_vad_stop()),
+                on_recording_stop=lambda: schedule_coro(self._on_vad_recording_stop()),
+                on_vad_start=lambda: schedule_coro(self._on_vad_start()),
+                on_vad_stop=lambda: schedule_coro(self._on_vad_stop()),
             )
             self._realtime_engine.start_recording(language)
             logger.info(f"Recording started with VAD for {self.client_name}")
+
+            # Start live transcriber polling if enabled
+            if self.capabilities.supports_preview:
+                self._live_transcriber_task = asyncio.create_task(
+                    self._live_transcriber_polling_loop()
+                )
+                logger.info(f"Live transcriber polling started for {self.client_name}")
         else:
             logger.info(f"Recording started for {self.client_name}")
 
@@ -241,12 +259,38 @@ class TranscriptionSession:
         """Called when VAD detects voice inactivity."""
         await self.send_message("vad_stop")
 
+    async def _live_transcriber_polling_loop(self) -> None:
+        """Poll live transcriber engine and send realtime text updates."""
+        last_text = ""
+        while self.is_recording and self._realtime_engine:
+            try:
+                result = await self._realtime_engine.get_live_transcription()
+                if result and result.text and result.text != last_text:
+                    last_text = result.text
+                    await self.send_message("realtime", {"text": result.text})
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Live transcriber polling error: {e}")
+            await asyncio.sleep(0.3)  # 300ms interval
+
     async def stop_recording(self) -> None:
         """Stop recording and process transcription."""
         if not self.is_recording:
             return
 
         self.is_recording = False
+
+        # Cancel live transcriber polling task
+        if self._live_transcriber_task:
+            self._live_transcriber_task.cancel()
+            try:
+                await self._live_transcriber_task
+            except asyncio.CancelledError:
+                pass
+            self._live_transcriber_task = None
+            logger.info(f"Live transcriber polling stopped for {self.client_name}")
+
         await self.send_message("session_stopped")
         logger.info(f"Recording stopped for {self.client_name}")
 

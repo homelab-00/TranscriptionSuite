@@ -45,6 +45,21 @@ class AbstractTray(ABC):
         """
         pass
 
+    def flash_then_set_state(
+        self, target_state: TrayState, flash_duration_ms: int = 250
+    ) -> None:
+        """
+        Flash icon to light gray, then transition to target state.
+
+        Override with platform-specific implementation for visual feedback.
+        Default implementation just calls set_state directly.
+
+        Args:
+            target_state: State to transition to after flash
+            flash_duration_ms: Duration of flash in milliseconds
+        """
+        self.set_state(target_state)
+
     @abstractmethod
     def show_notification(self, title: str, message: str) -> None:
         """
@@ -113,6 +128,18 @@ class AbstractTray(ABC):
         Show the settings dialog.
 
         Override with platform-specific implementation.
+        """
+        pass
+
+    def update_live_transcription_text(self, text: str) -> None:
+        """
+        Update the live transcription text display.
+
+        Override with platform-specific implementation to forward
+        live transcription text to the dashboard UI.
+
+        Args:
+            text: Live transcription text to display
         """
         pass
 

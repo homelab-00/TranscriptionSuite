@@ -65,6 +65,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
+  - [13.5 Checking Installed Packages](#135-checking-installed-packages)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
@@ -560,7 +561,8 @@ server/backend/
 │   ├── diarization_engine.py     # PyAnnote wrapper
 │   ├── model_manager.py          # Model lifecycle, job tracking
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
-│   ├── preview_engine.py         # Preview transcription
+│   ├── live_transcriber_engine.py # Live transcription for standalone clients
+│   ├── live_engine.py            # Live Mode engine (RealtimeSTT)
 │   └── stt/                      # Real-time speech-to-text engine
 │       ├── engine.py             # AudioToTextRecorder with VAD
 │       └── vad.py                # Dual VAD (Silero + WebRTC)
@@ -667,7 +669,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 
 **Key sections:**
 - `main_transcriber` - Primary Whisper model, device, batch settings
-- `preview_transcriber` - Optional preview model for live transcription
+- `live_transcriber` - Optional faster model for live transcription feedback
 - `diarization` - PyAnnote model and speaker detection
 - `remote_server` - Host, port, TLS settings
 - `storage` - Database path, audio storage
@@ -882,6 +884,23 @@ sudo systemctl restart tailscaled
 ./TranscriptionSuite-KDE-x86_64.AppImage --appimage-extract
 ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 ```
+
+### 13.5 Checking Installed Packages
+
+To inspect the Python packages installed in the *running* `transcription-suite` server container:
+
+```bash
+docker exec transcription-suite python -c "
+from importlib.metadata import distributions
+for dist in sorted(distributions(), key=lambda d: d.name.lower()):
+    print(f'{dist.name:40} {dist.version}')
+"
+```
+
+This lists all installed packages and their versions, sorted alphabetically. Useful for:
+- Verifying package versions
+- Debugging dependency conflicts
+- Confirming successful installations after rebuilds
 
 ---
 

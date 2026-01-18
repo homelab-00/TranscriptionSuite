@@ -30,15 +30,18 @@ dependencies = [
     "websockets>=15.0.1",
 
     # Core ML / Transcription
-    "faster-whisper>=1.2.1",
+    # "faster-whisper>=", # Moved to override section due to realtimestt's
+    # outdated requirements
     "ctranslate2>=4.6.2",
     "torch==2.8.0", # Pinned version required by PyAnnote 4.0.3
     "torchaudio==2.8.0", # Pinned version required by PyAnnote 4.0.3
     "pyannote.audio>=4.0.3",
+    "realtimestt>=0.3.104",  # Live transcription mode
 
     # Audio Processing
     "numpy>=2.4.0",
-    "scipy>=1.16.3",
+    # "scipy>=", # Moved to override section due to realtimestt's
+    # outdated requirements
     "soundfile>=0.13.1",
     "webrtcvad>=2.0.10",
     "silero-vad>=6.2.0",
@@ -53,6 +56,12 @@ dependencies = [
     "pyyaml>=6.0.3",
     "psutil>=7.2.0",
     "filelock>=3.20.1",
+]
+
+[tool.uv]
+override-dependencies = [
+    "scipy>=1.16.3",
+    "faster-whisper>=1.2.1",
 ]
 
 [project.scripts]

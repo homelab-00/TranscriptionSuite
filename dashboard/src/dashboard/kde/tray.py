@@ -56,7 +56,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         TrayState.IDLE: (128, 128, 128),  # Grey (fallback, normally uses logo)
         TrayState.DISCONNECTED: (128, 128, 128),  # Grey
         TrayState.CONNECTING: (255, 165, 0),  # Orange
-        TrayState.STANDBY: (0, 255, 0),  # Green
+        TrayState.STANDBY: (0, 255, 132),  # Neon Teal (#00FF84)
         TrayState.RECORDING: (255, 255, 0),  # Yellow
         TrayState.UPLOADING: (0, 191, 255),  # Deep sky blue
         TrayState.TRANSCRIBING: (255, 128, 0),  # Orange
@@ -110,12 +110,17 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.transcribe_action: QAction | None = None
         self.toggle_models_action: QAction | None = None
         self.reconnect_action: QAction | None = None
+        self.start_live_action: QAction | None = None
+        self.stop_live_action: QAction | None = None
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
 
         # Connection type tracking (assume local initially)
         self._is_local_connection = True
+
+        # Live Mode tracking
+        self._live_mode_active = False
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -175,6 +180,23 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         )
         self.transcribe_action.setEnabled(False)
         menu.addAction(self.transcribe_action)
+
+        menu.addSeparator()
+
+        # Live Mode (RealtimeSTT)
+        self.start_live_action = QAction("Start Live Mode", menu)
+        self.start_live_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.START_LIVE_MODE)
+        )
+        self.start_live_action.setEnabled(False)
+        menu.addAction(self.start_live_action)
+
+        self.stop_live_action = QAction("Stop Live Mode", menu)
+        self.stop_live_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        )
+        self.stop_live_action.setEnabled(False)
+        menu.addAction(self.stop_live_action)
 
         menu.addSeparator()
 
@@ -309,6 +331,27 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
                 state == TrayState.STANDBY and self._is_local_connection
             )
 
+        # Live Mode actions - only enabled when connected and in STANDBY
+        # Start is enabled when STANDBY and Live Mode not active
+        # Stop is enabled when Live Mode is active
+        if self.start_live_action:
+            self.start_live_action.setEnabled(
+                state == TrayState.STANDBY and not self._live_mode_active
+            )
+        if self.stop_live_action:
+            self.stop_live_action.setEnabled(self._live_mode_active)
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """Set Live Mode active state and update menu."""
+        self._live_mode_active = active
+        # Update menu state
+        if self.start_live_action:
+            self.start_live_action.setEnabled(
+                self.state == TrayState.STANDBY and not active
+            )
+        if self.stop_live_action:
+            self.stop_live_action.setEnabled(active)
+
     def _get_logo_icon(self) -> "QIcon":
         """Get the app logo icon for IDLE state."""
         if self.LOGO_PATH.exists():
@@ -407,6 +450,19 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         # Also update dashboard if it's open
         if self._dashboard_window:
             self._dashboard_window.set_connection_local(is_local)
+
+    def update_live_transcription_text(self, text: str) -> None:
+        """
+        Forward live transcription text to dashboard for display.
+
+        Called by the orchestrator during WebSocket streaming recording
+        when live transcription updates are received.
+
+        Args:
+            text: The live transcription text to display
+        """
+        if self._dashboard_window:
+            self._dashboard_window.update_live_transcription_text(text)
 
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""

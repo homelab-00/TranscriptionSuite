@@ -38,7 +38,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedWidget,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -822,21 +821,6 @@ class DashboardWindow(QMainWindow):
 
         layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        layout.addSpacing(20)
-
-        # Web client button (smaller)
-        web_btn = QPushButton("Open Web Client")
-        web_btn.setObjectName("secondaryButton")
-        web_btn.setProperty("accent", "web")
-        web_btn.clicked.connect(self._on_open_web_client)
-        layout.addWidget(web_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # Note about web client
-        web_note = QLabel("Opens browser based on your client settings")
-        web_note.setObjectName("webNoteLabel")
-        web_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(web_note)
-
         layout.addStretch()
 
         scroll.setWidget(view)
@@ -1273,6 +1257,15 @@ class DashboardWindow(QMainWindow):
 
         layout.addSpacing(15)
 
+        # Web client button
+        web_btn = QPushButton("Open Web Client")
+        web_btn.setObjectName("secondaryButton")
+        web_btn.setProperty("accent", "web")
+        web_btn.clicked.connect(self._on_open_web_client)
+        layout.addWidget(web_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(15)
+
         # Show logs button (centered)
         self._show_client_logs_btn = QPushButton("Show Logs")
         self._show_client_logs_btn.setObjectName("secondaryButton")
@@ -1341,6 +1334,130 @@ class DashboardWindow(QMainWindow):
         notebook_layout.addWidget(self._notebook_toggle_btn)
 
         layout.addWidget(notebook_frame)
+
+        layout.addSpacing(15)
+
+        # Preview Transcription toggle
+        preview_toggle_frame = QFrame()
+        preview_toggle_frame.setObjectName("statusCard")
+        preview_toggle_frame.setStyleSheet(
+            "QFrame#statusCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
+            "border-radius: 8px; padding: 12px; }"
+        )
+        preview_toggle_layout = QHBoxLayout(preview_toggle_frame)
+        preview_toggle_layout.setContentsMargins(16, 12, 16, 12)
+
+        preview_label = QLabel("Live Transcriber:")
+        preview_label.setObjectName("statusLabel")
+        preview_label.setStyleSheet("color: #e0e0e0;")
+        preview_toggle_layout.addWidget(preview_label)
+
+        preview_toggle_layout.addStretch()
+
+        self._preview_toggle_btn = QPushButton("Disabled")
+        self._preview_toggle_btn.setCheckable(True)
+        # Read live transcriber enabled setting
+        live_transcriber_enabled = self.config.get_server_config(
+            "transcription_options", "enable_live_transcriber", default=False
+        )
+        self._preview_toggle_btn.setChecked(live_transcriber_enabled)
+        self._preview_toggle_btn.setText(
+            "Enabled" if live_transcriber_enabled else "Disabled"
+        )
+        self._preview_toggle_btn.setToolTip(
+            "Enable live transcriber during recording.\n"
+            "Uses a faster model for real-time feedback.\n"
+            "Only editable when server is stopped."
+        )
+        self._preview_toggle_btn.clicked.connect(self._on_live_transcriber_toggle)
+        self._update_live_transcriber_toggle_style()
+        preview_toggle_layout.addWidget(self._preview_toggle_btn)
+
+        layout.addWidget(preview_toggle_frame)
+
+        layout.addSpacing(10)
+
+        # Collapsible preview display section (Live Mode)
+        preview_display_frame = QFrame()
+        preview_display_frame.setObjectName("previewCard")
+        preview_display_frame.setStyleSheet(
+            "QFrame#previewCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
+            "border-radius: 8px; padding: 8px; }"
+        )
+        preview_display_layout = QVBoxLayout(preview_display_frame)
+        preview_display_layout.setContentsMargins(12, 8, 12, 8)
+        preview_display_layout.setSpacing(8)
+
+        # Header with collapse toggle
+        preview_header = QHBoxLayout()
+        self._preview_collapse_btn = QPushButton("\u25bc")  # Down arrow (expanded)
+        self._preview_collapse_btn.setFixedSize(24, 24)
+        self._preview_collapse_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; border: none; "
+            "color: #808080; font-size: 12px; }"
+            "QPushButton:hover { color: #e0e0e0; }"
+        )
+        self._preview_collapse_btn.clicked.connect(self._toggle_live_preview_collapse)
+        preview_header.addWidget(self._preview_collapse_btn)
+
+        preview_title = QLabel("Live Preview")
+        preview_title.setStyleSheet("color: #a0a0a0; font-size: 13px;")
+        preview_header.addWidget(preview_title)
+        preview_header.addStretch()
+        preview_display_layout.addLayout(preview_header)
+
+        # Collapsible content
+        self._preview_content = QWidget()
+        preview_content_layout = QVBoxLayout(self._preview_content)
+        preview_content_layout.setContentsMargins(0, 4, 0, 0)
+        preview_content_layout.setSpacing(8)
+
+        # Scrollable text area for live transcription history (~10 lines)
+        self._live_transcription_text_edit = QPlainTextEdit()
+        self._live_transcription_text_edit.setReadOnly(True)
+        self._live_transcription_text_edit.setPlaceholderText(
+            "Start Live Mode to see transcription..."
+        )
+        self._live_transcription_text_edit.setMinimumHeight(
+            180
+        )  # ~10 lines at standard font
+        self._live_transcription_text_edit.setMaximumHeight(250)
+        self._live_transcription_text_edit.setStyleSheet(
+            "QPlainTextEdit { background-color: #252526; border-radius: 4px; "
+            "padding: 8px; color: #e0e0e0; font-family: 'Inter', sans-serif; "
+            "font-size: 13px; border: none; }"
+            "QPlainTextEdit::placeholder { color: #808080; }"
+        )
+        # Store history of transcription lines
+        self._live_transcription_history: list[str] = []
+        preview_content_layout.addWidget(self._live_transcription_text_edit)
+
+        # Auto-paste to cursor toggle (for Live Mode)
+        paste_row = QHBoxLayout()
+        paste_label = QLabel("Auto-paste to cursor:")
+        paste_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        paste_row.addWidget(paste_label)
+        paste_row.addStretch()
+
+        self._auto_paste_toggle_btn = QPushButton("Disabled")
+        self._auto_paste_toggle_btn.setCheckable(True)
+        self._auto_paste_toggle_btn.setChecked(False)
+        self._auto_paste_toggle_btn.setToolTip(
+            "When enabled, completed sentences will be\n"
+            "automatically pasted at the system cursor position."
+        )
+        self._auto_paste_toggle_btn.setStyleSheet(
+            "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
+            "color: white; padding: 4px 10px; font-size: 11px; min-width: 60px; }"
+            "QPushButton:hover { background-color: #e53935; }"
+        )
+        self._auto_paste_toggle_btn.clicked.connect(self._on_auto_paste_toggle)
+        paste_row.addWidget(self._auto_paste_toggle_btn)
+        preview_content_layout.addLayout(paste_row)
+
+        preview_display_layout.addWidget(self._preview_content)
+
+        layout.addWidget(preview_display_frame)
 
         layout.addStretch()
 
@@ -1893,6 +2010,11 @@ class DashboardWindow(QMainWindow):
             not self._client_running and server_stopped
         )
         self._update_notebook_toggle_style()
+
+        # Update live transcriber toggle state when server status changes
+        if hasattr(self, "_preview_toggle_btn"):
+            self._preview_toggle_btn.setEnabled(server_stopped)
+            self._update_live_transcriber_toggle_style()
 
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
@@ -2739,6 +2861,144 @@ class DashboardWindow(QMainWindow):
             else:
                 # Desaturated red when not editable
                 self._notebook_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #5d3d3d; border: none; border-radius: 4px; "
+                    "color: #9a7a7a; padding: 6px 12px; min-width: 70px; }"
+                )
+
+    def _on_live_transcriber_toggle(self) -> None:
+        """Handle live transcriber toggle button click."""
+        is_enabled = self._preview_toggle_btn.isChecked()
+        self._preview_toggle_btn.setText("Enabled" if is_enabled else "Disabled")
+        self._update_live_transcriber_toggle_style()
+
+        # Save to server config - requires server restart to take effect
+        self.config.set_server_config(
+            "transcription_options", "enable_live_transcriber", value=is_enabled
+        )
+        self.config.set_server_config("live_transcriber", "enabled", value=is_enabled)
+
+        logger.info(f"Live transcriber: {'enabled' if is_enabled else 'disabled'}")
+
+    def _toggle_live_preview_collapse(self) -> None:
+        """Toggle live preview section collapse."""
+        is_visible = self._preview_content.isVisible()
+        self._preview_content.setVisible(not is_visible)
+        self._preview_collapse_btn.setText("\u25b6" if is_visible else "\u25bc")
+
+    def _on_auto_paste_toggle(self) -> None:
+        """Handle auto-paste toggle button click."""
+        is_enabled = self._auto_paste_toggle_btn.isChecked()
+        self._auto_paste_toggle_btn.setText("Enabled" if is_enabled else "Disabled")
+
+        if is_enabled:
+            self._auto_paste_toggle_btn.setStyleSheet(
+                "QPushButton { background-color: #4caf50; border: none; border-radius: 4px; "
+                "color: white; padding: 4px 10px; font-size: 11px; min-width: 60px; }"
+                "QPushButton:hover { background-color: #43a047; }"
+            )
+        else:
+            self._auto_paste_toggle_btn.setStyleSheet(
+                "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
+                "color: white; padding: 4px 10px; font-size: 11px; min-width: 60px; }"
+                "QPushButton:hover { background-color: #e53935; }"
+            )
+
+        # Save to config
+        self.config.set("preview", "auto_paste_to_cursor", value=is_enabled)
+
+        # Update orchestrator for Live Mode auto-paste
+        if self.tray and self.tray.orchestrator:
+            self.tray.orchestrator.set_live_mode_auto_paste(is_enabled)
+
+        logger.info(f"Auto-paste to cursor: {'enabled' if is_enabled else 'disabled'}")
+
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Update live transcription text display (called from orchestrator via tray).
+
+        Args:
+            text: The text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        if (
+            not hasattr(self, "_live_transcription_text_edit")
+            or not self._live_transcription_text_edit
+        ):
+            return
+
+        if not text:
+            # Clear or show placeholder
+            self._live_transcription_text_edit.clear()
+            return
+
+        if append:
+            # Append text as a new line in history
+            self._live_transcription_history.append(text)
+            # Keep only last ~20 lines to prevent memory bloat
+            if len(self._live_transcription_history) > 20:
+                self._live_transcription_history = self._live_transcription_history[
+                    -20:
+                ]
+            # Update display
+            self._live_transcription_text_edit.setPlainText(
+                "\n".join(self._live_transcription_history)
+            )
+        else:
+            # Real-time update: show history + current partial text
+            if self._live_transcription_history:
+                display_text = "\n".join(self._live_transcription_history) + "\n" + text
+            else:
+                display_text = text
+            self._live_transcription_text_edit.setPlainText(display_text)
+
+        # Auto-scroll to bottom
+        scrollbar = self._live_transcription_text_edit.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
+
+    def clear_live_transcription_history(self) -> None:
+        """Clear the live transcription text history."""
+        if hasattr(self, "_live_transcription_history"):
+            self._live_transcription_history.clear()
+        if (
+            hasattr(self, "_live_transcription_text_edit")
+            and self._live_transcription_text_edit
+        ):
+            self._live_transcription_text_edit.clear()
+
+    def _update_live_transcriber_toggle_style(self) -> None:
+        """Update live transcriber toggle button style based on state and editability."""
+        if not hasattr(self, "_preview_toggle_btn"):
+            return
+
+        is_checked = self._preview_toggle_btn.isChecked()
+        is_editable = self._preview_toggle_btn.isEnabled()
+
+        if is_checked:
+            # Enabled state - green (or desaturated green if not editable)
+            if is_editable:
+                self._preview_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #4caf50; border: none; border-radius: 4px; "
+                    "color: white; padding: 6px 12px; font-weight: 500; min-width: 70px; }"
+                    "QPushButton:hover { background-color: #43a047; }"
+                )
+            else:
+                # Desaturated green when not editable
+                self._preview_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #3d5d3d; border: none; border-radius: 4px; "
+                    "color: #7a9a7a; padding: 6px 12px; min-width: 70px; }"
+                )
+        else:
+            # Disabled state - red (or desaturated red if not editable)
+            if is_editable:
+                self._preview_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
+                    "color: white; padding: 6px 12px; font-weight: 500; min-width: 70px; }"
+                    "QPushButton:hover { background-color: #e53935; }"
+                )
+            else:
+                # Desaturated red when not editable
+                self._preview_toggle_btn.setStyleSheet(
                     "QPushButton { background-color: #5d3d3d; border: none; border-radius: 4px; "
                     "color: #9a7a7a; padding: 6px 12px; min-width: 70px; }"
                 )

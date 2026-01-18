@@ -36,6 +36,9 @@ class TrayAction(Enum):
     RECONNECT = "reconnect"
     DISCONNECT = "disconnect"
     QUIT = "quit"
+    # Live Mode actions
+    START_LIVE_MODE = "start_live_mode"
+    STOP_LIVE_MODE = "stop_live_mode"
     # Docker server control actions
     SERVER_START_LOCAL = "server_start_local"
     SERVER_START_REMOTE = "server_start_remote"
