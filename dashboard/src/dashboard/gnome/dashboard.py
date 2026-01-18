@@ -2203,17 +2203,19 @@ class DashboardWindow(_get_dashboard_base()):
         if append:
             # Append text as a new line in history
             self._live_transcription_history.append(text)
-            # Keep only last ~20 lines to prevent memory bloat
-            if len(self._live_transcription_history) > 20:
-                self._live_transcription_history = self._live_transcription_history[-20:]
-            # Update display
+            # Keep only last 1000 lines to prevent memory bloat
+            if len(self._live_transcription_history) > 1000:
+                self._live_transcription_history = self._live_transcription_history[
+                    -1000:
+                ]
+            # Update display - join with spaces for continuous text wrapping
             self._live_transcription_text_buffer.set_text(
-                "\n".join(self._live_transcription_history)
+                " ".join(self._live_transcription_history)
             )
         else:
             # Real-time update: show history + current partial text
             if self._live_transcription_history:
-                display_text = "\n".join(self._live_transcription_history) + "\n" + text
+                display_text = " ".join(self._live_transcription_history) + " " + text
             else:
                 display_text = text
             self._live_transcription_text_buffer.set_text(display_text)

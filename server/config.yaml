@@ -21,7 +21,6 @@ transcription_options:
     # If false, only the main transcriber is used (saves GPU resources).
     enable_live_transcriber: false
 
-
 # ----------------------------------------------------------------------------
 # Longform Recording
 # ----------------------------------------------------------------------------
@@ -30,7 +29,6 @@ longform_recording:
     # Automatically add longform recordings to Audio Notebook.
     # When enabled, recordings are sent to the notebook instead of just the clipboard.
     auto_add_to_audio_notebook: false
-
 
 # ----------------------------------------------------------------------------
 # Static File Transcription
@@ -59,7 +57,6 @@ static_transcription:
     # Silero VAD sensitivity (0.0-1.0, higher = more sensitive to speech).
     # 0.5 is a good default balance between removing silence and keeping speech.
     silero_vad_sensitivity: 0.5
-
 
 # ----------------------------------------------------------------------------
 # Main Transcriber Configuration
@@ -96,7 +93,6 @@ main_transcriber:
     # Prevent the library from creating its own log file.
     no_log_file: true
 
-
 # ----------------------------------------------------------------------------
 # Live Transcriber Configuration
 # ----------------------------------------------------------------------------
@@ -113,6 +109,11 @@ live_transcriber:
     # When enabled AND a standalone client connects, the live model is loaded.
     # Web browser clients never use live transcriber to save GPU resources.
     enabled: false
+
+    # Language for live transcription (e.g., "en", "el").
+    # If set, this overrides the global transcription_options.language setting.
+    # Default: "en"
+    live_language: "en"
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.
@@ -133,7 +134,6 @@ live_transcriber:
     early_transcription_on_silence: 0.5
 
     no_log_file: true
-
 
 # ----------------------------------------------------------------------------
 # Speaker Diarization (PyAnnote)
@@ -182,7 +182,6 @@ diarization:
     # Default: 0.5
     merge_gap_threshold: 0.5
 
-
 # ----------------------------------------------------------------------------
 # Audio Settings
 # ----------------------------------------------------------------------------
@@ -195,7 +194,6 @@ audio:
     # If true, automatically use the default system microphone.
     # If false, use the device specified by input_device_index.
     use_default_input: true
-
 
 # ----------------------------------------------------------------------------
 # Audio Processing Backend
@@ -244,7 +242,6 @@ audio_processing:
     # Default: "dynaudnorm"
     normalization_method: "dynaudnorm"
 
-
 # ----------------------------------------------------------------------------
 # Storage Settings
 # ----------------------------------------------------------------------------
@@ -267,7 +264,6 @@ storage:
     # 192 = high quality
     # 64  = smaller files, lower quality
     audio_bitrate: 160
-
 
 # ----------------------------------------------------------------------------
 # Database Backup Configuration
@@ -292,7 +288,6 @@ backup:
     # Note: Backups are stored in /data/database/backups/ (Docker)
     # or <data_dir>/database/backups/ (local development)
 
-
 # ----------------------------------------------------------------------------
 # Processing Settings
 # ----------------------------------------------------------------------------
@@ -305,7 +300,6 @@ processing:
 
     # Sample rate for audio processing (Whisper requires 16kHz).
     sample_rate: 16000
-
 
 # ----------------------------------------------------------------------------
 # Local LLM Integration (LM Studio)
@@ -324,7 +318,6 @@ local_llm:
         highlighting the main points, key topics discussed, and any 
         action items if applicable. Respond in the same language as 
         the transcription.
-
 
 # ----------------------------------------------------------------------------
 # Remote Transcription Server
@@ -354,9 +347,9 @@ remote_server:
     # TLS/SSL configuration
     # Certificates are mounted from host when TLS_ENABLED=true
     tls:
-        enabled: false  # Controlled via TLS_ENABLED env var in Docker
-        cert_file: "/certs/cert.crt"   # Container path (don't modify)
-        key_file: "/certs/cert.key"    # Container path (don't modify)
+        enabled: false # Controlled via TLS_ENABLED env var in Docker
+        cert_file: "/certs/cert.crt" # Container path (don't modify)
+        key_file: "/certs/cert.key" # Container path (don't modify)
         auto_generate: false
 
         # HOST paths for TLS certificates (used by startup scripts)
@@ -366,7 +359,6 @@ remote_server:
         # Windows: ~/Documents/Tailscale/my-machine.crt
         host_cert_path: "~/.config/Tailscale/my-machine.crt"
         host_key_path: "~/.config/Tailscale/my-machine.key"
-
 
 # ----------------------------------------------------------------------------
 # Logging Configuration
@@ -393,7 +385,6 @@ logging:
 
     # Number of backup log files to keep
     backup_count: 5
-
 
 # ============================================================================
 # Real-time STT Engine Configuration

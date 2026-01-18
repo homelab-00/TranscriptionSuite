@@ -1145,7 +1145,7 @@ class ClientOrchestrator:
         logger.debug(f"Live Mode sentence: {text}")
         # Update live transcription text in tray/dashboard
         if self.tray:
-            self.tray.update_live_transcription_text(text)
+            self.tray.update_live_transcription_text(text, append=True)
         # Auto-paste if enabled
         if self._live_mode_auto_paste:
             self._auto_paste_text(text)

@@ -2954,7 +2954,9 @@ class DashboardWindow(QMainWindow):
         language_name = self._live_language_combo.currentText()
 
         # Save to server config - takes effect on next Live Mode start
-        self.config.set_server_config("live_transcriber", "language", value=language_code)
+        self.config.set_server_config(
+            "live_transcriber", "live_language", value=language_code
+        )
 
         logger.info(
             f"Live Mode language set to: {language_name} ({language_code or 'auto'})"
@@ -3015,17 +3017,19 @@ class DashboardWindow(QMainWindow):
         if append:
             # Append text as a new line in history
             self._live_transcription_history.append(text)
-            # Keep only last ~20 lines to prevent memory bloat
-            if len(self._live_transcription_history) > 20:
-                self._live_transcription_history = self._live_transcription_history[-20:]
-            # Update display
+            # Keep last 1000 lines
+            if len(self._live_transcription_history) > 1000:
+                self._live_transcription_history = self._live_transcription_history[
+                    -1000:
+                ]
+            # Update display - join with spaces for continuous text wrapping
             self._live_transcription_text_edit.setPlainText(
-                "\n".join(self._live_transcription_history)
+                " ".join(self._live_transcription_history)
             )
         else:
             # Real-time update: show history + current partial text
             if self._live_transcription_history:
-                display_text = "\n".join(self._live_transcription_history) + "\n" + text
+                display_text = " ".join(self._live_transcription_history) + " " + text
             else:
                 display_text = text
             self._live_transcription_text_edit.setPlainText(display_text)

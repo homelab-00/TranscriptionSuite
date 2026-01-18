@@ -42,7 +42,7 @@ try:
         clipboard_requested = pyqtSignal(str)  # text to copy
         settings_dialog_requested = pyqtSignal()  # show settings dialog
         flash_requested = pyqtSignal(object, int)  # target_state, duration_ms
-        live_transcription_update = pyqtSignal(str)  # text
+        live_transcription_update = pyqtSignal(str, bool)  # text, append
 
 except ImportError:
     # Provide stub for type checking only
@@ -485,7 +485,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if self._dashboard_window:
             self._dashboard_window.set_connection_local(is_local)
 
-    def update_live_transcription_text(self, text: str) -> None:
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """
         Forward live transcription text to dashboard for display (thread-safe).
 
@@ -494,13 +494,14 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
         Args:
             text: The live transcription text to display
+            append: If True, append to history. If False, replace current line.
         """
-        self._signals.live_transcription_update.emit(text)
+        self._signals.live_transcription_update.emit(text, append)
 
-    def _do_update_live_transcription(self, text: str) -> None:
+    def _do_update_live_transcription(self, text: str, append: bool = False) -> None:
         """Actually update the dashboard (must be called on main thread)."""
         if self._dashboard_window:
-            self._dashboard_window.update_live_transcription_text(text)
+            self._dashboard_window.update_live_transcription_text(text, append)
 
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""

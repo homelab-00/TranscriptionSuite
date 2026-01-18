@@ -24,9 +24,7 @@ class AbstractTray(ABC):
         self.callbacks: dict[TrayAction, Callable[[], None]] = {}
         self.orchestrator = None  # Set by orchestrator for state sync
 
-    def register_callback(
-        self, action: TrayAction, callback: Callable[[], None]
-    ) -> None:
+    def register_callback(self, action: TrayAction, callback: Callable[[], None]) -> None:
         """Register a callback for a tray action."""
         self.callbacks[action] = callback
 
@@ -131,7 +129,7 @@ class AbstractTray(ABC):
         """
         pass
 
-    def update_live_transcription_text(self, text: str) -> None:
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """
         Update the live transcription text display.
 
@@ -140,6 +138,7 @@ class AbstractTray(ABC):
 
         Args:
             text: Live transcription text to display
+            append: If True, append to history. If False, replace current line.
         """
         pass
 

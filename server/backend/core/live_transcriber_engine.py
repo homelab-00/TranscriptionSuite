@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Union
 
 import numpy as np
-
 from server.config import get_config
 
 # Target sample rate for Whisper (technical requirement, not configurable)
@@ -41,6 +40,7 @@ class LiveTranscriberConfig:
     early_transcription_on_silence: float = 0.5
     silero_sensitivity: float = 0.4
     webrtc_sensitivity: int = 3
+    live_language: Optional[str] = None
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "LiveTranscriberConfig":
@@ -71,6 +71,7 @@ class LiveTranscriberConfig:
             ),
             silero_sensitivity=live_config.get("silero_sensitivity", 0.4),
             webrtc_sensitivity=stt_config.get("webrtc_sensitivity", 3),
+            live_language=live_config.get("live_language"),
         )
 
     @classmethod
@@ -174,7 +175,7 @@ class LiveTranscriptionEngine:
                 self._engine = AudioToTextRecorder(
                     instance_name="live_transcriber",
                     model=self.config.model,
-                    language=language or "",
+                    language=language or self.config.live_language or "",
                     compute_type=self.config.compute_type,
                     device=self.config.device,
                     batch_size=self.config.batch_size,
