@@ -1,6 +1,6 @@
 [project]
 name = "transcription-suite-build"
-version = "0.3.7"
+version = "0.3.8"
 description = "TranscriptionSuite build env for the standalone client"
 requires-python = ">=3.12,<3.13"
 license = "MIT"

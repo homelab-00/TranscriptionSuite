@@ -607,6 +607,110 @@ class APIClient:
             logger.error(f"Transcription request failed: {type(e).__name__}: {e}")
             raise RuntimeError(f"Network error: {e}") from e
 
+    async def upload_to_notebook(
+        self,
+        audio_data: bytes,
+        language: str | None = None,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Upload audio to Audio Notebook for transcription and storage.
+
+        This uses the notebook endpoint which transcribes with diarization
+        and saves both audio and transcription to the Audio Notebook database.
+
+        Args:
+            audio_data: WAV audio bytes
+            language: Language code (None for auto-detect)
+            on_progress: Optional callback for progress updates
+
+        Returns:
+            Recording result dict with id, transcription, etc.
+        """
+        session = await self._get_session()
+
+        if on_progress:
+            on_progress("Uploading to Audio Notebook...")
+
+        # Prepare form data
+        data = aiohttp.FormData()
+        data.add_field(
+            "file",
+            audio_data,
+            filename="recording.wav",
+            content_type="audio/wav",
+        )
+        if language:
+            data.add_field("language", language)
+
+        # Use longer timeout for transcription with diarization
+        timeout = aiohttp.ClientTimeout(total=self.transcription_timeout)
+
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        if on_progress:
+            on_progress("Transcribing with diarization...")
+
+        try:
+            logger.debug(
+                f"Sending notebook upload request to {self.base_url}/api/notebook/transcribe/upload"
+            )
+
+            async with session.post(
+                f"{self.base_url}/api/notebook/transcribe/upload",
+                data=data,
+                headers=headers,
+                timeout=timeout,
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                logger.debug(f"Notebook upload response status: {resp.status}")
+
+                if resp.status == 409:
+                    # Server is busy with another transcription
+                    try:
+                        error_data = await resp.json()
+                        detail = error_data.get("detail", "Server is busy")
+                        active_user = "another user"
+                        if isinstance(detail, str) and " for " in detail:
+                            parts = detail.rsplit(" for ", 1)
+                            if len(parts) == 2:
+                                active_user = parts[1].strip()
+                        logger.warning(f"Server busy: {detail}")
+                        raise ServerBusyError(detail, active_user=active_user)
+                    except (json.JSONDecodeError, aiohttp.ContentTypeError) as e:
+                        error = await resp.text()
+                        logger.warning(f"Server busy (parse error: {e}): {error}")
+                        raise ServerBusyError(f"Server is busy: {error}") from None
+
+                if resp.status != 200:
+                    error = await resp.text()
+                    logger.error(
+                        f"Notebook upload failed (HTTP {resp.status}): {error}"
+                    )
+                    raise RuntimeError(f"Upload failed: {error}")
+
+                result = await resp.json()
+
+                if on_progress:
+                    on_progress("Saved to Audio Notebook")
+
+                return result
+
+        except aiohttp.ClientSSLError as e:
+            logger.error(f"SSL error during notebook upload: {e}")
+            raise RuntimeError(f"SSL/TLS error: {e}") from e
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"Connection error during notebook upload: {e}")
+            raise RuntimeError(f"Connection error: {e}") from e
+        except asyncio.TimeoutError as e:
+            logger.error(f"Notebook upload timeout after {self.transcription_timeout}s")
+            raise RuntimeError("Request timeout") from e
+        except aiohttp.ClientError as e:
+            logger.error(f"Notebook upload request failed: {type(e).__name__}: {e}")
+            raise RuntimeError(f"Network error: {e}") from e
+
     async def preload_model(self) -> bool:
         """Request server to preload the transcription model."""
         try:

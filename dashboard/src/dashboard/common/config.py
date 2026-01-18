@@ -255,3 +255,167 @@ class ClientConfig:
         """Set authentication token."""
         self.set("server", "token", value=value)
         self.save()
+
+    def set_server_config(self, *keys: str, value: Any) -> bool:
+        """
+        Set a configuration value in the server's config.yaml file.
+
+        This modifies ~/.config/TranscriptionSuite/config.yaml (the server config),
+        not the dashboard's dashboard.yaml file.
+
+        Uses targeted in-place editing to preserve comments and formatting.
+
+        Args:
+            *keys: Path to the configuration key (e.g., "longform_recording", "auto_add_to_audio_notebook")
+            value: Value to set
+
+        Returns:
+            True if successful, False otherwise
+        """
+        import re
+
+        server_config_path = get_config_dir() / "config.yaml"
+
+        if not server_config_path.exists():
+            print(f"Warning: Server config not found at {server_config_path}")
+            return False
+
+        if len(keys) != 2:
+            print(f"Error: set_server_config only supports 2-level keys (section.key)")
+            return False
+
+        section, key = keys
+        tmp_path = None
+
+        try:
+            # Read the file content
+            with open(server_config_path, "r") as f:
+                if fcntl is not None:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                try:
+                    lines = f.readlines()
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            # Convert value to YAML string representation
+            if isinstance(value, bool):
+                yaml_value = "true" if value else "false"
+            elif value is None:
+                yaml_value = "null"
+            elif isinstance(value, str):
+                # Quote strings if they contain special characters
+                if any(c in value for c in ":#{}[]&*!|>'\"%@`"):
+                    yaml_value = f'"{value}"'
+                else:
+                    yaml_value = value
+            else:
+                yaml_value = str(value)
+
+            # Find the section and key, then update the value
+            in_target_section = False
+            section_indent = 0
+            modified = False
+
+            for i, line in enumerate(lines):
+                stripped = line.lstrip()
+                current_indent = len(line) - len(stripped)
+
+                # Check if this is the target section header
+                if stripped.startswith(f"{section}:"):
+                    in_target_section = True
+                    section_indent = current_indent
+                    continue
+
+                # Check if we've left the target section (new section at same or lower indent)
+                if in_target_section and stripped and not stripped.startswith("#"):
+                    if current_indent <= section_indent and ":" in stripped:
+                        # This is a new top-level section
+                        in_target_section = False
+                        continue
+
+                # Look for the key within the target section
+                if in_target_section and current_indent > section_indent:
+                    # Match the key (with possible comment after)
+                    key_pattern = rf"^(\s*){re.escape(key)}:\s*(.*)$"
+                    match = re.match(key_pattern, line)
+                    if match:
+                        indent = match.group(1)
+                        # Preserve inline comment if present
+                        old_value_and_comment = match.group(2)
+                        if "#" in old_value_and_comment:
+                            # There's an inline comment
+                            comment_idx = old_value_and_comment.index("#")
+                            comment = old_value_and_comment[comment_idx:]
+                            lines[i] = f"{indent}{key}: {yaml_value}  {comment}\n"
+                        else:
+                            lines[i] = f"{indent}{key}: {yaml_value}\n"
+                        modified = True
+                        break
+
+            if not modified:
+                print(f"Warning: Could not find {section}.{key} in config file")
+                return False
+
+            # Write back atomically
+            tmp_path = server_config_path.with_suffix(".tmp")
+            with open(tmp_path, "w") as f:
+                if fcntl is not None:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    f.writelines(lines)
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            os.replace(tmp_path, server_config_path)
+            return True
+
+        except Exception as e:
+            print(f"Error setting server config: {e}")
+            if tmp_path and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+            return False
+
+    def get_server_config(self, *keys: str, default: Any = None) -> Any:
+        """
+        Get a configuration value from the server's config.yaml file.
+
+        Args:
+            *keys: Path to the configuration key
+            default: Default value if not found
+
+        Returns:
+            Configuration value or default
+        """
+        server_config_path = get_config_dir() / "config.yaml"
+
+        if not server_config_path.exists():
+            return default
+
+        try:
+            with open(server_config_path) as f:
+                if fcntl is not None:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                try:
+                    server_config = yaml.safe_load(f) or {}
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            value = server_config
+            for key in keys:
+                if isinstance(value, dict):
+                    value = value.get(key)
+                else:
+                    return default
+                if value is None:
+                    return default
+            return value
+
+        except Exception as e:
+            print(f"Error reading server config: {e}")
+            return default

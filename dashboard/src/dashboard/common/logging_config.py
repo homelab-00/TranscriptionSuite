@@ -39,7 +39,8 @@ def setup_logging(
     Returns:
         Logger instance for the component
     """
-    level = logging.DEBUG if verbose else logging.INFO
+    # Always use DEBUG level for full verbosity
+    level = logging.DEBUG
 
     # Create formatters
     verbose_formatter = logging.Formatter(

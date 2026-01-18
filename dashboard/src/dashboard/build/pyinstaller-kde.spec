@@ -31,6 +31,8 @@ a = Analysis(
         (str(repo_root / "README_DEV.md"), "."),
         # Version file for About dialog
         (str(repo_root / "dashboard" / "pyproject.toml"), "dashboard"),
+        # Default server config (copied to ~/.config/TranscriptionSuite on first run)
+        (str(repo_root / "server" / "config.yaml"), "server"),
     ],
     hiddenimports=[
         "dashboard.common",

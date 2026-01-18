@@ -56,6 +56,9 @@ class ClientOrchestrator:
         self.config = config
         self.auto_connect = auto_connect
         self.auto_copy_clipboard = auto_copy_clipboard
+        self.auto_add_to_notebook = config.get_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", default=False
+        )
 
         # Components
         self.tray: AbstractTray | None = None
@@ -394,30 +397,60 @@ class ClientOrchestrator:
             if self.tray:
                 self.tray.set_state(TrayState.TRANSCRIBING)
 
-            result = await self.api_client.transcribe_audio_data(
-                audio_data,
-                on_progress=lambda msg: logger.info(msg),
-            )
+            # Branch based on notebook mode
+            if self.auto_add_to_notebook:
+                # Use notebook endpoint - saves to notebook with diarization, no clipboard
+                result = await self.api_client.upload_to_notebook(
+                    audio_data,
+                    on_progress=lambda msg: logger.info(msg),
+                )
+                self.last_transcription = result.get("transcription", "")
 
-            self.last_transcription = result.get("text", "")
-
-            # Copy to clipboard
-            if self.last_transcription and self.auto_copy_clipboard:
-                self._copy_to_clipboard(self.last_transcription)
-
-                # Show notification with preview
-                preview = self.last_transcription[:100]
-                if len(self.last_transcription) > 100:
-                    preview += "..."
-
+                # Flash icon then set to STANDBY
                 if self.tray:
-                    self.tray.show_notification(
-                        "Transcription Complete",
-                        f"Copied to clipboard: {preview}",
-                    )
+                    if hasattr(self.tray, "flash_then_set_state"):
+                        self.tray.flash_then_set_state(
+                            TrayState.STANDBY, flash_duration_ms=500
+                        )
+                    else:
+                        self.tray.set_state(TrayState.STANDBY)
 
-            if self.tray:
-                self.tray.set_state(TrayState.STANDBY)
+                    self.tray.show_notification(
+                        "Saved to Notebook",
+                        "Recording saved to Audio Notebook",
+                    )
+            else:
+                # Regular flow - transcribe and copy to clipboard
+                result = await self.api_client.transcribe_audio_data(
+                    audio_data,
+                    on_progress=lambda msg: logger.info(msg),
+                )
+
+                self.last_transcription = result.get("text", "")
+
+                # Flash icon then set to STANDBY, before clipboard copy (fixes delay)
+                if self.tray:
+                    if hasattr(self.tray, "flash_then_set_state"):
+                        self.tray.flash_then_set_state(
+                            TrayState.STANDBY, flash_duration_ms=500
+                        )
+                    else:
+                        self.tray.set_state(TrayState.STANDBY)
+
+                # Copy to clipboard
+                if self.last_transcription and self.auto_copy_clipboard:
+                    self._copy_to_clipboard(self.last_transcription)
+
+                    # Show notification with preview
+                    preview = self.last_transcription[:100]
+                    if len(self.last_transcription) > 100:
+                        preview += "..."
+
+                    if self.tray:
+                        self.tray.show_notification(
+                            "Transcription Complete",
+                            f"Copied to clipboard: {preview}",
+                        )
 
         except ServerBusyError as e:
             logger.warning(f"Server busy: {e}")
@@ -504,6 +537,15 @@ class ClientOrchestrator:
 
             self.last_transcription = result.get("text", "")
 
+            # Flash icon then set to STANDBY, before clipboard copy (fixes delay)
+            if self.tray:
+                if hasattr(self.tray, "flash_then_set_state"):
+                    self.tray.flash_then_set_state(
+                        TrayState.STANDBY, flash_duration_ms=500
+                    )
+                else:
+                    self.tray.set_state(TrayState.STANDBY)
+
             if self.last_transcription and self.auto_copy_clipboard:
                 self._copy_to_clipboard(self.last_transcription)
 
@@ -516,9 +558,6 @@ class ClientOrchestrator:
                         "Transcription Complete",
                         f"Copied to clipboard: {preview}",
                     )
-
-            if self.tray:
-                self.tray.set_state(TrayState.STANDBY)
 
         except Exception as e:
             error_msg = str(e)
@@ -616,17 +655,14 @@ class ClientOrchestrator:
         """Toggle model loading state - unload to free GPU memory or reload."""
         if not self.api_client:
             if self.tray:
-                self.tray.show_notification(
-                    "Error", "Not connected to server"
-                )
+                self.tray.show_notification("Error", "Not connected to server")
             return
 
         # Only allow toggling models on local connections
         if not self.is_local_connection:
             if self.tray:
                 self.tray.show_notification(
-                    "Error",
-                    "Model management only available for local connections"
+                    "Error", "Model management only available for local connections"
                 )
             return
 

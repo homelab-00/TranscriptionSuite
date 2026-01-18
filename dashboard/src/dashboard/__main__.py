@@ -26,7 +26,11 @@ from dashboard.common.single_instance import (
     acquire_instance_lock,
     release_instance_lock,
 )
-from dashboard.common.setup_wizard import SetupWizard, is_first_time_setup
+from dashboard.common.setup_wizard import (
+    SetupWizard,
+    is_first_time_setup,
+    ensure_config_yaml,
+)
 from dashboard.common.logging_config import setup_logging
 
 
@@ -148,6 +152,10 @@ def main() -> int:
     except Exception as e:
         print(f"WARNING: Failed to set up logging: {e}", file=sys.stderr)
         # Continue anyway - we can still run without file logging
+
+    # Ensure config.yaml exists (copy from bundled/dev source if missing)
+    # This runs before setup wizard to handle case where config.yaml was deleted
+    ensure_config_yaml()
 
     # Check for first-time setup (before loading config)
     if not args.skip_setup and is_first_time_setup():

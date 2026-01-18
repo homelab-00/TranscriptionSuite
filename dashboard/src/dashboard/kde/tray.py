@@ -41,6 +41,7 @@ try:
         notification_requested = pyqtSignal(str, str)  # title, message
         clipboard_requested = pyqtSignal(str)  # text to copy
         settings_dialog_requested = pyqtSignal()  # show settings dialog
+        flash_requested = pyqtSignal(object, int)  # target_state, duration_ms
 
 except ImportError:
     # Provide stub for type checking only
@@ -125,6 +126,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self._signals.notification_requested.connect(self._do_show_notification)
         self._signals.clipboard_requested.connect(self._do_copy_to_clipboard)
         self._signals.settings_dialog_requested.connect(self._do_show_settings_dialog)
+        self._signals.flash_requested.connect(self._do_flash_then_set_state)
 
         # Dialog instances (created lazily)
         self._settings_dialog = None
@@ -241,6 +243,22 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         """Update tray icon color based on state (thread-safe)."""
         self._signals.state_changed.emit(state)
 
+    def flash_then_set_state(
+        self, target_state: TrayState, flash_duration_ms: int = 250
+    ) -> None:
+        """Flash icon to light gray, then transition to target state (thread-safe)."""
+        self._signals.flash_requested.emit(target_state, flash_duration_ms)
+
+    def _do_flash_then_set_state(
+        self, target_state: TrayState, flash_duration_ms: int = 250
+    ) -> None:
+        """Perform flash animation (main thread)."""
+        from PyQt6.QtCore import QTimer
+
+        flash_color = (240, 240, 240)  # Light gray (almost white)
+        self.tray.setIcon(self._create_icon(flash_color))
+        QTimer.singleShot(flash_duration_ms, lambda: self._do_set_state(target_state))
+
     def _do_set_state(self, state: TrayState) -> None:
         """Actually update the tray state (must be called on main thread)."""
         self.state = state
@@ -249,9 +267,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if state == TrayState.IDLE:
             self.tray.setIcon(self._get_logo_icon())
         else:
-            # If models are unloaded, use grey icon (same as DISCONNECTED)
+            # If models are unloaded, use dark desaturated green (connected but unloaded)
             if not self._models_loaded:
-                color = (128, 128, 128)  # Grey
+                color = (45, 140, 45)  # Dark desaturated green
             else:
                 color = self.COLORS.get(state, (128, 128, 128))
             self.tray.setIcon(self._create_icon(color))
@@ -405,21 +423,24 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
         if is_wayland:
             # On Wayland, use wl-copy as PRIMARY method (Qt clipboard is unreliable)
+            # Use Popen without waiting - wl-copy forks to background by default
+            # to serve clipboard data requests. Waiting causes hangs when compositor
+            # doesn't give focus to wl-copy's popup surface.
             try:
-                subprocess.run(
+                proc = subprocess.Popen(
                     ["wl-copy"],
-                    input=text.encode("utf-8"),
-                    check=True,
-                    capture_output=True,
-                    timeout=5,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
+                proc.stdin.write(text.encode("utf-8"))
+                proc.stdin.close()
+                # Don't wait - wl-copy forks to background to serve clipboard requests
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
                 return
             except FileNotFoundError:
                 logger.warning("wl-copy not found, falling back to Qt clipboard")
-            except subprocess.TimeoutExpired:
-                logger.warning("wl-copy timed out, falling back to Qt clipboard")
-            except subprocess.CalledProcessError as e:
+            except Exception as e:
                 logger.warning(f"wl-copy failed: {e}, falling back to Qt clipboard")
 
         # X11 or Wayland fallback: use Qt clipboard

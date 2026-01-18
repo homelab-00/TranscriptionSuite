@@ -1010,22 +1010,6 @@ class DashboardWindow(QMainWindow):
         self._stop_server_btn.clicked.connect(self._on_stop_server)
         btn_layout.addWidget(self._stop_server_btn)
 
-        # Model management button (unload/reload)
-        self._unload_models_btn = QPushButton("Unload All Models")
-        self._unload_models_btn.setObjectName("secondaryButton")
-        self._unload_models_btn.setToolTip(
-            "Unload transcription models to free GPU memory"
-        )
-        # Start disabled (gray) until server is healthy
-        self._unload_models_btn.setEnabled(False)
-        # Use dark gray disabled state
-        self._unload_models_btn.setStyleSheet(
-            "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; border-radius: 6px; color: #606060; padding: 10px 20px; }"
-            "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
-        )
-        self._unload_models_btn.clicked.connect(self._on_toggle_models)
-        btn_layout.addWidget(self._unload_models_btn)
-
         layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addSpacing(20)
@@ -1299,6 +1283,64 @@ class DashboardWindow(QMainWindow):
         layout.addWidget(
             self._show_client_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
+
+        layout.addSpacing(15)
+
+        # Model management button (unload/reload)
+        self._unload_models_btn = QPushButton("Unload All Models")
+        self._unload_models_btn.setObjectName("secondaryButton")
+        self._unload_models_btn.setToolTip(
+            "Unload transcription models to free GPU memory"
+        )
+        # Start disabled (gray) until server is healthy
+        self._unload_models_btn.setEnabled(False)
+        # Use dark gray disabled state
+        self._unload_models_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+            "border-radius: 6px; color: #606060; padding: 10px 20px; }"
+            "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
+        )
+        self._unload_models_btn.clicked.connect(self._on_toggle_models)
+        layout.addWidget(
+            self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
+        layout.addSpacing(20)
+
+        # Auto-add to Audio Notebook toggle
+        notebook_frame = QFrame()
+        notebook_frame.setObjectName("statusCard")
+        notebook_frame.setStyleSheet(
+            "QFrame#statusCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
+            "border-radius: 8px; padding: 12px; }"
+        )
+        notebook_layout = QHBoxLayout(notebook_frame)
+        notebook_layout.setContentsMargins(16, 12, 16, 12)
+
+        notebook_label = QLabel("Auto-add to Audio Notebook:")
+        notebook_label.setObjectName("statusLabel")
+        notebook_label.setStyleSheet("color: #e0e0e0;")
+        notebook_layout.addWidget(notebook_label)
+
+        notebook_layout.addStretch()
+
+        self._notebook_toggle_btn = QPushButton("Disabled")
+        self._notebook_toggle_btn.setCheckable(True)
+        auto_notebook = self.config.get_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", default=False
+        )
+        self._notebook_toggle_btn.setChecked(auto_notebook)
+        self._notebook_toggle_btn.setText("Enabled" if auto_notebook else "Disabled")
+        self._notebook_toggle_btn.setToolTip(
+            "When enabled, recordings are saved to Audio Notebook with diarization\\n"
+            "instead of copying transcription to clipboard.\\n"
+            "Can only be changed when both server and client are stopped."
+        )
+        self._notebook_toggle_btn.clicked.connect(self._on_notebook_toggle)
+        self._update_notebook_toggle_style()
+        notebook_layout.addWidget(self._notebook_toggle_btn)
+
+        layout.addWidget(notebook_frame)
 
         layout.addStretch()
 
@@ -1845,6 +1887,13 @@ class DashboardWindow(QMainWindow):
         # Update models button state when server status changes
         self._update_models_button_state()
 
+        # Update notebook toggle state when server status changes
+        server_stopped = status != ServerStatus.RUNNING
+        self._notebook_toggle_btn.setEnabled(
+            not self._client_running and server_stopped
+        )
+        self._update_notebook_toggle_style()
+
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
             "transcription-suite-data"
@@ -2329,6 +2378,15 @@ class DashboardWindow(QMainWindow):
         self._start_client_remote_btn.setEnabled(not self._client_running)
         self._stop_client_btn.setEnabled(self._client_running)
 
+        # Notebook toggle only allowed when both server and client are stopped
+        # (setting takes effect on next client start)
+        server_status = self._docker_manager.get_server_status()
+        server_stopped = server_status != ServerStatus.RUNNING
+        self._notebook_toggle_btn.setEnabled(
+            not self._client_running and server_stopped
+        )
+        self._update_notebook_toggle_style()
+
         # Update models button based on server health
         self._update_models_button_state()
 
@@ -2498,7 +2556,7 @@ class DashboardWindow(QMainWindow):
             loaded: True if models are loaded, False if unloaded
         """
         self._models_loaded = loaded
-        if self._current_view == View.SERVER and self._unload_models_btn:
+        if self._current_view == View.CLIENT and self._unload_models_btn:
             if loaded:
                 self._unload_models_btn.setText("Unload All Models")
                 self._unload_models_btn.setToolTip(
@@ -2529,7 +2587,7 @@ class DashboardWindow(QMainWindow):
         """
         self._is_local_connection = is_local
         # Refresh button state with new connection type
-        if self._current_view == View.SERVER:
+        if self._current_view == View.CLIENT:
             self._update_models_button_state()
 
     def _on_toggle_models(self) -> None:
@@ -2637,6 +2695,53 @@ class DashboardWindow(QMainWindow):
             )
         except FileNotFoundError:
             logger.debug("notify-send not found - cannot show desktop notifications")
+
+    def _on_notebook_toggle(self) -> None:
+        """Handle notebook toggle button click."""
+        is_enabled = self._notebook_toggle_btn.isChecked()
+        self._notebook_toggle_btn.setText("Enabled" if is_enabled else "Disabled")
+        self._update_notebook_toggle_style()
+
+        # Save to server config - orchestrator will read this on next startup
+        self.config.set_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", value=is_enabled
+        )
+
+        logger.info(f"Auto-add to notebook: {'enabled' if is_enabled else 'disabled'}")
+
+    def _update_notebook_toggle_style(self) -> None:
+        """Update notebook toggle button style based on state and editability."""
+        is_checked = self._notebook_toggle_btn.isChecked()
+        is_editable = self._notebook_toggle_btn.isEnabled()
+
+        if is_checked:
+            # Enabled state - green (or desaturated green if not editable)
+            if is_editable:
+                self._notebook_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #4caf50; border: none; border-radius: 4px; "
+                    "color: white; padding: 6px 12px; font-weight: 500; min-width: 70px; }"
+                    "QPushButton:hover { background-color: #43a047; }"
+                )
+            else:
+                # Desaturated green when not editable
+                self._notebook_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #3d5d3d; border: none; border-radius: 4px; "
+                    "color: #7a9a7a; padding: 6px 12px; min-width: 70px; }"
+                )
+        else:
+            # Disabled state - red (or desaturated red if not editable)
+            if is_editable:
+                self._notebook_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
+                    "color: white; padding: 6px 12px; font-weight: 500; min-width: 70px; }"
+                    "QPushButton:hover { background-color: #e53935; }"
+                )
+            else:
+                # Desaturated red when not editable
+                self._notebook_toggle_btn.setStyleSheet(
+                    "QPushButton { background-color: #5d3d3d; border: none; border-radius: 4px; "
+                    "color: #9a7a7a; padding: 6px 12px; min-width: 70px; }"
+                )
 
     # =========================================================================
     # Hamburger Menu, Help and About

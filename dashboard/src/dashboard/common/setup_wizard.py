@@ -6,19 +6,105 @@ including Docker image setup and connection mode selection.
 """
 
 import logging
+import os
 import platform
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 import requests
 
 from dashboard.common.config import get_config_dir
 
 logger = logging.getLogger(__name__)
+
+
+def _get_bundled_config_path() -> Optional[Path]:
+    """
+    Find the bundled config.yaml file.
+
+    Searches in order:
+    1. PyInstaller bundle (sys._MEIPASS/server/config.yaml)
+    2. AppImage bundle (APPDIR/usr/share/transcriptionsuite/config.yaml)
+    3. Development: server/config.yaml relative to repo root
+
+    Returns:
+        Path to config.yaml if found, None otherwise
+    """
+    # 1. PyInstaller frozen bundle
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        config_path = bundle_dir / "server" / "config.yaml"
+        if config_path.exists():
+            logger.debug(f"Found bundled config.yaml at {config_path}")
+            return config_path
+
+    # 2. AppImage bundle
+    if "APPDIR" in os.environ:
+        appdir = Path(os.environ["APPDIR"])
+        config_path = appdir / "usr" / "share" / "transcriptionsuite" / "config.yaml"
+        if config_path.exists():
+            logger.debug(f"Found AppImage config.yaml at {config_path}")
+            return config_path
+
+    # 3. Development: find repo root and look for server/config.yaml
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "README.md").exists():
+            config_path = parent / "server" / "config.yaml"
+            if config_path.exists():
+                logger.debug(f"Found development config.yaml at {config_path}")
+                return config_path
+            break
+
+    return None
+
+
+def ensure_config_yaml() -> bool:
+    """
+    Ensure config.yaml exists in the user config directory.
+
+    If config.yaml doesn't exist, copies it from:
+    - Development: server/config.yaml in the repo
+    - Deployed: bundled config.yaml in the app package
+
+    Returns:
+        True if config.yaml exists (or was created), False on error
+    """
+    config_dir = get_config_dir()
+    config_file = config_dir / "config.yaml"
+
+    if config_file.exists():
+        return True
+
+    # Find source config.yaml
+    source_config = _get_bundled_config_path()
+    if source_config is None:
+        logger.warning(
+            "Could not find bundled config.yaml. "
+            "Will try to download from GitHub during setup."
+        )
+        return False
+
+    # Ensure config directory exists
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Failed to create config directory {config_dir}: {e}")
+        return False
+
+    # Copy config.yaml
+    try:
+        shutil.copy2(source_config, config_file)
+        logger.info(f"Copied config.yaml from {source_config} to {config_file}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to copy config.yaml: {e}")
+        return False
 
 
 class ConnectionMode(Enum):
@@ -174,7 +260,7 @@ def is_first_time_setup() -> bool:
     Check if this is the first time the user is running the application.
 
     Returns:
-        True if config directory doesn't exist or is empty
+        True if config directory doesn't exist or is missing essential files
     """
     config_dir = get_config_dir()
 
@@ -183,7 +269,7 @@ def is_first_time_setup() -> bool:
         return True
 
     # Check if it has the essential files
-    essential_files = ["docker-compose.yml"]
+    essential_files = ["docker-compose.yml", "config.yaml"]
     for filename in essential_files:
         if not (config_dir / filename).exists():
             return True
@@ -336,22 +422,38 @@ class SetupWizard:
             logger.error(f"Failed to create config directory: {e}")
             return False
 
-    def download_config_yaml(self) -> bool:
-        """Download config.yaml from GitHub."""
+    def setup_config_yaml(self) -> bool:
+        """
+        Ensure config.yaml exists in the user config directory.
+
+        Tries in order:
+        1. Use existing config.yaml if present
+        2. Copy from bundled/development source
+        3. Download from GitHub as fallback
+
+        Returns:
+            True if config.yaml is available, False otherwise
+        """
         config_file = self.config_dir / "config.yaml"
         if config_file.exists():
-            logger.info("config.yaml already exists, skipping download")
+            logger.info("config.yaml already exists, skipping")
             return True
 
+        # Try to copy from bundled source first
+        if ensure_config_yaml():
+            return True
+
+        # Fallback: download from GitHub
+        logger.info("Bundled config.yaml not found, downloading from GitHub...")
         try:
             url = f"{GITHUB_RAW_URL}/server/config.yaml"
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             config_file.write_text(response.text)
-            logger.info(f"Downloaded config.yaml to {config_file}")
+            logger.info(f"Downloaded config.yaml from GitHub to {config_file}")
             return True
         except Exception as e:
-            logger.error(f"Failed to download config.yaml: {e}")
+            logger.error(f"Failed to download config.yaml from GitHub: {e}")
             return False
 
     def create_docker_compose(self) -> bool:
@@ -492,11 +594,11 @@ class SetupWizard:
         if not self.create_docker_compose():
             return SetupResult(False, "Failed to create docker-compose.yml")
 
-        # Download config.yaml
-        log("Downloading configuration...")
-        if not self.download_config_yaml():
+        # Set up config.yaml (copy from bundle or download from GitHub)
+        log("Setting up configuration...")
+        if not self.setup_config_yaml():
             # Non-fatal - container has defaults
-            log("Warning: Could not download config.yaml, using container defaults")
+            log("Warning: Could not set up config.yaml, using container defaults")
 
         # Create .env file
         if not self.create_env_file():

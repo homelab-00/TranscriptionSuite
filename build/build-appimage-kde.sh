@@ -99,6 +99,17 @@ cp "$PROJECT_ROOT/README_DEV.md" "$BUILD_DIR/AppDir/"
 mkdir -p "$BUILD_DIR/AppDir/usr/share/transcriptionsuite"
 cp "$PROJECT_ROOT/README.md" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
 cp "$PROJECT_ROOT/README_DEV.md" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
+
+# Copy default server config.yaml (for first-run setup)
+echo "→ Copying default config.yaml..."
+cp "$PROJECT_ROOT/server/config.yaml" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/"
+
+# Copy assets to share directory
+echo "→ Copying assets..."
+mkdir -p "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets"
+cp "$PROJECT_ROOT/build/assets/logo.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
+cp "$PROJECT_ROOT/build/assets/profile.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
+
 cat > "$BUILD_DIR/AppDir/AppRun" << 'EOF'
 #!/bin/bash
 SELF=$(readlink -f "$0")

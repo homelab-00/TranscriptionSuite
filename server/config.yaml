@@ -27,9 +27,9 @@ transcription_options:
 # ----------------------------------------------------------------------------
 # Settings for live recording mode (start/stop dictation).
 longform_recording:
-    # Include longform recordings in the viewer app's calendar/list.
-    # If false, only static file transcriptions appear in the app.
-    include_in_viewer: false
+    # Automatically add longform recordings to Audio Notebook.
+    # When enabled, recordings are sent to the notebook instead of just the clipboard.
+    auto_add_to_audio_notebook: false
 
 
 # ----------------------------------------------------------------------------

@@ -33,6 +33,8 @@ a = Analysis(
         # README files for Help menu
         (str(project_root / "README.md"), "."),
         (str(project_root / "README_DEV.md"), "."),
+        # Default server config (copied to ~/Documents/TranscriptionSuite on first run)
+        (str(project_root / "server" / "config.yaml"), "server"),
     ],
     hiddenimports=[
         "dashboard.common",

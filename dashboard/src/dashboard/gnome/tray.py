@@ -601,22 +601,27 @@ class GtkTray(ServerControlMixin, AbstractTray):
         )
 
         if is_wayland:
-            # On Wayland, try wl-copy first as it's more reliable
+            # On Wayland, use wl-copy as PRIMARY method
+            # Use Popen without waiting - wl-copy forks to background by default
+            # to serve clipboard data requests. Waiting causes hangs when compositor
+            # doesn't give focus to wl-copy's popup surface.
             try:
-                subprocess.run(
+                proc = subprocess.Popen(
                     ["wl-copy"],
-                    input=text.encode("utf-8"),
-                    check=True,
-                    capture_output=True,
-                    timeout=5,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
+                proc.stdin.write(text.encode("utf-8"))
+                proc.stdin.close()
+                # Don't wait - wl-copy forks to background to serve clipboard requests
                 logger.info(f"Copied to clipboard via wl-copy: {len(text)} characters")
                 return False
             except FileNotFoundError:
                 logger.warning(
                     "wl-copy not found, clipboard may not work. Install wl-clipboard package."
                 )
-            except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+            except Exception as e:
                 logger.warning(f"wl-copy failed: {e}")
 
         # Try GTK clipboard (works on X11, less reliable on Wayland)

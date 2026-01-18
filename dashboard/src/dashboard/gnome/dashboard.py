@@ -557,6 +557,7 @@ class DashboardWindow(_get_dashboard_base()):
         self._start_client_remote_btn: Any = None
         self._stop_client_btn: Any = None
         self._unload_models_btn: Any = None
+        self._notebook_toggle_btn: Any = None
 
         self._setup_ui()
         self._apply_styles()
@@ -1173,6 +1174,43 @@ class DashboardWindow(_get_dashboard_base()):
         logs_btn.connect("clicked", lambda _: self._toggle_client_logs())
         box.append(logs_btn)
 
+        # Auto-add to Audio Notebook toggle
+        notebook_frame = Gtk.Frame()
+        notebook_frame.add_css_class("card")
+        notebook_frame.set_margin_top(20)
+        notebook_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        notebook_box.set_margin_top(12)
+        notebook_box.set_margin_bottom(12)
+        notebook_box.set_margin_start(16)
+        notebook_box.set_margin_end(16)
+
+        notebook_label = Gtk.Label(label="Auto-add to Audio Notebook:")
+        notebook_label.add_css_class("dim-label")
+        notebook_box.append(notebook_label)
+
+        # Spacer
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        notebook_box.append(spacer)
+
+        self._notebook_toggle_btn = Gtk.ToggleButton(label="Disabled")
+        auto_notebook = self.config.get_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", default=False
+        )
+        self._notebook_toggle_btn.set_active(auto_notebook)
+        self._notebook_toggle_btn.set_label("Enabled" if auto_notebook else "Disabled")
+        self._notebook_toggle_btn.set_tooltip_text(
+            "When enabled, recordings are saved to Audio Notebook with diarization\n"
+            "instead of copying transcription to clipboard.\n"
+            "Can only be changed when both server and client are stopped."
+        )
+        self._notebook_toggle_btn.connect("toggled", self._on_notebook_toggle)
+        self._update_notebook_toggle_style()
+        notebook_box.append(self._notebook_toggle_btn)
+
+        notebook_frame.set_child(notebook_box)
+        box.append(notebook_frame)
+
         scrolled.set_child(box)
         return scrolled
 
@@ -1321,6 +1359,36 @@ class DashboardWindow(_get_dashboard_base()):
         /* Text labels */
         .dim-label {
             color: #a0a0a0;
+        }
+
+        /* Notebook toggle button states */
+        .notebook-enabled {
+            background: #4caf50;
+            color: white;
+            border-radius: 4px;
+            padding: 6px 12px;
+            min-width: 70px;
+        }
+        .notebook-enabled:hover {
+            background: #43a047;
+        }
+        .notebook-enabled:disabled {
+            background: #3d5d3d;
+            color: #7a9a7a;
+        }
+        .notebook-disabled {
+            background: #f44336;
+            color: white;
+            border-radius: 4px;
+            padding: 6px 12px;
+            min-width: 70px;
+        }
+        .notebook-disabled:hover {
+            background: #e53935;
+        }
+        .notebook-disabled:disabled {
+            background: #5d3d3d;
+            color: #9a7a7a;
         }
         """
         provider = Gtk.CssProvider()
@@ -1569,6 +1637,13 @@ class DashboardWindow(_get_dashboard_base()):
         # Update models button state when server status changes
         self._update_models_button_state()
 
+        # Update notebook toggle state when server status changes
+        if self._notebook_toggle_btn:
+            server_stopped = status != ServerStatus.RUNNING
+            self._notebook_toggle_btn.set_sensitive(
+                not self._client_running and server_stopped
+            )
+
     def _refresh_client_status(self) -> None:
         """Refresh client view status."""
         if self._client_status_label:
@@ -1649,6 +1724,11 @@ class DashboardWindow(_get_dashboard_base()):
             self._start_client_local_btn.set_sensitive(not running)
         if self._start_client_remote_btn:
             self._start_client_remote_btn.set_sensitive(not running)
+        if self._notebook_toggle_btn:
+            # Notebook toggle only allowed when both server and client are stopped
+            server_status = self._docker_manager.get_server_status()
+            server_stopped = server_status != ServerStatus.RUNNING
+            self._notebook_toggle_btn.set_sensitive(not running and server_stopped)
 
     # =========================================================================
     # Server Operations
@@ -1966,6 +2046,33 @@ class DashboardWindow(_get_dashboard_base()):
         except Exception as e:
             logger.error(f"Model toggle failed: {e}")
             self._show_notification("Error", f"Failed to toggle models: {e}")
+
+    def _on_notebook_toggle(self, button: Any) -> None:
+        """Handle notebook toggle button click."""
+        is_enabled = button.get_active()
+        button.set_label("Enabled" if is_enabled else "Disabled")
+        self._update_notebook_toggle_style()
+
+        # Save to server config - orchestrator will read this on next startup
+        self.config.set_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", value=is_enabled
+        )
+
+        logger.info(f"Auto-add to notebook: {'enabled' if is_enabled else 'disabled'}")
+
+    def _update_notebook_toggle_style(self) -> None:
+        """Update notebook toggle button style based on state."""
+        if not self._notebook_toggle_btn:
+            return
+
+        if self._notebook_toggle_btn.get_active():
+            # Enabled state - green
+            self._notebook_toggle_btn.remove_css_class("notebook-disabled")
+            self._notebook_toggle_btn.add_css_class("notebook-enabled")
+        else:
+            # Disabled state - gray
+            self._notebook_toggle_btn.remove_css_class("notebook-enabled")
+            self._notebook_toggle_btn.add_css_class("notebook-disabled")
 
     # =========================================================================
     # Web Client
