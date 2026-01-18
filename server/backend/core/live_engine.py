@@ -1,13 +1,12 @@
 """
-Live Mode Engine using RealtimeSTT.
+Live Mode Engine for real-time sentence-by-sentence transcription.
 
-Provides real-time, sentence-by-sentence transcription using RealtimeSTT's
-AudioToTextRecorder. This is designed for dictation-style use cases where
-text is continuously transcribed as the user speaks.
+Provides continuous transcription designed for dictation-style workflows.
+Audio is received via WebSocket from the client and fed to the transcription
+engine. Each completed sentence triggers a callback.
 
-Unlike the preview transcriber (which shows partial real-time text during
-recording), Live Mode operates independently and delivers complete sentences
-as they are detected.
+Unlike the main transcription (which processes complete recordings), Live Mode
+operates continuously and delivers sentences as they are detected via VAD.
 """
 
 import logging
@@ -15,19 +14,14 @@ import queue
 import threading
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Try to import RealtimeSTT
-try:
-    from RealtimeSTT import AudioToTextRecorder
-
-    HAS_REALTIMESTT = True
-except ImportError:
-    HAS_REALTIMESTT = False
-    AudioToTextRecorder = None  # type: ignore
-    logger.warning("RealtimeSTT not installed. Live Mode will not be available.")
+# Target sample rate for Whisper
+SAMPLE_RATE = 16000
 
 
 class LiveModeState(Enum):
@@ -45,7 +39,7 @@ class LiveModeConfig:
     """Configuration for Live Mode."""
 
     # Whisper model settings
-    model: str = "base"
+    model: str = "Systran/faster-whisper-large-v3"
     language: str = ""
     compute_type: str = "float16"
     device: str = "cuda"
@@ -69,11 +63,12 @@ class LiveModeConfig:
 
 class LiveModeEngine:
     """
-    Live Mode transcription engine using RealtimeSTT.
+    Live Mode transcription engine.
 
     This engine provides continuous sentence-by-sentence transcription,
-    designed for real-time dictation workflows. Each completed sentence
-    triggers a callback, and can optionally be auto-pasted at the cursor.
+    designed for real-time dictation workflows. Audio is fed externally
+    via feed_audio() from WebSocket streams, and completed sentences
+    trigger callbacks.
     """
 
     def __init__(
@@ -92,26 +87,22 @@ class LiveModeEngine:
             on_realtime_update: Callback for real-time partial updates
             on_state_change: Callback for state changes
         """
-        if not HAS_REALTIMESTT:
-            raise ImportError(
-                "RealtimeSTT is required for Live Mode. "
-                "Install with: pip install realtimestt"
-            )
-
         self.config = config or LiveModeConfig()
         self._on_sentence = on_sentence
         self._on_realtime_update = on_realtime_update
         self._on_state_change = on_state_change
 
-        self._recorder: Optional[AudioToTextRecorder] = None
+        self._recorder: Optional[Any] = None
         self._state = LiveModeState.STOPPED
         self._loop_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._sentence_queue: queue.Queue[str] = queue.Queue()
 
         # Track history for the UI
         self._sentence_history: list[str] = []
         self._max_history = 50
+
+        # Audio queue for feeding from WebSocket
+        self._audio_queue: queue.Queue[bytes] = queue.Queue()
 
     @property
     def state(self) -> LiveModeState:
@@ -148,14 +139,6 @@ class LiveModeEngine:
         if self._state == LiveModeState.PROCESSING:
             self._set_state(LiveModeState.LISTENING)
 
-    def _on_realtime_transcription(self, text: str) -> None:
-        """Callback for real-time partial transcription updates."""
-        if self._on_realtime_update:
-            try:
-                self._on_realtime_update(text)
-            except Exception as e:
-                logger.error(f"Realtime update callback error: {e}")
-
     def _process_sentence(self, text: str) -> None:
         """Process a completed sentence."""
         if not text or not text.strip():
@@ -181,10 +164,14 @@ class LiveModeEngine:
         try:
             self._set_state(LiveModeState.STARTING)
 
+            # Import server's AudioToTextRecorder (not RealtimeSTT's)
+            from server.core.stt.engine import AudioToTextRecorder
+
             # Create recorder with configuration
             self._recorder = AudioToTextRecorder(
+                instance_name="live_mode",
                 model=self.config.model,
-                language=self.config.language if self.config.language else None,
+                language=self.config.language if self.config.language else "",
                 compute_type=self.config.compute_type,
                 device=self.config.device,
                 gpu_device_index=self.config.gpu_device_index,
@@ -199,10 +186,6 @@ class LiveModeEngine:
                 batch_size=self.config.batch_size,
                 on_recording_start=self._on_recording_start,
                 on_recording_stop=self._on_recording_stop,
-                on_realtime_transcription_update=self._on_realtime_transcription,
-                enable_realtime_transcription=self._on_realtime_update is not None,
-                spinner=False,
-                level=logging.WARNING,
             )
 
             self._set_state(LiveModeState.LISTENING)
@@ -212,7 +195,9 @@ class LiveModeEngine:
             while not self._stop_event.is_set():
                 try:
                     # text() blocks until a sentence is complete
-                    self._recorder.text(self._process_sentence)
+                    text = self._recorder.text()
+                    if text:
+                        self._process_sentence(text)
                 except Exception as e:
                     if not self._stop_event.is_set():
                         logger.error(f"Live Mode transcription error: {e}")
@@ -234,6 +219,49 @@ class LiveModeEngine:
                 self._set_state(LiveModeState.STOPPED)
             logger.info("Live Mode stopped")
 
+    def _audio_feeder_loop(self) -> None:
+        """Feed audio from queue to recorder (runs in separate thread)."""
+        while not self._stop_event.is_set():
+            try:
+                # Get audio chunk from queue with timeout
+                try:
+                    chunk = self._audio_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                # Feed to recorder if available
+                if self._recorder and self.is_running:
+                    self._recorder.feed_audio(chunk, SAMPLE_RATE)
+
+            except Exception as e:
+                if not self._stop_event.is_set():
+                    logger.error(f"Audio feeder error: {e}")
+
+    def feed_audio(
+        self,
+        audio_data: Union[bytes, bytearray, np.ndarray],
+        sample_rate: int = SAMPLE_RATE,
+    ) -> None:
+        """
+        Feed audio data to the engine from WebSocket.
+
+        Args:
+            audio_data: Audio data (PCM Int16 bytes or numpy array)
+            sample_rate: Sample rate of the audio
+        """
+        if not self.is_running:
+            return
+
+        # Convert numpy array to bytes if needed
+        if isinstance(audio_data, np.ndarray):
+            audio_data = audio_data.astype(np.int16).tobytes()
+
+        # Add to queue
+        try:
+            self._audio_queue.put_nowait(audio_data)
+        except queue.Full:
+            logger.warning("Live Mode audio queue full, dropping chunk")
+
     def start(self) -> bool:
         """
         Start Live Mode transcription.
@@ -246,15 +274,31 @@ class LiveModeEngine:
             return False
 
         self._stop_event.clear()
+
+        # Clear audio queue
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        # Start transcription loop thread
         self._loop_thread = threading.Thread(
             target=self._transcription_loop, daemon=True, name="LiveModeThread"
         )
         self._loop_thread.start()
+
+        # Start audio feeder thread
+        self._feeder_thread = threading.Thread(
+            target=self._audio_feeder_loop, daemon=True, name="LiveModeAudioFeeder"
+        )
+        self._feeder_thread.start()
+
         return True
 
     def stop(self) -> None:
         """Stop Live Mode transcription."""
-        if not self.is_running:
+        if not self.is_running and self._state == LiveModeState.STOPPED:
             return
 
         logger.info("Stopping Live Mode...")
@@ -267,13 +311,17 @@ class LiveModeEngine:
             except Exception:
                 pass
 
-        # Wait for thread to finish
+        # Wait for threads to finish
         if self._loop_thread and self._loop_thread.is_alive():
             self._loop_thread.join(timeout=5.0)
             if self._loop_thread.is_alive():
                 logger.warning("Live Mode thread did not stop gracefully")
 
+        if hasattr(self, "_feeder_thread") and self._feeder_thread.is_alive():
+            self._feeder_thread.join(timeout=2.0)
+
         self._loop_thread = None
+        self._recorder = None
 
     def clear_history(self) -> None:
         """Clear sentence history."""

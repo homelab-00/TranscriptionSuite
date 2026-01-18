@@ -950,9 +950,11 @@ class APIClient:
 
 class LiveModeClient:
     """
-    WebSocket client for Live Mode (RealtimeSTT).
+    WebSocket client for Live Mode.
 
     Connects to /ws/live endpoint for continuous sentence transcription.
+    Audio is streamed from the client to the server, and completed sentences
+    are returned via callback.
     """
 
     def __init__(
@@ -981,6 +983,7 @@ class LiveModeClient:
 
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._running = False
+        self._muted = False
 
     async def connect(self) -> bool:
         """Connect to the Live Mode WebSocket endpoint."""
@@ -1088,6 +1091,26 @@ class LiveModeClient:
 
         finally:
             self._running = False
+
+    async def send_audio(self, audio_data: bytes) -> None:
+        """
+        Send audio data to the server.
+
+        Args:
+            audio_data: PCM Int16 audio data (already formatted with metadata header)
+        """
+        if self._ws and not self._ws.closed and not self._muted:
+            await self._ws.send_bytes(audio_data)
+
+    def set_muted(self, muted: bool) -> None:
+        """Set mute state - when muted, audio is not sent to server."""
+        self._muted = muted
+        logger.debug(f"Live Mode muted: {muted}")
+
+    @property
+    def is_muted(self) -> bool:
+        """Check if audio sending is muted."""
+        return self._muted
 
     async def close(self) -> None:
         """Close the WebSocket connection."""

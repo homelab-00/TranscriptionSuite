@@ -91,10 +91,12 @@ class ClientOrchestrator:
         self._live_transcription_text: str = ""
         self._use_websocket_streaming: bool = False
 
-        # Live Mode (RealtimeSTT) state
+        # Live Mode state
         self._live_mode_active: bool = False
         self._live_mode_client: LiveModeClient | None = None
         self._live_mode_auto_paste: bool = False
+        self._live_mode_muted: bool = False
+        self._live_mode_recorder: AudioRecorder | None = None
 
     @property
     def auto_add_to_notebook(self) -> bool:
@@ -161,6 +163,9 @@ class ClientOrchestrator:
             TrayAction.START_LIVE_MODE, self._on_start_live_mode
         )
         self.tray.register_callback(TrayAction.STOP_LIVE_MODE, self._on_stop_live_mode)
+        self.tray.register_callback(
+            TrayAction.TOGGLE_LIVE_MUTE, self._on_toggle_live_mute
+        )
 
     def _run_async_loop(self) -> None:
         """Run the asyncio event loop in a background thread."""
@@ -995,7 +1000,7 @@ class ClientOrchestrator:
         self._schedule_async(self._stop_live_mode())
 
     async def _start_live_mode(self) -> None:
-        """Start Live Mode WebSocket connection."""
+        """Start Live Mode WebSocket connection with audio streaming."""
         if not self.api_client:
             return
 
@@ -1014,23 +1019,43 @@ class ClientOrchestrator:
                 return
 
             self._live_mode_active = True
+            self._live_mode_muted = False  # Start unmuted
 
-            # Update tray state
+            # Update tray state to LIVE_LISTENING
             if self.tray and hasattr(self.tray, "set_live_mode_active"):
                 self.tray.set_live_mode_active(True)
             if self.tray:
-                self.tray.show_notification("Live Mode", "Live Mode started")
+                self.tray.set_state(TrayState.LIVE_LISTENING)
+                self.tray.show_notification("Live Mode", "Live Mode started - listening")
 
             # Send start command with config
             config = {
                 "model": self.config.get_server_config(
-                    "transcription_options", "model_id", default="base"
+                    "transcription_options", "model_id", default="Systran/faster-whisper-large-v3"
                 ),
                 "language": self.config.get_server_config(
                     "transcription_options", "target_language", default=""
                 ),
             }
             await self._live_mode_client.start(config)
+
+            # Start audio recording and streaming
+            try:
+                device_index = self.config.get("recording", "device_index")
+                self._live_mode_recorder = AudioRecorder(
+                    sample_rate=self.sample_rate,
+                    device_index=device_index,
+                    on_audio_chunk=self._on_live_audio_chunk,
+                )
+                self._live_mode_recorder.start()
+                logger.info("Live Mode audio recording started")
+            except Exception as e:
+                logger.error(f"Failed to start audio recording for Live Mode: {e}")
+                if self.tray:
+                    self.tray.show_notification(
+                        "Audio Error", f"Failed to start microphone: {e}"
+                    )
+                # Continue anyway - user might want to fix audio settings
 
             logger.info("Live Mode started")
 
@@ -1040,10 +1065,59 @@ class ClientOrchestrator:
         except Exception as e:
             logger.error(f"Failed to start Live Mode: {e}")
             self._live_mode_active = False
+            self._live_mode_muted = False
+            await self._cleanup_live_mode()
             if self.tray:
+                self.tray.set_state(TrayState.STANDBY)
                 self.tray.show_notification("Error", f"Failed to start Live Mode: {e}")
                 if hasattr(self.tray, "set_live_mode_active"):
                     self.tray.set_live_mode_active(False)
+
+    def _on_live_audio_chunk(self, chunk: bytes) -> None:
+        """Forward audio chunk to Live Mode WebSocket (called from AudioRecorder thread)."""
+        if self._live_mode_client and self._live_mode_client.is_connected:
+            if not self._live_mode_muted:
+                # Format and send via WebSocket
+                formatted = self._format_audio_for_websocket(chunk)
+                self._schedule_async(self._live_mode_client.send_audio(formatted))
+
+    async def _cleanup_live_mode(self) -> None:
+        """Clean up Live Mode resources."""
+        # Stop audio recorder
+        if self._live_mode_recorder:
+            try:
+                self._live_mode_recorder.cancel()
+            except Exception:
+                pass
+            self._live_mode_recorder = None
+
+        # Close WebSocket client
+        if self._live_mode_client:
+            try:
+                await self._live_mode_client.close()
+            except Exception:
+                pass
+            self._live_mode_client = None
+
+    def _on_toggle_live_mute(self) -> None:
+        """Handle toggle live mute action."""
+        if not self._live_mode_active:
+            return
+
+        self._live_mode_muted = not self._live_mode_muted
+
+        # Update client mute state
+        if self._live_mode_client:
+            self._live_mode_client.set_muted(self._live_mode_muted)
+
+        # Update tray state
+        if self.tray:
+            if self._live_mode_muted:
+                self.tray.set_state(TrayState.LIVE_MUTED)
+            else:
+                self.tray.set_state(TrayState.LIVE_LISTENING)
+
+        logger.info(f"Live Mode muted: {self._live_mode_muted}")
 
     async def _stop_live_mode(self) -> None:
         """Stop Live Mode WebSocket connection."""
@@ -1054,18 +1128,20 @@ class ClientOrchestrator:
             # Send stop command
             await self._live_mode_client.stop()
 
-            # Close connection
-            await self._live_mode_client.close()
+            # Clean up resources
+            await self._cleanup_live_mode()
         except Exception as e:
             logger.error(f"Error stopping Live Mode: {e}")
         finally:
             self._live_mode_client = None
             self._live_mode_active = False
+            self._live_mode_muted = False
 
             # Update tray state
             if self.tray and hasattr(self.tray, "set_live_mode_active"):
                 self.tray.set_live_mode_active(False)
             if self.tray:
+                self.tray.set_state(TrayState.STANDBY)
                 self.tray.show_notification("Live Mode", "Live Mode stopped")
 
             logger.info("Live Mode stopped")

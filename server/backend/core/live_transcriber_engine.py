@@ -32,7 +32,7 @@ class LiveTranscriberConfig:
     """Configuration for live transcription."""
 
     enabled: bool = False
-    model: str = "Systran/faster-whisper-base"
+    model: str = "Systran/faster-whisper-large-v3"
     device: str = "cuda"
     compute_type: str = "default"
     batch_size: int = 8
@@ -49,12 +49,16 @@ class LiveTranscriberConfig:
         if not live_config:
             live_config = config.get("transcription", {}).get("live_transcriber", {})
 
+        # Get main transcriber config as fallback for model
+        main_config = config.get("main_transcriber", {})
+        default_model = main_config.get("model", "Systran/faster-whisper-large-v3")
+
         # Get stt config for webrtc_sensitivity
         stt_config = config.get("stt", {})
 
         return cls(
             enabled=live_config.get("enabled", False),
-            model=live_config.get("model", "Systran/faster-whisper-base"),
+            model=live_config.get("model", default_model),
             device=live_config.get("device", "cuda"),
             compute_type=live_config.get("compute_type", "default"),
             batch_size=live_config.get("batch_size", 8),
@@ -74,11 +78,15 @@ class LiveTranscriberConfig:
         """Create LiveTranscriberConfig from the global server configuration."""
         cfg = get_config()
         live_config = cfg.get("live_transcriber", default={})
+        main_config = cfg.get("main_transcriber", default={})
         stt_config = cfg.stt
+
+        # Use main transcriber model as default for live transcriber
+        default_model = main_config.get("model", "Systran/faster-whisper-large-v3")
 
         return cls(
             enabled=live_config.get("enabled", False),
-            model=live_config.get("model", "Systran/faster-whisper-base"),
+            model=live_config.get("model", default_model),
             device=live_config.get("device", "cuda"),
             compute_type=live_config.get("compute_type", "default"),
             batch_size=live_config.get("batch_size", 8),

@@ -100,23 +100,28 @@ main_transcriber:
 # ----------------------------------------------------------------------------
 # Live Transcriber Configuration
 # ----------------------------------------------------------------------------
-# The fast transcriber used for live transcription during recording.
+# The transcriber used for live transcription during recording.
 # Only loaded when:
 #   1. enabled: true (below)
 #   2. A standalone client connects (not web browser)
+#
+# NOTE: When enabled, the live transcriber uses the SAME model as main_transcriber
+# by default. This ensures consistent transcription quality. If no model is
+# specified below, the main_transcriber.model is used automatically.
 live_transcriber:
     # Enable/disable live transcription.
     # When enabled AND a standalone client connects, the live model is loaded.
     # Web browser clients never use live transcriber to save GPU resources.
     enabled: false
 
-    # A smaller, faster model is recommended for live transcription.
-    model: "Systran/faster-whisper-medium"
+    # Model for live transcription. Defaults to main_transcriber.model if not set.
+    # Using the same model as main_transcriber is recommended for consistency.
+    # model: "Systran/faster-whisper-large-v3"
     compute_type: "default"
     device: "cuda"
     gpu_device_index: 0
     batch_size: 16
-    beam_size: 3  # Smaller for faster live transcription
+    beam_size: 5
 
     # VAD settings for quick sentence-by-sentence transcription.
     silero_sensitivity: 0.4

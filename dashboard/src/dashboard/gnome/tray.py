@@ -92,6 +92,9 @@ class GtkTray(ServerControlMixin, AbstractTray):
         TrayState.UPLOADING: "network-transmit-symbolic",
         TrayState.TRANSCRIBING: "preferences-system-time-symbolic",
         TrayState.ERROR: "dialog-error-symbolic",
+        # Live Mode states
+        TrayState.LIVE_LISTENING: "microphone-sensitivity-high-symbolic",  # Active listening
+        TrayState.LIVE_MUTED: "microphone-sensitivity-muted-symbolic",  # Muted
     }
 
     def __init__(
@@ -283,13 +286,21 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 state == TrayState.STANDBY and self._is_local_connection
             )
 
-        # Live Mode actions - only enabled when connected and in STANDBY
+        # Live Mode actions
+        # Check if we're in a Live Mode state
+        is_live_state = state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
+        if is_live_state:
+            self._live_mode_active = True
+        elif state == TrayState.STANDBY:
+            # Only reset when returning to STANDBY
+            self._live_mode_active = False
+
         if self.start_live_item:
             self.start_live_item.set_sensitive(
                 state == TrayState.STANDBY and not self._live_mode_active
             )
         if self.stop_live_item:
-            self.stop_live_item.set_sensitive(self._live_mode_active)
+            self.stop_live_item.set_sensitive(is_live_state)
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
             try:
@@ -361,12 +372,14 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
     def _update_live_mode_menu(self, active: bool) -> bool:
         """Update Live Mode menu items (called on main thread)."""
+        # Check if we're in a Live Mode state
+        is_live_state = self.state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
         if self.start_live_item:
             self.start_live_item.set_sensitive(
                 self.state == TrayState.STANDBY and not active
             )
         if self.stop_live_item:
-            self.stop_live_item.set_sensitive(active)
+            self.stop_live_item.set_sensitive(active or is_live_state)
         return False
 
     def run(self) -> None:
@@ -459,6 +472,8 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 TrayState.RECORDING,
                 TrayState.UPLOADING,
                 TrayState.TRANSCRIBING,
+                TrayState.LIVE_LISTENING,
+                TrayState.LIVE_MUTED,
             )
 
         return state, host, connected

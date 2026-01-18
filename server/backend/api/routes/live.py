@@ -24,7 +24,6 @@ from server.core.live_engine import (
     LiveModeEngine,
     LiveModeConfig,
     LiveModeState,
-    HAS_REALTIMESTT,
 )
 from server.logging import get_logger
 
@@ -283,19 +282,6 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for Live Mode transcription."""
     global _active_session
 
-    # Check if RealtimeSTT is available
-    if not HAS_REALTIMESTT:
-        await websocket.accept()
-        await websocket.send_json(
-            {
-                "type": "error",
-                "data": {"message": "RealtimeSTT not installed on server"},
-                "timestamp": asyncio.get_event_loop().time(),
-            }
-        )
-        await websocket.close()
-        return
-
     await websocket.accept()
     session: Optional[LiveModeSession] = None
 
@@ -393,6 +379,20 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
                 if message.get("type") == "websocket.disconnect":
                     logger.info("Live Mode WebSocket disconnect message received")
                     break
+
+                # Handle binary audio data
+                if "bytes" in message:
+                    audio_data = message["bytes"]
+                    if session and session._engine and session._engine.is_running:
+                        # Parse audio format (same as /ws endpoint):
+                        # [4 bytes metadata length][metadata JSON][PCM Int16 data]
+                        if len(audio_data) > 4:
+                            import struct
+                            metadata_len = struct.unpack("<I", audio_data[:4])[0]
+                            if len(audio_data) >= 4 + metadata_len:
+                                pcm_data = audio_data[4 + metadata_len:]
+                                session._engine.feed_audio(pcm_data)
+                    continue
 
                 if "text" in message:
                     try:

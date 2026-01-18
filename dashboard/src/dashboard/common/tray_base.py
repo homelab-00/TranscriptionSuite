@@ -154,6 +154,8 @@ class AbstractTray(ABC):
             TrayState.UPLOADING: "Uploading...",
             TrayState.TRANSCRIBING: "Transcribing...",
             TrayState.ERROR: "Error",
+            TrayState.LIVE_LISTENING: "Live Mode - Listening",
+            TrayState.LIVE_MUTED: "Live Mode - Muted",
         }
         return f"{self.app_name} - {state_names.get(state, 'Unknown')}"
 
@@ -168,5 +170,27 @@ class AbstractTray(ABC):
 
         Args:
             is_local: True if connected to localhost, False if remote
+        """
+        pass
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """
+        Set Live Mode active state and update menu items.
+
+        Override with platform-specific implementation.
+
+        Args:
+            active: True if Live Mode is active, False otherwise
+        """
+        pass
+
+    def update_models_menu_state(self, models_loaded: bool) -> None:
+        """
+        Update the toggle models menu item text based on current state.
+
+        Override with platform-specific implementation.
+
+        Args:
+            models_loaded: True if models are loaded, False if unloaded
         """
         pass

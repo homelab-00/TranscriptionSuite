@@ -61,6 +61,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         TrayState.UPLOADING: (0, 191, 255),  # Deep sky blue
         TrayState.TRANSCRIBING: (255, 128, 0),  # Orange
         TrayState.ERROR: (255, 0, 0),  # Red
+        # Live Mode states
+        TrayState.LIVE_LISTENING: (217, 7, 52),  # #d90734 - Bright red (active/listening)
+        TrayState.LIVE_MUTED: (89, 50, 58),  # #59323a - Dark maroon (muted)
     }
 
     # Path to app logo (relative to project root)
@@ -230,14 +233,18 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
     def _on_tray_activated(self, reason: "QSystemTrayIcon.ActivationReason") -> None:
         """Handle tray icon clicks."""
+        # Check if in Live Mode - different click behavior
+        is_live_mode = self.state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
+
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            # Left-click: Start recording (if in standby)
-            if self.state == TrayState.STANDBY:
+            # Left-click: Start recording (if in standby), do nothing in Live Mode
+            if not is_live_mode and self.state == TrayState.STANDBY:
                 self._trigger_callback(TrayAction.START_RECORDING)
         elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
-            # Middle-click: Stop recording and transcribe (if recording)
-            # Note: Windows often doesn't emit MiddleClick for system tray icons
-            if self.state == TrayState.RECORDING:
+            # Middle-click: Toggle mute in Live Mode, or stop recording
+            if is_live_mode:
+                self._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
+            elif self.state == TrayState.RECORDING:
                 self._trigger_callback(TrayAction.STOP_RECORDING)
         elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             # Double-click: Stop recording (primary method for Windows)
@@ -331,26 +338,36 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
                 state == TrayState.STANDBY and self._is_local_connection
             )
 
-        # Live Mode actions - only enabled when connected and in STANDBY
+        # Live Mode actions
+        # Check if we're in a Live Mode state
+        is_live_state = state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
+        if is_live_state:
+            self._live_mode_active = True
+        elif state == TrayState.STANDBY:
+            # Only reset when returning to STANDBY (not during other transitions)
+            self._live_mode_active = False
+
         # Start is enabled when STANDBY and Live Mode not active
-        # Stop is enabled when Live Mode is active
+        # Stop is enabled when in Live Mode state
         if self.start_live_action:
             self.start_live_action.setEnabled(
                 state == TrayState.STANDBY and not self._live_mode_active
             )
         if self.stop_live_action:
-            self.stop_live_action.setEnabled(self._live_mode_active)
+            self.stop_live_action.setEnabled(is_live_state)
 
     def set_live_mode_active(self, active: bool) -> None:
         """Set Live Mode active state and update menu."""
         self._live_mode_active = active
+        # Check if we're in a Live Mode state
+        is_live_state = self.state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
         # Update menu state
         if self.start_live_action:
             self.start_live_action.setEnabled(
                 self.state == TrayState.STANDBY and not active
             )
         if self.stop_live_action:
-            self.stop_live_action.setEnabled(active)
+            self.stop_live_action.setEnabled(active or is_live_state)
 
     def _get_logo_icon(self) -> "QIcon":
         """Get the app logo icon for IDLE state."""

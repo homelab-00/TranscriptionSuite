@@ -86,10 +86,14 @@ class RealtimeTranscriptionEngine:
         self._initialized = False
         self._is_recording = False
         self._language: Optional[str] = None
+        self._sharing_single_engine = False
 
     def initialize(self, language: Optional[str] = None) -> None:
         """
         Initialize the underlying STT engine.
+
+        When live_transcriber is enabled and uses the same model as main_transcriber,
+        we use a single shared engine for both purposes to conserve GPU memory.
 
         Args:
             language: Target language code (None for auto-detect)
@@ -106,49 +110,84 @@ class RealtimeTranscriptionEngine:
         main_config = self.config.get(
             "main_transcriber", trans_config.get("main_transcriber", {})
         )
-
-        # Create main transcription engine
-        # AudioToTextRecorder resolves defaults from config internally,
-        # so we only pass values if they're explicitly configured
-        self._engine = AudioToTextRecorder(
-            instance_name="realtime_main",
-            model=main_config.get("model"),
-            language=language or "",
-            compute_type=main_config.get("compute_type"),
-            device=main_config.get("device"),
-            batch_size=main_config.get("batch_size"),
-            beam_size=main_config.get("beam_size"),
-            silero_sensitivity=main_config.get("silero_sensitivity"),
-            webrtc_sensitivity=main_config.get("webrtc_sensitivity"),
-            post_speech_silence_duration=main_config.get(
-                "post_speech_silence_duration"
-            ),
-            pre_recording_buffer_duration=main_config.get(
-                "pre_recording_buffer_duration"
-            ),
-            faster_whisper_vad_filter=main_config.get("faster_whisper_vad_filter"),
-            normalize_audio=main_config.get("normalize_audio"),
-            on_recording_start=self._handle_recording_start,
-            on_recording_stop=self._handle_recording_stop,
-            on_vad_start=self._handle_vad_start,
-            on_vad_stop=self._handle_vad_stop,
+        live_config = self.config.get(
+            "live_transcriber", trans_config.get("live_transcriber", {})
         )
 
-        # Set up live transcriber engine if enabled
-        if self.enable_live_transcriber:
-            if self._external_live_transcriber_engine is not None:
-                # Use the shared live transcriber engine (avoids duplicate model loading)
-                self._live_transcriber_engine = self._external_live_transcriber_engine
-                logger.info("Using shared live transcriber engine")
-            else:
-                # Create our own live transcriber engine (fallback)
-                self._init_live_transcriber_engine()
+        # Determine model names
+        main_model = main_config.get("model", "Systran/faster-whisper-large-v3")
+        live_model = live_config.get("model", main_model)  # Defaults to main model
+
+        # Check if we should share a single engine (same model = share to save VRAM)
+        self._sharing_single_engine = (
+            self.enable_live_transcriber
+            and self._external_live_transcriber_engine is not None
+            and self._is_same_model(main_model, live_model)
+        )
+
+        if self._sharing_single_engine:
+            # Use the shared live transcriber engine for BOTH main and live transcription
+            # This saves ~6GB VRAM by not loading the model twice
+            self._engine = self._external_live_transcriber_engine
+            self._live_transcriber_engine = self._external_live_transcriber_engine
+            logger.info(
+                f"Using single shared engine for both main and live transcription "
+                f"(model: {live_model}, saves ~6GB VRAM)"
+            )
+        else:
+            # Create separate main transcription engine
+            # AudioToTextRecorder resolves defaults from config internally,
+            # so we only pass values if they're explicitly configured
+            self._engine = AudioToTextRecorder(
+                instance_name="realtime_main",
+                model=main_config.get("model"),
+                language=language or "",
+                compute_type=main_config.get("compute_type"),
+                device=main_config.get("device"),
+                batch_size=main_config.get("batch_size"),
+                beam_size=main_config.get("beam_size"),
+                silero_sensitivity=main_config.get("silero_sensitivity"),
+                webrtc_sensitivity=main_config.get("webrtc_sensitivity"),
+                post_speech_silence_duration=main_config.get(
+                    "post_speech_silence_duration"
+                ),
+                pre_recording_buffer_duration=main_config.get(
+                    "pre_recording_buffer_duration"
+                ),
+                faster_whisper_vad_filter=main_config.get("faster_whisper_vad_filter"),
+                normalize_audio=main_config.get("normalize_audio"),
+                on_recording_start=self._handle_recording_start,
+                on_recording_stop=self._handle_recording_stop,
+                on_vad_start=self._handle_vad_start,
+                on_vad_stop=self._handle_vad_stop,
+            )
+
+            # Set up live transcriber engine if enabled
+            if self.enable_live_transcriber:
+                if self._external_live_transcriber_engine is not None:
+                    # Use the shared live transcriber engine (separate from main)
+                    self._live_transcriber_engine = self._external_live_transcriber_engine
+                    logger.info("Using shared live transcriber engine (separate model)")
+                else:
+                    # Create our own live transcriber engine (fallback)
+                    self._init_live_transcriber_engine()
 
         self._initialized = True
         logger.info(
             f"RealtimeTranscriptionEngine initialized "
-            f"(live_transcriber={'enabled' if self.enable_live_transcriber else 'disabled'})"
+            f"(live_transcriber={'enabled' if self.enable_live_transcriber else 'disabled'}, "
+            f"sharing_engine={self._sharing_single_engine})"
         )
+
+    def _is_same_model(self, model_a: str, model_b: str) -> bool:
+        """Check if two model names refer to the same model."""
+        def normalize(name: str) -> str:
+            name = name.lower().strip()
+            for prefix in ["systran/", "faster-whisper-", "openai/whisper-"]:
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+            return name
+        return normalize(model_a) == normalize(model_b)
 
     def _init_live_transcriber_engine(self) -> None:
         """Initialize the live transcription engine."""
@@ -227,8 +266,9 @@ class RealtimeTranscriptionEngine:
 
         self._engine.feed_audio(audio_data, sample_rate)
 
-        # Also feed to live transcriber engine if enabled
-        if self._live_transcriber_engine:
+        # Also feed to live transcriber engine if enabled AND it's a separate engine
+        # (when sharing single engine, _engine and _live_transcriber_engine are the same)
+        if self._live_transcriber_engine and not self._sharing_single_engine:
             self._live_transcriber_engine.feed_audio(audio_data, sample_rate)
 
     def start_recording(self, language: Optional[str] = None) -> None:
@@ -246,14 +286,16 @@ class RealtimeTranscriptionEngine:
             logger.warning("Language changed mid-session, may not take effect")
 
         self._engine.listen()
-        if self._live_transcriber_engine:
+        # Only call listen() on live transcriber if it's a separate engine
+        if self._live_transcriber_engine and not self._sharing_single_engine:
             self._live_transcriber_engine.listen()
 
     def stop_recording(self) -> None:
         """Stop the current recording session."""
         if self._engine:
             self._engine.stop()
-        if self._live_transcriber_engine:
+        # Only call stop() on live transcriber if it's a separate engine
+        if self._live_transcriber_engine and not self._sharing_single_engine:
             self._live_transcriber_engine.stop()
 
     async def get_transcription(self) -> RealtimeTranscriptionResult:
@@ -315,19 +357,27 @@ class RealtimeTranscriptionEngine:
 
     def shutdown(self) -> None:
         """Shutdown the engine and release resources."""
-        if self._engine:
-            self._engine.shutdown()
+        # When sharing a single engine, DON'T shutdown it - it's owned by model_manager
+        if self._sharing_single_engine:
+            logger.info("Releasing shared engine reference (not shutting down)")
             self._engine = None
+            self._live_transcriber_engine = None
+        else:
+            # Shutdown main engine if we created it
+            if self._engine:
+                self._engine.shutdown()
+                self._engine = None
 
-        # Only shutdown the live transcriber engine if we created it (not if it's external/shared)
-        if (
-            self._live_transcriber_engine
-            and self._external_live_transcriber_engine is None
-        ):
-            self._live_transcriber_engine.shutdown()
-        self._live_transcriber_engine = None
+            # Only shutdown the live transcriber engine if we created it (not if it's external/shared)
+            if (
+                self._live_transcriber_engine
+                and self._external_live_transcriber_engine is None
+            ):
+                self._live_transcriber_engine.shutdown()
+            self._live_transcriber_engine = None
 
         self._initialized = False
+        self._sharing_single_engine = False
         logger.info("RealtimeTranscriptionEngine shutdown complete")
 
     def __enter__(self) -> "RealtimeTranscriptionEngine":
