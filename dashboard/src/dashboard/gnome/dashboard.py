@@ -503,6 +503,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         self.config = config
         self._docker_manager = DockerManager()
+        self._dbus_service: Any = None
 
         # Callbacks for client operations
         self._start_client_callback = on_start_client

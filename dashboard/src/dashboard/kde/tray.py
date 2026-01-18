@@ -42,6 +42,7 @@ try:
         clipboard_requested = pyqtSignal(str)  # text to copy
         settings_dialog_requested = pyqtSignal()  # show settings dialog
         flash_requested = pyqtSignal(object, int)  # target_state, duration_ms
+        live_transcription_update = pyqtSignal(str)  # text
 
 except ImportError:
     # Provide stub for type checking only
@@ -136,6 +137,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self._signals.clipboard_requested.connect(self._do_copy_to_clipboard)
         self._signals.settings_dialog_requested.connect(self._do_show_settings_dialog)
         self._signals.flash_requested.connect(self._do_flash_then_set_state)
+        self._signals.live_transcription_update.connect(
+            self._do_update_live_transcription
+        )
 
         # Dialog instances (created lazily)
         self._settings_dialog = None
@@ -483,7 +487,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
     def update_live_transcription_text(self, text: str) -> None:
         """
-        Forward live transcription text to dashboard for display.
+        Forward live transcription text to dashboard for display (thread-safe).
 
         Called by the orchestrator during WebSocket streaming recording
         when live transcription updates are received.
@@ -491,6 +495,10 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         Args:
             text: The live transcription text to display
         """
+        self._signals.live_transcription_update.emit(text)
+
+    def _do_update_live_transcription(self, text: str) -> None:
+        """Actually update the dashboard (must be called on main thread)."""
         if self._dashboard_window:
             self._dashboard_window.update_live_transcription_text(text)
 
@@ -567,6 +575,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
         if self._dashboard_window is None:
             self._dashboard_window = DashboardWindow(self.config)
+            self._dashboard_window.tray = self
             # Connect Dashboard signals
             self._dashboard_window.start_client_requested.connect(
                 self._on_dashboard_start_client

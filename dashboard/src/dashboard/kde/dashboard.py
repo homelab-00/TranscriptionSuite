@@ -13,7 +13,7 @@ import logging
 import webbrowser
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
@@ -605,6 +605,9 @@ class DashboardWindow(QMainWindow):
 
         # Docker pull worker for async image pulling
         self._pull_worker: "DockerPullWorker | None" = None
+
+        # Tray reference for orchestrator access
+        self.tray: Any = None
 
         self._setup_ui()
         self._apply_styles()
