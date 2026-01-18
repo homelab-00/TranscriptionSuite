@@ -16,16 +16,15 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
-
-from server.core.token_store import get_token_store
-from server.core.model_manager import get_model_manager
 from server.core.live_engine import (
-    LiveModeEngine,
     LiveModeConfig,
+    LiveModeEngine,
     LiveModeState,
 )
+from server.core.model_manager import get_model_manager
+from server.core.token_store import get_token_store
 from server.logging import get_logger
+from starlette.websockets import WebSocketState
 
 logger = get_logger(__name__)
 
@@ -234,11 +233,19 @@ class LiveModeSession:
 
     async def process_messages(self) -> None:
         """Process queued messages from engine callbacks."""
-        while self._running or not self._message_queue.empty():
+        # Wait for engine to start before processing
+        # The loop needs to keep running even when queue is empty,
+        # as long as the engine might produce more messages
+        while True:
             try:
                 msg = await asyncio.wait_for(self._message_queue.get(), timeout=0.1)
                 await self.send_message(msg["type"], msg["data"])
             except asyncio.TimeoutError:
+                # Check if we should exit - only exit when:
+                # 1. _running is False (engine stopped)
+                # 2. Queue is empty (no pending messages)
+                if not self._running and self._message_queue.empty():
+                    break
                 continue
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
@@ -311,9 +318,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
 
         if is_localhost:
             client_name = "localhost-user"
-            logger.info(
-                "Live Mode connection from localhost - bypassing authentication"
-            )
+            logger.info("Live Mode connection from localhost - bypassing authentication")
         else:
             if not token:
                 await websocket.send_json(
@@ -388,9 +393,10 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
                         # [4 bytes metadata length][metadata JSON][PCM Int16 data]
                         if len(audio_data) > 4:
                             import struct
+
                             metadata_len = struct.unpack("<I", audio_data[:4])[0]
                             if len(audio_data) >= 4 + metadata_len:
-                                pcm_data = audio_data[4 + metadata_len:]
+                                pcm_data = audio_data[4 + metadata_len :]
                                 session._engine.feed_audio(pcm_data)
                     continue
 

@@ -15,26 +15,27 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal
+from PyQt6.QtCore import QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
+    QColor,
     QFont,
     QIcon,
     QPainter,
     QPainterPath,
     QPixmap,
-    QColor,
     QSyntaxHighlighter,
     QTextCharFormat,
 )
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QPlainTextEdit,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -963,9 +964,7 @@ class DashboardWindow(QMainWindow):
         token_row.setSpacing(0)  # Remove spacing between widgets
         token_note = QLabel(" (for remote)")  # Leading space for minimal separation
         token_note.setObjectName("statusDateInline")
-        token_note.setStyleSheet(
-            "margin-left: 0px;"
-        )  # No margin - glued to token field
+        token_note.setStyleSheet("margin-left: 0px;")  # No margin - glued to token field
         token_row.addWidget(token_note)
         token_row.addStretch()
         status_layout.addLayout(token_row)
@@ -1294,9 +1293,7 @@ class DashboardWindow(QMainWindow):
             "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
         )
         self._unload_models_btn.clicked.connect(self._on_toggle_models)
-        layout.addWidget(
-            self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter
-        )
+        layout.addWidget(self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addSpacing(20)
 
@@ -1374,6 +1371,83 @@ class DashboardWindow(QMainWindow):
         preview_toggle_layout.addWidget(self._preview_toggle_btn)
 
         layout.addWidget(preview_toggle_frame)
+
+        # Live Mode Language selector
+        language_frame = QFrame()
+        language_frame.setObjectName("statusCard")
+        language_frame.setStyleSheet(
+            "QFrame#statusCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
+            "border-radius: 8px; padding: 12px; }"
+        )
+        language_layout = QHBoxLayout(language_frame)
+        language_layout.setContentsMargins(16, 12, 16, 12)
+
+        language_label = QLabel("Live Mode Language:")
+        language_label.setObjectName("statusLabel")
+        language_label.setStyleSheet("color: #e0e0e0;")
+        language_layout.addWidget(language_label)
+
+        language_layout.addStretch()
+
+        # Language combo box
+        self._live_language_combo = QComboBox()
+        self._live_language_combo.setMinimumWidth(180)
+        self._live_language_combo.setStyleSheet(
+            "QComboBox { background-color: #252526; border: 1px solid #3d3d3d; "
+            "border-radius: 4px; padding: 6px 12px; color: #e0e0e0; font-size: 12px; }"
+            "QComboBox::drop-down { border: none; width: 24px; }"
+            "QComboBox::down-arrow { image: none; border-left: 5px solid transparent; "
+            "border-right: 5px solid transparent; border-top: 6px solid #a0a0a0; margin-right: 8px; }"
+            "QComboBox QAbstractItemView { background-color: #252526; border: 1px solid #3d3d3d; "
+            "color: #e0e0e0; selection-background-color: #3d3d3d; }"
+        )
+        # Add language options (Whisper-supported languages)
+        languages = [
+            ("Auto-detect", ""),
+            ("English", "en"),
+            ("Greek", "el"),
+            ("German", "de"),
+            ("French", "fr"),
+            ("Spanish", "es"),
+            ("Italian", "it"),
+            ("Portuguese", "pt"),
+            ("Russian", "ru"),
+            ("Japanese", "ja"),
+            ("Korean", "ko"),
+            ("Chinese", "zh"),
+            ("Arabic", "ar"),
+            ("Hindi", "hi"),
+            ("Dutch", "nl"),
+            ("Polish", "pl"),
+            ("Turkish", "tr"),
+            ("Ukrainian", "uk"),
+            ("Vietnamese", "vi"),
+            ("Thai", "th"),
+        ]
+        for name, code in languages:
+            self._live_language_combo.addItem(name, code)
+
+        # Load saved value
+        saved_language = self.config.get_server_config(
+            "live_transcriber", "language", default=""
+        )
+        for i in range(self._live_language_combo.count()):
+            if self._live_language_combo.itemData(i) == saved_language:
+                self._live_language_combo.setCurrentIndex(i)
+                break
+
+        self._live_language_combo.setToolTip(
+            "Force a specific language for Live Mode.\\n"
+            "Recommended: Select your language for better accuracy.\\n"
+            "Auto-detect works poorly with short utterances.\\n"
+            "Only editable when server is stopped."
+        )
+        self._live_language_combo.currentIndexChanged.connect(
+            self._on_live_language_changed
+        )
+        language_layout.addWidget(self._live_language_combo)
+
+        layout.addWidget(language_frame)
 
         layout.addSpacing(10)
 
@@ -1970,9 +2044,7 @@ class DashboardWindow(QMainWindow):
             self._remove_image_btn.setToolTip("Remove the Docker image")
 
         if is_running:
-            self._remove_container_btn.setToolTip(
-                "Stop container first before removing"
-            )
+            self._remove_container_btn.setToolTip("Stop container first before removing")
         else:
             self._remove_container_btn.setToolTip("Remove the Docker container")
 
@@ -2006,15 +2078,17 @@ class DashboardWindow(QMainWindow):
 
         # Update notebook toggle state when server status changes
         server_stopped = status != ServerStatus.RUNNING
-        self._notebook_toggle_btn.setEnabled(
-            not self._client_running and server_stopped
-        )
+        self._notebook_toggle_btn.setEnabled(not self._client_running and server_stopped)
         self._update_notebook_toggle_style()
 
         # Update live transcriber toggle state when server status changes
         if hasattr(self, "_preview_toggle_btn"):
             self._preview_toggle_btn.setEnabled(server_stopped)
             self._update_live_transcriber_toggle_style()
+
+        # Update live mode language dropdown state when server status changes
+        if hasattr(self, "_live_language_combo"):
+            self._live_language_combo.setEnabled(server_stopped)
 
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
@@ -2092,9 +2166,7 @@ class DashboardWindow(QMainWindow):
             if self._show_server_logs_btn.isChecked():
                 self._server_log_view.appendPlainText(msg)
 
-        result = self._docker_manager.start_server(
-            mode=mode, progress_callback=progress
-        )
+        result = self._docker_manager.start_server(mode=mode, progress_callback=progress)
 
         if result.success:
             progress(result.message)
@@ -2317,9 +2389,7 @@ class DashboardWindow(QMainWindow):
                         # Wait for worker thread to finish (with timeout)
                         self._pull_worker.join(timeout=10)
                         if self._pull_worker.is_alive():
-                            logger.warning(
-                                "Docker pull worker still alive after cancel"
-                            )
+                            logger.warning("Docker pull worker still alive after cancel")
                         else:
                             logger.info("Docker pull worker terminated successfully")
                 except Exception as e:
@@ -2504,9 +2574,7 @@ class DashboardWindow(QMainWindow):
         # (setting takes effect on next client start)
         server_status = self._docker_manager.get_server_status()
         server_stopped = server_status != ServerStatus.RUNNING
-        self._notebook_toggle_btn.setEnabled(
-            not self._client_running and server_stopped
-        )
+        self._notebook_toggle_btn.setEnabled(not self._client_running and server_stopped)
         self._update_notebook_toggle_style()
 
         # Update models button based on server health
@@ -2691,9 +2759,7 @@ class DashboardWindow(QMainWindow):
                 )
             else:
                 self._unload_models_btn.setText("Reload Models")
-                self._unload_models_btn.setToolTip(
-                    "Reload transcription models for use"
-                )
+                self._unload_models_btn.setToolTip("Reload transcription models for use")
                 # Red background (models unloaded) - color 3
                 self._unload_models_btn.setStyleSheet(
                     "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
@@ -2879,6 +2945,18 @@ class DashboardWindow(QMainWindow):
 
         logger.info(f"Live transcriber: {'enabled' if is_enabled else 'disabled'}")
 
+    def _on_live_language_changed(self) -> None:
+        """Handle Live Mode language dropdown change."""
+        language_code = self._live_language_combo.currentData()
+        language_name = self._live_language_combo.currentText()
+
+        # Save to server config - takes effect on next Live Mode start
+        self.config.set_server_config("live_transcriber", "language", value=language_code)
+
+        logger.info(
+            f"Live Mode language set to: {language_name} ({language_code or 'auto'})"
+        )
+
     def _toggle_live_preview_collapse(self) -> None:
         """Toggle live preview section collapse."""
         is_visible = self._preview_content.isVisible()
@@ -2936,9 +3014,7 @@ class DashboardWindow(QMainWindow):
             self._live_transcription_history.append(text)
             # Keep only last ~20 lines to prevent memory bloat
             if len(self._live_transcription_history) > 20:
-                self._live_transcription_history = self._live_transcription_history[
-                    -20:
-                ]
+                self._live_transcription_history = self._live_transcription_history[-20:]
             # Update display
             self._live_transcription_text_edit.setPlainText(
                 "\n".join(self._live_transcription_history)
@@ -3066,9 +3142,7 @@ class DashboardWindow(QMainWindow):
         about_action.triggered.connect(self._show_about_dialog)
 
         # Show menu below the hamburger button
-        menu.exec(
-            self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().bottomLeft())
-        )
+        menu.exec(self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().bottomLeft()))
 
     def _show_help_menu(self) -> None:
         """Show help menu with README options."""
@@ -3105,15 +3179,11 @@ class DashboardWindow(QMainWindow):
             dev_guide_icon = QIcon.fromTheme("text-x-source")
         if dev_guide_icon.isNull():
             dev_guide_icon = QIcon.fromTheme("application-x-executable")
-        readme_dev_action = menu.addAction(
-            dev_guide_icon, "Developer Guide (README_DEV)"
-        )
+        readme_dev_action = menu.addAction(dev_guide_icon, "Developer Guide (README_DEV)")
         readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
 
         # Show menu below the help button
-        menu.exec(
-            self._nav_help_btn.mapToGlobal(self._nav_help_btn.rect().bottomLeft())
-        )
+        menu.exec(self._nav_help_btn.mapToGlobal(self._nav_help_btn.rect().bottomLeft()))
 
     def _show_readme_viewer(self, dev: bool = False) -> None:
         """Show a README file in a markdown viewer dialog with dark theme."""
@@ -3147,7 +3217,7 @@ class DashboardWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Markdown content viewer with HTML rendering
-        from PyQt6.QtGui import QPalette, QColor
+        from PyQt6.QtGui import QColor, QPalette
 
         text_browser = QTextBrowser()
         text_browser.setReadOnly(True)

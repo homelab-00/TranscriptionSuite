@@ -114,7 +114,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.toggle_models_action: QAction | None = None
         self.reconnect_action: QAction | None = None
         self.start_live_action: QAction | None = None
-        self.stop_live_action: QAction | None = None
+        # stop_live_action removed - we toggle label of start_live_action
+        self.mute_live_action: QAction | None = None
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
@@ -189,17 +190,17 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         # Live Mode (RealtimeSTT)
         self.start_live_action = QAction("Start Live Mode", menu)
         self.start_live_action.triggered.connect(
-            lambda: self._trigger_callback(TrayAction.START_LIVE_MODE)
+            lambda: self._on_toggle_live_mode_click()
         )
         self.start_live_action.setEnabled(False)
         menu.addAction(self.start_live_action)
 
-        self.stop_live_action = QAction("Stop Live Mode", menu)
-        self.stop_live_action.triggered.connect(
-            lambda: self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        self.mute_live_action = QAction("Mute Live Mode", menu)
+        self.mute_live_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
         )
-        self.stop_live_action.setEnabled(False)
-        menu.addAction(self.stop_live_action)
+        self.mute_live_action.setEnabled(False)
+        menu.addAction(self.mute_live_action)
 
         menu.addSeparator()
 
@@ -347,27 +348,39 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             # Only reset when returning to STANDBY (not during other transitions)
             self._live_mode_active = False
 
-        # Start is enabled when STANDBY and Live Mode not active
-        # Stop is enabled when in Live Mode state
+        # Start/Stop is enabled when STANDBY or in Live Mode state
         if self.start_live_action:
-            self.start_live_action.setEnabled(
-                state == TrayState.STANDBY and not self._live_mode_active
-            )
-        if self.stop_live_action:
-            self.stop_live_action.setEnabled(is_live_state)
+            can_toggle_live = state == TrayState.STANDBY or is_live_state
+            self.start_live_action.setEnabled(can_toggle_live)
+
+            # Update label based on state
+            if is_live_state:
+                self.start_live_action.setText("Stop Live Mode")
+            else:
+                self.start_live_action.setText("Start Live Mode")
+
+        # Mute is enabled only when Live Mode is active
+        if self.mute_live_action:
+            self.mute_live_action.setEnabled(is_live_state)
+
+            # Update label based on state
+            if state == TrayState.LIVE_MUTED:
+                self.mute_live_action.setText("Unmute Live Mode")
+            else:
+                self.mute_live_action.setText("Mute Live Mode")
 
     def set_live_mode_active(self, active: bool) -> None:
         """Set Live Mode active state and update menu."""
         self._live_mode_active = active
-        # Check if we're in a Live Mode state
-        is_live_state = self.state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
-        # Update menu state
-        if self.start_live_action:
-            self.start_live_action.setEnabled(
-                self.state == TrayState.STANDBY and not active
-            )
-        if self.stop_live_action:
-            self.stop_live_action.setEnabled(active or is_live_state)
+        # Force a state update to refresh menu labels
+        self._do_set_state(self.state)
+
+    def _on_toggle_live_mode_click(self) -> None:
+        """Handle Start/Stop Live Mode click."""
+        if self._live_mode_active:
+            self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        else:
+            self._trigger_callback(TrayAction.START_LIVE_MODE)
 
     def _get_logo_icon(self) -> "QIcon":
         """Get the app logo icon for IDLE state."""

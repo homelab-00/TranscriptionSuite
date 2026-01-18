@@ -61,6 +61,10 @@ INTERFACE_XML = """
     <signal name="ClientStateChanged">
       <arg name="state" type="s"/>
     </signal>
+    <signal name="LiveTranscriptionText">
+      <arg name="text" type="s"/>
+      <arg name="append" type="b"/>
+    </signal>
   </interface>
 </node>
 """
@@ -245,6 +249,25 @@ class TranscriptionSuiteDBusService:
             logger.debug(f"Emitted ClientStateChanged signal: {state}")
         except Exception as e:
             logger.error(f"Failed to emit D-Bus signal: {e}")
+
+    def emit_live_transcription_text(self, text: str, append: bool) -> None:
+        """Emit LiveTranscriptionText signal."""
+        if not self._connection:
+            return
+
+        from gi.repository import GLib
+
+        try:
+            self._connection.emit_signal(
+                None,  # Broadcast to all listeners
+                DBUS_OBJECT_PATH,
+                DBUS_INTERFACE_NAME,
+                "LiveTranscriptionText",
+                GLib.Variant("(sb)", (text, append)),
+            )
+            # Don't log essentially every character typed/spoken as it spams debug logs
+        except Exception as e:
+            logger.error(f"Failed to emit LiveTranscriptionText signal: {e}")
 
     def stop(self) -> None:
         """Unregister the D-Bus service."""
@@ -452,3 +475,28 @@ class DashboardDBusClient:
 
         self._proxy.connect("g-signal", on_signal)
         logger.debug("Connected to ClientStateChanged signal")
+
+    def connect_live_transcription_text(
+        self, callback: Callable[[str, bool], None]
+    ) -> None:
+        """
+        Connect to the LiveTranscriptionText signal.
+
+        Args:
+            callback: Function to call with (text, append)
+        """
+        if not self._proxy:
+            return
+
+        def on_signal(
+            proxy: Any,
+            sender_name: str,
+            signal_name: str,
+            parameters: "GLib.Variant",
+        ) -> None:
+            if signal_name == "LiveTranscriptionText":
+                text, append = parameters.unpack()
+                callback(text, append)
+
+        self._proxy.connect("g-signal", on_signal)
+        logger.debug("Connected to LiveTranscriptionText signal")

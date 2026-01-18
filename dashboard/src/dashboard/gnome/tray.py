@@ -134,7 +134,8 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.transcribe_item: Optional[Any] = None
         self.toggle_models_item: Optional[Any] = None
         self.start_live_item: Optional[Any] = None
-        self.stop_live_item: Optional[Any] = None
+        # self.stop_live_item removed - we'll toggle label of start_live_item
+        self.mute_live_item: Optional[Any] = None
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
@@ -200,17 +201,17 @@ class GtkTray(ServerControlMixin, AbstractTray):
         # Live Mode (RealtimeSTT)
         self.start_live_item = Gtk.MenuItem(label="Start Live Mode")
         self.start_live_item.connect(
-            "activate", lambda _: self._trigger_callback(TrayAction.START_LIVE_MODE)
+            "activate", lambda _: self._on_toggle_live_mode_click()
         )
         self.start_live_item.set_sensitive(False)
         menu.append(self.start_live_item)
 
-        self.stop_live_item = Gtk.MenuItem(label="Stop Live Mode")
-        self.stop_live_item.connect(
-            "activate", lambda _: self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        self.mute_live_item = Gtk.MenuItem(label="Mute Live Mode")
+        self.mute_live_item.connect(
+            "activate", lambda _: self._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
         )
-        self.stop_live_item.set_sensitive(False)
-        menu.append(self.stop_live_item)
+        self.mute_live_item.set_sensitive(False)
+        menu.append(self.mute_live_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -296,11 +297,26 @@ class GtkTray(ServerControlMixin, AbstractTray):
             self._live_mode_active = False
 
         if self.start_live_item:
-            self.start_live_item.set_sensitive(
-                state == TrayState.STANDBY and not self._live_mode_active
-            )
-        if self.stop_live_item:
-            self.stop_live_item.set_sensitive(is_live_state)
+            # Enabled in STANDBY or LIVE states
+            can_toggle_live = state == TrayState.STANDBY or is_live_state
+            self.start_live_item.set_sensitive(can_toggle_live)
+
+            # Update label based on state
+            if is_live_state:
+                self.start_live_item.set_label("Stop Live Mode")
+            else:
+                self.start_live_item.set_label("Start Live Mode")
+
+        if self.mute_live_item:
+            # Enabled only when Live Mode is active
+            self.mute_live_item.set_sensitive(is_live_state)
+
+            # Update label based on state
+            if state == TrayState.LIVE_MUTED:
+                self.mute_live_item.set_label("Unmute Live Mode")
+            else:
+                self.mute_live_item.set_label("Mute Live Mode")
+
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
             try:
@@ -372,15 +388,17 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
     def _update_live_mode_menu(self, active: bool) -> bool:
         """Update Live Mode menu items (called on main thread)."""
-        # Check if we're in a Live Mode state
-        is_live_state = self.state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
-        if self.start_live_item:
-            self.start_live_item.set_sensitive(
-                self.state == TrayState.STANDBY and not active
-            )
-        if self.stop_live_item:
-            self.stop_live_item.set_sensitive(active or is_live_state)
+        # We rely on _do_set_state which handles labels based on state enum now
+        # But we force a state update to ensure UI is consistent
+        self._do_set_state(self.state)
         return False
+
+    def _on_toggle_live_mode_click(self) -> None:
+        """Handle Start/Stop Live Mode click."""
+        if self._live_mode_active:
+            self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        else:
+            self._trigger_callback(TrayAction.START_LIVE_MODE)
 
     def run(self) -> None:
         """Start the GTK main loop."""
@@ -543,9 +561,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 stderr=subprocess.DEVNULL,
                 env=env,
             )
-            logger.info(
-                f"Dashboard process started (PID: {self._dashboard_process.pid})"
-            )
+            logger.info(f"Dashboard process started (PID: {self._dashboard_process.pid})")
 
         except FileNotFoundError as e:
             logger.error(f"Failed to launch Dashboard - Python not found: {e}")
@@ -603,10 +619,11 @@ class GtkTray(ServerControlMixin, AbstractTray):
             text: The live transcription text to display
             append: If True, append to history. If False, replace current line.
         """
-        if self._dbus_service and hasattr(self._dbus_service, "_dashboard"):
-            dashboard = self._dbus_service._dashboard
-            if dashboard and hasattr(dashboard, "update_live_transcription_text"):
-                GLib.idle_add(dashboard.update_live_transcription_text, text, append)
+        if self._dbus_service:
+            try:
+                self._dbus_service.emit_live_transcription_text(text, append)
+            except Exception as e:
+                logger.debug(f"Failed to emit live text via D-Bus: {e}")
 
     def open_file_dialog(
         self, title: str, filetypes: list[tuple[str, str]]
