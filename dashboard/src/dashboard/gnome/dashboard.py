@@ -737,6 +737,31 @@ class DashboardWindow(_get_dashboard_base()):
         subtitle.add_css_class("dim-label")
         box.append(subtitle)
 
+        # Add logo
+        logo_path = _get_assets_path() / "logo_wide.png"
+        if logo_path.exists():
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(logo_path))
+                # Scale to specified dimensions (350 x 193)
+                orig_width = pixbuf.get_width()
+                orig_height = pixbuf.get_height()
+                # Calculate aspect ratio
+                aspect = orig_width / orig_height if orig_height > 0 else 1
+                # Scale to fit within 350 x 193 while maintaining aspect ratio
+                target_width = 350
+                target_height = int(target_width / aspect)
+                if target_height > 193:
+                    target_height = 193
+                    target_width = int(target_height * aspect)
+                scaled_pixbuf = pixbuf.scale_simple(
+                    target_width, target_height, GdkPixbuf.InterpType.BILINEAR
+                )
+                logo_image = Gtk.Image.new_from_pixbuf(scaled_pixbuf)
+                logo_image.set_halign(Gtk.Align.CENTER)
+                box.append(logo_image)
+            except Exception as e:
+                logger.debug(f"Failed to load logo: {e}")
+
         # Status indicators
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=40)
         status_box.set_halign(Gtk.Align.CENTER)

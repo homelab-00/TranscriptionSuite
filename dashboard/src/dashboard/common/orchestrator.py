@@ -1041,7 +1041,7 @@ class ClientOrchestrator:
                     "live_transcriber", "language", default=""
                 ),
                 "post_speech_silence_duration": self.config.get(
-                    "live_mode", "grace_period", default=3.0
+                    "live_mode", "grace_period", default=1.0
                 ),
             }
             await self._live_mode_client.start(config)

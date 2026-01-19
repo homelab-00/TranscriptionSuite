@@ -486,9 +486,9 @@ class SettingsDialog(QDialog):
         grace_row.addWidget(grace_label)
 
         self.grace_period_spin = QDoubleSpinBox()
-        self.grace_period_spin.setRange(0.5, 10.0)
-        self.grace_period_spin.setSingleStep(0.5)
-        self.grace_period_spin.setValue(3.0)
+        self.grace_period_spin.setRange(0.1, 10.0)
+        self.grace_period_spin.setSingleStep(0.1)
+        self.grace_period_spin.setValue(1.0)
         self.grace_period_spin.setDecimals(1)
         self.grace_period_spin.setSuffix(" seconds")
         self.grace_period_spin.setFixedWidth(130)
@@ -780,7 +780,7 @@ class SettingsDialog(QDialog):
                     break
 
         # Live Mode grace period
-        grace_period = self.config.get("live_mode", "grace_period", default=3.0)
+        grace_period = self.config.get("live_mode", "grace_period", default=1.0)
         self.grace_period_spin.setValue(grace_period)
 
         # Client tab - Connection
