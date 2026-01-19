@@ -743,7 +743,28 @@ class DashboardWindow(QMainWindow):
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
-        layout.addSpacing(30)
+        layout.addSpacing(20)
+
+        # Add logo
+        logo_path = _get_assets_path() / "logo_wide.png"
+        if logo_path.exists():
+            logo_label = QLabel()
+            pixmap = QPixmap(str(logo_path))
+            if not pixmap.isNull():
+                # Scale to specified dimensions (350 x 193)
+                scaled_pixmap = pixmap.scaledToWidth(
+                    350, Qt.TransformationMode.SmoothTransformation
+                )
+                # Ensure it's at most 193 pixels tall
+                if scaled_pixmap.height() > 193:
+                    scaled_pixmap = pixmap.scaledToHeight(
+                        193, Qt.TransformationMode.SmoothTransformation
+                    )
+                logo_label.setPixmap(scaled_pixmap)
+                logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(10)
 
         # Status indicators
         status_container = QWidget()

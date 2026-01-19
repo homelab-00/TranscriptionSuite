@@ -393,18 +393,18 @@ class SettingsDialog:
         grace_row.append(grace_label)
 
         grace_adjustment = Gtk.Adjustment(
-            value=3.0,
-            lower=0.5,
+            value=1.0,
+            lower=0.1,
             upper=10.0,
-            step_increment=0.5,
-            page_increment=1.0,
+            step_increment=0.1,
+            page_increment=0.5,
         )
         self.grace_period_spin = Gtk.SpinButton()
         self.grace_period_spin.set_adjustment(grace_adjustment)
         self.grace_period_spin.set_digits(1)
-        self.grace_period_spin.set_value(3.0)
+        self.grace_period_spin.set_value(1.0)
         self.grace_period_spin.set_tooltip_text(
-            "Recommended: 2-4 seconds. Higher values allow longer pauses\n"
+            "Recommended: 0.5-3 seconds. Higher values allow longer pauses\n"
             "but may make responses feel slower."
         )
         grace_row.append(self.grace_period_spin)
@@ -753,7 +753,7 @@ class SettingsDialog:
 
         # Live Mode grace period
         if self.grace_period_spin:
-            grace_period = self.config.get("live_mode", "grace_period", default=3.0)
+            grace_period = self.config.get("live_mode", "grace_period", default=1.0)
             self.grace_period_spin.set_value(grace_period)
 
         # Client tab - Connection

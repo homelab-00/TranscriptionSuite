@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcription-suite-dashboard"
-version = "0.4.0"
+version = "0.4.1"
 description = "TranscriptionSuite Dashboard for desktop integration"
 requires-python = ">=3.12,<3.13"
 license = "MIT"

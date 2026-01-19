@@ -10,7 +10,7 @@ A fully local & private Speech-To-Text app
 with cross-platform support offering
 advanced features like diarization, audio
 notebook mode and LM Studio integration.
-Focused on long-form transcription.
+Longform & Live Transcription available.
 Written in Python, utilizing faster-whisper
 and NVIDIA GPU acceleration. Server/client
 architecture; server is Dockerized for
@@ -107,10 +107,13 @@ easy installation.
 
 #### Videos
 
-Transcription demo:
+Longform Transcription demo:
 
 https://github.com/user-attachments/assets/b38955c6-12d3-4810-979d-ce1475d2b165
 
+Live Transcription demo:
+
+https://github.com/user-attachments/assets/aaada672-08aa-4735-8beb-3825ead031bd
 
 Audio Notebook demo:
 
