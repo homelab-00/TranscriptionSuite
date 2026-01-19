@@ -166,7 +166,9 @@ class RealtimeTranscriptionEngine:
             if self.enable_live_transcriber:
                 if self._external_live_transcriber_engine is not None:
                     # Use the shared live transcriber engine (separate from main)
-                    self._live_transcriber_engine = self._external_live_transcriber_engine
+                    self._live_transcriber_engine = (
+                        self._external_live_transcriber_engine
+                    )
                     logger.info("Using shared live transcriber engine (separate model)")
                 else:
                     # Create our own live transcriber engine (fallback)
@@ -181,12 +183,14 @@ class RealtimeTranscriptionEngine:
 
     def _is_same_model(self, model_a: str, model_b: str) -> bool:
         """Check if two model names refer to the same model."""
+
         def normalize(name: str) -> str:
             name = name.lower().strip()
             for prefix in ["systran/", "faster-whisper-", "openai/whisper-"]:
                 if name.startswith(prefix):
-                    name = name[len(prefix):]
+                    name = name[len(prefix) :]
             return name
+
         return normalize(model_a) == normalize(model_b)
 
     def _init_live_transcriber_engine(self) -> None:

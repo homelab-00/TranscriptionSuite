@@ -318,7 +318,9 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
 
         if is_localhost:
             client_name = "localhost-user"
-            logger.info("Live Mode connection from localhost - bypassing authentication")
+            logger.info(
+                "Live Mode connection from localhost - bypassing authentication"
+            )
         else:
             if not token:
                 await websocket.send_json(

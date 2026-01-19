@@ -561,7 +561,9 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 stderr=subprocess.DEVNULL,
                 env=env,
             )
-            logger.info(f"Dashboard process started (PID: {self._dashboard_process.pid})")
+            logger.info(
+                f"Dashboard process started (PID: {self._dashboard_process.pid})"
+            )
 
         except FileNotFoundError as e:
             logger.error(f"Failed to launch Dashboard - Python not found: {e}")

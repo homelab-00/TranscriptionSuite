@@ -895,7 +895,9 @@ class DashboardWindow(_get_dashboard_base()):
 
         self._start_local_btn = Gtk.Button(label="Start Local")
         self._start_local_btn.add_css_class("suggested-action")
-        self._start_local_btn.connect("clicked", lambda _: self._on_start_server_local())
+        self._start_local_btn.connect(
+            "clicked", lambda _: self._on_start_server_local()
+        )
         btn_box.append(self._start_local_btn)
 
         self._start_remote_btn = Gtk.Button(label="Start Remote")
@@ -1682,7 +1684,9 @@ class DashboardWindow(_get_dashboard_base()):
         if self._models_volume_status:
             if models_volume_exists:
                 self._models_volume_status.set_text("Available")
-                size = self._docker_manager.get_volume_size("transcription-suite-models")
+                size = self._docker_manager.get_volume_size(
+                    "transcription-suite-models"
+                )
                 if self._models_volume_size and size:
                     self._models_volume_size.set_text(f"  ({size})")
                 else:
@@ -1892,7 +1896,9 @@ class DashboardWindow(_get_dashboard_base()):
         # Prevent starting another pull if one is already in progress
         if self._pull_worker is not None and self._pull_worker.is_alive():
             logger.warning("Docker pull already in progress")
-            self._show_notification("Docker Server", "Image download already in progress")
+            self._show_notification(
+                "Docker Server", "Image download already in progress"
+            )
             return
 
         self._show_notification(
@@ -2197,7 +2203,6 @@ class DashboardWindow(_get_dashboard_base()):
             # Disabled state - gray
             self._notebook_toggle_btn.remove_css_class("notebook-enabled")
             self._notebook_toggle_btn.add_css_class("notebook-disabled")
-
 
     def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """

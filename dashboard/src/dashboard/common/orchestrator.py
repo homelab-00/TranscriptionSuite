@@ -77,7 +77,9 @@ class ClientOrchestrator:
         self._state_lock = threading.Lock()
         self.is_recording = False
         self.is_transcribing = False  # Track if transcription is in progress
-        self.models_loaded = True  # Track if models are loaded (assume loaded initially)
+        self.models_loaded = (
+            True  # Track if models are loaded (assume loaded initially)
+        )
         self.last_transcription: str | None = None
         self._reconnect_task: concurrent.futures.Future[Any] | None = None
         self._is_initial_connection = (
@@ -137,12 +139,16 @@ class ClientOrchestrator:
         if not self.tray:
             return
 
-        self.tray.register_callback(TrayAction.START_RECORDING, self._on_start_recording)
+        self.tray.register_callback(
+            TrayAction.START_RECORDING, self._on_start_recording
+        )
         self.tray.register_callback(TrayAction.STOP_RECORDING, self._on_stop_recording)
         self.tray.register_callback(
             TrayAction.CANCEL_RECORDING, self._on_cancel_recording
         )
-        self.tray.register_callback(TrayAction.TRANSCRIBE_FILE, self._on_transcribe_file)
+        self.tray.register_callback(
+            TrayAction.TRANSCRIBE_FILE, self._on_transcribe_file
+        )
         self.tray.register_callback(
             TrayAction.OPEN_AUDIO_NOTEBOOK, self._on_open_notebook
         )
@@ -152,7 +158,9 @@ class ClientOrchestrator:
         self.tray.register_callback(TrayAction.DISCONNECT, self._on_disconnect)
         self.tray.register_callback(TrayAction.QUIT, self._on_quit)
         # Live Mode callbacks
-        self.tray.register_callback(TrayAction.START_LIVE_MODE, self._on_start_live_mode)
+        self.tray.register_callback(
+            TrayAction.START_LIVE_MODE, self._on_start_live_mode
+        )
         self.tray.register_callback(TrayAction.STOP_LIVE_MODE, self._on_stop_live_mode)
         self.tray.register_callback(
             TrayAction.TOGGLE_LIVE_MUTE, self._on_toggle_live_mute
@@ -542,7 +550,9 @@ class ClientOrchestrator:
         # Send stop command to server
         if self._streaming_client and self._streaming_client.is_connected:
             await self._streaming_client.send_control("stop")
-            logger.info("WebSocket stop command sent, waiting for final transcription...")
+            logger.info(
+                "WebSocket stop command sent, waiting for final transcription..."
+            )
             # The final result will be handled by _on_websocket_final callback
 
     async def _cancel_websocket_recording(self) -> None:
@@ -1015,7 +1025,9 @@ class ClientOrchestrator:
                 self.tray.set_live_mode_active(True)
             if self.tray:
                 self.tray.set_state(TrayState.LIVE_LISTENING)
-                self.tray.show_notification("Live Mode", "Live Mode started - listening")
+                self.tray.show_notification(
+                    "Live Mode", "Live Mode started - listening"
+                )
 
             # Send start command with config
             config = {

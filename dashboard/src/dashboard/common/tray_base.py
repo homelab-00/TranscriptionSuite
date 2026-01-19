@@ -24,7 +24,9 @@ class AbstractTray(ABC):
         self.callbacks: dict[TrayAction, Callable[[], None]] = {}
         self.orchestrator = None  # Set by orchestrator for state sync
 
-    def register_callback(self, action: TrayAction, callback: Callable[[], None]) -> None:
+    def register_callback(
+        self, action: TrayAction, callback: Callable[[], None]
+    ) -> None:
         """Register a callback for a tray action."""
         self.callbacks[action] = callback
 

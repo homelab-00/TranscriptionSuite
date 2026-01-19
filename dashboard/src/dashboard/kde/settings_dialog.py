@@ -780,9 +780,7 @@ class SettingsDialog(QDialog):
                     break
 
         # Live Mode grace period
-        grace_period = self.config.get(
-            "live_mode", "grace_period", default=3.0
-        )
+        grace_period = self.config.get("live_mode", "grace_period", default=3.0)
         self.grace_period_spin.setValue(grace_period)
 
         # Client tab - Connection

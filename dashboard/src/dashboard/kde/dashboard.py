@@ -967,7 +967,9 @@ class DashboardWindow(QMainWindow):
         token_row.setSpacing(0)  # Remove spacing between widgets
         token_note = QLabel(" (for remote)")  # Leading space for minimal separation
         token_note.setObjectName("statusDateInline")
-        token_note.setStyleSheet("margin-left: 0px;")  # No margin - glued to token field
+        token_note.setStyleSheet(
+            "margin-left: 0px;"
+        )  # No margin - glued to token field
         token_row.addWidget(token_note)
         token_row.addStretch()
         status_layout.addLayout(token_row)
@@ -1296,7 +1298,9 @@ class DashboardWindow(QMainWindow):
             "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
         )
         self._unload_models_btn.clicked.connect(self._on_toggle_models)
-        layout.addWidget(self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(
+            self._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
 
         layout.addSpacing(20)
 
@@ -2024,7 +2028,9 @@ class DashboardWindow(QMainWindow):
             self._remove_image_btn.setToolTip("Remove the Docker image")
 
         if is_running:
-            self._remove_container_btn.setToolTip("Stop container first before removing")
+            self._remove_container_btn.setToolTip(
+                "Stop container first before removing"
+            )
         else:
             self._remove_container_btn.setToolTip("Remove the Docker container")
 
@@ -2058,7 +2064,9 @@ class DashboardWindow(QMainWindow):
 
         # Update notebook toggle state when server status changes
         server_stopped = status != ServerStatus.RUNNING
-        self._notebook_toggle_btn.setEnabled(not self._client_running and server_stopped)
+        self._notebook_toggle_btn.setEnabled(
+            not self._client_running and server_stopped
+        )
         self._update_notebook_toggle_style()
 
         # Update live transcriber toggle state when server status changes
@@ -2146,7 +2154,9 @@ class DashboardWindow(QMainWindow):
             if self._show_server_logs_btn.isChecked():
                 self._server_log_view.appendPlainText(msg)
 
-        result = self._docker_manager.start_server(mode=mode, progress_callback=progress)
+        result = self._docker_manager.start_server(
+            mode=mode, progress_callback=progress
+        )
 
         if result.success:
             progress(result.message)
@@ -2369,7 +2379,9 @@ class DashboardWindow(QMainWindow):
                         # Wait for worker thread to finish (with timeout)
                         self._pull_worker.join(timeout=10)
                         if self._pull_worker.is_alive():
-                            logger.warning("Docker pull worker still alive after cancel")
+                            logger.warning(
+                                "Docker pull worker still alive after cancel"
+                            )
                         else:
                             logger.info("Docker pull worker terminated successfully")
                 except Exception as e:
@@ -2554,7 +2566,9 @@ class DashboardWindow(QMainWindow):
         # (setting takes effect on next client start)
         server_status = self._docker_manager.get_server_status()
         server_stopped = server_status != ServerStatus.RUNNING
-        self._notebook_toggle_btn.setEnabled(not self._client_running and server_stopped)
+        self._notebook_toggle_btn.setEnabled(
+            not self._client_running and server_stopped
+        )
         self._update_notebook_toggle_style()
 
         # Update models button based on server health
@@ -2739,7 +2753,9 @@ class DashboardWindow(QMainWindow):
                 )
             else:
                 self._unload_models_btn.setText("Reload Models")
-                self._unload_models_btn.setToolTip("Reload transcription models for use")
+                self._unload_models_btn.setToolTip(
+                    "Reload transcription models for use"
+                )
                 # Red background (models unloaded) - color 3
                 self._unload_models_btn.setStyleSheet(
                     "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
@@ -2945,7 +2961,6 @@ class DashboardWindow(QMainWindow):
         self._preview_content.setVisible(not is_visible)
         self._preview_collapse_btn.setText("\u25b6" if is_visible else "\u25bc")
 
-
     def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """
         Update live transcription text display (called from orchestrator via tray).
@@ -3100,7 +3115,9 @@ class DashboardWindow(QMainWindow):
         about_action.triggered.connect(self._show_about_dialog)
 
         # Show menu below the hamburger button
-        menu.exec(self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().bottomLeft()))
+        menu.exec(
+            self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().bottomLeft())
+        )
 
     def _show_help_menu(self) -> None:
         """Show help menu with README options."""
@@ -3137,11 +3154,15 @@ class DashboardWindow(QMainWindow):
             dev_guide_icon = QIcon.fromTheme("text-x-source")
         if dev_guide_icon.isNull():
             dev_guide_icon = QIcon.fromTheme("application-x-executable")
-        readme_dev_action = menu.addAction(dev_guide_icon, "Developer Guide (README_DEV)")
+        readme_dev_action = menu.addAction(
+            dev_guide_icon, "Developer Guide (README_DEV)"
+        )
         readme_dev_action.triggered.connect(lambda: self._show_readme_viewer(dev=True))
 
         # Show menu below the help button
-        menu.exec(self._nav_help_btn.mapToGlobal(self._nav_help_btn.rect().bottomLeft()))
+        menu.exec(
+            self._nav_help_btn.mapToGlobal(self._nav_help_btn.rect().bottomLeft())
+        )
 
     def _show_readme_viewer(self, dev: bool = False) -> None:
         """Show a README file in a markdown viewer dialog with dark theme."""
