@@ -92,7 +92,6 @@ class ClientOrchestrator:
         # Live Mode state
         self._live_mode_active: bool = False
         self._live_mode_client: LiveModeClient | None = None
-        self._live_mode_auto_paste: bool = False
         self._live_mode_muted: bool = False
         self._live_mode_recorder: AudioRecorder | None = None
 
@@ -1028,6 +1027,9 @@ class ClientOrchestrator:
                 "language": self.config.get_server_config(
                     "live_transcriber", "language", default=""
                 ),
+                "post_speech_silence_duration": self.config.get(
+                    "live_mode", "grace_period", default=3.0
+                ),
             }
             await self._live_mode_client.start(config)
 
@@ -1146,9 +1148,6 @@ class ClientOrchestrator:
         # Update live transcription text in tray/dashboard
         if self.tray:
             self.tray.update_live_transcription_text(text, append=True)
-        # Auto-paste if enabled
-        if self._live_mode_auto_paste:
-            self._auto_paste_text(text)
 
     def _on_live_partial(self, text: str) -> None:
         """Callback for Live Mode partial/real-time updates."""
@@ -1164,56 +1163,6 @@ class ClientOrchestrator:
         logger.error(f"Live Mode error: {error_msg}")
         if self.tray:
             self.tray.show_notification("Live Mode Error", error_msg)
-
-    def _auto_paste_text(self, text: str) -> None:
-        """Auto-paste text at cursor position."""
-        import shutil
-        import subprocess
-
-        # Detect display server
-        session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
-
-        try:
-            if session_type == "wayland":
-                # Wayland: use wl-copy and wtype
-                if shutil.which("wl-copy") and shutil.which("wtype"):
-                    subprocess.run(
-                        ["wl-copy", "--", text],
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        ["wtype", "--", text],
-                        check=True,
-                        capture_output=True,
-                    )
-                else:
-                    logger.warning("wl-copy/wtype not found for Wayland auto-paste")
-            else:
-                # X11: use xclip and xdotool
-                if shutil.which("xclip") and shutil.which("xdotool"):
-                    subprocess.run(
-                        ["xclip", "-selection", "clipboard"],
-                        input=text.encode(),
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        ["xdotool", "type", "--", text],
-                        check=True,
-                        capture_output=True,
-                    )
-                else:
-                    logger.warning("xclip/xdotool not found for X11 auto-paste")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Auto-paste failed: {e}")
-        except Exception as e:
-            logger.error(f"Auto-paste error: {e}")
-
-    def set_live_mode_auto_paste(self, enabled: bool) -> None:
-        """Set auto-paste mode for Live Mode."""
-        self._live_mode_auto_paste = enabled
-        logger.debug(f"Live Mode auto-paste set to: {enabled}")
 
     # =========================================================================
     # Clipboard

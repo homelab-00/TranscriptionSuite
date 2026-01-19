@@ -1204,6 +1204,71 @@ class DashboardWindow(_get_dashboard_base()):
         notebook_frame.set_child(notebook_box)
         box.append(notebook_frame)
 
+        # Live Mode Language selector
+        language_frame = Gtk.Frame()
+        language_frame.add_css_class("card")
+        language_frame.set_margin_top(16)
+        language_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        language_box.set_margin_top(12)
+        language_box.set_margin_bottom(12)
+        language_box.set_margin_start(16)
+        language_box.set_margin_end(16)
+
+        language_label = Gtk.Label(label="Live Mode Language:")
+        language_label.add_css_class("dim-label")
+        language_box.append(language_label)
+
+        # Spacer
+        language_spacer = Gtk.Box()
+        language_spacer.set_hexpand(True)
+        language_box.append(language_spacer)
+
+        # Language dropdown
+        self._live_language_combo = Gtk.ComboBoxText()
+        # Add language options (Whisper-supported languages)
+        languages = [
+            ("Auto-detect", ""),
+            ("English", "en"),
+            ("Greek", "el"),
+            ("German", "de"),
+            ("French", "fr"),
+            ("Spanish", "es"),
+            ("Italian", "it"),
+            ("Portuguese", "pt"),
+            ("Russian", "ru"),
+            ("Japanese", "ja"),
+            ("Korean", "ko"),
+            ("Chinese", "zh"),
+            ("Arabic", "ar"),
+            ("Hindi", "hi"),
+            ("Dutch", "nl"),
+            ("Polish", "pl"),
+            ("Turkish", "tr"),
+            ("Ukrainian", "uk"),
+            ("Vietnamese", "vi"),
+            ("Thai", "th"),
+        ]
+        for name, code in languages:
+            self._live_language_combo.append(code, name)
+
+        # Load saved value
+        saved_language = self.config.get_server_config(
+            "live_transcriber", "live_language", default="en"
+        )
+        self._live_language_combo.set_active_id(saved_language)
+
+        self._live_language_combo.set_tooltip_text(
+            "Force a specific language for Live Mode.\n"
+            "Recommended: Select your language for better accuracy.\n"
+            "Auto-detect works poorly with short utterances.\n"
+            "Only editable when server is stopped."
+        )
+        self._live_language_combo.connect("changed", self._on_live_language_changed)
+        language_box.append(self._live_language_combo)
+
+        language_frame.set_child(language_box)
+        box.append(language_frame)
+
         # Live Transcription section
         preview_frame = Gtk.Frame()
         preview_frame.add_css_class("card")
@@ -1243,28 +1308,6 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Store history of transcription lines
         self._live_transcription_history: list[str] = []
-
-        # Auto-paste toggle row
-        paste_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        paste_row.set_margin_top(8)
-        paste_label = Gtk.Label(label="Auto-paste to cursor:")
-        paste_label.add_css_class("dim-label")
-        paste_row.append(paste_label)
-
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        paste_row.append(spacer)
-
-        self._auto_paste_toggle_btn = Gtk.ToggleButton(label="Disabled")
-        self._auto_paste_toggle_btn.set_active(False)
-        self._auto_paste_toggle_btn.add_css_class("paste-disabled")
-        self._auto_paste_toggle_btn.set_tooltip_text(
-            "When enabled, completed sentences will be\n"
-            "automatically pasted at the system cursor position."
-        )
-        self._auto_paste_toggle_btn.connect("toggled", self._on_auto_paste_toggle)
-        paste_row.append(self._auto_paste_toggle_btn)
-        preview_box.append(paste_row)
 
         preview_frame.set_child(preview_box)
         box.append(preview_frame)
@@ -1456,30 +1499,6 @@ class DashboardWindow(_get_dashboard_base()):
             font-family: "Inter", sans-serif;
             font-size: 13px;
             padding: 8px;
-        }
-
-        /* Auto-paste toggle button states */
-        .paste-enabled {
-            background: #4caf50;
-            color: white;
-            border-radius: 4px;
-            padding: 4px 10px;
-            font-size: 11px;
-            min-width: 60px;
-        }
-        .paste-enabled:hover {
-            background: #43a047;
-        }
-        .paste-disabled {
-            background: #f44336;
-            color: white;
-            border-radius: 4px;
-            padding: 4px 10px;
-            font-size: 11px;
-            min-width: 60px;
-        }
-        .paste-disabled:hover {
-            background: #e53935;
         }
         """
         provider = Gtk.CssProvider()
@@ -1732,6 +1751,10 @@ class DashboardWindow(_get_dashboard_base()):
             self._notebook_toggle_btn.set_sensitive(
                 not self._client_running and server_stopped
             )
+
+        # Update live mode language dropdown state when server status changes
+        if hasattr(self, "_live_language_combo"):
+            self._live_language_combo.set_sensitive(server_stopped)
 
     def _refresh_client_status(self) -> None:
         """Refresh client view status."""
@@ -2147,6 +2170,20 @@ class DashboardWindow(_get_dashboard_base()):
 
         logger.info(f"Auto-add to notebook: {'enabled' if is_enabled else 'disabled'}")
 
+    def _on_live_language_changed(self, combo: Any) -> None:
+        """Handle Live Mode language dropdown change."""
+        language_code = combo.get_active_id()
+        language_name = combo.get_active_text()
+
+        # Save to server config - takes effect on next Live Mode start
+        self.config.set_server_config(
+            "live_transcriber", "live_language", value=language_code
+        )
+
+        logger.info(
+            f"Live Mode language set to: {language_name} ({language_code or 'auto'})"
+        )
+
     def _update_notebook_toggle_style(self) -> None:
         """Update notebook toggle button style based on state."""
         if not self._notebook_toggle_btn:
@@ -2161,26 +2198,6 @@ class DashboardWindow(_get_dashboard_base()):
             self._notebook_toggle_btn.remove_css_class("notebook-enabled")
             self._notebook_toggle_btn.add_css_class("notebook-disabled")
 
-    def _on_auto_paste_toggle(self, button: Any) -> None:
-        """Handle auto-paste toggle button click."""
-        is_enabled = button.get_active()
-        button.set_label("Enabled" if is_enabled else "Disabled")
-
-        if is_enabled:
-            button.remove_css_class("paste-disabled")
-            button.add_css_class("paste-enabled")
-        else:
-            button.remove_css_class("paste-enabled")
-            button.add_css_class("paste-disabled")
-
-        # Save to config
-        self.config.set("preview", "auto_paste_to_cursor", value=is_enabled)
-
-        # Update orchestrator for Live Mode auto-paste
-        if self._dbus_service and self._dbus_service.orchestrator:
-            self._dbus_service.orchestrator.set_live_mode_auto_paste(is_enabled)
-
-        logger.info(f"Auto-paste to cursor: {'enabled' if is_enabled else 'disabled'}")
 
     def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """

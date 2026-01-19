@@ -1432,7 +1432,7 @@ class DashboardWindow(QMainWindow):
 
         # Load saved value
         saved_language = self.config.get_server_config(
-            "live_transcriber", "language", default=""
+            "live_transcriber", "live_language", default="en"
         )
         for i in range(self._live_language_combo.count()):
             if self._live_language_combo.itemData(i) == saved_language:
@@ -1508,29 +1508,6 @@ class DashboardWindow(QMainWindow):
         # Store history of transcription lines
         self._live_transcription_history: list[str] = []
         preview_content_layout.addWidget(self._live_transcription_text_edit)
-
-        # Auto-paste to cursor toggle (for Live Mode)
-        paste_row = QHBoxLayout()
-        paste_label = QLabel("Auto-paste to cursor:")
-        paste_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
-        paste_row.addWidget(paste_label)
-        paste_row.addStretch()
-
-        self._auto_paste_toggle_btn = QPushButton("Disabled")
-        self._auto_paste_toggle_btn.setCheckable(True)
-        self._auto_paste_toggle_btn.setChecked(False)
-        self._auto_paste_toggle_btn.setToolTip(
-            "When enabled, completed sentences will be\n"
-            "automatically pasted at the system cursor position."
-        )
-        self._auto_paste_toggle_btn.setStyleSheet(
-            "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
-            "color: white; padding: 4px 10px; font-size: 11px; min-width: 60px; }"
-            "QPushButton:hover { background-color: #e53935; }"
-        )
-        self._auto_paste_toggle_btn.clicked.connect(self._on_auto_paste_toggle)
-        paste_row.addWidget(self._auto_paste_toggle_btn)
-        preview_content_layout.addLayout(paste_row)
 
         preview_display_layout.addWidget(self._preview_content)
 
@@ -2968,32 +2945,6 @@ class DashboardWindow(QMainWindow):
         self._preview_content.setVisible(not is_visible)
         self._preview_collapse_btn.setText("\u25b6" if is_visible else "\u25bc")
 
-    def _on_auto_paste_toggle(self) -> None:
-        """Handle auto-paste toggle button click."""
-        is_enabled = self._auto_paste_toggle_btn.isChecked()
-        self._auto_paste_toggle_btn.setText("Enabled" if is_enabled else "Disabled")
-
-        if is_enabled:
-            self._auto_paste_toggle_btn.setStyleSheet(
-                "QPushButton { background-color: #4caf50; border: none; border-radius: 4px; "
-                "color: white; padding: 4px 10px; font-size: 11px; min-width: 60px; }"
-                "QPushButton:hover { background-color: #43a047; }"
-            )
-        else:
-            self._auto_paste_toggle_btn.setStyleSheet(
-                "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
-                "color: white; padding: 4px 10px; font-size: 11px; min-width: 60px; }"
-                "QPushButton:hover { background-color: #e53935; }"
-            )
-
-        # Save to config
-        self.config.set("preview", "auto_paste_to_cursor", value=is_enabled)
-
-        # Update orchestrator for Live Mode auto-paste
-        if self.tray and self.tray.orchestrator:
-            self.tray.orchestrator.set_live_mode_auto_paste(is_enabled)
-
-        logger.info(f"Auto-paste to cursor: {'enabled' if is_enabled else 'disabled'}")
 
     def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """

@@ -69,6 +69,8 @@ Technical documentation for developing and building TranscriptionSuite.
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
+- [15. Known Issues & Future Work](#15-known-issues--future-work)
+  - [15.1 Live Mode Language Setting](#151-live-mode-language-setting)
 
 ---
 
@@ -922,3 +924,24 @@ This lists all installed packages and their versions, sorted alphabetically. Use
 - aiohttp (async HTTP client)
 - PyAudio (audio recording)
 - PyQt6 (KDE/Windows) or GTK3+AppIndicator (GNOME)
+
+---
+
+## 15. Known Issues & Future Work
+
+### 15.1 Live Mode Language Setting
+
+**Issue**: The `live_language` setting in `server/config.yaml` (line 117) is currently not being respected by the Live Mode transcription engine.
+
+**Current State**:
+- Setting is commented out in config.yaml with a TODO note
+- Dashboard UIs (KDE/GNOME) have a language selector, but it may not override the server's behavior
+- Language can be set through the dashboard, but effectiveness needs verification
+
+**Action Required**:
+- Investigate why the setting isn't being applied to the Live Mode engine
+- Verify the data flow from dashboard → API → live engine configuration
+- Ensure language preference is properly passed to the underlying transcription model
+- Test with various languages to confirm the setting takes effect
+
+**Workaround**: Use the language selector in the dashboard Client view, which attempts to set the language via the WebSocket configuration payload.

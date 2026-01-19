@@ -111,9 +111,10 @@ live_transcriber:
     enabled: false
 
     # Language for live transcription (e.g., "en", "el").
-    # If set, this overrides the global transcription_options.language setting.
+    # This is the dedicated setting for Live Mode language.
     # Default: "en"
-    live_language: "en"
+    # TODO: Currently not being respected - needs investigation
+    # live_language: "en"
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.
@@ -127,7 +128,9 @@ live_transcriber:
     # VAD settings for quick sentence-by-sentence transcription.
     silero_sensitivity: 0.4
     silero_use_onnx: false
-    post_speech_silence_duration: 0.5
+    # Grace period after silence detection before stopping recording
+    # Allows user to pause for up to 3 seconds while speaking
+    post_speech_silence_duration: 3.0
     min_length_of_recording: 1.0
 
     # Trigger early transcription during silence (seconds, 0 = disabled)
