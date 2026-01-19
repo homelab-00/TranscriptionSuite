@@ -42,6 +42,7 @@ try:
         clipboard_requested = pyqtSignal(str)  # text to copy
         settings_dialog_requested = pyqtSignal()  # show settings dialog
         flash_requested = pyqtSignal(object, int)  # target_state, duration_ms
+        live_transcription_update = pyqtSignal(str, bool)  # text, append
 
 except ImportError:
     # Provide stub for type checking only
@@ -56,11 +57,18 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         TrayState.IDLE: (128, 128, 128),  # Grey (fallback, normally uses logo)
         TrayState.DISCONNECTED: (128, 128, 128),  # Grey
         TrayState.CONNECTING: (255, 165, 0),  # Orange
-        TrayState.STANDBY: (0, 255, 0),  # Green
+        TrayState.STANDBY: (0, 255, 132),  # Neon Teal (#00FF84)
         TrayState.RECORDING: (255, 255, 0),  # Yellow
         TrayState.UPLOADING: (0, 191, 255),  # Deep sky blue
         TrayState.TRANSCRIBING: (255, 128, 0),  # Orange
         TrayState.ERROR: (255, 0, 0),  # Red
+        # Live Mode states
+        TrayState.LIVE_LISTENING: (
+            217,
+            7,
+            52,
+        ),  # #d90734 - Bright red (active/listening)
+        TrayState.LIVE_MUTED: (89, 50, 58),  # #59323a - Dark maroon (muted)
     }
 
     # Path to app logo (relative to project root)
@@ -110,12 +118,18 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self.transcribe_action: QAction | None = None
         self.toggle_models_action: QAction | None = None
         self.reconnect_action: QAction | None = None
+        self.start_live_action: QAction | None = None
+        # stop_live_action removed - we toggle label of start_live_action
+        self.mute_live_action: QAction | None = None
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
 
         # Connection type tracking (assume local initially)
         self._is_local_connection = True
+
+        # Live Mode tracking
+        self._live_mode_active = False
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -127,6 +141,9 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self._signals.clipboard_requested.connect(self._do_copy_to_clipboard)
         self._signals.settings_dialog_requested.connect(self._do_show_settings_dialog)
         self._signals.flash_requested.connect(self._do_flash_then_set_state)
+        self._signals.live_transcription_update.connect(
+            self._do_update_live_transcription
+        )
 
         # Dialog instances (created lazily)
         self._settings_dialog = None
@@ -178,6 +195,23 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
         menu.addSeparator()
 
+        # Live Mode (RealtimeSTT)
+        self.start_live_action = QAction("Start Live Mode", menu)
+        self.start_live_action.triggered.connect(
+            lambda: self._on_toggle_live_mode_click()
+        )
+        self.start_live_action.setEnabled(False)
+        menu.addAction(self.start_live_action)
+
+        self.mute_live_action = QAction("Mute Live Mode", menu)
+        self.mute_live_action.triggered.connect(
+            lambda: self._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
+        )
+        self.mute_live_action.setEnabled(False)
+        menu.addAction(self.mute_live_action)
+
+        menu.addSeparator()
+
         # Model management (unload/reload)
         self.toggle_models_action = QAction("Unload All Models", menu)
         self.toggle_models_action.triggered.connect(
@@ -208,14 +242,18 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
     def _on_tray_activated(self, reason: "QSystemTrayIcon.ActivationReason") -> None:
         """Handle tray icon clicks."""
+        # Check if in Live Mode - different click behavior
+        is_live_mode = self.state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
+
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            # Left-click: Start recording (if in standby)
-            if self.state == TrayState.STANDBY:
+            # Left-click: Start recording (if in standby), do nothing in Live Mode
+            if not is_live_mode and self.state == TrayState.STANDBY:
                 self._trigger_callback(TrayAction.START_RECORDING)
         elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
-            # Middle-click: Stop recording and transcribe (if recording)
-            # Note: Windows often doesn't emit MiddleClick for system tray icons
-            if self.state == TrayState.RECORDING:
+            # Middle-click: Toggle mute in Live Mode, or stop recording
+            if is_live_mode:
+                self._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
+            elif self.state == TrayState.RECORDING:
                 self._trigger_callback(TrayAction.STOP_RECORDING)
         elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             # Double-click: Stop recording (primary method for Windows)
@@ -308,6 +346,49 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
             self.toggle_models_action.setEnabled(
                 state == TrayState.STANDBY and self._is_local_connection
             )
+
+        # Live Mode actions
+        # Check if we're in a Live Mode state
+        is_live_state = state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
+        if is_live_state:
+            self._live_mode_active = True
+        elif state == TrayState.STANDBY:
+            # Only reset when returning to STANDBY (not during other transitions)
+            self._live_mode_active = False
+
+        # Start/Stop is enabled when STANDBY or in Live Mode state
+        if self.start_live_action:
+            can_toggle_live = state == TrayState.STANDBY or is_live_state
+            self.start_live_action.setEnabled(can_toggle_live)
+
+            # Update label based on state
+            if is_live_state:
+                self.start_live_action.setText("Stop Live Mode")
+            else:
+                self.start_live_action.setText("Start Live Mode")
+
+        # Mute is enabled only when Live Mode is active
+        if self.mute_live_action:
+            self.mute_live_action.setEnabled(is_live_state)
+
+            # Update label based on state
+            if state == TrayState.LIVE_MUTED:
+                self.mute_live_action.setText("Unmute Live Mode")
+            else:
+                self.mute_live_action.setText("Mute Live Mode")
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """Set Live Mode active state and update menu."""
+        self._live_mode_active = active
+        # Force a state update to refresh menu labels
+        self._do_set_state(self.state)
+
+    def _on_toggle_live_mode_click(self) -> None:
+        """Handle Start/Stop Live Mode click."""
+        if self._live_mode_active:
+            self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        else:
+            self._trigger_callback(TrayAction.START_LIVE_MODE)
 
     def _get_logo_icon(self) -> "QIcon":
         """Get the app logo icon for IDLE state."""
@@ -408,6 +489,24 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if self._dashboard_window:
             self._dashboard_window.set_connection_local(is_local)
 
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Forward live transcription text to dashboard for display (thread-safe).
+
+        Called by the orchestrator during WebSocket streaming recording
+        when live transcription updates are received.
+
+        Args:
+            text: The live transcription text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        self._signals.live_transcription_update.emit(text, append)
+
+    def _do_update_live_transcription(self, text: str, append: bool = False) -> None:
+        """Actually update the dashboard (must be called on main thread)."""
+        if self._dashboard_window:
+            self._dashboard_window.update_live_transcription_text(text, append)
+
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""
         self._signals.clipboard_requested.emit(text)
@@ -481,6 +580,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
         if self._dashboard_window is None:
             self._dashboard_window = DashboardWindow(self.config)
+            self._dashboard_window.tray = self
             # Connect Dashboard signals
             self._dashboard_window.start_client_requested.connect(
                 self._on_dashboard_start_client

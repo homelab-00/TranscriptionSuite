@@ -8,12 +8,18 @@ This is the central controller for all client operations.
 import asyncio
 import concurrent.futures
 import logging
+import os
 import threading
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from dashboard.common.api_client import APIClient, ServerBusyError
+from dashboard.common.api_client import (
+    APIClient,
+    LiveModeClient,
+    ServerBusyError,
+    StreamingClient,
+)
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig
 from dashboard.common.models import TrayAction, TrayState
@@ -56,9 +62,6 @@ class ClientOrchestrator:
         self.config = config
         self.auto_connect = auto_connect
         self.auto_copy_clipboard = auto_copy_clipboard
-        self.auto_add_to_notebook = config.get_server_config(
-            "longform_recording", "auto_add_to_audio_notebook", default=False
-        )
 
         # Components
         self.tray: AbstractTray | None = None
@@ -81,6 +84,24 @@ class ClientOrchestrator:
         self._reconnect_task: concurrent.futures.Future[Any] | None = None
         self._is_initial_connection = (
             True  # Track if this is the first connection attempt
+        )
+
+        # WebSocket streaming for live transcription
+        self._streaming_client: StreamingClient | None = None
+        self._live_transcription_text: str = ""
+        self._use_websocket_streaming: bool = False
+
+        # Live Mode state
+        self._live_mode_active: bool = False
+        self._live_mode_client: LiveModeClient | None = None
+        self._live_mode_muted: bool = False
+        self._live_mode_recorder: AudioRecorder | None = None
+
+    @property
+    def auto_add_to_notebook(self) -> bool:
+        """Get auto-add to notebook setting (reads from config each time)."""
+        return self.config.get_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", default=False
         )
 
     def start(self, tray: "AbstractTray") -> None:
@@ -136,6 +157,14 @@ class ClientOrchestrator:
         self.tray.register_callback(TrayAction.RECONNECT, self._on_reconnect)
         self.tray.register_callback(TrayAction.DISCONNECT, self._on_disconnect)
         self.tray.register_callback(TrayAction.QUIT, self._on_quit)
+        # Live Mode callbacks
+        self.tray.register_callback(
+            TrayAction.START_LIVE_MODE, self._on_start_live_mode
+        )
+        self.tray.register_callback(TrayAction.STOP_LIVE_MODE, self._on_stop_live_mode)
+        self.tray.register_callback(
+            TrayAction.TOGGLE_LIVE_MUTE, self._on_toggle_live_mute
+        )
 
     def _run_async_loop(self) -> None:
         """Run the asyncio event loop in a background thread."""
@@ -156,6 +185,24 @@ class ClientOrchestrator:
         if self.api_client is None:
             return False
         return self.api_client._is_localhost()
+
+    @property
+    def live_transcriber_enabled(self) -> bool:
+        """Check if live transcriber is enabled in server config."""
+        return self.config.get_server_config(
+            "transcription_options", "enable_live_transcriber", default=False
+        )
+
+    @property
+    def sample_rate(self) -> int:
+        """Get the configured sample rate."""
+        return self.config.get("recording", "sample_rate", default=16000)
+
+    def _on_live_transcription_text(self, text: str) -> None:
+        """Handle live transcription text from WebSocket."""
+        self._live_transcription_text = text
+        if self.tray:
+            self.tray.update_live_transcription_text(text)
 
     # =========================================================================
     # Server Connection
@@ -291,20 +338,30 @@ class ClientOrchestrator:
 
             self.is_recording = True
 
+        # Check if we should use WebSocket streaming for live transcription
+        # Live transcriber mode is only used when: live transcriber enabled AND not notebook mode
+        if self.live_transcriber_enabled and not self.auto_add_to_notebook:
+            self._use_websocket_streaming = True
+            self._schedule_async(self._start_websocket_recording())
+        else:
+            self._use_websocket_streaming = False
+            self._start_http_recording()
+
+    def _start_http_recording(self) -> None:
+        """Start recording with HTTP batch upload (default mode)."""
         if self.tray:
             self.tray.set_state(TrayState.RECORDING)
 
         # Initialize recorder
         try:
             device_index = self.config.get("recording", "device_index")
-            sample_rate = self.config.get("recording", "sample_rate", default=16000)
 
             self.recorder = AudioRecorder(
-                sample_rate=sample_rate,
+                sample_rate=self.sample_rate,
                 device_index=device_index,
             )
             self.recorder.start()
-            logger.info("Recording started")
+            logger.info("Recording started (HTTP batch mode)")
 
         except Exception as e:
             logger.error(f"Failed to start recording: {e}")
@@ -317,45 +374,59 @@ class ClientOrchestrator:
     def _on_stop_recording(self) -> None:
         """Handle stop recording action."""
         with self._state_lock:
-            if not self.is_recording or not self.recorder:
+            if not self.is_recording:
+                return
+            # For WebSocket mode, recorder might be None (chunks sent directly)
+            if not self._use_websocket_streaming and not self.recorder:
                 return
             self.is_recording = False
 
-        if self.tray:
-            self.tray.set_state(TrayState.UPLOADING)
-
-        # Get recorded audio as WAV bytes
-        try:
-            audio_data = self.recorder.stop()
-            self.recorder = None
-
-            # Transcribe
-            self._schedule_async(self._transcribe_audio(audio_data))
-
-        except Exception as e:
-            logger.error(f"Failed to stop recording: {e}")
+        if self._use_websocket_streaming:
+            # WebSocket streaming mode - send stop command
+            self._schedule_async(self._stop_websocket_recording())
+        else:
+            # HTTP batch mode - upload recorded audio
             if self.tray:
-                self.tray.set_state(TrayState.ERROR)
-                self.tray.show_notification("Error", str(e))
+                self.tray.set_state(TrayState.UPLOADING)
+
+            # Get recorded audio as WAV bytes
+            if self.recorder:
+                try:
+                    audio_data = self.recorder.stop()
+                    self.recorder = None
+
+                    # Transcribe
+                    self._schedule_async(self._transcribe_audio(audio_data))
+
+                except Exception as e:
+                    logger.error(f"Failed to stop recording: {e}")
+                    if self.tray:
+                        self.tray.set_state(TrayState.ERROR)
+                        self.tray.show_notification("Error", str(e))
 
     def _on_cancel_recording(self) -> None:
         """Handle cancel recording/transcription action."""
         # Cancel recording if in progress
         with self._state_lock:
-            if self.is_recording and self.recorder:
+            if self.is_recording:
                 self.is_recording = False
-                try:
-                    self.recorder.cancel()
-                except Exception:
-                    logger.debug("Failed to cancel recorder during cleanup")
-                self.recorder = None
 
-            if self.tray:
-                self.tray.set_state(TrayState.STANDBY)
-                self.tray.show_notification("Cancelled", "Recording cancelled")
+                # Cancel WebSocket streaming if active
+                if self._use_websocket_streaming and self._streaming_client:
+                    self._schedule_async(self._cancel_websocket_recording())
+                elif self.recorder:
+                    try:
+                        self.recorder.cancel()
+                    except Exception:
+                        logger.debug("Failed to cancel recorder during cleanup")
+                    self.recorder = None
 
-            logger.info("Recording cancelled")
-            return
+                if self.tray:
+                    self.tray.set_state(TrayState.STANDBY)
+                    self.tray.show_notification("Cancelled", "Recording cancelled")
+
+                logger.info("Recording cancelled")
+                return
 
         # Cancel transcription if in progress
         with self._state_lock:
@@ -384,6 +455,194 @@ class ClientOrchestrator:
                 self.tray.show_notification(
                     "Cancel Failed", result.get("message", "Unknown error")
                 )
+
+    # =========================================================================
+    # WebSocket Streaming (Live Transcriber Mode)
+    # =========================================================================
+
+    async def _start_websocket_recording(self) -> None:
+        """Start recording with WebSocket streaming for real-time live transcription."""
+        if not self.api_client:
+            with self._state_lock:
+                self.is_recording = False
+            return
+
+        self._live_transcription_text = ""
+        if self.tray:
+            self.tray.set_state(TrayState.RECORDING)
+            self.tray.update_live_transcription_text("")
+
+        # Create streaming client with callbacks
+        self._streaming_client = StreamingClient(
+            self.api_client,
+            on_preview=self._on_live_transcription_text,
+            on_final=self._on_websocket_final,
+            on_error=self._on_websocket_error,
+        )
+
+        # Connect to WebSocket
+        if not await self._streaming_client.connect():
+            logger.warning("WebSocket connect failed, falling back to HTTP batch mode")
+            with self._state_lock:
+                self.is_recording = False
+                self._use_websocket_streaming = False
+            # Fall back to HTTP batch mode
+            self._start_http_recording()
+            with self._state_lock:
+                self.is_recording = True
+            return
+
+        # Send start command with VAD enabled for server-side processing
+        await self._streaming_client.send_control("start", {"use_vad": True})
+
+        # Start audio recorder with chunk callback for streaming
+        try:
+            device_index = self.config.get("recording", "device_index")
+
+            self.recorder = AudioRecorder(
+                sample_rate=self.sample_rate,
+                device_index=device_index,
+                on_audio_chunk=self._on_audio_chunk,
+            )
+            self.recorder.start()
+            logger.info(
+                "Recording started (WebSocket streaming mode with live transcriber)"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to start WebSocket recording: {e}")
+            await self._cleanup_websocket()
+            with self._state_lock:
+                self.is_recording = False
+            if self.tray:
+                self.tray.set_state(TrayState.ERROR)
+                self.tray.show_notification("Error", f"Failed to start recording: {e}")
+
+    def _on_audio_chunk(self, chunk: bytes) -> None:
+        """Forward audio chunk to WebSocket (called from AudioRecorder thread)."""
+        if self._streaming_client and self._streaming_client.is_connected:
+            # Format and send via WebSocket
+            formatted = self._format_audio_for_websocket(chunk)
+            self._schedule_async(self._streaming_client.send_audio(formatted))
+
+    def _format_audio_for_websocket(self, pcm_data: bytes) -> bytes:
+        """Format audio chunk for WebSocket binary protocol."""
+        import json
+        import struct
+
+        metadata = json.dumps({"sample_rate": self.sample_rate, "channels": 1})
+        metadata_bytes = metadata.encode("utf-8")
+        header = struct.pack("<I", len(metadata_bytes))
+        return header + metadata_bytes + pcm_data
+
+    async def _stop_websocket_recording(self) -> None:
+        """Stop WebSocket recording and wait for final transcription."""
+        if self.tray:
+            self.tray.set_state(TrayState.TRANSCRIBING)
+
+        # Stop the audio recorder
+        if self.recorder:
+            try:
+                self.recorder.stop()
+            except Exception as e:
+                logger.debug(f"Error stopping recorder: {e}")
+            self.recorder = None
+
+        # Send stop command to server
+        if self._streaming_client and self._streaming_client.is_connected:
+            await self._streaming_client.send_control("stop")
+            logger.info(
+                "WebSocket stop command sent, waiting for final transcription..."
+            )
+            # The final result will be handled by _on_websocket_final callback
+
+    async def _cancel_websocket_recording(self) -> None:
+        """Cancel WebSocket recording without waiting for transcription."""
+        if self.recorder:
+            try:
+                self.recorder.cancel()
+            except Exception:
+                pass
+            self.recorder = None
+
+        await self._cleanup_websocket()
+
+    async def _cleanup_websocket(self) -> None:
+        """Clean up WebSocket resources."""
+        if self._streaming_client:
+            await self._streaming_client.close()
+            self._streaming_client = None
+        self._live_transcription_text = ""
+        self._use_websocket_streaming = False
+
+    def _on_websocket_final(self, result: dict[str, Any]) -> None:
+        """Handle final transcription result from WebSocket (callback from receive loop)."""
+        # Schedule the processing on the async loop
+        self._schedule_async(self._process_websocket_result(result))
+
+    async def _process_websocket_result(self, result: dict[str, Any]) -> None:
+        """Process final WebSocket transcription result."""
+        # Extract text from result (handle both formats)
+        text = result.get("data", {}).get("text", "") or result.get("text", "")
+        self.last_transcription = text
+
+        # Clean up WebSocket
+        await self._cleanup_websocket()
+
+        # Flash icon then set to STANDBY
+        if self.tray:
+            if hasattr(self.tray, "flash_then_set_state"):
+                self.tray.flash_then_set_state(TrayState.STANDBY, flash_duration_ms=500)
+            else:
+                self.tray.set_state(TrayState.STANDBY)
+
+        # Copy to clipboard (only when NOT in notebook mode)
+        # Note: WebSocket streaming should not be used in notebook mode (see _on_start_recording),
+        # but we check anyway for robustness.
+        if text and self.auto_copy_clipboard and not self.auto_add_to_notebook:
+            self._copy_to_clipboard(text)
+
+            # Show notification with preview
+            preview = text[:100]
+            if len(text) > 100:
+                preview += "..."
+
+            if self.tray:
+                self.tray.show_notification(
+                    "Transcription Complete",
+                    f"Copied to clipboard: {preview}",
+                )
+        elif not text:
+            if self.tray:
+                self.tray.show_notification(
+                    "Transcription Complete",
+                    "No speech detected",
+                )
+
+        logger.info("WebSocket transcription complete")
+
+    def _on_websocket_error(self, error: str) -> None:
+        """Handle WebSocket error (callback from receive loop)."""
+        logger.error(f"WebSocket error: {error}")
+
+        # Schedule cleanup and error handling
+        self._schedule_async(self._handle_websocket_error(error))
+
+    async def _handle_websocket_error(self, error: str) -> None:
+        """Handle WebSocket error and clean up."""
+        await self._cleanup_websocket()
+
+        with self._state_lock:
+            self.is_recording = False
+
+        if self.tray:
+            self.tray.set_state(TrayState.ERROR)
+            self.tray.show_notification("Transcription Error", error)
+
+            # Reset to standby after a delay
+            await asyncio.sleep(3)
+            if self.api_client and self.api_client.is_connected:
+                self.tray.set_state(TrayState.STANDBY)
 
     async def _transcribe_audio(self, audio_data: bytes) -> None:
         """Send audio to server for transcription."""
@@ -714,6 +973,211 @@ class ClientOrchestrator:
         logger.debug(f"Orchestrator models_loaded synced to: {loaded}")
 
     # =========================================================================
+    # Live Mode (RealtimeSTT)
+    # =========================================================================
+
+    def _on_start_live_mode(self) -> None:
+        """Handle start live mode action."""
+        if self._live_mode_active:
+            logger.warning("Live Mode already active")
+            return
+
+        if not self.api_client or not self.api_client.is_connected:
+            if self.tray:
+                self.tray.show_notification(
+                    "Not Connected",
+                    "Please wait for server connection",
+                )
+            return
+
+        self._schedule_async(self._start_live_mode())
+
+    def _on_stop_live_mode(self) -> None:
+        """Handle stop live mode action."""
+        if not self._live_mode_active:
+            return
+
+        self._schedule_async(self._stop_live_mode())
+
+    async def _start_live_mode(self) -> None:
+        """Start Live Mode WebSocket connection with audio streaming."""
+        if not self.api_client:
+            return
+
+        try:
+            # Create Live Mode client with callbacks
+            self._live_mode_client = LiveModeClient(
+                self.api_client,
+                on_sentence=self._on_live_sentence,
+                on_partial=self._on_live_partial,
+                on_state=self._on_live_state,
+                on_error=self._on_live_error,
+            )
+
+            # Connect
+            if not await self._live_mode_client.connect():
+                return
+
+            self._live_mode_active = True
+            self._live_mode_muted = False  # Start unmuted
+
+            # Update tray state to LIVE_LISTENING
+            if self.tray and hasattr(self.tray, "set_live_mode_active"):
+                self.tray.set_live_mode_active(True)
+            if self.tray:
+                self.tray.set_state(TrayState.LIVE_LISTENING)
+                self.tray.show_notification(
+                    "Live Mode", "Live Mode started - listening"
+                )
+
+            # Send start command with config
+            config = {
+                "model": self.config.get_server_config(
+                    "transcription_options",
+                    "model_id",
+                    default="Systran/faster-whisper-large-v3",
+                ),
+                "language": self.config.get_server_config(
+                    "live_transcriber", "language", default=""
+                ),
+                "post_speech_silence_duration": self.config.get(
+                    "live_mode", "grace_period", default=3.0
+                ),
+            }
+            await self._live_mode_client.start(config)
+
+            # Start audio recording and streaming
+            try:
+                device_index = self.config.get("recording", "device_index")
+                self._live_mode_recorder = AudioRecorder(
+                    sample_rate=self.sample_rate,
+                    device_index=device_index,
+                    on_audio_chunk=self._on_live_audio_chunk,
+                )
+                self._live_mode_recorder.start()
+                logger.info("Live Mode audio recording started")
+            except Exception as e:
+                logger.error(f"Failed to start audio recording for Live Mode: {e}")
+                if self.tray:
+                    self.tray.show_notification(
+                        "Audio Error", f"Failed to start microphone: {e}"
+                    )
+                # Continue anyway - user might want to fix audio settings
+
+            logger.info("Live Mode started")
+
+            # Start listening for messages (this blocks until done)
+            await self._live_mode_client.receive_messages()
+
+        except Exception as e:
+            logger.error(f"Failed to start Live Mode: {e}")
+            self._live_mode_active = False
+            self._live_mode_muted = False
+            await self._cleanup_live_mode()
+            if self.tray:
+                self.tray.set_state(TrayState.STANDBY)
+                self.tray.show_notification("Error", f"Failed to start Live Mode: {e}")
+                if hasattr(self.tray, "set_live_mode_active"):
+                    self.tray.set_live_mode_active(False)
+
+    def _on_live_audio_chunk(self, chunk: bytes) -> None:
+        """Forward audio chunk to Live Mode WebSocket (called from AudioRecorder thread)."""
+        if self._live_mode_client and self._live_mode_client.is_connected:
+            if not self._live_mode_muted:
+                # Format and send via WebSocket
+                formatted = self._format_audio_for_websocket(chunk)
+                self._schedule_async(self._live_mode_client.send_audio(formatted))
+
+    async def _cleanup_live_mode(self) -> None:
+        """Clean up Live Mode resources."""
+        # Stop audio recorder
+        if self._live_mode_recorder:
+            try:
+                self._live_mode_recorder.cancel()
+            except Exception:
+                pass
+            self._live_mode_recorder = None
+
+        # Close WebSocket client
+        if self._live_mode_client:
+            try:
+                await self._live_mode_client.close()
+            except Exception:
+                pass
+            self._live_mode_client = None
+
+    def _on_toggle_live_mute(self) -> None:
+        """Handle toggle live mute action."""
+        if not self._live_mode_active:
+            return
+
+        self._live_mode_muted = not self._live_mode_muted
+
+        # Update client mute state
+        if self._live_mode_client:
+            self._live_mode_client.set_muted(self._live_mode_muted)
+
+        # Update tray state
+        if self.tray:
+            if self._live_mode_muted:
+                self.tray.set_state(TrayState.LIVE_MUTED)
+            else:
+                self.tray.set_state(TrayState.LIVE_LISTENING)
+
+        logger.info(f"Live Mode muted: {self._live_mode_muted}")
+
+    async def _stop_live_mode(self) -> None:
+        """Stop Live Mode WebSocket connection."""
+        if not self._live_mode_client:
+            return
+
+        try:
+            # Send stop command
+            await self._live_mode_client.stop()
+
+            # Clean up resources
+            await self._cleanup_live_mode()
+        except Exception as e:
+            logger.error(f"Error stopping Live Mode: {e}")
+        finally:
+            self._live_mode_client = None
+            self._live_mode_active = False
+            self._live_mode_muted = False
+
+            # Update tray state
+            if self.tray and hasattr(self.tray, "set_live_mode_active"):
+                self.tray.set_live_mode_active(False)
+            if self.tray:
+                self.tray.set_state(TrayState.STANDBY)
+                self.tray.show_notification("Live Mode", "Live Mode stopped")
+
+            logger.info("Live Mode stopped")
+
+    def _on_live_sentence(self, text: str) -> None:
+        """Callback for completed Live Mode sentences."""
+        if not text:
+            return
+        logger.debug(f"Live Mode sentence: {text}")
+        # Update live transcription text in tray/dashboard
+        if self.tray:
+            self.tray.update_live_transcription_text(text, append=True)
+
+    def _on_live_partial(self, text: str) -> None:
+        """Callback for Live Mode partial/real-time updates."""
+        # Could update a "typing" indicator if desired
+        pass
+
+    def _on_live_state(self, state: str) -> None:
+        """Callback for Live Mode state changes."""
+        logger.debug(f"Live Mode state: {state}")
+
+    def _on_live_error(self, error_msg: str) -> None:
+        """Callback for Live Mode errors."""
+        logger.error(f"Live Mode error: {error_msg}")
+        if self.tray:
+            self.tray.show_notification("Live Mode Error", error_msg)
+
+    # =========================================================================
     # Clipboard
     # =========================================================================
 
@@ -797,6 +1261,10 @@ class ClientOrchestrator:
         if self._reconnect_task:
             self._reconnect_task.cancel()
             self._reconnect_task = None
+
+        # Stop Live Mode if active
+        if self._live_mode_active and self._live_mode_client:
+            self._schedule_async(self._stop_live_mode())
 
         # Stop recording if active
         with self._state_lock:

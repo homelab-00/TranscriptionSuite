@@ -380,6 +380,54 @@ class SettingsDialog:
         sample_rate_label.set_halign(Gtk.Align.START)
         audio_box.append(sample_rate_label)
 
+        # Live Mode grace period
+        grace_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        grace_label = Gtk.Label(label="Live Mode Grace Period:")
+        grace_label.set_size_request(160, -1)
+        grace_label.set_halign(Gtk.Align.START)
+        grace_label.set_tooltip_text(
+            "How long to keep recording after detecting silence.\n"
+            "Allows natural pauses while speaking."
+        )
+        grace_row.append(grace_label)
+
+        grace_adjustment = Gtk.Adjustment(
+            value=3.0,
+            lower=0.5,
+            upper=10.0,
+            step_increment=0.5,
+            page_increment=1.0,
+        )
+        self.grace_period_spin = Gtk.SpinButton()
+        self.grace_period_spin.set_adjustment(grace_adjustment)
+        self.grace_period_spin.set_digits(1)
+        self.grace_period_spin.set_value(3.0)
+        self.grace_period_spin.set_tooltip_text(
+            "Recommended: 2-4 seconds. Higher values allow longer pauses\n"
+            "but may make responses feel slower."
+        )
+        grace_row.append(self.grace_period_spin)
+
+        seconds_label = Gtk.Label(label="seconds")
+        seconds_label.set_halign(Gtk.Align.START)
+        grace_row.append(seconds_label)
+
+        grace_row_spacer = Gtk.Box()
+        grace_row_spacer.set_hexpand(True)
+        grace_row.append(grace_row_spacer)
+
+        audio_box.append(grace_row)
+
+        # Help text for grace period
+        grace_help = Gtk.Label(
+            label="Tip: Increase if your transcriptions cut off mid-sentence, decrease for faster responses."
+        )
+        grace_help.add_css_class("settings-help-text")
+        grace_help.set_halign(Gtk.Align.START)
+        grace_help.set_wrap(True)
+        audio_box.append(grace_help)
+
         audio_frame.set_child(audio_box)
         content.append(audio_frame)
 
@@ -703,6 +751,11 @@ class SettingsDialog:
             else:
                 self.device_combo.set_active_id(str(current_device))
 
+        # Live Mode grace period
+        if self.grace_period_spin:
+            grace_period = self.config.get("live_mode", "grace_period", default=3.0)
+            self.grace_period_spin.set_value(grace_period)
+
         # Client tab - Connection
         if self.host_entry:
             self.host_entry.set_text(
@@ -764,6 +817,12 @@ class SettingsDialog:
                     self.config.set("recording", "device_index", value=int(device_id))
                 except (ValueError, TypeError):
                     self.config.set("recording", "device_index", value=None)
+
+        # Live Mode grace period
+        if self.grace_period_spin:
+            self.config.set(
+                "live_mode", "grace_period", value=self.grace_period_spin.get_value()
+            )
 
         # Client tab - Connection
         if self.host_entry:

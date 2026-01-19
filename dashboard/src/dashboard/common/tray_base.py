@@ -6,8 +6,12 @@ Defines the interface that all platform-specific tray implementations must follo
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from dashboard.common.models import TrayAction, TrayState
+
+if TYPE_CHECKING:
+    from dashboard.common.orchestrator import ClientOrchestrator
 
 
 class AbstractTray(ABC):
@@ -22,7 +26,7 @@ class AbstractTray(ABC):
         self.app_name = app_name
         self.state = TrayState.DISCONNECTED
         self.callbacks: dict[TrayAction, Callable[[], None]] = {}
-        self.orchestrator = None  # Set by orchestrator for state sync
+        self.orchestrator: "ClientOrchestrator | None" = None  # Set by orchestrator for state sync
 
     def register_callback(
         self, action: TrayAction, callback: Callable[[], None]
@@ -44,6 +48,21 @@ class AbstractTray(ABC):
             state: New application state
         """
         pass
+
+    def flash_then_set_state(
+        self, target_state: TrayState, flash_duration_ms: int = 250
+    ) -> None:
+        """
+        Flash icon to light gray, then transition to target state.
+
+        Override with platform-specific implementation for visual feedback.
+        Default implementation just calls set_state directly.
+
+        Args:
+            target_state: State to transition to after flash
+            flash_duration_ms: Duration of flash in milliseconds
+        """
+        self.set_state(target_state)
 
     @abstractmethod
     def show_notification(self, title: str, message: str) -> None:
@@ -116,6 +135,19 @@ class AbstractTray(ABC):
         """
         pass
 
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Update the live transcription text display.
+
+        Override with platform-specific implementation to forward
+        live transcription text to the dashboard UI.
+
+        Args:
+            text: Live transcription text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        pass
+
     def get_state_tooltip(self, state: TrayState) -> str:
         """Get tooltip text for a state."""
         state_names = {
@@ -127,6 +159,8 @@ class AbstractTray(ABC):
             TrayState.UPLOADING: "Uploading...",
             TrayState.TRANSCRIBING: "Transcribing...",
             TrayState.ERROR: "Error",
+            TrayState.LIVE_LISTENING: "Live Mode - Listening",
+            TrayState.LIVE_MUTED: "Live Mode - Muted",
         }
         return f"{self.app_name} - {state_names.get(state, 'Unknown')}"
 
@@ -141,5 +175,27 @@ class AbstractTray(ABC):
 
         Args:
             is_local: True if connected to localhost, False if remote
+        """
+        pass
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """
+        Set Live Mode active state and update menu items.
+
+        Override with platform-specific implementation.
+
+        Args:
+            active: True if Live Mode is active, False otherwise
+        """
+        pass
+
+    def update_models_menu_state(self, models_loaded: bool) -> None:
+        """
+        Update the toggle models menu item text based on current state.
+
+        Override with platform-specific implementation.
+
+        Args:
+            models_loaded: True if models are loaded, False if unloaded
         """
         pass

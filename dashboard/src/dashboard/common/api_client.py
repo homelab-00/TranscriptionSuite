@@ -948,6 +948,184 @@ class APIClient:
         return self._connected
 
 
+class LiveModeClient:
+    """
+    WebSocket client for Live Mode.
+
+    Connects to /ws/live endpoint for continuous sentence transcription.
+    Audio is streamed from the client to the server, and completed sentences
+    are returned via callback.
+    """
+
+    def __init__(
+        self,
+        api_client: APIClient,
+        on_sentence: Callable[[str], None] | None = None,
+        on_partial: Callable[[str], None] | None = None,
+        on_state: Callable[[str], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
+    ):
+        """
+        Initialize Live Mode client.
+
+        Args:
+            api_client: Base API client for connection info
+            on_sentence: Callback for completed sentences
+            on_partial: Callback for partial/real-time updates
+            on_state: Callback for state changes
+            on_error: Callback for errors
+        """
+        self.api_client = api_client
+        self.on_sentence = on_sentence
+        self.on_partial = on_partial
+        self.on_state = on_state
+        self.on_error = on_error
+
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._running = False
+        self._muted = False
+
+    async def connect(self) -> bool:
+        """Connect to the Live Mode WebSocket endpoint."""
+        try:
+            session = await self.api_client._get_session()
+            url = f"{self.api_client.ws_url}/ws/live"
+
+            # Use SSL kwargs for HTTPS WebSocket connections
+            ssl_kwargs = self.api_client._get_ssl_kwargs()
+            self._ws = await session.ws_connect(url, **ssl_kwargs)
+            assert self._ws is not None  # ws_connect always returns a valid websocket
+
+            # Send authentication message
+            await self._ws.send_json(
+                {"type": "auth", "data": {"token": self.api_client.token or ""}}
+            )
+
+            # Wait for auth response
+            auth_response = await asyncio.wait_for(
+                self._ws.receive_json(), timeout=10.0
+            )
+            if auth_response.get("type") == "error":
+                error_msg = auth_response.get("data", {}).get(
+                    "message", "Unknown error"
+                )
+                logger.error(f"Live Mode error: {error_msg}")
+                await self._ws.close()
+                if self.on_error:
+                    self.on_error(error_msg)
+                return False
+            if auth_response.get("type") != "auth_ok":
+                error_msg = auth_response.get("data", {}).get(
+                    "message", "Authentication failed"
+                )
+                logger.error(f"Live Mode auth failed: {error_msg}")
+                await self._ws.close()
+                if self.on_error:
+                    self.on_error(f"Authentication failed: {error_msg}")
+                return False
+
+            logger.debug("Live Mode auth successful")
+            self._running = True
+            return True
+
+        except asyncio.TimeoutError:
+            logger.error("Live Mode authentication timeout")
+            if self.on_error:
+                self.on_error("Authentication timeout")
+            return False
+
+        except Exception as e:
+            logger.error(f"Live Mode connection failed: {e}")
+            if self.on_error:
+                self.on_error(str(e))
+            return False
+
+    async def start(self, config: dict[str, Any] | None = None) -> None:
+        """Send start command to begin Live Mode."""
+        if self._ws and not self._ws.closed:
+            await self._ws.send_json(
+                {"type": "start", "data": {"config": config or {}}}
+            )
+
+    async def stop(self) -> None:
+        """Send stop command to end Live Mode."""
+        if self._ws and not self._ws.closed:
+            await self._ws.send_json({"type": "stop"})
+
+    async def receive_messages(self) -> None:
+        """Receive and handle WebSocket messages."""
+        if not self._ws:
+            return
+
+        try:
+            async for msg in self._ws:
+                if not self._running:
+                    break
+
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    data = json.loads(msg.data)
+                    msg_type = data.get("type")
+                    msg_data = data.get("data", {})
+
+                    if msg_type == "sentence" and self.on_sentence:
+                        self.on_sentence(msg_data.get("text", ""))
+                    elif msg_type == "partial" and self.on_partial:
+                        self.on_partial(msg_data.get("text", ""))
+                    elif msg_type == "state" and self.on_state:
+                        self.on_state(msg_data.get("state", ""))
+                    elif msg_type == "error" and self.on_error:
+                        self.on_error(msg_data.get("message", "Unknown error"))
+                    elif msg_type == "pong":
+                        pass  # Ping response
+                    else:
+                        logger.debug(f"Live Mode unhandled message: {msg_type}")
+
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    if self.on_error:
+                        self.on_error(f"WebSocket error: {self._ws.exception()}")
+                    break
+
+        except Exception as e:
+            logger.error(f"Live Mode receive error: {e}")
+            if self.on_error:
+                self.on_error(str(e))
+
+        finally:
+            self._running = False
+
+    async def send_audio(self, audio_data: bytes) -> None:
+        """
+        Send audio data to the server.
+
+        Args:
+            audio_data: PCM Int16 audio data (already formatted with metadata header)
+        """
+        if self._ws and not self._ws.closed and not self._muted:
+            await self._ws.send_bytes(audio_data)
+
+    def set_muted(self, muted: bool) -> None:
+        """Set mute state - when muted, audio is not sent to server."""
+        self._muted = muted
+        logger.debug(f"Live Mode muted: {muted}")
+
+    @property
+    def is_muted(self) -> bool:
+        """Check if audio sending is muted."""
+        return self._muted
+
+    async def close(self) -> None:
+        """Close the WebSocket connection."""
+        self._running = False
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
+            self._ws = None
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if WebSocket is connected."""
+        return self._ws is not None and not self._ws.closed
+
+
 class StreamingClient:
     """
     WebSocket client for real-time audio streaming.
@@ -965,12 +1143,14 @@ class StreamingClient:
 
         Args:
             api_client: Base API client for connection info
-            on_preview: Callback for preview transcription text
+            on_preview: Callback for live transcription text updates
             on_final: Callback for final transcription result
             on_error: Callback for errors
         """
         self.api_client = api_client
-        self.on_preview = on_preview
+        self.on_live_transcription = (
+            on_preview  # Store as new name, param name kept for backwards compat
+        )
         self.on_final = on_final
         self.on_error = on_error
 
@@ -981,25 +1161,51 @@ class StreamingClient:
         """Connect to the streaming endpoint."""
         try:
             session = await self.api_client._get_session()
-            url = f"{self.api_client.ws_url}/api/transcribe/stream"
+            url = f"{self.api_client.ws_url}/ws"
 
             # Include client identification headers
             headers = {
                 "X-Client-Type": CLIENT_TYPE,
                 "User-Agent": f"TranscriptionSuite-Client/{CLIENT_VERSION} ({platform.system()})",
             }
-            if self.api_client.token:
-                headers["Authorization"] = f"Bearer {self.api_client.token}"
 
             # Use SSL kwargs for HTTPS WebSocket connections (handles IP fallback)
             ssl_kwargs = self.api_client._get_ssl_kwargs()
             self._ws = await session.ws_connect(url, headers=headers, **ssl_kwargs)
+            assert self._ws is not None  # ws_connect always returns a valid websocket
+
+            # Send authentication message
+            await self._ws.send_json(
+                {"type": "auth", "data": {"token": self.api_client.token or ""}}
+            )
+
+            # Wait for auth response
+            auth_response = await asyncio.wait_for(
+                self._ws.receive_json(), timeout=10.0
+            )
+            if auth_response.get("type") != "auth_ok":
+                error_msg = auth_response.get("data", {}).get(
+                    "message", "Authentication failed"
+                )
+                logger.error(f"WebSocket auth failed: {error_msg}")
+                await self._ws.close()
+                if self.on_error:
+                    self.on_error(f"Authentication failed: {error_msg}")
+                return False
+
+            logger.debug("WebSocket auth successful")
             self._running = True
 
             # Start receiving messages
             asyncio.create_task(self._receive_loop())
 
             return True
+
+        except asyncio.TimeoutError:
+            logger.error("WebSocket authentication timeout")
+            if self.on_error:
+                self.on_error("Authentication timeout")
+            return False
 
         except Exception as e:
             logger.error(f"WebSocket connection failed: {e}")
@@ -1018,10 +1224,26 @@ class StreamingClient:
                     data = json.loads(msg.data)
                     msg_type = data.get("type")
 
-                    if msg_type == "preview" and self.on_preview:
-                        self.on_preview(data.get("text", ""))
+                    if msg_type == "realtime" and self.on_live_transcription:
+                        # Real-time live transcription text from server
+                        text = data.get("data", {}).get("text", "")
+                        self.on_live_transcription(text)
+                    elif msg_type == "preview" and self.on_live_transcription:
+                        # Legacy preview format (backwards compat with older servers)
+                        self.on_live_transcription(data.get("text", ""))
                     elif msg_type == "final" and self.on_final:
                         self.on_final(data)
+                    elif msg_type == "session_started":
+                        # Server confirmed recording started
+                        live_transcriber_enabled = data.get("data", {}).get(
+                            "preview_enabled",
+                            False,  # Keep old key name for server compat
+                        )
+                        logger.info(
+                            f"Session started: live_transcriber_enabled={live_transcriber_enabled}"
+                        )
+                    elif msg_type == "session_stopped":
+                        logger.info("Session stopped")
                     elif msg_type == "session_busy" and self.on_error:
                         active_user = data.get("data", {}).get(
                             "active_user", "another user"
@@ -1030,7 +1252,23 @@ class StreamingClient:
                             f"Server busy - transcription in progress for {active_user}"
                         )
                     elif msg_type == "error" and self.on_error:
-                        self.on_error(data.get("message", "Unknown error"))
+                        error_msg = data.get("data", {}).get(
+                            "message", data.get("message", "Unknown error")
+                        )
+                        self.on_error(error_msg)
+                    elif msg_type in (
+                        "vad_start",
+                        "vad_stop",
+                        "vad_recording_start",
+                        "vad_recording_stop",
+                    ):
+                        # VAD events - log for debugging
+                        logger.debug(f"VAD event: {msg_type}")
+                    elif msg_type == "pong":
+                        # Ping response - ignore
+                        pass
+                    else:
+                        logger.debug(f"Unhandled message type: {msg_type}")
 
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     if self.on_error:
@@ -1050,10 +1288,15 @@ class StreamingClient:
         if self._ws and not self._ws.closed:
             await self._ws.send_bytes(audio_data)
 
-    async def send_control(self, action: str) -> None:
+    async def send_control(
+        self, action: str, data: dict[str, Any] | None = None
+    ) -> None:
         """Send a control message (start, stop, cancel)."""
         if self._ws and not self._ws.closed:
-            await self._ws.send_json({"action": action})
+            msg: dict[str, Any] = {"type": action}
+            if data:
+                msg["data"] = data
+            await self._ws.send_json(msg)
 
     async def close(self) -> None:
         """Close the WebSocket connection."""

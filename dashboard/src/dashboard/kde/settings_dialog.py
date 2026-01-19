@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -474,6 +475,39 @@ class SettingsDialog(QDialog):
         sample_rate_label.setObjectName("helpText")
         audio_layout.addWidget(sample_rate_label)
 
+        # Live Mode grace period
+        grace_row = QHBoxLayout()
+        grace_label = QLabel("Live Mode Grace Period:")
+        grace_label.setObjectName("fieldLabel")
+        grace_label.setToolTip(
+            "How long to keep recording after detecting silence.\n"
+            "Allows natural pauses while speaking."
+        )
+        grace_row.addWidget(grace_label)
+
+        self.grace_period_spin = QDoubleSpinBox()
+        self.grace_period_spin.setRange(0.5, 10.0)
+        self.grace_period_spin.setSingleStep(0.5)
+        self.grace_period_spin.setValue(3.0)
+        self.grace_period_spin.setDecimals(1)
+        self.grace_period_spin.setSuffix(" seconds")
+        self.grace_period_spin.setFixedWidth(130)
+        self.grace_period_spin.setToolTip(
+            "Recommended: 2-4 seconds. Higher values allow longer pauses\n"
+            "but may make responses feel slower."
+        )
+        grace_row.addWidget(self.grace_period_spin)
+        grace_row.addStretch()
+        audio_layout.addLayout(grace_row)
+
+        # Help text for grace period
+        grace_help = QLabel(
+            "Tip: Increase if your transcriptions cut off mid-sentence, decrease for faster responses."
+        )
+        grace_help.setObjectName("helpText")
+        grace_help.setWordWrap(True)
+        audio_layout.addWidget(grace_help)
+
         layout.addWidget(audio_group)
 
         # Populate devices
@@ -745,6 +779,10 @@ class SettingsDialog(QDialog):
                     self.device_combo.setCurrentIndex(i)
                     break
 
+        # Live Mode grace period
+        grace_period = self.config.get("live_mode", "grace_period", default=3.0)
+        self.grace_period_spin.setValue(grace_period)
+
         # Client tab - Connection
         self.host_edit.setText(self.config.get("server", "host", default="localhost"))
         self.port_spin.setValue(self.config.get("server", "port", default=8000))
@@ -784,6 +822,11 @@ class SettingsDialog(QDialog):
         # Client tab - Audio
         device_index = self.device_combo.currentData()
         self.config.set("recording", "device_index", value=device_index)
+
+        # Live Mode grace period
+        self.config.set(
+            "live_mode", "grace_period", value=self.grace_period_spin.value()
+        )
 
         # Client tab - Connection
         self.config.set(

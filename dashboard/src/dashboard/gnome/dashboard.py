@@ -503,6 +503,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         self.config = config
         self._docker_manager = DockerManager()
+        self._dbus_service: Any = None
 
         # Callbacks for client operations
         self._start_client_callback = on_start_client
@@ -807,21 +808,6 @@ class DashboardWindow(_get_dashboard_base()):
         btn_box.append(client_btn)
 
         box.append(btn_box)
-
-        # Web client button
-        web_btn = Gtk.Button(label="Open Web Client")
-        web_btn.add_css_class("secondary-button")
-        web_btn.add_css_class("web-accent")
-        web_btn.set_margin_top(20)
-        web_btn.set_halign(Gtk.Align.CENTER)
-        web_btn.connect("clicked", lambda _: self._on_open_web_client())
-        box.append(web_btn)
-
-        # Web note
-        web_note = Gtk.Label(label="Opens browser based on your client settings")
-        web_note.add_css_class("dim-label")
-        web_note.add_css_class("caption")
-        box.append(web_note)
 
         scrolled.set_child(box)
         return scrolled
@@ -1160,6 +1146,15 @@ class DashboardWindow(_get_dashboard_base()):
 
         box.append(btn_box)
 
+        # Web client button
+        web_btn = Gtk.Button(label="Open Web Client")
+        web_btn.add_css_class("secondary-button")
+        web_btn.add_css_class("web-accent")
+        web_btn.set_margin_top(12)
+        web_btn.set_halign(Gtk.Align.CENTER)
+        web_btn.connect("clicked", lambda _: self._on_open_web_client())
+        box.append(web_btn)
+
         # Show logs button with icon and text
         logs_btn = Gtk.Button()
         logs_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1210,6 +1205,114 @@ class DashboardWindow(_get_dashboard_base()):
 
         notebook_frame.set_child(notebook_box)
         box.append(notebook_frame)
+
+        # Live Mode Language selector
+        language_frame = Gtk.Frame()
+        language_frame.add_css_class("card")
+        language_frame.set_margin_top(16)
+        language_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        language_box.set_margin_top(12)
+        language_box.set_margin_bottom(12)
+        language_box.set_margin_start(16)
+        language_box.set_margin_end(16)
+
+        language_label = Gtk.Label(label="Live Mode Language:")
+        language_label.add_css_class("dim-label")
+        language_box.append(language_label)
+
+        # Spacer
+        language_spacer = Gtk.Box()
+        language_spacer.set_hexpand(True)
+        language_box.append(language_spacer)
+
+        # Language dropdown
+        self._live_language_combo = Gtk.ComboBoxText()
+        # Add language options (Whisper-supported languages)
+        languages = [
+            ("Auto-detect", ""),
+            ("English", "en"),
+            ("Greek", "el"),
+            ("German", "de"),
+            ("French", "fr"),
+            ("Spanish", "es"),
+            ("Italian", "it"),
+            ("Portuguese", "pt"),
+            ("Russian", "ru"),
+            ("Japanese", "ja"),
+            ("Korean", "ko"),
+            ("Chinese", "zh"),
+            ("Arabic", "ar"),
+            ("Hindi", "hi"),
+            ("Dutch", "nl"),
+            ("Polish", "pl"),
+            ("Turkish", "tr"),
+            ("Ukrainian", "uk"),
+            ("Vietnamese", "vi"),
+            ("Thai", "th"),
+        ]
+        for name, code in languages:
+            self._live_language_combo.append(code, name)
+
+        # Load saved value
+        saved_language = self.config.get_server_config(
+            "live_transcriber", "live_language", default="en"
+        )
+        self._live_language_combo.set_active_id(saved_language)
+
+        self._live_language_combo.set_tooltip_text(
+            "Force a specific language for Live Mode.\n"
+            "Recommended: Select your language for better accuracy.\n"
+            "Auto-detect works poorly with short utterances.\n"
+            "Only editable when server is stopped."
+        )
+        self._live_language_combo.connect("changed", self._on_live_language_changed)
+        language_box.append(self._live_language_combo)
+
+        language_frame.set_child(language_box)
+        box.append(language_frame)
+
+        # Live Transcription section
+        preview_frame = Gtk.Frame()
+        preview_frame.add_css_class("card")
+        preview_frame.set_margin_top(16)
+        preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        preview_box.set_margin_top(12)
+        preview_box.set_margin_bottom(12)
+        preview_box.set_margin_start(16)
+        preview_box.set_margin_end(16)
+
+        # Live transcription header
+        preview_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        preview_title = Gtk.Label(label="Live Transcription")
+        preview_title.add_css_class("dim-label")
+        preview_header.append(preview_title)
+        preview_box.append(preview_header)
+
+        # Scrollable text view for live transcription history (~10 lines)
+        preview_scroll = Gtk.ScrolledWindow()
+        preview_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        preview_scroll.set_min_content_height(180)
+        preview_scroll.set_max_content_height(250)
+
+        self._live_transcription_text_view = Gtk.TextView()
+        self._live_transcription_text_view.set_editable(False)
+        self._live_transcription_text_view.set_cursor_visible(False)
+        self._live_transcription_text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._live_transcription_text_view.add_css_class("preview-text")
+        self._live_transcription_text_buffer = (
+            self._live_transcription_text_view.get_buffer()
+        )
+        self._live_transcription_text_buffer.set_text(
+            "Start Live Mode to see transcription..."
+        )
+        preview_scroll.set_child(self._live_transcription_text_view)
+        preview_box.append(preview_scroll)
+
+        # Store history of transcription lines
+        self._live_transcription_history: list[str] = []
+
+        preview_frame.set_child(preview_box)
+        box.append(preview_frame)
 
         scrolled.set_child(box)
         return scrolled
@@ -1389,6 +1492,15 @@ class DashboardWindow(_get_dashboard_base()):
         .notebook-disabled:disabled {
             background: #5d3d3d;
             color: #9a7a7a;
+        }
+
+        /* Preview text view */
+        .preview-text {
+            background: #252526;
+            color: #e0e0e0;
+            font-family: "Inter", sans-serif;
+            font-size: 13px;
+            padding: 8px;
         }
         """
         provider = Gtk.CssProvider()
@@ -1643,6 +1755,10 @@ class DashboardWindow(_get_dashboard_base()):
             self._notebook_toggle_btn.set_sensitive(
                 not self._client_running and server_stopped
             )
+
+        # Update live mode language dropdown state when server status changes
+        if hasattr(self, "_live_language_combo"):
+            self._live_language_combo.set_sensitive(server_stopped)
 
     def _refresh_client_status(self) -> None:
         """Refresh client view status."""
@@ -2060,6 +2176,20 @@ class DashboardWindow(_get_dashboard_base()):
 
         logger.info(f"Auto-add to notebook: {'enabled' if is_enabled else 'disabled'}")
 
+    def _on_live_language_changed(self, combo: Any) -> None:
+        """Handle Live Mode language dropdown change."""
+        language_code = combo.get_active_id()
+        language_name = combo.get_active_text()
+
+        # Save to server config - takes effect on next Live Mode start
+        self.config.set_server_config(
+            "live_transcriber", "live_language", value=language_code
+        )
+
+        logger.info(
+            f"Live Mode language set to: {language_name} ({language_code or 'auto'})"
+        )
+
     def _update_notebook_toggle_style(self) -> None:
         """Update notebook toggle button style based on state."""
         if not self._notebook_toggle_btn:
@@ -2073,6 +2203,71 @@ class DashboardWindow(_get_dashboard_base()):
             # Disabled state - gray
             self._notebook_toggle_btn.remove_css_class("notebook-enabled")
             self._notebook_toggle_btn.add_css_class("notebook-disabled")
+
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Update live transcription text display.
+
+        Args:
+            text: The text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        if (
+            not hasattr(self, "_live_transcription_text_buffer")
+            or not self._live_transcription_text_buffer
+        ):
+            return
+
+        if not text:
+            self._live_transcription_text_buffer.set_text("")
+            return
+
+        if append:
+            # Append text as a new line in history
+            self._live_transcription_history.append(text)
+            # Keep only last 1000 lines to prevent memory bloat
+            if len(self._live_transcription_history) > 1000:
+                self._live_transcription_history = self._live_transcription_history[
+                    -1000:
+                ]
+            # Update display - join with spaces for continuous text wrapping
+            self._live_transcription_text_buffer.set_text(
+                " ".join(self._live_transcription_history)
+            )
+        else:
+            # Real-time update: show history + current partial text
+            if self._live_transcription_history:
+                display_text = " ".join(self._live_transcription_history) + " " + text
+            else:
+                display_text = text
+            self._live_transcription_text_buffer.set_text(display_text)
+
+        # Auto-scroll to bottom - schedule on idle to ensure layout is updated
+        if hasattr(self, "_live_transcription_text_view"):
+            from gi.repository import GLib
+
+            GLib.idle_add(self._scroll_live_transcription_to_bottom)
+
+    def _scroll_live_transcription_to_bottom(self) -> bool:
+        """Scroll live transcription text view to bottom."""
+        if (
+            hasattr(self, "_live_transcription_text_view")
+            and self._live_transcription_text_view
+        ):
+            adj = self._live_transcription_text_view.get_parent().get_vadjustment()
+            if adj:
+                adj.set_value(adj.get_upper() - adj.get_page_size())
+        return False  # Don't repeat
+
+    def clear_live_transcription_history(self) -> None:
+        """Clear the live transcription text history."""
+        if hasattr(self, "_live_transcription_history"):
+            self._live_transcription_history.clear()
+        if (
+            hasattr(self, "_live_transcription_text_buffer")
+            and self._live_transcription_text_buffer
+        ):
+            self._live_transcription_text_buffer.set_text("")
 
     # =========================================================================
     # Web Client
@@ -2490,6 +2685,14 @@ def run_dashboard(config_path: Path | None = None) -> int:
             on_stop_client=on_stop_client if tray_connected else None,
             on_show_settings=on_show_settings,
         )
+
+        # Connect live transcription updates
+        if tray_connected:
+            dbus_client.connect_live_transcription_text(
+                lambda text, append: GLib.idle_add(
+                    main_window.update_live_transcription_text, text, append
+                )
+            )
 
         # If tray not connected, show a warning banner
         if not tray_connected:

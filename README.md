@@ -67,6 +67,7 @@ easy installation.
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
 - **Fully featured GUI**: Native app for KDE, GNOME, and Windows
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
 - **Static File Transcription**: Transcribe an existing audio/video file
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
   (utilizing Tailscale)
@@ -204,6 +205,13 @@ sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-p
     * On GNOME left click on the system tray icon and the select 'Stop Recording'
 * **Static transcription**
   * Right click on the system tray and select 'Transcribe File...'
+* **Live Mode** (Dashboard only)
+  * Open the Dashboard window and navigate to the Client View
+  * Enable "Live Transcriber" toggle to activate continuous transcription
+  * Speak naturally with pauses - sentences appear in real-time as you speak
+  * Mute/unmute with the toggle button to control when audio is captured
+  * Completed sentences are shown in the transcription display
+  * Optionally select a specific language for better accuracy (auto-detect may struggle with short utterances)
 
 Result is automatically copied to clipboard
 
@@ -217,6 +225,8 @@ Result is automatically copied to clipboard
 | 🔵 | Uploading |
 | ⚫ | Disconnected / Models Unloaded |
 | 🔴 | Error |
+| 🔴 (Bright) | Live Mode - Listening |
+| 🟤 (Dark) | Live Mode - Muted |
 
 ### 4.2 Dashboard GUI
 

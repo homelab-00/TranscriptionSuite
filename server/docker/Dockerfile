@@ -42,6 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.12-dev \
     python3-pip \
     curl \
+    git \
+    portaudio19-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager)
@@ -92,6 +94,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswscale-dev \
     libswresample-dev \
     libsndfile1 \
+    libportaudio2 \
     curl \
     gosu \
     && rm -rf /var/lib/apt/lists/*

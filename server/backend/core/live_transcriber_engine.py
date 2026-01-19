@@ -1,14 +1,14 @@
 """
-Preview transcription engine for real-time text preview.
+Live transcription engine for real-time text transcription.
 
-Provides live preview transcription using a smaller, faster model
+Provides live transcription using a smaller, faster model
 while the main transcriber processes for final accuracy.
 
 Only loaded when:
-1. config.yaml has preview_transcriber.enabled = true
+1. config.yaml has live_transcriber.enabled = true
 2. Client is the standalone app (not web browser)
 
-This saves GPU memory when preview isn't needed.
+This saves GPU memory when live transcription isn't needed.
 """
 
 import asyncio
@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Union
 
 import numpy as np
-
 from server.config import get_config
 
 # Target sample rate for Whisper (technical requirement, not configurable)
@@ -28,11 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class PreviewConfig:
-    """Configuration for preview transcription."""
+class LiveTranscriberConfig:
+    """Configuration for live transcription."""
 
     enabled: bool = False
-    model: str = "Systran/faster-whisper-base"
+    model: str = "Systran/faster-whisper-large-v3"
     device: str = "cuda"
     compute_type: str = "default"
     batch_size: int = 8
@@ -41,88 +40,95 @@ class PreviewConfig:
     early_transcription_on_silence: float = 0.5
     silero_sensitivity: float = 0.4
     webrtc_sensitivity: int = 3
+    live_language: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, config: Dict[str, Any]) -> "PreviewConfig":
-        """Create PreviewConfig from configuration dict."""
-        # Support both raw dict and nested dict format
-        preview_config = config.get("preview_transcriber", {})
-        if not preview_config:
-            preview_config = config.get("transcription", {}).get(
-                "preview_transcriber", {}
-            )
+    def from_dict(cls, config: Dict[str, Any]) -> "LiveTranscriberConfig":
+        """Create LiveTranscriberConfig from configuration dict."""
+        live_config = config.get("live_transcriber", {})
+        if not live_config:
+            live_config = config.get("transcription", {}).get("live_transcriber", {})
+
+        # Get main transcriber config as fallback for model
+        main_config = config.get("main_transcriber", {})
+        default_model = main_config.get("model", "Systran/faster-whisper-large-v3")
 
         # Get stt config for webrtc_sensitivity
         stt_config = config.get("stt", {})
 
         return cls(
-            enabled=preview_config.get("enabled", False),
-            model=preview_config.get("model", "Systran/faster-whisper-base"),
-            device=preview_config.get("device", "cuda"),
-            compute_type=preview_config.get("compute_type", "default"),
-            batch_size=preview_config.get("batch_size", 8),
-            beam_size=preview_config.get("beam_size", 3),
-            post_speech_silence_duration=preview_config.get(
+            enabled=live_config.get("enabled", False),
+            model=live_config.get("model", default_model),
+            device=live_config.get("device", "cuda"),
+            compute_type=live_config.get("compute_type", "default"),
+            batch_size=live_config.get("batch_size", 8),
+            beam_size=live_config.get("beam_size", 3),
+            post_speech_silence_duration=live_config.get(
                 "post_speech_silence_duration", 0.3
             ),
-            early_transcription_on_silence=preview_config.get(
+            early_transcription_on_silence=live_config.get(
                 "early_transcription_on_silence", 0.5
             ),
-            silero_sensitivity=preview_config.get("silero_sensitivity", 0.4),
+            silero_sensitivity=live_config.get("silero_sensitivity", 0.4),
             webrtc_sensitivity=stt_config.get("webrtc_sensitivity", 3),
+            live_language=live_config.get("live_language"),
         )
 
     @classmethod
-    def from_server_config(cls) -> "PreviewConfig":
-        """Create PreviewConfig from the global server configuration."""
+    def from_server_config(cls) -> "LiveTranscriberConfig":
+        """Create LiveTranscriberConfig from the global server configuration."""
         cfg = get_config()
-        preview_config = cfg.get("preview_transcriber", default={})
+        live_config = cfg.get("live_transcriber", default={})
+        main_config = cfg.get("main_transcriber", default={})
         stt_config = cfg.stt
 
+        # Use main transcriber model as default for live transcriber
+        default_model = main_config.get("model", "Systran/faster-whisper-large-v3")
+
         return cls(
-            enabled=preview_config.get("enabled", False),
-            model=preview_config.get("model", "Systran/faster-whisper-base"),
-            device=preview_config.get("device", "cuda"),
-            compute_type=preview_config.get("compute_type", "default"),
-            batch_size=preview_config.get("batch_size", 8),
-            beam_size=preview_config.get("beam_size", 3),
-            post_speech_silence_duration=preview_config.get(
+            enabled=live_config.get("enabled", False),
+            model=live_config.get("model", default_model),
+            device=live_config.get("device", "cuda"),
+            compute_type=live_config.get("compute_type", "default"),
+            batch_size=live_config.get("batch_size", 8),
+            beam_size=live_config.get("beam_size", 3),
+            post_speech_silence_duration=live_config.get(
                 "post_speech_silence_duration", 0.3
             ),
-            early_transcription_on_silence=preview_config.get(
+            early_transcription_on_silence=live_config.get(
                 "early_transcription_on_silence", 0.5
             ),
-            silero_sensitivity=preview_config.get("silero_sensitivity", 0.4),
+            silero_sensitivity=live_config.get("silero_sensitivity", 0.4),
             webrtc_sensitivity=stt_config.get("webrtc_sensitivity", 3),
         )
 
 
-class PreviewTranscriptionEngine:
+class LiveTranscriptionEngine:
     """
-    Secondary transcription engine for real-time preview.
+    Secondary transcription engine for real-time live transcription.
 
-    Uses a smaller, faster model to provide live preview text
+    Uses a smaller, faster model to provide live transcription text
     while the main transcriber processes for final accuracy.
 
     Only loaded when:
-    1. config.yaml has preview_transcriber.enabled = true
+    1. config.yaml has live_transcriber.enabled = true
     2. Client is the standalone app (not web browser)
     """
 
     def __init__(
         self,
         config: Dict[str, Any],
-        on_preview_text: Optional[Callable[[str], None]] = None,
+        on_live_text: Optional[Callable[[str], None]] = None,
     ):
         """
-        Initialize the preview engine.
+        Initialize the live transcription engine.
 
         Args:
             config: Server configuration dict
-            on_preview_text: Callback for preview transcription text
+            on_live_text: Callback for live transcription text
         """
-        self.config = PreviewConfig.from_dict(config)
-        self.on_preview_text = on_preview_text
+        self.config = LiveTranscriberConfig.from_dict(config)
+        self.on_live_text = on_live_text
 
         self._engine: Optional[Any] = None
         self._loaded = False
@@ -131,17 +137,17 @@ class PreviewTranscriptionEngine:
 
     @property
     def should_load(self) -> bool:
-        """Check if preview should be loaded based on config."""
+        """Check if live transcriber should be loaded based on config."""
         return self.config.enabled
 
     @property
     def is_loaded(self) -> bool:
-        """Check if the preview engine is currently loaded."""
+        """Check if the live transcription engine is currently loaded."""
         return self._loaded
 
     def load(self, language: Optional[str] = None) -> bool:
         """
-        Load the preview model.
+        Load the live transcription model.
 
         Args:
             language: Target language code
@@ -150,11 +156,11 @@ class PreviewTranscriptionEngine:
             True if successfully loaded, False if disabled or error
         """
         if not self.should_load:
-            logger.info("Preview transcriber disabled in config")
+            logger.info("Live transcriber disabled in config")
             return False
 
         if self._loaded:
-            logger.debug("Preview engine already loaded")
+            logger.debug("Live transcription engine already loaded")
             return True
 
         with self._lock:
@@ -167,9 +173,9 @@ class PreviewTranscriptionEngine:
                 self._language = language
 
                 self._engine = AudioToTextRecorder(
-                    instance_name="preview_transcriber",
+                    instance_name="live_transcriber",
                     model=self.config.model,
-                    language=language or "",
+                    language=language or self.config.live_language or "",
                     compute_type=self.config.compute_type,
                     device=self.config.device,
                     batch_size=self.config.batch_size,
@@ -186,26 +192,24 @@ class PreviewTranscriptionEngine:
                 )
 
                 self._loaded = True
-                logger.info(
-                    f"Preview transcriber loaded with model: {self.config.model}"
-                )
+                logger.info(f"Live transcriber loaded with model: {self.config.model}")
                 return True
 
             except Exception as e:
-                logger.exception(f"Failed to load preview transcriber: {e}")
+                logger.exception(f"Failed to load live transcriber: {e}")
                 return False
 
     def unload(self) -> None:
-        """Unload the preview model to free memory."""
+        """Unload the live transcriber model to free memory."""
         with self._lock:
             if self._engine:
                 try:
                     self._engine.shutdown()
                 except Exception as e:
-                    logger.warning(f"Error shutting down preview engine: {e}")
+                    logger.warning(f"Error shutting down live transcriber engine: {e}")
                 self._engine = None
             self._loaded = False
-            logger.info("Preview transcriber unloaded")
+            logger.info("Live transcriber unloaded")
 
     def feed_audio(
         self,
@@ -213,7 +217,7 @@ class PreviewTranscriptionEngine:
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
         """
-        Feed audio data to the preview engine.
+        Feed audio data to the live transcriber engine.
 
         Args:
             audio_data: Audio data (PCM Int16 bytes or numpy array)
@@ -225,11 +229,11 @@ class PreviewTranscriptionEngine:
         try:
             self._engine.feed_audio(audio_data, sample_rate)
         except Exception as e:
-            logger.warning(f"Error feeding audio to preview engine: {e}")
+            logger.warning(f"Error feeding audio to live transcriber engine: {e}")
 
     def start_recording(self, language: Optional[str] = None) -> None:
         """
-        Start preview recording session.
+        Start live transcriber recording session.
 
         Args:
             language: Target language code
@@ -242,16 +246,16 @@ class PreviewTranscriptionEngine:
             self._engine.listen()
 
     def stop_recording(self) -> None:
-        """Stop the preview recording session."""
+        """Stop the live transcriber recording session."""
         if self._engine:
             self._engine.stop()
 
-    async def get_preview_text(self) -> Optional[str]:
+    async def get_live_text(self) -> Optional[str]:
         """
-        Get the current preview transcription.
+        Get the current live transcription text.
 
         Returns:
-            Preview text or None if not available
+            Live transcription text or None if not available
         """
         if not self._loaded or not self._engine:
             return None
@@ -261,11 +265,11 @@ class PreviewTranscriptionEngine:
             text = await asyncio.to_thread(self._engine.text)
             return text if text else None
         except Exception as e:
-            logger.warning(f"Error getting preview text: {e}")
+            logger.warning(f"Error getting live transcription text: {e}")
             return None
 
     def get_status(self) -> Dict[str, Any]:
-        """Get status information about the preview engine."""
+        """Get status information about the live transcriber engine."""
         return {
             "enabled": self.config.enabled,
             "loaded": self._loaded,
@@ -273,39 +277,39 @@ class PreviewTranscriptionEngine:
         }
 
 
-# Module-level singleton for preview engine
-_preview_engine: Optional[PreviewTranscriptionEngine] = None
-_preview_lock = threading.Lock()
+# Module-level singleton for live transcriber engine
+_live_transcriber_engine: Optional[LiveTranscriptionEngine] = None
+_live_transcriber_lock = threading.Lock()
 
 
-def get_preview_engine(
+def get_live_transcriber_engine(
     config: Optional[Dict[str, Any]] = None,
-) -> Optional[PreviewTranscriptionEngine]:
+) -> Optional[LiveTranscriptionEngine]:
     """
-    Get or create the preview engine singleton.
+    Get or create the live transcriber engine singleton.
 
     Args:
         config: Server configuration dict (required on first call)
 
     Returns:
-        PreviewTranscriptionEngine or None if not configured
+        LiveTranscriptionEngine or None if not configured
     """
-    global _preview_engine
+    global _live_transcriber_engine
 
-    with _preview_lock:
-        if _preview_engine is None:
+    with _live_transcriber_lock:
+        if _live_transcriber_engine is None:
             if config is None:
                 return None
-            _preview_engine = PreviewTranscriptionEngine(config)
+            _live_transcriber_engine = LiveTranscriptionEngine(config)
 
-    return _preview_engine
+    return _live_transcriber_engine
 
 
-def cleanup_preview_engine() -> None:
-    """Clean up the preview engine."""
-    global _preview_engine
+def cleanup_live_transcriber_engine() -> None:
+    """Clean up the live transcriber engine."""
+    global _live_transcriber_engine
 
-    with _preview_lock:
-        if _preview_engine is not None:
-            _preview_engine.unload()
-            _preview_engine = None
+    with _live_transcriber_lock:
+        if _live_transcriber_engine is not None:
+            _live_transcriber_engine.unload()
+            _live_transcriber_engine = None

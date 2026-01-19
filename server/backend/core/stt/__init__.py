@@ -11,7 +11,7 @@ Key components:
 
 Configuration for the STT engine is loaded from config.yaml via
 the server.config module. See the 'stt', 'main_transcriber', and
-'preview_transcriber' sections in config.yaml.
+'live_transcriber' sections in config.yaml.
 """
 
 from server.core.stt.engine import AudioToTextRecorder, TranscriptionResult

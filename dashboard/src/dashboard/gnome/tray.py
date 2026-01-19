@@ -92,6 +92,9 @@ class GtkTray(ServerControlMixin, AbstractTray):
         TrayState.UPLOADING: "network-transmit-symbolic",
         TrayState.TRANSCRIBING: "preferences-system-time-symbolic",
         TrayState.ERROR: "dialog-error-symbolic",
+        # Live Mode states
+        TrayState.LIVE_LISTENING: "microphone-sensitivity-high-symbolic",  # Active listening
+        TrayState.LIVE_MUTED: "microphone-sensitivity-muted-symbolic",  # Muted
     }
 
     def __init__(
@@ -130,12 +133,18 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self.cancel_item: Optional[Any] = None
         self.transcribe_item: Optional[Any] = None
         self.toggle_models_item: Optional[Any] = None
+        self.start_live_item: Optional[Any] = None
+        # self.stop_live_item removed - we'll toggle label of start_live_item
+        self.mute_live_item: Optional[Any] = None
 
         # Model state tracking (assume loaded initially)
         self._models_loaded = True
 
         # Connection type tracking (assume local initially)
         self._is_local_connection = True
+
+        # Live Mode tracking
+        self._live_mode_active = False
 
         # Docker manager for server control
         self._docker_manager = DockerManager()
@@ -186,6 +195,23 @@ class GtkTray(ServerControlMixin, AbstractTray):
         )
         self.transcribe_item.set_sensitive(False)
         menu.append(self.transcribe_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        # Live Mode (RealtimeSTT)
+        self.start_live_item = Gtk.MenuItem(label="Start Live Mode")
+        self.start_live_item.connect(
+            "activate", lambda _: self._on_toggle_live_mode_click()
+        )
+        self.start_live_item.set_sensitive(False)
+        menu.append(self.start_live_item)
+
+        self.mute_live_item = Gtk.MenuItem(label="Mute Live Mode")
+        self.mute_live_item.connect(
+            "activate", lambda _: self._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
+        )
+        self.mute_live_item.set_sensitive(False)
+        menu.append(self.mute_live_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -261,6 +287,36 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 state == TrayState.STANDBY and self._is_local_connection
             )
 
+        # Live Mode actions
+        # Check if we're in a Live Mode state
+        is_live_state = state in (TrayState.LIVE_LISTENING, TrayState.LIVE_MUTED)
+        if is_live_state:
+            self._live_mode_active = True
+        elif state == TrayState.STANDBY:
+            # Only reset when returning to STANDBY
+            self._live_mode_active = False
+
+        if self.start_live_item:
+            # Enabled in STANDBY or LIVE states
+            can_toggle_live = state == TrayState.STANDBY or is_live_state
+            self.start_live_item.set_sensitive(can_toggle_live)
+
+            # Update label based on state
+            if is_live_state:
+                self.start_live_item.set_label("Stop Live Mode")
+            else:
+                self.start_live_item.set_label("Start Live Mode")
+
+        if self.mute_live_item:
+            # Enabled only when Live Mode is active
+            self.mute_live_item.set_sensitive(is_live_state)
+
+            # Update label based on state
+            if state == TrayState.LIVE_MUTED:
+                self.mute_live_item.set_label("Unmute Live Mode")
+            else:
+                self.mute_live_item.set_label("Mute Live Mode")
+
         # Emit D-Bus signal for Dashboard to track state
         if self._dbus_service:
             try:
@@ -323,6 +379,26 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self._is_local_connection = is_local
         # Re-trigger state update to refresh menu item states
         GLib.idle_add(self._do_set_state, self.state)
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """Set Live Mode active state and update menu."""
+        self._live_mode_active = active
+        # Update menu state on main thread
+        GLib.idle_add(self._update_live_mode_menu, active)
+
+    def _update_live_mode_menu(self, active: bool) -> bool:
+        """Update Live Mode menu items (called on main thread)."""
+        # We rely on _do_set_state which handles labels based on state enum now
+        # But we force a state update to ensure UI is consistent
+        self._do_set_state(self.state)
+        return False
+
+    def _on_toggle_live_mode_click(self) -> None:
+        """Handle Start/Stop Live Mode click."""
+        if self._live_mode_active:
+            self._trigger_callback(TrayAction.STOP_LIVE_MODE)
+        else:
+            self._trigger_callback(TrayAction.START_LIVE_MODE)
 
     def run(self) -> None:
         """Start the GTK main loop."""
@@ -414,6 +490,8 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 TrayState.RECORDING,
                 TrayState.UPLOADING,
                 TrayState.TRANSCRIBING,
+                TrayState.LIVE_LISTENING,
+                TrayState.LIVE_MUTED,
             )
 
         return state, host, connected
@@ -531,6 +609,23 @@ class GtkTray(ServerControlMixin, AbstractTray):
         self._trigger_callback(TrayAction.DISCONNECT)
         # Set tray state to IDLE (client not running)
         self.set_state(TrayState.IDLE)
+
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Forward live transcription text to dashboard for display.
+
+        Called by the orchestrator during WebSocket streaming recording
+        when live transcription updates are received.
+
+        Args:
+            text: The live transcription text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        if self._dbus_service:
+            try:
+                self._dbus_service.emit_live_transcription_text(text, append)
+            except Exception as e:
+                logger.debug(f"Failed to emit live text via D-Bus: {e}")
 
     def open_file_dialog(
         self, title: str, filetypes: list[tuple[str, str]]

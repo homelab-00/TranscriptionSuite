@@ -21,6 +21,9 @@ class TrayState(Enum):
     UPLOADING = "uploading"  # Sending audio to server
     TRANSCRIBING = "transcribing"  # Waiting for transcription
     ERROR = "error"  # Error state
+    # Live Mode states
+    LIVE_LISTENING = "live_listening"  # Live Mode active, microphone unmuted
+    LIVE_MUTED = "live_muted"  # Live Mode active, microphone muted
 
 
 class TrayAction(Enum):
@@ -36,6 +39,10 @@ class TrayAction(Enum):
     RECONNECT = "reconnect"
     DISCONNECT = "disconnect"
     QUIT = "quit"
+    # Live Mode actions
+    START_LIVE_MODE = "start_live_mode"
+    STOP_LIVE_MODE = "stop_live_mode"
+    TOGGLE_LIVE_MUTE = "toggle_live_mute"
     # Docker server control actions
     SERVER_START_LOCAL = "server_start_local"
     SERVER_START_REMOTE = "server_start_remote"

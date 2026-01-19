@@ -478,12 +478,13 @@ class AudioRecorder:
             for i in range(audio.get_device_count()):
                 try:
                     info = audio.get_device_info_by_index(i)
-                    if info.get("maxInputChannels", 0) > 0:
+                    max_input_channels = int(info.get("maxInputChannels", 0))
+                    if max_input_channels > 0:
                         devices.append(
                             {
                                 "index": i,
                                 "name": info.get("name", f"Device {i}"),
-                                "channels": info.get("maxInputChannels"),
+                                "channels": max_input_channels,
                                 "sample_rate": info.get("defaultSampleRate"),
                             }
                         )

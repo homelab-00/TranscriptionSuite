@@ -37,6 +37,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [7.1 Web UI Routes](#71-web-ui-routes)
   - [7.2 API Endpoints](#72-api-endpoints)
   - [7.3 WebSocket Protocol](#73-websocket-protocol)
+  - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
 - [8. Backend Development](#8-backend-development)
   - [8.1 Backend Structure](#81-backend-structure)
   - [8.2 Running the Server Locally](#82-running-the-server-locally)
@@ -65,9 +66,12 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
+  - [13.5 Checking Installed Packages](#135-checking-installed-packages)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
+- [15. Known Issues & Future Work](#15-known-issues--future-work)
+  - [15.1 Live Mode Language Setting](#151-live-mode-language-setting)
 
 ---
 
@@ -161,6 +165,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  TranscriptionSuite Server                        │  │
 │  │  - FastAPI REST API + WebSocket                   │  │
 │  │  - faster-whisper transcription                   │  │
+│  │  - Live Mode (RealtimeSTT) continuous transcribe  │  │
 │  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
 │  │  - React frontend (Web UI)                        │  │
@@ -190,6 +195,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
+- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM
 
 ### 2.2 Platform Architectures
 
@@ -523,6 +529,7 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 | `/api/transcribe/audio` | POST | Transcribe uploaded audio |
 | `/api/transcribe/cancel` | POST | Cancel running transcription |
 | `/ws` | WebSocket | Real-time audio streaming |
+| `/ws/live` | WebSocket | Live Mode continuous transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
 | `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization |
@@ -544,6 +551,31 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
 
+### 7.4 Live Mode WebSocket Protocol
+
+**Connection flow:**
+1. Connect to `/ws/live`
+2. Send auth: `{"type": "auth", "data": {"token": "<token>"}}`
+3. Receive: `{"type": "auth_ok"}`
+4. Send start: `{"type": "start", "data": {"language": "en"}}`
+5. Stream binary audio (16kHz PCM Int16)
+6. Receive real-time updates:
+   - `{"type": "partial", "data": {"text": "..."}}` - Interim transcription
+   - `{"type": "sentence", "data": {"text": "..."}}` - Completed sentence
+   - `{"type": "state", "data": {"state": "LISTENING|PROCESSING"}}` - Engine state changes
+7. Send mute: `{"type": "mute"}` or unmute: `{"type": "unmute"}`
+8. Send stop: `{"type": "stop"}`
+
+**Key differences from `/ws`:**
+- Continuous operation: Engine stays active between utterances
+- Sentence-by-sentence output: Completed sentences sent immediately
+- Mute control: Client can pause/resume audio capture without disconnecting
+- Model swapping: Unloads main model to free VRAM for Live Mode model
+
+**Audio format:**
+- Sample rate: 16kHz, Format: Int16 PCM (little-endian)
+- Raw PCM bytes sent directly (no metadata wrapper)
+
 ---
 
 ## 8. Backend Development
@@ -560,7 +592,8 @@ server/backend/
 │   ├── diarization_engine.py     # PyAnnote wrapper
 │   ├── model_manager.py          # Model lifecycle, job tracking
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
-│   ├── preview_engine.py         # Preview transcription
+│   ├── live_transcriber_engine.py # Live transcription for standalone clients
+│   ├── live_engine.py            # Live Mode engine (RealtimeSTT)
 │   └── stt/                      # Real-time speech-to-text engine
 │       ├── engine.py             # AudioToTextRecorder with VAD
 │       └── vad.py                # Dual VAD (Silero + WebRTC)
@@ -657,6 +690,12 @@ The dashboard provides a convenient way to manage GPU memory via the system tray
 - Checks server for active transcriptions before unloading
 - Returns HTTP 409 if server is busy
 
+**Live Mode Model Swapping:**
+- When Live Mode starts, main transcription model is automatically unloaded to free VRAM
+- Live Mode uses the same model as main_transcriber by default (configurable in config.yaml)
+- When Live Mode stops, main model is reloaded for normal transcription
+- This ensures efficient VRAM usage on consumer GPUs (e.g., RTX 3060 12GB)
+
 ---
 
 ## 10. Configuration Reference
@@ -667,12 +706,19 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 
 **Key sections:**
 - `main_transcriber` - Primary Whisper model, device, batch settings
-- `preview_transcriber` - Optional preview model for live transcription
+- `live_transcriber` - Live Mode continuous transcription (uses same model as main by default)
 - `diarization` - PyAnnote model and speaker detection
 - `remote_server` - Host, port, TLS settings
 - `storage` - Database path, audio storage
 - `local_llm` - LM Studio integration
 - `backup` - Automatic database backup settings
+
+**Live Mode Configuration:**
+- `live_transcriber.enabled` - Enable/disable Live Mode feature
+- `live_transcriber.post_speech_silence_duration` - Grace period after silence (default: 3.0s)
+- `live_transcriber.live_language` - Language code for Live Mode (currently not respected - see Known Issues)
+- Model is inherited from `main_transcriber.model` if not explicitly set
+- Automatically swaps models to free VRAM when Live Mode starts
 
 **Environment variables:**
 | Variable | Purpose |
@@ -883,6 +929,23 @@ sudo systemctl restart tailscaled
 ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 ```
 
+### 13.5 Checking Installed Packages
+
+To inspect the Python packages installed in the *running* `transcription-suite` server container:
+
+```bash
+docker exec transcription-suite python -c "
+from importlib.metadata import distributions
+for dist in sorted(distributions(), key=lambda d: d.name.lower()):
+    print(f'{dist.name:40} {dist.version}')
+"
+```
+
+This lists all installed packages and their versions, sorted alphabetically. Useful for:
+- Verifying package versions
+- Debugging dependency conflicts
+- Confirming successful installations after rebuilds
+
 ---
 
 ## 14. Dependencies
@@ -892,6 +955,7 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 - Python 3.12
 - FastAPI + Uvicorn
 - faster-whisper (CTranslate2 backend)
+- RealtimeSTT 0.3.104+ (Live Mode continuous transcription)
 - PyAnnote Audio 4.0.3+ (speaker diarization)
 - PyTorch 2.8.0 + TorchAudio 2.8.0
 - SQLite with FTS5
@@ -903,3 +967,24 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 - aiohttp (async HTTP client)
 - PyAudio (audio recording)
 - PyQt6 (KDE/Windows) or GTK3+AppIndicator (GNOME)
+
+---
+
+## 15. Known Issues & Future Work
+
+### 15.1 Live Mode Language Setting
+
+**Issue**: The `live_language` setting in `server/config.yaml` (line 117) is currently not being respected by the Live Mode transcription engine.
+
+**Current State**:
+- Setting is commented out in config.yaml with a TODO note
+- Dashboard UIs (KDE/GNOME) have a language selector, but it may not override the server's behavior
+- Language can be set through the dashboard, but effectiveness needs verification
+
+**Action Required**:
+- Investigate why the setting isn't being applied to the Live Mode engine
+- Verify the data flow from dashboard → API → live engine configuration
+- Ensure language preference is properly passed to the underlying transcription model
+- Test with various languages to confirm the setting takes effect
+
+**Workaround**: Use the language selector in the dashboard Client view, which attempts to set the language via the WebSocket configuration payload.
