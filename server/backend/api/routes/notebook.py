@@ -289,11 +289,17 @@ async def upload_and_transcribe(
     enable_diarization: bool = Form(False),
     enable_word_timestamps: bool = Form(True),
     file_created_at: Optional[str] = Form(None),
+    expected_speakers: Optional[int] = Form(None),
 ) -> Dict[str, Any]:
     """
     Upload an audio file, transcribe it, and save to the notebook database.
 
     Returns the recording_id for status tracking.
+
+    Parameters:
+    - expected_speakers: Exact number of speakers (2-10). Forces diarization to
+      identify exactly this many speakers. Useful for podcasts with known hosts
+      where occasional clips should be attributed to the main speakers.
 
     Returns 409 Conflict if another transcription job is already running.
     """
@@ -302,6 +308,14 @@ async def upload_and_transcribe(
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
+
+    # Validate expected_speakers parameter
+    if expected_speakers is not None:
+        if expected_speakers < 1 or expected_speakers > 10:
+            raise HTTPException(
+                status_code=400,
+                detail="expected_speakers must be between 1 and 10",
+            )
 
     # Get model manager and check if busy
     model_manager = request.app.state.model_manager
@@ -350,7 +364,9 @@ async def upload_and_transcribe(
                 audio_data, sample_rate = load_audio(
                     str(tmp_path), target_sample_rate=16000
                 )
-                diar_result = diar_engine.diarize_audio(audio_data, sample_rate)
+                diar_result = diar_engine.diarize_audio(
+                    audio_data, sample_rate, num_speakers=expected_speakers
+                )
 
                 # Convert to list of dicts for database
                 diarization_segments = [seg.to_dict() for seg in diar_result.segments]

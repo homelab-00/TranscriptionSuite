@@ -402,6 +402,7 @@ class APIClient:
         language: str | None = None,
         word_timestamps: bool = True,
         diarization: bool = False,
+        expected_speakers: int | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """
@@ -412,6 +413,7 @@ class APIClient:
             language: Language code (None for auto-detect)
             word_timestamps: Include word-level timestamps
             diarization: Enable speaker diarization
+            expected_speakers: Exact number of speakers (2-10, None for auto-detect)
             on_progress: Optional callback for progress updates
 
         Returns:
@@ -432,6 +434,8 @@ class APIClient:
             data.add_field("language", language)
         data.add_field("word_timestamps", str(word_timestamps).lower())
         data.add_field("diarization", str(diarization).lower())
+        if expected_speakers is not None:
+            data.add_field("expected_speakers", str(expected_speakers))
 
         # Use longer timeout for transcription
         timeout = aiohttp.ClientTimeout(total=self.transcription_timeout)

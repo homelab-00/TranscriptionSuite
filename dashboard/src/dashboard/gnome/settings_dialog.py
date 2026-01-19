@@ -73,6 +73,10 @@ class SettingsDialog:
         # Client tab - Audio
         self.device_combo: Any = None
 
+        # Client tab - Diarization
+        self.constrain_speakers_check: Any = None
+        self.expected_speakers_spin: Any = None
+
         # Client tab - Connection
         self.host_entry: Any = None
         self.remote_host_entry: Any = None
@@ -434,6 +438,75 @@ class SettingsDialog:
         # Populate devices
         self._refresh_devices()
 
+        # === Diarization Section ===
+        diarization_frame = Gtk.Frame()
+        diarization_frame.add_css_class("settings-section")
+        diarization_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        diarization_box.set_margin_start(12)
+        diarization_box.set_margin_end(12)
+        diarization_box.set_margin_top(8)
+        diarization_box.set_margin_bottom(8)
+
+        diarization_label = Gtk.Label(label="Diarization")
+        diarization_label.add_css_class("settings-section-title")
+        diarization_label.set_halign(Gtk.Align.START)
+        diarization_box.append(diarization_label)
+
+        # Constrain speakers checkbox
+        self.constrain_speakers_check = Gtk.CheckButton(
+            label="Constrain to expected number of speakers"
+        )
+        self.constrain_speakers_check.set_tooltip_text(
+            "When enabled, forces diarization to identify exactly the specified number of speakers.\n"
+            "Useful for podcasts with known hosts where occasional clips should be attributed to the main speakers."
+        )
+        self.constrain_speakers_check.connect("toggled", self._on_constrain_speakers_toggled)
+        diarization_box.append(self.constrain_speakers_check)
+
+        # Number of speakers row
+        speakers_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        speakers_label = Gtk.Label(label="Number of speakers:")
+        speakers_label.set_size_request(140, -1)
+        speakers_label.set_halign(Gtk.Align.START)
+        speakers_row.append(speakers_label)
+
+        speakers_adjustment = Gtk.Adjustment(
+            value=2.0,
+            lower=2.0,
+            upper=10.0,
+            step_increment=1.0,
+            page_increment=1.0,
+        )
+        self.expected_speakers_spin = Gtk.SpinButton()
+        self.expected_speakers_spin.set_adjustment(speakers_adjustment)
+        self.expected_speakers_spin.set_digits(0)
+        self.expected_speakers_spin.set_value(2.0)
+        self.expected_speakers_spin.set_tooltip_text(
+            "Specify the exact number of speakers (2-10).\n"
+            "Example: Set to 2 for a podcast with 2 hosts."
+        )
+        speakers_row.append(self.expected_speakers_spin)
+
+        speakers_row_spacer = Gtk.Box()
+        speakers_row_spacer.set_hexpand(True)
+        speakers_row.append(speakers_row_spacer)
+
+        diarization_box.append(speakers_row)
+
+        # Help text
+        diarization_help = Gtk.Label(
+            label="Useful for podcasts with known hosts. Forces all speech to be attributed to "
+            "exactly this many speakers, ignoring occasional clips."
+        )
+        diarization_help.add_css_class("settings-help-text")
+        diarization_help.set_halign(Gtk.Align.START)
+        diarization_help.set_wrap(True)
+        diarization_box.append(diarization_help)
+
+        diarization_frame.set_child(diarization_box)
+        content.append(diarization_frame)
+
         # === Connection Section ===
         connection_frame = Gtk.Frame()
         connection_frame.add_css_class("settings-section")
@@ -670,6 +743,11 @@ class SettingsDialog:
             self.token_entry.set_visibility(button.get_active())
             button.set_label("Hide" if button.get_active() else "Show")
 
+    def _on_constrain_speakers_toggled(self, button: Gtk.CheckButton) -> None:
+        """Enable/disable the expected speakers spinbox based on checkbox state."""
+        if self.expected_speakers_spin:
+            self.expected_speakers_spin.set_sensitive(button.get_active())
+
     def _refresh_devices(self) -> None:
         """Refresh the audio device list."""
         if not self.device_combo:
@@ -756,6 +834,18 @@ class SettingsDialog:
             grace_period = self.config.get("live_mode", "grace_period", default=1.0)
             self.grace_period_spin.set_value(grace_period)
 
+        # Client tab - Diarization
+        if self.constrain_speakers_check and self.expected_speakers_spin:
+            expected_speakers = self.config.get("diarization", "expected_speakers", default=None)
+            if expected_speakers is not None:
+                self.constrain_speakers_check.set_active(True)
+                self.expected_speakers_spin.set_value(float(expected_speakers))
+                self.expected_speakers_spin.set_sensitive(True)
+            else:
+                self.constrain_speakers_check.set_active(False)
+                self.expected_speakers_spin.set_value(2.0)
+                self.expected_speakers_spin.set_sensitive(False)
+
         # Client tab - Connection
         if self.host_entry:
             self.host_entry.set_text(
@@ -823,6 +913,17 @@ class SettingsDialog:
             self.config.set(
                 "live_mode", "grace_period", value=self.grace_period_spin.get_value()
             )
+
+        # Client tab - Diarization
+        if self.constrain_speakers_check and self.expected_speakers_spin:
+            if self.constrain_speakers_check.get_active():
+                self.config.set(
+                    "diarization",
+                    "expected_speakers",
+                    value=int(self.expected_speakers_spin.get_value()),
+                )
+            else:
+                self.config.set("diarization", "expected_speakers", value=None)
 
         # Client tab - Connection
         if self.host_entry:
@@ -1039,6 +1140,66 @@ class SettingsDialog:
         # Populate devices
         self._refresh_devices_gtk3()
 
+        # === Diarization Section ===
+        diarization_frame = Gtk.Frame(label="Diarization")
+        diarization_frame.set_margin_bottom(8)
+        diarization_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        diarization_box.set_margin_start(8)
+        diarization_box.set_margin_end(8)
+        diarization_box.set_margin_top(8)
+        diarization_box.set_margin_bottom(8)
+
+        # Constrain speakers checkbox
+        self.constrain_speakers_check = Gtk.CheckButton(
+            label="Constrain to expected number of speakers"
+        )
+        self.constrain_speakers_check.set_tooltip_text(
+            "When enabled, forces diarization to identify exactly the specified number of speakers.\n"
+            "Useful for podcasts with known hosts where occasional clips should be attributed to the main speakers."
+        )
+        self.constrain_speakers_check.connect("toggled", self._on_constrain_speakers_toggled_gtk3)
+        diarization_box.pack_start(self.constrain_speakers_check, False, False, 0)
+
+        # Number of speakers row
+        speakers_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        speakers_label = Gtk.Label(label="Number of speakers:")
+        speakers_label.set_xalign(0)
+        speakers_label.set_size_request(140, -1)
+        speakers_row.pack_start(speakers_label, False, False, 0)
+
+        speakers_adjustment = Gtk.Adjustment(
+            value=2.0,
+            lower=2.0,
+            upper=10.0,
+            step_increment=1.0,
+            page_increment=1.0,
+        )
+        self.expected_speakers_spin = Gtk.SpinButton()
+        self.expected_speakers_spin.set_adjustment(speakers_adjustment)
+        self.expected_speakers_spin.set_digits(0)
+        self.expected_speakers_spin.set_value(2.0)
+        self.expected_speakers_spin.set_tooltip_text(
+            "Specify the exact number of speakers (2-10).\n"
+            "Example: Set to 2 for a podcast with 2 hosts."
+        )
+        speakers_row.pack_start(self.expected_speakers_spin, False, False, 0)
+        diarization_box.pack_start(speakers_row, False, False, 0)
+
+        # Help text
+        diarization_help = Gtk.Label()
+        diarization_help.set_markup(
+            '<span size="small" foreground="gray">'
+            "Useful for podcasts with known hosts. Forces all speech to be attributed to "
+            "exactly this many speakers, ignoring occasional clips."
+            "</span>"
+        )
+        diarization_help.set_xalign(0)
+        diarization_help.set_line_wrap(True)
+        diarization_box.pack_start(diarization_help, False, False, 0)
+
+        diarization_frame.add(diarization_box)
+        box.pack_start(diarization_frame, False, False, 0)
+
         # === Connection Section ===
         connection_frame = Gtk.Frame(label="Connection")
         connection_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1198,6 +1359,11 @@ class SettingsDialog:
             self.token_entry.set_visibility(button.get_active())
             button.set_label("Hide" if button.get_active() else "Show")
 
+    def _on_constrain_speakers_toggled_gtk3(self, button) -> None:
+        """Enable/disable the expected speakers spinbox based on checkbox state (GTK3)."""
+        if self.expected_speakers_spin:
+            self.expected_speakers_spin.set_sensitive(button.get_active())
+
     def _refresh_devices_gtk3(self) -> None:
         """Refresh the audio device list (GTK3)."""
         if not self.device_combo:
@@ -1242,6 +1408,17 @@ class SettingsDialog:
                     self.config.set("recording", "device_index", value=int(device_id))
                 except (ValueError, TypeError):
                     self.config.set("recording", "device_index", value=None)
+
+        # Client tab - Diarization
+        if self.constrain_speakers_check and self.expected_speakers_spin:
+            if self.constrain_speakers_check.get_active():
+                self.config.set(
+                    "diarization",
+                    "expected_speakers",
+                    value=int(self.expected_speakers_spin.get_value()),
+                )
+            else:
+                self.config.set("diarization", "expected_speakers", value=None)
 
         # Client tab - Connection
         if self.host_entry:

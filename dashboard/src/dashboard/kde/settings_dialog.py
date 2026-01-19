@@ -513,6 +513,50 @@ class SettingsDialog(QDialog):
         # Populate devices
         self._refresh_devices()
 
+        # === Diarization Section ===
+        diarization_group = QGroupBox("Diarization")
+        diarization_layout = QVBoxLayout(diarization_group)
+
+        # Constrain speakers checkbox
+        self.constrain_speakers_check = QCheckBox(
+            "Constrain to expected number of speakers"
+        )
+        self.constrain_speakers_check.setToolTip(
+            "When enabled, forces diarization to identify exactly the specified number of speakers.\n"
+            "Useful for podcasts with known hosts where occasional clips should be attributed to the main speakers."
+        )
+        self.constrain_speakers_check.toggled.connect(self._on_constrain_speakers_toggled)
+        diarization_layout.addWidget(self.constrain_speakers_check)
+
+        # Number of speakers row
+        speakers_row = QHBoxLayout()
+        speakers_label = QLabel("Number of speakers:")
+        speakers_label.setObjectName("fieldLabel")
+        speakers_row.addWidget(speakers_label)
+
+        self.expected_speakers_spin = QSpinBox()
+        self.expected_speakers_spin.setRange(2, 10)
+        self.expected_speakers_spin.setValue(2)
+        self.expected_speakers_spin.setFixedWidth(100)
+        self.expected_speakers_spin.setToolTip(
+            "Specify the exact number of speakers (2-10).\n"
+            "Example: Set to 2 for a podcast with 2 hosts."
+        )
+        speakers_row.addWidget(self.expected_speakers_spin)
+        speakers_row.addStretch()
+        diarization_layout.addLayout(speakers_row)
+
+        # Help text
+        diarization_help = QLabel(
+            "Useful for podcasts with known hosts. Forces all speech to be attributed to "
+            "exactly this many speakers, ignoring occasional clips."
+        )
+        diarization_help.setObjectName("helpText")
+        diarization_help.setWordWrap(True)
+        diarization_layout.addWidget(diarization_help)
+
+        layout.addWidget(diarization_group)
+
         # === Connection Section ===
         connection_group = QGroupBox("Connection")
         connection_layout = QVBoxLayout(connection_group)
@@ -705,6 +749,10 @@ class SettingsDialog(QDialog):
             self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
             self.show_token_btn.setText("Show")
 
+    def _on_constrain_speakers_toggled(self, checked: bool) -> None:
+        """Enable/disable the expected speakers spinbox based on checkbox state."""
+        self.expected_speakers_spin.setEnabled(checked)
+
     def _refresh_devices(self) -> None:
         """Refresh the audio device list."""
         self.device_combo.clear()
@@ -783,6 +831,17 @@ class SettingsDialog(QDialog):
         grace_period = self.config.get("live_mode", "grace_period", default=1.0)
         self.grace_period_spin.setValue(grace_period)
 
+        # Client tab - Diarization
+        expected_speakers = self.config.get("diarization", "expected_speakers", default=None)
+        if expected_speakers is not None:
+            self.constrain_speakers_check.setChecked(True)
+            self.expected_speakers_spin.setValue(expected_speakers)
+            self.expected_speakers_spin.setEnabled(True)
+        else:
+            self.constrain_speakers_check.setChecked(False)
+            self.expected_speakers_spin.setValue(2)
+            self.expected_speakers_spin.setEnabled(False)
+
         # Client tab - Connection
         self.host_edit.setText(self.config.get("server", "host", default="localhost"))
         self.port_spin.setValue(self.config.get("server", "port", default=8000))
@@ -827,6 +886,14 @@ class SettingsDialog(QDialog):
         self.config.set(
             "live_mode", "grace_period", value=self.grace_period_spin.value()
         )
+
+        # Client tab - Diarization
+        if self.constrain_speakers_check.isChecked():
+            self.config.set(
+                "diarization", "expected_speakers", value=self.expected_speakers_spin.value()
+            )
+        else:
+            self.config.set("diarization", "expected_speakers", value=None)
 
         # Client tab - Connection
         self.config.set(

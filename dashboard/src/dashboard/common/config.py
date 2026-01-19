@@ -95,6 +95,9 @@ def get_default_config() -> dict[str, Any]:
         "dashboard": {
             "stop_server_on_quit": True,  # Stop Docker server when quitting
         },
+        "diarization": {
+            "expected_speakers": None,  # Exact number of speakers (2-10), or None for auto-detect
+        },
     }
 
 

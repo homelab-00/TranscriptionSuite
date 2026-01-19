@@ -52,6 +52,7 @@ async def transcribe_audio(
     language: Optional[str] = Form(None),
     word_timestamps: Optional[bool] = Form(None),
     diarization: Optional[bool] = Form(None),
+    expected_speakers: Optional[int] = Form(None),
 ) -> Dict[str, Any]:
     """
     Transcribe an uploaded audio file.
@@ -66,10 +67,23 @@ async def transcribe_audio(
     - Standalone client (X-Client-Type: standalone): Uses static_transcription config
     - Web UI clients: Uses API defaults (word_timestamps=True, diarization=False)
 
+    Parameters:
+    - expected_speakers: Exact number of speakers (2-10). Forces diarization to
+      identify exactly this many speakers. Useful for podcasts with known hosts
+      where occasional clips should be attributed to the main speakers.
+
     Returns 409 Conflict if another transcription job is already running.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
+
+    # Validate expected_speakers parameter
+    if expected_speakers is not None:
+        if expected_speakers < 1 or expected_speakers > 10:
+            raise HTTPException(
+                status_code=400,
+                detail="expected_speakers must be between 1 and 10",
+            )
 
     # Get model manager and check if busy
     model_manager = request.app.state.model_manager
@@ -129,9 +143,27 @@ async def transcribe_audio(
         # Handle diarization if requested
         if diarization:
             try:
+                logger.info("Running diarization on transcribed audio")
                 model_manager.load_diarization_model()
-                # TODO: Integrate diarization with transcription results
-                logger.info("Diarization requested but not yet integrated")
+                diar_engine = model_manager.diarization_engine
+
+                # Load audio for diarization
+                from server.core.audio_utils import load_audio
+
+                audio_data, sample_rate = load_audio(tmp_path, target_sample_rate=16000)
+
+                # Run diarization with expected_speakers parameter
+                diar_result = diar_engine.diarize_audio(
+                    audio_data, sample_rate, num_speakers=expected_speakers
+                )
+
+                logger.info(
+                    f"Diarization complete: {diar_result.num_speakers} speakers found"
+                )
+
+                # TODO: Integrate diarization segments with transcription results
+                # For now, just log success - full integration requires aligning
+                # speaker labels with transcript segments based on timestamps
             except Exception as e:
                 logger.warning(f"Diarization failed: {e}")
 
