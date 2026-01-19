@@ -93,8 +93,15 @@ class ServerConfig:
         ]
 
         for path in candidates:
-            if path.exists():
-                return path
+            if path.exists() and path.is_file():
+                # Check if file is readable by attempting to open it
+                try:
+                    with path.open("r", encoding="utf-8"):
+                        pass
+                    return path
+                except (PermissionError, OSError):
+                    # Skip unreadable config files and try next candidate
+                    continue
 
         return None
 

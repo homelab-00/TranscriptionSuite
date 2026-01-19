@@ -93,6 +93,7 @@ echo "→ Copying assets..."
 mkdir -p "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets"
 cp "$PROJECT_ROOT/build/assets/profile.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
 cp "$PROJECT_ROOT/build/assets/logo.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
+cp "$PROJECT_ROOT/build/assets/logo_wide.png" "$BUILD_DIR/AppDir/usr/share/transcriptionsuite/assets/"
 
 # Create launcher script that uses system Python with GTK
 cat > "$BUILD_DIR/AppDir/usr/bin/transcriptionsuite-gnome" << 'EOF'

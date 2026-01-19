@@ -25,6 +25,7 @@ a = Analysis(
     datas=[
         # Assets (logo, profile picture)
         (str(repo_root / "build" / "assets" / "logo.png"), "build/assets"),
+        (str(repo_root / "build" / "assets" / "logo_wide.png"), "build/assets"),
         (str(repo_root / "build" / "assets" / "profile.png"), "build/assets"),
         # README files for Help menu
         (str(repo_root / "README.md"), "."),
