@@ -1286,6 +1286,19 @@ class DashboardWindow(_get_dashboard_base()):
         preview_title = Gtk.Label(label="Live Transcription")
         preview_title.add_css_class("dim-label")
         preview_header.append(preview_title)
+
+        # Spacer to push button to the right
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        preview_header.append(spacer)
+
+        # Copy and Clear button (upper right)
+        self._copy_clear_btn = Gtk.Button(label="Copy and Clear")
+        self._copy_clear_btn.add_css_class("copy-clear-btn")
+        self._copy_clear_btn.set_size_request(120, 24)
+        self._copy_clear_btn.connect("clicked", self._on_copy_and_clear_live_preview)
+        preview_header.append(self._copy_clear_btn)
+
         preview_box.append(preview_header)
 
         # Scrollable text view for live transcription history (~10 lines)
@@ -1501,6 +1514,24 @@ class DashboardWindow(_get_dashboard_base()):
             font-family: "Inter", sans-serif;
             font-size: 13px;
             padding: 8px;
+        }
+
+        /* Copy and Clear button */
+        .copy-clear-btn {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 0 8px;
+            min-height: 24px;
+        }
+        .copy-clear-btn:hover {
+            background: #3d3d3d;
+            border-color: #505050;
+        }
+        .copy-clear-btn:active {
+            background: #1e1e1e;
         }
         """
         provider = Gtk.CssProvider()
@@ -2203,6 +2234,31 @@ class DashboardWindow(_get_dashboard_base()):
             # Disabled state - gray
             self._notebook_toggle_btn.remove_css_class("notebook-enabled")
             self._notebook_toggle_btn.add_css_class("notebook-disabled")
+
+    def _on_copy_and_clear_live_preview(self, _button: Gtk.Button) -> None:
+        """Copy all text from live preview to clipboard and clear the field."""
+        if (
+            not hasattr(self, "_live_transcription_text_buffer")
+            or not self._live_transcription_text_buffer
+        ):
+            return
+
+        # Get all text from the buffer
+        start = self._live_transcription_text_buffer.get_start_iter()
+        end = self._live_transcription_text_buffer.get_end_iter()
+        text = self._live_transcription_text_buffer.get_text(start, end, False)
+
+        if text:
+            # Copy to clipboard
+            clipboard = Gdk.Display.get_default().get_clipboard()
+            if clipboard:
+                clipboard.set(text)
+                logger.debug("Copied live preview text to clipboard")
+
+        # Clear the buffer and history
+        self._live_transcription_text_buffer.set_text("")
+        self._live_transcription_history.clear()
+        logger.debug("Cleared live preview text and history")
 
     def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """

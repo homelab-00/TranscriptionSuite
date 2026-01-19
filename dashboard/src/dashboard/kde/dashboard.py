@@ -27,6 +27,7 @@ from PyQt6.QtGui import (
     QTextCharFormat,
 )
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFrame,
@@ -1485,6 +1486,20 @@ class DashboardWindow(QMainWindow):
         preview_title.setStyleSheet("color: #a0a0a0; font-size: 13px;")
         preview_header.addWidget(preview_title)
         preview_header.addStretch()
+
+        # Copy and Clear button (upper right)
+        self._copy_clear_btn = QPushButton("Copy and Clear")
+        self._copy_clear_btn.setMaximumWidth(120)
+        self._copy_clear_btn.setFixedHeight(24)
+        self._copy_clear_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d2d; border: 1px solid #404040; "
+            "border-radius: 4px; color: #e0e0e0; font-size: 11px; padding: 0 8px; }"
+            "QPushButton:hover { background-color: #3d3d3d; border-color: #505050; }"
+            "QPushButton:pressed { background-color: #1e1e1e; }"
+        )
+        self._copy_clear_btn.clicked.connect(self._copy_and_clear_live_preview)
+        preview_header.addWidget(self._copy_clear_btn)
+
         preview_display_layout.addLayout(preview_header)
 
         # Collapsible content
@@ -2960,6 +2975,29 @@ class DashboardWindow(QMainWindow):
         is_visible = self._preview_content.isVisible()
         self._preview_content.setVisible(not is_visible)
         self._preview_collapse_btn.setText("\u25b6" if is_visible else "\u25bc")
+
+    def _copy_and_clear_live_preview(self) -> None:
+        """Copy all text from live preview to clipboard and clear the field."""
+        if (
+            not hasattr(self, "_live_transcription_text_edit")
+            or not self._live_transcription_text_edit
+        ):
+            return
+
+        # Get all text from the text edit
+        text = self._live_transcription_text_edit.toPlainText()
+
+        if text:
+            # Copy to clipboard
+            clipboard = QApplication.clipboard()
+            if clipboard:
+                clipboard.setText(text)
+                logger.debug("Copied live preview text to clipboard")
+
+        # Clear the text edit and history
+        self._live_transcription_text_edit.clear()
+        self._live_transcription_history.clear()
+        logger.debug("Cleared live preview text and history")
 
     def update_live_transcription_text(self, text: str, append: bool = False) -> None:
         """
