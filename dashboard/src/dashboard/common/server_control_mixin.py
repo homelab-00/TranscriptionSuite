@@ -6,10 +6,23 @@ the Docker server across different platform-specific tray implementations.
 """
 
 import logging
+from typing import Any, Callable, Protocol
 
 from dashboard.common.docker_manager import DockerManager, ServerMode
 
 logger = logging.getLogger(__name__)
+
+
+class _ServerControlHost(Protocol):
+    """Protocol defining required attributes for ServerControlMixin."""
+
+    _docker_manager: DockerManager
+
+    def show_notification(self, title: str, message: str) -> None: ...
+
+    def _run_server_operation(
+        self, operation: Callable[[], Any], progress_msg: str
+    ) -> None: ...
 
 
 class ServerControlMixin:
@@ -22,7 +35,7 @@ class ServerControlMixin:
         - self._run_server_operation(operation, progress_msg): platform-specific method for async ops
     """
 
-    def _on_server_start_local(self) -> None:
+    def _on_server_start_local(self: _ServerControlHost) -> None:
         """Start Docker server in local (HTTP) mode."""
         self._run_server_operation(
             lambda: self._docker_manager.start_server(
@@ -32,7 +45,7 @@ class ServerControlMixin:
             "Starting server (local mode)...",
         )
 
-    def _on_server_start_remote(self) -> None:
+    def _on_server_start_remote(self: _ServerControlHost) -> None:
         """Start Docker server in remote (HTTPS) mode."""
         self._run_server_operation(
             lambda: self._docker_manager.start_server(
@@ -42,7 +55,7 @@ class ServerControlMixin:
             "Starting server (remote mode)...",
         )
 
-    def _on_server_stop(self) -> None:
+    def _on_server_stop(self: _ServerControlHost) -> None:
         """Stop the Docker server."""
         self._run_server_operation(
             lambda: self._docker_manager.stop_server(
@@ -51,7 +64,7 @@ class ServerControlMixin:
             "Stopping server...",
         )
 
-    def _on_server_status(self) -> None:
+    def _on_server_status(self: _ServerControlHost) -> None:
         """Check Docker server status."""
         try:
             available, docker_msg = self._docker_manager.is_docker_available()

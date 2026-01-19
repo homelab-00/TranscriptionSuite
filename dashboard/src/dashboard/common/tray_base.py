@@ -6,8 +6,12 @@ Defines the interface that all platform-specific tray implementations must follo
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from dashboard.common.models import TrayAction, TrayState
+
+if TYPE_CHECKING:
+    from dashboard.common.orchestrator import ClientOrchestrator
 
 
 class AbstractTray(ABC):
@@ -22,7 +26,7 @@ class AbstractTray(ABC):
         self.app_name = app_name
         self.state = TrayState.DISCONNECTED
         self.callbacks: dict[TrayAction, Callable[[], None]] = {}
-        self.orchestrator = None  # Set by orchestrator for state sync
+        self.orchestrator: "ClientOrchestrator | None" = None  # Set by orchestrator for state sync
 
     def register_callback(
         self, action: TrayAction, callback: Callable[[], None]

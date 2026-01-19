@@ -994,6 +994,7 @@ class LiveModeClient:
             # Use SSL kwargs for HTTPS WebSocket connections
             ssl_kwargs = self.api_client._get_ssl_kwargs()
             self._ws = await session.ws_connect(url, **ssl_kwargs)
+            assert self._ws is not None  # ws_connect always returns a valid websocket
 
             # Send authentication message
             await self._ws.send_json(
@@ -1171,6 +1172,7 @@ class StreamingClient:
             # Use SSL kwargs for HTTPS WebSocket connections (handles IP fallback)
             ssl_kwargs = self.api_client._get_ssl_kwargs()
             self._ws = await session.ws_connect(url, headers=headers, **ssl_kwargs)
+            assert self._ws is not None  # ws_connect always returns a valid websocket
 
             # Send authentication message
             await self._ws.send_json(

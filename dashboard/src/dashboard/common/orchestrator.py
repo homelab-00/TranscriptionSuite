@@ -390,18 +390,19 @@ class ClientOrchestrator:
                 self.tray.set_state(TrayState.UPLOADING)
 
             # Get recorded audio as WAV bytes
-            try:
-                audio_data = self.recorder.stop()
-                self.recorder = None
+            if self.recorder:
+                try:
+                    audio_data = self.recorder.stop()
+                    self.recorder = None
 
-                # Transcribe
-                self._schedule_async(self._transcribe_audio(audio_data))
+                    # Transcribe
+                    self._schedule_async(self._transcribe_audio(audio_data))
 
-            except Exception as e:
-                logger.error(f"Failed to stop recording: {e}")
-                if self.tray:
-                    self.tray.set_state(TrayState.ERROR)
-                    self.tray.show_notification("Error", str(e))
+                except Exception as e:
+                    logger.error(f"Failed to stop recording: {e}")
+                    if self.tray:
+                        self.tray.set_state(TrayState.ERROR)
+                        self.tray.show_notification("Error", str(e))
 
     def _on_cancel_recording(self) -> None:
         """Handle cancel recording/transcription action."""
