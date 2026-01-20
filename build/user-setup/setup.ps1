@@ -189,7 +189,7 @@ try {
     Write-Info "Docker image pulled successfully"
 } catch {
     Write-Warning "Could not pull from GitHub Container Registry (image may not be published yet)"
-    Write-Info "You can build locally instead: cd docker; docker compose build"
+    Write-Info "You can build locally instead: cd server/docker; docker compose build"
 }
 
 # ============================================================================

@@ -8,13 +8,15 @@ Handles:
 """
 
 import logging
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+import aiofiles
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from server.api.routes.utils import get_client_name, sanitize_for_log
@@ -198,9 +200,14 @@ async def update_title_patch(
 
 
 @router.get("/recordings/{recording_id}/audio")
-async def get_audio_file(recording_id: int) -> FileResponse:
+async def get_audio_file(
+    recording_id: int,
+    range: Optional[str] = Header(None, alias="Range"),
+) -> Response:
     """
-    Stream the audio file for a recording.
+    Stream the audio file for a recording with HTTP Range request support.
+
+    Supports partial content requests (HTTP 206) for efficient seeking in large files.
     """
     recording = get_recording(recording_id)
     if not recording:
@@ -221,10 +228,58 @@ async def get_audio_file(recording_id: int) -> FileResponse:
     }
     media_type = media_types.get(suffix, "audio/mpeg")
 
+    file_size = audio_path.stat().st_size
+
+    # Check for Range header
+    if range:
+        # Parse range header: "bytes=start-end"
+        range_match = re.match(r"bytes=(\d+)-(\d*)", range)
+        if range_match:
+            start = int(range_match.group(1))
+            end_str = range_match.group(2)
+            end = int(end_str) if end_str else file_size - 1
+
+            # Validate range
+            if start >= file_size:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Range Not Satisfiable",
+                    headers={"Content-Range": f"bytes */{file_size}"},
+                )
+
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+
+            async def stream_range():
+                async with aiofiles.open(audio_path, "rb") as f:
+                    await f.seek(start)
+                    remaining = content_length
+                    chunk_size = 64 * 1024  # 64KB chunks
+                    while remaining > 0:
+                        chunk = await f.read(min(chunk_size, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+
+            return StreamingResponse(
+                stream_range(),
+                status_code=206,
+                media_type=media_type,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(content_length),
+                    "Content-Disposition": f'inline; filename="{recording["filename"]}"',
+                },
+            )
+
+    # No Range header - return full file with Accept-Ranges header
     return FileResponse(
         path=audio_path,
         media_type=media_type,
         filename=recording["filename"],
+        headers={"Accept-Ranges": "bytes"},
     )
 
 

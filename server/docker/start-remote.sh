@@ -2,7 +2,7 @@
 # TranscriptionSuite - Start Server in Remote Mode (HTTPS/TLS)
 # Starts the server on https://localhost:8443
 # Requires TLS certificates configured in config.yaml
-# This script can run from the docker/ folder OR from ~/.config/TranscriptionSuite
+# This script can run from the server/docker/ folder OR from ~/.config/TranscriptionSuite
 
 set -e
 
@@ -51,11 +51,11 @@ fi
 # Find Config and .env Files
 # ============================================================================
 # This script works in two scenarios:
-#   1. Development: Run from docker/ directory (finds config at ../server/)
+#   1. Development: Run from server/docker/ directory (finds config at ../server/)
 #   2. End user: Run from ~/.config/TranscriptionSuite/ (finds config in same dir)
 #
 # Priority order for config.yaml:
-#   1. ../server/config.yaml (development - when running from docker/ dir)
+#   1. ../server/config.yaml (development - when running from server/docker/ dir)
 #   2. $SCRIPT_DIR/config.yaml (end user - when running from ~/.config/TranscriptionSuite/)
 #   3. ~/.config/TranscriptionSuite/config.yaml (fallback)
 #

@@ -143,7 +143,7 @@ cleanup_old_images() {
 }
 
 main() {
-    local custom_tag="${1:-latest}"
+    local custom_tag="${1:-${TAG:-latest}}"
     local is_release=false
     
     echo "=========================================="

@@ -19,6 +19,7 @@ import dayjs from 'dayjs';
 import { api } from '../services/api';
 import { Recording, Transcription, Word, LLMStatus } from '../types';
 import ChatPanel from '../components/ChatPanel';
+import { useTranscriptHighlighter, FlatWord } from '../hooks/useTranscriptHighlighter';
 
 export default function RecordingView() {
   const { id } = useParams<{ id: string }>();
@@ -35,10 +36,27 @@ export default function RecordingView() {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [displayTime, setDisplayTime] = useState(0); // Throttled for UI display only
   const [duration, setDuration] = useState(0);
   const soundRef = useRef<Howl | null>(null);
   const animationRef = useRef<number | null>(null);
+  const currentTimeRef = useRef(0); // Real-time tracking without re-renders
+  const lastUIUpdateRef = useRef(0); // Throttle UI updates
+
+  // Transcript container ref for highlighting
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
+  // Transcript highlighter hook (CSS Highlight API + binary search)
+  const {
+    updateHighlight,
+    clearHighlight,
+    createFlattenedWords,
+  } = useTranscriptHighlighter({
+    containerRef: transcriptContainerRef,
+  });
+
+  // Store flattened words for click handling
+  const flattenedWordsRef = useRef<FlatWord[]>([]);
 
   // LLM state
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
@@ -85,9 +103,11 @@ export default function RecordingView() {
     if (startTime && soundRef.current) {
       const time = parseFloat(startTime);
       soundRef.current.seek(time);
-      setCurrentTime(time);
+      currentTimeRef.current = time;
+      setDisplayTime(time);
+      updateHighlight(time);
     }
-  }, [searchParams, duration]);
+  }, [searchParams, duration, updateHighlight]);
 
   const loadRecording = async (recordingId: number) => {
     setLoading(true);
@@ -115,11 +135,13 @@ export default function RecordingView() {
           if (startTime) {
             const time = parseFloat(startTime);
             soundRef.current?.seek(time);
-            setCurrentTime(time);
+            currentTimeRef.current = time;
+            setDisplayTime(time);
           }
         },
         onend: () => {
           setPlaying(false);
+          clearHighlight();
         },
       });
     } catch (error) {
@@ -168,7 +190,19 @@ export default function RecordingView() {
 
   const updateTime = () => {
     if (soundRef.current && playing) {
-      setCurrentTime(soundRef.current.seek() as number);
+      const seek = soundRef.current.seek() as number;
+      currentTimeRef.current = seek;
+
+      // Update highlight every frame (no React re-render)
+      updateHighlight(seek);
+
+      // Throttle UI state updates to ~10fps for progress bar
+      const now = performance.now();
+      if (now - lastUIUpdateRef.current > 100) {
+        setDisplayTime(seek);
+        lastUIUpdateRef.current = now;
+      }
+
       animationRef.current = requestAnimationFrame(updateTime);
     }
   };
@@ -181,6 +215,8 @@ export default function RecordingView() {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      // Final UI sync on pause
+      setDisplayTime(currentTimeRef.current);
     } else {
       soundRef.current.play();
       animationRef.current = requestAnimationFrame(updateTime);
@@ -191,7 +227,9 @@ export default function RecordingView() {
   const seekTo = (time: number) => {
     if (soundRef.current) {
       soundRef.current.seek(time);
-      setCurrentTime(time);
+      currentTimeRef.current = time;
+      setDisplayTime(time);
+      updateHighlight(time);
     }
   };
 
@@ -199,7 +237,7 @@ export default function RecordingView() {
     seekTo(parseFloat(e.target.value));
   };
 
-  const handleWordClick = (word: Word) => {
+  const handleWordClick = (word: Word | FlatWord) => {
     seekTo(word.start);
     if (!playing) {
       togglePlayPause();
@@ -214,10 +252,6 @@ export default function RecordingView() {
       return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const isWordActive = (word: Word): boolean => {
-    return currentTime >= word.start && currentTime < word.end;
   };
 
   // LLM Functions
@@ -425,32 +459,32 @@ export default function RecordingView() {
       {/* Audio player */}
       <div className="card p-4 mb-4">
         <div className="flex items-center gap-2">
-          <button 
-            onClick={() => seekTo(Math.max(0, currentTime - 10))}
+          <button
+            onClick={() => seekTo(Math.max(0, currentTimeRef.current - 10))}
             className="btn-icon"
           >
             <RotateCcw size={20} />
           </button>
-          <button 
-            onClick={togglePlayPause} 
+          <button
+            onClick={togglePlayPause}
             className="btn-icon p-3"
           >
             {playing ? <Pause size={28} /> : <Play size={28} />}
           </button>
-          <button 
-            onClick={() => seekTo(Math.min(duration, currentTime + 10))}
+          <button
+            onClick={() => seekTo(Math.min(duration, currentTimeRef.current + 10))}
             className="btn-icon"
           >
             <RotateCw size={20} />
           </button>
           <span className="text-sm text-gray-400 min-w-[60px]">
-            {formatTime(currentTime)}
+            {formatTime(displayTime)}
           </span>
           <input
             type="range"
             min={0}
             max={duration}
-            value={currentTime}
+            value={displayTime}
             onChange={handleSliderChange}
             className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary mx-2"
           />
@@ -578,36 +612,41 @@ export default function RecordingView() {
             </button>
           </div>
         </div>
-        {transcription.segments.map((segment, segIndex) => (
-          <div key={segIndex} className="mb-4">
-            {segment.speaker && (
-              <span className="chip-primary mb-2 inline-block">
-                {segment.speaker}
-              </span>
-            )}
-            <div className="leading-8">
-              {segment.words ? (
-                segment.words.map((word, wordIndex) => (
-                  <span
-                    key={`${segIndex}-${wordIndex}`}
-                    onClick={() => handleWordClick(word)}
-                    className={`
-                      cursor-pointer px-0.5 rounded transition-colors
-                      ${isWordActive(word)
-                        ? 'bg-primary text-gray-900'
-                        : 'text-white hover:bg-surface-light'
-                      }
-                    `}
-                  >
-                    {word.word}{' '}
+        <div ref={transcriptContainerRef}>
+          {(() => {
+            // Create flattened words for binary search highlighting
+            flattenedWordsRef.current = createFlattenedWords(transcription.segments);
+            let globalWordIndex = 0;
+            return transcription.segments.map((segment, segIndex) => (
+              <div key={segIndex} className="mb-4">
+                {segment.speaker && (
+                  <span className="chip-primary mb-2 inline-block">
+                    {segment.speaker}
                   </span>
-                ))
-              ) : (
-                <p className="text-white">{segment.text}</p>
-              )}
-            </div>
-          </div>
-        ))}
+                )}
+                <div className="leading-8">
+                  {segment.words ? (
+                    segment.words.map((word, wordIndex) => {
+                      const wordGlobalIndex = globalWordIndex++;
+                      return (
+                        <span
+                          key={`${segIndex}-${wordIndex}`}
+                          data-word-index={wordGlobalIndex}
+                          onClick={() => handleWordClick(word)}
+                          className="transcript-word text-white"
+                        >
+                          {word.word}{' '}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <p className="text-white">{segment.text}</p>
+                  )}
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
       </div>
 
       {/* Chat Panel */}

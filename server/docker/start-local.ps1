@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # TranscriptionSuite - Start Server in Local Mode (HTTP)
 # Starts the server on http://localhost:8000
-# This script can run from the docker/ folder OR from Documents\TranscriptionSuite
+# This script can run from the server/docker/ folder OR from Documents\TranscriptionSuite
 
 $ErrorActionPreference = "Stop"
 
@@ -58,11 +58,11 @@ if (-not (Test-Path $ComposeFile)) {
 # Find Config and .env Files
 # ============================================================================
 # This script works in two scenarios:
-#   1. Development: Run from docker/ directory (finds config at ../server/)
+#   1. Development: Run from server/docker/ directory (finds config at ../server/)
 #   2. End user: Run from Documents\TranscriptionSuite\ (finds config in same dir)
 #
 # Priority order for config.yaml:
-#   1. ../server/config.yaml (development - when running from docker/ dir)
+#   1. ../server/config.yaml (development - when running from server/docker/ dir)
 #   2. $ScriptDir/config.yaml (end user - when running from Documents\TranscriptionSuite\)
 #   3. Documents\TranscriptionSuite\config.yaml (fallback)
 #

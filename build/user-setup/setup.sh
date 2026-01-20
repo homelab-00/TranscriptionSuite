@@ -186,7 +186,7 @@ if docker pull "$DOCKER_IMAGE:latest"; then
     print_info "Docker image pulled successfully"
 else
     print_warning "Could not pull from GitHub Container Registry (image may not be published yet)"
-    print_info "You can build locally instead: cd docker && docker compose build"
+    print_info "You can build locally instead: cd server/docker && docker compose build"
 fi
 
 # ============================================================================

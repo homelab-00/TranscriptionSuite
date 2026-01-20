@@ -306,6 +306,18 @@ docker compose build
 2. Python runtime stage: Installs server dependencies
 3. Static files: Copies built frontend to `/app/static/frontend`
 
+**Build with specific tag:**
+To build an image with a specific tag (instead of default `latest`):
+```bash
+TAG=v0.3.0 docker compose build
+```
+This produces `ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0`.
+
+**Note:** The `build/docker-build-push.sh` script also supports the `TAG` environment variable for consistency:
+```bash
+TAG=v0.3.0 ./build/docker-build-push.sh
+```
+
 **Force rebuild:**
 ```bash
 docker compose build --no-cache

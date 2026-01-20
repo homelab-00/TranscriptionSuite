@@ -25,6 +25,7 @@ import { api } from '../services/api';
 import { Recording, Transcription, Word, LLMStatus } from '../types';
 import { Modal, Toggle, ContextMenu, ContextMenuItem, Alert, ProgressBar } from '../components/ui';
 import ChatPanel from '../components/ChatPanel';
+import { useTranscriptHighlighter, FlatWord } from '../hooks/useTranscriptHighlighter';
 
 interface RecordingWithTranscription extends Recording {
   transcription?: Transcription;
@@ -53,10 +54,27 @@ export default function DayView() {
   
   // Audio player state
   const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [displayTime, setDisplayTime] = useState(0); // Throttled for UI display only
   const [duration, setDuration] = useState(0);
   const soundRef = useRef<Howl | null>(null);
   const animationRef = useRef<number | null>(null);
+  const currentTimeRef = useRef(0); // Real-time tracking without re-renders
+  const lastUIUpdateRef = useRef(0); // Throttle UI updates
+
+  // Transcript container ref for highlighting
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
+  // Transcript highlighter hook (CSS Highlight API + binary search)
+  const {
+    updateHighlight,
+    clearHighlight,
+    createFlattenedWords,
+  } = useTranscriptHighlighter({
+    containerRef: transcriptContainerRef,
+  });
+
+  // Store flattened words for click handling
+  const flattenedWordsRef = useRef<FlatWord[]>([]);
 
   // New entry form state
   const [newEntryFilePath, setNewEntryFilePath] = useState('');
@@ -296,8 +314,10 @@ export default function DayView() {
       animationRef.current = null;
     }
     setPlaying(false);
-    setCurrentTime(seekTime || 0);
-    
+    currentTimeRef.current = seekTime || 0;
+    setDisplayTime(seekTime || 0);
+    clearHighlight();
+
     const audioUrl = api.getAudioUrl(recordingId);
     soundRef.current = new Howl({
       src: [audioUrl],
@@ -307,7 +327,8 @@ export default function DayView() {
         // Seek to the specified time after loading
         if (seekTime !== null && soundRef.current) {
           soundRef.current.seek(seekTime);
-          setCurrentTime(seekTime);
+          currentTimeRef.current = seekTime;
+          setDisplayTime(seekTime);
         }
       },
       onplay: () => {
@@ -315,7 +336,17 @@ export default function DayView() {
           if (soundRef.current && soundRef.current.playing()) {
             const seek = soundRef.current.seek();
             if (typeof seek === 'number') {
-              setCurrentTime(seek);
+              currentTimeRef.current = seek;
+
+              // Update highlight every frame (no React re-render)
+              updateHighlight(seek);
+
+              // Throttle UI state updates to ~10fps for progress bar
+              const now = performance.now();
+              if (now - lastUIUpdateRef.current > 100) {
+                setDisplayTime(seek);
+                lastUIUpdateRef.current = now;
+              }
             }
             animationRef.current = requestAnimationFrame(animate);
           }
@@ -327,6 +358,8 @@ export default function DayView() {
           cancelAnimationFrame(animationRef.current);
           animationRef.current = null;
         }
+        // Final UI sync on pause
+        setDisplayTime(currentTimeRef.current);
       },
       onend: () => {
         setPlaying(false);
@@ -334,6 +367,7 @@ export default function DayView() {
           cancelAnimationFrame(animationRef.current);
           animationRef.current = null;
         }
+        clearHighlight();
       },
     });
   };
@@ -352,11 +386,13 @@ export default function DayView() {
   const seekTo = (time: number) => {
     if (soundRef.current) {
       soundRef.current.seek(time);
-      setCurrentTime(time);
+      currentTimeRef.current = time;
+      setDisplayTime(time);
+      updateHighlight(time);
     }
   };
 
-  const handleWordClick = (word: Word) => {
+  const handleWordClick = (word: Word | FlatWord) => {
     seekTo(word.start);
     if (!playing) {
       togglePlayPause();
@@ -371,10 +407,6 @@ export default function DayView() {
       return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const isWordActive = (word: Word): boolean => {
-    return currentTime >= word.start && currentTime < word.end;
   };
 
   // LLM Functions
@@ -590,8 +622,11 @@ export default function DayView() {
       soundRef.current.unload();
     }
     setPlaying(false);
-    setCurrentTime(0);
+    currentTimeRef.current = 0;
+    setDisplayTime(0);
     setDuration(0);
+    clearHighlight();
+    flattenedWordsRef.current = [];
     // Clear LLM state
     setLlmSummary('');
     setLlmError(null);
@@ -874,23 +909,23 @@ export default function DayView() {
             {/* Audio player */}
             <div className="bg-surface-light rounded-lg p-4 mb-4">
               <div className="flex items-center gap-2">
-                <button onClick={() => seekTo(Math.max(0, currentTime - 10))} className="btn-icon">
+                <button onClick={() => seekTo(Math.max(0, currentTimeRef.current - 10))} className="btn-icon">
                   <RotateCcw size={20} />
                 </button>
                 <button onClick={togglePlayPause} className="btn-icon p-3">
                   {playing ? <Pause size={28} /> : <Play size={28} />}
                 </button>
-                <button onClick={() => seekTo(Math.min(duration, currentTime + 10))} className="btn-icon">
+                <button onClick={() => seekTo(Math.min(duration, currentTimeRef.current + 10))} className="btn-icon">
                   <RotateCw size={20} />
                 </button>
                 <span className="text-sm text-gray-400 min-w-[60px]">
-                  {formatTime(currentTime)}
+                  {formatTime(displayTime)}
                 </span>
                 <input
                   type="range"
                   min={0}
                   max={duration || 100}
-                  value={currentTime}
+                  value={displayTime}
                   onChange={(e) => seekTo(parseFloat(e.target.value))}
                   className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary mx-2"
                 />
@@ -995,7 +1030,7 @@ export default function DayView() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-medium text-white">Transcript</h3>
-                  
+
                   {/* AI Buttons */}
                   <div className="flex items-center gap-2">
                     {/* LM Studio Status Indicator */}
@@ -1037,36 +1072,41 @@ export default function DayView() {
                     )}
                   </div>
                 </div>
-                {selectedRecording.transcription.segments.map((segment, segIndex) => (
-                  <div key={segIndex} className="mb-3">
-                    {segment.speaker && (
-                      <span className="chip-primary mb-2 inline-block">
-                        {segment.speaker}
-                      </span>
-                    )}
-                    <div className="leading-8">
-                      {segment.words ? (
-                        segment.words.map((word, wordIndex) => (
-                          <span
-                            key={`${segIndex}-${wordIndex}`}
-                            onClick={() => handleWordClick(word)}
-                            className={`
-                              cursor-pointer px-0.5 rounded transition-colors
-                              ${isWordActive(word)
-                                ? 'bg-primary text-gray-900'
-                                : 'text-white hover:bg-surface-light'
-                              }
-                            `}
-                          >
-                            {word.word}{' '}
+                <div ref={transcriptContainerRef}>
+                  {(() => {
+                    // Create flattened words for binary search highlighting
+                    flattenedWordsRef.current = createFlattenedWords(selectedRecording.transcription!.segments);
+                    let globalWordIndex = 0;
+                    return selectedRecording.transcription!.segments.map((segment, segIndex) => (
+                      <div key={segIndex} className="mb-3">
+                        {segment.speaker && (
+                          <span className="chip-primary mb-2 inline-block">
+                            {segment.speaker}
                           </span>
-                        ))
-                      ) : (
-                        <p className="text-white">{segment.text}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                        )}
+                        <div className="leading-8">
+                          {segment.words ? (
+                            segment.words.map((word, wordIndex) => {
+                              const wordGlobalIndex = globalWordIndex++;
+                              return (
+                                <span
+                                  key={`${segIndex}-${wordIndex}`}
+                                  data-word-index={wordGlobalIndex}
+                                  onClick={() => handleWordClick(word)}
+                                  className="transcript-word text-white"
+                                >
+                                  {word.word}{' '}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <p className="text-white">{segment.text}</p>
+                          )}
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
               </div>
             )}
           </div>
