@@ -462,7 +462,7 @@ Alternatively install `lazydocker`, it's an excellent cli tool to manage docker.
 
 Verify NVIDIA Container Toolkit is installed:
 ```bash
-docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 ```
 
 ### 9.3 Connection Issues (Remote Mode)

@@ -81,8 +81,8 @@ Technical documentation for developing and building TranscriptionSuite.
 
 ```bash
 # 1. Setup virtual environments
-cd dashboard && uv venv --python 3.12 && uv sync --extra kde && cd ..
-cd build && uv venv --python 3.12 && uv sync && cd ..
+cd dashboard && uv venv --python 3.13 && uv sync --extra kde && cd ..
+cd build && uv venv --python 3.13 && uv sync && cd ..
 
 # 2. Audit frontend packages
 cd server/frontend && npm ci && npm audit && cd ../..
@@ -99,7 +99,7 @@ cd dashboard && uv run transcription-dashboard
 ```bash
 # 1. Run backend server (native Python)
 cd server/backend
-uv venv --python 3.12 && uv sync
+uv venv --python 3.13 && uv sync
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 
 # 2. Run frontend dev server (in a separate terminal)
@@ -109,7 +109,7 @@ npm run dev  # Starts on http://localhost:1420
 
 # 3. Run dashboard (in a separate terminal)
 cd dashboard
-uv venv --python 3.12 && uv sync --extra kde  # or --extra gnome / --extra windows
+uv venv --python 3.13 && uv sync --extra kde  # or --extra gnome / --extra windows
 uv run transcription-dashboard --host localhost --port 8000
 ```
 
@@ -280,13 +280,13 @@ Each `pyproject.toml` defines its component's version. All version strings are d
 ```bash
 # Dashboard virtual environment
 cd dashboard
-uv venv --python 3.12
+uv venv --python 3.13
 uv sync --extra kde    # or --extra gnome / --extra windows
 cd ..
 
 # Build tools virtual environment
 cd build
-uv venv --python 3.12
+uv venv --python 3.13
 uv sync
 cd ..
 
@@ -361,7 +361,7 @@ uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443
 
 ```bash
 cd build
-uv venv --python 3.12
+uv venv --python 3.13
 uv sync    # Installs PyInstaller, build, ruff, pytest
 ```
 
@@ -370,7 +370,7 @@ uv sync    # Installs PyInstaller, build, ruff, pytest
 | Platform | Method | Output | Target Requirements |
 |----------|--------|--------|---------------------|
 | **KDE (Linux)** | PyInstaller + AppImage | Fully standalone | None |
-| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.12+, GTK3, AppIndicator3 |
+| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.13+, GTK3, AppIndicator3 |
 | **Windows** | PyInstaller | Fully standalone | None |
 
 ### 5.3 KDE AppImage (Linux)
@@ -410,7 +410,7 @@ winget install ImageMagick.ImageMagick
 **Build steps:**
 ```powershell
 cd build
-uv venv --python 3.12
+uv venv --python 3.13
 uv sync
 cd ..
 
@@ -606,7 +606,7 @@ server/backend/
 
 ```bash
 cd server/backend
-uv venv --python 3.12
+uv venv --python 3.13
 uv sync
 
 # Development mode with auto-reload
@@ -648,7 +648,7 @@ The frontend uses `import.meta.env.DEV` to detect development mode:
 
 ```bash
 cd dashboard
-uv venv --python 3.12
+uv venv --python 3.13
 uv sync --extra kde    # or --extra gnome / --extra windows
 
 uv run transcription-dashboard
@@ -886,7 +886,7 @@ cd ../..
 
 ```bash
 # Verify GPU is accessible
-docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 
 # Check container logs
 docker compose logs -f
@@ -952,7 +952,7 @@ This lists all installed packages and their versions, sorted alphabetically. Use
 
 ### 14.1 Server (Docker)
 
-- Python 3.12
+- Python 3.13
 - FastAPI + Uvicorn
 - faster-whisper (CTranslate2 backend)
 - RealtimeSTT 0.3.104+ (Live Mode continuous transcription)
@@ -963,7 +963,7 @@ This lists all installed packages and their versions, sorted alphabetically. Use
 
 ### 14.2 Dashboard
 
-- Python 3.12
+- Python 3.13
 - aiohttp (async HTTP client)
 - PyAudio (audio recording)
 - PyQt6 (KDE/Windows) or GTK3+AppIndicator (GNOME)

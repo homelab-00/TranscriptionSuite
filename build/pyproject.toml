@@ -1,15 +1,15 @@
 [project]
 name = "transcription-suite-build"
-version = "0.4.0"
+version = "0.4.4"
 description = "TranscriptionSuite build env for the standalone client"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13,<3.14"
 license = "MIT"
 authors = [
     { name = "homelab-00" }
 ]
 keywords = ["transcription", "tray", "desktop", "client"]
 classifiers = [
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows :: Windows 11",
@@ -39,14 +39,14 @@ dependencies = [
 
 [tool.ruff]
 line-length = 90
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
 ignore = ["E501"]
 
 [tool.pyright]
-pythonVersion = "3.12"
+pythonVersion = "3.13"
 typeCheckingMode = "basic"
 
 [tool.pytest.ini_options]

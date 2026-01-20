@@ -525,7 +525,9 @@ class SettingsDialog(QDialog):
             "When enabled, forces diarization to identify exactly the specified number of speakers.\n"
             "Useful for podcasts with known hosts where occasional clips should be attributed to the main speakers."
         )
-        self.constrain_speakers_check.toggled.connect(self._on_constrain_speakers_toggled)
+        self.constrain_speakers_check.toggled.connect(
+            self._on_constrain_speakers_toggled
+        )
         diarization_layout.addWidget(self.constrain_speakers_check)
 
         # Number of speakers row
@@ -832,7 +834,9 @@ class SettingsDialog(QDialog):
         self.grace_period_spin.setValue(grace_period)
 
         # Client tab - Diarization
-        expected_speakers = self.config.get("diarization", "expected_speakers", default=None)
+        expected_speakers = self.config.get(
+            "diarization", "expected_speakers", default=None
+        )
         if expected_speakers is not None:
             self.constrain_speakers_check.setChecked(True)
             self.expected_speakers_spin.setValue(expected_speakers)
@@ -890,7 +894,9 @@ class SettingsDialog(QDialog):
         # Client tab - Diarization
         if self.constrain_speakers_check.isChecked():
             self.config.set(
-                "diarization", "expected_speakers", value=self.expected_speakers_spin.value()
+                "diarization",
+                "expected_speakers",
+                value=self.expected_speakers_spin.value(),
             )
         else:
             self.config.set("diarization", "expected_speakers", value=None)

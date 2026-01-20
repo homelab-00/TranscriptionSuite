@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcription-suite-server"
-version = "0.4.2"
+version = "0.4.4"
 description = "TranscriptionSuite unified server for transcription services"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13,<3.14"
 license = "MIT"
 authors = [
     { name = "homelab-00" }
 ]
 keywords = ["transcription", "whisper", "speech-to-text", "diarization"]
 classifiers = [
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
@@ -31,12 +31,10 @@ dependencies = [
 
     # Core ML / Transcription
     "ctranslate2>=4.6.2",
-    "torch==2.8.0", # Pinned version required by PyAnnote 4.0.3
-    "torchaudio==2.8.0", # Pinned version required by PyAnnote 4.0.3
-    "pyannote.audio>=4.0.3",
+    "torch>=2.8.0",          # Required by PyAnnote 4.0.3
+    "torchaudio>=2.8.0",     # Required by PyAnnote 4.0.3
+    "pyannote.audio>=4.0.3", # Diarization
     "realtimestt>=0.3.104",  # Live transcription mode
-    # "faster-whisper>=", # Moved to override section due to realtimestt's
-                          # outdated requirements
 
     # Audio Processing
     "numpy>=2.4.0",
@@ -44,8 +42,6 @@ dependencies = [
     "webrtcvad>=2.0.10",
     "silero-vad>=6.2.0",
     "ffmpeg-python>=0.2.0",
-    # "scipy>=", # Moved to override section due to realtimestt's
-                 # outdated requirements
 
     # Database
     "aiosqlite>=0.22.1",
@@ -58,10 +54,11 @@ dependencies = [
     "filelock>=3.20.1",
 ]
 
+## OVERRIDE DEPENDENCIES
 [tool.uv]
 override-dependencies = [
-    "scipy>=1.16.3",
-    "faster-whisper>=1.2.1",
+    "scipy>=1.16.3",         # Moved here due to realtimestt's outdated requirements
+    "faster-whisper>=1.2.1", # Moved here due to realtimestt's outdated requirements
 ]
 
 [project.scripts]
@@ -73,3 +70,13 @@ packages = ["server"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# The section below is needed to specifically get CUDA 12.9 (and not the default 12.8)
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu129" }]
+torchaudio = [{ index = "pytorch-cu129" }]

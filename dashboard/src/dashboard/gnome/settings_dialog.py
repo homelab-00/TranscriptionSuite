@@ -460,7 +460,9 @@ class SettingsDialog:
             "When enabled, forces diarization to identify exactly the specified number of speakers.\n"
             "Useful for podcasts with known hosts where occasional clips should be attributed to the main speakers."
         )
-        self.constrain_speakers_check.connect("toggled", self._on_constrain_speakers_toggled)
+        self.constrain_speakers_check.connect(
+            "toggled", self._on_constrain_speakers_toggled
+        )
         diarization_box.append(self.constrain_speakers_check)
 
         # Number of speakers row
@@ -836,7 +838,9 @@ class SettingsDialog:
 
         # Client tab - Diarization
         if self.constrain_speakers_check and self.expected_speakers_spin:
-            expected_speakers = self.config.get("diarization", "expected_speakers", default=None)
+            expected_speakers = self.config.get(
+                "diarization", "expected_speakers", default=None
+            )
             if expected_speakers is not None:
                 self.constrain_speakers_check.set_active(True)
                 self.expected_speakers_spin.set_value(float(expected_speakers))
@@ -1157,7 +1161,9 @@ class SettingsDialog:
             "When enabled, forces diarization to identify exactly the specified number of speakers.\n"
             "Useful for podcasts with known hosts where occasional clips should be attributed to the main speakers."
         )
-        self.constrain_speakers_check.connect("toggled", self._on_constrain_speakers_toggled_gtk3)
+        self.constrain_speakers_check.connect(
+            "toggled", self._on_constrain_speakers_toggled_gtk3
+        )
         diarization_box.pack_start(self.constrain_speakers_check, False, False, 0)
 
         # Number of speakers row

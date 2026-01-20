@@ -35,11 +35,16 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install build dependencies (will be removed in final stage)
+# Add deadsnakes PPA for Python 3.13
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
     build-essential \
-    python3.12 \
-    python3.12-venv \
-    python3.12-dev \
+    python3.13 \
+    python3.13-venv \
+    python3.13-dev \
     python3-pip \
     curl \
     git \
@@ -53,7 +58,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="/usr/
 WORKDIR /app
 
 # Configure uv to use system Python and target venv location
-ENV UV_PYTHON=python3.12
+ENV UV_PYTHON=python3.13
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/.venv"
@@ -82,9 +87,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Install only runtime dependencies (no build-essential, no python-dev)
 # gosu is used to drop privileges from root to appuser after TLS cert setup
+# Add deadsnakes PPA for Python 3.13
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-venv \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.13 \
+    python3.13-venv \
     ffmpeg \
     libavcodec-dev \
     libavformat-dev \
@@ -107,7 +117,7 @@ RUN useradd -m -s /bin/bash appuser
 WORKDIR /app
 
 # Configure Python environment
-ENV UV_PYTHON=python3.12
+ENV UV_PYTHON=python3.13
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/.venv"
@@ -140,7 +150,7 @@ ENV SERVER_PORT=8000
 ENV LOG_LEVEL=INFO
 ENV HF_HOME=/models
 # Prioritize PyTorch's bundled cuDNN over system cuDNN to avoid version mismatch
-ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/torch/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.13/site-packages/torch/lib:$LD_LIBRARY_PATH
 
 # Expose port
 EXPOSE 8000
