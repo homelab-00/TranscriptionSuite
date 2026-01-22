@@ -10,26 +10,23 @@
 #
 # Usage:
 #   ./docker-build-push.sh [TAG]
+#   TAG=v0.3.0 ./docker-build-push.sh
 #
 # Examples:
-#   ./docker-build-push.sh           # Builds and pushes as 'latest'
-#   ./docker-build-push.sh v0.3.0    # Builds and pushes as 'v0.3.0' and 'latest'
-#   ./docker-build-push.sh dev       # Builds and pushes as 'dev'
+#   ./docker-build-push.sh           # Pushes the most recently built local image
+#   ./docker-build-push.sh v0.3.0    # Pushes local image 'v0.3.0' (fails if missing)
+#   TAG=dev ./docker-build-push.sh   # Pushes local image 'dev' (fails if missing)
 
 set -euo pipefail
 
 # Colors for output
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
 # Configuration
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server"
-readonly DOCKERFILE_PATH="$PROJECT_ROOT/server/docker/Dockerfile"
 
 # Functions
 log_info() {
@@ -63,12 +60,6 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check if Dockerfile exists
-    if [[ ! -f "$DOCKERFILE_PATH" ]]; then
-        log_error "Dockerfile not found at $DOCKERFILE_PATH"
-        exit 1
-    fi
-    
     log_success "Prerequisites check passed"
 }
 
@@ -83,26 +74,6 @@ check_docker_login() {
         log_info "Continuing anyway (you'll need auth to push)..."
     else
         log_success "Docker registry authentication verified"
-    fi
-}
-
-build_image() {
-    local tag=$1
-    local build_args=$2
-    
-    log_info "Building Docker image: $IMAGE_NAME:$tag"
-    log_info "This may take 15-20 minutes on first build..."
-    
-    if docker build \
-        --file "$DOCKERFILE_PATH" \
-        --tag "$IMAGE_NAME:$tag" \
-        $build_args \
-        "$PROJECT_ROOT"; then
-        log_success "Image built successfully: $IMAGE_NAME:$tag"
-        return 0
-    else
-        log_error "Image build failed"
-        return 1
     fi
 }
 
@@ -143,57 +114,66 @@ cleanup_old_images() {
 }
 
 main() {
-    local custom_tag="${1:-${TAG:-latest}}"
+    local custom_tag="${1:-${TAG:-}}"
     local is_release=false
     
     echo "=========================================="
-    echo "  TranscriptionSuite Docker Build & Push"
+    echo "  TranscriptionSuite Docker Push Only"
     echo "=========================================="
     echo ""
-    
-    # Check if tag looks like a release version (v*.*.*)
-    if [[ "$custom_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        is_release=true
-        log_info "Detected release version: $custom_tag"
-    else
-        log_info "Building with custom tag: $custom_tag"
-    fi
     
     # Run checks
     check_prerequisites
     check_docker_login
     
-    # Build the image
-    echo ""
-    log_info "Starting build process..."
-    if ! build_image "$custom_tag" ""; then
-        exit 1
-    fi
-    
-    # For release versions, also tag as 'latest'
-    if [[ "$is_release" == true ]]; then
-        echo ""
-        if ! tag_image "$custom_tag" "latest"; then
+    # Determine which image to use
+    if [[ -z "$custom_tag" ]]; then
+        log_info "No tag provided. Searching for most recently built local image..."
+        # Get the tag of the most recently created image for this repo
+        local recent_tag
+        recent_tag=$(docker images --filter "reference=$IMAGE_NAME" --format "{{.Tag}}" | head -n 1)
+        
+        if [[ -z "$recent_tag" ]]; then
+            log_error "No local images found for $IMAGE_NAME"
             exit 1
         fi
+        
+        custom_tag="$recent_tag"
+        log_success "Found most recent image: $IMAGE_NAME:$custom_tag"
+    else
+        log_info "Checking for local image: $IMAGE_NAME:$custom_tag"
+        if ! docker image inspect "$IMAGE_NAME:$custom_tag" > /dev/null 2>&1; then
+            log_error "Image not found locally: $IMAGE_NAME:$custom_tag"
+            log_info "Please build it first with: docker compose build"
+            exit 1
+        fi
+        log_success "Image found: $IMAGE_NAME:$custom_tag"
     fi
     
-    # Push all tags
+    # Check if tag looks like a release version (v*.*.*)
+    if [[ "$custom_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        is_release=true
+        log_info "Detected release version: $custom_tag"
+    fi
+
+    # Push the requested tag
     echo ""
-    log_info "Pushing images to GHCR..."
+    log_info "Pushing image to GHCR..."
     if ! push_image "$custom_tag"; then
         exit 1
     fi
     
+    # For release versions, also tag as 'latest' and push
     if [[ "$is_release" == true ]]; then
+        echo ""
+        log_info "Tagging and pushing 'latest' alias..."
+        if ! tag_image "$custom_tag" "latest"; then
+            exit 1
+        fi
         if ! push_image "latest"; then
             exit 1
         fi
     fi
-    
-    # Cleanup
-    echo ""
-    cleanup_old_images
     
     # Success summary
     echo ""

@@ -313,7 +313,7 @@ TAG=v0.3.0 docker compose build
 ```
 This produces `ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0`.
 
-**Note:** The `build/docker-build-push.sh` script also supports the `TAG` environment variable for consistency:
+**Note:** The `build/docker-build-push.sh` script is used to **push** the image you just built. It also supports the `TAG` environment variable:
 ```bash
 TAG=v0.3.0 ./build/docker-build-push.sh
 ```
@@ -350,14 +350,16 @@ uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443
 
 ### 4.5 Publishing Docker Images
 
+Prerequisite: You must have built the image first (see Step 2).
+
 ```bash
-# Build and push as 'latest'
+# Push the most recent local image as 'latest'
 ./build/docker-build-push.sh
 
-# Build and push a release version
+# Push a specific tag (must exist locally)
 ./build/docker-build-push.sh v0.3.0
 
-# Build and push a custom tag
+# Push a custom tag
 ./build/docker-build-push.sh dev
 ```
 
