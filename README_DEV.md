@@ -943,7 +943,29 @@ sudo systemctl restart tailscaled
 ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 ```
 
-### 13.5 Checking Installed Packages
+### 13.5 Windows Docker Networking
+
+**Issue**: On Windows Docker Desktop, `network_mode: "host"` doesn't expose container ports to the Windows host because containers run inside a Linux VM (WSL2/Hyper-V). The server listens inside the VM but Windows can't reach `localhost:8000`.
+
+**Solution**: The setup wizard automatically generates platform-specific `docker-compose.yml`:
+- **Linux**: Uses `network_mode: "host"` for direct access
+- **Windows**: Uses explicit port mappings (`8000:8000`, `8443:8443`) with bridge networking
+- **LM Studio URL**: Windows uses `host.docker.internal:1234` to reach host services
+
+**For existing installations**, manually edit `docker-compose.yml`:
+```yaml
+# Replace:
+network_mode: "host"
+
+# With:
+ports:
+  - "8000:8000"
+  - "8443:8443"
+```
+
+Then restart: `docker compose down && docker compose up -d`
+
+### 13.6 Checking Installed Packages
 
 To inspect the Python packages installed in the *running* `transcription-suite` server container:
 

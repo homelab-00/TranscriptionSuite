@@ -188,6 +188,7 @@ class APIClient:
                 ssl=ssl_context,
                 force_close=False,
                 enable_cleanup_closed=True,
+                family=socket.AF_INET if self._is_localhost() else 0,  # Force IPv4 for localhost
             )
 
             self._session = aiohttp.ClientSession(

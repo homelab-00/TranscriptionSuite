@@ -56,7 +56,7 @@ class IconLoader:
         },
         "server": {
             "theme_names": ["server-database", "network-server", "computer"],
-            "standard_pixmap": QStyle.StandardPixmap.SP_DriveNetIcon,
+            "standard_pixmap": None,  # Let theme icons work on Windows like home/client
         },
         "client": {
             "theme_names": ["audio-input-microphone", "microphone"],
