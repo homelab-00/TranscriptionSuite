@@ -632,12 +632,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
 
             # Trigger reconnect if server started successfully
             if result.success and result.status == ServerStatus.RUNNING:
-                # Give server time to start, then reconnect
-                from PyQt6.QtCore import QTimer
-
-                QTimer.singleShot(
-                    3000, lambda: self._trigger_callback(TrayAction.RECONNECT)
-                )
+                # Start reconnect loop immediately - it will wait for server readiness
+                self._trigger_callback(TrayAction.RECONNECT)
         except Exception as e:
             logger.error(f"Server operation failed: {e}")
             self.show_notification("Docker Server", f"Error: {e}")

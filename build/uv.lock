@@ -666,7 +666,7 @@ wheels = [
 
 [[package]]
 name = "transcription-suite-build"
-version = "0.4.4"
+version = "0.4.6"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },

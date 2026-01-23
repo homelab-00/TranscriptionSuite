@@ -317,6 +317,52 @@ class APIClient:
             self._connected = False
             return False
 
+    async def readiness_check(self) -> bool:
+        """
+        Check if server is fully ready (models loaded).
+
+        Uses the /ready endpoint which returns:
+        - 200: Server ready, models loaded
+        - 503: Server starting, models still loading
+
+        Falls back to health_check() for older servers without /ready endpoint.
+        """
+        url = f"{self.base_url}/ready"
+        logger.debug(f"Readiness check: {url}")
+
+        try:
+            session = await self._get_session()
+            async with session.get(url, **self._get_ssl_kwargs()) as resp:
+                if resp.status == 200:
+                    self._connected = True
+                    logger.info(f"Server ready: {self.base_url}")
+                    return True
+                elif resp.status == 503:
+                    # Server is up but not ready (models loading)
+                    logger.debug("Server is loading models...")
+                    return False
+                else:
+                    # Unexpected status, fall back to health check
+                    logger.debug(f"Unexpected status {resp.status}, falling back to health check")
+                    return await self.health_check()
+
+        except aiohttp.ClientResponseError as e:
+            if e.status == 404:
+                # /ready endpoint not available, fall back to health check
+                logger.debug("/ready endpoint not found, using health check")
+                return await self.health_check()
+            logger.debug(f"Readiness check error: {e}")
+            return False
+
+        except aiohttp.ClientError as e:
+            # Connection failed, try health check as fallback
+            logger.debug(f"Readiness check failed: {e}, trying health check")
+            return await self.health_check()
+
+        except Exception as e:
+            logger.debug(f"Readiness check exception: {e}")
+            return False
+
     async def _diagnose_connection(self) -> None:
         """
         Perform pre-connection diagnostics and attempt fallback if needed.

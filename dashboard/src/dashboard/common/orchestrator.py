@@ -30,7 +30,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Maximum number of automatic reconnection attempts
-MAX_RECONNECT_ATTEMPTS = 10
+# 60 attempts * 10s interval = 10 minutes (enough for model loading)
+MAX_RECONNECT_ATTEMPTS = 60
 
 
 class ClientOrchestrator:
@@ -300,7 +301,7 @@ class ClientOrchestrator:
                 f"Attempting to reconnect ({attempt}/{MAX_RECONNECT_ATTEMPTS})..."
             )
 
-            if self.api_client and await self.api_client.health_check():
+            if self.api_client and await self.api_client.readiness_check():
                 if self.tray:
                     self.tray.set_state(TrayState.STANDBY)
                     self.tray.show_notification("Reconnected", "Connection restored")
