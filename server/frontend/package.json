@@ -1,9 +1,9 @@
 {
-  "name": "audio-notebook",
+  "name": "transcription-suite-webui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Web application for managing and searching transcribed audio recordings",
+  "description": "Web UI for TranscriptionSuite - recording and admin interface",
   "author": "homelab-00",
   "license": "MIT",
   "scripts": {
@@ -13,15 +13,12 @@
   },
   "dependencies": {
     "axios": "^1.6.0",
-    "dayjs": "^1.11.10",
-    "howler": "^2.2.4",
     "lucide-react": "^0.460.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0"
   },
   "devDependencies": {
-    "@types/howler": "^2.2.12",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",

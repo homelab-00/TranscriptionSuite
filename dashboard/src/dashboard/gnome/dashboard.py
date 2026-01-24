@@ -176,6 +176,7 @@ class View(Enum):
     WELCOME = auto()
     SERVER = auto()
     CLIENT = auto()
+    NOTEBOOK = auto()
 
 
 # Use a factory function instead of conditional base class for type checker
@@ -595,10 +596,12 @@ class DashboardWindow(_get_dashboard_base()):
         welcome_view = self._create_welcome_view()
         server_view = self._create_server_view()
         client_view = self._create_client_view()
+        notebook_view = self._create_notebook_view()
 
         self._stack.add_named(welcome_view, "welcome")
         self._stack.add_named(server_view, "server")
         self._stack.add_named(client_view, "client")
+        self._stack.add_named(notebook_view, "notebook")
 
         main_box.append(self._stack)
 
@@ -663,6 +666,12 @@ class DashboardWindow(_get_dashboard_base()):
         client_btn.add_css_class("nav-button")
         client_btn.connect("clicked", lambda _: self._navigate_to(View.CLIENT))
         header.pack_start(client_btn)
+
+        notebook_btn = Gtk.Button(label="Notebook")
+        notebook_btn.set_icon_name("accessories-text-editor-symbolic")
+        notebook_btn.add_css_class("nav-button")
+        notebook_btn.connect("clicked", lambda _: self._navigate_to(View.NOTEBOOK))
+        header.pack_start(notebook_btn)
 
         # Right side: Hamburger menu button (☰) with Settings, Help, About
         self._menu_btn = Gtk.MenuButton()
@@ -1355,6 +1364,50 @@ class DashboardWindow(_get_dashboard_base()):
         scrolled.set_child(box)
         return scrolled
 
+    def _create_notebook_view(self) -> Any:
+        """Create the Audio Notebook view."""
+        from dashboard.gnome.notebook_view import NotebookView
+
+        # Get API client from orchestrator if available
+        api_client = None
+        if self.tray and hasattr(self.tray, "_orchestrator"):
+            api_client = self.tray._orchestrator._api_client
+
+        self._notebook_widget = NotebookView(api_client)
+        self._notebook_widget.recording_requested.connect(self._open_recording_dialog)
+        return self._notebook_widget
+
+    def _refresh_notebook_view(self) -> None:
+        """Refresh the notebook view data."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.refresh()
+
+    def _open_recording_dialog(self, recording_id: int) -> None:
+        """Open a recording dialog for the given recording ID."""
+        from dashboard.gnome.recording_dialog import RecordingDialog
+
+        # Get API client from orchestrator if available
+        api_client = None
+        if self.tray and hasattr(self.tray, "_orchestrator"):
+            api_client = self.tray._orchestrator._api_client
+
+        if not api_client:
+            logger.error("Cannot open recording: API client not available")
+            return
+
+        dialog = RecordingDialog(
+            api_client=api_client,
+            recording_id=recording_id,
+            parent=self,
+        )
+        dialog.recording_deleted.connect(self._on_recording_deleted)
+        dialog.present()
+
+    def _on_recording_deleted(self, recording_id: int) -> None:
+        """Handle recording deletion - refresh notebook view."""
+        logger.info(f"Recording {recording_id} deleted, refreshing notebook")
+        self._refresh_notebook_view()
+
     def _apply_styles(self) -> None:
         """Apply custom CSS styling matching KDE color scheme."""
         css = b"""
@@ -1582,6 +1635,7 @@ class DashboardWindow(_get_dashboard_base()):
             View.WELCOME: "welcome",
             View.SERVER: "server",
             View.CLIENT: "client",
+            View.NOTEBOOK: "notebook",
         }
 
         if self._stack:
@@ -1594,6 +1648,8 @@ class DashboardWindow(_get_dashboard_base()):
             self._refresh_server_status()
         elif view == View.CLIENT:
             self._refresh_client_status()
+        elif view == View.NOTEBOOK:
+            self._refresh_notebook_view()
 
     def _go_home(self) -> None:
         """Navigate to home view."""

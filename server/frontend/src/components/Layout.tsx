@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Calendar, Search, Upload, Menu, X, Mic, Settings } from 'lucide-react';
+import { Menu, X, Mic, Settings } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -7,7 +7,7 @@ interface LayoutProps {
 
 interface MenuItem {
   text: string;
-  icon: typeof Calendar;
+  icon: typeof Menu;
   href: string;  // Full URL path for navigation
 }
 
@@ -17,13 +17,6 @@ interface MenuSection {
 
 // Use full paths since we need to navigate across different basenames
 const menuSections: MenuSection[] = [
-  {
-    items: [
-      { text: 'Calendar', icon: Calendar, href: '/notebook/calendar' },
-      { text: 'Search', icon: Search, href: '/notebook/search' },
-      { text: 'Import', icon: Upload, href: '/notebook/import' },
-    ],
-  },
   {
     items: [
       { text: 'Record', icon: Mic, href: '/record' },
@@ -51,13 +44,11 @@ export default function Layout({ children }: LayoutProps) {
   // Check if current path matches menu item
   const isActive = (href: string): boolean => {
     const currentPath = window.location.pathname;
-    // Exact match or starts with (for nested routes)
-    if (href === '/notebook/calendar' && (currentPath === '/notebook' || currentPath === '/notebook/')) return true;
     return currentPath === href || currentPath.startsWith(href + '/');
   };
 
   const allItems = menuSections.flatMap(s => s.items);
-  const currentPage = allItems.find((item) => isActive(item.href))?.text || 'Calendar';
+  const currentPage = allItems.find((item) => isActive(item.href))?.text || 'Record';
 
   return (
     <>

@@ -157,6 +157,7 @@ class View(Enum):
     WELCOME = auto()
     SERVER = auto()
     CLIENT = auto()
+    NOTEBOOK = auto()
 
 
 class LogSyntaxHighlighter(QSyntaxHighlighter):
@@ -660,10 +661,12 @@ class DashboardWindow(QMainWindow):
         self._welcome_view = self._create_welcome_view()
         self._server_view = self._create_server_view()
         self._client_view = self._create_client_view()
+        self._notebook_view = self._create_notebook_view()
 
         self._stack.addWidget(self._welcome_view)
         self._stack.addWidget(self._server_view)
         self._stack.addWidget(self._client_view)
+        self._stack.addWidget(self._notebook_view)
 
         # Start on welcome view
         self._navigate_to(View.WELCOME, add_to_history=False)
@@ -702,6 +705,15 @@ class DashboardWindow(QMainWindow):
             self._nav_client_btn.setIcon(client_icon)
         self._nav_client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
         layout.addWidget(self._nav_client_btn)
+
+        # Notebook button with icon
+        self._nav_notebook_btn = QPushButton("  Notebook")
+        self._nav_notebook_btn.setObjectName("navButton")
+        notebook_icon = self._icon_loader.get_icon("notebook")
+        if not notebook_icon.isNull():
+            self._nav_notebook_btn.setIcon(notebook_icon)
+        self._nav_notebook_btn.clicked.connect(lambda: self._navigate_to(View.NOTEBOOK))
+        layout.addWidget(self._nav_notebook_btn)
 
         layout.addStretch()
 
@@ -1558,6 +1570,48 @@ class DashboardWindow(QMainWindow):
         scroll.setWidget(view)
         return scroll
 
+    def _create_notebook_view(self) -> QWidget:
+        """Create the Audio Notebook view."""
+        from dashboard.kde.notebook_view import NotebookView
+        from dashboard.kde.recording_dialog import RecordingDialog
+
+        # Create the notebook view with API client from tray
+        api_client = None
+        if self.tray and hasattr(self.tray, "_orchestrator"):
+            api_client = self.tray._orchestrator._api_client
+
+        self._notebook_widget = NotebookView(api_client)
+        self._notebook_widget.recording_requested.connect(self._open_recording_dialog)
+
+        return self._notebook_widget
+
+    def _refresh_notebook_view(self) -> None:
+        """Refresh the notebook view data."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            # Update API client reference in case connection changed
+            if self.tray and hasattr(self.tray, "_orchestrator"):
+                api_client = self.tray._orchestrator._api_client
+                self._notebook_widget.set_api_client(api_client)
+            self._notebook_widget.refresh()
+
+    def _open_recording_dialog(self, recording_id: int) -> None:
+        """Open the recording dialog for a specific recording."""
+        from dashboard.kde.recording_dialog import RecordingDialog
+
+        api_client = None
+        if self.tray and hasattr(self.tray, "_orchestrator"):
+            api_client = self.tray._orchestrator._api_client
+
+        if api_client:
+            dialog = RecordingDialog(api_client, recording_id, self)
+            dialog.recording_deleted.connect(self._on_recording_deleted)
+            dialog.exec()
+
+    def _on_recording_deleted(self, recording_id: int) -> None:
+        """Handle recording deletion - refresh notebook view."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.refresh()
+
     def _apply_styles(self) -> None:
         """Apply stylesheet to the window - matching Web UI colors."""
         # Web UI color palette:
@@ -1930,6 +1984,7 @@ class DashboardWindow(QMainWindow):
             View.WELCOME: 0,
             View.SERVER: 1,
             View.CLIENT: 2,
+            View.NOTEBOOK: 3,
         }
         self._stack.setCurrentIndex(view_map[view])
 
@@ -1940,6 +1995,8 @@ class DashboardWindow(QMainWindow):
             self._refresh_server_status()
         elif view == View.CLIENT:
             self._refresh_client_status()
+        elif view == View.NOTEBOOK:
+            self._refresh_notebook_view()
 
     def _go_back(self) -> None:
         """Navigate to the previous view."""

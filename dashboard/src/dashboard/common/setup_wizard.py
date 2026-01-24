@@ -537,7 +537,9 @@ class SetupWizard:
 
         try:
             compose_file.write_text(template)
-            logger.info(f"Created docker-compose.yml at {compose_file} (platform: {self.system})")
+            logger.info(
+                f"Created docker-compose.yml at {compose_file} (platform: {self.system})"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to create docker-compose.yml: {e}")

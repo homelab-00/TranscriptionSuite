@@ -115,3 +115,224 @@ ActionCallback = Callable[[], None]
 ProgressCallback = Callable[[str], None]
 TranscriptionCallback = Callable[[TranscriptionResult], None]
 ErrorCallback = Callable[[str], None]
+
+
+# =============================================================================
+# Audio Notebook Data Models
+# =============================================================================
+
+
+@dataclass
+class Recording:
+    """Audio notebook recording metadata."""
+
+    id: int
+    filename: str
+    filepath: str
+    title: str | None
+    recorded_at: str  # ISO datetime string
+    imported_at: str  # ISO datetime string
+    duration_seconds: float
+    word_count: int
+    has_diarization: bool
+    summary: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Recording":
+        """Create from API response dict."""
+        return cls(
+            id=data.get("id", 0),
+            filename=data.get("filename", ""),
+            filepath=data.get("filepath", ""),
+            title=data.get("title"),
+            recorded_at=data.get("recorded_at", ""),
+            imported_at=data.get("imported_at", ""),
+            duration_seconds=data.get("duration_seconds", 0.0),
+            word_count=data.get("word_count", 0),
+            has_diarization=data.get("has_diarization", False),
+            summary=data.get("summary"),
+        )
+
+
+@dataclass
+class Word:
+    """Word-level transcription data with timestamps."""
+
+    word: str
+    start: float  # Start time in seconds
+    end: float  # End time in seconds
+    probability: float | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Word":
+        """Create from API response dict."""
+        return cls(
+            word=data.get("word", ""),
+            start=data.get("start", 0.0),
+            end=data.get("end", 0.0),
+            probability=data.get("probability"),
+        )
+
+
+@dataclass
+class Segment:
+    """Transcription segment with optional speaker and word-level data."""
+
+    text: str
+    start: float  # Start time in seconds
+    end: float  # End time in seconds
+    speaker: str | None = None
+    words: list[Word] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Segment":
+        """Create from API response dict."""
+        words_data = data.get("words", [])
+        words = [Word.from_dict(w) for w in words_data] if words_data else []
+        return cls(
+            text=data.get("text", ""),
+            start=data.get("start", 0.0),
+            end=data.get("end", 0.0),
+            speaker=data.get("speaker"),
+            words=words,
+        )
+
+
+@dataclass
+class Transcription:
+    """Full transcription with segments."""
+
+    recording_id: int
+    segments: list[Segment] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Transcription":
+        """Create from API response dict."""
+        segments_data = data.get("segments", [])
+        segments = [Segment.from_dict(s) for s in segments_data]
+        return cls(
+            recording_id=data.get("recording_id", 0),
+            segments=segments,
+        )
+
+
+@dataclass
+class SearchResult:
+    """Search result from full-text search."""
+
+    recording_id: int
+    recording: Recording | None
+    word: str
+    start_time: float
+    end_time: float
+    context: str
+    match_type: str  # 'word', 'filename', 'summary'
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SearchResult":
+        """Create from API response dict."""
+        recording_data = data.get("recording")
+        recording = Recording.from_dict(recording_data) if recording_data else None
+        return cls(
+            recording_id=data.get("recording_id", 0),
+            recording=recording,
+            word=data.get("word", ""),
+            start_time=data.get("start_time", 0.0),
+            end_time=data.get("end_time", 0.0),
+            context=data.get("context", ""),
+            match_type=data.get("match_type", "word"),
+        )
+
+
+@dataclass
+class Conversation:
+    """LLM conversation metadata."""
+
+    id: int
+    recording_id: int
+    title: str
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Conversation":
+        """Create from API response dict."""
+        return cls(
+            id=data.get("id", 0),
+            recording_id=data.get("recording_id", 0),
+            title=data.get("title", ""),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+        )
+
+
+@dataclass
+class Message:
+    """Chat message in a conversation."""
+
+    id: int
+    conversation_id: int
+    role: str  # 'user', 'assistant', 'system'
+    content: str
+    created_at: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Message":
+        """Create from API response dict."""
+        return cls(
+            id=data.get("id", 0),
+            conversation_id=data.get("conversation_id", 0),
+            role=data.get("role", ""),
+            content=data.get("content", ""),
+            created_at=data.get("created_at", ""),
+        )
+
+
+@dataclass
+class ConversationWithMessages:
+    """Conversation with full message history."""
+
+    id: int
+    recording_id: int
+    title: str
+    created_at: str
+    updated_at: str
+    messages: list[Message] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ConversationWithMessages":
+        """Create from API response dict."""
+        messages_data = data.get("messages", [])
+        messages = [Message.from_dict(m) for m in messages_data]
+        return cls(
+            id=data.get("id", 0),
+            recording_id=data.get("recording_id", 0),
+            title=data.get("title", ""),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            messages=messages,
+        )
+
+
+@dataclass
+class ImportJob:
+    """Import job status for tracking file uploads."""
+
+    id: int
+    filename: str
+    status: str  # 'pending', 'transcribing', 'completed', 'failed'
+    progress: float | None = None
+    message: str | None = None
+    recording_id: int | None = None  # Set when completed
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ImportJob":
+        """Create from API response dict."""
+        return cls(
+            id=data.get("id", 0),
+            filename=data.get("filename", ""),
+            status=data.get("status", "pending"),
+            progress=data.get("progress"),
+            message=data.get("message"),
+            recording_id=data.get("recording_id"),
+        )
