@@ -48,6 +48,7 @@ from dashboard.common.docker_manager import (
     DockerManager,
     DockerPullWorker,
     DockerResult,
+    DockerServerWorker,
     ServerMode,
     ServerStatus,
 )
@@ -573,6 +574,10 @@ class DashboardWindow(QMainWindow):
     _pull_progress_signal = pyqtSignal(str)
     _pull_complete_signal = pyqtSignal(object)  # DockerResult
 
+    # Signals for Docker server start progress (thread-safe cross-thread communication)
+    _server_start_progress_signal = pyqtSignal(str)
+    _server_start_complete_signal = pyqtSignal(object)  # DockerResult
+
     def __init__(self, config: "ClientConfig", parent: QWidget | None = None):
         super().__init__(parent)
         self.config = config
@@ -608,6 +613,9 @@ class DashboardWindow(QMainWindow):
         # Docker pull worker for async image pulling
         self._pull_worker: "DockerPullWorker | None" = None
 
+        # Docker server start worker for async server start
+        self._server_worker: "DockerServerWorker | None" = None
+
         # Tray reference for orchestrator access
         self.tray: Any = None
 
@@ -617,6 +625,10 @@ class DashboardWindow(QMainWindow):
         # Connect Docker pull signals (thread-safe cross-thread communication)
         self._pull_progress_signal.connect(self._update_pull_progress)
         self._pull_complete_signal.connect(self._on_pull_complete)
+
+        # Connect Docker server start signals (thread-safe cross-thread communication)
+        self._server_start_progress_signal.connect(self._update_server_start_progress)
+        self._server_start_complete_signal.connect(self._on_server_start_complete)
 
         # Start home status auto-refresh timer
         self._start_home_status_timer()
@@ -2300,7 +2312,12 @@ class DashboardWindow(QMainWindow):
         self._start_server(ServerMode.REMOTE)
 
     def _start_server(self, mode: ServerMode) -> None:
-        """Start the Docker server."""
+        """Start the Docker server asynchronously."""
+        # Check if a server start is already in progress
+        if self._server_worker is not None and self._server_worker.is_alive():
+            logger.warning("Server start already in progress")
+            return
+
         if self._server_health_timer:
             self._server_health_timer.stop()
             self._server_health_timer = None
@@ -2309,21 +2326,47 @@ class DashboardWindow(QMainWindow):
         self._start_local_btn.setEnabled(False)
         self._start_remote_btn.setEnabled(False)
 
-        # Log progress
-        def progress(msg: str) -> None:
-            logger.info(msg)
-            if self._show_server_logs_btn.isChecked():
-                self._server_log_view.appendPlainText(msg)
-
         # Get selected image from dropdown
         image_selection = self._get_selected_image_tag()
 
-        result = self._docker_manager.start_server(
-            mode=mode, progress_callback=progress, image_selection=image_selection
+        # Define callbacks that emit signals for thread-safe UI updates
+        def on_progress(msg: str) -> None:
+            """Called from worker thread - emit signal for thread-safe UI update."""
+            self._server_start_progress_signal.emit(msg)
+
+        def on_complete(result: DockerResult) -> None:
+            """Called from worker thread - emit signal for thread-safe UI update."""
+            self._server_start_complete_signal.emit(result)
+
+        # Start the server asynchronously
+        result = self._docker_manager.start_server_async(
+            mode=mode,
+            progress_callback=on_progress,
+            complete_callback=on_complete,
+            image_selection=image_selection,
         )
 
+        # Check if pre-flight validation failed (returns DockerResult instead of worker)
+        if isinstance(result, DockerResult):
+            # Validation failed - handle synchronously
+            self._server_start_progress_signal.emit(f"Error: {result.message}")
+            self._on_server_start_complete(result)
+        else:
+            # Got a worker - store reference
+            self._server_worker = result
+
+    def _update_server_start_progress(self, msg: str) -> None:
+        """Update UI with server start progress (called on main thread via signal)."""
+        logger.info(msg)
+        if self._show_server_logs_btn.isChecked():
+            self._server_log_view.appendPlainText(msg)
+
+    def _on_server_start_complete(self, result: DockerResult) -> None:
+        """Handle server start completion (called on main thread via signal)."""
+        self._server_worker = None
+
         if result.success:
-            progress(result.message)
+            self._update_server_start_progress(result.message)
             # Force refresh token from logs for new/restarted container
             QTimer.singleShot(2000, self._docker_manager.refresh_admin_token)
             self._refresh_server_status()
@@ -2332,8 +2375,12 @@ class DashboardWindow(QMainWindow):
             self._server_health_timer.timeout.connect(self._refresh_server_status)
             self._server_health_timer.start(1500)
         else:
-            progress(f"Error: {result.message}")
+            self._update_server_start_progress(f"Error: {result.message}")
             QTimer.singleShot(1000, self._refresh_server_status)
+
+        # Re-enable buttons
+        self._start_local_btn.setEnabled(True)
+        self._start_remote_btn.setEnabled(True)
 
     def _on_stop_server(self) -> None:
         """Stop the Docker server."""

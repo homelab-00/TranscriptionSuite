@@ -150,7 +150,7 @@ DOCKER_COMPOSE_LINUX = """# TranscriptionSuite Docker Compose Configuration
 
 services:
   transcriptionsuite:
-    image: ghcr.io/homelab-00/transcriptionsuite-server:latest
+    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
     container_name: transcriptionsuite-container
 
     # Use host network mode for direct access to host services (LM Studio)
@@ -231,7 +231,7 @@ DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
 
 services:
   transcriptionsuite:
-    image: ghcr.io/homelab-00/transcriptionsuite-server:latest
+    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
     container_name: transcriptionsuite-container
 
     # Windows: Use bridge networking with explicit port mappings

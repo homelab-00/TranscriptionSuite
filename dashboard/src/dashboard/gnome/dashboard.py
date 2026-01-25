@@ -25,6 +25,7 @@ from dashboard.common.docker_manager import (
     DockerManager,
     DockerPullWorker,
     DockerResult,
+    DockerServerWorker,
     ServerMode,
     ServerStatus,
 )
@@ -533,6 +534,9 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Docker pull worker for async image pulling
         self._pull_worker: DockerPullWorker | None = None
+
+        # Docker server start worker for async server start
+        self._server_worker: DockerServerWorker | None = None
 
         # UI references (typed as Any since GTK types are dynamic)
         self._stack: Any = None
@@ -2036,24 +2040,67 @@ class DashboardWindow(_get_dashboard_base()):
         return tag if tag else "auto"
 
     def _on_start_server_local(self) -> None:
-        """Start server in local mode."""
-        image_selection = self._get_selected_image_tag()
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(
-                ServerMode.LOCAL, image_selection=image_selection
-            ),
-            "Starting server (local mode)...",
-        )
+        """Start server in local mode (async, non-blocking)."""
+        self._start_server_async(ServerMode.LOCAL)
 
     def _on_start_server_remote(self) -> None:
-        """Start server in remote mode."""
+        """Start server in remote mode (async, non-blocking)."""
+        self._start_server_async(ServerMode.REMOTE)
+
+    def _start_server_async(self, mode: ServerMode) -> None:
+        """Start the Docker server asynchronously."""
+        # Prevent starting another server start if one is already in progress
+        if self._server_worker is not None and self._server_worker.is_alive():
+            logger.warning("Server start already in progress")
+            self._show_notification(
+                "Docker Server", "Server start already in progress"
+            )
+            return
+
         image_selection = self._get_selected_image_tag()
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(
-                ServerMode.REMOTE, image_selection=image_selection
-            ),
-            "Starting server (remote mode)...",
+        self._show_notification(
+            "Docker Server", f"Starting server ({mode.value} mode)..."
         )
+
+        def on_progress(msg: str) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            GLib.idle_add(self._update_server_start_progress, msg)
+
+        def on_complete(result: DockerResult) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            GLib.idle_add(self._on_server_start_complete, result)
+
+        # Start the server asynchronously
+        result = self._docker_manager.start_server_async(
+            mode=mode,
+            progress_callback=on_progress,
+            complete_callback=on_complete,
+            image_selection=image_selection,
+        )
+
+        # Check if pre-flight validation failed (returns DockerResult instead of worker)
+        if isinstance(result, DockerResult):
+            # Validation failed - handle synchronously
+            self._show_notification("Docker Server", f"Error: {result.message}")
+            self._refresh_server_status()
+            self._refresh_home_status()
+        else:
+            # Got a worker - store reference
+            self._server_worker = result
+            logger.info(f"Started async server start ({mode.value} mode)")
+
+    def _update_server_start_progress(self, msg: str) -> bool:
+        """Update with server start progress (main thread via GLib.idle_add)."""
+        logger.info(msg)
+        return False  # Remove from idle queue
+
+    def _on_server_start_complete(self, result: DockerResult) -> bool:
+        """Handle server start completion (main thread via GLib.idle_add)."""
+        self._server_worker = None
+        self._show_notification("Docker Server", result.message)
+        self._refresh_server_status()
+        self._refresh_home_status()
+        return False  # Remove from idle queue
 
     def _on_stop_server(self) -> None:
         """Stop the server."""
