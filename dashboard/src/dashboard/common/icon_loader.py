@@ -64,10 +64,11 @@ class IconLoader:
         },
         "notebook": {
             "theme_names": [
-                "accessories-text-editor",
-                "text-editor",
-                "x-office-document",
-                "notebook",
+                "audio-x-generic",
+                "audio-volume-high",
+                "multimedia-audio-player",
+                "applications-multimedia",
+                "folder-sound",
             ],
             "standard_pixmap": QStyle.StandardPixmap.SP_FileIcon,
         },

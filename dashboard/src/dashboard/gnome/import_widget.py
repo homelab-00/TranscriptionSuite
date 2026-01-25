@@ -6,6 +6,8 @@ Provides file upload and import functionality for audio files.
 
 import asyncio
 import logging
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -46,13 +48,22 @@ AUDIO_EXTENSIONS = {
 class ImportJob:
     """Represents an import job in the queue."""
 
-    def __init__(self, file_path: Path):
+    def __init__(self, file_path: Path, recorded_at: str | None = None):
         self.file_path = file_path
         self.filename = file_path.name
         self.status = "pending"
         self.progress: float | None = None
         self.message: str | None = None
         self.recording_id: int | None = None
+        # Extract file modification time if not provided
+        if recorded_at:
+            self.recorded_at = recorded_at
+        else:
+            try:
+                mtime = os.path.getmtime(file_path)
+                self.recorded_at = datetime.fromtimestamp(mtime).isoformat()
+            except (OSError, ValueError):
+                self.recorded_at = None
 
 
 class ImportWidget:
@@ -90,9 +101,11 @@ class ImportWidget:
         self._drop_zone.set_size_request(-1, 180)
         self._drop_zone.set_hexpand(True)
 
-        icon_label = Gtk.Label(label="📁")
-        icon_label.add_css_class("drop-icon")
-        self._drop_zone.append(icon_label)
+        # Use themed folder icon instead of emoji
+        icon_image = Gtk.Image.new_from_icon_name("folder-symbolic")
+        icon_image.set_pixel_size(48)
+        icon_image.add_css_class("drop-icon")
+        self._drop_zone.append(icon_image)
 
         text_label = Gtk.Label(label="Drag audio files here\nor click to browse")
         text_label.add_css_class("drop-text")
@@ -147,6 +160,12 @@ class ImportWidget:
 
         queue_header.append(Gtk.Box(hexpand=True))
 
+        self._start_btn = Gtk.Button(label="Start Transcribing")
+        self._start_btn.add_css_class("primary-button")
+        self._start_btn.set_sensitive(False)
+        self._start_btn.connect("clicked", lambda _: self._start_transcribing())
+        queue_header.append(self._start_btn)
+
         self._clear_btn = Gtk.Button(label="Clear Completed")
         self._clear_btn.add_css_class("secondary-button")
         self._clear_btn.set_sensitive(False)
@@ -186,6 +205,36 @@ class ImportWidget:
         """Apply CSS styling."""
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
+            .primary-button {
+                background-color: #1e88e5;
+                border: none;
+                border-radius: 6px;
+                color: white;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+
+            .primary-button:hover {
+                background-color: #2196f3;
+            }
+
+            .primary-button:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            .secondary-button {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: white;
+                padding: 8px 16px;
+            }
+
+            .secondary-button:hover {
+                background-color: #3d3d3d;
+            }
+
             .drop-zone {
                 background-color: #1e1e1e;
                 border: 2px dashed #3d3d3d;
@@ -337,7 +386,7 @@ class ImportWidget:
 
         if added_count > 0:
             self._status_label.set_label(f"Added {added_count} file(s) to queue")
-            self._process_queue()
+            self._update_start_button()
 
     def _add_job_to_list(self, job: ImportJob) -> None:
         """Add a job item to the queue list."""
@@ -389,6 +438,16 @@ class ImportWidget:
         name_label.set_hexpand(True)
         box.append(name_label)
 
+    def _update_start_button(self) -> None:
+        """Update the state of the Start Transcribing button."""
+        pending_jobs = [j for j in self._jobs if j.status == "pending"]
+        self._start_btn.set_sensitive(len(pending_jobs) > 0 and not self._is_processing)
+
+    def _start_transcribing(self) -> None:
+        """Start processing the queue when user clicks the button."""
+        if not self._is_processing:
+            self._process_queue()
+
     def _process_queue(self) -> None:
         """Process the next job in the queue."""
         if self._is_processing:
@@ -401,7 +460,11 @@ class ImportWidget:
 
             completed = [j for j in self._jobs if j.status in ("completed", "failed")]
             self._clear_btn.set_sensitive(len(completed) > 0)
+            self._start_btn.set_sensitive(False)
             return
+
+        # Disable start button while processing
+        self._start_btn.set_sensitive(False)
 
         self._is_processing = True
         self._current_job = pending_jobs[0]
@@ -445,6 +508,7 @@ class ImportWidget:
                 file_path=job.file_path,
                 diarization=self._diarization_check.get_active(),
                 word_timestamps=self._word_timestamps_check.get_active(),
+                recorded_at=job.recorded_at,
                 on_progress=on_progress,
             )
 

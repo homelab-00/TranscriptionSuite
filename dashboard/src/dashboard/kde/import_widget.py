@@ -7,10 +7,12 @@ with transcription options.
 
 import asyncio
 import logging
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -24,6 +26,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from dashboard.common.icon_loader import IconLoader
 
 if TYPE_CHECKING:
     from dashboard.common.api_client import APIClient
@@ -50,13 +54,22 @@ AUDIO_EXTENSIONS = {
 class ImportJob:
     """Represents an import job in the queue."""
 
-    def __init__(self, file_path: Path):
+    def __init__(self, file_path: Path, recorded_at: str | None = None):
         self.file_path = file_path
         self.filename = file_path.name
         self.status = "pending"  # pending, transcribing, completed, failed
         self.progress: float | None = None
         self.message: str | None = None
         self.recording_id: int | None = None
+        # Extract file modification time if not provided
+        if recorded_at:
+            self.recorded_at = recorded_at
+        else:
+            try:
+                mtime = os.path.getmtime(file_path)
+                self.recorded_at = datetime.fromtimestamp(mtime).isoformat()
+            except (OSError, ValueError):
+                self.recorded_at = None
 
 
 class DropZone(QFrame):
@@ -74,10 +87,12 @@ class DropZone(QFrame):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon_label = QLabel("📁")
-        icon_label.setObjectName("dropIcon")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(icon_label)
+        # Use themed folder icon via IconLoader
+        self._icon_label = QLabel()
+        self._icon_label.setObjectName("dropIcon")
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_label.setFixedSize(48, 48)
+        layout.addWidget(self._icon_label)
 
         text_label = QLabel("Drag audio files here\nor click to browse")
         text_label.setObjectName("dropText")
@@ -136,6 +151,16 @@ class DropZone(QFrame):
         if files:
             self.files_dropped.emit([Path(f) for f in files])
 
+    def set_icon(self, icon_loader: IconLoader) -> None:
+        """Set the folder icon using IconLoader."""
+        icon = icon_loader.get_icon("folder")
+        if not icon.isNull():
+            pixmap = icon.pixmap(QSize(48, 48))
+            self._icon_label.setPixmap(pixmap)
+        else:
+            # Fallback to emoji if no icon available
+            self._icon_label.setText("📁")
+
 
 class ImportWidget(QWidget):
     """
@@ -161,6 +186,9 @@ class ImportWidget(QWidget):
         self._current_job: ImportJob | None = None
         self._is_processing = False
 
+        # Target date/time for imports from Day View (overrides file date)
+        self._target_recorded_at: str | None = None
+
         self._setup_ui()
         self._apply_styles()
 
@@ -175,6 +203,10 @@ class ImportWidget(QWidget):
         self._drop_zone.setMinimumHeight(180)
         self._drop_zone.files_dropped.connect(self._add_files)
         layout.addWidget(self._drop_zone)
+
+        # Set folder icon using IconLoader
+        self._icon_loader = IconLoader(self)
+        self._drop_zone.set_icon(self._icon_loader)
 
         # Options section
         options_container = QFrame()
@@ -217,6 +249,12 @@ class ImportWidget(QWidget):
         queue_header_layout.addWidget(self._queue_label)
 
         queue_header_layout.addStretch()
+
+        self._start_btn = QPushButton("Start Transcribing")
+        self._start_btn.setObjectName("primaryButton")
+        self._start_btn.clicked.connect(self._start_transcribing)
+        self._start_btn.setEnabled(False)
+        queue_header_layout.addWidget(self._start_btn)
 
         self._clear_completed_btn = QPushButton("Clear Completed")
         self._clear_completed_btn.setObjectName("secondaryButton")
@@ -348,6 +386,24 @@ class ImportWidget(QWidget):
                 font-size: 13px;
             }
 
+            #primaryButton {
+                background-color: #1e88e5;
+                border: none;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+
+            #primaryButton:hover {
+                background-color: #2196f3;
+            }
+
+            #primaryButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
             #secondaryButton {
                 background-color: #2d2d2d;
                 border: 1px solid #3d3d3d;
@@ -382,14 +438,18 @@ class ImportWidget(QWidget):
                 logger.debug(f"File already in queue: {file_path}")
                 continue
 
-            job = ImportJob(file_path)
+            # Use target date/time if set (from Day View), otherwise use file date
+            job = ImportJob(file_path, recorded_at=self._target_recorded_at)
             self._jobs.append(job)
             self._add_job_to_list(job)
             added_count += 1
 
+        # Clear target date after adding files
+        self._target_recorded_at = None
+
         if added_count > 0:
             self._status_label.setText(f"Added {added_count} file(s) to queue")
-            self._process_queue()
+            self._update_start_button()
 
     def _add_job_to_list(self, job: ImportJob) -> None:
         """Add a job item to the queue list."""
@@ -419,6 +479,16 @@ class ImportWidget(QWidget):
 
         item.setText(text)
 
+    def _update_start_button(self) -> None:
+        """Update the state of the Start Transcribing button."""
+        pending_jobs = [j for j in self._jobs if j.status == "pending"]
+        self._start_btn.setEnabled(len(pending_jobs) > 0 and not self._is_processing)
+
+    def _start_transcribing(self) -> None:
+        """Start processing the queue when user clicks the button."""
+        if not self._is_processing:
+            self._process_queue()
+
     def _process_queue(self) -> None:
         """Process the next job in the queue."""
         if self._is_processing:
@@ -430,12 +500,16 @@ class ImportWidget(QWidget):
             self._is_processing = False
             self._progress_bar.setVisible(False)
 
-            # Update clear button state
+            # Update button states
             completed_jobs = [
                 j for j in self._jobs if j.status in ("completed", "failed")
             ]
             self._clear_completed_btn.setEnabled(len(completed_jobs) > 0)
+            self._start_btn.setEnabled(False)
             return
+
+        # Disable start button while processing
+        self._start_btn.setEnabled(False)
 
         self._is_processing = True
         self._current_job = pending_jobs[0]
@@ -486,6 +560,7 @@ class ImportWidget(QWidget):
                 file_path=job.file_path,
                 diarization=self._diarization_checkbox.isChecked(),
                 word_timestamps=self._word_timestamps_checkbox.isChecked(),
+                recorded_at=job.recorded_at,
                 on_progress=on_progress,
             )
 
@@ -557,3 +632,12 @@ class ImportWidget(QWidget):
     def set_api_client(self, api_client: "APIClient") -> None:
         """Update the API client reference."""
         self._api_client = api_client
+
+    def import_for_datetime(self, target_date, hour: int) -> None:
+        """Open file browser with a preset target date/time for the import."""
+        # Set the target datetime (will be used instead of file creation date)
+        self._target_recorded_at = datetime(
+            target_date.year, target_date.month, target_date.day, hour, 0, 0
+        ).isoformat()
+        # Open file browser
+        self._drop_zone._open_file_browser()

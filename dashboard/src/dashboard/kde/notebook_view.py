@@ -86,6 +86,7 @@ class NotebookView(QWidget):
 
         # Connect signals
         self._calendar_widget.recording_requested.connect(self._on_recording_requested)
+        self._calendar_widget.import_requested.connect(self._on_import_requested)
         self._search_widget.recording_requested.connect(self._on_recording_requested)
         self._import_widget.recording_created.connect(self._on_import_complete)
 
@@ -143,12 +144,18 @@ class NotebookView(QWidget):
         self.recording_requested.emit(recording_id)
 
     def _on_import_complete(self, recording_id: int) -> None:
-        """Handle import completion - refresh calendar and open recording."""
+        """Handle import completion - refresh calendar (don't auto-open)."""
         logger.info(f"Import complete, recording ID: {recording_id}")
         # Refresh calendar to show new recording
         self._calendar_widget.refresh()
-        # Emit signal to open the recording
-        self.recording_requested.emit(recording_id)
+        # Don't auto-open the recording - let user review queue first
+
+    def _on_import_requested(self, target_date, hour: int) -> None:
+        """Handle import request from calendar day view."""
+        logger.debug(f"Import requested for {target_date} at {hour}:00")
+        # Switch to import tab and open file browser with target date/time
+        self._tabs.setCurrentIndex(2)
+        self._import_widget.import_for_datetime(target_date, hour)
 
     def refresh(self) -> None:
         """Refresh all notebook data."""

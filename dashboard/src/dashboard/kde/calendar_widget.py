@@ -47,10 +47,12 @@ class DayCell(QFrame):
         self._is_current_month = is_current_month
         self._is_selected = False
         self._is_today = day_date == date.today() if day_date else False
+        self._is_future = day_date > date.today() if day_date else False
         self._recording_count = 0
 
         self.setObjectName("dayCell")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if not self._is_future:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(80)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -89,7 +91,9 @@ class DayCell(QFrame):
 
     def _update_style(self) -> None:
         """Update the cell styling based on state."""
-        if self._is_selected:
+        if self._is_future:
+            self.setProperty("state", "future")
+        elif self._is_selected:
             self.setProperty("state", "selected")
         elif self._is_today:
             self.setProperty("state", "today")
@@ -104,7 +108,7 @@ class DayCell(QFrame):
 
     def mousePressEvent(self, event) -> None:
         """Handle mouse click."""
-        if self._date:
+        if self._date and not self._is_future:
             self.clicked.emit(self._date)
         super().mousePressEvent(event)
 
@@ -118,6 +122,7 @@ class CalendarWidget(QWidget):
     """
 
     recording_requested = pyqtSignal(int)
+    import_requested = pyqtSignal(date, int)  # date, hour
 
     def __init__(
         self,
@@ -133,6 +138,7 @@ class CalendarWidget(QWidget):
         self._current_month = date.today().month
         self._selected_date: date | None = date.today()
         self._day_cells: list[DayCell] = []
+        self._time_slots: dict[int, dict] = {}  # hour -> {slot, dot, add_btn}
         self._view_mode = "month"  # "month" or "day"
 
         self._setup_ui()
@@ -236,8 +242,8 @@ class CalendarWidget(QWidget):
         morning = self._create_time_section("Morning", range(0, 12))
         layout.addWidget(morning, 1)
 
-        # Afternoon & Evening section (12 PM - 11 PM)
-        afternoon = self._create_time_section("Afternoon & Evening", range(12, 24))
+        # Afternoon section (12 PM - 11 PM)
+        afternoon = self._create_time_section("Afternoon", range(12, 24))
         layout.addWidget(afternoon, 1)
 
         return container
@@ -290,11 +296,11 @@ class CalendarWidget(QWidget):
 
         return container
 
-    def _create_time_slot(self, hour: int) -> QWidget:
+    def _create_time_slot(self, hour: int) -> QFrame:
         """Create a single time slot row."""
         slot = QFrame()
         slot.setObjectName("timeSlot")
-        slot.setMinimumHeight(50)
+        slot.setMinimumHeight(60)
         slot.setProperty("hour", hour)
 
         layout = QHBoxLayout(slot)
@@ -316,12 +322,6 @@ class CalendarWidget(QWidget):
         time_label.setFixedWidth(50)
         layout.addWidget(time_label)
 
-        # Indicator dot
-        dot = QLabel("●")
-        dot.setObjectName("timeDot")
-        dot.setFixedWidth(16)
-        layout.addWidget(dot)
-
         # Recordings container (for this hour)
         recordings_container = QWidget()
         recordings_container.setObjectName(f"recordings_{hour}")
@@ -329,17 +329,49 @@ class CalendarWidget(QWidget):
         recordings_layout.setContentsMargins(0, 0, 0, 0)
         recordings_layout.setSpacing(8)
 
-        # Add button placeholder
+        recordings_layout.addStretch()
+
+        # Add button at the END - hidden by default, shown on hover
         add_btn = QPushButton("+")
         add_btn.setObjectName("addButton")
-        add_btn.setFixedSize(24, 24)
+        add_btn.setFixedSize(28, 28)
         add_btn.setToolTip("Import recording for this time")
+        add_btn.clicked.connect(lambda checked, h=hour: self._on_add_clicked(h))
+        add_btn.hide()  # Hidden by default, shown on hover
         recordings_layout.addWidget(add_btn)
 
-        recordings_layout.addStretch()
         layout.addWidget(recordings_container, 1)
 
+        # Install event filter on slot for hover detection
+        slot.enterEvent = lambda e, h=hour: self._on_slot_enter(h)
+        slot.leaveEvent = lambda e, h=hour: self._on_slot_leave(h)
+
+        # Store references for later updates
+        self._time_slots[hour] = {
+            "slot": slot,
+            "add_btn": add_btn,
+            "recordings_layout": recordings_layout,
+            "recording_widgets": [],  # Track recording widgets for cleanup
+        }
+
         return slot
+
+    def _on_slot_enter(self, hour: int) -> None:
+        """Show add button when mouse enters time slot."""
+        slot_info = self._time_slots.get(hour)
+        if slot_info and slot_info["add_btn"].isEnabled():
+            slot_info["add_btn"].show()
+
+    def _on_slot_leave(self, hour: int) -> None:
+        """Hide add button when mouse leaves time slot."""
+        slot_info = self._time_slots.get(hour)
+        if slot_info:
+            slot_info["add_btn"].hide()
+
+    def _on_add_clicked(self, hour: int) -> None:
+        """Handle add button click for a time slot."""
+        if self._selected_date:
+            self.import_requested.emit(self._selected_date, hour)
 
     def _apply_styles(self) -> None:
         """Apply styling to calendar components."""
@@ -402,6 +434,20 @@ class CalendarWidget(QWidget):
                 color: #404040;
             }
 
+            #dayCell[state="future"] {
+                background-color: #0d0d1a;
+                cursor: default;
+            }
+
+            #dayCell[state="future"] #dayNumber {
+                color: #404040;
+            }
+
+            #dayCell[state="future"]:hover {
+                background-color: #0d0d1a;
+                border-color: #2d2d2d;
+            }
+
             #dayCell[state="has-recordings"] {
                 background-color: #1e2a3a;
             }
@@ -432,22 +478,61 @@ class CalendarWidget(QWidget):
                 font-size: 12px;
             }
 
-            #timeDot {
-                color: #90caf9;
-                font-size: 8px;
-            }
-
             #addButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
+                background-color: transparent;
+                border: 1px dashed #3d3d3d;
                 border-radius: 4px;
                 color: #606060;
-                font-size: 14px;
+                font-size: 16px;
             }
 
             #addButton:hover {
-                background-color: #3d3d3d;
+                background-color: #2d2d2d;
+                border-color: #90caf9;
                 color: #90caf9;
+            }
+
+            #addButton:disabled {
+                color: #404040;
+                border-color: #2d2d2d;
+            }
+
+            /* Recording card in day view */
+            #recordingCard {
+                background-color: #1e2a3a;
+                border: 1px solid #2d4a6d;
+                border-radius: 8px;
+                min-width: 180px;
+            }
+
+            #recordingCard:hover {
+                background-color: #263a4f;
+                border-color: #90caf9;
+            }
+
+            #cardTitle {
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            #cardInfo {
+                color: #808080;
+                font-size: 11px;
+            }
+
+            #cardDuration {
+                color: #a0a0a0;
+                font-size: 11px;
+            }
+
+            #diarizationBadge {
+                background-color: #1e3a5f;
+                border: 1px solid #4a90d9;
+                border-radius: 4px;
+                color: #90caf9;
+                font-size: 10px;
+                padding: 2px 6px;
             }
 
             /* Scroll area */
@@ -556,6 +641,8 @@ class CalendarWidget(QWidget):
 
         date_str = self._selected_date.isoformat()
         recordings = self._recordings_cache.get(date_str, [])
+        today = date.today()
+        now = datetime.now()
 
         # Group recordings by hour
         recordings_by_hour: dict[int, list[Recording]] = {}
@@ -569,7 +656,97 @@ class CalendarWidget(QWidget):
             except (ValueError, AttributeError):
                 pass
 
-        # TODO: Update time slot widgets with recording cards
+        # Update time slot widgets
+        for hour, slot_info in self._time_slots.items():
+            add_btn = slot_info["add_btn"]
+            recordings_layout = slot_info["recordings_layout"]
+
+            # Clear existing recording widgets
+            for widget in slot_info["recording_widgets"]:
+                recordings_layout.removeWidget(widget)
+                widget.deleteLater()
+            slot_info["recording_widgets"] = []
+
+            # Add recording cards for this hour
+            hour_recordings = recordings_by_hour.get(hour, [])
+            for rec in hour_recordings:
+                card = self._create_recording_card(rec)
+                # Insert at position 0 (before stretch and add button)
+                recordings_layout.insertWidget(0, card)
+                slot_info["recording_widgets"].append(card)
+
+            # Disable add button for future time slots
+            is_future = (
+                self._selected_date > today
+                or (self._selected_date == today and hour > now.hour)
+            )
+            add_btn.setEnabled(not is_future)
+            if is_future:
+                add_btn.setToolTip("Cannot import to future time slots")
+            else:
+                add_btn.setToolTip("Import recording for this time")
+
+    def _create_recording_card(self, rec: Recording) -> QFrame:
+        """Create a card widget for a recording entry."""
+        card = QFrame()
+        card.setObjectName("recordingCard")
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
+
+        # Top row: title
+        title = rec.title or rec.filename or "Recording"
+        title_label = QLabel(title)
+        title_label.setObjectName("cardTitle")
+        layout.addWidget(title_label)
+
+        # Bottom row: time, duration, and optional diarization badge
+        info_layout = QHBoxLayout()
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(12)
+
+        # Time (e.g., "12:01 AM")
+        try:
+            rec_dt = datetime.fromisoformat(rec.recorded_at.replace("Z", "+00:00"))
+            time_str = rec_dt.strftime("%I:%M %p").lstrip("0")
+        except (ValueError, AttributeError):
+            time_str = ""
+        time_label = QLabel(f"🕐 {time_str}")
+        time_label.setObjectName("cardInfo")
+        info_layout.addWidget(time_label)
+
+        # Duration (e.g., "39s" or "2m 15s")
+        duration = rec.duration_seconds
+        if duration < 60:
+            duration_str = f"{int(duration)}s"
+        elif duration < 3600:
+            mins = int(duration // 60)
+            secs = int(duration % 60)
+            duration_str = f"{mins}m {secs}s" if secs else f"{mins}m"
+        else:
+            hours = int(duration // 3600)
+            mins = int((duration % 3600) // 60)
+            duration_str = f"{hours}h {mins}m"
+        duration_label = QLabel(duration_str)
+        duration_label.setObjectName("cardDuration")
+        info_layout.addWidget(duration_label)
+
+        info_layout.addStretch()
+
+        # Diarization badge if enabled
+        if rec.has_diarization:
+            diar_badge = QLabel("Diarization")
+            diar_badge.setObjectName("diarizationBadge")
+            info_layout.addWidget(diar_badge)
+
+        layout.addLayout(info_layout)
+
+        # Connect click to open recording
+        card.mousePressEvent = lambda e, rid=rec.id: self.recording_requested.emit(rid)
+
+        return card
 
     def _go_prev(self) -> None:
         """Navigate to previous month/day."""

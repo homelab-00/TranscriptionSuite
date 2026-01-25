@@ -12,6 +12,10 @@ server/frontend/node_modules/
 server/frontend/dist/
 server/frontend/build/
 
+## Video files
+build/assets/videos/
+
+
 
 # MISC
 

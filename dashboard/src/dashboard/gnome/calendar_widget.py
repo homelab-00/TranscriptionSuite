@@ -361,6 +361,19 @@ class CalendarWidget:
 
     def _on_date_selected(self, calendar) -> None:
         """Handle date selection."""
+        # Prevent selecting future dates
+        cal_date = self._calendar.get_date()
+        selected_date = date(
+            cal_date.get_year(), cal_date.get_month(), cal_date.get_day_of_month()
+        )
+        today = date.today()
+
+        if selected_date > today:
+            # Reset to today if user tries to select a future date
+            new_date = GLib.DateTime.new_local(today.year, today.month, today.day, 0, 0, 0)
+            self._calendar.select_day(new_date)
+            return
+
         self._update_recordings_list()
 
     def _on_month_changed(self) -> None:

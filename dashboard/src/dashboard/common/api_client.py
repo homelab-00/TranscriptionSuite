@@ -1048,10 +1048,10 @@ class APIClient:
             file_contents,
             filename=file_path.name,
         )
-        data.add_field("diarization", str(diarization).lower())
-        data.add_field("word_timestamps", str(word_timestamps).lower())
+        data.add_field("enable_diarization", str(diarization).lower())
+        data.add_field("enable_word_timestamps", str(word_timestamps).lower())
         if recorded_at:
-            data.add_field("recorded_at", recorded_at)
+            data.add_field("file_created_at", recorded_at)
 
         timeout = aiohttp.ClientTimeout(total=self.transcription_timeout)
 
