@@ -1386,14 +1386,51 @@ class DashboardWindow(_get_dashboard_base()):
         scrolled.set_child(box)
         return scrolled
 
+    def _get_api_client(self) -> "APIClient | None":
+        """Create an API client from current config settings for notebook operations.
+
+        GNOME Dashboard runs in a separate process from the tray, so it cannot
+        access the tray's orchestrator directly. This method creates an API client
+        from the current config settings when the server is running.
+        """
+        from dashboard.common.api_client import APIClient
+
+        server_status = self._docker_manager.get_server_status()
+        if server_status != ServerStatus.RUNNING:
+            logger.debug("Server not running, cannot create API client")
+            return None
+
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            logger.debug("No host configured, cannot create API client")
+            return None
+
+        return APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
+
     def _create_notebook_view(self) -> Any:
         """Create the Audio Notebook view."""
         from dashboard.gnome.notebook_view import NotebookView
 
-        # Get API client from orchestrator if available
-        api_client = None
-        if self.tray and hasattr(self.tray, "_orchestrator"):
-            api_client = self.tray._orchestrator._api_client
+        # Create API client from config settings (GNOME runs in separate process, no tray access)
+        api_client = self._get_api_client()
 
         self._notebook_widget = NotebookView(api_client)
         self._notebook_widget.recording_requested.connect(self._open_recording_dialog)
@@ -1403,33 +1440,30 @@ class DashboardWindow(_get_dashboard_base()):
         """Refresh the notebook view data."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
             # Update API client reference in case connection changed
-            if self.tray and hasattr(self.tray, "_orchestrator"):
-                api_client = self.tray._orchestrator._api_client
-                if api_client:
-                    self._notebook_widget.set_api_client(api_client)
+            api_client = self._get_api_client()
+            if api_client:
+                self._notebook_widget.set_api_client(api_client)
             self._notebook_widget.refresh()
 
     def _update_notebook_api_client(self) -> bool:
         """Update notebook widgets with current API client (called after connection)."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
-            if self.tray and hasattr(self.tray, "_orchestrator"):
-                api_client = self.tray._orchestrator._api_client
-                if api_client:
-                    self._notebook_widget.set_api_client(api_client)
-                    logger.debug("Notebook API client updated after connection")
+            api_client = self._get_api_client()
+            if api_client:
+                self._notebook_widget.set_api_client(api_client)
+                logger.debug("Notebook API client updated after connection")
         return False  # Don't repeat
 
     def _open_recording_dialog(self, recording_id: int) -> None:
         """Open a recording dialog for the given recording ID."""
         from dashboard.gnome.recording_dialog import RecordingDialog
 
-        # Get API client from orchestrator if available
-        api_client = None
-        if self.tray and hasattr(self.tray, "_orchestrator"):
-            api_client = self.tray._orchestrator._api_client
+        # Create API client from config settings
+        api_client = self._get_api_client()
 
         if not api_client:
-            logger.error("Cannot open recording: API client not available")
+            logger.error("Cannot open recording: API client not available (server not running?)")
+            self._show_notification("Error", "Cannot open recording: Server not running")
             return
 
         dialog = RecordingDialog(
@@ -1993,6 +2027,10 @@ class DashboardWindow(_get_dashboard_base()):
             server_stopped = server_status != ServerStatus.RUNNING
             self._notebook_toggle_btn.set_sensitive(not running and server_stopped)
 
+        # Update notebook API client when client starts
+        if running:
+            GLib.timeout_add(2000, self._update_notebook_api_client)
+
     # =========================================================================
     # Server Operations
     # =========================================================================
@@ -2052,9 +2090,7 @@ class DashboardWindow(_get_dashboard_base()):
         # Prevent starting another server start if one is already in progress
         if self._server_worker is not None and self._server_worker.is_alive():
             logger.warning("Server start already in progress")
-            self._show_notification(
-                "Docker Server", "Server start already in progress"
-            )
+            self._show_notification("Docker Server", "Server start already in progress")
             return
 
         image_selection = self._get_selected_image_tag()
@@ -2100,6 +2136,12 @@ class DashboardWindow(_get_dashboard_base()):
         self._show_notification("Docker Server", result.message)
         self._refresh_server_status()
         self._refresh_home_status()
+
+        # Update notebook API client when server starts successfully
+        # (user may use notebook without explicitly starting client)
+        if result.success:
+            GLib.timeout_add(2000, self._update_notebook_api_client)
+
         return False  # Remove from idle queue
 
     def _on_stop_server(self) -> None:

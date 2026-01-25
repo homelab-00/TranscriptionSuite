@@ -398,7 +398,9 @@ class DockerServerWorker(threading.Thread):
                             "Notebook: https://localhost:8443/notebook"
                         )
                     self._progress_callback("Server started successfully!")
-                    self._complete_callback(DockerResult(True, msg, ServerStatus.RUNNING))
+                    self._complete_callback(
+                        DockerResult(True, msg, ServerStatus.RUNNING)
+                    )
                 else:
                     self._complete_callback(
                         DockerResult(

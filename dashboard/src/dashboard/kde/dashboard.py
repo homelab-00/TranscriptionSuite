@@ -1607,12 +1607,9 @@ class DashboardWindow(QMainWindow):
     def _create_notebook_view(self) -> QWidget:
         """Create the Audio Notebook view."""
         from dashboard.kde.notebook_view import NotebookView
-        from dashboard.kde.recording_dialog import RecordingDialog
 
-        # Create the notebook view with API client from tray
-        api_client = None
-        if self.tray and hasattr(self.tray, "_orchestrator"):
-            api_client = self.tray._orchestrator._api_client
+        # Create API client from config settings (not from orchestrator)
+        api_client = self._get_api_client()
 
         self._notebook_widget = NotebookView(api_client)
         self._notebook_widget.recording_requested.connect(self._open_recording_dialog)
@@ -1623,37 +1620,75 @@ class DashboardWindow(QMainWindow):
         """Refresh the notebook view data."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
             # Update API client reference in case connection changed
-            if self.tray and hasattr(self.tray, "_orchestrator"):
-                api_client = self.tray._orchestrator._api_client
+            api_client = self._get_api_client()
+            if api_client:
                 self._notebook_widget.set_api_client(api_client)
             self._notebook_widget.refresh()
 
     def _update_notebook_api_client(self) -> None:
         """Update notebook widgets with current API client (called after connection)."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
-            if self.tray and hasattr(self.tray, "_orchestrator"):
-                api_client = self.tray._orchestrator._api_client
-                if api_client:
-                    self._notebook_widget.set_api_client(api_client)
-                    logger.debug("Notebook API client updated after connection")
+            api_client = self._get_api_client()
+            if api_client:
+                self._notebook_widget.set_api_client(api_client)
+                logger.debug("Notebook API client updated after connection")
 
     def _open_recording_dialog(self, recording_id: int) -> None:
         """Open the recording dialog for a specific recording."""
         from dashboard.kde.recording_dialog import RecordingDialog
 
-        api_client = None
-        if self.tray and hasattr(self.tray, "_orchestrator"):
-            api_client = self.tray._orchestrator._api_client
+        api_client = self._get_api_client()
 
         if api_client:
             dialog = RecordingDialog(api_client, recording_id, self)
             dialog.recording_deleted.connect(self._on_recording_deleted)
             dialog.exec()
+        else:
+            logger.error("Cannot open recording: API client not available (server not running?)")
 
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
             self._notebook_widget.refresh()
+
+    def _get_api_client(self) -> "APIClient | None":
+        """Create an API client from current config settings for notebook operations.
+
+        The orchestrator's API client is only available when the "client" is running.
+        For notebook operations, we create our own API client directly when the
+        Docker server is running.
+        """
+        from dashboard.common.api_client import APIClient
+
+        server_status = self._docker_manager.get_server_status()
+        if server_status != ServerStatus.RUNNING:
+            logger.debug("Server not running, cannot create API client")
+            return None
+
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            logger.debug("No host configured, cannot create API client")
+            return None
+
+        return APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
 
     def _apply_styles(self) -> None:
         """Apply stylesheet to the window - matching Web UI colors."""
@@ -2374,6 +2409,10 @@ class DashboardWindow(QMainWindow):
             self._server_health_timer = QTimer(self)
             self._server_health_timer.timeout.connect(self._refresh_server_status)
             self._server_health_timer.start(1500)
+
+            # Update notebook API client when server starts
+            # (user may use notebook without explicitly starting client)
+            QTimer.singleShot(2000, self._update_notebook_api_client)
         else:
             self._update_server_start_progress(f"Error: {result.message}")
             QTimer.singleShot(1000, self._refresh_server_status)
@@ -2948,6 +2987,10 @@ class DashboardWindow(QMainWindow):
         self._client_running = running
         if self._current_view == View.CLIENT:
             self._refresh_client_status()
+
+        # Update notebook API client when client starts
+        if running:
+            QTimer.singleShot(2000, self._update_notebook_api_client)
 
     def set_models_loaded(self, loaded: bool) -> None:
         """
