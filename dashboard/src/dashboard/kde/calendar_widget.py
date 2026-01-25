@@ -39,7 +39,9 @@ class DayCell(QFrame):
 
     clicked = pyqtSignal(date)
 
-    def __init__(self, day_date: date | None, is_current_month: bool = True, parent=None):
+    def __init__(
+        self, day_date: date | None, is_current_month: bool = True, parent=None
+    ):
         super().__init__(parent)
         self._date = day_date
         self._is_current_month = is_current_month
@@ -251,9 +253,13 @@ class CalendarWidget(QWidget):
         title_label = QLabel(title)
         title_label.setObjectName("sectionTitle")
         if "Morning" in title:
-            title_label.setStyleSheet("color: #90caf9; font-size: 16px; font-weight: bold;")
+            title_label.setStyleSheet(
+                "color: #90caf9; font-size: 16px; font-weight: bold;"
+            )
         else:
-            title_label.setStyleSheet("color: #f48fb1; font-size: 16px; font-weight: bold;")
+            title_label.setStyleSheet(
+                "color: #f48fb1; font-size: 16px; font-weight: bold;"
+            )
         layout.addWidget(title_label)
 
         # Scrollable time slots
@@ -515,9 +521,7 @@ class CalendarWidget(QWidget):
             self._title_label.setText(f"{month_name} {self._current_year}")
         else:
             if self._selected_date:
-                self._title_label.setText(
-                    self._selected_date.strftime("%A, %b %d")
-                )
+                self._title_label.setText(self._selected_date.strftime("%A, %b %d"))
 
     def _on_day_clicked(self, clicked_date: date) -> None:
         """Handle day cell click."""
@@ -591,7 +595,11 @@ class CalendarWidget(QWidget):
         if self._view_mode == "month":
             # Don't go past current month
             next_month = self._current_month + 1 if self._current_month < 12 else 1
-            next_year = self._current_year if self._current_month < 12 else self._current_year + 1
+            next_year = (
+                self._current_year
+                if self._current_month < 12
+                else self._current_year + 1
+            )
             if date(next_year, next_month, 1) > date(today.year, today.month, 1):
                 return
 
@@ -629,7 +637,9 @@ class CalendarWidget(QWidget):
             if self._current_month == 12:
                 last_of_month = date(self._current_year + 1, 1, 1) - timedelta(days=1)
             else:
-                last_of_month = date(self._current_year, self._current_month + 1, 1) - timedelta(days=1)
+                last_of_month = date(
+                    self._current_year, self._current_month + 1, 1
+                ) - timedelta(days=1)
 
             # Extend range to cover the full calendar view
             start_date = first_of_month - timedelta(days=7)
@@ -653,7 +663,9 @@ class CalendarWidget(QWidget):
             # Update calendar display
             self._update_calendar_highlights()
 
-            logger.debug(f"Loaded {len(recordings_data)} recordings for {start_date} to {end_date}")
+            logger.debug(
+                f"Loaded {len(recordings_data)} recordings for {start_date} to {end_date}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to load recordings: {e}")

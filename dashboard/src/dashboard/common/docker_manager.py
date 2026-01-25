@@ -50,6 +50,24 @@ class DockerResult:
     status: ServerStatus | None = None
 
 
+@dataclass
+class DockerImageInfo:
+    """Information about a local Docker image."""
+
+    repository: str
+    tag: str
+    image_id: str
+    created: str  # ISO format datetime string
+    size: str
+    full_name: str  # repository:tag
+
+    def display_name(self) -> str:
+        """Return a user-friendly display name with tag, date, and size."""
+        # Parse date to show just YYYY-MM-DD
+        date_part = self.created.split()[0] if self.created else "unknown"
+        return f"{self.tag} - {date_part} - {self.size}"
+
+
 class DockerPullWorker(threading.Thread):
     """
     Background worker for Docker pull operations.
@@ -273,7 +291,7 @@ class DockerManager:
     """
 
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
-    CONTAINER_NAME = "transcription-suite"
+    CONTAINER_NAME = "transcriptionsuite-container"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
 
     def __init__(self, config_dir: Path | None = None):
@@ -508,6 +526,111 @@ class DockerManager:
             return None
         except Exception:
             return None
+
+    def list_local_images(
+        self, repository_filter: str = "transcriptionsuite-server"
+    ) -> list[DockerImageInfo]:
+        """
+        List all local Docker images matching the repository filter.
+
+        Args:
+            repository_filter: Substring to filter repository names (default: transcriptionsuite-server)
+
+        Returns:
+            List of DockerImageInfo sorted by creation date (newest first)
+        """
+        images: list[DockerImageInfo] = []
+        try:
+            # Get image info with detailed format
+            result = self._run_command(
+                [
+                    "docker",
+                    "images",
+                    "--format",
+                    "{{.Repository}}|{{.Tag}}|{{.ID}}|{{.CreatedAt}}|{{.Size}}",
+                ]
+            )
+            if result.returncode != 0:
+                return images
+
+            for line in result.stdout.strip().split("\n"):
+                if not line or "|" not in line:
+                    continue
+                parts = line.split("|")
+                if len(parts) < 5:
+                    continue
+
+                repository, tag, image_id, created, size = parts[:5]
+
+                # Filter by repository name
+                if repository_filter not in repository:
+                    continue
+
+                # Skip <none> tags
+                if tag == "<none>":
+                    continue
+
+                images.append(
+                    DockerImageInfo(
+                        repository=repository,
+                        tag=tag,
+                        image_id=image_id,
+                        created=created,
+                        size=size,
+                        full_name=f"{repository}:{tag}",
+                    )
+                )
+
+            # Sort by created date (newest first)
+            # CreatedAt format: "2025-01-20 15:30:45 +0200 EET"
+            def parse_date(img: DockerImageInfo) -> str:
+                # Return created string for sorting (ISO-ish format sorts correctly)
+                return img.created
+
+            images.sort(key=parse_date, reverse=True)
+            return images
+
+        except Exception as e:
+            logger.error(f"Failed to list local images: {e}")
+            return images
+
+    def get_most_recent_image(self) -> DockerImageInfo | None:
+        """
+        Get the most recent local image by build date.
+
+        Returns:
+            DockerImageInfo for the newest image, or None if no images found
+        """
+        images = self.list_local_images()
+        return images[0] if images else None
+
+    def get_image_for_selection(self, selection: str) -> str:
+        """
+        Get the full image name for a given selection.
+
+        Args:
+            selection: Either "auto" for most recent, or a specific tag
+
+        Returns:
+            Full image name (repository:tag) to use
+        """
+        if selection == "auto" or not selection:
+            # Use most recent by build date
+            most_recent = self.get_most_recent_image()
+            if most_recent:
+                logger.info(f"Auto-selected most recent image: {most_recent.full_name}")
+                return most_recent.full_name
+            # Fallback to default
+            return self.DOCKER_IMAGE
+
+        # Find image with matching tag
+        images = self.list_local_images()
+        for img in images:
+            if img.tag == selection:
+                return img.full_name
+
+        # Fallback to default
+        return self.DOCKER_IMAGE
 
     def volume_exists(self, volume_name: str) -> bool:
         """
@@ -837,7 +960,7 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        volume_name = "transcription-suite-data"
+        volume_name = "transcriptionsuite-data"
         log(f"Removing data volume {volume_name}...")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
@@ -927,7 +1050,7 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        volume_name = "transcription-suite-models"
+        volume_name = "transcriptionsuite-models"
         log(f"Removing models volume {volume_name}...")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
@@ -945,6 +1068,7 @@ class DockerManager:
         self,
         mode: ServerMode = ServerMode.LOCAL,
         progress_callback: Callable[[str], None] | None = None,
+        image_selection: str = "auto",
     ) -> DockerResult:
         """
         Start the TranscriptionSuite server.
@@ -952,6 +1076,8 @@ class DockerManager:
         Args:
             mode: Server mode (local HTTP or remote HTTPS)
             progress_callback: Optional callback for progress messages
+            image_selection: Image to use - "auto" for most recent by build date,
+                           or a specific tag name
 
         Returns:
             DockerResult with success status and message
@@ -984,6 +1110,16 @@ class DockerManager:
 
         # Set USER_CONFIG_DIR for the compose file
         env["USER_CONFIG_DIR"] = str(self.config_dir)
+
+        # Determine which image to use based on selection
+        selected_image = self.get_image_for_selection(image_selection)
+        # Extract just the tag from the full image name for the TAG env var
+        if ":" in selected_image:
+            tag = selected_image.split(":")[-1]
+        else:
+            tag = "latest"
+        env["TAG"] = tag
+        log(f"Using image tag: {tag}")
 
         # Handle env file
         env_file_args = []
@@ -1046,11 +1182,15 @@ class DockerManager:
                     env=env,
                 )
 
-        # Check if image exists
-        if self.image_exists_locally():
-            log(f"Using existing image: {self.DOCKER_IMAGE}")
+        # Check if selected image exists
+        images = self.list_local_images()
+        image_found = any(img.full_name == selected_image for img in images)
+        if image_found:
+            log(f"Using image: {selected_image}")
         else:
-            log("Image will be pulled on first run")
+            log(
+                f"Image {selected_image} not found locally, will be pulled on first run"
+            )
 
         # Start the container
         log(f"Starting TranscriptionSuite server ({mode.value} mode)...")

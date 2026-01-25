@@ -43,7 +43,7 @@ services:
       context: ../..
       dockerfile: server/docker/Dockerfile
     image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
-    container_name: transcription-suite
+    container_name: transcriptionsuite-container
     
     # Use host network mode for direct access to host services (LM Studio)
     # Note: Ports are exposed directly on host (no port mapping needed)
@@ -100,6 +100,6 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-suite-data
+    name: transcriptionsuite-data
   huggingface-models:
-    name: transcription-suite-models
+    name: transcriptionsuite-models

@@ -325,6 +325,35 @@ TAG=v0.3.0 ./build/docker-build-push.sh
 docker compose build --no-cache
 ```
 
+**Managing Image Tags:**
+
+Tag existing local images:
+```bash
+# Create a new tag pointing to an existing image
+# e.g. make existing image 'v0.4.7' also be tagged as 'latest'
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:latest
+
+# List all tags for this repository
+docker image ls ghcr.io/homelab-00/transcriptionsuite-server
+```
+
+Remove tags:
+```bash
+# Remove a tag (only deletes the tag, not the image if other tags reference it)
+docker rmi ghcr.io/homelab-00/transcriptionsuite-server:old-tag
+
+# Remove all untagged images (clean up)
+docker image prune -f
+```
+
+**Typical tag management workflow:**
+1. Build and push a release: `TAG=v0.4.7 docker compose build && ./build/docker-build-push.sh v0.4.7`
+2. Create an alias: `docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:stable`
+3. Push the alias: `docker push ghcr.io/homelab-00/transcriptionsuite-server:stable`
+4. Remove old tags when no longer needed: `docker rmi ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0`
+
+**Note:** The `docker-build-push.sh` script automatically creates and pushes a `latest` tag when pushing release versions (v*.*.* format).
+
 ### 4.3 Step 3: Run Dashboard Locally
 
 ```bash
@@ -500,7 +529,7 @@ docker compose up -d
 
 ### 6.3 Docker Volume Structure
 
-**`transcription-suite-data`** (mounted to `/data`):
+**`transcriptionsuite-data`** (mounted to `/data`):
 
 | Path | Description |
 |------|-------------|
@@ -509,7 +538,7 @@ docker compose up -d
 | `/data/logs/` | Server logs |
 | `/data/tokens/` | Authentication tokens |
 
-**`transcription-suite-models`** (mounted to `/models`):
+**`transcriptionsuite-models`** (mounted to `/models`):
 
 | Path | Description |
 |------|-------------|
@@ -524,9 +553,11 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcriptionsuite-server`) with flexible tag selection:
 
 **Default behavior:**
-- Image tag defaults to `latest` (via `${TAG:-latest}` in docker-compose.yml)
-- The system checks for existing local images before pulling from the registry
-- If a matching local image exists, it's used without pulling
+- The Dashboard automatically selects the most recent local image by build date (not the `:latest` tag)
+- A dropdown in the Server tab allows selecting a specific image from available local images
+- Each image entry shows: tag, build date, and size
+- The "Most Recent (auto)" option (default) picks the newest image by build date
+- If no local images exist, the system falls back to pulling `:latest` from the registry
 
 **Using specific versions:**
 ```bash

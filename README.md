@@ -436,7 +436,7 @@ backup:
 docker compose down
 
 # Copy the database file
-docker run --rm -v transcription-suite-data:/data -v $(pwd):/backup \
+docker run --rm -v transcriptionsuite-data:/data -v $(pwd):/backup \
     alpine cp /data/database/notebook.db /backup/notebook_backup.db
 
 # Restart the server

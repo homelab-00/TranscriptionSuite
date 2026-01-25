@@ -975,6 +975,28 @@ class DashboardWindow(QMainWindow):
         image_row.addStretch()
         status_layout.addLayout(image_row)
 
+        # Image selector row (THIRD)
+        image_selector_row = QHBoxLayout()
+        selector_label = QLabel("Select Image:")
+        selector_label.setObjectName("statusLabel")
+        image_selector_row.addWidget(selector_label)
+        self._image_selector = QComboBox()
+        self._image_selector.setObjectName("imageSelector")
+        self._image_selector.setMinimumWidth(280)
+        self._image_selector.setToolTip(
+            "Select which Docker image to use when starting the server.\n"
+            "'Most Recent (auto)' automatically selects the newest image by build date."
+        )
+        self._image_selector.currentIndexChanged.connect(
+            self._on_image_selection_changed
+        )
+        image_selector_row.addWidget(self._image_selector)
+        image_selector_row.addStretch()
+        status_layout.addLayout(image_selector_row)
+
+        # Populate image selector
+        self._populate_image_selector()
+
         # Separator line before Auth Token
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
@@ -2182,17 +2204,17 @@ class DashboardWindow(QMainWindow):
 
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
-            "transcription-suite-data"
+            "transcriptionsuite-data"
         )
         models_volume_exists = self._docker_manager.volume_exists(
-            "transcription-suite-models"
+            "transcriptionsuite-models"
         )
 
         if data_volume_exists:
             self._data_volume_status.setText("✓ Exists")
             self._data_volume_status.setStyleSheet("color: #4caf50;")  # success
             # Get volume size
-            size = self._docker_manager.get_volume_size("transcription-suite-data")
+            size = self._docker_manager.get_volume_size("transcriptionsuite-data")
             if size:
                 self._data_volume_size.setText(f"({size})")
             else:
@@ -2206,7 +2228,7 @@ class DashboardWindow(QMainWindow):
             self._models_volume_status.setText("✓ Exists")
             self._models_volume_status.setStyleSheet("color: #4caf50;")  # success
             # Get volume size
-            size = self._docker_manager.get_volume_size("transcription-suite-models")
+            size = self._docker_manager.get_volume_size("transcriptionsuite-models")
             if size:
                 self._models_volume_size.setText(f"({size})")
             else:
@@ -2232,6 +2254,43 @@ class DashboardWindow(QMainWindow):
             self._models_volume_size.setText("")
             self._models_list_label.setVisible(False)
 
+    def _populate_image_selector(self) -> None:
+        """Populate the image selector dropdown with available local images."""
+        self._image_selector.blockSignals(True)
+        self._image_selector.clear()
+
+        # Add "Most Recent (auto)" as first option
+        self._image_selector.addItem("Most Recent (auto)", "auto")
+
+        # Get list of local images
+        images = self._docker_manager.list_local_images()
+
+        for img in images:
+            display_text = img.display_name()
+            self._image_selector.addItem(display_text, img.tag)
+
+        self._image_selector.blockSignals(False)
+
+        # If no images found, show a placeholder message
+        if not images:
+            self._image_selector.setToolTip(
+                "No local images found.\n"
+                "Use 'Fetch Fresh' to pull the latest image from the registry."
+            )
+
+    def _on_image_selection_changed(self, index: int) -> None:
+        """Handle image selection change."""
+        tag = self._image_selector.currentData()
+        if tag == "auto":
+            logger.debug("Image selection: auto (most recent)")
+        else:
+            logger.debug(f"Image selection: {tag}")
+
+    def _get_selected_image_tag(self) -> str:
+        """Get the currently selected image tag."""
+        tag = self._image_selector.currentData()
+        return tag if tag else "auto"
+
     def _on_start_server_local(self) -> None:
         """Start server in local mode."""
         self._start_server(ServerMode.LOCAL)
@@ -2256,8 +2315,11 @@ class DashboardWindow(QMainWindow):
             if self._show_server_logs_btn.isChecked():
                 self._server_log_view.appendPlainText(msg)
 
+        # Get selected image from dropdown
+        image_selection = self._get_selected_image_tag()
+
         result = self._docker_manager.start_server(
-            mode=mode, progress_callback=progress
+            mode=mode, progress_callback=progress, image_selection=image_selection
         )
 
         if result.success:

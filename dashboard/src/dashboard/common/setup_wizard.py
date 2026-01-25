@@ -151,7 +151,7 @@ DOCKER_COMPOSE_LINUX = """# TranscriptionSuite Docker Compose Configuration
 services:
   transcription-suite:
     image: ghcr.io/homelab-00/transcriptionsuite-server:latest
-    container_name: transcription-suite
+    container_name: transcriptionsuite-container
 
     # Use host network mode for direct access to host services (LM Studio)
     # Note: Ports are exposed directly on host (no port mapping needed)
@@ -205,9 +205,9 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-suite-data
+    name: transcriptionsuite-data
   huggingface-models:
-    name: transcription-suite-models
+    name: transcriptionsuite-models
 """
 
 DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
@@ -232,7 +232,7 @@ DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
 services:
   transcription-suite:
     image: ghcr.io/homelab-00/transcriptionsuite-server:latest
-    container_name: transcription-suite
+    container_name: transcriptionsuite-container
 
     # Windows: Use bridge networking with explicit port mappings
     # (network_mode: "host" doesn't work on Windows Docker Desktop)
@@ -289,9 +289,9 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-suite-data
+    name: transcriptionsuite-data
   huggingface-models:
-    name: transcription-suite-models
+    name: transcriptionsuite-models
 """
 
 ENV_EXAMPLE = """# TranscriptionSuite - Environment variables

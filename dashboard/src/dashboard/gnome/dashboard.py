@@ -542,6 +542,7 @@ class DashboardWindow(_get_dashboard_base()):
         self._image_status_label: Any = None
         self._image_date_label: Any = None
         self._image_size_label: Any = None
+        self._image_selector: Any = None
         self._server_token_entry: Any = None
         self._data_volume_status: Any = None
         self._data_volume_size: Any = None
@@ -897,6 +898,23 @@ class DashboardWindow(_get_dashboard_base()):
         self._image_size_label.add_css_class("caption")
         image_row.append(self._image_size_label)
         status_box.append(image_row)
+
+        # Image selector row
+        image_selector_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        selector_label = Gtk.Label(label="Select Image:")
+        selector_label.add_css_class("dim-label")
+        image_selector_row.append(selector_label)
+        self._image_selector = Gtk.ComboBoxText()
+        self._image_selector.set_tooltip_text(
+            "Select which Docker image to use when starting the server.\n"
+            "'Most Recent (auto)' automatically selects the newest image by build date."
+        )
+        self._image_selector.connect("changed", self._on_image_selection_changed)
+        image_selector_row.append(self._image_selector)
+        status_box.append(image_selector_row)
+
+        # Populate image selector
+        self._populate_image_selector()
 
         # Separator
         separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -1789,16 +1807,16 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Volume status
         data_volume_exists = self._docker_manager.volume_exists(
-            "transcription-suite-data"
+            "transcriptionsuite-data"
         )
         models_volume_exists = self._docker_manager.volume_exists(
-            "transcription-suite-models"
+            "transcriptionsuite-models"
         )
 
         if self._data_volume_status:
             if data_volume_exists:
                 self._data_volume_status.set_text("Available")
-                size = self._docker_manager.get_volume_size("transcription-suite-data")
+                size = self._docker_manager.get_volume_size("transcriptionsuite-data")
                 if self._data_volume_size and size:
                     self._data_volume_size.set_text(f"  ({size})")
                 else:
@@ -1811,9 +1829,7 @@ class DashboardWindow(_get_dashboard_base()):
         if self._models_volume_status:
             if models_volume_exists:
                 self._models_volume_status.set_text("Available")
-                size = self._docker_manager.get_volume_size(
-                    "transcription-suite-models"
-                )
+                size = self._docker_manager.get_volume_size("transcriptionsuite-models")
                 if self._models_volume_size and size:
                     self._models_volume_size.set_text(f"  ({size})")
                 else:
@@ -1977,17 +1993,65 @@ class DashboardWindow(_get_dashboard_base()):
     # Server Operations
     # =========================================================================
 
+    def _populate_image_selector(self) -> None:
+        """Populate the image selector dropdown with available local images."""
+        if not self._image_selector:
+            return
+
+        self._image_selector.remove_all()
+
+        # Add "Most Recent (auto)" as first option
+        self._image_selector.append("auto", "Most Recent (auto)")
+
+        # Get list of local images
+        images = self._docker_manager.list_local_images()
+
+        for img in images:
+            display_text = img.display_name()
+            self._image_selector.append(img.tag, display_text)
+
+        # Set default selection to "auto"
+        self._image_selector.set_active_id("auto")
+
+        # If no images found, show a placeholder tooltip
+        if not images:
+            self._image_selector.set_tooltip_text(
+                "No local images found.\n"
+                "Use 'Fetch Fresh' to pull the latest image from the registry."
+            )
+
+    def _on_image_selection_changed(self, combo: Any) -> None:
+        """Handle image selection change."""
+        tag = combo.get_active_id()
+        if tag == "auto":
+            logger.debug("Image selection: auto (most recent)")
+        else:
+            logger.debug(f"Image selection: {tag}")
+
+    def _get_selected_image_tag(self) -> str:
+        """Get the currently selected image tag."""
+        if not self._image_selector:
+            return "auto"
+        tag = self._image_selector.get_active_id()
+        return tag if tag else "auto"
+
     def _on_start_server_local(self) -> None:
         """Start server in local mode."""
+        image_selection = self._get_selected_image_tag()
         self._run_server_operation(
-            lambda: self._docker_manager.start_server(ServerMode.LOCAL),
+            lambda: self._docker_manager.start_server(
+                ServerMode.LOCAL, image_selection=image_selection
+            ),
             "Starting server (local mode)...",
         )
 
     def _on_start_server_remote(self) -> None:
         """Start server in remote mode."""
+        image_selection = self._get_selected_image_tag()
         self._run_server_operation(
-            lambda: self._docker_manager.start_server(ServerMode.REMOTE),
+            lambda: self._docker_manager.start_server(
+                ServerMode.REMOTE, image_selection=image_selection
+            ),
             "Starting server (remote mode)...",
         )
 
