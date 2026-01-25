@@ -1594,6 +1594,15 @@ class DashboardWindow(QMainWindow):
                 self._notebook_widget.set_api_client(api_client)
             self._notebook_widget.refresh()
 
+    def _update_notebook_api_client(self) -> None:
+        """Update notebook widgets with current API client (called after connection)."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            if self.tray and hasattr(self.tray, "_orchestrator"):
+                api_client = self.tray._orchestrator._api_client
+                if api_client:
+                    self._notebook_widget.set_api_client(api_client)
+                    logger.debug("Notebook API client updated after connection")
+
     def _open_recording_dialog(self, recording_id: int) -> None:
         """Open the recording dialog for a specific recording."""
         from dashboard.kde.recording_dialog import RecordingDialog
@@ -2388,7 +2397,7 @@ class DashboardWindow(QMainWindow):
         msg_box.setWindowTitle("Fetch Fresh Image")
         msg_box.setText("Pull a fresh copy of the Docker image?")
         msg_box.setInformativeText(
-            "This will download the latest server image (~15GB). "
+            "This will download the latest server image (~17GB). "
             "This may take several minutes to hours depending on your connection speed.\n\n"
             "The download runs in the background - you can continue using the app."
         )
@@ -2756,6 +2765,9 @@ class DashboardWindow(QMainWindow):
         self._refresh_client_status()
         self.start_client_requested.emit(False)  # False = local
 
+        # Schedule notebook API client update after connection establishes
+        QTimer.singleShot(2000, self._update_notebook_api_client)
+
     def _on_start_client_remote(self) -> None:
         """Start client in remote mode."""
         # Validate settings first
@@ -2775,6 +2787,9 @@ class DashboardWindow(QMainWindow):
         self._client_running = True
         self._refresh_client_status()
         self.start_client_requested.emit(True)  # True = remote
+
+        # Schedule notebook API client update after connection establishes
+        QTimer.singleShot(2000, self._update_notebook_api_client)
 
     def _on_stop_client(self) -> None:
         """Stop the client."""

@@ -96,6 +96,19 @@ class NotebookView(QWidget):
 
     def _apply_tab_styles(self) -> None:
         """Apply consistent styling to the tab widget."""
+        self.setStyleSheet("""
+            #notebookHeader {
+                background-color: #0a0a0a;
+                border-bottom: 1px solid #2d2d2d;
+            }
+
+            #viewTitle {
+                color: #ffffff;
+                font-size: 18px;
+                font-weight: bold;
+            }
+        """)
+
         self._tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: none;

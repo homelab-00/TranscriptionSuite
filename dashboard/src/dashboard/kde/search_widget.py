@@ -253,6 +253,36 @@ class SearchWidget(QWidget):
             #resultsList::item:hover:!selected {
                 background-color: #2d2d2d;
             }
+
+            #primaryButton {
+                background-color: #90caf9;
+                border: none;
+                border-radius: 6px;
+                color: #121212;
+                padding: 10px 20px;
+                font-weight: 500;
+            }
+
+            #primaryButton:hover {
+                background-color: #42a5f5;
+            }
+
+            #primaryButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            #secondaryButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 16px;
+            }
+
+            #secondaryButton:hover {
+                background-color: #3d3d3d;
+            }
         """)
 
     def _on_search_text_changed(self, text: str) -> None:
@@ -281,6 +311,10 @@ class SearchWidget(QWidget):
 
     async def _do_search(self, query: str) -> None:
         """Perform the actual search request."""
+        if self._api_client is None:
+            self._results_label.setText("Not connected to server")
+            return
+
         try:
             self._results_label.setText("Searching...")
             self._results_list.clear()

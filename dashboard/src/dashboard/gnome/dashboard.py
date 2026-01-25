@@ -1380,7 +1380,22 @@ class DashboardWindow(_get_dashboard_base()):
     def _refresh_notebook_view(self) -> None:
         """Refresh the notebook view data."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            # Update API client reference in case connection changed
+            if self.tray and hasattr(self.tray, "_orchestrator"):
+                api_client = self.tray._orchestrator._api_client
+                if api_client:
+                    self._notebook_widget.set_api_client(api_client)
             self._notebook_widget.refresh()
+
+    def _update_notebook_api_client(self) -> bool:
+        """Update notebook widgets with current API client (called after connection)."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            if self.tray and hasattr(self.tray, "_orchestrator"):
+                api_client = self.tray._orchestrator._api_client
+                if api_client:
+                    self._notebook_widget.set_api_client(api_client)
+                    logger.debug("Notebook API client updated after connection")
+        return False  # Don't repeat
 
     def _open_recording_dialog(self, recording_id: int) -> None:
         """Open a recording dialog for the given recording ID."""
@@ -2015,7 +2030,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         self._show_notification(
             "Docker Server",
-            "Starting image download (~15GB). This may take a while...",
+            "Starting image download (~17GB). This may take a while...",
         )
 
         def on_progress(msg: str) -> None:
@@ -2149,6 +2164,9 @@ class DashboardWindow(_get_dashboard_base()):
             self._start_client_callback(False)
         self.set_client_running(True)
 
+        # Schedule notebook API client update after connection establishes
+        GLib.timeout_add(2000, self._update_notebook_api_client)
+
     def _on_start_client_remote(self) -> None:
         """Start client in remote mode."""
         self.config.set("server", "use_remote", value=True)
@@ -2159,6 +2177,9 @@ class DashboardWindow(_get_dashboard_base()):
         if self._start_client_callback:
             self._start_client_callback(True)
         self.set_client_running(True)
+
+        # Schedule notebook API client update after connection establishes
+        GLib.timeout_add(2000, self._update_notebook_api_client)
 
     def _on_stop_client(self) -> None:
         """Stop the client."""

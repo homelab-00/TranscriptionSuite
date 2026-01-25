@@ -33,6 +33,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.1 Local vs Remote Mode](#61-local-vs-remote-mode)
   - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
   - [6.3 Docker Volume Structure](#63-docker-volume-structure)
+  - [6.4 Docker Image Selection](#64-docker-image-selection)
 - [7. API Reference](#7-api-reference)
   - [7.1 Web UI Routes](#71-web-ui-routes)
   - [7.2 API Endpoints](#72-api-endpoints)
@@ -66,7 +67,8 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
-  - [13.5 Checking Installed Packages](#135-checking-installed-packages)
+  - [13.5 Windows Docker Networking](#135-windows-docker-networking)
+  - [13.6 Checking Installed Packages](#136-checking-installed-packages)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
@@ -516,6 +518,36 @@ docker compose up -d
 **Optional user config** (bind mount to `/user-config`):
 
 When `USER_CONFIG_DIR` is set, mounts custom config and logs.
+
+### 6.4 Docker Image Selection
+
+The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcriptionsuite-server`) with flexible tag selection:
+
+**Default behavior:**
+- Image tag defaults to `latest` (via `${TAG:-latest}` in docker-compose.yml)
+- The system checks for existing local images before pulling from the registry
+- If a matching local image exists, it's used without pulling
+
+**Using specific versions:**
+```bash
+# Use a specific tag (must exist locally or will be pulled from ghcr.io)
+TAG=v0.3.0 docker compose up -d
+
+# Set TAG as environment variable
+export TAG=dev-branch
+docker compose up -d
+```
+
+**Building and using local images:**
+```bash
+# Build with custom tag
+TAG=my-custom docker compose build
+
+# Use the local image you just built
+TAG=my-custom docker compose up -d
+```
+
+**Note:** The `TAG` environment variable is the only way to override which image version is used. If you have multiple local images with different tags, you must explicitly specify which one via `TAG=...` or it defaults to looking for the `latest` tag.
 
 ---
 

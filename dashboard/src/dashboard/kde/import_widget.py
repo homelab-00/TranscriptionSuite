@@ -348,6 +348,18 @@ class ImportWidget(QWidget):
                 font-size: 13px;
             }
 
+            #secondaryButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 16px;
+            }
+
+            #secondaryButton:hover {
+                background-color: #3d3d3d;
+            }
+
             #importProgress {
                 background-color: #2d2d2d;
                 border: none;
@@ -445,6 +457,15 @@ class ImportWidget(QWidget):
 
     async def _upload_file(self, job: ImportJob) -> None:
         """Upload and transcribe a file."""
+        if self._api_client is None:
+            job.status = "failed"
+            job.message = "Not connected to server"
+            self._update_queue_display()
+            self._is_processing = False
+            self._current_job = None
+            QTimer.singleShot(100, self._process_queue)
+            return
+
         try:
             job.status = "transcribing"
             self._update_queue_display()
