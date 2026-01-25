@@ -8,10 +8,16 @@ for managing audio recordings and transcriptions.
 import logging
 from typing import TYPE_CHECKING
 
+import asyncio
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QDateTimeEdit,
+    QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -86,7 +92,10 @@ class NotebookView(QWidget):
 
         # Connect signals
         self._calendar_widget.recording_requested.connect(self._on_recording_requested)
-        self._calendar_widget.import_requested.connect(self._on_import_requested)
+        self._calendar_widget.delete_requested.connect(self._on_delete_requested)
+        self._calendar_widget.change_date_requested.connect(
+            self._on_change_date_requested
+        )
         self._search_widget.recording_requested.connect(self._on_recording_requested)
         self._import_widget.recording_created.connect(self._on_import_complete)
 
@@ -150,13 +159,6 @@ class NotebookView(QWidget):
         self._calendar_widget.refresh()
         # Don't auto-open the recording - let user review queue first
 
-    def _on_import_requested(self, target_date, hour: int) -> None:
-        """Handle import request from calendar day view."""
-        logger.debug(f"Import requested for {target_date} at {hour}:00")
-        # Switch to import tab and open file browser with target date/time
-        self._tabs.setCurrentIndex(2)
-        self._import_widget.import_for_datetime(target_date, hour)
-
     def refresh(self) -> None:
         """Refresh all notebook data."""
         current_index = self._tabs.currentIndex()
@@ -175,3 +177,130 @@ class NotebookView(QWidget):
         self._calendar_widget.set_api_client(api_client)
         self._search_widget.set_api_client(api_client)
         self._import_widget.set_api_client(api_client)
+
+    def _on_delete_requested(self, recording_id: int) -> None:
+        """Handle delete request from calendar."""
+        reply = QMessageBox.question(
+            self,
+            "Delete Recording",
+            "Are you sure you want to delete this recording?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(self._delete_recording(recording_id))
+                else:
+                    loop.run_until_complete(self._delete_recording(recording_id))
+            except RuntimeError:
+                asyncio.run(self._delete_recording(recording_id))
+
+    async def _delete_recording(self, recording_id: int) -> None:
+        """Delete a recording and refresh the view."""
+        try:
+            await self._api_client.delete_recording(recording_id)
+            logger.info(f"Deleted recording {recording_id}")
+            self._calendar_widget.refresh()
+        except Exception as e:
+            logger.error(f"Failed to delete recording: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to delete recording: {e}",
+            )
+
+    def _on_change_date_requested(self, recording_id: int) -> None:
+        """Handle change date request from calendar."""
+        from PyQt6.QtCore import QDateTime
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Change Date & Time")
+        dialog.setMinimumWidth(300)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e1e;
+            }
+            QLabel {
+                color: #e0e0e0;
+                font-size: 13px;
+            }
+            QDateTimeEdit {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #e0e0e0;
+                padding: 8px;
+                font-size: 13px;
+            }
+            QDateTimeEdit::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QPushButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #e0e0e0;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+            QPushButton:default {
+                background-color: #1e3a5f;
+                border-color: #2d4a6d;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        label = QLabel("Select new date and time:")
+        layout.addWidget(label)
+
+        datetime_edit = QDateTimeEdit()
+        datetime_edit.setDateTime(QDateTime.currentDateTime())
+        datetime_edit.setCalendarPopup(True)
+        datetime_edit.setDisplayFormat("yyyy-MM-dd hh:mm AP")
+        layout.addWidget(datetime_edit)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_datetime = datetime_edit.dateTime().toPyDateTime()
+            new_datetime_iso = new_datetime.isoformat()
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(
+                        self._update_recording_date(recording_id, new_datetime_iso)
+                    )
+                else:
+                    loop.run_until_complete(
+                        self._update_recording_date(recording_id, new_datetime_iso)
+                    )
+            except RuntimeError:
+                asyncio.run(self._update_recording_date(recording_id, new_datetime_iso))
+
+    async def _update_recording_date(self, recording_id: int, new_date: str) -> None:
+        """Update a recording's date and refresh the view."""
+        try:
+            await self._api_client.update_recording_date(recording_id, new_date)
+            logger.info(f"Updated recording {recording_id} date to {new_date}")
+            self._calendar_widget.refresh()
+        except Exception as e:
+            logger.error(f"Failed to update recording date: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to update recording date: {e}",
+            )

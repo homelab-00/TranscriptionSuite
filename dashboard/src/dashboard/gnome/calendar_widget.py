@@ -370,7 +370,9 @@ class CalendarWidget:
 
         if selected_date > today:
             # Reset to today if user tries to select a future date
-            new_date = GLib.DateTime.new_local(today.year, today.month, today.day, 0, 0, 0)
+            new_date = GLib.DateTime.new_local(
+                today.year, today.month, today.day, 0, 0, 0
+            )
             self._calendar.select_day(new_date)
             return
 

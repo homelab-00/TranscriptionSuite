@@ -1462,8 +1462,12 @@ class DashboardWindow(_get_dashboard_base()):
         api_client = self._get_api_client()
 
         if not api_client:
-            logger.error("Cannot open recording: API client not available (server not running?)")
-            self._show_notification("Error", "Cannot open recording: Server not running")
+            logger.error(
+                "Cannot open recording: API client not available (server not running?)"
+            )
+            self._show_notification(
+                "Error", "Cannot open recording: Server not running"
+            )
             return
 
         dialog = RecordingDialog(

@@ -63,13 +63,7 @@ class IconLoader:
             "standard_pixmap": None,  # No good Windows equivalent
         },
         "notebook": {
-            "theme_names": [
-                "audio-x-generic",
-                "audio-volume-high",
-                "multimedia-audio-player",
-                "applications-multimedia",
-                "folder-sound",
-            ],
+            "theme_names": ["folder-open"],
             "standard_pixmap": QStyle.StandardPixmap.SP_FileIcon,
         },
         "menu": {

@@ -1329,28 +1329,6 @@ class DashboardWindow(QMainWindow):
 
         layout.addSpacing(15)
 
-        # Web client button
-        web_btn = QPushButton("Open Web Client")
-        web_btn.setObjectName("secondaryButton")
-        web_btn.setProperty("accent", "web")
-        web_btn.clicked.connect(self._on_open_web_client)
-        layout.addWidget(web_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        layout.addSpacing(15)
-
-        # Show logs button (centered)
-        self._show_client_logs_btn = QPushButton("Show Logs")
-        self._show_client_logs_btn.setObjectName("secondaryButton")
-        logs_icon = self._icon_loader.get_icon("logs")
-        if not logs_icon.isNull():
-            self._show_client_logs_btn.setIcon(logs_icon)
-        self._show_client_logs_btn.clicked.connect(self._toggle_client_logs)
-        layout.addWidget(
-            self._show_client_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
-        )
-
-        layout.addSpacing(15)
-
         # Model management button (unload/reload)
         self._unload_models_btn = QPushButton("Unload All Models")
         self._unload_models_btn.setObjectName("secondaryButton")
@@ -1372,62 +1350,49 @@ class DashboardWindow(QMainWindow):
 
         layout.addSpacing(20)
 
-        # Auto-add to Audio Notebook toggle
-        notebook_frame = QFrame()
-        notebook_frame.setObjectName("statusCard")
-        notebook_frame.setStyleSheet(
-            "QFrame#statusCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
-            "border-radius: 8px; padding: 12px; }"
+        # Options row: Auto-add, Live Transcriber, Live Mode Language (all in one row)
+        options_frame = QFrame()
+        options_frame.setObjectName("optionsRow")
+        options_frame.setStyleSheet(
+            "QFrame#optionsRow { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
+            "border-radius: 8px; padding: 8px; }"
         )
-        notebook_layout = QHBoxLayout(notebook_frame)
-        notebook_layout.setContentsMargins(16, 12, 16, 12)
+        options_layout = QHBoxLayout(options_frame)
+        options_layout.setContentsMargins(12, 10, 12, 10)
+        options_layout.setSpacing(16)
 
-        notebook_label = QLabel("Auto-add to Audio Notebook:")
-        notebook_label.setObjectName("statusLabel")
-        notebook_label.setStyleSheet("color: #e0e0e0;")
-        notebook_layout.addWidget(notebook_label)
-
-        notebook_layout.addStretch()
+        # Auto-add to Audio Notebook toggle
+        notebook_label = QLabel("Auto-add:")
+        notebook_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        options_layout.addWidget(notebook_label)
 
         self._notebook_toggle_btn = QPushButton("Disabled")
         self._notebook_toggle_btn.setCheckable(True)
+        self._notebook_toggle_btn.setFixedWidth(80)
         auto_notebook = self.config.get_server_config(
             "longform_recording", "auto_add_to_audio_notebook", default=False
         )
         self._notebook_toggle_btn.setChecked(auto_notebook)
         self._notebook_toggle_btn.setText("Enabled" if auto_notebook else "Disabled")
         self._notebook_toggle_btn.setToolTip(
-            "When enabled, recordings are saved to Audio Notebook with diarization\\n"
-            "instead of copying transcription to clipboard.\\n"
+            "When enabled, recordings are saved to Audio Notebook with diarization\n"
+            "instead of copying transcription to clipboard.\n"
             "Can only be changed when both server and client are stopped."
         )
         self._notebook_toggle_btn.clicked.connect(self._on_notebook_toggle)
         self._update_notebook_toggle_style()
-        notebook_layout.addWidget(self._notebook_toggle_btn)
+        options_layout.addWidget(self._notebook_toggle_btn)
 
-        layout.addWidget(notebook_frame)
+        options_layout.addSpacing(8)
 
-        layout.addSpacing(15)
-
-        # Preview Transcription toggle
-        preview_toggle_frame = QFrame()
-        preview_toggle_frame.setObjectName("statusCard")
-        preview_toggle_frame.setStyleSheet(
-            "QFrame#statusCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
-            "border-radius: 8px; padding: 12px; }"
-        )
-        preview_toggle_layout = QHBoxLayout(preview_toggle_frame)
-        preview_toggle_layout.setContentsMargins(16, 12, 16, 12)
-
+        # Live Transcriber toggle
         preview_label = QLabel("Live Transcriber:")
-        preview_label.setObjectName("statusLabel")
-        preview_label.setStyleSheet("color: #e0e0e0;")
-        preview_toggle_layout.addWidget(preview_label)
-
-        preview_toggle_layout.addStretch()
+        preview_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        options_layout.addWidget(preview_label)
 
         self._preview_toggle_btn = QPushButton("Disabled")
         self._preview_toggle_btn.setCheckable(True)
+        self._preview_toggle_btn.setFixedWidth(80)
         # Read live transcriber enabled setting
         live_transcriber_enabled = self.config.get_server_config(
             "transcription_options", "enable_live_transcriber", default=False
@@ -1443,38 +1408,27 @@ class DashboardWindow(QMainWindow):
         )
         self._preview_toggle_btn.clicked.connect(self._on_live_transcriber_toggle)
         self._update_live_transcriber_toggle_style()
-        preview_toggle_layout.addWidget(self._preview_toggle_btn)
+        options_layout.addWidget(self._preview_toggle_btn)
 
-        layout.addWidget(preview_toggle_frame)
+        options_layout.addSpacing(8)
 
         # Live Mode Language selector
-        language_frame = QFrame()
-        language_frame.setObjectName("statusCard")
-        language_frame.setStyleSheet(
-            "QFrame#statusCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
-            "border-radius: 8px; padding: 12px; }"
-        )
-        language_layout = QHBoxLayout(language_frame)
-        language_layout.setContentsMargins(16, 12, 16, 12)
-
-        language_label = QLabel("Live Mode Language:")
-        language_label.setObjectName("statusLabel")
-        language_label.setStyleSheet("color: #e0e0e0;")
-        language_layout.addWidget(language_label)
-
-        language_layout.addStretch()
+        language_label = QLabel("Language:")
+        language_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        options_layout.addWidget(language_label)
 
         # Language combo box
         self._live_language_combo = QComboBox()
-        self._live_language_combo.setMinimumWidth(180)
+        self._live_language_combo.setMinimumWidth(120)
         self._live_language_combo.setStyleSheet(
-            "QComboBox { background-color: #252526; border: 1px solid #3d3d3d; "
-            "border-radius: 4px; padding: 6px 12px; color: #e0e0e0; font-size: 12px; }"
-            "QComboBox::drop-down { border: none; width: 24px; }"
-            "QComboBox::down-arrow { image: none; border-left: 5px solid transparent; "
-            "border-right: 5px solid transparent; border-top: 6px solid #a0a0a0; margin-right: 8px; }"
-            "QComboBox QAbstractItemView { background-color: #252526; border: 1px solid #3d3d3d; "
-            "color: #e0e0e0; selection-background-color: #3d3d3d; }"
+            "QComboBox { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+            "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
+            "QComboBox:hover { border-color: #505050; }"
+            "QComboBox::drop-down { border: none; width: 20px; }"
+            "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
+            "border-right: 4px solid transparent; border-top: 5px solid #808080; margin-right: 6px; }"
+            "QComboBox QAbstractItemView { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+            "color: #e0e0e0; selection-background-color: #404040; padding: 4px; }"
         )
         # Add language options (Whisper-supported languages)
         languages = [
@@ -1512,17 +1466,19 @@ class DashboardWindow(QMainWindow):
                 break
 
         self._live_language_combo.setToolTip(
-            "Force a specific language for Live Mode.\\n"
-            "Recommended: Select your language for better accuracy.\\n"
-            "Auto-detect works poorly with short utterances.\\n"
+            "Force a specific language for Live Mode.\n"
+            "Recommended: Select your language for better accuracy.\n"
+            "Auto-detect works poorly with short utterances.\n"
             "Only editable when server is stopped."
         )
         self._live_language_combo.currentIndexChanged.connect(
             self._on_live_language_changed
         )
-        language_layout.addWidget(self._live_language_combo)
+        options_layout.addWidget(self._live_language_combo)
 
-        layout.addWidget(language_frame)
+        options_layout.addStretch()
+
+        layout.addWidget(options_frame)
 
         layout.addSpacing(10)
 
@@ -1599,6 +1555,19 @@ class DashboardWindow(QMainWindow):
 
         layout.addWidget(preview_display_frame)
 
+        layout.addSpacing(15)
+
+        # Show logs button (at bottom)
+        self._show_client_logs_btn = QPushButton("Show Logs")
+        self._show_client_logs_btn.setObjectName("secondaryButton")
+        logs_icon = self._icon_loader.get_icon("logs")
+        if not logs_icon.isNull():
+            self._show_client_logs_btn.setIcon(logs_icon)
+        self._show_client_logs_btn.clicked.connect(self._toggle_client_logs)
+        layout.addWidget(
+            self._show_client_logs_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
         layout.addStretch()
 
         scroll.setWidget(view)
@@ -1644,7 +1613,9 @@ class DashboardWindow(QMainWindow):
             dialog.recording_deleted.connect(self._on_recording_deleted)
             dialog.exec()
         else:
-            logger.error("Cannot open recording: API client not available (server not running?)")
+            logger.error(
+                "Cannot open recording: API client not available (server not running?)"
+            )
 
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""

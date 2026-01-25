@@ -27,8 +27,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dashboard.common.icon_loader import IconLoader
-
 if TYPE_CHECKING:
     from dashboard.common.api_client import APIClient
 
@@ -86,13 +84,13 @@ class DropZone(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(8)
 
-        # Use themed folder icon via IconLoader
-        self._icon_label = QLabel()
+        # Simple upload icon (white, centered)
+        self._icon_label = QLabel("⬆")
         self._icon_label.setObjectName("dropIcon")
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._icon_label.setFixedSize(48, 48)
-        layout.addWidget(self._icon_label)
+        layout.addWidget(self._icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         text_label = QLabel("Drag audio files here\nor click to browse")
         text_label.setObjectName("dropText")
@@ -151,16 +149,6 @@ class DropZone(QFrame):
         if files:
             self.files_dropped.emit([Path(f) for f in files])
 
-    def set_icon(self, icon_loader: IconLoader) -> None:
-        """Set the folder icon using IconLoader."""
-        icon = icon_loader.get_icon("folder")
-        if not icon.isNull():
-            pixmap = icon.pixmap(QSize(48, 48))
-            self._icon_label.setPixmap(pixmap)
-        else:
-            # Fallback to emoji if no icon available
-            self._icon_label.setText("📁")
-
 
 class ImportWidget(QWidget):
     """
@@ -203,10 +191,6 @@ class ImportWidget(QWidget):
         self._drop_zone.setMinimumHeight(180)
         self._drop_zone.files_dropped.connect(self._add_files)
         layout.addWidget(self._drop_zone)
-
-        # Set folder icon using IconLoader
-        self._icon_loader = IconLoader(self)
-        self._drop_zone.set_icon(self._icon_loader)
 
         # Options section
         options_container = QFrame()
@@ -309,8 +293,8 @@ class ImportWidget(QWidget):
             }
 
             #dropIcon {
-                font-size: 48px;
-                color: #606060;
+                font-size: 42px;
+                color: #ffffff;
             }
 
             #dropText {

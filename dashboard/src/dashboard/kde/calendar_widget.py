@@ -11,13 +11,20 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QDate, QLocale, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+from pathlib import Path
+
+from PyQt6.QtCore import QDate, QLocale, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QFont
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -113,6 +120,464 @@ class DayCell(QFrame):
         super().mousePressEvent(event)
 
 
+# Supported audio formats (same as ImportWidget)
+AUDIO_EXTENSIONS = {
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".wma",
+    ".aac",
+    ".aiff",
+    ".webm",
+    ".mp4",
+}
+
+
+class DayViewDropZone(QFrame):
+    """Drag-and-drop zone for day view import dialog."""
+
+    files_dropped = pyqtSignal(list)  # List of file paths
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setObjectName("dayViewDropZone")
+        self._file_path: Path | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(8)
+
+        # Upload icon
+        self._icon_label = QLabel("⬆")
+        self._icon_label.setObjectName("dropIcon")
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._text_label = QLabel("Drag audio file here")
+        self._text_label.setObjectName("dropText")
+        self._text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._text_label)
+
+        self._formats_label = QLabel("Supported: MP3, WAV, M4A, FLAC, OGG, and more")
+        self._formats_label.setObjectName("dropFormats")
+        self._formats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._formats_label)
+
+        # Enable click cursor
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event) -> None:
+        """Handle click to open file browser."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._open_file_browser()
+        super().mousePressEvent(event)
+
+    def _open_file_browser(self) -> None:
+        """Open file browser dialog."""
+        extensions = " ".join(f"*{ext}" for ext in sorted(AUDIO_EXTENSIONS))
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Audio File",
+            "",
+            f"Audio Files ({extensions});;All Files (*)",
+        )
+
+        if file_path:
+            path_obj = Path(file_path)
+            self._file_path = path_obj
+            self._update_display()
+            self.files_dropped.emit([path_obj])
+
+    def dragEnterEvent(self, event) -> None:
+        """Handle drag enter event."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self.setProperty("dragOver", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def dragLeaveEvent(self, event) -> None:
+        """Handle drag leave event."""
+        self.setProperty("dragOver", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dropEvent(self, event) -> None:
+        """Handle drop event."""
+        self.setProperty("dragOver", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        for url in event.mimeData().urls():
+            file_path = Path(url.toLocalFile())
+            if file_path.suffix.lower() in AUDIO_EXTENSIONS:
+                self._file_path = file_path
+                self._update_display()
+                self.files_dropped.emit([file_path])
+                break  # Only accept one file
+
+    def _update_display(self) -> None:
+        """Update display to show selected file."""
+        if self._file_path:
+            self._icon_label.setText("🎵")
+            self._text_label.setText(self._file_path.name)
+            self._formats_label.setText("Drop another file to replace")
+
+    def get_file_path(self) -> Path | None:
+        """Get the currently selected file path."""
+        return self._file_path
+
+    def clear(self) -> None:
+        """Clear the selected file."""
+        self._file_path = None
+        self._icon_label.setText("⬆")
+        self._text_label.setText("Drag audio file here")
+        self._formats_label.setText("Supported: MP3, WAV, M4A, FLAC, OGG, and more")
+
+
+class DayViewImportDialog(QDialog):
+    """
+    Import dialog for adding audio entries from the day view.
+
+    This dialog provides a simplified import experience without the queue UI,
+    allowing users to drag-and-drop a single file and set transcription options.
+    """
+
+    transcription_complete = pyqtSignal(int)  # recording_id
+
+    def __init__(
+        self,
+        api_client: "APIClient",
+        target_date: date,
+        hour: int,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._api_client = api_client
+        self._target_date = target_date
+        self._hour = hour
+        self._is_transcribing = False
+
+        self.setWindowTitle("Add Audio Entry")
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(380)
+
+        self._setup_ui()
+        self._apply_styles()
+
+    def _setup_ui(self) -> None:
+        """Set up the dialog UI."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        # Header with date/time info
+        time_str = self._format_time(self._hour)
+        date_str = self._target_date.strftime("%B %d, %Y")
+        header_label = QLabel(f"Adding entry for {date_str} at {time_str}")
+        header_label.setObjectName("dialogHeader")
+        layout.addWidget(header_label)
+
+        # Drop zone
+        self._drop_zone = DayViewDropZone()
+        self._drop_zone.setMinimumHeight(140)
+        self._drop_zone.files_dropped.connect(self._on_file_dropped)
+        layout.addWidget(self._drop_zone)
+
+        # Options section
+        options_container = QFrame()
+        options_container.setObjectName("optionsCard")
+        options_layout = QVBoxLayout(options_container)
+        options_layout.setContentsMargins(16, 12, 16, 12)
+        options_layout.setSpacing(12)
+
+        options_label = QLabel("Transcription Options:")
+        options_label.setObjectName("optionsLabel")
+        options_layout.addWidget(options_label)
+
+        checkboxes_layout = QHBoxLayout()
+        checkboxes_layout.setSpacing(24)
+
+        self._diarization_checkbox = QCheckBox("Speaker diarization")
+        self._diarization_checkbox.setObjectName("optionCheckbox")
+        self._diarization_checkbox.setChecked(True)
+        self._diarization_checkbox.setToolTip(
+            "Identify and label different speakers in the audio"
+        )
+        checkboxes_layout.addWidget(self._diarization_checkbox)
+
+        self._word_timestamps_checkbox = QCheckBox("Word-level timestamps")
+        self._word_timestamps_checkbox.setObjectName("optionCheckbox")
+        self._word_timestamps_checkbox.setChecked(True)
+        self._word_timestamps_checkbox.setToolTip(
+            "Include precise timestamps for each word"
+        )
+        checkboxes_layout.addWidget(self._word_timestamps_checkbox)
+
+        checkboxes_layout.addStretch()
+        options_layout.addLayout(checkboxes_layout)
+
+        layout.addWidget(options_container)
+
+        # Progress section (hidden by default)
+        self._progress_container = QWidget()
+        progress_layout = QVBoxLayout(self._progress_container)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(8)
+
+        self._status_label = QLabel("")
+        self._status_label.setObjectName("statusLabel")
+        progress_layout.addWidget(self._status_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setObjectName("importProgress")
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        progress_layout.addWidget(self._progress_bar)
+
+        self._progress_container.hide()
+        layout.addWidget(self._progress_container)
+
+        layout.addStretch()
+
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setObjectName("secondaryButton")
+        self._cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self._cancel_btn)
+
+        button_layout.addStretch()
+
+        self._transcribe_btn = QPushButton("Transcribe")
+        self._transcribe_btn.setObjectName("primaryButton")
+        self._transcribe_btn.setEnabled(False)
+        self._transcribe_btn.clicked.connect(self._start_transcription)
+        button_layout.addWidget(self._transcribe_btn)
+
+        layout.addLayout(button_layout)
+
+    def _format_time(self, hour: int) -> str:
+        """Format hour to 12-hour time string."""
+        if hour == 0:
+            return "12:00 AM"
+        elif hour < 12:
+            return f"{hour}:00 AM"
+        elif hour == 12:
+            return "12:00 PM"
+        else:
+            return f"{hour - 12}:00 PM"
+
+    def _apply_styles(self) -> None:
+        """Apply styling to dialog components."""
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a1a;
+            }
+
+            #dialogHeader {
+                color: #ffffff;
+                font-size: 15px;
+                font-weight: bold;
+            }
+
+            #dayViewDropZone {
+                background-color: #1e1e1e;
+                border: 2px dashed #3d3d3d;
+                border-radius: 12px;
+                padding: 20px;
+            }
+
+            #dayViewDropZone[dragOver="true"] {
+                border-color: #90caf9;
+                background-color: #1e2a3a;
+            }
+
+            #dropIcon {
+                font-size: 36px;
+                color: #ffffff;
+            }
+
+            #dropText {
+                color: #a0a0a0;
+                font-size: 13px;
+                margin-top: 8px;
+            }
+
+            #dropFormats {
+                color: #606060;
+                font-size: 11px;
+                margin-top: 4px;
+            }
+
+            #optionsCard {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+            }
+
+            #optionsLabel {
+                color: #a0a0a0;
+                font-size: 13px;
+                font-weight: bold;
+            }
+
+            #optionCheckbox {
+                color: #e0e0e0;
+                font-size: 13px;
+            }
+
+            #optionCheckbox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #3d3d3d;
+                border-radius: 3px;
+                background-color: #1e1e1e;
+            }
+
+            #optionCheckbox::indicator:checked {
+                background-color: #90caf9;
+                border-color: #90caf9;
+            }
+
+            #statusLabel {
+                color: #a0a0a0;
+                font-size: 13px;
+            }
+
+            #importProgress {
+                background-color: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                height: 8px;
+            }
+
+            #importProgress::chunk {
+                background-color: #90caf9;
+                border-radius: 4px;
+            }
+
+            #primaryButton {
+                background-color: #1e88e5;
+                border: none;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 10px 24px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+
+            #primaryButton:hover {
+                background-color: #2196f3;
+            }
+
+            #primaryButton:disabled {
+                background-color: #2d2d2d;
+                color: #606060;
+            }
+
+            #secondaryButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 10px 24px;
+                font-size: 13px;
+            }
+
+            #secondaryButton:hover {
+                background-color: #3d3d3d;
+            }
+        """)
+
+    def _on_file_dropped(self, files: list[Path]) -> None:
+        """Handle file being dropped."""
+        if files:
+            self._transcribe_btn.setEnabled(True)
+
+    def _start_transcription(self) -> None:
+        """Start the transcription process."""
+        file_path = self._drop_zone.get_file_path()
+        if not file_path:
+            return
+
+        self._is_transcribing = True
+        self._transcribe_btn.setEnabled(False)
+        self._cancel_btn.setText("Close")
+        self._progress_container.show()
+        self._status_label.setText("Starting transcription...")
+        self._progress_bar.setValue(0)
+
+        # Build target datetime
+        target_datetime = datetime(
+            self._target_date.year,
+            self._target_date.month,
+            self._target_date.day,
+            self._hour,
+            0,
+            0,
+        ).isoformat()
+
+        # Start async upload
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._upload_file(file_path, target_datetime))
+            else:
+                loop.run_until_complete(self._upload_file(file_path, target_datetime))
+        except RuntimeError:
+            asyncio.run(self._upload_file(file_path, target_datetime))
+
+    async def _upload_file(self, file_path: Path, recorded_at: str) -> None:
+        """Upload and transcribe the file."""
+        if self._api_client is None:
+            self._status_label.setText("Error: Not connected to server")
+            self._is_transcribing = False
+            return
+
+        try:
+            def on_progress(message: str) -> None:
+                """Handle progress updates."""
+                self._status_label.setText(message)
+                if "uploading" in message.lower():
+                    self._progress_bar.setValue(20)
+                elif "transcribing" in message.lower():
+                    self._progress_bar.setValue(50)
+                elif "complete" in message.lower():
+                    self._progress_bar.setValue(100)
+
+            result = await self._api_client.upload_file_to_notebook(
+                file_path=file_path,
+                diarization=self._diarization_checkbox.isChecked(),
+                word_timestamps=self._word_timestamps_checkbox.isChecked(),
+                recorded_at=recorded_at,
+                on_progress=on_progress,
+            )
+
+            recording_id = result.get("id") or result.get("recording_id")
+            self._progress_bar.setValue(100)
+            self._status_label.setText("Transcription complete!")
+
+            logger.info(f"Day view import complete: {file_path.name} -> ID {recording_id}")
+
+            if recording_id:
+                self.transcription_complete.emit(recording_id)
+
+            # Auto-close after brief delay
+            QTimer.singleShot(1000, self.accept)
+
+        except Exception as e:
+            logger.error(f"Day view import failed for {file_path.name}: {e}")
+            self._status_label.setText(f"Error: {e}")
+            self._is_transcribing = False
+
+
 class CalendarWidget(QWidget):
     """
     Calendar-based recording browser with month and day views.
@@ -122,7 +587,8 @@ class CalendarWidget(QWidget):
     """
 
     recording_requested = pyqtSignal(int)
-    import_requested = pyqtSignal(date, int)  # date, hour
+    delete_requested = pyqtSignal(int)  # recording_id
+    change_date_requested = pyqtSignal(int)  # recording_id
 
     def __init__(
         self,
@@ -300,7 +766,7 @@ class CalendarWidget(QWidget):
         """Create a single time slot row."""
         slot = QFrame()
         slot.setObjectName("timeSlot")
-        slot.setMinimumHeight(60)
+        slot.setMinimumHeight(72)
         slot.setProperty("hour", hour)
 
         layout = QHBoxLayout(slot)
@@ -322,7 +788,14 @@ class CalendarWidget(QWidget):
         time_label.setFixedWidth(50)
         layout.addWidget(time_label)
 
-        # Recordings container (for this hour)
+        # Scrollable recordings container (for this hour)
+        recordings_scroll = QScrollArea()
+        recordings_scroll.setObjectName(f"recordings_scroll_{hour}")
+        recordings_scroll.setWidgetResizable(True)
+        recordings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        recordings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        recordings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        
         recordings_container = QWidget()
         recordings_container.setObjectName(f"recordings_{hour}")
         recordings_layout = QHBoxLayout(recordings_container)
@@ -339,8 +812,9 @@ class CalendarWidget(QWidget):
         add_btn.clicked.connect(lambda checked, h=hour: self._on_add_clicked(h))
         add_btn.hide()  # Hidden by default, shown on hover
         recordings_layout.addWidget(add_btn)
-
-        layout.addWidget(recordings_container, 1)
+        
+        recordings_scroll.setWidget(recordings_container)
+        layout.addWidget(recordings_scroll, 1)
 
         # Install event filter on slot for hover detection
         slot.enterEvent = lambda e, h=hour: self._on_slot_enter(h)
@@ -369,9 +843,21 @@ class CalendarWidget(QWidget):
             slot_info["add_btn"].hide()
 
     def _on_add_clicked(self, hour: int) -> None:
-        """Handle add button click for a time slot."""
+        """Handle add button click for a time slot - show import dialog."""
         if self._selected_date:
-            self.import_requested.emit(self._selected_date, hour)
+            dialog = DayViewImportDialog(
+                api_client=self._api_client,
+                target_date=self._selected_date,
+                hour=hour,
+                parent=self,
+            )
+            dialog.transcription_complete.connect(self._on_day_view_import_complete)
+            dialog.exec()
+
+    def _on_day_view_import_complete(self, recording_id: int) -> None:
+        """Handle completion of a day view import - refresh calendar."""
+        logger.info(f"Day view import complete, recording ID: {recording_id}")
+        self.refresh()
 
     def _apply_styles(self) -> None:
         """Apply styling to calendar components."""
@@ -560,6 +1046,36 @@ class CalendarWidget(QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
             }
+
+            /* Horizontal scrollbar for recording cards */
+            QScrollArea[objectName^="recordings_scroll_"] {
+                background-color: transparent;
+                border: none;
+            }
+
+            QScrollBar:horizontal {
+                background-color: transparent;
+                height: 6px;
+                margin: 0;
+            }
+
+            QScrollBar::handle:horizontal {
+                background-color: rgba(61, 61, 61, 0.6);
+                border-radius: 3px;
+                min-width: 20px;
+            }
+
+            QScrollBar::handle:horizontal:hover {
+                background-color: rgba(80, 80, 80, 0.8);
+            }
+
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0;
+            }
+
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: transparent;
+            }
         """)
 
     def _rebuild_calendar_grid(self) -> None:
@@ -676,9 +1192,8 @@ class CalendarWidget(QWidget):
                 slot_info["recording_widgets"].append(card)
 
             # Disable add button for future time slots
-            is_future = (
-                self._selected_date > today
-                or (self._selected_date == today and hour > now.hour)
+            is_future = self._selected_date > today or (
+                self._selected_date == today and hour > now.hour
             )
             add_btn.setEnabled(not is_future)
             if is_future:
@@ -691,18 +1206,32 @@ class CalendarWidget(QWidget):
         card = QFrame()
         card.setObjectName("recordingCard")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(4)
 
-        # Top row: title
+        # Top row: title + diarization badge
+        top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(8)
+
         title = rec.title or rec.filename or "Recording"
         title_label = QLabel(title)
         title_label.setObjectName("cardTitle")
-        layout.addWidget(title_label)
+        top_layout.addWidget(title_label)
+        top_layout.addStretch()
 
-        # Bottom row: time, duration, and optional diarization badge
+        # Diarization badge top-right
+        if rec.has_diarization:
+            diar_badge = QLabel("Diarization")
+            diar_badge.setObjectName("diarizationBadge")
+            top_layout.addWidget(diar_badge)
+
+        layout.addLayout(top_layout)
+
+        # Bottom row: time (left) and duration (right)
         info_layout = QHBoxLayout()
         info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(12)
@@ -713,11 +1242,13 @@ class CalendarWidget(QWidget):
             time_str = rec_dt.strftime("%I:%M %p").lstrip("0")
         except (ValueError, AttributeError):
             time_str = ""
-        time_label = QLabel(f"🕐 {time_str}")
+        time_label = QLabel(f"● {time_str}")
         time_label.setObjectName("cardInfo")
         info_layout.addWidget(time_label)
 
-        # Duration (e.g., "39s" or "2m 15s")
+        info_layout.addStretch()
+
+        # Duration right-aligned
         duration = rec.duration_seconds
         if duration < 60:
             duration_str = f"{int(duration)}s"
@@ -733,18 +1264,47 @@ class CalendarWidget(QWidget):
         duration_label.setObjectName("cardDuration")
         info_layout.addWidget(duration_label)
 
-        info_layout.addStretch()
-
-        # Diarization badge if enabled
-        if rec.has_diarization:
-            diar_badge = QLabel("Diarization")
-            diar_badge.setObjectName("diarizationBadge")
-            info_layout.addWidget(diar_badge)
-
         layout.addLayout(info_layout)
 
-        # Connect click to open recording
-        card.mousePressEvent = lambda e, rid=rec.id: self.recording_requested.emit(rid)
+        # Left-click opens recording, right-click shows context menu
+        def on_mouse_press(event, rid=rec.id):
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.recording_requested.emit(rid)
+
+        card.mousePressEvent = on_mouse_press
+
+        # Context menu for right-click
+        def show_context_menu(pos, rid=rec.id):
+            menu = QMenu(card)
+            menu.setStyleSheet("""
+                QMenu {
+                    background-color: #2d2d2d;
+                    border: 1px solid #3d3d3d;
+                    border-radius: 4px;
+                    padding: 4px;
+                }
+                QMenu::item {
+                    padding: 8px 24px;
+                    color: #e0e0e0;
+                }
+                QMenu::item:selected {
+                    background-color: #3d3d3d;
+                }
+            """)
+
+            change_date_action = QAction("Change date && time", menu)
+            change_date_action.triggered.connect(
+                lambda: self.change_date_requested.emit(rid)
+            )
+            menu.addAction(change_date_action)
+
+            delete_action = QAction("Delete note", menu)
+            delete_action.triggered.connect(lambda: self.delete_requested.emit(rid))
+            menu.addAction(delete_action)
+
+            menu.exec(card.mapToGlobal(pos))
+
+        card.customContextMenuRequested.connect(show_context_menu)
 
         return card
 
@@ -848,12 +1408,16 @@ class CalendarWidget(QWidget):
             logger.error(f"Failed to load recordings: {e}")
 
     def _update_calendar_highlights(self) -> None:
-        """Update day cells with recording counts."""
+        """Update day cells with recording counts and refresh day view if active."""
         for cell in self._day_cells:
             if cell._date:
                 date_str = cell._date.isoformat()
                 recordings = self._recordings_cache.get(date_str, [])
                 cell.set_recording_count(len(recordings))
+
+        # Also refresh day view if currently visible
+        if self._view_mode == "day" and self._selected_date:
+            self._update_day_view()
 
     def refresh(self) -> None:
         """Refresh the calendar data."""
