@@ -2189,7 +2189,7 @@ wheels = [
 ]
 
 [[package]]
-name = "transcription-suite-server"
+name = "transcriptionsuite-server"
 version = "0.4.7"
 source = { editable = "." }
 dependencies = [

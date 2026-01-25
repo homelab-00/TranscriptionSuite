@@ -181,7 +181,7 @@ fi
 # ============================================================================
 # Check for Existing Container and Mode Conflicts
 # ============================================================================
-CONTAINER_NAME="transcription-suite"
+CONTAINER_NAME="transcriptionsuite-container"
 
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     print_info "Container already exists, checking mode..."

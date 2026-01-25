@@ -117,7 +117,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
 
         # Create AppIndicator
         self.indicator = AppIndicator3.Indicator.new(
-            "transcription-suite",
+            "transcriptionsuite",
             indicator_icon,
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )

@@ -665,7 +665,7 @@ wheels = [
 ]
 
 [[package]]
-name = "transcription-suite-build"
+name = "transcriptionsuite-build"
 version = "0.4.7"
 source = { virtual = "." }
 dependencies = [

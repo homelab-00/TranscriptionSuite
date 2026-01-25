@@ -974,10 +974,10 @@ docker compose logs -f
 ```bash
 # Check health status
 docker compose ps
-docker inspect transcription-suite | grep Health -A 10
+docker inspect transcriptionsuite-container | grep Health -A 10
 
 # Test health endpoint
-docker compose exec transcription-suite curl -f http://localhost:8000/health
+docker compose exec transcriptionsuite-container curl -f http://localhost:8000/health
 ```
 
 ### 13.3 Tailscale DNS Resolution
@@ -1030,10 +1030,10 @@ Then restart: `docker compose down && docker compose up -d`
 
 ### 13.6 Checking Installed Packages
 
-To inspect the Python packages installed in the *running* `transcription-suite` server container:
+To inspect the Python packages installed in the *running* `transcriptionsuite-container` server container:
 
 ```bash
-docker exec transcription-suite python -c "
+docker exec transcriptionsuite-container python -c "
 from importlib.metadata import distributions
 for dist in sorted(distributions(), key=lambda d: d.name.lower()):
     print(f'{dist.name:40} {dist.version}')

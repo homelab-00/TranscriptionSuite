@@ -788,7 +788,7 @@ class SettingsDialog(QDialog):
                     "The config.yaml file doesn't exist yet.\n\n"
                     "To create it:\n"
                     f"  1. Run first-time setup from terminal:\n"
-                    f"     transcription-suite-setup\n\n"
+                    f"     transcriptionsuite-setup\n\n"
                     f"  2. Or create it manually at:\n"
                     f"     {self._docker_manager.config_dir}/config.yaml"
                 )

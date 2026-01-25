@@ -296,7 +296,7 @@ backup:
 # ----------------------------------------------------------------------------
 processing:
     # Temporary directory for intermediate files during transcription.
-    temp_dir: "/tmp/transcription-suite"
+    temp_dir: "/tmp/transcriptionsuite"
 
     # Whether to keep temporary WAV files after processing.
     keep_temp_files: false

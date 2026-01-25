@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "transcription-suite-dashboard"
+name = "transcriptionsuite-dashboard"
 version = "0.4.7"
 description = "TranscriptionSuite Dashboard for desktop integration"
 requires-python = ">=3.13,<3.14"

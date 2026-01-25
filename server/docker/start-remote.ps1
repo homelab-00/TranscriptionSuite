@@ -196,12 +196,12 @@ if ($EnvFile -ne "" -and (Test-Path $EnvFile)) {
     $EnvFileArg = @("--env-file", $EnvFile)
 } else {
     Write-Info "No .env file found (diarization may not work without HF token)"
-}
+
 
 # ============================================================================
 # Check for Existing Container and Mode Conflicts
 # ============================================================================
-$ContainerName = "transcription-suite"
+$ContainerName = "transcriptionsuite-container"
 
 $containerExists = docker ps -a --format "{{.Names}}" 2>$null | Where-Object { $_ -eq $ContainerName }
 if ($containerExists) {

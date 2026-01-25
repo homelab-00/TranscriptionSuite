@@ -149,7 +149,7 @@ DOCKER_COMPOSE_LINUX = """# TranscriptionSuite Docker Compose Configuration
 #     USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d
 
 services:
-  transcription-suite:
+  transcriptionsuite:
     image: ghcr.io/homelab-00/transcriptionsuite-server:latest
     container_name: transcriptionsuite-container
 
@@ -230,7 +230,7 @@ DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
 #     docker compose up -d
 
 services:
-  transcription-suite:
+  transcriptionsuite:
     image: ghcr.io/homelab-00/transcriptionsuite-server:latest
     container_name: transcriptionsuite-container
 

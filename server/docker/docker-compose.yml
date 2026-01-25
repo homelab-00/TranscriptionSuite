@@ -38,7 +38,7 @@
 #   and edit as needed. The server will use your custom config instead of defaults.
 
 services:
-  transcription-suite:
+  transcriptionsuite:
     build:
       context: ../..
       dockerfile: server/docker/Dockerfile

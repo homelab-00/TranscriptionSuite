@@ -492,37 +492,31 @@ class DockerManager:
             return None, None
 
     def image_exists_locally(self) -> bool:
-        """Check if the Docker image exists locally."""
+        """Check if any transcriptionsuite-server Docker image exists locally."""
         try:
-            result = self._run_command(
-                ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"]
-            )
-            if result.returncode != 0:
-                return False
-            return self.DOCKER_IMAGE in result.stdout
+            # Check if any image with our repository exists (any tag)
+            images = self.list_local_images()
+            return len(images) > 0
         except Exception:
             return False
 
     def get_image_created_date(self) -> str | None:
-        """Get the creation date of the local Docker image."""
+        """Get the creation date of the most recent local Docker image."""
         try:
-            result = self._run_command(
-                ["docker", "images", self.DOCKER_IMAGE, "--format", "{{.CreatedAt}}"]
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().split()[0]  # Return just the date part
+            most_recent = self.get_most_recent_image()
+            if most_recent:
+                # Return just the date part (YYYY-MM-DD)
+                return most_recent.created.split()[0] if most_recent.created else None
             return None
         except Exception:
             return None
 
     def get_image_size(self) -> str | None:
-        """Get the size of the local Docker image."""
+        """Get the size of the most recent local Docker image."""
         try:
-            result = self._run_command(
-                ["docker", "images", self.DOCKER_IMAGE, "--format", "{{.Size}}"]
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+            most_recent = self.get_most_recent_image()
+            if most_recent:
+                return most_recent.size
             return None
         except Exception:
             return None
