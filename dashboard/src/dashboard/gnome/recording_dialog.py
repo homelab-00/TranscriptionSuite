@@ -55,8 +55,8 @@ class RecordingDialog(Adw.Window):
 
         # Callback for recording deletion
         self._deletion_callback: Callable[[int], None] | None = None
-        # Callback for recording updates
-        self._update_callback: Callable[[int], None] | None = None
+        # Callback for recording updates (recording_id, title)
+        self._update_callback: Callable[[int, str], None] | None = None
 
         self._setup_ui()
         self._apply_styles()
@@ -68,8 +68,8 @@ class RecordingDialog(Adw.Window):
         """Connect callback for recording deletion."""
         self._deletion_callback = callback
 
-    def connect_recording_updated(self, callback: Callable[[int], None]) -> None:
-        """Connect callback for recording updates."""
+    def connect_recording_updated(self, callback: Callable[[int, str], None]) -> None:
+        """Connect callback for recording updates (receives recording_id and new title)."""
         self._update_callback = callback
 
     # Alias for compatibility
@@ -454,9 +454,9 @@ class RecordingDialog(Adw.Window):
             if self._recording:
                 self._recording.title = title
             logger.info(f"Title updated: {title}")
-            # Notify about update
+            # Notify about update with new title
             if self._update_callback:
-                GLib.idle_add(self._update_callback, self._recording_id)
+                GLib.idle_add(self._update_callback, self._recording_id, title)
         except Exception as e:
             logger.error(f"Failed to save title: {e}")
 

@@ -258,7 +258,7 @@ class SearchWidget(QWidget):
                 background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #060606;
+                color: #141414;
                 padding: 10px 20px;
                 font-weight: 500;
             }

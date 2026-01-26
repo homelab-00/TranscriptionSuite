@@ -618,15 +618,15 @@ class CalendarWidget:
 
             .time-slot {
                 background-color: #1E1E1E;
-                border-bottom: 1px solid #1a1a1a;
+                border-bottom: 1px solid #141414;
                 border-radius: 4px;
                 padding: 8px 12px;
-                min-height: 60px;
+                min-height: 84px;
                 margin: 2px 0;
             }
 
             .time-slot:hover {
-                background-color: #1a1a1a;
+                background-color: #141414;
                 border: 1px solid #2d2d2d;
             }
 
@@ -654,7 +654,11 @@ class CalendarWidget:
                 border-radius: 4px;
                 color: #606060;
                 min-width: 28px;
+                max-width: 28px;
                 min-height: 28px;
+                max-height: 28px;
+                padding: 0px;
+                margin-right: 8px;
             }
 
             .add-button:hover {
@@ -665,15 +669,15 @@ class CalendarWidget:
 
             .recording-card {
                 background-color: #1e2a3a;
-                border: 1px solid #2d4a6d;
+                border: 1px solid #0AFCCF;
                 border-radius: 8px;
-                padding: 8px 12px;
+                padding: 12px 16px;
                 min-width: 180px;
             }
 
             .recording-card:hover {
                 background-color: #263a4f;
-                border-color: #0AFCCF;
+                border-color: #2DFFE5;
             }
 
             .card-title {
@@ -699,6 +703,15 @@ class CalendarWidget:
                 color: #90caf9;
                 font-size: 10px;
                 padding: 2px 6px;
+            }
+
+            .recordings-scroll {
+                border-radius: 8px;
+            }
+
+            .recordings-box {
+                background-color: #1e1e1e;
+                border-radius: 8px;
             }
         """)
 
@@ -818,11 +831,13 @@ class CalendarWidget:
 
         # Recordings container (scrollable horizontally)
         recordings_scroll = Gtk.ScrolledWindow()
+        recordings_scroll.add_css_class("recordings-scroll")
         recordings_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         recordings_scroll.set_hexpand(True)
-        recordings_scroll.set_size_request(-1, 56)
+        recordings_scroll.set_size_request(-1, 72)
 
         recordings_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        recordings_box.add_css_class("recordings-box")
         recordings_scroll.set_child(recordings_box)
         slot.append(recordings_scroll)
 
@@ -1333,6 +1348,27 @@ class CalendarWidget:
         """Refresh the calendar data."""
         self._rebuild_calendar_grid()
         self._schedule_refresh()
+        # Schedule delayed update to catch async data load
+        GLib.timeout_add(500, self._delayed_view_update)
+
+    def remove_recording_from_cache(self, recording_id: int) -> None:
+        """Remove a recording from the local cache and update UI immediately."""
+        for date_str, recordings in self._recordings_cache.items():
+            self._recordings_cache[date_str] = [
+                r for r in recordings if r.id != recording_id
+            ]
+        # Immediately update UI
+        self._update_calendar_highlights()
+
+    def update_recording_in_cache(self, recording_id: int, title: str) -> None:
+        """Update a recording's title in the local cache and update UI immediately."""
+        for recordings in self._recordings_cache.values():
+            for rec in recordings:
+                if rec.id == recording_id:
+                    rec.title = title
+                    break
+        # Immediately update UI
+        self._update_calendar_highlights()
 
     def set_api_client(self, api_client: "APIClient") -> None:
         """Update the API client reference."""

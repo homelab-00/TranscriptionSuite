@@ -389,7 +389,7 @@ class DialogsMixin:
         # Author section header
         author_header = QLabel("Author")
         author_header.setStyleSheet(
-            "color: #90caf9; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
+            "color: #0AFCCF; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
         )
         links_layout.addWidget(author_header)
 
@@ -409,7 +409,7 @@ class DialogsMixin:
         # Repository section header
         repo_header = QLabel("Repository")
         repo_header.setStyleSheet(
-            "color: #90caf9; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
+            "color: #0AFCCF; font-size: 13px; font-weight: bold; margin-bottom: 4px;"
         )
         links_layout.addWidget(repo_header)
 

@@ -372,7 +372,7 @@ class DayViewImportDialog(QDialog):
         """Apply styling to dialog components."""
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1a1a;
+                background-color: #141414;
             }
 
             #dialogHeader {
@@ -461,7 +461,7 @@ class DayViewImportDialog(QDialog):
                 background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #060606;
+                color: #141414;
                 padding: 10px 24px;
                 font-weight: bold;
                 font-size: 13px;
@@ -776,7 +776,7 @@ class CalendarWidget(QWidget):
         """Create a single time slot row."""
         slot = QFrame()
         slot.setObjectName("timeSlot")
-        slot.setMinimumHeight(72)
+        slot.setMinimumHeight(96)
         slot.setProperty("hour", hour)
 
         layout = QHBoxLayout(slot)
@@ -809,7 +809,7 @@ class CalendarWidget(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         recordings_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        recordings_scroll.setFixedHeight(64)
+        recordings_scroll.setFixedHeight(72)
 
         recordings_container = QWidget()
         recordings_container.setObjectName(f"recordings_{hour}")
@@ -908,7 +908,7 @@ class CalendarWidget(QWidget):
 
             /* Day cells */
             #dayCell {
-                background-color: #131313;
+                background-color: #212121;
                 border: 1px solid #2d2d2d;
                 border-radius: 4px;
             }
@@ -929,7 +929,7 @@ class CalendarWidget(QWidget):
             }
 
             #dayCell[state="other-month"] {
-                background-color: #060606;
+                background-color: #141414;
             }
 
             #dayCell[state="other-month"] #dayNumber {
@@ -937,7 +937,7 @@ class CalendarWidget(QWidget):
             }
 
             #dayCell[state="future"] {
-                background-color: #060606;
+                background-color: #141414;
             }
 
             #dayCell[state="future"] #dayNumber {
@@ -945,7 +945,7 @@ class CalendarWidget(QWidget):
             }
 
             #dayCell[state="future"]:hover {
-                background-color: #060606;
+                background-color: #141414;
                 border-color: #2d2d2d;
             }
 
@@ -967,13 +967,13 @@ class CalendarWidget(QWidget):
             /* Time slots in day view */
             #timeSlot {
                 background-color: #1E1E1E;
-                border-bottom: 1px solid #1a1a1a;
+                border-bottom: 1px solid #141414;
                 border-radius: 4px;
                 margin: 2px 0;
             }
 
             #timeSlot:hover {
-                background-color: #1a1a1a;
+                background-color: #141414;
                 border: 1px solid #2d2d2d;
             }
 
@@ -989,6 +989,12 @@ class CalendarWidget(QWidget):
                 border-radius: 4px;
                 color: #606060;
                 font-size: 16px;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+                padding: 0px;
+                margin-right: 8px;
             }
 
             #addButton:hover {
@@ -1004,15 +1010,16 @@ class CalendarWidget(QWidget):
 
             /* Recording card in day view */
             #recordingCard {
-                background-color: #131313;
-                border: 1px solid #2d2d2d;
+                background-color: #212121;
+                border: 1px solid #0AFCCF;
                 border-radius: 8px;
                 min-width: 180px;
+                padding: 8px;
             }
 
             #recordingCard:hover {
                 background-color: #1e1e1e;
-                border-color: #0AFCCF;
+                border-color: #2DFFE5;
             }
 
             #cardTitle {
@@ -1047,7 +1054,7 @@ class CalendarWidget(QWidget):
             }
 
             QScrollBar:vertical {
-                background-color: #1a1a1a;
+                background-color: #141414;
                 width: 8px;
                 border-radius: 4px;
             }
@@ -1070,6 +1077,13 @@ class CalendarWidget(QWidget):
             QScrollArea[objectName^="recordings_scroll_"] {
                 background-color: transparent;
                 border: none;
+                border-radius: 8px;
+            }
+
+            /* Recordings container widget */
+            QWidget[objectName^="recordings_"] {
+                background-color: #1e1e1e;
+                border-radius: 8px;
             }
 
             QScrollBar:horizontal {
@@ -1448,6 +1462,27 @@ class CalendarWidget(QWidget):
         """Refresh the calendar data."""
         self._rebuild_calendar_grid()
         self._schedule_refresh()
+        # Schedule delayed update to catch async data load
+        QTimer.singleShot(500, self._delayed_view_update)
+
+    def remove_recording_from_cache(self, recording_id: int) -> None:
+        """Remove a recording from the local cache and update UI immediately."""
+        for date_str, recordings in self._recordings_cache.items():
+            self._recordings_cache[date_str] = [
+                r for r in recordings if r.id != recording_id
+            ]
+        # Immediately update UI
+        self._update_calendar_highlights()
+
+    def update_recording_in_cache(self, recording_id: int, title: str) -> None:
+        """Update a recording's title in the local cache and update UI immediately."""
+        for recordings in self._recordings_cache.values():
+            for rec in recordings:
+                if rec.id == recording_id:
+                    rec.title = title
+                    break
+        # Immediately update UI
+        self._update_calendar_highlights()
 
     def _force_refresh(self) -> None:
         """Force refresh with immediate UI update - used after imports."""

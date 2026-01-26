@@ -89,6 +89,16 @@ def create_server_view(dashboard) -> QWidget:
     dashboard._image_selector = QComboBox()
     dashboard._image_selector.setObjectName("imageSelector")
     dashboard._image_selector.setMinimumWidth(280)
+    dashboard._image_selector.setStyleSheet(
+        "QComboBox { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
+        "QComboBox:hover { border-color: #505050; }"
+        "QComboBox::drop-down { border: none; width: 20px; }"
+        "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
+        "border-right: 4px solid transparent; border-top: 5px solid #808080; margin-right: 6px; }"
+        "QComboBox QAbstractItemView { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "color: #e0e0e0; selection-background-color: #404040; padding: 4px; }"
+    )
     dashboard._image_selector.setToolTip(
         "Select which Docker image to use when starting the server.\n"
         "'Most Recent (auto)' automatically selects the newest image by build date."

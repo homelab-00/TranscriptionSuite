@@ -27,14 +27,14 @@ def get_dashboard_css() -> bytes:
     """Get the main dashboard CSS stylesheet.
 
     Color palette:
-    - Background: #131313, #060606
-    - Accents from logo: #9C1971 (magenta), #B9295E (pink), #DD4243/#E24343 (red), #0AFCCF (cyan)
+    - Background: #212121, #141414
+    - Accents from logo: #ff007a (magenta), #ff0002 (red), #0AFCCF (cyan)
     - Status: success=#4caf50, warning=#ff9800, error=#f44336
     """
     return b"""
     /* Sidebar styling */
     .sidebar {
-        background-color: #131313;
+        background-color: #212121;
         border-right: 1px solid #2d2d2d;
     }
 
@@ -45,7 +45,7 @@ def get_dashboard_css() -> bytes:
     }
 
     .sidebar-subtitle {
-        color: #9C1971;
+        color: #ff007a;
         font-size: 16px;
     }
 
@@ -75,7 +75,7 @@ def get_dashboard_css() -> bytes:
 
     /* Status card styling */
     .status-card {
-        background-color: #131313;
+        background-color: #212121;
         border-radius: 12px;
         padding: 16px;
         border: 1px solid #2d2d2d;
@@ -95,7 +95,7 @@ def get_dashboard_css() -> bytes:
     /* Button styles */
     .primary-button {
         background-color: #0AFCCF;
-        color: #060606;
+        color: #141414;
         border-radius: 8px;
         padding: 12px 24px;
         font-weight: bold;
@@ -106,7 +106,7 @@ def get_dashboard_css() -> bytes:
     }
 
     .stop-button {
-        background-color: #DD4243;
+        background-color: #ff0002;
         color: white;
         border-radius: 8px;
         padding: 12px 24px;
@@ -114,12 +114,12 @@ def get_dashboard_css() -> bytes:
     }
 
     .stop-button:hover {
-        background-color: #E24343;
+        background-color: #ff0002;
     }
 
     .danger-button {
         background-color: #3d3d3d;
-        color: #DD4243;
+        color: #ff0002;
         border-radius: 8px;
         padding: 10px 16px;
     }
@@ -145,11 +145,11 @@ def get_dashboard_css() -> bytes:
     }
 
     .status-stopped {
-        color: #ff9800;
+        color: #6c757d;
     }
 
     .status-error {
-        color: #DD4243;
+        color: #ff0002;
     }
 
     .status-unknown {
@@ -158,7 +158,7 @@ def get_dashboard_css() -> bytes:
 
     /* Management group styling */
     .management-group {
-        background-color: #131313;
+        background-color: #212121;
         border: 1px solid #2d2d2d;
         border-radius: 8px;
         padding: 12px;
@@ -189,7 +189,7 @@ def get_dashboard_css() -> bytes:
 
     /* Live preview section */
     .preview-card {
-        background-color: #131313;
+        background-color: #212121;
         border: 1px solid #2d2d2d;
         border-radius: 8px;
         padding: 12px;
@@ -205,7 +205,7 @@ def get_dashboard_css() -> bytes:
 
     /* Volumes status card */
     .volumes-card {
-        background-color: #131313;
+        background-color: #212121;
         border: 1px solid #2d2d2d;
         border-radius: 10px;
         padding: 16px;

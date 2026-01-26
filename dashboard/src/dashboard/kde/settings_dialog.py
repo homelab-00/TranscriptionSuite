@@ -181,7 +181,7 @@ class SettingsDialog(QDialog):
             }
 
             QLineEdit:disabled {
-                background-color: #1a1a1a;
+                background-color: #141414;
                 color: #606060;
             }
 
@@ -278,7 +278,7 @@ class SettingsDialog(QDialog):
                 background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #060606;
+                color: #141414;
                 padding: 10px 24px;
                 font-size: 13px;
                 font-weight: 500;

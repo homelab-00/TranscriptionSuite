@@ -192,11 +192,12 @@ class DashboardWindow(
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 16, 8, 16)
         header_layout.setSpacing(4)
+        self._sidebar_header_layout = header_layout
 
         # Title container (for collapse/expand)
-        title_container = QWidget()
-        title_container.setObjectName("sidebarTitleContainer")
-        title_inner = QVBoxLayout(title_container)
+        self._sidebar_title_container = QWidget()
+        self._sidebar_title_container.setObjectName("sidebarTitleContainer")
+        title_inner = QVBoxLayout(self._sidebar_title_container)
         title_inner.setContentsMargins(0, 0, 0, 0)
         title_inner.setSpacing(2)
 
@@ -208,7 +209,7 @@ class DashboardWindow(
         self._sidebar_subtitle.setObjectName("sidebarSubtitle")
         title_inner.addWidget(self._sidebar_subtitle)
 
-        header_layout.addWidget(title_container, 1)
+        header_layout.addWidget(self._sidebar_title_container, 1)
 
         # Collapse toggle button
         self._collapse_btn = QPushButton("«")
@@ -306,6 +307,12 @@ class DashboardWindow(
             self._sidebar.setFixedWidth(200)
             self._collapse_btn.setText("«")
             self._collapse_btn.setToolTip("Collapse sidebar")
+            self._sidebar_title_container.show()
+            self._sidebar_header_layout.setContentsMargins(16, 16, 8, 16)
+            self._sidebar_header_layout.setAlignment(
+                self._collapse_btn,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
             self._sidebar_title.show()
             self._sidebar_subtitle.show()
             # Show text on buttons
@@ -321,6 +328,11 @@ class DashboardWindow(
             self._sidebar.setFixedWidth(56)
             self._collapse_btn.setText("»")
             self._collapse_btn.setToolTip("Expand sidebar")
+            self._sidebar_title_container.hide()
+            self._sidebar_header_layout.setContentsMargins(0, 16, 0, 16)
+            self._sidebar_header_layout.setAlignment(
+                self._collapse_btn, Qt.AlignmentFlag.AlignCenter
+            )
             self._sidebar_title.hide()
             self._sidebar_subtitle.hide()
             # Hide text on buttons, keep only icons
@@ -427,11 +439,11 @@ class DashboardWindow(
                     )
             elif status == ServerStatus.STOPPED:
                 self._server_status_light.setStyleSheet(
-                    "color: #f44336; font-size: 8px;"
+                    "color: #6c757d; font-size: 8px;"
                 )
             else:
                 self._server_status_light.setStyleSheet(
-                    "color: #6c757d; font-size: 8px;"
+                    "color: #5d0000; font-size: 8px;"
                 )
 
         if hasattr(self, "_client_status_light"):
@@ -441,7 +453,7 @@ class DashboardWindow(
                 )
             else:
                 self._client_status_light.setStyleSheet(
-                    "color: #f44336; font-size: 8px;"
+                    "color: #6c757d; font-size: 8px;"
                 )
 
     # =========================================================================
@@ -490,7 +502,7 @@ class DashboardWindow(
                 logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 layout.addWidget(logo_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        layout.addSpacing(10)
+        layout.addSpacing(20)
 
         # Status indicators
         status_container = QWidget()
@@ -594,17 +606,17 @@ class DashboardWindow(
                 self._home_server_status.setStyleSheet("color: #4caf50;")
         elif status == ServerStatus.STOPPED:
             self._home_server_status.setText("⬤ Stopped")
-            self._home_server_status.setStyleSheet("color: #f44336;")
+            self._home_server_status.setStyleSheet("color: #6c757d;")
         else:
             self._home_server_status.setText("⬤ Not set up")
-            self._home_server_status.setStyleSheet("color: #6c757d;")
+            self._home_server_status.setStyleSheet("color: #5d0000;")
 
         if self._client_running:
             self._home_client_status.setText("⬤ Running")
             self._home_client_status.setStyleSheet("color: #4caf50;")
         else:
             self._home_client_status.setText("⬤ Stopped")
-            self._home_client_status.setStyleSheet("color: #f44336;")
+            self._home_client_status.setStyleSheet("color: #6c757d;")
 
         self._update_sidebar_status_lights()
 
@@ -673,11 +685,13 @@ class DashboardWindow(
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.remove_recording_from_cache(recording_id)
             self._notebook_widget.refresh()
 
-    def _on_recording_updated(self, recording_id: int) -> None:
-        """Handle recording update - refresh notebook view."""
+    def _on_recording_updated(self, recording_id: int, title: str) -> None:
+        """Handle recording update - update cache and refresh notebook view."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.update_recording_in_cache(recording_id, title)
             self._notebook_widget.refresh()
 
     def _get_api_client(self) -> "APIClient | None":

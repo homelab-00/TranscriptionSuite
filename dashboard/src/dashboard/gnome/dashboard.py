@@ -402,9 +402,9 @@ class DashboardWindow(_get_dashboard_base()):
                 else:
                     self._server_status_light.add_css_class("status-light-green")
             elif status == ServerStatus.STOPPED:
-                self._server_status_light.add_css_class("status-light-orange")
-            else:
                 self._server_status_light.add_css_class("status-light-gray")
+            else:
+                self._server_status_light.add_css_class("status-light-red")
 
         # Client status light
         if hasattr(self, "_client_status_light") and self._client_status_light:
@@ -415,7 +415,7 @@ class DashboardWindow(_get_dashboard_base()):
             if self._client_running:
                 self._client_status_light.add_css_class("status-light-green")
             else:
-                self._client_status_light.add_css_class("status-light-orange")
+                self._client_status_light.add_css_class("status-light-gray")
 
     def _set_window_icon(self) -> None:
         """Set the window icon from the app logo.
@@ -498,7 +498,7 @@ class DashboardWindow(_get_dashboard_base()):
         # Status indicators
         status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=40)
         status_box.set_halign(Gtk.Align.CENTER)
-        status_box.set_margin_top(20)
+        status_box.set_margin_top(30)
 
         # Server status
         server_status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -1282,11 +1282,15 @@ class DashboardWindow(_get_dashboard_base()):
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""
         logger.info(f"Recording {recording_id} deleted, refreshing notebook")
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.remove_recording_from_cache(recording_id)
         self._refresh_notebook_view()
 
-    def _on_recording_updated(self, recording_id: int) -> None:
-        """Handle recording update - refresh notebook view."""
-        logger.info(f"Recording {recording_id} updated, refreshing notebook")
+    def _on_recording_updated(self, recording_id: int, title: str) -> None:
+        """Handle recording update - update cache and refresh notebook view."""
+        logger.info(f"Recording {recording_id} updated with title: {title}")
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.update_recording_in_cache(recording_id, title)
         self._refresh_notebook_view()
 
     def _apply_styles(self) -> None:
@@ -1310,7 +1314,7 @@ class DashboardWindow(_get_dashboard_base()):
             color: #6B8DD9;
         }
         .client-accent {
-            color: #D070D0;
+            color: #ff007a;
         }
         .web-accent {
             color: #4DD0E1;
@@ -1330,8 +1334,11 @@ class DashboardWindow(_get_dashboard_base()):
         .welcome-button.server-accent:hover {
             border-color: #6B8DD9;
         }
+        .welcome-button.client-accent {
+            border-color: #ff007a;
+        }
         .welcome-button.client-accent:hover {
-            border-color: #D070D0;
+            border-color: #ff007a;
         }
 
         /* Secondary button */
@@ -1401,6 +1408,9 @@ class DashboardWindow(_get_dashboard_base()):
         }
         .status-stopped {
             color: #6c757d;
+        }
+        .status-not-setup {
+            color: #5d0000;
         }
         .status-error {
             color: #f44336;
@@ -1547,6 +1557,38 @@ class DashboardWindow(_get_dashboard_base()):
         .copy-clear-btn:active {
             background: #1e1e1e;
         }
+
+        /* Combobox styling to match Client view dropdown */
+        combobox button {
+            background-color: #2d2d2d;
+            border: 1px solid #3d3d3d;
+            border-radius: 6px;
+            color: #e0e0e0;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+        combobox button:hover {
+            border-color: #505050;
+        }
+        combobox button:focus {
+            border-color: #0AFCCF;
+        }
+        combobox popover {
+            background-color: #2d2d2d;
+            border: 1px solid #3d3d3d;
+            border-radius: 6px;
+            color: #e0e0e0;
+        }
+        combobox list {
+            background-color: #2d2d2d;
+            color: #e0e0e0;
+        }
+        combobox row {
+            padding: 4px;
+        }
+        combobox row:selected {
+            background-color: #404040;
+        }
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(css)
@@ -1657,7 +1699,7 @@ class DashboardWindow(_get_dashboard_base()):
             self._home_server_status.add_css_class("status-stopped")
         else:
             self._home_server_status.set_text("⬤ Not set up")
-            self._home_server_status.add_css_class("status-stopped")
+            self._home_server_status.add_css_class("status-not-setup")
 
         # Client status
         if self._home_client_status:

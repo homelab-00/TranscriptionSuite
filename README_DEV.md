@@ -325,13 +325,13 @@ docker compose build
 **Build with specific tag:**
 To build an image with a specific tag (instead of default `latest`):
 ```bash
-TAG=v0.3.0 docker compose build
+TAG=v0.4.7 docker compose build
 ```
-This produces `ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0`.
+This produces `ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7`.
 
 **Note:** The `build/docker-build-push.sh` script is used to **push** the image you just built. It also supports the `TAG` environment variable:
 ```bash
-TAG=v0.3.0 ./build/docker-build-push.sh
+TAG=v0.4.7 ./build/docker-build-push.sh
 ```
 
 **Force rebuild:**
@@ -362,9 +362,9 @@ docker image prune -f
 
 **Typical tag management workflow:**
 1. Build and push a release: `TAG=v0.4.7 docker compose build && ./build/docker-build-push.sh v0.4.7`
-2. Create an alias: `docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:stable`
-3. Push the alias: `docker push ghcr.io/homelab-00/transcriptionsuite-server:stable`
-4. Remove old tags when no longer needed: `docker rmi ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0`
+2. Create an alias: `docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:latest`
+3. Push the alias: `docker push ghcr.io/homelab-00/transcriptionsuite-server:latest`
+4. Remove old tags when no longer needed: `docker rmi ghcr.io/homelab-00/transcriptionsuite-server:v0.4.6`
 
 **Note:** The `docker-build-push.sh` script automatically creates and pushes a `latest` tag when pushing release versions (v*.*.* format).
 
@@ -402,7 +402,7 @@ Prerequisite: You must have built the image first (see Step 2).
 ./build/docker-build-push.sh
 
 # Push a specific tag (must exist locally)
-./build/docker-build-push.sh v0.3.0
+./build/docker-build-push.sh v0.4.7
 
 # Push a custom tag
 ./build/docker-build-push.sh dev
@@ -576,7 +576,7 @@ The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcription
 **Using specific versions:**
 ```bash
 # Use a specific tag (must exist locally or will be pulled from ghcr.io)
-TAG=v0.3.0 docker compose up -d
+TAG=v0.4.7 docker compose up -d
 
 # Set TAG as environment variable
 export TAG=dev-branch

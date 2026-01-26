@@ -194,7 +194,14 @@ class NotebookView:
         try:
             await self._api_client.delete_recording(recording_id)
             logger.info(f"Deleted recording {recording_id}")
-            GLib.idle_add(self._calendar_widget.refresh)
+
+            # Remove from cache immediately and update UI (use lambda to ensure both run together)
+            def update_ui():
+                self._calendar_widget.remove_recording_from_cache(recording_id)
+                self._calendar_widget.refresh()
+                return False
+
+            GLib.idle_add(update_ui)
         except Exception as e:
             logger.error(f"Failed to delete recording: {e}")
             GLib.idle_add(
@@ -433,6 +440,14 @@ class NotebookView:
         current_page = self._notebook.get_current_page()
         if current_page == 0:
             self._calendar_widget.refresh()
+
+    def remove_recording_from_cache(self, recording_id: int) -> None:
+        """Remove a recording from the calendar cache and update UI immediately."""
+        self._calendar_widget.remove_recording_from_cache(recording_id)
+
+    def update_recording_in_cache(self, recording_id: int, title: str) -> None:
+        """Update a recording's title in the calendar cache and update UI immediately."""
+        self._calendar_widget.update_recording_in_cache(recording_id, title)
 
     def set_api_client(self, api_client: "APIClient") -> None:
         """Update the API client reference."""

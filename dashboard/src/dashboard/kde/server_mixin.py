@@ -164,9 +164,9 @@ class ServerControlMixin:
             else:
                 self._server_status_label.setStyleSheet("color: #4caf50;")  # success
         elif status == ServerStatus.STOPPED:
-            self._server_status_label.setStyleSheet("color: #f44336;")  # red
+            self._server_status_label.setStyleSheet("color: #6c757d;")  # grey
         elif status == ServerStatus.NOT_FOUND:
-            self._server_status_label.setStyleSheet("color: #6c757d;")
+            self._server_status_label.setStyleSheet("color: #5d0000;")
         else:
             self._server_status_label.setStyleSheet("color: #f44336;")  # error
 

@@ -373,7 +373,7 @@ class ImportWidget(QWidget):
                 background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #060606;
+                color: #141414;
                 padding: 8px 16px;
                 font-weight: bold;
             }

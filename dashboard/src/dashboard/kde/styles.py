@@ -11,22 +11,26 @@ def get_dashboard_stylesheet() -> str:
     Get the main dashboard stylesheet.
 
     Returns the CSS stylesheet with unified color palette:
-    - Background: #131313, #060606
-    - Accents from logo: #9C1971 (magenta), #B9295E (pink), #DD4243/#E24343 (red), #0AFCCF (cyan)
+    - Background: #212121, #141414
+    - Accents from logo: #ff007a (magenta), #ff0002 (red), #0AFCCF (cyan)
     - Status: success=#4caf50, warning=#ff9800, error=#f44336
     """
     return """
         QMainWindow {
-            background-color: #060606;
+            background-color: #141414;
         }
 
         QScrollArea {
-            background-color: #060606;
+            background-color: #141414;
             border: none;
         }
 
+        QScrollArea > QWidget > QWidget {
+            background-color: #141414;
+        }
+
         QScrollBar:vertical {
-            background-color: #131313;
+            background-color: #212121;
             width: 10px;
             margin: 0;
         }
@@ -50,7 +54,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         QScrollBar:horizontal {
-            background-color: #131313;
+            background-color: #212121;
             height: 10px;
             margin: 0;
         }
@@ -75,12 +79,12 @@ def get_dashboard_stylesheet() -> str:
 
         /* Sidebar styles */
         #sidebar {
-            background-color: #131313;
+            background-color: #212121;
             border-right: 1px solid #2d2d2d;
         }
 
         #sidebarHeader {
-            background-color: #131313;
+            background-color: #212121;
             border-bottom: 1px solid #2d2d2d;
         }
 
@@ -91,7 +95,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #sidebarSubtitle {
-            color: #9C1971;
+            color: #ff007a;
             font-size: 16px;
             font-weight: 500;
         }
@@ -127,12 +131,12 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #sidebarSubButton:hover {
-            background-color: #1a1a1a;
+            background-color: #141414;
             color: #a0a0a0;
         }
 
         #sidebarSubButton:checked {
-            background-color: #1a1a1a;
+            background-color: #141414;
             color: #0AFCCF;
         }
 
@@ -150,7 +154,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #sidebarBottom {
-            background-color: #131313;
+            background-color: #212121;
             border-top: 1px solid #2d2d2d;
         }
 
@@ -207,7 +211,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #welcomeButton {
-            background-color: #131313;
+            background-color: #212121;
             border: 1px solid #2d2d2d;
             border-radius: 8px;
             color: #ffffff;
@@ -298,7 +302,7 @@ def get_dashboard_stylesheet() -> str:
             background-color: #0AFCCF;
             border: none;
             border-radius: 6px;
-            color: #060606;
+            color: #141414;
             padding: 10px 20px;
             font-size: 13px;
             min-width: 100px;
@@ -315,7 +319,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #stopButton {
-            background-color: #DD4243;
+            background-color: #ff0002;
             border: none;
             border-radius: 6px;
             color: white;
@@ -325,7 +329,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #stopButton:hover {
-            background-color: #E24343;
+            background-color: #ff0002;
         }
 
         #stopButton:disabled {
@@ -393,7 +397,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #dangerButton {
-            background-color: #DD4243;
+            background-color: #ff0002;
             border: none;
             border-radius: 4px;
             color: white;
@@ -402,7 +406,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         #dangerButton:hover {
-            background-color: #E24343;
+            background-color: #ff0002;
         }
 
         #dangerButton:disabled {
@@ -428,7 +432,7 @@ def get_dashboard_stylesheet() -> str:
         }
 
         QLabel#homeStatusLabel[accent="client"] {
-            color: #B9295E;
+            color: #ff007a;
         }
 
         QPushButton#welcomeButton[accent="server"] {
@@ -440,11 +444,11 @@ def get_dashboard_stylesheet() -> str:
         }
 
         QPushButton#welcomeButton[accent="client"] {
-            border: 2px solid #B9295E;
+            border: 2px solid #ff007a;
         }
 
         QPushButton#welcomeButton[accent="client"]:hover {
-            border-color: #9C1971;
+            border-color: #ff007a;
         }
 
         QPushButton#secondaryButton[accent="web"] {
@@ -517,10 +521,10 @@ def get_about_dialog_stylesheet() -> str:
         }
         #linkButton:hover {
             background-color: #2d2d2d;
-            border-color: #90caf9;
+            border-color: #0AFCCF;
         }
         #primaryButton {
-            background-color: #90caf9;
+            background-color: #0AFCCF;
             border: none;
             border-radius: 6px;
             color: #121212;
@@ -529,7 +533,7 @@ def get_about_dialog_stylesheet() -> str:
             font-weight: 500;
         }
         #primaryButton:hover {
-            background-color: #42a5f5;
+            background-color: #08d9b3;
         }
     """
 
@@ -573,7 +577,7 @@ def get_readme_html_css() -> str:
             font-size: 13px;
         }
         pre {
-            background-color: #1a1a1a;
+            background-color: #141414;
             border: 1px solid #3d3d3d;
             border-radius: 6px;
             padding: 12px;

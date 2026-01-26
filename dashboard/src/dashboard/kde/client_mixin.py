@@ -51,7 +51,7 @@ class ClientControlMixin:
             self._connection_info_label.setText(f"{https}://{host}:{port}")
         else:
             self._client_status_label.setText("Stopped")
-            self._client_status_label.setStyleSheet("color: #f44336;")  # red
+            self._client_status_label.setStyleSheet("color: #6c757d;")  # grey
             self._connection_info_label.setText("Not connected")
 
         # Update button states
