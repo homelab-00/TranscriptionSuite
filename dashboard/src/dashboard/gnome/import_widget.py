@@ -83,6 +83,9 @@ class ImportWidget:
         self._is_processing = False
         self._recording_created_callback: Callable[[int], None] | None = None
 
+        # Target date/time for imports from Day View (overrides file date)
+        self._target_recorded_at: str | None = None
+
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -379,10 +382,14 @@ class ImportWidget:
             if any(job.file_path == file_path for job in self._jobs):
                 continue
 
-            job = ImportJob(file_path)
+            # Use target date/time if set (from Day View), otherwise use file date
+            job = ImportJob(file_path, recorded_at=self._target_recorded_at)
             self._jobs.append(job)
             self._add_job_to_list(job)
             added_count += 1
+
+        # Clear target date after adding files
+        self._target_recorded_at = None
 
         if added_count > 0:
             self._status_label.set_label(f"Added {added_count} file(s) to queue")
@@ -585,3 +592,12 @@ class ImportWidget:
     def set_api_client(self, api_client: "APIClient") -> None:
         """Update the API client reference."""
         self._api_client = api_client
+
+    def import_for_datetime(self, target_date, hour: int) -> None:
+        """Open file browser with a preset target date/time for the import."""
+        # Set the target datetime (will be used instead of file creation date)
+        self._target_recorded_at = datetime(
+            target_date.year, target_date.month, target_date.day, hour, 0, 0
+        ).isoformat()
+        # Open file browser
+        self._open_file_chooser()

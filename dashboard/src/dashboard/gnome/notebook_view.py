@@ -5,7 +5,9 @@ Provides a tabbed interface with Calendar, Search, and Import sub-tabs
 for managing audio recordings and transcriptions.
 """
 
+import asyncio
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 try:
@@ -94,6 +96,8 @@ class NotebookView:
 
         # Connect signals
         self._calendar_widget.set_recording_callback(self._on_recording_requested)
+        self._calendar_widget.set_delete_callback(self._on_delete_requested)
+        self._calendar_widget.set_change_date_callback(self._on_change_date_requested)
         self._search_widget.set_recording_callback(self._on_recording_requested)
         self._import_widget.set_recording_created_callback(self._on_import_complete)
 
@@ -149,13 +153,180 @@ class NotebookView:
             self._recording_requested_callback(recording_id)
 
     def _on_import_complete(self, recording_id: int) -> None:
-        """Handle import completion."""
+        """Handle import completion - refresh calendar (don't auto-open)."""
         logger.info(f"Import complete, recording ID: {recording_id}")
-        # Refresh calendar
+        # Refresh calendar to show new recording
         self._calendar_widget.refresh()
-        # Open the recording
-        if self._recording_requested_callback:
-            self._recording_requested_callback(recording_id)
+        # Don't auto-open the recording - let user review queue first
+
+    def _on_delete_requested(self, recording_id: int) -> None:
+        """Handle delete request from calendar."""
+        dialog = Adw.MessageDialog(
+            heading="Delete Recording",
+            body="Are you sure you want to delete this recording?\n\nThis action cannot be undone.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def on_response(dialog, response):
+            if response == "delete":
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(self._delete_recording(recording_id))
+                    else:
+                        asyncio.run(self._delete_recording(recording_id))
+                except RuntimeError:
+                    pass
+            dialog.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    async def _delete_recording(self, recording_id: int) -> None:
+        """Delete a recording and refresh the view."""
+        try:
+            await self._api_client.delete_recording(recording_id)
+            logger.info(f"Deleted recording {recording_id}")
+            GLib.idle_add(self._calendar_widget.refresh)
+        except Exception as e:
+            logger.error(f"Failed to delete recording: {e}")
+            GLib.idle_add(
+                lambda: self._show_error_dialog(f"Failed to delete recording: {e}")
+            )
+
+    def _on_change_date_requested(self, recording_id: int) -> None:
+        """Handle change date request from calendar."""
+        dialog = Gtk.Window(title="Change Date & Time")
+        dialog.set_default_size(350, 200)
+        dialog.set_modal(True)
+
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        main_box.set_margin_start(20)
+        main_box.set_margin_end(20)
+        main_box.set_margin_top(20)
+        main_box.set_margin_bottom(20)
+
+        label = Gtk.Label(label="Select new date and time:")
+        label.set_xalign(0)
+        main_box.append(label)
+
+        # Date and time entry (simplified - using entry fields)
+        datetime_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        date_entry = Gtk.Entry()
+        date_entry.set_placeholder_text("YYYY-MM-DD")
+        date_entry.set_text(datetime.now().strftime("%Y-%m-%d"))
+        date_entry.set_hexpand(True)
+        datetime_box.append(date_entry)
+
+        time_entry = Gtk.Entry()
+        time_entry.set_placeholder_text("HH:MM")
+        time_entry.set_text(datetime.now().strftime("%H:%M"))
+        time_entry.set_max_width_chars(6)
+        datetime_box.append(time_entry)
+
+        main_box.append(datetime_box)
+
+        # Spacer
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        main_box.append(spacer)
+
+        # Buttons
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.add_css_class("secondary-button")
+        cancel_btn.connect("clicked", lambda _: dialog.close())
+        button_box.append(cancel_btn)
+
+        spacer2 = Gtk.Box()
+        spacer2.set_hexpand(True)
+        button_box.append(spacer2)
+
+        ok_btn = Gtk.Button(label="OK")
+        ok_btn.add_css_class("primary-button")
+
+        def on_ok_clicked(_):
+            date_str = date_entry.get_text().strip()
+            time_str = time_entry.get_text().strip()
+            try:
+                new_datetime = datetime.strptime(
+                    f"{date_str} {time_str}", "%Y-%m-%d %H:%M"
+                )
+                new_datetime_iso = new_datetime.isoformat()
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(
+                            self._update_recording_date(recording_id, new_datetime_iso)
+                        )
+                    else:
+                        asyncio.run(
+                            self._update_recording_date(recording_id, new_datetime_iso)
+                        )
+                except RuntimeError:
+                    pass
+                dialog.close()
+            except ValueError as e:
+                logger.error(f"Invalid date/time format: {e}")
+
+        ok_btn.connect("clicked", on_ok_clicked)
+        button_box.append(ok_btn)
+
+        main_box.append(button_box)
+        dialog.set_child(main_box)
+
+        # Apply styles
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"""
+            .primary-button {
+                background-color: #1e3a5f;
+                border: 1px solid #2d4a6d;
+                border-radius: 4px;
+                color: white;
+                padding: 8px 16px;
+            }
+            .secondary-button {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: white;
+                padding: 8px 16px;
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            dialog.get_display(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
+        dialog.present()
+
+    async def _update_recording_date(self, recording_id: int, new_date: str) -> None:
+        """Update a recording's date and refresh the view."""
+        try:
+            await self._api_client.update_recording_date(recording_id, new_date)
+            logger.info(f"Updated recording {recording_id} date to {new_date}")
+            GLib.idle_add(self._calendar_widget.refresh)
+        except Exception as e:
+            logger.error(f"Failed to update recording date: {e}")
+            GLib.idle_add(
+                lambda: self._show_error_dialog(f"Failed to update recording date: {e}")
+            )
+
+    def _show_error_dialog(self, message: str) -> None:
+        """Show an error dialog."""
+        dialog = Adw.MessageDialog(
+            heading="Error",
+            body=message,
+        )
+        dialog.add_response("ok", "OK")
+        dialog.present()
 
     def set_recording_callback(self, callback) -> None:
         """Set callback for recording requests."""

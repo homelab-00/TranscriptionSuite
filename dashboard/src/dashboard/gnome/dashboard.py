@@ -1475,12 +1475,18 @@ class DashboardWindow(_get_dashboard_base()):
             recording_id=recording_id,
             parent=self,
         )
-        dialog.recording_deleted.connect(self._on_recording_deleted)
+        dialog.connect_recording_deleted(self._on_recording_deleted)
+        dialog.connect_recording_updated(self._on_recording_updated)
         dialog.present()
 
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""
         logger.info(f"Recording {recording_id} deleted, refreshing notebook")
+        self._refresh_notebook_view()
+
+    def _on_recording_updated(self, recording_id: int) -> None:
+        """Handle recording update - refresh notebook view."""
+        logger.info(f"Recording {recording_id} updated, refreshing notebook")
         self._refresh_notebook_view()
 
     def _apply_styles(self) -> None:

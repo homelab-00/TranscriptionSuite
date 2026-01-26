@@ -8,24 +8,7 @@
 #   docker run -it --gpus all -v transcription-data:/data -p 8000:8000 ghcr.io/homelab-00/transcriptionsuite-server:latest
 #
 # =============================================================================
-# Stage 1: Frontend Builder
-# =============================================================================
-FROM node:20-slim AS frontend-builder
-
-WORKDIR /build
-
-# Build unified frontend (contains Calendar, Search, Import, Record, and Admin views)
-COPY server/frontend/package*.json ./frontend/
-WORKDIR /build/frontend
-RUN npm ci
-
-COPY server/frontend/ ./
-# Copy logo from build/assets/ to public/ before building
-COPY build/assets/logo.svg ./public/logo.svg
-RUN npm run build
-
-# =============================================================================
-# Stage 2: Python Builder (with build dependencies)
+# Stage 1: Python Builder (with build dependencies)
 # =============================================================================
 FROM ubuntu:24.04 AS python-builder
 
@@ -73,7 +56,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync
 
 # =============================================================================
-# Stage 3: Python Runtime (minimal, without build dependencies)
+# Stage 2: Python Runtime (minimal, without build dependencies)
 # =============================================================================
 FROM ubuntu:24.04 AS runtime
 
@@ -130,9 +113,6 @@ COPY server/backend/ ./server/
 COPY server/docker/entrypoint.py ./docker/
 COPY server/docker/docker-entrypoint.sh ./docker/
 RUN chmod +x ./docker/docker-entrypoint.sh
-
-# Copy built frontend to static serving location (unified UI)
-COPY --from=frontend-builder /build/frontend/dist ./static/frontend
 
 # Copy default configuration (users can override via mounted /user-config/config.yaml)
 COPY server/config.yaml ./config.yaml

@@ -50,6 +50,8 @@ class RecordingDialog(QDialog):
 
     # Signal emitted when recording is deleted
     recording_deleted = pyqtSignal(int)  # recording_id
+    # Signal emitted when recording is updated (title, etc.)
+    recording_updated = pyqtSignal(int)  # recording_id
 
     def __init__(
         self,
@@ -475,6 +477,7 @@ class RecordingDialog(QDialog):
             if self._recording:
                 self._recording.title = title
             logger.info(f"Title updated: {title}")
+            self.recording_updated.emit(self._recording_id)
         except Exception as e:
             logger.error(f"Failed to save title: {e}")
 

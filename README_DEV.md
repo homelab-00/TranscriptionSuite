@@ -35,16 +35,14 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.3 Docker Volume Structure](#63-docker-volume-structure)
   - [6.4 Docker Image Selection](#64-docker-image-selection)
 - [7. API Reference](#7-api-reference)
-  - [7.1 Web UI Routes](#71-web-ui-routes)
-  - [7.2 API Endpoints](#72-api-endpoints)
-  - [7.3 WebSocket Protocol](#73-websocket-protocol)
-  - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
+  - [7.1 API Endpoints](#71-api-endpoints)
+  - [7.2 WebSocket Protocol](#72-websocket-protocol)
+  - [7.3 Live Mode WebSocket Protocol](#73-live-mode-websocket-protocol)
 - [8. Backend Development](#8-backend-development)
   - [8.1 Backend Structure](#81-backend-structure)
   - [8.2 Running the Server Locally](#82-running-the-server-locally)
   - [8.3 Configuration System](#83-configuration-system)
-  - [8.4 Frontend Development](#84-frontend-development)
-  - [8.5 Testing](#85-testing)
+  - [8.4 Testing](#84-testing)
 - [9. Dashboard Development](#9-dashboard-development)
   - [9.1 Running from Source](#91-running-from-source)
   - [9.2 Verbose Logging](#92-verbose-logging)
@@ -60,8 +58,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [11.3 Automatic Backups](#113-automatic-backups)
 - [12. Code Quality Checks](#12-code-quality-checks)
   - [12.1 Python Code Quality](#121-python-code-quality)
-  - [12.2 TypeScript/JavaScript Quality](#122-typescriptjavascript-quality)
-  - [12.3 Complete Quality Check Workflow](#123-complete-quality-check-workflow)
+  - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
 - [13. Troubleshooting](#13-troubleshooting)
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
   - [13.2 Health Check Issues](#132-health-check-issues)
@@ -86,13 +83,10 @@ Technical documentation for developing and building TranscriptionSuite.
 cd dashboard && uv venv --python 3.13 && uv sync --extra kde && cd ..
 cd build && uv venv --python 3.13 && uv sync && cd ..
 
-# 2. Audit frontend packages
-cd server/frontend && npm ci && npm audit && cd ../..
-
-# 3. Build and run Docker server
+# 2. Build and run Docker server
 cd server/docker && docker compose build && docker compose up -d
 
-# 4. Run dashboard
+# 3. Run dashboard
 cd dashboard && uv run transcription-dashboard
 ```
 
@@ -104,23 +98,17 @@ cd server/backend
 uv venv --python 3.13 && uv sync
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 
-# 2. Run frontend dev server (in a separate terminal)
-cd server/frontend
-npm install
-npm run dev  # Starts on http://localhost:1420
-
-# 3. Run dashboard (in a separate terminal)
+# 2. Run dashboard (in a separate terminal)
 cd dashboard
 uv venv --python 3.13 && uv sync --extra kde  # or --extra gnome / --extra windows
 uv run transcription-dashboard --host localhost --port 8000
 ```
 
 **Notes:**
-- Backend runs on port 8000, frontend dev server on port 1420
-- Frontend auto-detects dev mode and proxies API calls to backend
+- Backend runs on port 8000
 - Dashboard connects directly to backend API on port 8000
 - Backend must be running for dashboard to function
-- This setup enables hot-reload for both backend and frontend
+- This setup enables hot-reload for the backend
 
 ### 1.3 Build Commands
 
@@ -170,7 +158,6 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  - Live Mode (RealtimeSTT) continuous transcribe  │  │
 │  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
-│  │  - React frontend (Web UI)                        │  │
 │  │  - SQLite + FTS5 search                           │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
@@ -255,7 +242,6 @@ TranscriptionSuite/
 │   │   ├── core/                 # ML engines (transcription, diarization, VAD)
 │   │   ├── database/             # SQLite + FTS5 + migrations
 │   │   └── pyproject.toml        # Server dependencies (pinned versions)
-│   ├── frontend/                 # React web UI
 │   └── config.yaml               # Server configuration template
 ```
 
@@ -291,9 +277,6 @@ cd build
 uv venv --python 3.13
 uv sync
 cd ..
-
-# Audit frontend packages
-cd server/frontend && npm ci && npm audit && cd ../..
 ```
 
 ### 4.2 Step 2: Build Docker Image
@@ -304,9 +287,8 @@ docker compose build
 ```
 
 **What happens:**
-1. Frontend builder stage: Builds React frontend
-2. Python runtime stage: Installs server dependencies
-3. Static files: Copies built frontend to `/app/static/frontend`
+1. Python builder stage: Installs server dependencies
+2. Python runtime stage: Sets up minimal runtime environment
 
 **Build with specific tag:**
 To build an image with a specific tag (instead of default `latest`):
@@ -584,23 +566,13 @@ TAG=my-custom docker compose up -d
 
 ## 7. API Reference
 
-### 7.1 Web UI Routes
-
-| URL Path | Description |
-|----------|-------------|
-| `/` | Redirects to `/record` |
-| `/auth` | Authentication page (TLS mode) |
-| `/record` | File upload, recording, admin panel |
-| `/notebook` | Calendar view, search, audio playback |
-
-### 7.2 API Endpoints
+### 7.1 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check (no auth) |
 | `/api/status` | GET | Server status, GPU info |
 | `/api/auth/login` | POST | Authenticate with token |
-| `/api/auth/tokens` | GET/POST | Token management (admin only) |
 | `/api/admin/models/load` | POST | Load transcription models (admin only) |
 | `/api/admin/models/unload` | POST | Unload models to free GPU memory (admin only) |
 | `/api/transcribe/audio` | POST | Transcribe uploaded audio |
@@ -613,7 +585,7 @@ TAG=my-custom docker compose up -d
 | `/api/search` | GET | Full-text search |
 | `/api/llm/chat` | POST | LLM chat integration |
 
-### 7.3 WebSocket Protocol
+### 7.2 WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws`
@@ -628,7 +600,7 @@ TAG=my-custom docker compose up -d
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
 
-### 7.4 Live Mode WebSocket Protocol
+### 7.3 Live Mode WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws/live`
@@ -699,19 +671,7 @@ All modules use `get_config()` from `server.config`. Configuration is loaded wit
 3. `/app/config.yaml` (Docker default)
 4. `server/config.yaml` (native development)
 
-### 8.4 Frontend Development
-
-```bash
-cd server/frontend
-npm install
-npm run dev  # Starts dev server on http://localhost:1420
-```
-
-The frontend uses `import.meta.env.DEV` to detect development mode:
-- HTTP API requests: `http://localhost:8000/api`
-- WebSocket connections: `ws://localhost:8000/ws`
-
-### 8.5 Testing
+### 8.4 Testing
 
 ```bash
 ./build/.venv/bin/pytest server/backend/tests
@@ -898,7 +858,7 @@ All Python code quality tools are installed in the build environment. Run these 
 ```bash
 ./build/.venv/bin/ruff check server/backend/
 ./build/.venv/bin/ruff format dashboard/
-./build/.venv/bin/pyright server/frontend/
+./build/.venv/bin/pyright dashboard/
 ```
 
 **Preview changes without modifying files:**
@@ -911,29 +871,7 @@ All Python code quality tools are installed in the build environment. Run these 
 2. Run `ruff format` to auto-fix style issues
 3. Run `pyright` for type errors (requires manual fixes)
 
-### 12.2 TypeScript/JavaScript Quality
-
-Frontend code uses TypeScript with Vite. From `server/frontend/`:
-
-```bash
-cd server/frontend
-
-# Install dependencies
-npm ci
-
-# Security audit
-npm audit
-
-# Type checking (via TypeScript compiler)
-npm run build  # Runs tsc + vite build
-
-# Development server with hot reload
-npm run dev
-```
-
-**Note:** The `npm run build` script runs TypeScript's `tsc` compiler, which performs type checking before building.
-
-### 12.3 Complete Quality Check Workflow
+### 12.2 Complete Quality Check Workflow
 
 Run all checks across the entire codebase:
 
@@ -945,13 +883,7 @@ Run all checks across the entire codebase:
 ./build/.venv/bin/ruff format .
 ./build/.venv/bin/pyright
 
-# 2. Frontend checks
-cd server/frontend
-npm ci && npm audit
-npm run build  # Type checks + builds
-cd ../..
-
-# 3. Python tests
+# 2. Python tests
 ./build/.venv/bin/pytest server/backend/tests
 ```
 

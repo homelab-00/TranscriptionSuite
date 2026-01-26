@@ -542,6 +542,7 @@ class DayViewImportDialog(QDialog):
             return
 
         try:
+
             def on_progress(message: str) -> None:
                 """Handle progress updates."""
                 self._status_label.setText(message)
@@ -564,7 +565,9 @@ class DayViewImportDialog(QDialog):
             self._progress_bar.setValue(100)
             self._status_label.setText("Transcription complete!")
 
-            logger.info(f"Day view import complete: {file_path.name} -> ID {recording_id}")
+            logger.info(
+                f"Day view import complete: {file_path.name} -> ID {recording_id}"
+            )
 
             if recording_id:
                 self.transcription_complete.emit(recording_id)
@@ -792,10 +795,15 @@ class CalendarWidget(QWidget):
         recordings_scroll = QScrollArea()
         recordings_scroll.setObjectName(f"recordings_scroll_{hour}")
         recordings_scroll.setWidgetResizable(True)
-        recordings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        recordings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        recordings_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        recordings_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         recordings_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        
+        recordings_scroll.setFixedHeight(64)
+
         recordings_container = QWidget()
         recordings_container.setObjectName(f"recordings_{hour}")
         recordings_layout = QHBoxLayout(recordings_container)
@@ -812,7 +820,7 @@ class CalendarWidget(QWidget):
         add_btn.clicked.connect(lambda checked, h=hour: self._on_add_clicked(h))
         add_btn.hide()  # Hidden by default, shown on hover
         recordings_layout.addWidget(add_btn)
-        
+
         recordings_scroll.setWidget(recordings_container)
         layout.addWidget(recordings_scroll, 1)
 

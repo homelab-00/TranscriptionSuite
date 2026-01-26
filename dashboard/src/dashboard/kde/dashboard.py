@@ -1611,6 +1611,7 @@ class DashboardWindow(QMainWindow):
         if api_client:
             dialog = RecordingDialog(api_client, recording_id, self)
             dialog.recording_deleted.connect(self._on_recording_deleted)
+            dialog.recording_updated.connect(self._on_recording_updated)
             dialog.exec()
         else:
             logger.error(
@@ -1619,6 +1620,11 @@ class DashboardWindow(QMainWindow):
 
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.refresh()
+
+    def _on_recording_updated(self, recording_id: int) -> None:
+        """Handle recording update - refresh notebook view."""
         if hasattr(self, "_notebook_widget") and self._notebook_widget:
             self._notebook_widget.refresh()
 
