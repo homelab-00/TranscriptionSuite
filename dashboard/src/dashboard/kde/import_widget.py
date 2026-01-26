@@ -289,7 +289,6 @@ class ImportWidget(QWidget):
 
             #dropZone:hover {
                 border-color: #606060;
-                cursor: pointer;
             }
 
             #dropIcon {

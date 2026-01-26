@@ -196,6 +196,13 @@ TranscriptionSuite uses a **client-server architecture**:
 
 **GNOME Dual-Process Design**: GTK3 and GTK4 cannot coexist in the same Python process (GObject Introspection limitation). The tray uses GTK3 + AppIndicator3, while the Dashboard uses GTK4 + libadwaita. They communicate via D-Bus (`com.transcriptionsuite.Dashboard`).
 
+**Dashboard UI Design**: All platforms feature a **sidebar navigation** layout:
+- Left sidebar with navigation buttons and real-time status lights
+- Status lights show Server and Client states with color indicators (green=running, red=unhealthy, blue=starting, orange=stopped, gray=not set up)
+- Main content area on the right with views: Home, Notebook, Docker Server, Client
+- Notebook tab contains Calendar, Search, and Import sub-tabs
+- Settings accessible via hamburger menu with four tabs: App, Client, Server, Notebook
+
 ### 2.3 Security Model
 
 TranscriptionSuite uses layered security for remote access:
@@ -581,7 +588,12 @@ TAG=my-custom docker compose up -d
 | `/ws/live` | WebSocket | Live Mode continuous transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
+| `/api/notebook/recordings/{id}/export` | GET | Export recording (txt/json with timestamps) |
 | `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization |
+| `/api/notebook/calendar` | GET | Get recordings by date range |
+| `/backups` | GET | List available database backups |
+| `/backup` | POST | Create new database backup |
+| `/restore` | POST | Restore database from backup |
 | `/api/search` | GET | Full-text search |
 | `/api/llm/chat` | POST | LLM chat integration |
 
@@ -708,11 +720,19 @@ uv run transcription-dashboard --verbose
 
 | Module | Purpose |
 |--------|---------|
-| `common/api_client.py` | HTTP client, WebSocket, error handling |
+| `common/api_client.py` | HTTP client, WebSocket, error handling, backup/export methods |
 | `common/orchestrator.py` | Main controller, state machine |
 | `common/docker_manager.py` | Docker server control |
 | `common/setup_wizard.py` | First-time setup |
 | `common/tailscale_resolver.py` | Tailscale IP fallback when DNS fails |
+| `kde/dashboard.py` | KDE Dashboard with sidebar navigation and status lights |
+| `kde/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |
+| `kde/notebook_view.py` | Audio Notebook with Calendar, Search, Import tabs |
+| `kde/calendar_widget.py` | Calendar view with export context menu |
+| `gnome/dashboard.py` | GNOME Dashboard with sidebar navigation and status lights |
+| `gnome/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |
+| `gnome/notebook_view.py` | Audio Notebook view for GNOME |
+| `gnome/calendar_widget.py` | Calendar view with export context menu |
 
 ### 9.4 Server Busy Handling
 
@@ -834,6 +854,26 @@ backup:
 ```
 
 **Backup location:** `/data/database/backups/` (Docker)
+
+**Manual Backup/Restore via Dashboard:**
+
+The Dashboard provides a graphical interface for backup management in Settings → Notebook tab:
+- **Create Backup**: Manually trigger a database backup
+- **List Backups**: View all available backups with timestamps and sizes
+- **Restore Backup**: Restore database from any backup (creates safety backup first)
+
+**Export Individual Recordings:**
+
+Recordings can be exported from the Audio Notebook Calendar view:
+- Right-click on any recording → "Export transcription"
+- **Text format (.txt)**: Human-readable with speaker labels and timestamps
+- **JSON format (.json)**: Machine-readable with word-level timestamps, confidence scores, and diarization data
+
+**API Endpoints:**
+- `GET /api/notebook/recordings/{id}/export?format=txt|json` - Export recording
+- `GET /backups` - List available backups
+- `POST /backup` - Create new backup
+- `POST /restore` - Restore from backup (requires `filename` in request body)
 
 ---
 

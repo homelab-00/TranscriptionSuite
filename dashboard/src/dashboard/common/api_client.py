@@ -696,6 +696,88 @@ class APIClient:
         """
         return f"{self.base_url}/api/notebook/recordings/{recording_id}/audio"
 
+    async def export_recording(
+        self, recording_id: int, format: str = "txt"
+    ) -> tuple[bytes, str]:
+        """
+        Export a recording's transcription.
+
+        Args:
+            recording_id: Recording ID
+            format: Export format ('txt' or 'json')
+
+        Returns:
+            Tuple of (content bytes, suggested filename)
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/export",
+            params={"format": format},
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            content = await resp.read()
+            # Extract filename from Content-Disposition header
+            cd = resp.headers.get("Content-Disposition", "")
+            filename = "export.txt"
+            if 'filename="' in cd:
+                filename = cd.split('filename="')[1].split('"')[0]
+            return content, filename
+
+    async def list_backups(self) -> list[dict[str, Any]]:
+        """
+        List all available database backups.
+
+        Returns:
+            List of backup info dicts
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/backups",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            return data.get("backups", [])
+
+    async def create_backup(self) -> dict[str, Any]:
+        """
+        Create a manual database backup.
+
+        Returns:
+            Dict with backup info
+        """
+        session = await self._get_session()
+        async with session.post(
+            f"{self.base_url}/api/notebook/backup",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def restore_backup(self, filename: str) -> dict[str, Any]:
+        """
+        Restore the database from a backup.
+
+        Args:
+            filename: Backup filename to restore from
+
+        Returns:
+            Dict with restore result
+        """
+        session = await self._get_session()
+        async with session.post(
+            f"{self.base_url}/api/notebook/restore",
+            headers=self._get_headers(),
+            json={"filename": filename},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
     async def get_summary(self, recording_id: int) -> str | None:
         """
         Get summary for a recording.

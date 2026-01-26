@@ -98,6 +98,7 @@ class NotebookView:
         self._calendar_widget.set_recording_callback(self._on_recording_requested)
         self._calendar_widget.set_delete_callback(self._on_delete_requested)
         self._calendar_widget.set_change_date_callback(self._on_change_date_requested)
+        self._calendar_widget.set_export_callback(self._on_export_requested)
         self._search_widget.set_recording_callback(self._on_recording_requested)
         self._import_widget.set_recording_created_callback(self._on_import_complete)
 
@@ -324,6 +325,88 @@ class NotebookView:
         dialog = Adw.MessageDialog(
             heading="Error",
             body=message,
+        )
+        dialog.add_response("ok", "OK")
+        dialog.present()
+
+    def _on_export_requested(self, recording_id: int) -> None:
+        """Handle export request from calendar."""
+        dialog = Adw.MessageDialog(
+            heading="Export Format",
+            body="Choose export format:",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("txt", "Text (.txt)")
+        dialog.add_response("json", "JSON (.json)")
+        dialog.set_default_response("txt")
+        dialog.set_close_response("cancel")
+
+        def on_format_response(dialog, response):
+            dialog.destroy()
+            if response == "cancel":
+                return
+
+            export_format = response
+            file_filter = "Text Files (*.txt)" if export_format == "txt" else "JSON Files (*.json)"
+            default_ext = ".txt" if export_format == "txt" else ".json"
+
+            # Create file chooser
+            file_dialog = Gtk.FileDialog()
+            file_dialog.set_title("Export Transcription")
+            file_dialog.set_initial_name(f"transcription_export{default_ext}")
+
+            def on_save_response(file_dialog, result):
+                try:
+                    file = file_dialog.save_finish(result)
+                    if file:
+                        file_path = file.get_path()
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.create_task(
+                                    self._export_recording(recording_id, export_format, file_path)
+                                )
+                            else:
+                                asyncio.run(
+                                    self._export_recording(recording_id, export_format, file_path)
+                                )
+                        except RuntimeError:
+                            pass
+                except GLib.Error:
+                    pass  # User cancelled
+
+            file_dialog.save(None, None, on_save_response)
+
+        dialog.connect("response", on_format_response)
+        dialog.present()
+
+    async def _export_recording(self, recording_id: int, format: str, file_path: str) -> None:
+        """Export a recording to a file."""
+        try:
+            content, _ = await self._api_client.export_recording(recording_id, format)
+
+            # Write to file
+            from pathlib import Path
+            Path(file_path).write_bytes(content)
+
+            logger.info(f"Exported recording {recording_id} to {file_path}")
+            GLib.idle_add(
+                lambda: self._show_info_dialog(
+                    "Export Complete",
+                    f"Transcription exported successfully to:\n{file_path}"
+                )
+            )
+        except Exception as e:
+            logger.error(f"Failed to export recording: {e}")
+            GLib.idle_add(
+                lambda: self._show_error_dialog(f"Failed to export recording: {e}")
+            )
+
+    def _show_info_dialog(self, heading: str, body: str) -> None:
+        """Show an info dialog."""
+        dialog = Adw.MessageDialog(
+            heading=heading,
+            body=body,
         )
         dialog.add_response("ok", "OK")
         dialog.present()

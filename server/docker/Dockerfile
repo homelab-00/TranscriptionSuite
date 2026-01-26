@@ -17,7 +17,7 @@ FROM ubuntu:24.04 AS base
 ENV DEBIAN_FRONTEND="noninteractive"
 ENV PYTHONUNBUFFERED="1"
 ENV PYTHONDONTWRITEBYTECODE="1"
-ENV UV_PYTHON="python3"
+ENV UV_PYTHON="3.13"
 ENV UV_PROJECT_ENVIRONMENT="/app/.venv"
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/.venv"
@@ -28,11 +28,16 @@ ENV VIRTUAL_ENV="/app/.venv"
 FROM base AS python-builder
 
 # Install build dependencies (will be removed in final stage)
-RUN apt update && apt install -y --no-install-recommends \
+# Add deadsnakes PPA for Python 3.13
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
     build-essential \
-    python3 \
-    python3-venv \
-    python3-dev \
+    python3.13 \
+    python3.13-venv \
+    python3.13-dev \
     python3-pip \
     curl \
     git \
@@ -60,7 +65,7 @@ FROM base AS runtime
 
 # OCI standard labels for container metadata
 LABEL org.opencontainers.image.title="TranscriptionSuite Server"
-LABEL org.opencontainers.image.description="AI-powered transcription server with whisper.cpp backend"
+LABEL org.opencontainers.image.description="Self contained server for TranscriptionSuite"
 LABEL org.opencontainers.image.authors="homelab-00"
 LABEL org.opencontainers.image.vendor="homelab-00"
 LABEL org.opencontainers.image.source="https://github.com/homelab-00/TranscriptionSuite"
@@ -70,9 +75,14 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 # Install only runtime dependencies (no build-essential, no python-dev)
 # gosu is used to drop privileges from root to appuser after TLS cert setup
-RUN apt update && apt install -y --no-install-recommends \
-    python3 \
-    python3-venv \
+# Add deadsnakes PPA for Python 3.13
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    python3.13 \
+    python3.13-venv \
     ffmpeg \
     libavcodec-dev \
     libavformat-dev \
@@ -88,8 +98,8 @@ RUN apt update && apt install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security with pinned UID/GID
-RUN groupadd -g 1000 appuser && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash appuser
+RUN groupadd -g 10000 appuser && \
+    useradd -u 10000 -g 10000 -m -s /bin/bash appuser
 
 # Create app directory
 WORKDIR /app

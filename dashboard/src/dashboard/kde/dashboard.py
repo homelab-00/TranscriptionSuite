@@ -645,25 +645,25 @@ class DashboardWindow(QMainWindow):
         self._refresh_home_status()
 
     def _setup_ui(self) -> None:
-        """Set up the main UI structure."""
+        """Set up the main UI structure with sidebar navigation."""
         self.setWindowTitle("TranscriptionSuite")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(800, 550)
 
         # Set window icon from app logo
         logo_path = _get_assets_path() / "logo.png"
         if logo_path.exists():
             self.setWindowIcon(QIcon(str(logo_path)))
 
-        # Central widget
+        # Central widget with horizontal layout (sidebar | content)
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
+        main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Add navigation bar
-        nav_bar = self._create_nav_bar()
-        main_layout.addWidget(nav_bar)
+        # Add sidebar navigation
+        sidebar = self._create_sidebar()
+        main_layout.addWidget(sidebar)
 
         # Stacked widget for views
         self._stack = QStackedWidget()
@@ -680,66 +680,166 @@ class DashboardWindow(QMainWindow):
         self._stack.addWidget(self._client_view)
         self._stack.addWidget(self._notebook_view)
 
-        # Start on welcome view
-        self._navigate_to(View.WELCOME, add_to_history=False)
+        # Start on notebook view (calendar) by default
+        self._navigate_to(View.NOTEBOOK, add_to_history=False)
 
-    def _create_nav_bar(self) -> QWidget:
-        """Create the navigation bar with Home, Server, Client buttons and Help/About."""
-        nav = QFrame()
-        nav.setObjectName("navBar")
-        layout = QHBoxLayout(nav)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(12)
+    def _create_sidebar(self) -> QWidget:
+        """Create the vertical sidebar navigation with status lights."""
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(200)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Home button with icon
-        self._nav_home_btn = QPushButton("  Home")
-        self._nav_home_btn.setObjectName("navButton")
-        home_icon = self._icon_loader.get_icon("home")
-        if not home_icon.isNull():
-            self._nav_home_btn.setIcon(home_icon)
+        # Logo/Title header
+        header = QFrame()
+        header.setObjectName("sidebarHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(16, 20, 16, 16)
+        header_layout.setSpacing(4)
+
+        title = QLabel("Transcription")
+        title.setObjectName("sidebarTitle")
+        header_layout.addWidget(title)
+
+        subtitle = QLabel("Suite")
+        subtitle.setObjectName("sidebarSubtitle")
+        header_layout.addWidget(subtitle)
+
+        layout.addWidget(header)
+
+        # Navigation items container
+        nav_container = QWidget()
+        nav_layout = QVBoxLayout(nav_container)
+        nav_layout.setContentsMargins(8, 8, 8, 8)
+        nav_layout.setSpacing(4)
+
+        # Home button
+        self._nav_home_btn = self._create_sidebar_button("Home", "home")
         self._nav_home_btn.clicked.connect(self._go_home)
-        layout.addWidget(self._nav_home_btn)
+        nav_layout.addWidget(self._nav_home_btn)
 
-        # Server button with icon
-        self._nav_server_btn = QPushButton("  Server")
-        self._nav_server_btn.setObjectName("navButton")
-        server_icon = self._icon_loader.get_icon("server")
-        if not server_icon.isNull():
-            self._nav_server_btn.setIcon(server_icon)
-        self._nav_server_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
-        layout.addWidget(self._nav_server_btn)
-
-        # Client button with icon
-        self._nav_client_btn = QPushButton("  Client")
-        self._nav_client_btn.setObjectName("navButton")
-        client_icon = self._icon_loader.get_icon("client")
-        if not client_icon.isNull():
-            self._nav_client_btn.setIcon(client_icon)
-        self._nav_client_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
-        layout.addWidget(self._nav_client_btn)
-
-        # Notebook button with icon
-        self._nav_notebook_btn = QPushButton("  Notebook")
-        self._nav_notebook_btn.setObjectName("navButton")
-        notebook_icon = self._icon_loader.get_icon("notebook")
-        if not notebook_icon.isNull():
-            self._nav_notebook_btn.setIcon(notebook_icon)
+        # Notebook button (Calendar/Search/Import)
+        self._nav_notebook_btn = self._create_sidebar_button("Notebook", "notebook")
         self._nav_notebook_btn.clicked.connect(lambda: self._navigate_to(View.NOTEBOOK))
-        layout.addWidget(self._nav_notebook_btn)
+        nav_layout.addWidget(self._nav_notebook_btn)
 
-        layout.addStretch()
+        nav_layout.addSpacing(8)
 
-        # Hamburger menu button (☰)
-        self._nav_menu_btn = QPushButton("  ☰")
-        self._nav_menu_btn.setObjectName("navButton")
-        menu_icon = self._icon_loader.get_icon("menu")
-        if not menu_icon.isNull():
-            self._nav_menu_btn.setIcon(menu_icon)
-            self._nav_menu_btn.setText("")  # Remove text if icon is available
+        # Separator
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("background-color: #2d2d2d; max-height: 1px;")
+        nav_layout.addWidget(sep1)
+
+        nav_layout.addSpacing(8)
+
+        # Server button with status light
+        self._nav_server_btn = self._create_sidebar_button_with_status("Docker Server", "server")
+        self._server_nav_btn.clicked.connect(lambda: self._navigate_to(View.SERVER))
+        nav_layout.addWidget(self._nav_server_btn)
+
+        # Client button with status light
+        self._nav_client_btn = self._create_sidebar_button_with_status("Client", "client")
+        self._client_nav_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
+        nav_layout.addWidget(self._nav_client_btn)
+
+        nav_layout.addStretch()
+
+        layout.addWidget(nav_container, 1)
+
+        # Bottom section with menu button
+        bottom = QFrame()
+        bottom.setObjectName("sidebarBottom")
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(8, 8, 8, 12)
+        bottom_layout.setSpacing(4)
+
+        # Settings/Menu button
+        self._nav_menu_btn = self._create_sidebar_button("Menu", "menu")
         self._nav_menu_btn.clicked.connect(self._show_hamburger_menu)
-        layout.addWidget(self._nav_menu_btn)
+        bottom_layout.addWidget(self._nav_menu_btn)
 
-        return nav
+        layout.addWidget(bottom)
+
+        return sidebar
+
+    def _create_sidebar_button(self, text: str, icon_name: str) -> QPushButton:
+        """Create a sidebar navigation button."""
+        btn = QPushButton(f"  {text}")
+        btn.setObjectName("sidebarButton")
+        btn.setCheckable(True)
+        btn.setAutoExclusive(False)
+        icon = self._icon_loader.get_icon(icon_name)
+        if not icon.isNull():
+            btn.setIcon(icon)
+        return btn
+
+    def _create_sidebar_button_with_status(self, text: str, icon_name: str) -> QWidget:
+        """Create a sidebar navigation button with a status light indicator."""
+        container = QWidget()
+        container.setObjectName("sidebarButtonContainer")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(0)
+
+        # Main button
+        btn = QPushButton(f"  {text}")
+        btn.setObjectName("sidebarButton")
+        btn.setCheckable(True)
+        btn.setAutoExclusive(False)
+        icon = self._icon_loader.get_icon(icon_name)
+        if not icon.isNull():
+            btn.setIcon(icon)
+        layout.addWidget(btn, 1)
+
+        # Status light
+        status_light = QLabel("⬤")
+        status_light.setObjectName(f"{icon_name}StatusLight")
+        status_light.setFixedWidth(16)
+        status_light.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_light.setStyleSheet("color: #6c757d; font-size: 8px;")  # Default: gray (not set up)
+        layout.addWidget(status_light)
+
+        # Store references for status updates
+        if icon_name == "server":
+            self._server_status_light = status_light
+            self._server_nav_btn = btn
+        elif icon_name == "client":
+            self._client_status_light = status_light
+            self._client_nav_btn = btn
+
+        # Connect button click
+        container.mousePressEvent = lambda e: btn.click()
+        container.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        return container
+
+    def _update_sidebar_status_lights(self) -> None:
+        """Update the status light indicators in the sidebar."""
+        # Server status light
+        if hasattr(self, "_server_status_light"):
+            status = self._docker_manager.get_server_status()
+            if status == ServerStatus.RUNNING:
+                health = self._docker_manager.get_container_health()
+                if health == "unhealthy":
+                    self._server_status_light.setStyleSheet("color: #f44336; font-size: 8px;")  # Red
+                elif health and health != "healthy":
+                    self._server_status_light.setStyleSheet("color: #2196f3; font-size: 8px;")  # Blue (starting)
+                else:
+                    self._server_status_light.setStyleSheet("color: #4caf50; font-size: 8px;")  # Green
+            elif status == ServerStatus.STOPPED:
+                self._server_status_light.setStyleSheet("color: #ff9800; font-size: 8px;")  # Orange
+            else:
+                self._server_status_light.setStyleSheet("color: #6c757d; font-size: 8px;")  # Gray
+
+        # Client status light
+        if hasattr(self, "_client_status_light"):
+            if self._client_running:
+                self._client_status_light.setStyleSheet("color: #4caf50; font-size: 8px;")  # Green
+            else:
+                self._client_status_light.setStyleSheet("color: #ff9800; font-size: 8px;")  # Orange
 
     def _create_welcome_view(self) -> QWidget:
         """Create the welcome/home view."""
@@ -909,6 +1009,9 @@ class DashboardWindow(QMainWindow):
         else:
             self._home_client_status.setText("⬤ Stopped")
             self._home_client_status.setStyleSheet("color: #ff9800;")  # warning
+
+        # Update sidebar status lights
+        self._update_sidebar_status_lights()
 
     def _on_open_web_client(self) -> None:
         """Open the web client in the default browser."""
@@ -1731,6 +1834,64 @@ class DashboardWindow(QMainWindow):
                 background: none;
             }
 
+            /* Sidebar styles */
+            #sidebar {
+                background-color: #1a1a2e;
+                border-right: 1px solid #2d2d2d;
+            }
+
+            #sidebarHeader {
+                background-color: #1a1a2e;
+                border-bottom: 1px solid #2d2d2d;
+            }
+
+            #sidebarTitle {
+                color: #90caf9;
+                font-size: 20px;
+                font-weight: bold;
+            }
+
+            #sidebarSubtitle {
+                color: #606080;
+                font-size: 16px;
+                font-weight: 500;
+            }
+
+            #sidebarButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                color: #a0a0a0;
+                padding: 10px 12px;
+                font-size: 13px;
+                text-align: left;
+            }
+
+            #sidebarButton:hover {
+                background-color: #2d2d3d;
+                color: #ffffff;
+            }
+
+            #sidebarButton:checked {
+                background-color: #2d4a6d;
+                color: #90caf9;
+            }
+
+            #sidebarButtonContainer {
+                background-color: transparent;
+                border-radius: 6px;
+            }
+
+            #sidebarButtonContainer:hover {
+                background-color: #2d2d3d;
+            }
+
+            #sidebarBottom {
+                background-color: #1a1a2e;
+                border-top: 1px solid #2d2d2d;
+            }
+
+            /* Legacy navBar styles (kept for compatibility) */
             #navBar {
                 background-color: #1e1e1e;
                 border-bottom: 1px solid #2d2d2d;

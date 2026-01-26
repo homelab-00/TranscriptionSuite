@@ -67,10 +67,11 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        # Create tabs in order: App, Client, Server
+        # Create tabs in order: App, Client, Server, Notebook
         self._create_app_tab()
         self._create_client_tab()
         self._create_server_tab()
+        self._create_notebook_tab()
 
         # Button container
         btn_container = QWidget()
@@ -805,6 +806,383 @@ class SettingsDialog(QDialog):
 
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.exec()
+
+    def _create_notebook_tab(self) -> None:
+        """Create the Notebook tab for backup/restore functionality."""
+        import asyncio
+        from PyQt6.QtWidgets import QMessageBox, QListWidget, QListWidgetItem
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+
+        # Backup section
+        backup_group = QGroupBox("Database Backup")
+        backup_group.setObjectName("settingsGroup")
+        backup_layout = QVBoxLayout(backup_group)
+        backup_layout.setSpacing(12)
+
+        backup_desc = QLabel(
+            "Create a backup of your Audio Notebook database. "
+            "Backups include all recordings metadata and transcriptions."
+        )
+        backup_desc.setWordWrap(True)
+        backup_desc.setObjectName("descriptionLabel")
+        backup_layout.addWidget(backup_desc)
+
+        # Backup list
+        self._backup_list = QListWidget()
+        self._backup_list.setObjectName("backupList")
+        self._backup_list.setMaximumHeight(120)
+        self._backup_list.setStyleSheet("""
+            QListWidget {
+                background-color: #1e1e1e;
+                border: 1px solid #2d2d2d;
+                border-radius: 4px;
+                color: #e0e0e0;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                padding: 6px 8px;
+            }
+            QListWidget::item:selected {
+                background-color: #2d4a6d;
+            }
+        """)
+        backup_layout.addWidget(self._backup_list)
+
+        # Backup buttons
+        backup_btn_layout = QHBoxLayout()
+        backup_btn_layout.setSpacing(12)
+
+        self._create_backup_btn = QPushButton("Create Backup")
+        self._create_backup_btn.setObjectName("primaryButton")
+        self._create_backup_btn.clicked.connect(self._on_create_backup)
+        backup_btn_layout.addWidget(self._create_backup_btn)
+
+        self._refresh_backups_btn = QPushButton("Refresh")
+        self._refresh_backups_btn.setObjectName("secondaryButton")
+        self._refresh_backups_btn.clicked.connect(self._refresh_backup_list)
+        backup_btn_layout.addWidget(self._refresh_backups_btn)
+
+        backup_btn_layout.addStretch()
+        backup_layout.addLayout(backup_btn_layout)
+
+        layout.addWidget(backup_group)
+
+        # Restore section
+        restore_group = QGroupBox("Database Restore")
+        restore_group.setObjectName("settingsGroup")
+        restore_layout = QVBoxLayout(restore_group)
+        restore_layout.setSpacing(12)
+
+        restore_desc = QLabel(
+            "Restore your database from a backup. "
+            "Warning: This will replace all current data with the backup data. "
+            "A safety backup will be created automatically before restoring."
+        )
+        restore_desc.setWordWrap(True)
+        restore_desc.setObjectName("descriptionLabel")
+        restore_desc.setStyleSheet("color: #ff9800;")  # Warning color
+        restore_layout.addWidget(restore_desc)
+
+        restore_btn_layout = QHBoxLayout()
+
+        self._restore_backup_btn = QPushButton("Restore Selected Backup")
+        self._restore_backup_btn.setObjectName("dangerButton")
+        self._restore_backup_btn.clicked.connect(self._on_restore_backup)
+        restore_btn_layout.addWidget(self._restore_backup_btn)
+
+        restore_btn_layout.addStretch()
+        restore_layout.addLayout(restore_btn_layout)
+
+        layout.addWidget(restore_group)
+
+        layout.addStretch()
+
+        scroll.setWidget(tab)
+        self.tabs.addTab(scroll, "Notebook")
+
+        # Load backup list on tab creation
+        self._refresh_backup_list()
+
+    def _get_api_client(self):
+        """Get API client for backup operations."""
+        from dashboard.common.api_client import APIClient
+        from dashboard.common.docker_manager import ServerStatus
+
+        server_status = self._docker_manager.get_server_status()
+        if server_status != ServerStatus.RUNNING:
+            return None
+
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            return None
+
+        return APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
+
+    def _refresh_backup_list(self) -> None:
+        """Refresh the list of available backups."""
+        import asyncio
+        from PyQt6.QtWidgets import QListWidgetItem
+
+        self._backup_list.clear()
+
+        api_client = self._get_api_client()
+        if not api_client:
+            item = QListWidgetItem("Server not running - cannot list backups")
+            item.setForeground(Qt.GlobalColor.gray)
+            self._backup_list.addItem(item)
+            return
+
+        async def fetch_backups():
+            try:
+                backups = await api_client.list_backups()
+                return backups
+            except Exception as e:
+                logger.error(f"Failed to list backups: {e}")
+                return None
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Schedule task and return immediately
+                asyncio.create_task(self._async_refresh_backup_list(api_client))
+            else:
+                backups = loop.run_until_complete(fetch_backups())
+                self._populate_backup_list(backups)
+        except RuntimeError:
+            backups = asyncio.run(fetch_backups())
+            self._populate_backup_list(backups)
+
+    async def _async_refresh_backup_list(self, api_client) -> None:
+        """Async version of backup list refresh."""
+        try:
+            backups = await api_client.list_backups()
+            self._populate_backup_list(backups)
+        except Exception as e:
+            logger.error(f"Failed to list backups: {e}")
+            self._populate_backup_list(None)
+
+    def _populate_backup_list(self, backups) -> None:
+        """Populate the backup list widget."""
+        from PyQt6.QtWidgets import QListWidgetItem
+
+        self._backup_list.clear()
+
+        if backups is None:
+            item = QListWidgetItem("Failed to load backups")
+            item.setForeground(Qt.GlobalColor.red)
+            self._backup_list.addItem(item)
+            return
+
+        if not backups:
+            item = QListWidgetItem("No backups available")
+            item.setForeground(Qt.GlobalColor.gray)
+            self._backup_list.addItem(item)
+            return
+
+        for backup in backups:
+            filename = backup.get("filename", "Unknown")
+            created = backup.get("created_at", "")
+            size_bytes = backup.get("size_bytes", 0)
+
+            # Format size
+            if size_bytes < 1024:
+                size_str = f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                size_str = f"{size_bytes / 1024:.1f} KB"
+            else:
+                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+
+            # Format date
+            if created:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(created)
+                    date_str = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    date_str = created[:16] if len(created) > 16 else created
+            else:
+                date_str = "Unknown date"
+
+            item = QListWidgetItem(f"{filename}  |  {date_str}  |  {size_str}")
+            item.setData(Qt.ItemDataRole.UserRole, filename)
+            self._backup_list.addItem(item)
+
+    def _on_create_backup(self) -> None:
+        """Handle create backup button click."""
+        import asyncio
+        from PyQt6.QtWidgets import QMessageBox
+
+        api_client = self._get_api_client()
+        if not api_client:
+            QMessageBox.warning(
+                self,
+                "Server Not Running",
+                "The server must be running to create backups.",
+            )
+            return
+
+        async def create_backup():
+            try:
+                result = await api_client.create_backup()
+                return result
+            except Exception as e:
+                logger.error(f"Failed to create backup: {e}")
+                return {"success": False, "message": str(e)}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_create_backup(api_client))
+            else:
+                result = loop.run_until_complete(create_backup())
+                self._handle_backup_result(result)
+        except RuntimeError:
+            result = asyncio.run(create_backup())
+            self._handle_backup_result(result)
+
+    async def _async_create_backup(self, api_client) -> None:
+        """Async version of backup creation."""
+        from PyQt6.QtWidgets import QMessageBox
+        try:
+            result = await api_client.create_backup()
+            self._handle_backup_result(result)
+        except Exception as e:
+            logger.error(f"Failed to create backup: {e}")
+            QMessageBox.critical(self, "Backup Failed", f"Failed to create backup: {e}")
+
+    def _handle_backup_result(self, result) -> None:
+        """Handle backup creation result."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        if result.get("success"):
+            QMessageBox.information(
+                self,
+                "Backup Created",
+                f"Backup created successfully.\n\n{result.get('backup', {}).get('filename', '')}",
+            )
+            self._refresh_backup_list()
+        else:
+            QMessageBox.critical(
+                self,
+                "Backup Failed",
+                f"Failed to create backup: {result.get('message', 'Unknown error')}",
+            )
+
+    def _on_restore_backup(self) -> None:
+        """Handle restore backup button click."""
+        import asyncio
+        from PyQt6.QtWidgets import QMessageBox
+
+        selected_items = self._backup_list.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(
+                self,
+                "No Backup Selected",
+                "Please select a backup from the list to restore.",
+            )
+            return
+
+        filename = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        if not filename:
+            QMessageBox.warning(self, "Invalid Selection", "Please select a valid backup.")
+            return
+
+        # Confirm restore
+        reply = QMessageBox.warning(
+            self,
+            "Confirm Restore",
+            f"Are you sure you want to restore from:\n\n{filename}\n\n"
+            "This will replace ALL current data with the backup data.\n"
+            "A safety backup will be created first.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        api_client = self._get_api_client()
+        if not api_client:
+            QMessageBox.warning(
+                self,
+                "Server Not Running",
+                "The server must be running to restore backups.",
+            )
+            return
+
+        async def restore_backup():
+            try:
+                result = await api_client.restore_backup(filename)
+                return result
+            except Exception as e:
+                logger.error(f"Failed to restore backup: {e}")
+                return {"success": False, "message": str(e)}
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_restore_backup(api_client, filename))
+            else:
+                result = loop.run_until_complete(restore_backup())
+                self._handle_restore_result(result)
+        except RuntimeError:
+            result = asyncio.run(restore_backup())
+            self._handle_restore_result(result)
+
+    async def _async_restore_backup(self, api_client, filename: str) -> None:
+        """Async version of backup restore."""
+        from PyQt6.QtWidgets import QMessageBox
+        try:
+            result = await api_client.restore_backup(filename)
+            self._handle_restore_result(result)
+        except Exception as e:
+            logger.error(f"Failed to restore backup: {e}")
+            QMessageBox.critical(self, "Restore Failed", f"Failed to restore backup: {e}")
+
+    def _handle_restore_result(self, result) -> None:
+        """Handle backup restore result."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        if result.get("success"):
+            QMessageBox.information(
+                self,
+                "Restore Complete",
+                f"Database restored successfully from:\n{result.get('restored_from', 'backup')}\n\n"
+                "You may need to refresh the Notebook view to see the restored data.",
+            )
+            self._refresh_backup_list()
+        else:
+            QMessageBox.critical(
+                self,
+                "Restore Failed",
+                f"Failed to restore backup: {result.get('message', 'Unknown error')}",
+            )
 
     def _load_values(self) -> None:
         """Load current configuration values into the dialog."""

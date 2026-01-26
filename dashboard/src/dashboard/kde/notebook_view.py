@@ -96,6 +96,7 @@ class NotebookView(QWidget):
         self._calendar_widget.change_date_requested.connect(
             self._on_change_date_requested
         )
+        self._calendar_widget.export_requested.connect(self._on_export_requested)
         self._search_widget.recording_requested.connect(self._on_recording_requested)
         self._import_widget.recording_created.connect(self._on_import_complete)
 
@@ -303,4 +304,92 @@ class NotebookView(QWidget):
                 self,
                 "Error",
                 f"Failed to update recording date: {e}",
+            )
+
+    def _on_export_requested(self, recording_id: int) -> None:
+        """Handle export request from calendar."""
+        from PyQt6.QtWidgets import QFileDialog
+
+        # Ask user for export format
+        format_dialog = QMessageBox(self)
+        format_dialog.setWindowTitle("Export Format")
+        format_dialog.setText("Choose export format:")
+        format_dialog.setStyleSheet("""
+            QMessageBox {
+                background-color: #1e1e1e;
+            }
+            QLabel {
+                color: #e0e0e0;
+            }
+            QPushButton {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #e0e0e0;
+                padding: 8px 16px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+        """)
+        txt_btn = format_dialog.addButton("Text (.txt)", QMessageBox.ButtonRole.AcceptRole)
+        json_btn = format_dialog.addButton("JSON (.json)", QMessageBox.ButtonRole.AcceptRole)
+        format_dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        format_dialog.exec()
+
+        clicked = format_dialog.clickedButton()
+        if clicked == txt_btn:
+            export_format = "txt"
+            file_filter = "Text Files (*.txt)"
+            default_ext = ".txt"
+        elif clicked == json_btn:
+            export_format = "json"
+            file_filter = "JSON Files (*.json)"
+            default_ext = ".json"
+        else:
+            return  # Cancelled
+
+        # Get save location
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Transcription",
+            f"transcription_export{default_ext}",
+            file_filter,
+        )
+
+        if not file_path:
+            return  # Cancelled
+
+        # Perform export
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._export_recording(recording_id, export_format, file_path))
+            else:
+                loop.run_until_complete(self._export_recording(recording_id, export_format, file_path))
+        except RuntimeError:
+            asyncio.run(self._export_recording(recording_id, export_format, file_path))
+
+    async def _export_recording(self, recording_id: int, format: str, file_path: str) -> None:
+        """Export a recording to a file."""
+        try:
+            content, _ = await self._api_client.export_recording(recording_id, format)
+            
+            # Write to file
+            from pathlib import Path
+            Path(file_path).write_bytes(content)
+            
+            logger.info(f"Exported recording {recording_id} to {file_path}")
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Transcription exported successfully to:\n{file_path}",
+            )
+        except Exception as e:
+            logger.error(f"Failed to export recording: {e}")
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Failed to export recording: {e}",
             )

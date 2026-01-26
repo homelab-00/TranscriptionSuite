@@ -122,6 +122,7 @@ class SettingsDialog:
         self._create_app_tab()
         self._create_client_tab()
         self._create_server_tab()
+        self._create_notebook_tab()
 
         # View switcher in header
         switcher = Adw.ViewSwitcher()
@@ -738,6 +739,357 @@ class SettingsDialog:
         self._stack.add_titled_with_icon(
             scrolled, "server", "Server", "network-server-symbolic"
         )
+
+    def _create_notebook_tab(self) -> None:
+        """Create the Notebook tab for backup/restore functionality."""
+        import asyncio
+        from dashboard.common.api_client import APIClient
+        from dashboard.common.docker_manager import ServerStatus
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.set_margin_start(20)
+        content.set_margin_end(20)
+        content.set_margin_top(20)
+        content.set_margin_bottom(20)
+
+        # Backup section
+        backup_frame = Gtk.Frame()
+        backup_frame.set_label("Database Backup")
+        backup_frame.add_css_class("settings-group")
+
+        backup_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        backup_box.set_margin_start(12)
+        backup_box.set_margin_end(12)
+        backup_box.set_margin_top(12)
+        backup_box.set_margin_bottom(12)
+
+        backup_desc = Gtk.Label(
+            label="Create a backup of your Audio Notebook database. "
+            "Backups include all recordings metadata and transcriptions."
+        )
+        backup_desc.set_wrap(True)
+        backup_desc.set_halign(Gtk.Align.START)
+        backup_desc.add_css_class("dim-label")
+        backup_box.append(backup_desc)
+
+        # Backup list
+        self._backup_listbox = Gtk.ListBox()
+        self._backup_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self._backup_listbox.add_css_class("boxed-list")
+        self._backup_listbox.set_size_request(-1, 100)
+
+        backup_scroll = Gtk.ScrolledWindow()
+        backup_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        backup_scroll.set_child(self._backup_listbox)
+        backup_scroll.set_min_content_height(100)
+        backup_scroll.set_max_content_height(120)
+        backup_box.append(backup_scroll)
+
+        # Backup buttons
+        backup_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+
+        create_backup_btn = Gtk.Button(label="Create Backup")
+        create_backup_btn.add_css_class("suggested-action")
+        create_backup_btn.connect("clicked", lambda _: self._on_create_backup_gnome())
+        backup_btn_box.append(create_backup_btn)
+
+        refresh_btn = Gtk.Button(label="Refresh")
+        refresh_btn.connect("clicked", lambda _: self._refresh_backup_list_gnome())
+        backup_btn_box.append(refresh_btn)
+
+        backup_box.append(backup_btn_box)
+        backup_frame.set_child(backup_box)
+        content.append(backup_frame)
+
+        # Restore section
+        restore_frame = Gtk.Frame()
+        restore_frame.set_label("Database Restore")
+        restore_frame.add_css_class("settings-group")
+
+        restore_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        restore_box.set_margin_start(12)
+        restore_box.set_margin_end(12)
+        restore_box.set_margin_top(12)
+        restore_box.set_margin_bottom(12)
+
+        restore_desc = Gtk.Label(
+            label="Restore your database from a backup. "
+            "Warning: This will replace all current data. "
+            "A safety backup will be created automatically."
+        )
+        restore_desc.set_wrap(True)
+        restore_desc.set_halign(Gtk.Align.START)
+        restore_desc.add_css_class("warning")
+
+        restore_box.append(restore_desc)
+
+        restore_btn = Gtk.Button(label="Restore Selected Backup")
+        restore_btn.add_css_class("destructive-action")
+        restore_btn.connect("clicked", lambda _: self._on_restore_backup_gnome())
+        restore_btn.set_halign(Gtk.Align.START)
+        restore_box.append(restore_btn)
+
+        restore_frame.set_child(restore_box)
+        content.append(restore_frame)
+
+        scrolled.set_child(content)
+        self._stack.add_titled_with_icon(
+            scrolled, "notebook", "Notebook", "accessories-text-editor-symbolic"
+        )
+
+        # Load backup list
+        self._refresh_backup_list_gnome()
+
+    def _get_api_client_gnome(self):
+        """Get API client for backup operations."""
+        from dashboard.common.api_client import APIClient
+        from dashboard.common.docker_manager import ServerStatus
+
+        server_status = self._docker_manager.get_server_status()
+        if server_status != ServerStatus.RUNNING:
+            return None
+
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            return None
+
+        return APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
+
+    def _refresh_backup_list_gnome(self) -> None:
+        """Refresh the list of available backups."""
+        import asyncio
+        from gi.repository import GLib
+
+        if not hasattr(self, "_backup_listbox"):
+            return
+
+        # Clear existing items
+        while True:
+            row = self._backup_listbox.get_row_at_index(0)
+            if row is None:
+                break
+            self._backup_listbox.remove(row)
+
+        api_client = self._get_api_client_gnome()
+        if not api_client:
+            label = Gtk.Label(label="Server not running - cannot list backups")
+            label.add_css_class("dim-label")
+            label.set_margin_top(8)
+            label.set_margin_bottom(8)
+            self._backup_listbox.append(label)
+            return
+
+        async def fetch_and_populate():
+            try:
+                backups = await api_client.list_backups()
+                GLib.idle_add(lambda: self._populate_backup_list_gnome(backups))
+            except Exception as e:
+                logger.error(f"Failed to list backups: {e}")
+                GLib.idle_add(lambda: self._populate_backup_list_gnome(None))
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(fetch_and_populate())
+            else:
+                asyncio.run(fetch_and_populate())
+        except RuntimeError:
+            asyncio.run(fetch_and_populate())
+
+    def _populate_backup_list_gnome(self, backups) -> None:
+        """Populate the backup list widget."""
+        if not hasattr(self, "_backup_listbox"):
+            return
+
+        # Clear existing
+        while True:
+            row = self._backup_listbox.get_row_at_index(0)
+            if row is None:
+                break
+            self._backup_listbox.remove(row)
+
+        if backups is None:
+            label = Gtk.Label(label="Failed to load backups")
+            label.add_css_class("error")
+            self._backup_listbox.append(label)
+            return
+
+        if not backups:
+            label = Gtk.Label(label="No backups available")
+            label.add_css_class("dim-label")
+            label.set_margin_top(8)
+            label.set_margin_bottom(8)
+            self._backup_listbox.append(label)
+            return
+
+        for backup in backups:
+            filename = backup.get("filename", "Unknown")
+            created = backup.get("created_at", "")
+            size_bytes = backup.get("size_bytes", 0)
+
+            # Format size
+            if size_bytes < 1024:
+                size_str = f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                size_str = f"{size_bytes / 1024:.1f} KB"
+            else:
+                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+
+            # Format date
+            if created:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(created)
+                    date_str = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    date_str = created[:16] if len(created) > 16 else created
+            else:
+                date_str = "Unknown"
+
+            row = Adw.ActionRow()
+            row.set_title(filename)
+            row.set_subtitle(f"{date_str}  •  {size_str}")
+            row.filename = filename  # Store for retrieval
+            self._backup_listbox.append(row)
+
+    def _on_create_backup_gnome(self) -> None:
+        """Handle create backup button click."""
+        import asyncio
+        from gi.repository import GLib
+
+        api_client = self._get_api_client_gnome()
+        if not api_client:
+            self._show_message_gnome("Server Not Running", "The server must be running to create backups.")
+            return
+
+        async def create_backup():
+            try:
+                result = await api_client.create_backup()
+                GLib.idle_add(lambda: self._handle_backup_result_gnome(result))
+            except Exception as e:
+                logger.error(f"Failed to create backup: {e}")
+                GLib.idle_add(lambda: self._show_message_gnome("Backup Failed", str(e)))
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(create_backup())
+            else:
+                asyncio.run(create_backup())
+        except RuntimeError:
+            asyncio.run(create_backup())
+
+    def _handle_backup_result_gnome(self, result) -> None:
+        """Handle backup creation result."""
+        if result.get("success"):
+            filename = result.get("backup", {}).get("filename", "")
+            self._show_message_gnome("Backup Created", f"Backup created successfully.\n\n{filename}")
+            self._refresh_backup_list_gnome()
+        else:
+            self._show_message_gnome("Backup Failed", result.get("message", "Unknown error"))
+
+    def _on_restore_backup_gnome(self) -> None:
+        """Handle restore backup button click."""
+        import asyncio
+        from gi.repository import GLib
+
+        if not hasattr(self, "_backup_listbox"):
+            return
+
+        selected_row = self._backup_listbox.get_selected_row()
+        if not selected_row or not hasattr(selected_row, "filename"):
+            self._show_message_gnome("No Backup Selected", "Please select a backup from the list to restore.")
+            return
+
+        filename = selected_row.filename
+
+        # Confirmation dialog
+        dialog = Adw.MessageDialog.new(
+            self.dialog,
+            "Confirm Restore",
+            f"Are you sure you want to restore from:\n\n{filename}\n\n"
+            "This will replace ALL current data.\nA safety backup will be created first."
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("restore", "Restore")
+        dialog.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+
+        def on_response(dialog, response):
+            dialog.destroy()
+            if response == "restore":
+                self._do_restore_gnome(filename)
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _do_restore_gnome(self, filename: str) -> None:
+        """Perform the actual restore operation."""
+        import asyncio
+        from gi.repository import GLib
+
+        api_client = self._get_api_client_gnome()
+        if not api_client:
+            self._show_message_gnome("Server Not Running", "The server must be running to restore backups.")
+            return
+
+        async def restore_backup():
+            try:
+                result = await api_client.restore_backup(filename)
+                GLib.idle_add(lambda: self._handle_restore_result_gnome(result))
+            except Exception as e:
+                logger.error(f"Failed to restore backup: {e}")
+                GLib.idle_add(lambda: self._show_message_gnome("Restore Failed", str(e)))
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(restore_backup())
+            else:
+                asyncio.run(restore_backup())
+        except RuntimeError:
+            asyncio.run(restore_backup())
+
+    def _handle_restore_result_gnome(self, result) -> None:
+        """Handle restore result."""
+        if result.get("success"):
+            restored_from = result.get("restored_from", "backup")
+            self._show_message_gnome(
+                "Restore Complete",
+                f"Database restored successfully from:\n{restored_from}\n\n"
+                "Refresh the Notebook view to see the restored data."
+            )
+            self._refresh_backup_list_gnome()
+        else:
+            self._show_message_gnome("Restore Failed", result.get("message", "Unknown error"))
+
+    def _show_message_gnome(self, heading: str, body: str) -> None:
+        """Show a message dialog."""
+        if self.dialog:
+            dialog = Adw.MessageDialog.new(self.dialog, heading, body)
+            dialog.add_response("ok", "OK")
+            dialog.present()
 
     def _on_toggle_token_visibility(self, button: Gtk.ToggleButton) -> None:
         """Toggle token visibility."""

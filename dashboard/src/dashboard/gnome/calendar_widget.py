@@ -467,6 +467,7 @@ class CalendarWidget:
         self._recording_callback: Callable[[int], None] | None = None
         self._delete_callback: Callable[[int], None] | None = None
         self._change_date_callback: Callable[[int], None] | None = None
+        self._export_callback: Callable[[int], None] | None = None
 
         # State
         self._current_year = date.today().year
@@ -1113,6 +1114,18 @@ class CalendarWidget:
         box.set_margin_top(8)
         box.set_margin_bottom(8)
 
+        export_btn = Gtk.Button(label="Export transcription")
+        export_btn.add_css_class("flat")
+        export_btn.connect(
+            "clicked", lambda _, rid=rec.id: self._request_export(rid, popover)
+        )
+        box.append(export_btn)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(4)
+        sep.set_margin_bottom(4)
+        box.append(sep)
+
         change_btn = Gtk.Button(label="Change date & time")
         change_btn.add_css_class("flat")
         change_btn.connect(
@@ -1141,6 +1154,12 @@ class CalendarWidget:
         popover.popdown()
         if self._delete_callback:
             self._delete_callback(recording_id)
+
+    def _request_export(self, recording_id: int, popover: Gtk.Popover) -> None:
+        """Request export of a recording."""
+        popover.popdown()
+        if self._export_callback:
+            self._export_callback(recording_id)
 
     def _go_prev(self) -> None:
         """Navigate to previous month/day."""
@@ -1275,6 +1294,10 @@ class CalendarWidget:
     def set_change_date_callback(self, callback: Callable[[int], None]) -> None:
         """Set callback for change date requests."""
         self._change_date_callback = callback
+
+    def set_export_callback(self, callback: Callable[[int], None]) -> None:
+        """Set callback for export requests."""
+        self._export_callback = callback
 
     def refresh(self) -> None:
         """Refresh the calendar data."""

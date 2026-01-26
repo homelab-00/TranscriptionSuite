@@ -592,6 +592,7 @@ class CalendarWidget(QWidget):
     recording_requested = pyqtSignal(int)
     delete_requested = pyqtSignal(int)  # recording_id
     change_date_requested = pyqtSignal(int)  # recording_id
+    export_requested = pyqtSignal(int)  # recording_id
 
     def __init__(
         self,
@@ -930,7 +931,6 @@ class CalendarWidget(QWidget):
 
             #dayCell[state="future"] {
                 background-color: #0d0d1a;
-                cursor: default;
             }
 
             #dayCell[state="future"] #dayNumber {
@@ -1299,6 +1299,12 @@ class CalendarWidget(QWidget):
                     background-color: #3d3d3d;
                 }
             """)
+
+            export_action = QAction("Export transcription", menu)
+            export_action.triggered.connect(lambda: self.export_requested.emit(rid))
+            menu.addAction(export_action)
+
+            menu.addSeparator()
 
             change_date_action = QAction("Change date && time", menu)
             change_date_action.triggered.connect(

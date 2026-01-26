@@ -573,9 +573,9 @@ class DashboardWindow(_get_dashboard_base()):
         self._start_status_timer()
 
     def _setup_ui(self) -> None:
-        """Set up the main UI structure."""
+        """Set up the main UI structure with sidebar navigation."""
         self.set_title("TranscriptionSuite")
-        self.set_default_size(750, 600)
+        self.set_default_size(850, 600)
 
         # Set window icon from app logo
         self._set_window_icon()
@@ -584,12 +584,30 @@ class DashboardWindow(_get_dashboard_base()):
         style_manager = Adw.StyleManager.get_default()
         style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
 
-        # Main content box
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # Main horizontal box (sidebar | content)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
 
-        # Navigation header bar
-        header = self._create_header_bar()
-        main_box.append(header)
+        # Create sidebar
+        sidebar = self._create_sidebar()
+        main_box.append(sidebar)
+
+        # Content area with header
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content_box.set_hexpand(True)
+
+        # Minimal header bar for window controls
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(True)
+        header.set_show_start_title_buttons(False)
+        
+        # Menu button in header
+        self._menu_btn = Gtk.MenuButton()
+        self._menu_btn.set_icon_name("open-menu-symbolic")
+        self._menu_btn.set_tooltip_text("Menu")
+        self._setup_menu_button()
+        header.pack_end(self._menu_btn)
+        
+        content_box.append(header)
 
         # Stack for views
         self._stack = Gtk.Stack()
@@ -608,82 +626,105 @@ class DashboardWindow(_get_dashboard_base()):
         self._stack.add_named(client_view, "client")
         self._stack.add_named(notebook_view, "notebook")
 
-        main_box.append(self._stack)
+        content_box.append(self._stack)
+        main_box.append(content_box)
 
         self.set_content(main_box)
 
-        # Start on welcome view
-        self._navigate_to(View.WELCOME, add_to_history=False)
+        # Start on notebook view by default
+        self._navigate_to(View.NOTEBOOK, add_to_history=False)
 
         # Connect close request
         self.connect("close-request", self._on_close_request)
 
-    def _set_window_icon(self) -> None:
-        """Set the window icon from the app logo.
+    def _create_sidebar(self) -> Any:
+        """Create the vertical sidebar navigation with status lights."""
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar.set_size_request(200, -1)
+        sidebar.add_css_class("sidebar")
 
-        In GTK4/Wayland, window icons are typically determined by the .desktop file.
-        However, we can add our assets directory to the icon theme search path
-        so the icon can be found.
-        """
-        try:
-            assets_path = _get_assets_path()
+        # Header with title
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        header.set_margin_top(20)
+        header.set_margin_bottom(16)
+        header.set_margin_start(16)
+        header.set_margin_end(16)
+        header.add_css_class("sidebar-header")
 
-            # Add the assets directory to icon theme search path
-            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-            icon_theme.add_search_path(str(assets_path))
+        title = Gtk.Label(label="Transcription")
+        title.add_css_class("sidebar-title")
+        title.set_halign(Gtk.Align.START)
+        header.append(title)
 
-            # Also add parent directories that might contain icons
-            # AppImage structure: usr/share/icons/...
-            if "APPDIR" in os.environ:
-                appdir = Path(os.environ["APPDIR"])
-                icon_dirs = [
-                    appdir / "usr" / "share" / "icons",
-                    appdir / "usr" / "share" / "pixmaps",
-                ]
-                for icon_dir in icon_dirs:
-                    if icon_dir.exists():
-                        icon_theme.add_search_path(str(icon_dir))
-                        logger.debug(f"Added icon search path: {icon_dir}")
+        subtitle = Gtk.Label(label="Suite")
+        subtitle.add_css_class("sidebar-subtitle")
+        subtitle.set_halign(Gtk.Align.START)
+        header.append(subtitle)
 
-            logger.debug(f"Added icon search path: {assets_path}")
-        except Exception as e:
-            logger.warning(f"Failed to configure icon theme: {e}")
+        sidebar.append(header)
 
-    def _create_header_bar(self) -> Any:
-        """Create the navigation header bar."""
-        header = Adw.HeaderBar()
+        # Navigation buttons container
+        nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        nav_box.set_margin_start(8)
+        nav_box.set_margin_end(8)
+        nav_box.set_vexpand(True)
 
-        # Left side: Home, Server, Client buttons
-        home_btn = Gtk.Button(label="Home")
+        # Home button
+        home_btn = Gtk.Button(label="  Home")
         home_btn.set_icon_name("go-home-symbolic")
-        home_btn.add_css_class("nav-button")
+        home_btn.add_css_class("sidebar-button")
         home_btn.connect("clicked", lambda _: self._go_home())
-        header.pack_start(home_btn)
+        nav_box.append(home_btn)
 
-        server_btn = Gtk.Button(label="Server")
-        server_btn.set_icon_name("network-server-symbolic")
-        server_btn.add_css_class("nav-button")
-        server_btn.connect("clicked", lambda _: self._navigate_to(View.SERVER))
-        header.pack_start(server_btn)
-
-        client_btn = Gtk.Button(label="Client")
-        client_btn.set_icon_name("audio-input-microphone-symbolic")
-        client_btn.add_css_class("nav-button")
-        client_btn.connect("clicked", lambda _: self._navigate_to(View.CLIENT))
-        header.pack_start(client_btn)
-
-        notebook_btn = Gtk.Button(label="Notebook")
+        # Notebook button
+        notebook_btn = Gtk.Button(label="  Notebook")
         notebook_btn.set_icon_name("accessories-text-editor-symbolic")
-        notebook_btn.add_css_class("nav-button")
+        notebook_btn.add_css_class("sidebar-button")
         notebook_btn.connect("clicked", lambda _: self._navigate_to(View.NOTEBOOK))
-        header.pack_start(notebook_btn)
+        nav_box.append(notebook_btn)
 
-        # Right side: Hamburger menu button (☰) with Settings, Help, About
-        self._menu_btn = Gtk.MenuButton()
-        self._menu_btn.set_icon_name("open-menu-symbolic")
-        self._menu_btn.set_tooltip_text("Menu")
-        self._menu_btn.add_css_class("nav-button")
+        # Separator
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(8)
+        sep.set_margin_bottom(8)
+        nav_box.append(sep)
 
+        # Server button with status light
+        server_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        server_btn = Gtk.Button(label="  Docker Server")
+        server_btn.set_icon_name("network-server-symbolic")
+        server_btn.add_css_class("sidebar-button")
+        server_btn.set_hexpand(True)
+        server_btn.connect("clicked", lambda _: self._navigate_to(View.SERVER))
+        server_box.append(server_btn)
+
+        self._server_status_light = Gtk.Label(label="⬤")
+        self._server_status_light.add_css_class("status-light-gray")
+        self._server_status_light.set_margin_end(8)
+        server_box.append(self._server_status_light)
+        nav_box.append(server_box)
+
+        # Client button with status light
+        client_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        client_btn = Gtk.Button(label="  Client")
+        client_btn.set_icon_name("audio-input-microphone-symbolic")
+        client_btn.add_css_class("sidebar-button")
+        client_btn.set_hexpand(True)
+        client_btn.connect("clicked", lambda _: self._navigate_to(View.CLIENT))
+        client_box.append(client_btn)
+
+        self._client_status_light = Gtk.Label(label="⬤")
+        self._client_status_light.add_css_class("status-light-orange")
+        self._client_status_light.set_margin_end(8)
+        client_box.append(self._client_status_light)
+        nav_box.append(client_box)
+
+        sidebar.append(nav_box)
+
+        return sidebar
+
+    def _setup_menu_button(self) -> None:
+        """Set up the hamburger menu button."""
         # Create menu model
         menu = Gio.Menu()
 
@@ -725,9 +766,69 @@ class DashboardWindow(_get_dashboard_base()):
         about_action.connect("activate", lambda a, p: self._show_about_dialog())
         self.add_action(about_action)
 
-        header.pack_end(self._menu_btn)
+    def _update_sidebar_status_lights(self) -> None:
+        """Update the status light indicators in the sidebar."""
+        # Server status light
+        if hasattr(self, "_server_status_light") and self._server_status_light:
+            status = self._docker_manager.get_server_status()
+            # Remove old classes
+            for cls in ["status-light-green", "status-light-red", "status-light-blue", "status-light-orange", "status-light-gray"]:
+                self._server_status_light.remove_css_class(cls)
+            
+            if status == ServerStatus.RUNNING:
+                health = self._docker_manager.get_container_health()
+                if health == "unhealthy":
+                    self._server_status_light.add_css_class("status-light-red")
+                elif health and health != "healthy":
+                    self._server_status_light.add_css_class("status-light-blue")
+                else:
+                    self._server_status_light.add_css_class("status-light-green")
+            elif status == ServerStatus.STOPPED:
+                self._server_status_light.add_css_class("status-light-orange")
+            else:
+                self._server_status_light.add_css_class("status-light-gray")
 
-        return header
+        # Client status light
+        if hasattr(self, "_client_status_light") and self._client_status_light:
+            # Remove old classes
+            for cls in ["status-light-green", "status-light-orange"]:
+                self._client_status_light.remove_css_class(cls)
+            
+            if self._client_running:
+                self._client_status_light.add_css_class("status-light-green")
+            else:
+                self._client_status_light.add_css_class("status-light-orange")
+
+    def _set_window_icon(self) -> None:
+        """Set the window icon from the app logo.
+
+        In GTK4/Wayland, window icons are typically determined by the .desktop file.
+        However, we can add our assets directory to the icon theme search path
+        so the icon can be found.
+        """
+        try:
+            assets_path = _get_assets_path()
+
+            # Add the assets directory to icon theme search path
+            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            icon_theme.add_search_path(str(assets_path))
+
+            # Also add parent directories that might contain icons
+            # AppImage structure: usr/share/icons/...
+            if "APPDIR" in os.environ:
+                appdir = Path(os.environ["APPDIR"])
+                icon_dirs = [
+                    appdir / "usr" / "share" / "icons",
+                    appdir / "usr" / "share" / "pixmaps",
+                ]
+                for icon_dir in icon_dirs:
+                    if icon_dir.exists():
+                        icon_theme.add_search_path(str(icon_dir))
+                        logger.debug(f"Added icon search path: {icon_dir}")
+
+            logger.debug(f"Added icon search path: {assets_path}")
+        except Exception as e:
+            logger.warning(f"Failed to configure icon theme: {e}")
 
     def _create_welcome_view(self) -> Any:
         """Create the welcome/home view."""
@@ -1624,6 +1725,61 @@ class DashboardWindow(_get_dashboard_base()):
             color: #90caf9;
         }
 
+        /* Sidebar styles */
+        .sidebar {
+            background-color: #1a1a2e;
+            border-right: 1px solid #2d2d2d;
+        }
+        .sidebar-header {
+            border-bottom: 1px solid #2d2d2d;
+        }
+        .sidebar-title {
+            color: #90caf9;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .sidebar-subtitle {
+            color: #606080;
+            font-size: 16px;
+        }
+        .sidebar-button {
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #a0a0a0;
+        }
+        .sidebar-button:hover {
+            background: #2d2d3d;
+            color: #ffffff;
+        }
+        .sidebar-button:checked {
+            background: #2d4a6d;
+            color: #90caf9;
+        }
+
+        /* Status light colors */
+        .status-light-green {
+            color: #4caf50;
+            font-size: 8px;
+        }
+        .status-light-red {
+            color: #f44336;
+            font-size: 8px;
+        }
+        .status-light-blue {
+            color: #2196f3;
+            font-size: 8px;
+        }
+        .status-light-orange {
+            color: #ff9800;
+            font-size: 8px;
+        }
+        .status-light-gray {
+            color: #6c757d;
+            font-size: 8px;
+        }
+
         /* Log view */
         .log-view {
             font-family: "CaskaydiaCove Nerd Font", "Cascadia Code", monospace;
@@ -1813,6 +1969,9 @@ class DashboardWindow(_get_dashboard_base()):
                 self._home_client_status.set_text("⬤ Stopped")
                 self._home_client_status.remove_css_class("status-running")
                 self._home_client_status.add_css_class("status-stopped")
+
+        # Update sidebar status lights
+        self._update_sidebar_status_lights()
 
     def _refresh_server_status(self) -> None:
         """Refresh server view status."""
