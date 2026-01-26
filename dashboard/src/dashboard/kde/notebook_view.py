@@ -109,7 +109,7 @@ class NotebookView(QWidget):
         """Apply consistent styling to the tab widget."""
         self.setStyleSheet("""
             #notebookHeader {
-                background-color: #0a0a0a;
+                background-color: #060606;
                 border-bottom: 1px solid #2d2d2d;
             }
 
@@ -123,11 +123,11 @@ class NotebookView(QWidget):
         self._tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: none;
-                background-color: #0a0a0a;
+                background-color: #060606;
             }
 
             QTabBar::tab {
-                background-color: #1e1e1e;
+                background-color: #131313;
                 color: #a0a0a0;
                 padding: 10px 20px;
                 border: none;
@@ -137,14 +137,14 @@ class NotebookView(QWidget):
             }
 
             QTabBar::tab:selected {
-                color: #90caf9;
-                border-bottom: 2px solid #90caf9;
-                background-color: #1e1e1e;
+                color: #0AFCCF;
+                border-bottom: 2px solid #0AFCCF;
+                background-color: #131313;
             }
 
             QTabBar::tab:hover:!selected {
                 color: #ffffff;
-                background-color: #2d2d2d;
+                background-color: #1e1e1e;
             }
         """)
 

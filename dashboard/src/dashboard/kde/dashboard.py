@@ -135,7 +135,7 @@ class DashboardWindow(
         if self._home_status_timer is None:
             self._home_status_timer = QTimer()
             self._home_status_timer.timeout.connect(self._refresh_home_status)
-            self._home_status_timer.start(3000)
+            self._home_status_timer.start(1000)
             logger.debug("Home status auto-refresh timer started")
         self._refresh_home_status()
 
@@ -170,7 +170,7 @@ class DashboardWindow(
         self._stack.addWidget(self._client_view)
         self._stack.addWidget(self._notebook_view)
 
-        self._navigate_to(View.NOTEBOOK, add_to_history=False)
+        self._navigate_to(View.WELCOME, add_to_history=False)
 
     def _apply_styles(self) -> None:
         """Apply stylesheet to the window."""
@@ -178,32 +178,51 @@ class DashboardWindow(
 
     def _create_sidebar(self) -> QWidget:
         """Create the vertical sidebar navigation with status lights."""
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(200)
-        layout = QVBoxLayout(sidebar)
+        self._sidebar = QFrame()
+        self._sidebar.setObjectName("sidebar")
+        self._sidebar.setFixedWidth(200)
+        self._sidebar_expanded = True
+        layout = QVBoxLayout(self._sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
+        # Header with collapse button
         header = QFrame()
         header.setObjectName("sidebarHeader")
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(16, 20, 16, 16)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 16, 8, 16)
         header_layout.setSpacing(4)
 
-        title = QLabel("Transcription")
-        title.setObjectName("sidebarTitle")
-        header_layout.addWidget(title)
+        # Title container (for collapse/expand)
+        title_container = QWidget()
+        title_container.setObjectName("sidebarTitleContainer")
+        title_inner = QVBoxLayout(title_container)
+        title_inner.setContentsMargins(0, 0, 0, 0)
+        title_inner.setSpacing(2)
 
-        subtitle = QLabel("Suite")
-        subtitle.setObjectName("sidebarSubtitle")
-        header_layout.addWidget(subtitle)
+        self._sidebar_title = QLabel("Transcription")
+        self._sidebar_title.setObjectName("sidebarTitle")
+        title_inner.addWidget(self._sidebar_title)
+
+        self._sidebar_subtitle = QLabel("Suite")
+        self._sidebar_subtitle.setObjectName("sidebarSubtitle")
+        title_inner.addWidget(self._sidebar_subtitle)
+
+        header_layout.addWidget(title_container, 1)
+
+        # Collapse toggle button
+        self._collapse_btn = QPushButton("«")
+        self._collapse_btn.setObjectName("collapseButton")
+        self._collapse_btn.setFixedSize(24, 24)
+        self._collapse_btn.setToolTip("Collapse sidebar")
+        self._collapse_btn.clicked.connect(self._toggle_sidebar)
+        header_layout.addWidget(self._collapse_btn)
 
         layout.addWidget(header)
 
-        # Navigation
+        # Navigation - reordered: Home, Docker Server, Client | separator | Notebook
         nav_container = QWidget()
+        self._nav_container = nav_container
         nav_layout = QVBoxLayout(nav_container)
         nav_layout.setContentsMargins(8, 8, 8, 8)
         nav_layout.setSpacing(4)
@@ -211,19 +230,6 @@ class DashboardWindow(
         self._nav_home_btn = self._create_sidebar_button("Home", "home")
         self._nav_home_btn.clicked.connect(self._go_home)
         nav_layout.addWidget(self._nav_home_btn)
-
-        self._nav_notebook_btn = self._create_sidebar_button("Notebook", "notebook")
-        self._nav_notebook_btn.clicked.connect(lambda: self._navigate_to(View.NOTEBOOK))
-        nav_layout.addWidget(self._nav_notebook_btn)
-
-        nav_layout.addSpacing(8)
-
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.Shape.HLine)
-        sep1.setStyleSheet("background-color: #2d2d2d; max-height: 1px;")
-        nav_layout.addWidget(sep1)
-
-        nav_layout.addSpacing(8)
 
         self._nav_server_btn = self._create_sidebar_button_with_status(
             "Docker Server", "server"
@@ -236,6 +242,19 @@ class DashboardWindow(
         )
         self._client_nav_btn.clicked.connect(lambda: self._navigate_to(View.CLIENT))
         nav_layout.addWidget(self._nav_client_btn)
+
+        nav_layout.addSpacing(8)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("background-color: #2d2d2d; max-height: 1px;")
+        nav_layout.addWidget(sep1)
+
+        nav_layout.addSpacing(8)
+
+        self._nav_notebook_btn = self._create_sidebar_button("Notebook", "notebook")
+        self._nav_notebook_btn.clicked.connect(lambda: self._navigate_to(View.NOTEBOOK))
+        nav_layout.addWidget(self._nav_notebook_btn)
 
         nav_layout.addStretch()
         layout.addWidget(nav_container, 1)
@@ -252,7 +271,35 @@ class DashboardWindow(
         bottom_layout.addWidget(self._nav_menu_btn)
 
         layout.addWidget(bottom)
-        return sidebar
+        return self._sidebar
+
+    def _toggle_sidebar(self) -> None:
+        """Toggle sidebar between expanded and collapsed state."""
+        self._sidebar_expanded = not self._sidebar_expanded
+        if self._sidebar_expanded:
+            self._sidebar.setFixedWidth(200)
+            self._collapse_btn.setText("«")
+            self._collapse_btn.setToolTip("Collapse sidebar")
+            self._sidebar_title.show()
+            self._sidebar_subtitle.show()
+            # Show text on buttons
+            self._nav_home_btn.setText("  Home")
+            self._nav_notebook_btn.setText("  Notebook")
+            self._nav_menu_btn.setText("  Menu")
+            self._server_nav_btn.setText("  Docker Server")
+            self._client_nav_btn.setText("  Client")
+        else:
+            self._sidebar.setFixedWidth(56)
+            self._collapse_btn.setText("»")
+            self._collapse_btn.setToolTip("Expand sidebar")
+            self._sidebar_title.hide()
+            self._sidebar_subtitle.hide()
+            # Hide text on buttons, keep only icons
+            self._nav_home_btn.setText("")
+            self._nav_notebook_btn.setText("")
+            self._nav_menu_btn.setText("")
+            self._server_nav_btn.setText("")
+            self._client_nav_btn.setText("")
 
     def _create_sidebar_button(self, text: str, icon_name: str) -> QPushButton:
         """Create a sidebar navigation button."""

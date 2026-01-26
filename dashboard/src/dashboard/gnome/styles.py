@@ -24,12 +24,29 @@ except (ImportError, ValueError):
 
 
 def get_dashboard_css() -> bytes:
-    """Get the main dashboard CSS stylesheet."""
+    """Get the main dashboard CSS stylesheet.
+
+    Color palette:
+    - Background: #131313, #060606
+    - Accents from logo: #9C1971 (magenta), #B9295E (pink), #DD4243/#E24343 (red), #0AFCCF (cyan)
+    - Status: success=#4caf50, warning=#ff9800, error=#f44336
+    """
     return b"""
     /* Sidebar styling */
     .sidebar {
-        background-color: #1a1a1a;
+        background-color: #131313;
         border-right: 1px solid #2d2d2d;
+    }
+
+    .sidebar-title {
+        color: #0AFCCF;
+        font-size: 20px;
+        font-weight: bold;
+    }
+
+    .sidebar-subtitle {
+        color: #9C1971;
+        font-size: 16px;
     }
 
     .sidebar-button {
@@ -41,16 +58,24 @@ def get_dashboard_css() -> bytes:
     }
 
     .sidebar-button:hover {
-        background-color: rgba(255, 255, 255, 0.08);
+        background-color: #1e1e1e;
     }
 
     .sidebar-button:checked {
-        background-color: rgba(255, 255, 255, 0.12);
+        background-color: #1e1e1e;
+        color: #0AFCCF;
     }
+
+    /* Status lights */
+    .status-light-green { color: #4caf50; font-size: 8px; }
+    .status-light-red { color: #f44336; font-size: 8px; }
+    .status-light-blue { color: #2196f3; font-size: 8px; }
+    .status-light-orange { color: #ff9800; font-size: 8px; }
+    .status-light-gray { color: #6c757d; font-size: 8px; }
 
     /* Status card styling */
     .status-card {
-        background-color: #252526;
+        background-color: #131313;
         border-radius: 12px;
         padding: 16px;
         border: 1px solid #2d2d2d;
@@ -69,19 +94,19 @@ def get_dashboard_css() -> bytes:
 
     /* Button styles */
     .primary-button {
-        background-color: #0078d4;
-        color: white;
+        background-color: #0AFCCF;
+        color: #060606;
         border-radius: 8px;
         padding: 12px 24px;
         font-weight: bold;
     }
 
     .primary-button:hover {
-        background-color: #1084d8;
+        background-color: #08d9b3;
     }
 
     .stop-button {
-        background-color: #dc3545;
+        background-color: #DD4243;
         color: white;
         border-radius: 8px;
         padding: 12px 24px;
@@ -89,12 +114,12 @@ def get_dashboard_css() -> bytes:
     }
 
     .stop-button:hover {
-        background-color: #e04555;
+        background-color: #E24343;
     }
 
     .danger-button {
         background-color: #3d3d3d;
-        color: #f44336;
+        color: #DD4243;
         border-radius: 8px;
         padding: 10px 16px;
     }
@@ -104,14 +129,14 @@ def get_dashboard_css() -> bytes:
     }
 
     .secondary-button {
-        background-color: #2d2d2d;
+        background-color: #1e1e1e;
         border: 1px solid #3d3d3d;
         border-radius: 8px;
         padding: 10px 20px;
     }
 
     .secondary-button:hover {
-        background-color: #3d3d3d;
+        background-color: #2d2d2d;
     }
 
     /* Status indicators */
@@ -124,7 +149,7 @@ def get_dashboard_css() -> bytes:
     }
 
     .status-error {
-        color: #f44336;
+        color: #DD4243;
     }
 
     .status-unknown {
@@ -133,7 +158,7 @@ def get_dashboard_css() -> bytes:
 
     /* Management group styling */
     .management-group {
-        background-color: #1e1e1e;
+        background-color: #131313;
         border: 1px solid #2d2d2d;
         border-radius: 8px;
         padding: 12px;
@@ -143,15 +168,15 @@ def get_dashboard_css() -> bytes:
     .column-header {
         font-size: 12px;
         font-weight: bold;
-        color: #808080;
+        color: #0AFCCF;
         margin-bottom: 8px;
     }
 
     /* Toggle button styles */
     .toggle-enabled {
-        background-color: rgba(76, 175, 80, 0.2);
-        color: #4caf50;
-        border: 1px solid rgba(76, 175, 80, 0.3);
+        background-color: rgba(10, 252, 207, 0.15);
+        color: #0AFCCF;
+        border: 1px solid rgba(10, 252, 207, 0.3);
         border-radius: 6px;
     }
 
@@ -164,14 +189,14 @@ def get_dashboard_css() -> bytes:
 
     /* Live preview section */
     .preview-card {
-        background-color: #1e1e1e;
+        background-color: #131313;
         border: 1px solid #2d2d2d;
         border-radius: 8px;
         padding: 12px;
     }
 
     .live-transcription-view {
-        background-color: #252526;
+        background-color: #1e1e1e;
         border-radius: 4px;
         padding: 8px;
         font-family: 'Inter', sans-serif;
@@ -180,7 +205,7 @@ def get_dashboard_css() -> bytes:
 
     /* Volumes status card */
     .volumes-card {
-        background-color: #1a1a1a;
+        background-color: #131313;
         border: 1px solid #2d2d2d;
         border-radius: 10px;
         padding: 16px;

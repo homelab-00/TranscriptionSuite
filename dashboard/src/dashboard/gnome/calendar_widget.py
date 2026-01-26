@@ -143,17 +143,13 @@ class DayViewImportDialog:
         options_label.set_xalign(0)
         options_box.append(options_label)
 
-        checkboxes_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-
         self._diarization_check = Gtk.CheckButton(label="Speaker diarization")
-        self._diarization_check.set_active(True)
-        checkboxes_box.append(self._diarization_check)
+        self._diarization_check.set_active(False)
+        options_box.append(self._diarization_check)
 
         self._word_timestamps_check = Gtk.CheckButton(label="Word-level timestamps")
         self._word_timestamps_check.set_active(True)
-        checkboxes_box.append(self._word_timestamps_check)
-
-        options_box.append(checkboxes_box)
+        options_box.append(self._word_timestamps_check)
         main_box.append(options_box)
 
         # Progress section (hidden by default)
@@ -862,7 +858,23 @@ class CalendarWidget:
     def _on_day_view_import_complete(self, recording_id: int) -> None:
         """Handle completion of a day view import."""
         logger.info(f"Day view import complete, recording ID: {recording_id}")
-        self.refresh()
+        # Use GLib.timeout_add to ensure refresh happens after dialog closes
+        GLib.timeout_add(100, self._force_refresh)
+
+    def _force_refresh(self) -> bool:
+        """Force refresh with delayed UI update - used after imports."""
+        self._rebuild_calendar_grid()
+        self._schedule_refresh()
+        # Schedule delayed update to catch async data load
+        GLib.timeout_add(500, self._delayed_view_update)
+        return False  # Don't repeat
+
+    def _delayed_view_update(self) -> bool:
+        """Delayed update to ensure day view reflects loaded data."""
+        self._update_calendar_highlights()
+        if self._view_mode == "day" and self._selected_date:
+            self._update_day_view()
+        return False  # Don't repeat
 
     def _rebuild_calendar_grid(self) -> None:
         """Rebuild the calendar grid for the current month."""

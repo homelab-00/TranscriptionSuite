@@ -87,10 +87,13 @@ class DialogsMixin:
         about_action = menu.addAction(about_icon, "About")
         about_action.triggered.connect(self._show_about_dialog)
 
-        # Show menu below the hamburger button
-        menu.exec(
-            self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().bottomLeft())
-        )
+        # Show menu above the hamburger button, inside the window bounds
+        btn_pos = self._nav_menu_btn.mapToGlobal(self._nav_menu_btn.rect().topLeft())
+        menu_height = menu.sizeHint().height()
+        # Position menu above the button
+        menu_pos = btn_pos
+        menu_pos.setY(btn_pos.y() - menu_height)
+        menu.exec(menu_pos)
 
     def _show_help_menu(self) -> None:
         """Show help menu with README options."""

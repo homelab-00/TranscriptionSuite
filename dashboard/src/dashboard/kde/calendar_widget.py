@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from pathlib import Path
 
-from PyQt6.QtCore import QDate, QLocale, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QDate, QLocale, Qt, QMetaObject, QTimer, pyqtSignal, Q_ARG
 from PyQt6.QtGui import QAction, QColor, QFont
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -60,12 +60,13 @@ class DayCell(QFrame):
         self.setObjectName("dayCell")
         if not self._is_future:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(70)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(2)
 
         # Day number label
         self._day_label = QLabel(str(day_date.day) if day_date else "")
@@ -299,16 +300,13 @@ class DayViewImportDialog(QDialog):
         options_label.setObjectName("optionsLabel")
         options_layout.addWidget(options_label)
 
-        checkboxes_layout = QHBoxLayout()
-        checkboxes_layout.setSpacing(24)
-
         self._diarization_checkbox = QCheckBox("Speaker diarization")
         self._diarization_checkbox.setObjectName("optionCheckbox")
-        self._diarization_checkbox.setChecked(True)
+        self._diarization_checkbox.setChecked(False)
         self._diarization_checkbox.setToolTip(
             "Identify and label different speakers in the audio"
         )
-        checkboxes_layout.addWidget(self._diarization_checkbox)
+        options_layout.addWidget(self._diarization_checkbox)
 
         self._word_timestamps_checkbox = QCheckBox("Word-level timestamps")
         self._word_timestamps_checkbox.setObjectName("optionCheckbox")
@@ -316,10 +314,7 @@ class DayViewImportDialog(QDialog):
         self._word_timestamps_checkbox.setToolTip(
             "Include precise timestamps for each word"
         )
-        checkboxes_layout.addWidget(self._word_timestamps_checkbox)
-
-        checkboxes_layout.addStretch()
-        options_layout.addLayout(checkboxes_layout)
+        options_layout.addWidget(self._word_timestamps_checkbox)
 
         layout.addWidget(options_container)
 
@@ -866,7 +861,8 @@ class CalendarWidget(QWidget):
     def _on_day_view_import_complete(self, recording_id: int) -> None:
         """Handle completion of a day view import - refresh calendar."""
         logger.info(f"Day view import complete, recording ID: {recording_id}")
-        self.refresh()
+        # Use QTimer to ensure refresh happens on main thread after dialog closes
+        QTimer.singleShot(100, self._force_refresh)
 
     def _apply_styles(self) -> None:
         """Apply styling to calendar components."""
@@ -874,7 +870,7 @@ class CalendarWidget(QWidget):
             /* Title */
             #calendarTitle {
                 color: #ffffff;
-                font-size: 24px;
+                font-size: 22px;
                 font-weight: bold;
             }
 
@@ -901,28 +897,28 @@ class CalendarWidget(QWidget):
 
             /* Day cells */
             #dayCell {
-                background-color: #1a1a2e;
+                background-color: #131313;
                 border: 1px solid #2d2d2d;
                 border-radius: 4px;
             }
 
             #dayCell:hover {
-                background-color: #252540;
+                background-color: #1e1e1e;
                 border-color: #3d3d3d;
             }
 
             #dayCell[state="selected"] {
-                background-color: #2d4a6d;
-                border: 2px solid #90caf9;
+                background-color: #1e2a3a;
+                border: 2px solid #0AFCCF;
             }
 
             #dayCell[state="today"] {
-                background-color: #1e3a5f;
-                border: 2px solid #90caf9;
+                background-color: #1a2a2a;
+                border: 2px solid #0AFCCF;
             }
 
             #dayCell[state="other-month"] {
-                background-color: #0d0d1a;
+                background-color: #060606;
             }
 
             #dayCell[state="other-month"] #dayNumber {
@@ -930,7 +926,7 @@ class CalendarWidget(QWidget):
             }
 
             #dayCell[state="future"] {
-                background-color: #0d0d1a;
+                background-color: #060606;
             }
 
             #dayCell[state="future"] #dayNumber {
@@ -938,12 +934,12 @@ class CalendarWidget(QWidget):
             }
 
             #dayCell[state="future"]:hover {
-                background-color: #0d0d1a;
+                background-color: #060606;
                 border-color: #2d2d2d;
             }
 
             #dayCell[state="has-recordings"] {
-                background-color: #1e2a3a;
+                background-color: #1a2020;
             }
 
             #dayNumber {
@@ -953,7 +949,7 @@ class CalendarWidget(QWidget):
             }
 
             #recordingIndicator {
-                color: #90caf9;
+                color: #0AFCCF;
                 font-size: 10px;
             }
 
@@ -964,7 +960,7 @@ class CalendarWidget(QWidget):
             }
 
             #timeSlot:hover {
-                background-color: #1e1e2e;
+                background-color: #131313;
             }
 
             #timeLabel {
@@ -981,9 +977,9 @@ class CalendarWidget(QWidget):
             }
 
             #addButton:hover {
-                background-color: #2d2d2d;
-                border-color: #90caf9;
-                color: #90caf9;
+                background-color: #1e1e1e;
+                border-color: #0AFCCF;
+                color: #0AFCCF;
             }
 
             #addButton:disabled {
@@ -993,15 +989,15 @@ class CalendarWidget(QWidget):
 
             /* Recording card in day view */
             #recordingCard {
-                background-color: #1e2a3a;
-                border: 1px solid #2d4a6d;
+                background-color: #131313;
+                border: 1px solid #2d2d2d;
                 border-radius: 8px;
                 min-width: 180px;
             }
 
             #recordingCard:hover {
-                background-color: #263a4f;
-                border-color: #90caf9;
+                background-color: #1e1e1e;
+                border-color: #0AFCCF;
             }
 
             #cardTitle {
@@ -1021,10 +1017,10 @@ class CalendarWidget(QWidget):
             }
 
             #diarizationBadge {
-                background-color: #1e3a5f;
-                border: 1px solid #4a90d9;
+                background-color: #1a2a2a;
+                border: 1px solid #0AFCCF;
                 border-radius: 4px;
-                color: #90caf9;
+                color: #0AFCCF;
                 font-size: 10px;
                 padding: 2px 6px;
             }
@@ -1437,6 +1433,19 @@ class CalendarWidget(QWidget):
         """Refresh the calendar data."""
         self._rebuild_calendar_grid()
         self._schedule_refresh()
+
+    def _force_refresh(self) -> None:
+        """Force refresh with immediate UI update - used after imports."""
+        self._rebuild_calendar_grid()
+        self._schedule_refresh()
+        # Also schedule a delayed update to catch async data load
+        QTimer.singleShot(500, self._delayed_view_update)
+
+    def _delayed_view_update(self) -> None:
+        """Delayed update to ensure day view reflects loaded data."""
+        self._update_calendar_highlights()
+        if self._view_mode == "day" and self._selected_date:
+            self._update_day_view()
 
     def set_api_client(self, api_client: "APIClient") -> None:
         """Update the API client reference."""

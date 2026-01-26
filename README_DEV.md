@@ -47,8 +47,9 @@ Technical documentation for developing and building TranscriptionSuite.
   - [9.1 Running from Source](#91-running-from-source)
   - [9.2 Verbose Logging](#92-verbose-logging)
   - [9.3 Key Modules](#93-key-modules)
-  - [9.4 Server Busy Handling](#94-server-busy-handling)
-  - [9.5 Model Management](#95-model-management)
+  - [9.4 Dashboard Architecture & Refactoring](#94-dashboard-architecture--refactoring)
+  - [9.5 Server Busy Handling](#95-server-busy-handling)
+  - [9.6 Model Management](#96-model-management)
 - [10. Configuration Reference](#10-configuration-reference)
   - [10.1 Server Configuration](#101-server-configuration)
   - [10.2 Dashboard Configuration](#102-dashboard-configuration)
@@ -227,8 +228,32 @@ TranscriptionSuite/
 │   ├── src/dashboard/            # Python package source
 │   │   ├── common/               # Shared code (API client, orchestrator, config)
 │   │   ├── kde/                  # KDE Plasma (PyQt6)
+│   │   │   ├── dashboard.py      # Main window (654 lines)
+│   │   │   ├── server_mixin.py   # Server control methods (739 lines)
+│   │   │   ├── client_mixin.py   # Client control methods (530 lines)
+│   │   │   ├── dialogs.py        # About/README dialogs (458 lines)
+│   │   │   ├── log_window.py     # Log viewer with highlighting (406 lines)
+│   │   │   ├── styles.py         # Stylesheets (566 lines)
+│   │   │   ├── utils.py          # Utilities & constants (106 lines)
+│   │   │   ├── views/            # View creation functions
+│   │   │   │   ├── server_view.py # Server management view (341 lines)
+│   │   │   │   └── client_view.py # Client management view (339 lines)
+│   │   │   ├── tray.py           # System tray
+│   │   │   ├── settings_dialog.py # Settings UI
+│   │   │   ├── notebook_view.py  # Audio notebook
+│   │   │   └── ... (other UI components)
 │   │   ├── gnome/                # GNOME (GTK3 tray + GTK4 Dashboard via D-Bus)
+│   │   │   ├── dashboard.py      # Main window (2799 lines)
+│   │   │   ├── log_window.py     # Log viewer with highlighting (282 lines)
+│   │   │   ├── styles.py         # Stylesheets (236 lines)
+│   │   │   ├── utils.py          # Utilities & constants (115 lines)
+│   │   │   ├── tray.py           # System tray
+│   │   │   ├── settings_dialog.py # Settings UI
+│   │   │   ├── notebook_view.py  # Audio notebook
+│   │   │   └── ... (other UI components)
 │   │   ├── windows/              # Windows (PyQt6)
+│   │   │   ├── tray.py           # System tray
+│   │   │   └── ... (other UI components)
 │   │   └── build/                # PyInstaller spec files
 │   └── pyproject.toml            # Dashboard package + dependencies
 │
@@ -718,6 +743,8 @@ uv run transcription-dashboard --verbose
 
 ### 9.3 Key Modules
 
+**Common (Shared):**
+
 | Module | Purpose |
 |--------|---------|
 | `common/api_client.py` | HTTP client, WebSocket, error handling, backup/export methods |
@@ -725,22 +752,110 @@ uv run transcription-dashboard --verbose
 | `common/docker_manager.py` | Docker server control |
 | `common/setup_wizard.py` | First-time setup |
 | `common/tailscale_resolver.py` | Tailscale IP fallback when DNS fails |
-| `kde/dashboard.py` | KDE Dashboard with sidebar navigation and status lights |
-| `kde/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |
-| `kde/notebook_view.py` | Audio Notebook with Calendar, Search, Import tabs |
-| `kde/calendar_widget.py` | Calendar view with export context menu |
-| `gnome/dashboard.py` | GNOME Dashboard with sidebar navigation and status lights |
-| `gnome/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |
-| `gnome/notebook_view.py` | Audio Notebook view for GNOME |
-| `gnome/calendar_widget.py` | Calendar view with export context menu |
 
-### 9.4 Server Busy Handling
+**KDE (PyQt6) - Modular Architecture:**
+
+| Module | Purpose | Lines |
+|--------|---------|-------|
+| `kde/dashboard.py` | Main window with sidebar, navigation, and lifecycle | 654 |
+| `kde/server_mixin.py` | Server control methods (start/stop, image/volume mgmt, logs) | 739 |
+| `kde/client_mixin.py` | Client control methods (start/stop, models, live transcriber) | 530 |
+| `kde/dialogs.py` | About dialog, README viewer, hamburger menu | 458 |
+| `kde/log_window.py` | Log viewer with syntax highlighting and line numbers | 406 |
+| `kde/styles.py` | Stylesheet definitions for consistent theming | 566 |
+| `kde/utils.py` | Utility functions (path resolution) and constants | 106 |
+| `kde/views/server_view.py` | Server management view UI creation | 341 |
+| `kde/views/client_view.py` | Client management view UI creation | 339 |
+| `kde/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |  |
+| `kde/notebook_view.py` | Audio Notebook with Calendar, Search, Import tabs |  |
+| `kde/calendar_widget.py` | Calendar view with export context menu |  |
+
+**GNOME (GTK4) - Partially Modularized:**
+
+| Module | Purpose | Lines |
+|--------|---------|-------|
+| `gnome/dashboard.py` | Main window with sidebar, navigation, and lifecycle | 2799 |
+| `gnome/log_window.py` | Log viewer with syntax highlighting (extracted) | 282 |
+| `gnome/styles.py` | Stylesheet definitions (extracted) | 236 |
+| `gnome/utils.py` | Utility functions and constants (extracted) | 115 |
+| `gnome/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |  |
+| `gnome/notebook_view.py` | Audio Notebook view for GNOME |  |
+| `gnome/calendar_widget.py` | Calendar view with export context menu |  |
+
+**Architecture Notes:**
+- **KDE**: Fully modularized with mixins (`ServerControlMixin`, `ClientControlMixin`, `DialogsMixin`) for clean separation of concerns. Main dashboard.py is 654 lines.
+- **GNOME**: Partially modularized. Extracted utility modules (utils.py, log_window.py, styles.py) to reduce duplication. Main dashboard.py is 2799 lines (GTK4 API requires more boilerplate).
+- **View Creation**: KDE uses factory functions in `views/` package for server and client views, keeping dashboard.py focused on navigation and lifecycle.
+
+### 9.4 Dashboard Architecture & Refactoring
+
+#### KDE Dashboard Refactoring (Completed)
+
+The KDE dashboard was refactored from a single 4035-line `dashboard.py` file into modular, maintainable components:
+
+**Refactoring Strategy:**
+1. **Mixins for Functionality**: Extracted server and client control logic into reusable mixins
+2. **Utility Modules**: Separated stylesheets, utilities, and constants into dedicated files
+3. **Dialog Management**: Centralized all dialog-related code (About, README viewer, menus)
+4. **View Factories**: Created factory functions for server and client views to keep main dashboard focused
+
+**File Breakdown:**
+
+| Component | File | Lines | Responsibility |
+|-----------|------|-------|-----------------|
+| **Main Window** | `dashboard.py` | 654 | Window setup, navigation, lifecycle, view management |
+| **Server Control** | `server_mixin.py` | 739 | Docker server start/stop, image/volume management, server logs |
+| **Client Control** | `client_mixin.py` | 530 | Client start/stop, model management, live transcriber, notifications |
+| **Dialogs** | `dialogs.py` | 458 | About dialog, README viewer, hamburger menu, help menu |
+| **Log Viewer** | `log_window.py` | 406 | Syntax-highlighted log display with line numbers |
+| **Stylesheets** | `styles.py` | 566 | QSS stylesheets for consistent theming |
+| **Utilities** | `utils.py` | 106 | Path resolution, constants (GitHub URLs) |
+| **Server View** | `views/server_view.py` | 341 | Server management UI (status, controls, volumes) |
+| **Client View** | `views/client_view.py` | 339 | Client management UI (status, controls, live preview) |
+
+**Total**: 4,139 lines across 9 files (all under 800 lines each)
+
+**Benefits:**
+- **Maintainability**: Each file has a single, clear responsibility
+- **Testability**: Mixins can be tested independently
+- **Reusability**: Mixins can be shared with other UI frameworks if needed
+- **Readability**: Reduced cognitive load per file
+- **Scalability**: Easy to add new features without bloating main dashboard
+
+**Mixin Architecture:**
+
+```python
+class DashboardWindow(ServerControlMixin, ClientControlMixin, DialogsMixin, QMainWindow):
+    """Main dashboard inherits all control logic from mixins."""
+    # Focuses on: window setup, navigation, view management, lifecycle
+```
+
+#### GNOME Dashboard Partial Refactoring
+
+The GNOME dashboard was partially refactored to extract common utilities:
+
+| Component | File | Lines | Status |
+|-----------|------|-------|--------|
+| **Main Window** | `dashboard.py` | 2799 | Monolithic (GTK4 API requires more boilerplate) |
+| **Log Viewer** | `log_window.py` | 282 | Extracted (shared with KDE) |
+| **Stylesheets** | `styles.py` | 236 | Extracted (shared with KDE) |
+| **Utilities** | `utils.py` | 115 | Extracted (shared with KDE) |
+
+**Note**: GNOME dashboard remains larger due to GTK4's verbose API requirements. Full mixin-based refactoring would require significant restructuring of GTK4 event handling.
+
+#### Future Refactoring Opportunities
+
+- **GNOME Dashboard**: Extract view creation functions similar to KDE
+- **Windows Dashboard**: Apply mixin pattern once fully implemented
+- **Shared Mixins**: Consider moving `ServerControlMixin` and `ClientControlMixin` to `common/` for potential reuse across platforms
+
+### 9.5 Server Busy Handling
 
 The dashboard handles server busy conditions automatically:
 - HTTP transcription: Server returns 409, dashboard shows "Server Busy" notification
 - WebSocket recording: Server sends `session_busy` message, dashboard shows error
 
-### 9.5 Model Management
+### 9.6 Model Management
 
 The dashboard provides a convenient way to manage GPU memory via the system tray and client view:
 - Automatically disabled when server is stopped or becomes unhealthy

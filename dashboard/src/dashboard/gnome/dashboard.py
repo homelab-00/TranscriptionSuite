@@ -243,8 +243,8 @@ class DashboardWindow(_get_dashboard_base()):
 
         self.set_content(main_box)
 
-        # Start on notebook view by default
-        self._navigate_to(View.NOTEBOOK, add_to_history=False)
+        # Start on home view by default
+        self._navigate_to(View.WELCOME, add_to_history=False)
 
         # Connect close request
         self.connect("close-request", self._on_close_request)
@@ -288,19 +288,6 @@ class DashboardWindow(_get_dashboard_base()):
         home_btn.connect("clicked", lambda _: self._go_home())
         nav_box.append(home_btn)
 
-        # Notebook button
-        notebook_btn = Gtk.Button(label="  Notebook")
-        notebook_btn.set_icon_name("accessories-text-editor-symbolic")
-        notebook_btn.add_css_class("sidebar-button")
-        notebook_btn.connect("clicked", lambda _: self._navigate_to(View.NOTEBOOK))
-        nav_box.append(notebook_btn)
-
-        # Separator
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        sep.set_margin_top(8)
-        sep.set_margin_bottom(8)
-        nav_box.append(sep)
-
         # Server button with status light
         server_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         server_btn = Gtk.Button(label="  Docker Server")
@@ -330,6 +317,19 @@ class DashboardWindow(_get_dashboard_base()):
         self._client_status_light.set_margin_end(8)
         client_box.append(self._client_status_light)
         nav_box.append(client_box)
+
+        # Separator
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(8)
+        sep.set_margin_bottom(8)
+        nav_box.append(sep)
+
+        # Notebook button
+        notebook_btn = Gtk.Button(label="  Notebook")
+        notebook_btn.set_icon_name("accessories-text-editor-symbolic")
+        notebook_btn.add_css_class("sidebar-button")
+        notebook_btn.connect("clicked", lambda _: self._navigate_to(View.NOTEBOOK))
+        nav_box.append(notebook_btn)
 
         sidebar.append(nav_box)
 
@@ -1526,7 +1526,7 @@ class DashboardWindow(_get_dashboard_base()):
 
     def _start_status_timer(self) -> None:
         """Start periodic status updates."""
-        self._status_timer_id = GLib.timeout_add_seconds(5, self._on_status_tick)
+        self._status_timer_id = GLib.timeout_add_seconds(1, self._on_status_tick)
         # Initial refresh
         self._refresh_home_status()
         self._refresh_server_status()
