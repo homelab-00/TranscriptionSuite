@@ -50,6 +50,24 @@ class DockerResult:
     status: ServerStatus | None = None
 
 
+@dataclass
+class DockerImageInfo:
+    """Information about a local Docker image."""
+
+    repository: str
+    tag: str
+    image_id: str
+    created: str  # ISO format datetime string
+    size: str
+    full_name: str  # repository:tag
+
+    def display_name(self) -> str:
+        """Return a user-friendly display name with tag, date, and size."""
+        # Parse date to show just YYYY-MM-DD
+        date_part = self.created.split()[0] if self.created else "unknown"
+        return f"{self.tag} - {date_part} - {self.size}"
+
+
 class DockerPullWorker(threading.Thread):
     """
     Background worker for Docker pull operations.
@@ -264,6 +282,180 @@ class DockerPullWorker(threading.Thread):
             return self._cancelled
 
 
+class DockerServerWorker(threading.Thread):
+    """
+    Background worker for Docker server start operations.
+
+    Runs docker compose up -d in a separate thread with progress streaming
+    and cancellation support.
+    """
+
+    def __init__(
+        self,
+        cmd: list[str],
+        config_dir: Path,
+        env: dict[str, str],
+        mode: ServerMode,
+        progress_callback: Callable[[str], None],
+        complete_callback: Callable[[DockerResult], None],
+        system: str = "Linux",
+    ):
+        """
+        Initialize the server start worker.
+
+        Args:
+            cmd: Docker compose command to execute
+            config_dir: Working directory for the command
+            env: Environment variables to set
+            mode: Server mode (for success message)
+            progress_callback: Called with progress messages (from worker thread)
+            complete_callback: Called when complete with result (from worker thread)
+            system: Operating system name for platform-specific handling
+        """
+        super().__init__(daemon=True, name="DockerServerWorker")
+        self._cmd = cmd
+        self._config_dir = config_dir
+        self._env = env
+        self._mode = mode
+        self._progress_callback = progress_callback
+        self._complete_callback = complete_callback
+        self._system = system
+        self._process: subprocess.Popen | None = None
+        self._cancelled = False
+        self._lock = threading.Lock()
+
+    def run(self) -> None:
+        """Execute docker compose up -d in background thread."""
+        try:
+            self._progress_callback("Starting Docker container...")
+
+            # Build full environment
+            full_env = os.environ.copy()
+            full_env.update(self._env)
+
+            # Hide console window on Windows
+            startupinfo = None
+            creationflags = 0
+            if self._system == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                creationflags = subprocess.CREATE_NO_WINDOW
+
+            # Start process with pipes for output streaming
+            self._process = subprocess.Popen(
+                self._cmd,
+                cwd=self._config_dir,
+                env=full_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # Line buffered
+                startupinfo=startupinfo,
+                creationflags=creationflags if self._system == "Windows" else 0,
+            )
+
+            # Stream output line by line
+            if self._process.stdout:
+                try:
+                    for line in iter(self._process.stdout.readline, ""):
+                        if self._cancelled:
+                            break
+
+                        line = line.strip()
+                        if line:
+                            self._progress_callback(line)
+                except ValueError:
+                    # stdout was closed during cancel - this is expected
+                    logger.debug("stdout closed during read (cancel requested)")
+
+            # Wait for completion (if not already terminated)
+            try:
+                returncode = self._process.wait()
+            except Exception:
+                # Process already terminated
+                returncode = -1
+
+            with self._lock:
+                if self._cancelled:
+                    self._complete_callback(
+                        DockerResult(False, "Server start cancelled by user.")
+                    )
+                elif returncode == 0:
+                    # Success message based on mode
+                    if self._mode == ServerMode.LOCAL:
+                        msg = (
+                            "Server started (Local Mode)\n\n"
+                            "Server URL: http://localhost:8000\n"
+                            "Web UI: http://localhost:8000/record\n"
+                            "Notebook: http://localhost:8000/notebook"
+                        )
+                    else:
+                        msg = (
+                            "Server started (Remote/TLS Mode)\n\n"
+                            "HTTPS URL: https://localhost:8443\n"
+                            "Web UI: https://localhost:8443/record\n"
+                            "Notebook: https://localhost:8443/notebook"
+                        )
+                    self._progress_callback("Server started successfully!")
+                    self._complete_callback(
+                        DockerResult(True, msg, ServerStatus.RUNNING)
+                    )
+                else:
+                    self._complete_callback(
+                        DockerResult(
+                            False, f"Server start failed with exit code {returncode}"
+                        )
+                    )
+
+        except FileNotFoundError:
+            self._complete_callback(
+                DockerResult(False, "Docker is not installed or not in PATH.")
+            )
+        except Exception as e:
+            logger.exception("Server start failed")
+            self._complete_callback(DockerResult(False, f"Server start error: {e}"))
+        finally:
+            self._process = None
+
+    def cancel(self) -> None:
+        """Cancel the server start operation."""
+        with self._lock:
+            self._cancelled = True
+            if self._process and self._process.poll() is None:
+                logger.info("Cancelling Docker server start...")
+                try:
+                    # Close stdout to unblock the readline() loop in the thread
+                    if self._process.stdout:
+                        try:
+                            self._process.stdout.close()
+                        except Exception:
+                            pass
+
+                    # Terminate the process
+                    self._process.terminate()
+
+                    # Give it a moment to terminate gracefully
+                    try:
+                        self._process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        # Force kill if it didn't terminate
+                        logger.warning("Docker compose didn't terminate, killing...")
+                        self._process.kill()
+                        try:
+                            self._process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            logger.error("Failed to kill Docker compose process")
+                except Exception as e:
+                    logger.warning(f"Error terminating Docker compose: {e}")
+
+    @property
+    def is_cancelled(self) -> bool:
+        """Check if cancellation was requested."""
+        with self._lock:
+            return self._cancelled
+
+
 class DockerManager:
     """
     Manages Docker server operations for TranscriptionSuite.
@@ -273,7 +465,7 @@ class DockerManager:
     """
 
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
-    CONTAINER_NAME = "transcription-suite"
+    CONTAINER_NAME = "transcriptionsuite-container"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
 
     def __init__(self, config_dir: Path | None = None):
@@ -474,40 +666,139 @@ class DockerManager:
             return None, None
 
     def image_exists_locally(self) -> bool:
-        """Check if the Docker image exists locally."""
+        """Check if any transcriptionsuite-server Docker image exists locally."""
         try:
-            result = self._run_command(
-                ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"]
-            )
-            if result.returncode != 0:
-                return False
-            return self.DOCKER_IMAGE in result.stdout
+            # Check if any image with our repository exists (any tag)
+            images = self.list_local_images()
+            return len(images) > 0
         except Exception:
             return False
 
     def get_image_created_date(self) -> str | None:
-        """Get the creation date of the local Docker image."""
+        """Get the creation date of the most recent local Docker image."""
         try:
-            result = self._run_command(
-                ["docker", "images", self.DOCKER_IMAGE, "--format", "{{.CreatedAt}}"]
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().split()[0]  # Return just the date part
+            most_recent = self.get_most_recent_image()
+            if most_recent:
+                # Return just the date part (YYYY-MM-DD)
+                return most_recent.created.split()[0] if most_recent.created else None
             return None
         except Exception:
             return None
 
     def get_image_size(self) -> str | None:
-        """Get the size of the local Docker image."""
+        """Get the size of the most recent local Docker image."""
         try:
-            result = self._run_command(
-                ["docker", "images", self.DOCKER_IMAGE, "--format", "{{.Size}}"]
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+            most_recent = self.get_most_recent_image()
+            if most_recent:
+                return most_recent.size
             return None
         except Exception:
             return None
+
+    def list_local_images(
+        self, repository_filter: str = "transcriptionsuite-server"
+    ) -> list[DockerImageInfo]:
+        """
+        List all local Docker images matching the repository filter.
+
+        Args:
+            repository_filter: Substring to filter repository names (default: transcriptionsuite-server)
+
+        Returns:
+            List of DockerImageInfo sorted by creation date (newest first)
+        """
+        images: list[DockerImageInfo] = []
+        try:
+            # Get image info with detailed format
+            result = self._run_command(
+                [
+                    "docker",
+                    "images",
+                    "--format",
+                    "{{.Repository}}|{{.Tag}}|{{.ID}}|{{.CreatedAt}}|{{.Size}}",
+                ]
+            )
+            if result.returncode != 0:
+                return images
+
+            for line in result.stdout.strip().split("\n"):
+                if not line or "|" not in line:
+                    continue
+                parts = line.split("|")
+                if len(parts) < 5:
+                    continue
+
+                repository, tag, image_id, created, size = parts[:5]
+
+                # Filter by repository name
+                if repository_filter not in repository:
+                    continue
+
+                # Skip <none> tags
+                if tag == "<none>":
+                    continue
+
+                images.append(
+                    DockerImageInfo(
+                        repository=repository,
+                        tag=tag,
+                        image_id=image_id,
+                        created=created,
+                        size=size,
+                        full_name=f"{repository}:{tag}",
+                    )
+                )
+
+            # Sort by created date (newest first)
+            # CreatedAt format: "2025-01-20 15:30:45 +0200 EET"
+            def parse_date(img: DockerImageInfo) -> str:
+                # Return created string for sorting (ISO-ish format sorts correctly)
+                return img.created
+
+            images.sort(key=parse_date, reverse=True)
+            return images
+
+        except Exception as e:
+            logger.error(f"Failed to list local images: {e}")
+            return images
+
+    def get_most_recent_image(self) -> DockerImageInfo | None:
+        """
+        Get the most recent local image by build date.
+
+        Returns:
+            DockerImageInfo for the newest image, or None if no images found
+        """
+        images = self.list_local_images()
+        return images[0] if images else None
+
+    def get_image_for_selection(self, selection: str) -> str:
+        """
+        Get the full image name for a given selection.
+
+        Args:
+            selection: Either "auto" for most recent, or a specific tag
+
+        Returns:
+            Full image name (repository:tag) to use
+        """
+        if selection == "auto" or not selection:
+            # Use most recent by build date
+            most_recent = self.get_most_recent_image()
+            if most_recent:
+                logger.info(f"Auto-selected most recent image: {most_recent.full_name}")
+                return most_recent.full_name
+            # Fallback to default
+            return self.DOCKER_IMAGE
+
+        # Find image with matching tag
+        images = self.list_local_images()
+        for img in images:
+            if img.tag == selection:
+                return img.full_name
+
+        # Fallback to default
+        return self.DOCKER_IMAGE
 
     def volume_exists(self, volume_name: str) -> bool:
         """
@@ -837,7 +1128,7 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        volume_name = "transcription-suite-data"
+        volume_name = "transcriptionsuite-data"
         log(f"Removing data volume {volume_name}...")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
@@ -927,7 +1218,7 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        volume_name = "transcription-suite-models"
+        volume_name = "transcriptionsuite-models"
         log(f"Removing models volume {volume_name}...")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
@@ -945,6 +1236,7 @@ class DockerManager:
         self,
         mode: ServerMode = ServerMode.LOCAL,
         progress_callback: Callable[[str], None] | None = None,
+        image_selection: str = "auto",
     ) -> DockerResult:
         """
         Start the TranscriptionSuite server.
@@ -952,6 +1244,8 @@ class DockerManager:
         Args:
             mode: Server mode (local HTTP or remote HTTPS)
             progress_callback: Optional callback for progress messages
+            image_selection: Image to use - "auto" for most recent by build date,
+                           or a specific tag name
 
         Returns:
             DockerResult with success status and message
@@ -984,6 +1278,16 @@ class DockerManager:
 
         # Set USER_CONFIG_DIR for the compose file
         env["USER_CONFIG_DIR"] = str(self.config_dir)
+
+        # Determine which image to use based on selection
+        selected_image = self.get_image_for_selection(image_selection)
+        # Extract just the tag from the full image name for the TAG env var
+        if ":" in selected_image:
+            tag = selected_image.split(":")[-1]
+        else:
+            tag = "latest"
+        env["TAG"] = tag
+        log(f"Using image tag: {tag}")
 
         # Handle env file
         env_file_args = []
@@ -1046,17 +1350,22 @@ class DockerManager:
                     env=env,
                 )
 
-        # Check if image exists
-        if self.image_exists_locally():
-            log(f"Using existing image: {self.DOCKER_IMAGE}")
+        # Check if selected image exists
+        images = self.list_local_images()
+        image_found = any(img.full_name == selected_image for img in images)
+        if image_found:
+            log(f"Using image: {selected_image}")
         else:
-            log("Image will be pulled on first run")
+            log(
+                f"Image {selected_image} not found locally, will be pulled on first run"
+            )
 
         # Start the container
         log(f"Starting TranscriptionSuite server ({mode.value} mode)...")
 
         cmd = ["docker", "compose"] + env_file_args + ["up", "-d"]
-        result = self._run_command(cmd, cwd=self.config_dir, env=env)
+        # No timeout - may need to pull image on first run which can take a long time
+        result = self._run_command(cmd, cwd=self.config_dir, env=env, timeout=None)
 
         if result.returncode != 0:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
@@ -1079,6 +1388,163 @@ class DockerManager:
             )
 
         return DockerResult(True, msg, ServerStatus.RUNNING)
+
+    def start_server_async(
+        self,
+        mode: ServerMode,
+        progress_callback: Callable[[str], None],
+        complete_callback: Callable[[DockerResult], None],
+        image_selection: str = "auto",
+    ) -> DockerServerWorker | DockerResult:
+        """
+        Start the TranscriptionSuite server asynchronously.
+
+        This method starts a background thread that executes docker compose up -d
+        with real-time progress reporting. The UI remains responsive during startup.
+
+        Pre-flight validation is done synchronously (fast), and if it fails,
+        a DockerResult is returned immediately instead of a worker.
+
+        Args:
+            mode: Server mode (local HTTP or remote HTTPS)
+            progress_callback: Called with progress messages (from worker thread).
+                              Caller is responsible for thread-safe UI updates.
+            complete_callback: Called when operation completes with result
+                              (from worker thread). Caller is responsible for
+                              thread-safe UI updates.
+            image_selection: Image to use - "auto" for most recent by build date,
+                           or a specific tag name
+
+        Returns:
+            DockerServerWorker instance if validation passed (call .cancel() to abort),
+            or DockerResult if pre-flight validation failed.
+        """
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            progress_callback(msg)
+
+        # Pre-flight checks (synchronous - these are fast)
+        available, msg = self.is_docker_available()
+        if not available:
+            return DockerResult(False, msg)
+
+        # Check for docker-compose.yml
+        compose_file = self._find_compose_file()
+        if not compose_file:
+            return DockerResult(
+                False,
+                f"docker-compose.yml not found in {self.config_dir}. Run setup first.",
+            )
+
+        # Find config and env files
+        config_file = self._find_config_file()
+        env_file = self._find_env_file()
+
+        # Build environment variables
+        env = {}
+
+        # Set USER_CONFIG_DIR for the compose file
+        env["USER_CONFIG_DIR"] = str(self.config_dir)
+
+        # Determine which image to use based on selection
+        selected_image = self.get_image_for_selection(image_selection)
+        # Extract just the tag from the full image name for the TAG env var
+        if ":" in selected_image:
+            tag = selected_image.split(":")[-1]
+        else:
+            tag = "latest"
+        env["TAG"] = tag
+        log(f"Using image tag: {tag}")
+
+        # Handle env file
+        env_file_args: list[str] = []
+        if env_file:
+            log(f"Using secrets from: {env_file}")
+            env_file_args = ["--env-file", str(env_file)]
+        else:
+            log("No .env file found (diarization may not work without HF token)")
+
+        # Handle mode-specific configuration
+        if mode == ServerMode.REMOTE:
+            if not config_file:
+                return DockerResult(
+                    False,
+                    "config.yaml required for remote mode. Run setup first.",
+                )
+
+            # Parse TLS paths from config
+            cert_path, key_path = self._parse_tls_paths_from_config(config_file)
+
+            if not cert_path:
+                return DockerResult(
+                    False,
+                    "remote_server.tls.host_cert_path not set in config.yaml",
+                )
+            if not key_path:
+                return DockerResult(
+                    False,
+                    "remote_server.tls.host_key_path not set in config.yaml",
+                )
+            if not Path(cert_path).exists():
+                return DockerResult(False, f"Certificate file not found: {cert_path}")
+            if not Path(key_path).exists():
+                return DockerResult(False, f"Key file not found: {key_path}")
+
+            log(f"Certificate: {cert_path}")
+            log(f"Key: {key_path}")
+
+            env["TLS_ENABLED"] = "true"
+            env["TLS_CERT_PATH"] = cert_path
+            env["TLS_KEY_PATH"] = key_path
+        else:
+            log(
+                "Using config: "
+                + (str(config_file) if config_file else "container defaults")
+            )
+
+        # Check for existing container with mode conflict
+        current_status = self.get_server_status()
+        if current_status in (ServerStatus.RUNNING, ServerStatus.STOPPED):
+            current_mode = self.get_current_mode()
+            if current_mode and current_mode != mode:
+                log(
+                    f"Mode conflict: container is in {current_mode.value} mode, switching to {mode.value}"
+                )
+                log("Removing existing container...")
+                self._run_command(
+                    ["docker", "compose", "down"],
+                    cwd=self.config_dir,
+                    env=env,
+                )
+
+        # Check if selected image exists
+        images = self.list_local_images()
+        image_found = any(img.full_name == selected_image for img in images)
+        if image_found:
+            log(f"Using image: {selected_image}")
+        else:
+            log(
+                f"Image {selected_image} not found locally, will be pulled on first run"
+            )
+
+        # Build the command
+        cmd = ["docker", "compose"] + env_file_args + ["up", "-d"]
+        log(f"Starting TranscriptionSuite server ({mode.value} mode)...")
+
+        # Create and start the worker
+        worker = DockerServerWorker(
+            cmd=cmd,
+            config_dir=self.config_dir,
+            env=env,
+            mode=mode,
+            progress_callback=progress_callback,
+            complete_callback=complete_callback,
+            system=self.system,
+        )
+        worker.start()
+        logger.info(f"Started async server start for {mode.value} mode")
+        return worker
 
     def stop_server(
         self, progress_callback: Callable[[str], None] | None = None

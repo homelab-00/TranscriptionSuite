@@ -15,7 +15,7 @@ router = APIRouter()
 @router.get("/health")
 async def health_check() -> Dict[str, str]:
     """Basic health check endpoint (no auth required)."""
-    return {"status": "healthy", "service": "transcription-suite"}
+    return {"status": "healthy", "service": "transcriptionsuite"}
 
 
 @router.get("/ready")

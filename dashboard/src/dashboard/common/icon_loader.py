@@ -62,6 +62,10 @@ class IconLoader:
             "theme_names": ["audio-input-microphone", "microphone"],
             "standard_pixmap": None,  # No good Windows equivalent
         },
+        "notebook": {
+            "theme_names": ["folder-open"],
+            "standard_pixmap": QStyle.StandardPixmap.SP_FileIcon,
+        },
         "menu": {
             "theme_names": ["application-menu", "open-menu-symbolic", "view-more"],
             "standard_pixmap": None,  # Use hamburger text ☰ instead

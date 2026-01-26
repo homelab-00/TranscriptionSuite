@@ -149,9 +149,9 @@ DOCKER_COMPOSE_LINUX = """# TranscriptionSuite Docker Compose Configuration
 #     USER_CONFIG_DIR=~/.config/TranscriptionSuite docker compose up -d
 
 services:
-  transcription-suite:
-    image: ghcr.io/homelab-00/transcriptionsuite-server:latest
-    container_name: transcription-suite
+  transcriptionsuite:
+    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
+    container_name: transcriptionsuite-container
 
     # Use host network mode for direct access to host services (LM Studio)
     # Note: Ports are exposed directly on host (no port mapping needed)
@@ -205,9 +205,9 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-suite-data
+    name: transcriptionsuite-data
   huggingface-models:
-    name: transcription-suite-models
+    name: transcriptionsuite-models
 """
 
 DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
@@ -230,9 +230,9 @@ DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
 #     docker compose up -d
 
 services:
-  transcription-suite:
-    image: ghcr.io/homelab-00/transcriptionsuite-server:latest
-    container_name: transcription-suite
+  transcriptionsuite:
+    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
+    container_name: transcriptionsuite-container
 
     # Windows: Use bridge networking with explicit port mappings
     # (network_mode: "host" doesn't work on Windows Docker Desktop)
@@ -289,9 +289,9 @@ services:
 
 volumes:
   transcription-data:
-    name: transcription-suite-data
+    name: transcriptionsuite-data
   huggingface-models:
-    name: transcription-suite-models
+    name: transcriptionsuite-models
 """
 
 ENV_EXAMPLE = """# TranscriptionSuite - Environment variables
@@ -537,7 +537,9 @@ class SetupWizard:
 
         try:
             compose_file.write_text(template)
-            logger.info(f"Created docker-compose.yml at {compose_file} (platform: {self.system})")
+            logger.info(
+                f"Created docker-compose.yml at {compose_file} (platform: {self.system})"
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to create docker-compose.yml: {e}")

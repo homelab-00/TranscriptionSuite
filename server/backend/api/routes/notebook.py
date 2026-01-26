@@ -15,7 +15,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -27,6 +36,7 @@ from server.config import get_config
 from server.database.database import (
     delete_recording,
     get_all_recordings,
+    get_db_path,
     get_recording,
     get_recordings_by_date_range,
     get_segments,
@@ -35,6 +45,7 @@ from server.database.database import (
     update_recording_title,
     update_recording_summary,
 )
+from server.database.backup import DatabaseBackupManager
 
 logger = logging.getLogger(__name__)
 
@@ -560,4 +571,314 @@ async def get_calendar_data(
 
     except Exception as e:
         logger.error(f"Failed to get calendar data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/recordings/{recording_id}/export")
+async def export_recording(
+    recording_id: int,
+    format: str = Query("txt", description="Export format: 'txt' or 'json'"),
+) -> Response:
+    """
+    Export a recording's transcription in a human-readable format.
+
+    Includes:
+    - Recording metadata (title, date, duration)
+    - Full transcription text
+    - Word-level timestamps (if present)
+    - Speaker diarization labels (if present)
+
+    Formats:
+    - txt: Human-readable text format
+    - json: Machine-readable JSON format
+    """
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    segments = get_segments(recording_id)
+    words = get_words(recording_id)
+
+    # Parse recording date
+    recorded_at = recording.get("recorded_at", "")
+    try:
+        rec_dt = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+        date_str = rec_dt.strftime("%B %d, %Y at %I:%M %p")
+    except (ValueError, AttributeError):
+        date_str = recorded_at
+
+    # Format duration
+    duration = recording.get("duration_seconds", 0)
+    if duration < 60:
+        duration_str = f"{int(duration)} seconds"
+    elif duration < 3600:
+        mins = int(duration // 60)
+        secs = int(duration % 60)
+        duration_str = f"{mins} min {secs} sec"
+    else:
+        hours = int(duration // 3600)
+        mins = int((duration % 3600) // 60)
+        duration_str = f"{hours} hr {mins} min"
+
+    title = recording.get("title") or recording.get("filename") or "Recording"
+    has_diarization = bool(recording.get("has_diarization"))
+
+    if format.lower() == "json":
+        # JSON export with full data
+        import json
+
+        export_data = {
+            "metadata": {
+                "title": title,
+                "recorded_at": recorded_at,
+                "duration_seconds": duration,
+                "word_count": recording.get("word_count", 0),
+                "has_diarization": has_diarization,
+                "summary": recording.get("summary"),
+            },
+            "segments": [
+                {
+                    "speaker": seg.get("speaker"),
+                    "text": seg.get("text", ""),
+                    "start_time": seg.get("start_time", 0),
+                    "end_time": seg.get("end_time", 0),
+                }
+                for seg in segments
+            ],
+            "words": [
+                {
+                    "word": w.get("word", ""),
+                    "start_time": w.get("start_time", 0),
+                    "end_time": w.get("end_time", 0),
+                    "confidence": w.get("confidence"),
+                }
+                for w in words
+            ]
+            if words
+            else None,
+        }
+
+        content = json.dumps(export_data, indent=2, ensure_ascii=False)
+        filename = f"{title.replace(' ', '_')}_export.json"
+        media_type = "application/json"
+    else:
+        # Human-readable text export
+        lines = []
+        lines.append("=" * 60)
+        lines.append(f"TRANSCRIPTION EXPORT")
+        lines.append("=" * 60)
+        lines.append("")
+        lines.append(f"Title: {title}")
+        lines.append(f"Date: {date_str}")
+        lines.append(f"Duration: {duration_str}")
+        lines.append(f"Word Count: {recording.get('word_count', 0)}")
+        if has_diarization:
+            lines.append("Speaker Diarization: Yes")
+        lines.append("")
+
+        if recording.get("summary"):
+            lines.append("-" * 40)
+            lines.append("SUMMARY")
+            lines.append("-" * 40)
+            lines.append(recording["summary"])
+            lines.append("")
+
+        lines.append("-" * 40)
+        lines.append("TRANSCRIPTION")
+        lines.append("-" * 40)
+        lines.append("")
+
+        if has_diarization and segments:
+            # Group by speaker with timestamps
+            current_speaker = None
+            for seg in segments:
+                speaker = seg.get("speaker") or "Unknown"
+                start = seg.get("start_time", 0)
+                text = seg.get("text", "").strip()
+
+                # Format timestamp
+                mins = int(start // 60)
+                secs = int(start % 60)
+                timestamp = f"[{mins:02d}:{secs:02d}]"
+
+                if speaker != current_speaker:
+                    lines.append("")
+                    lines.append(f"{speaker}:")
+                    current_speaker = speaker
+
+                lines.append(f"  {timestamp} {text}")
+        else:
+            # Simple text output with timestamps
+            for seg in segments:
+                start = seg.get("start_time", 0)
+                text = seg.get("text", "").strip()
+                mins = int(start // 60)
+                secs = int(start % 60)
+                lines.append(f"[{mins:02d}:{secs:02d}] {text}")
+
+        # Add word-level timestamps section if present
+        if words:
+            lines.append("")
+            lines.append("-" * 40)
+            lines.append("WORD-LEVEL TIMESTAMPS")
+            lines.append("-" * 40)
+            lines.append("")
+
+            word_lines = []
+            for w in words:
+                word = w.get("word", "")
+                start = w.get("start_time", 0)
+                end = w.get("end_time", 0)
+                conf = w.get("confidence")
+                conf_str = f" ({conf:.2f})" if conf is not None else ""
+                word_lines.append(f"{word} [{start:.2f}s-{end:.2f}s]{conf_str}")
+
+            # Group words into lines of ~80 chars
+            current_line = []
+            current_len = 0
+            for wl in word_lines:
+                if current_len + len(wl) + 2 > 80 and current_line:
+                    lines.append("  ".join(current_line))
+                    current_line = [wl]
+                    current_len = len(wl)
+                else:
+                    current_line.append(wl)
+                    current_len += len(wl) + 2
+            if current_line:
+                lines.append("  ".join(current_line))
+
+        lines.append("")
+        lines.append("=" * 60)
+        lines.append("End of Export")
+        lines.append("=" * 60)
+
+        content = "\n".join(lines)
+        filename = f"{title.replace(' ', '_')}_export.txt"
+        media_type = "text/plain; charset=utf-8"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+def _get_backup_manager() -> DatabaseBackupManager:
+    """Get the backup manager instance with configured paths."""
+    config = get_config()
+    db_path = get_db_path()
+    backup_dir = db_path.parent / "backups"
+    max_backups = config.get("backup", "max_backups", default=10)
+    return DatabaseBackupManager(
+        db_path=db_path,
+        backup_dir=backup_dir,
+        max_backups=max_backups,
+    )
+
+
+@router.get("/backups")
+async def list_backups() -> Dict[str, Any]:
+    """
+    List all available database backups.
+
+    Returns:
+        Dict with list of backups and their metadata
+    """
+    try:
+        manager = _get_backup_manager()
+        backups = manager.list_backups_with_info()
+        return {
+            "backups": backups,
+            "count": len(backups),
+        }
+    except Exception as e:
+        logger.error(f"Failed to list backups: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/backup")
+async def create_backup() -> Dict[str, Any]:
+    """
+    Create a manual database backup.
+
+    Returns:
+        Dict with backup info if successful
+    """
+    try:
+        manager = _get_backup_manager()
+        backup_path = manager.create_backup()
+
+        if backup_path:
+            info = manager.get_backup_info(backup_path)
+            return {
+                "success": True,
+                "message": "Backup created successfully",
+                "backup": info,
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create backup")
+
+    except Exception as e:
+        logger.error(f"Failed to create backup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RestoreRequest(BaseModel):
+    """Request body for restore operation."""
+
+    filename: str
+
+
+@router.post("/restore")
+async def restore_backup(body: RestoreRequest) -> Dict[str, Any]:
+    """
+    Restore the database from a backup.
+
+    This operation:
+    1. Creates a safety backup of the current database
+    2. Verifies the backup file integrity
+    3. Restores the database from the backup
+
+    Warning: This will replace all current data with the backup data.
+    """
+    try:
+        manager = _get_backup_manager()
+
+        # Find the backup file
+        backups = manager.get_all_backups()
+        backup_path = None
+        for b in backups:
+            if b.name == body.filename:
+                backup_path = b
+                break
+
+        if not backup_path:
+            raise HTTPException(
+                status_code=404, detail=f"Backup not found: {body.filename}"
+            )
+
+        # Verify backup is valid
+        if not manager.verify_backup(backup_path):
+            raise HTTPException(
+                status_code=400, detail="Backup file is invalid or corrupted"
+            )
+
+        # Perform restore
+        success = manager.restore_backup(backup_path)
+
+        if success:
+            return {
+                "success": True,
+                "message": f"Database restored from {body.filename}",
+                "restored_from": body.filename,
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Restore operation failed")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to restore backup: {e}")
         raise HTTPException(status_code=500, detail=str(e))

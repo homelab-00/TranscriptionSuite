@@ -32,8 +32,7 @@ _log_time("stdlib imports done")
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse  # noqa: E402
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
 _log_time("fastapi imports done")
@@ -160,15 +159,6 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
         # Allow public routes without authentication
         if path in PUBLIC_ROUTES or path.startswith(PUBLIC_PREFIXES):
-            return await call_next(request)
-
-        # Allow /record from localhost without authentication
-        client_host = request.client.host if request.client else None
-        if (path == "/record" or path.startswith("/record/")) and client_host in (
-            "127.0.0.1",
-            "::1",
-            "localhost",
-        ):
             return await call_next(request)
 
         # Check for valid authentication
@@ -351,36 +341,6 @@ def create_app(config_path: Path | None = None) -> FastAPI:
         )
 
     return app
-
-
-def mount_frontend(app: FastAPI, frontend_path: Path, mount_path: str = "/") -> None:
-    """
-    Mount a frontend SPA to the application.
-
-    Args:
-        app: FastAPI application
-        frontend_path: Path to the built frontend (dist directory)
-        mount_path: URL path to mount at
-    """
-    if not frontend_path.exists():
-        logger.warning(f"Frontend path not found: {frontend_path}")
-        return
-
-    # Mount assets directory
-    assets_path = frontend_path / "assets"
-    if assets_path.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
-
-    # Catch-all route for SPA
-    @app.get("/{path:path}", include_in_schema=False)
-    async def serve_frontend(path: str) -> FileResponse:
-        file_path = frontend_path / path
-        if file_path.is_file():
-            return FileResponse(file_path)
-        # Return index.html for SPA routing
-        return FileResponse(frontend_path / "index.html")
-
-    logger.info(f"Frontend mounted from {frontend_path}")
 
 
 # Create default app instance
@@ -587,73 +547,6 @@ AUTH_PAGE_HTML = """
 """
 
 
-# Mount frontends in Docker environment
-# Frontends are built and copied to /app/static/ during Docker build
-_static_dir = Path("/app/static")
-if _static_dir.exists():
-    # Mount unified frontend for all UI routes
-    _frontend_dir = _static_dir / "frontend"
-    if _frontend_dir.exists():
-        # Mount frontend assets for all routes
-        _frontend_assets = _frontend_dir / "assets"
-        if _frontend_assets.exists():
-            app.mount(
-                "/notebook/assets",
-                StaticFiles(directory=str(_frontend_assets)),
-                name="notebook_assets",
-            )
-            app.mount(
-                "/record/assets",
-                StaticFiles(directory=str(_frontend_assets)),
-                name="record_assets",
-            )
-            app.mount(
-                "/admin/assets",
-                StaticFiles(directory=str(_frontend_assets)),
-                name="admin_assets",
-            )
-
-        # Serve frontend for /notebook routes
-        @app.get("/notebook", include_in_schema=False)
-        @app.get("/notebook/{path:path}", include_in_schema=False)
-        async def serve_notebook_ui(path: str = "") -> FileResponse:
-            file_path = (_frontend_dir / path).resolve()
-            # Prevent path traversal attacks
-            if not file_path.is_relative_to(_frontend_dir):
-                return FileResponse(_frontend_dir / "index.html")
-            if file_path.is_file() and not path.startswith("assets"):
-                return FileResponse(file_path)
-            return FileResponse(_frontend_dir / "index.html")
-
-        # Serve frontend for /record routes
-        @app.get("/record", include_in_schema=False)
-        @app.get("/record/{path:path}", include_in_schema=False)
-        async def serve_record_ui(path: str = "") -> FileResponse:
-            file_path = (_frontend_dir / path).resolve()
-            # Prevent path traversal attacks
-            if not file_path.is_relative_to(_frontend_dir):
-                return FileResponse(_frontend_dir / "index.html")
-            if file_path.is_file() and not path.startswith("assets"):
-                return FileResponse(file_path)
-            return FileResponse(_frontend_dir / "index.html")
-
-        # Serve frontend for /admin routes
-        @app.get("/admin", include_in_schema=False)
-        @app.get("/admin/{path:path}", include_in_schema=False)
-        async def serve_admin_ui(path: str = "") -> FileResponse:
-            file_path = (_frontend_dir / path).resolve()
-            # Prevent path traversal attacks
-            if not file_path.is_relative_to(_frontend_dir):
-                return FileResponse(_frontend_dir / "index.html")
-            if file_path.is_file() and not path.startswith("assets"):
-                return FileResponse(file_path)
-            return FileResponse(_frontend_dir / "index.html")
-
-        logger.info(
-            f"Unified UI frontend mounted at /notebook, /record, /admin from {_frontend_dir}"
-        )
-
-
 # Auth page route (served for all modes, but only required in TLS mode)
 @app.get("/auth", include_in_schema=False)
 @app.get("/auth/{path:path}", include_in_schema=False)
@@ -662,19 +555,11 @@ async def serve_auth_page(path: str = "") -> HTMLResponse:
     return HTMLResponse(content=AUTH_PAGE_HTML)
 
 
-# Root redirect - send to notebook calendar by default
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    icon_path = Path("/app/static/frontend/logo.svg")
-    if icon_path.exists():
-        return FileResponse(icon_path)
-    return JSONResponse(status_code=204, content=None)
-
-
+# Root redirect - send to API docs
 @app.get("/", include_in_schema=False)
 async def root_redirect() -> RedirectResponse:
-    """Redirect root to /notebook/calendar."""
-    return RedirectResponse(url="/notebook/calendar", status_code=302)
+    """Redirect root to API documentation."""
+    return RedirectResponse(url="/docs", status_code=302)
 
 
 _log_time("main.py module load complete")

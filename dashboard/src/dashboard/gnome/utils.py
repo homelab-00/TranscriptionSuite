@@ -1,0 +1,115 @@
+"""
+Utility functions and constants for GNOME Dashboard.
+
+This module contains helper functions for path resolution and
+constants used throughout the dashboard.
+"""
+
+import logging
+import os
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Constants for embedded resources
+GITHUB_PROFILE_URL = "https://github.com/homelab-00"
+GITHUB_REPO_URL = "https://github.com/homelab-00/TranscriptionSuite"
+
+
+def get_assets_path() -> Path:
+    """Get the path to the assets directory, handling dev, PyInstaller, and AppImage modes."""
+    import sys
+
+    # 1. PyInstaller bundle
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore
+        return bundle_dir / "build" / "assets"
+
+    # 2. AppImage (APPDIR is set by AppImage runtime)
+    if "APPDIR" in os.environ:
+        appdir = Path(os.environ["APPDIR"])
+        assets_path = appdir / "usr" / "share" / "transcriptionsuite" / "assets"
+        if assets_path.exists():
+            logger.debug(f"Using AppImage assets path: {assets_path}")
+            return assets_path
+
+    # 3. Running from source - find project root
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "README.md").exists():
+            return parent / "build" / "assets"
+    return Path(__file__).parent.parent.parent.parent.parent / "build" / "assets"
+
+
+def get_readme_path(dev: bool = False) -> Path | None:
+    """Get the path to README.md or README_DEV.md.
+
+    Handles multiple scenarios:
+    - PyInstaller bundle (looks in _MEIPASS)
+    - AppImage (looks in AppDir - checked even when not frozen)
+    - Running from source (searches parent directories)
+    - Current working directory (fallback)
+    """
+    import sys
+
+    filename = "README_DEV.md" if dev else "README.md"
+
+    # List of potential paths to check (in order of priority)
+    paths_to_check: list[Path] = []
+
+    # 1. AppImage root directory (APPDIR is set by AppImage runtime)
+    if "APPDIR" in os.environ:
+        appdir = Path(os.environ["APPDIR"])
+        logger.debug(f"Checking AppImage APPDIR: {appdir}")
+        paths_to_check.extend(
+            [
+                appdir / filename,
+                appdir / "usr" / "share" / "transcriptionsuite" / filename,
+            ]
+        )
+
+    # 2. PyInstaller bundle (_MEIPASS)
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys._MEIPASS)  # type: ignore
+        logger.debug(f"Checking PyInstaller bundle: {bundle_dir}")
+        paths_to_check.extend(
+            [
+                bundle_dir / filename,
+                bundle_dir / "docs" / filename,
+                bundle_dir / "src" / "dashboard" / filename,
+            ]
+        )
+
+    # 3. Running from source - find repo root
+    current = Path(__file__).resolve()
+    logger.debug(f"Searching from module path: {current}")
+    for parent in current.parents:
+        if (parent / "README.md").exists():
+            # Found project root
+            paths_to_check.insert(0, parent / filename)
+            logger.debug(f"Found project root at: {parent}")
+            break
+        paths_to_check.append(parent / filename)
+
+    # 4. Current working directory (fallback)
+    paths_to_check.append(Path.cwd() / filename)
+
+    # 5. XDG data directories (Linux)
+    if "XDG_DATA_DIRS" in os.environ:
+        for data_dir in os.environ["XDG_DATA_DIRS"].split(":"):
+            if data_dir:  # Skip empty strings
+                paths_to_check.append(Path(data_dir) / "transcriptionsuite" / filename)
+
+    # Check all paths and return first existing one
+    logger.debug(
+        f"Searching for {filename} in paths: {[str(p) for p in paths_to_check[:5]]}..."
+    )
+    for path in paths_to_check:
+        if path.exists():
+            logger.info(f"Found {filename} at: {path}")
+            return path
+
+    logger.error(
+        f"Could not find {filename} in any expected location. Searched {len(paths_to_check)} paths."
+    )
+    return None

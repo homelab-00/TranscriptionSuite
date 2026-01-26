@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "transcription-suite-server"
-version = "0.4.6"
+name = "transcriptionsuite-server"
+version = "0.5.0"
 description = "TranscriptionSuite unified server for transcription services"
 requires-python = ">=3.13,<3.14"
 license = "MIT"

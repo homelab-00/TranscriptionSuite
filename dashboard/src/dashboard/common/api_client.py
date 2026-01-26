@@ -188,7 +188,9 @@ class APIClient:
                 ssl=ssl_context,
                 force_close=False,
                 enable_cleanup_closed=True,
-                family=socket.AF_INET if self._is_localhost() else 0,  # Force IPv4 for localhost
+                family=socket.AF_INET
+                if self._is_localhost()
+                else 0,  # Force IPv4 for localhost
             )
 
             self._session = aiohttp.ClientSession(
@@ -343,7 +345,9 @@ class APIClient:
                     return False
                 else:
                     # Unexpected status, fall back to health check
-                    logger.debug(f"Unexpected status {resp.status}, falling back to health check")
+                    logger.debug(
+                        f"Unexpected status {resp.status}, falling back to health check"
+                    )
                     return await self.health_check()
 
         except aiohttp.ClientResponseError as e:
@@ -540,18 +544,637 @@ class APIClient:
         query: str,
         search_type: str = "all",
         limit: int = 50,
+        fuzzy: bool = False,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> dict[str, Any]:
-        """Search transcriptions."""
+        """
+        Search transcriptions.
+
+        Args:
+            query: Search query string
+            search_type: Type of search ('all', 'word', 'filename', 'summary')
+            limit: Maximum number of results
+            fuzzy: Enable fuzzy matching
+            start_date: Filter by start date (YYYY-MM-DD)
+            end_date: Filter by end date (YYYY-MM-DD)
+
+        Returns:
+            Search results dict
+        """
         session = await self._get_session()
+
+        params: dict[str, Any] = {"q": query, "type": search_type, "limit": limit}
+        if fuzzy:
+            params["fuzzy"] = "true"
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
 
         async with session.get(
             f"{self.base_url}/api/search/",
             headers=self._get_headers(),
-            params={"q": query, "type": search_type, "limit": limit},
+            params=params,
             **self._get_ssl_kwargs(),
         ) as resp:
             resp.raise_for_status()
             return await resp.json()
+
+    # =========================================================================
+    # Audio Notebook API Methods
+    # =========================================================================
+
+    async def get_recording(self, recording_id: int) -> dict[str, Any]:
+        """
+        Get a single recording by ID.
+
+        Args:
+            recording_id: Recording ID
+
+        Returns:
+            Recording dict
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def delete_recording(self, recording_id: int) -> None:
+        """
+        Delete a recording.
+
+        Args:
+            recording_id: Recording ID to delete
+        """
+        session = await self._get_session()
+        async with session.delete(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+
+    async def update_recording_title(
+        self, recording_id: int, title: str
+    ) -> dict[str, Any]:
+        """
+        Update a recording's title.
+
+        Args:
+            recording_id: Recording ID
+            title: New title
+
+        Returns:
+            Updated recording dict
+        """
+        session = await self._get_session()
+        async with session.patch(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/title",
+            headers=self._get_headers(),
+            json={"title": title},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def update_recording_date(
+        self, recording_id: int, recorded_at: str
+    ) -> dict[str, Any]:
+        """
+        Update a recording's date/time.
+
+        Args:
+            recording_id: Recording ID
+            recorded_at: New date/time in ISO format
+
+        Returns:
+            Updated recording dict
+        """
+        session = await self._get_session()
+        async with session.patch(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/date",
+            headers=self._get_headers(),
+            json={"recorded_at": recorded_at},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_transcription(self, recording_id: int) -> dict[str, Any]:
+        """
+        Get transcription for a recording.
+
+        Args:
+            recording_id: Recording ID
+
+        Returns:
+            Transcription dict with segments
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/transcription",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    def get_audio_url(self, recording_id: int) -> str:
+        """
+        Get the URL for streaming a recording's audio.
+
+        Args:
+            recording_id: Recording ID
+
+        Returns:
+            Audio streaming URL
+        """
+        return f"{self.base_url}/api/notebook/recordings/{recording_id}/audio"
+
+    async def export_recording(
+        self, recording_id: int, format: str = "txt"
+    ) -> tuple[bytes, str]:
+        """
+        Export a recording's transcription.
+
+        Args:
+            recording_id: Recording ID
+            format: Export format ('txt' or 'json')
+
+        Returns:
+            Tuple of (content bytes, suggested filename)
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/export",
+            params={"format": format},
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            content = await resp.read()
+            # Extract filename from Content-Disposition header
+            cd = resp.headers.get("Content-Disposition", "")
+            filename = "export.txt"
+            if 'filename="' in cd:
+                filename = cd.split('filename="')[1].split('"')[0]
+            return content, filename
+
+    async def list_backups(self) -> list[dict[str, Any]]:
+        """
+        List all available database backups.
+
+        Returns:
+            List of backup info dicts
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/backups",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            return data.get("backups", [])
+
+    async def create_backup(self) -> dict[str, Any]:
+        """
+        Create a manual database backup.
+
+        Returns:
+            Dict with backup info
+        """
+        session = await self._get_session()
+        async with session.post(
+            f"{self.base_url}/api/notebook/backup",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def restore_backup(self, filename: str) -> dict[str, Any]:
+        """
+        Restore the database from a backup.
+
+        Args:
+            filename: Backup filename to restore from
+
+        Returns:
+            Dict with restore result
+        """
+        session = await self._get_session()
+        async with session.post(
+            f"{self.base_url}/api/notebook/restore",
+            headers=self._get_headers(),
+            json={"filename": filename},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_summary(self, recording_id: int) -> str | None:
+        """
+        Get summary for a recording.
+
+        Args:
+            recording_id: Recording ID
+
+        Returns:
+            Summary text or None if no summary exists
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/summary",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            return data.get("summary")
+
+    async def update_summary(
+        self, recording_id: int, summary: str | None
+    ) -> dict[str, Any]:
+        """
+        Update a recording's summary.
+
+        Args:
+            recording_id: Recording ID
+            summary: New summary text (or None to clear)
+
+        Returns:
+            Updated recording dict
+        """
+        session = await self._get_session()
+        async with session.patch(
+            f"{self.base_url}/api/notebook/recordings/{recording_id}/summary",
+            headers=self._get_headers(),
+            json={"summary": summary},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_llm_status(self) -> dict[str, Any]:
+        """
+        Get LLM (LM Studio) connection status.
+
+        Returns:
+            Status dict with 'connected', 'models', etc.
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/llm/status",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_conversations(self, recording_id: int) -> list[dict[str, Any]]:
+        """
+        Get all conversations for a recording.
+
+        Args:
+            recording_id: Recording ID
+
+        Returns:
+            List of conversation dicts
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/llm/conversations/{recording_id}",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_conversation(self, conversation_id: int) -> dict[str, Any]:
+        """
+        Get a conversation with all messages.
+
+        Args:
+            conversation_id: Conversation ID
+
+        Returns:
+            Conversation dict with messages
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/llm/conversation/{conversation_id}",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def create_conversation(
+        self, recording_id: int, title: str = "New Conversation"
+    ) -> dict[str, Any]:
+        """
+        Create a new conversation for a recording.
+
+        Args:
+            recording_id: Recording ID
+            title: Conversation title
+
+        Returns:
+            Created conversation dict
+        """
+        session = await self._get_session()
+        async with session.post(
+            f"{self.base_url}/api/llm/conversations",
+            headers=self._get_headers(),
+            json={"recording_id": recording_id, "title": title},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def update_conversation_title(
+        self, conversation_id: int, title: str
+    ) -> dict[str, Any]:
+        """
+        Update a conversation's title.
+
+        Args:
+            conversation_id: Conversation ID
+            title: New title
+
+        Returns:
+            Updated conversation dict
+        """
+        session = await self._get_session()
+        async with session.patch(
+            f"{self.base_url}/api/llm/conversation/{conversation_id}",
+            headers=self._get_headers(),
+            json={"title": title},
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def delete_conversation(self, conversation_id: int) -> None:
+        """
+        Delete a conversation.
+
+        Args:
+            conversation_id: Conversation ID to delete
+        """
+        session = await self._get_session()
+        async with session.delete(
+            f"{self.base_url}/api/llm/conversation/{conversation_id}",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+
+    async def chat_stream(
+        self,
+        conversation_id: int,
+        message: str,
+        system_prompt: str | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+        on_done: Callable[[str], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
+    ) -> None:
+        """
+        Send a chat message and stream the response.
+
+        Args:
+            conversation_id: Conversation ID
+            message: User message
+            system_prompt: Optional system prompt override
+            on_chunk: Callback for each response chunk
+            on_done: Callback when response is complete (receives full text)
+            on_error: Callback for errors
+        """
+        session = await self._get_session()
+
+        request_data: dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "message": message,
+        }
+        if system_prompt:
+            request_data["system_prompt"] = system_prompt
+
+        try:
+            async with session.post(
+                f"{self.base_url}/api/llm/chat",
+                headers=self._get_headers(),
+                json=request_data,
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    if on_error:
+                        on_error(f"Chat request failed: {error_text}")
+                    return
+
+                # Stream the response
+                full_response = ""
+                async for line in resp.content:
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8").strip()
+                    if decoded.startswith("data: "):
+                        chunk_data = decoded[6:]  # Remove "data: " prefix
+                        if chunk_data == "[DONE]":
+                            if on_done:
+                                on_done(full_response)
+                            return
+                        try:
+                            chunk_json = json.loads(chunk_data)
+                            content = chunk_json.get("content", "")
+                            if content and on_chunk:
+                                on_chunk(content)
+                            full_response += content
+                        except json.JSONDecodeError:
+                            # Not JSON, might be plain text chunk
+                            if chunk_data and on_chunk:
+                                on_chunk(chunk_data)
+                            full_response += chunk_data
+
+                if on_done:
+                    on_done(full_response)
+
+        except Exception as e:
+            logger.error(f"Chat stream error: {e}")
+            if on_error:
+                on_error(str(e))
+
+    async def summarize_recording(
+        self,
+        recording_id: int,
+        custom_prompt: str | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+        on_done: Callable[[str], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
+    ) -> None:
+        """
+        Generate an AI summary for a recording with streaming.
+
+        Args:
+            recording_id: Recording ID to summarize
+            custom_prompt: Optional custom summarization prompt
+            on_chunk: Callback for each response chunk
+            on_done: Callback when summary is complete
+            on_error: Callback for errors
+        """
+        session = await self._get_session()
+
+        request_data: dict[str, Any] = {}
+        if custom_prompt:
+            request_data["custom_prompt"] = custom_prompt
+
+        try:
+            async with session.post(
+                f"{self.base_url}/api/llm/summarize/{recording_id}",
+                headers=self._get_headers(),
+                json=request_data,
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    if on_error:
+                        on_error(f"Summarize request failed: {error_text}")
+                    return
+
+                # Stream the response
+                full_response = ""
+                async for line in resp.content:
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8").strip()
+                    if decoded.startswith("data: "):
+                        chunk_data = decoded[6:]
+                        if chunk_data == "[DONE]":
+                            if on_done:
+                                on_done(full_response)
+                            return
+                        try:
+                            chunk_json = json.loads(chunk_data)
+                            content = chunk_json.get("content", "")
+                            if content and on_chunk:
+                                on_chunk(content)
+                            full_response += content
+                        except json.JSONDecodeError:
+                            if chunk_data and on_chunk:
+                                on_chunk(chunk_data)
+                            full_response += chunk_data
+
+                if on_done:
+                    on_done(full_response)
+
+        except Exception as e:
+            logger.error(f"Summarize stream error: {e}")
+            if on_error:
+                on_error(str(e))
+
+    async def get_next_available_minute(self, date: str, hour: int) -> dict[str, Any]:
+        """
+        Get the next available minute for a recording in a given hour.
+
+        Args:
+            date: Date in YYYY-MM-DD format
+            hour: Hour (0-23)
+
+        Returns:
+            Dict with 'minute' key
+        """
+        session = await self._get_session()
+        async with session.get(
+            f"{self.base_url}/api/notebook/recordings/next-minute/{date}/{hour}",
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def upload_file_to_notebook(
+        self,
+        file_path: Path,
+        diarization: bool = True,
+        word_timestamps: bool = True,
+        recorded_at: str | None = None,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Upload an audio file to Audio Notebook.
+
+        Args:
+            file_path: Path to the audio file
+            diarization: Enable speaker diarization
+            word_timestamps: Include word-level timestamps
+            recorded_at: Optional recording date/time (ISO format)
+            on_progress: Optional callback for progress updates
+
+        Returns:
+            Recording result dict
+        """
+        session = await self._get_session()
+
+        # Read file contents
+        file_contents = await asyncio.to_thread(file_path.read_bytes)
+
+        data = aiohttp.FormData()
+        data.add_field(
+            "file",
+            file_contents,
+            filename=file_path.name,
+        )
+        data.add_field("enable_diarization", str(diarization).lower())
+        data.add_field("enable_word_timestamps", str(word_timestamps).lower())
+        if recorded_at:
+            data.add_field("file_created_at", recorded_at)
+
+        timeout = aiohttp.ClientTimeout(total=self.transcription_timeout)
+
+        if on_progress:
+            on_progress("Uploading file...")
+
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        try:
+            async with session.post(
+                f"{self.base_url}/api/notebook/transcribe/upload",
+                data=data,
+                headers=headers,
+                timeout=timeout,
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                if on_progress:
+                    on_progress("Transcribing...")
+
+                if resp.status == 409:
+                    try:
+                        error_data = await resp.json()
+                        detail = error_data.get("detail", "Server is busy")
+                        raise ServerBusyError(detail)
+                    except (json.JSONDecodeError, aiohttp.ContentTypeError):
+                        error = await resp.text()
+                        raise ServerBusyError(f"Server is busy: {error}") from None
+
+                resp.raise_for_status()
+                result = await resp.json()
+
+                if on_progress:
+                    on_progress("Complete")
+
+                return result
+
+        except aiohttp.ClientError as e:
+            logger.error(f"File upload failed: {e}")
+            raise RuntimeError(f"Upload failed: {e}") from e
 
     async def transcribe_audio_data(
         self,

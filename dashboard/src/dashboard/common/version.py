@@ -23,7 +23,7 @@ def get_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("transcription-suite-dashboard")
+        return version("transcriptionsuite-dashboard")
     except Exception:
         pass
 

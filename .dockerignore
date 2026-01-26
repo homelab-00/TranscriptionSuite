@@ -36,10 +36,8 @@ build/
 dist/
 *.spec
 
-# Node modules (will be rebuilt in container)
+# Node modules
 node_modules/
-server/AUDIO_NOTEBOOK/node_modules/
-server/frontend/node_modules/
 
 # Test files
 tests/

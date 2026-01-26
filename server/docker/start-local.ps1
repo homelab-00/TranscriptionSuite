@@ -132,7 +132,7 @@ else {
 # ============================================================================
 # Check for Existing Container and Mode Conflicts
 # ============================================================================
-$ContainerName = "transcription-suite"
+$ContainerName = "transcriptionsuite-container"
 
 $containerExists = docker ps -a --format "{{.Names}}" 2>$null | Where-Object { $_ -eq $ContainerName }
 if ($containerExists) {

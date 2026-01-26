@@ -234,15 +234,24 @@ Result is automatically copied to clipboard
 ### 4.2 Dashboard GUI
 
 The app includes a full Docker & client management GUI. Click the tray icon and select
-"Show App" to open the Dashboard window, which provides:
+"Show App" to open the Dashboard window, which features a **sidebar navigation** with:
 
-- **Server View**: Full Docker management including:
+- **Home**: Overview with status indicators for Server and Client
+- **Notebook**: Audio Notebook with Calendar, Search, and Import sub-tabs
+- **Docker Server**: Full Docker management including:
   - Container and image status with health indicators
   - Volume status with sizes and downloaded models list
   - 3-column management section (Container | Image | Volumes)
   - Server configuration with Settings button
-- **Client View**: Start/stop client, configure settings
-- **Help Menu**: Access built-in documentation (User Guide / Developer Guide)
+- **Client**: Start/stop client, configure settings
+- **Menu**: Settings, Help (User Guide / Developer Guide), and About
+
+**Status Lights**: The sidebar shows real-time status indicators next to Server and Client:
+- 🟢 Green: Running/Healthy
+- 🔴 Red: Unhealthy
+- 🔵 Blue: Starting
+- 🟠 Orange: Stopped
+- ⚪ Gray: Not set up
 
 ---
 
@@ -250,13 +259,17 @@ The app includes a full Docker & client management GUI. Click the tray icon and 
 
 **Before starting either Client or Server, you need to configure a few settings.**
 
-To access them, click on the hamburger menu on the top right and select Settings. A new
-window will open up with three tabs: `App`, `Client` and `Server`.
+To access them, click on the hamburger menu and select Settings. A new
+window will open up with four tabs: `App`, `Client`, `Server`, and `Notebook`.
 Let's go through each one:
 * The settings in the `App` tab are self explanatory
 * The `Server` tab is just a button that opens the full `config.yaml` for the server.
   You generally don't need to worry about it unless you want to change the model or
   other server parameters. Refer to [README_DEV.md](README_DEV.md) for more information.
+* The `Notebook` tab provides database backup and restore functionality:
+  - Create manual backups of your Audio Notebook database
+  - View list of available backups with timestamps and sizes
+  - Restore from any backup (creates safety backup first)
 * For the `Client` tab, the first thing you need to know is whether you want a local or
   a remote connection. I'll list both cases:
   * Local: All you need to do is select your input device. Leave everything else default.
@@ -405,11 +418,13 @@ The Notebook features are listed below. The web client is a way to access the
 transcription service on devices without Dashboard app builds.
 
 **Audio Notebook Features:**
-- Calendar view of recordings
+- Calendar view of recordings with day/month views
 - Full-text search across all transcriptions
 - Audio playback with click-to-seek timestamps
 - AI chat about recordings (requires LM Studio)
-- Import external audio files
+- Import external audio files with drag-and-drop
+- Export transcriptions in text or JSON format (with word-level timestamps and diarization data)
+- Context menu actions: Export, Change date/time, Delete
 
 ---
 
@@ -430,18 +445,36 @@ backup:
     max_backups: 3       # Number of backups to keep
 ```
 
-**Manual Backup:**
+**Manual Backup via Dashboard:**
+
+The Dashboard provides a graphical interface for backup management:
+1. Open Settings → Notebook tab
+2. Click "Create Backup" to create a new backup
+3. View list of available backups with timestamps and sizes
+4. Select a backup and click "Restore Selected Backup" to restore
+
+**Manual Backup via Command Line:**
 ```bash
 # Stop the server first
 docker compose down
 
 # Copy the database file
-docker run --rm -v transcription-suite-data:/data -v $(pwd):/backup \
+docker run --rm -v transcriptionsuite-data:/data -v $(pwd):/backup \
     alpine cp /data/database/notebook.db /backup/notebook_backup.db
 
 # Restart the server
 docker compose up -d
 ```
+
+**Export Individual Recordings:**
+
+You can export individual transcriptions from the Audio Notebook:
+1. Right-click on any recording in the Calendar view
+2. Select "Export transcription"
+3. Choose format (Text or JSON)
+4. Select save location
+
+The JSON format includes word-level timestamps and speaker diarization data.
 
 ---
 

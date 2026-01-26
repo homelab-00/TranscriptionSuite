@@ -33,23 +33,23 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.1 Local vs Remote Mode](#61-local-vs-remote-mode)
   - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
   - [6.3 Docker Volume Structure](#63-docker-volume-structure)
+  - [6.4 Docker Image Selection](#64-docker-image-selection)
 - [7. API Reference](#7-api-reference)
-  - [7.1 Web UI Routes](#71-web-ui-routes)
-  - [7.2 API Endpoints](#72-api-endpoints)
-  - [7.3 WebSocket Protocol](#73-websocket-protocol)
-  - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
+  - [7.1 API Endpoints](#71-api-endpoints)
+  - [7.2 WebSocket Protocol](#72-websocket-protocol)
+  - [7.3 Live Mode WebSocket Protocol](#73-live-mode-websocket-protocol)
 - [8. Backend Development](#8-backend-development)
   - [8.1 Backend Structure](#81-backend-structure)
   - [8.2 Running the Server Locally](#82-running-the-server-locally)
   - [8.3 Configuration System](#83-configuration-system)
-  - [8.4 Frontend Development](#84-frontend-development)
-  - [8.5 Testing](#85-testing)
+  - [8.4 Testing](#84-testing)
 - [9. Dashboard Development](#9-dashboard-development)
   - [9.1 Running from Source](#91-running-from-source)
   - [9.2 Verbose Logging](#92-verbose-logging)
   - [9.3 Key Modules](#93-key-modules)
-  - [9.4 Server Busy Handling](#94-server-busy-handling)
-  - [9.5 Model Management](#95-model-management)
+  - [9.4 Dashboard Architecture & Refactoring](#94-dashboard-architecture--refactoring)
+  - [9.5 Server Busy Handling](#95-server-busy-handling)
+  - [9.6 Model Management](#96-model-management)
 - [10. Configuration Reference](#10-configuration-reference)
   - [10.1 Server Configuration](#101-server-configuration)
   - [10.2 Dashboard Configuration](#102-dashboard-configuration)
@@ -59,14 +59,14 @@ Technical documentation for developing and building TranscriptionSuite.
   - [11.3 Automatic Backups](#113-automatic-backups)
 - [12. Code Quality Checks](#12-code-quality-checks)
   - [12.1 Python Code Quality](#121-python-code-quality)
-  - [12.2 TypeScript/JavaScript Quality](#122-typescriptjavascript-quality)
-  - [12.3 Complete Quality Check Workflow](#123-complete-quality-check-workflow)
+  - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
 - [13. Troubleshooting](#13-troubleshooting)
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
-  - [13.5 Checking Installed Packages](#135-checking-installed-packages)
+  - [13.5 Windows Docker Networking](#135-windows-docker-networking)
+  - [13.6 Checking Installed Packages](#136-checking-installed-packages)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
@@ -84,13 +84,10 @@ Technical documentation for developing and building TranscriptionSuite.
 cd dashboard && uv venv --python 3.13 && uv sync --extra kde && cd ..
 cd build && uv venv --python 3.13 && uv sync && cd ..
 
-# 2. Audit frontend packages
-cd server/frontend && npm ci && npm audit && cd ../..
-
-# 3. Build and run Docker server
+# 2. Build and run Docker server
 cd server/docker && docker compose build && docker compose up -d
 
-# 4. Run dashboard
+# 3. Run dashboard
 cd dashboard && uv run transcription-dashboard
 ```
 
@@ -102,23 +99,17 @@ cd server/backend
 uv venv --python 3.13 && uv sync
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 
-# 2. Run frontend dev server (in a separate terminal)
-cd server/frontend
-npm install
-npm run dev  # Starts on http://localhost:1420
-
-# 3. Run dashboard (in a separate terminal)
+# 2. Run dashboard (in a separate terminal)
 cd dashboard
 uv venv --python 3.13 && uv sync --extra kde  # or --extra gnome / --extra windows
 uv run transcription-dashboard --host localhost --port 8000
 ```
 
 **Notes:**
-- Backend runs on port 8000, frontend dev server on port 1420
-- Frontend auto-detects dev mode and proxies API calls to backend
+- Backend runs on port 8000
 - Dashboard connects directly to backend API on port 8000
 - Backend must be running for dashboard to function
-- This setup enables hot-reload for both backend and frontend
+- This setup enables hot-reload for the backend
 
 ### 1.3 Build Commands
 
@@ -168,7 +159,6 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  - Live Mode (RealtimeSTT) continuous transcribe  │  │
 │  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
-│  │  - React frontend (Web UI)                        │  │
 │  │  - SQLite + FTS5 search                           │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
@@ -207,6 +197,13 @@ TranscriptionSuite uses a **client-server architecture**:
 
 **GNOME Dual-Process Design**: GTK3 and GTK4 cannot coexist in the same Python process (GObject Introspection limitation). The tray uses GTK3 + AppIndicator3, while the Dashboard uses GTK4 + libadwaita. They communicate via D-Bus (`com.transcriptionsuite.Dashboard`).
 
+**Dashboard UI Design**: All platforms feature a **sidebar navigation** layout:
+- Left sidebar with navigation buttons and real-time status lights
+- Status lights show Server and Client states with color indicators (green=running, red=unhealthy, blue=starting, orange=stopped, gray=not set up)
+- Main content area on the right with views: Home, Notebook, Docker Server, Client
+- Notebook tab contains Calendar, Search, and Import sub-tabs
+- Settings accessible via hamburger menu with four tabs: App, Client, Server, Notebook
+
 ### 2.3 Security Model
 
 TranscriptionSuite uses layered security for remote access:
@@ -231,8 +228,32 @@ TranscriptionSuite/
 │   ├── src/dashboard/            # Python package source
 │   │   ├── common/               # Shared code (API client, orchestrator, config)
 │   │   ├── kde/                  # KDE Plasma (PyQt6)
+│   │   │   ├── dashboard.py      # Main window (654 lines)
+│   │   │   ├── server_mixin.py   # Server control methods (739 lines)
+│   │   │   ├── client_mixin.py   # Client control methods (530 lines)
+│   │   │   ├── dialogs.py        # About/README dialogs (458 lines)
+│   │   │   ├── log_window.py     # Log viewer with highlighting (406 lines)
+│   │   │   ├── styles.py         # Stylesheets (566 lines)
+│   │   │   ├── utils.py          # Utilities & constants (106 lines)
+│   │   │   ├── views/            # View creation functions
+│   │   │   │   ├── server_view.py # Server management view (341 lines)
+│   │   │   │   └── client_view.py # Client management view (339 lines)
+│   │   │   ├── tray.py           # System tray
+│   │   │   ├── settings_dialog.py # Settings UI
+│   │   │   ├── notebook_view.py  # Audio notebook
+│   │   │   └── ... (other UI components)
 │   │   ├── gnome/                # GNOME (GTK3 tray + GTK4 Dashboard via D-Bus)
+│   │   │   ├── dashboard.py      # Main window (2799 lines)
+│   │   │   ├── log_window.py     # Log viewer with highlighting (282 lines)
+│   │   │   ├── styles.py         # Stylesheets (236 lines)
+│   │   │   ├── utils.py          # Utilities & constants (115 lines)
+│   │   │   ├── tray.py           # System tray
+│   │   │   ├── settings_dialog.py # Settings UI
+│   │   │   ├── notebook_view.py  # Audio notebook
+│   │   │   └── ... (other UI components)
 │   │   ├── windows/              # Windows (PyQt6)
+│   │   │   ├── tray.py           # System tray
+│   │   │   └── ... (other UI components)
 │   │   └── build/                # PyInstaller spec files
 │   └── pyproject.toml            # Dashboard package + dependencies
 │
@@ -253,7 +274,6 @@ TranscriptionSuite/
 │   │   ├── core/                 # ML engines (transcription, diarization, VAD)
 │   │   ├── database/             # SQLite + FTS5 + migrations
 │   │   └── pyproject.toml        # Server dependencies (pinned versions)
-│   ├── frontend/                 # React web UI
 │   └── config.yaml               # Server configuration template
 ```
 
@@ -289,9 +309,6 @@ cd build
 uv venv --python 3.13
 uv sync
 cd ..
-
-# Audit frontend packages
-cd server/frontend && npm ci && npm audit && cd ../..
 ```
 
 ### 4.2 Step 2: Build Docker Image
@@ -302,9 +319,8 @@ docker compose build
 ```
 
 **What happens:**
-1. Frontend builder stage: Builds React frontend
-2. Python runtime stage: Installs server dependencies
-3. Static files: Copies built frontend to `/app/static/frontend`
+1. Python builder stage: Installs server dependencies
+2. Python runtime stage: Sets up minimal runtime environment
 
 **Build with specific tag:**
 To build an image with a specific tag (instead of default `latest`):
@@ -322,6 +338,35 @@ TAG=v0.3.0 ./build/docker-build-push.sh
 ```bash
 docker compose build --no-cache
 ```
+
+**Managing Image Tags:**
+
+Tag existing local images:
+```bash
+# Create a new tag pointing to an existing image
+# e.g. make existing image 'v0.4.7' also be tagged as 'latest'
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:latest
+
+# List all tags for this repository
+docker image ls ghcr.io/homelab-00/transcriptionsuite-server
+```
+
+Remove tags:
+```bash
+# Remove a tag (only deletes the tag, not the image if other tags reference it)
+docker rmi ghcr.io/homelab-00/transcriptionsuite-server:old-tag
+
+# Remove all untagged images (clean up)
+docker image prune -f
+```
+
+**Typical tag management workflow:**
+1. Build and push a release: `TAG=v0.4.7 docker compose build && ./build/docker-build-push.sh v0.4.7`
+2. Create an alias: `docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:stable`
+3. Push the alias: `docker push ghcr.io/homelab-00/transcriptionsuite-server:stable`
+4. Remove old tags when no longer needed: `docker rmi ghcr.io/homelab-00/transcriptionsuite-server:v0.3.0`
+
+**Note:** The `docker-build-push.sh` script automatically creates and pushes a `latest` tag when pushing release versions (v*.*.* format).
 
 ### 4.3 Step 3: Run Dashboard Locally
 
@@ -498,7 +543,7 @@ docker compose up -d
 
 ### 6.3 Docker Volume Structure
 
-**`transcription-suite-data`** (mounted to `/data`):
+**`transcriptionsuite-data`** (mounted to `/data`):
 
 | Path | Description |
 |------|-------------|
@@ -507,7 +552,7 @@ docker compose up -d
 | `/data/logs/` | Server logs |
 | `/data/tokens/` | Authentication tokens |
 
-**`transcription-suite-models`** (mounted to `/models`):
+**`transcriptionsuite-models`** (mounted to `/models`):
 
 | Path | Description |
 |------|-------------|
@@ -517,27 +562,49 @@ docker compose up -d
 
 When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 
+### 6.4 Docker Image Selection
+
+The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcriptionsuite-server`) with flexible tag selection:
+
+**Default behavior:**
+- The Dashboard automatically selects the most recent local image by build date (not the `:latest` tag)
+- A dropdown in the Server tab allows selecting a specific image from available local images
+- Each image entry shows: tag, build date, and size
+- The "Most Recent (auto)" option (default) picks the newest image by build date
+- If no local images exist, the system falls back to pulling `:latest` from the registry
+
+**Using specific versions:**
+```bash
+# Use a specific tag (must exist locally or will be pulled from ghcr.io)
+TAG=v0.3.0 docker compose up -d
+
+# Set TAG as environment variable
+export TAG=dev-branch
+docker compose up -d
+```
+
+**Building and using local images:**
+```bash
+# Build with custom tag
+TAG=my-custom docker compose build
+
+# Use the local image you just built
+TAG=my-custom docker compose up -d
+```
+
+**Note:** The `TAG` environment variable is the only way to override which image version is used. If you have multiple local images with different tags, you must explicitly specify which one via `TAG=...` or it defaults to looking for the `latest` tag.
+
 ---
 
 ## 7. API Reference
 
-### 7.1 Web UI Routes
-
-| URL Path | Description |
-|----------|-------------|
-| `/` | Redirects to `/record` |
-| `/auth` | Authentication page (TLS mode) |
-| `/record` | File upload, recording, admin panel |
-| `/notebook` | Calendar view, search, audio playback |
-
-### 7.2 API Endpoints
+### 7.1 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check (no auth) |
 | `/api/status` | GET | Server status, GPU info |
 | `/api/auth/login` | POST | Authenticate with token |
-| `/api/auth/tokens` | GET/POST | Token management (admin only) |
 | `/api/admin/models/load` | POST | Load transcription models (admin only) |
 | `/api/admin/models/unload` | POST | Unload models to free GPU memory (admin only) |
 | `/api/transcribe/audio` | POST | Transcribe uploaded audio |
@@ -546,11 +613,16 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 | `/ws/live` | WebSocket | Live Mode continuous transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
+| `/api/notebook/recordings/{id}/export` | GET | Export recording (txt/json with timestamps) |
 | `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization |
+| `/api/notebook/calendar` | GET | Get recordings by date range |
+| `/backups` | GET | List available database backups |
+| `/backup` | POST | Create new database backup |
+| `/restore` | POST | Restore database from backup |
 | `/api/search` | GET | Full-text search |
 | `/api/llm/chat` | POST | LLM chat integration |
 
-### 7.3 WebSocket Protocol
+### 7.2 WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws`
@@ -565,7 +637,7 @@ When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
 
-### 7.4 Live Mode WebSocket Protocol
+### 7.3 Live Mode WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws/live`
@@ -636,19 +708,7 @@ All modules use `get_config()` from `server.config`. Configuration is loaded wit
 3. `/app/config.yaml` (Docker default)
 4. `server/config.yaml` (native development)
 
-### 8.4 Frontend Development
-
-```bash
-cd server/frontend
-npm install
-npm run dev  # Starts dev server on http://localhost:1420
-```
-
-The frontend uses `import.meta.env.DEV` to detect development mode:
-- HTTP API requests: `http://localhost:8000/api`
-- WebSocket connections: `ws://localhost:8000/ws`
-
-### 8.5 Testing
+### 8.4 Testing
 
 ```bash
 ./build/.venv/bin/pytest server/backend/tests
@@ -683,21 +743,119 @@ uv run transcription-dashboard --verbose
 
 ### 9.3 Key Modules
 
+**Common (Shared):**
+
 | Module | Purpose |
 |--------|---------|
-| `common/api_client.py` | HTTP client, WebSocket, error handling |
+| `common/api_client.py` | HTTP client, WebSocket, error handling, backup/export methods |
 | `common/orchestrator.py` | Main controller, state machine |
 | `common/docker_manager.py` | Docker server control |
 | `common/setup_wizard.py` | First-time setup |
 | `common/tailscale_resolver.py` | Tailscale IP fallback when DNS fails |
 
-### 9.4 Server Busy Handling
+**KDE (PyQt6) - Modular Architecture:**
+
+| Module | Purpose | Lines |
+|--------|---------|-------|
+| `kde/dashboard.py` | Main window with sidebar, navigation, and lifecycle | 654 |
+| `kde/server_mixin.py` | Server control methods (start/stop, image/volume mgmt, logs) | 739 |
+| `kde/client_mixin.py` | Client control methods (start/stop, models, live transcriber) | 530 |
+| `kde/dialogs.py` | About dialog, README viewer, hamburger menu | 458 |
+| `kde/log_window.py` | Log viewer with syntax highlighting and line numbers | 406 |
+| `kde/styles.py` | Stylesheet definitions for consistent theming | 566 |
+| `kde/utils.py` | Utility functions (path resolution) and constants | 106 |
+| `kde/views/server_view.py` | Server management view UI creation | 341 |
+| `kde/views/client_view.py` | Client management view UI creation | 339 |
+| `kde/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |  |
+| `kde/notebook_view.py` | Audio Notebook with Calendar, Search, Import tabs |  |
+| `kde/calendar_widget.py` | Calendar view with export context menu |  |
+
+**GNOME (GTK4) - Partially Modularized:**
+
+| Module | Purpose | Lines |
+|--------|---------|-------|
+| `gnome/dashboard.py` | Main window with sidebar, navigation, and lifecycle | 2799 |
+| `gnome/log_window.py` | Log viewer with syntax highlighting (extracted) | 282 |
+| `gnome/styles.py` | Stylesheet definitions (extracted) | 236 |
+| `gnome/utils.py` | Utility functions and constants (extracted) | 115 |
+| `gnome/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |  |
+| `gnome/notebook_view.py` | Audio Notebook view for GNOME |  |
+| `gnome/calendar_widget.py` | Calendar view with export context menu |  |
+
+**Architecture Notes:**
+- **KDE**: Fully modularized with mixins (`ServerControlMixin`, `ClientControlMixin`, `DialogsMixin`) for clean separation of concerns. Main dashboard.py is 654 lines.
+- **GNOME**: Partially modularized. Extracted utility modules (utils.py, log_window.py, styles.py) to reduce duplication. Main dashboard.py is 2799 lines (GTK4 API requires more boilerplate).
+- **View Creation**: KDE uses factory functions in `views/` package for server and client views, keeping dashboard.py focused on navigation and lifecycle.
+
+### 9.4 Dashboard Architecture & Refactoring
+
+#### KDE Dashboard Refactoring (Completed)
+
+The KDE dashboard was refactored from a single 4035-line `dashboard.py` file into modular, maintainable components:
+
+**Refactoring Strategy:**
+1. **Mixins for Functionality**: Extracted server and client control logic into reusable mixins
+2. **Utility Modules**: Separated stylesheets, utilities, and constants into dedicated files
+3. **Dialog Management**: Centralized all dialog-related code (About, README viewer, menus)
+4. **View Factories**: Created factory functions for server and client views to keep main dashboard focused
+
+**File Breakdown:**
+
+| Component | File | Lines | Responsibility |
+|-----------|------|-------|-----------------|
+| **Main Window** | `dashboard.py` | 654 | Window setup, navigation, lifecycle, view management |
+| **Server Control** | `server_mixin.py` | 739 | Docker server start/stop, image/volume management, server logs |
+| **Client Control** | `client_mixin.py` | 530 | Client start/stop, model management, live transcriber, notifications |
+| **Dialogs** | `dialogs.py` | 458 | About dialog, README viewer, hamburger menu, help menu |
+| **Log Viewer** | `log_window.py` | 406 | Syntax-highlighted log display with line numbers |
+| **Stylesheets** | `styles.py` | 566 | QSS stylesheets for consistent theming |
+| **Utilities** | `utils.py` | 106 | Path resolution, constants (GitHub URLs) |
+| **Server View** | `views/server_view.py` | 341 | Server management UI (status, controls, volumes) |
+| **Client View** | `views/client_view.py` | 339 | Client management UI (status, controls, live preview) |
+
+**Total**: 4,139 lines across 9 files (all under 800 lines each)
+
+**Benefits:**
+- **Maintainability**: Each file has a single, clear responsibility
+- **Testability**: Mixins can be tested independently
+- **Reusability**: Mixins can be shared with other UI frameworks if needed
+- **Readability**: Reduced cognitive load per file
+- **Scalability**: Easy to add new features without bloating main dashboard
+
+**Mixin Architecture:**
+
+```python
+class DashboardWindow(ServerControlMixin, ClientControlMixin, DialogsMixin, QMainWindow):
+    """Main dashboard inherits all control logic from mixins."""
+    # Focuses on: window setup, navigation, view management, lifecycle
+```
+
+#### GNOME Dashboard Partial Refactoring
+
+The GNOME dashboard was partially refactored to extract common utilities:
+
+| Component | File | Lines | Status |
+|-----------|------|-------|--------|
+| **Main Window** | `dashboard.py` | 2799 | Monolithic (GTK4 API requires more boilerplate) |
+| **Log Viewer** | `log_window.py` | 282 | Extracted (shared with KDE) |
+| **Stylesheets** | `styles.py` | 236 | Extracted (shared with KDE) |
+| **Utilities** | `utils.py` | 115 | Extracted (shared with KDE) |
+
+**Note**: GNOME dashboard remains larger due to GTK4's verbose API requirements. Full mixin-based refactoring would require significant restructuring of GTK4 event handling.
+
+#### Future Refactoring Opportunities
+
+- **GNOME Dashboard**: Extract view creation functions similar to KDE
+- **Windows Dashboard**: Apply mixin pattern once fully implemented
+- **Shared Mixins**: Consider moving `ServerControlMixin` and `ClientControlMixin` to `common/` for potential reuse across platforms
+
+### 9.5 Server Busy Handling
 
 The dashboard handles server busy conditions automatically:
 - HTTP transcription: Server returns 409, dashboard shows "Server Busy" notification
 - WebSocket recording: Server sends `session_busy` message, dashboard shows error
 
-### 9.5 Model Management
+### 9.6 Model Management
 
 The dashboard provides a convenient way to manage GPU memory via the system tray and client view:
 - Automatically disabled when server is stopped or becomes unhealthy
@@ -812,6 +970,26 @@ backup:
 
 **Backup location:** `/data/database/backups/` (Docker)
 
+**Manual Backup/Restore via Dashboard:**
+
+The Dashboard provides a graphical interface for backup management in Settings → Notebook tab:
+- **Create Backup**: Manually trigger a database backup
+- **List Backups**: View all available backups with timestamps and sizes
+- **Restore Backup**: Restore database from any backup (creates safety backup first)
+
+**Export Individual Recordings:**
+
+Recordings can be exported from the Audio Notebook Calendar view:
+- Right-click on any recording → "Export transcription"
+- **Text format (.txt)**: Human-readable with speaker labels and timestamps
+- **JSON format (.json)**: Machine-readable with word-level timestamps, confidence scores, and diarization data
+
+**API Endpoints:**
+- `GET /api/notebook/recordings/{id}/export?format=txt|json` - Export recording
+- `GET /backups` - List available backups
+- `POST /backup` - Create new backup
+- `POST /restore` - Restore from backup (requires `filename` in request body)
+
 ---
 
 ## 12. Code Quality Checks
@@ -835,7 +1013,7 @@ All Python code quality tools are installed in the build environment. Run these 
 ```bash
 ./build/.venv/bin/ruff check server/backend/
 ./build/.venv/bin/ruff format dashboard/
-./build/.venv/bin/pyright server/frontend/
+./build/.venv/bin/pyright dashboard/
 ```
 
 **Preview changes without modifying files:**
@@ -848,29 +1026,7 @@ All Python code quality tools are installed in the build environment. Run these 
 2. Run `ruff format` to auto-fix style issues
 3. Run `pyright` for type errors (requires manual fixes)
 
-### 12.2 TypeScript/JavaScript Quality
-
-Frontend code uses TypeScript with Vite. From `server/frontend/`:
-
-```bash
-cd server/frontend
-
-# Install dependencies
-npm ci
-
-# Security audit
-npm audit
-
-# Type checking (via TypeScript compiler)
-npm run build  # Runs tsc + vite build
-
-# Development server with hot reload
-npm run dev
-```
-
-**Note:** The `npm run build` script runs TypeScript's `tsc` compiler, which performs type checking before building.
-
-### 12.3 Complete Quality Check Workflow
+### 12.2 Complete Quality Check Workflow
 
 Run all checks across the entire codebase:
 
@@ -882,13 +1038,7 @@ Run all checks across the entire codebase:
 ./build/.venv/bin/ruff format .
 ./build/.venv/bin/pyright
 
-# 2. Frontend checks
-cd server/frontend
-npm ci && npm audit
-npm run build  # Type checks + builds
-cd ../..
-
-# 3. Python tests
+# 2. Python tests
 ./build/.venv/bin/pytest server/backend/tests
 ```
 
@@ -911,10 +1061,10 @@ docker compose logs -f
 ```bash
 # Check health status
 docker compose ps
-docker inspect transcription-suite | grep Health -A 10
+docker inspect transcriptionsuite-container | grep Health -A 10
 
 # Test health endpoint
-docker compose exec transcription-suite curl -f http://localhost:8000/health
+docker compose exec transcriptionsuite-container curl -f http://localhost:8000/health
 ```
 
 ### 13.3 Tailscale DNS Resolution
@@ -967,10 +1117,10 @@ Then restart: `docker compose down && docker compose up -d`
 
 ### 13.6 Checking Installed Packages
 
-To inspect the Python packages installed in the *running* `transcription-suite` server container:
+To inspect the Python packages installed in the *running* `transcriptionsuite-container` server container:
 
 ```bash
-docker exec transcription-suite python -c "
+docker exec transcriptionsuite-container python -c "
 from importlib.metadata import distributions
 for dist in sorted(distributions(), key=lambda d: d.name.lower()):
     print(f'{dist.name:40} {dist.version}')

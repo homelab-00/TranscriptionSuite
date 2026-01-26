@@ -25,6 +25,7 @@ from dashboard.common.docker_manager import (
     DockerManager,
     DockerPullWorker,
     DockerResult,
+    DockerServerWorker,
     ServerMode,
     ServerStatus,
 )
@@ -66,108 +67,14 @@ except (ImportError, ValueError) as e:
 if TYPE_CHECKING:
     from dashboard.common.config import ClientConfig
 
-# Constants for embedded resources
-GITHUB_PROFILE_URL = "https://github.com/homelab-00"
-GITHUB_REPO_URL = "https://github.com/homelab-00/TranscriptionSuite"
-
-
-def _get_assets_path() -> Path:
-    """Get the path to the assets directory, handling dev, PyInstaller, and AppImage modes."""
-    import sys
-
-    # 1. PyInstaller bundle
-    if getattr(sys, "frozen", False):
-        bundle_dir = Path(sys._MEIPASS)  # type: ignore
-        return bundle_dir / "build" / "assets"
-
-    # 2. AppImage (APPDIR is set by AppImage runtime)
-    if "APPDIR" in os.environ:
-        appdir = Path(os.environ["APPDIR"])
-        assets_path = appdir / "usr" / "share" / "transcriptionsuite" / "assets"
-        if assets_path.exists():
-            logger.debug(f"Using AppImage assets path: {assets_path}")
-            return assets_path
-
-    # 3. Running from source - find project root
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        if (parent / "README.md").exists():
-            return parent / "build" / "assets"
-    return Path(__file__).parent.parent.parent.parent.parent / "build" / "assets"
-
-
-def _get_readme_path(dev: bool = False) -> Path | None:
-    """Get the path to README.md or README_DEV.md.
-
-    Handles multiple scenarios:
-    - PyInstaller bundle (looks in _MEIPASS)
-    - AppImage (looks in AppDir - checked even when not frozen)
-    - Running from source (searches parent directories)
-    - Current working directory (fallback)
-    """
-    import sys
-
-    filename = "README_DEV.md" if dev else "README.md"
-
-    # List of potential paths to check (in order of priority)
-    paths_to_check: list[Path] = []
-
-    # 1. AppImage root directory (APPDIR is set by AppImage runtime)
-    if "APPDIR" in os.environ:
-        appdir = Path(os.environ["APPDIR"])
-        logger.debug(f"Checking AppImage APPDIR: {appdir}")
-        paths_to_check.extend(
-            [
-                appdir / filename,
-                appdir / "usr" / "share" / "transcriptionsuite" / filename,
-            ]
-        )
-
-    # 2. PyInstaller bundle (_MEIPASS)
-    if getattr(sys, "frozen", False):
-        bundle_dir = Path(sys._MEIPASS)  # type: ignore
-        logger.debug(f"Checking PyInstaller bundle: {bundle_dir}")
-        paths_to_check.extend(
-            [
-                bundle_dir / filename,
-                bundle_dir / "docs" / filename,
-                bundle_dir / "src" / "dashboard" / filename,
-            ]
-        )
-
-    # 3. Running from source - find repo root
-    current = Path(__file__).resolve()
-    logger.debug(f"Searching from module path: {current}")
-    for parent in current.parents:
-        if (parent / "README.md").exists():
-            # Found project root
-            paths_to_check.insert(0, parent / filename)
-            logger.debug(f"Found project root at: {parent}")
-            break
-        paths_to_check.append(parent / filename)
-
-    # 4. Current working directory (fallback)
-    paths_to_check.append(Path.cwd() / filename)
-
-    # 5. XDG data directories (Linux)
-    if "XDG_DATA_DIRS" in os.environ:
-        for data_dir in os.environ["XDG_DATA_DIRS"].split(":"):
-            if data_dir:  # Skip empty strings
-                paths_to_check.append(Path(data_dir) / "transcriptionsuite" / filename)
-
-    # Check all paths and return first existing one
-    logger.debug(
-        f"Searching for {filename} in paths: {[str(p) for p in paths_to_check[:5]]}..."
-    )
-    for path in paths_to_check:
-        if path.exists():
-            logger.info(f"Found {filename} at: {path}")
-            return path
-
-    logger.error(
-        f"Could not find {filename} in any expected location. Searched {len(paths_to_check)} paths."
-    )
-    return None
+# Import from modular files
+from dashboard.gnome.utils import (
+    GITHUB_PROFILE_URL,
+    GITHUB_REPO_URL,
+    get_assets_path as _get_assets_path,
+    get_readme_path as _get_readme_path,
+)
+from dashboard.gnome.log_window import LogWindow
 
 
 class View(Enum):
@@ -176,300 +83,7 @@ class View(Enum):
     WELCOME = auto()
     SERVER = auto()
     CLIENT = auto()
-
-
-# Use a factory function instead of conditional base class for type checker
-def _get_log_window_base():
-    """Get the base class for LogWindow."""
-    if HAS_GTK4:
-        return Adw.Window
-    return object
-
-
-class LogWindow(_get_log_window_base()):
-    """Separate window for displaying logs with syntax highlighting and line numbers."""
-
-    def __init__(self, title: str, app: Any = None):
-        if not HAS_GTK4:
-            raise ImportError("GTK4 is required for LogWindow")
-
-        super().__init__(title=title)
-        if app:
-            self.set_application(app)
-        self.set_default_size(800, 600)
-
-        # Track displayed content to avoid unnecessary redraws
-        self._current_line_count = 0
-        self._current_content_hash = 0
-
-        # Main content
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
-        # Header bar
-        header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label=title))
-        content.append(header)
-
-        # Log view in a scrolled window
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_hexpand(True)
-
-        # Use GtkSourceView if available (for line numbers), otherwise fallback to TextView
-        if HAS_GTKSOURCEVIEW and GtkSource:
-            self._text_view = GtkSource.View()
-            self._text_view.set_show_line_numbers(True)
-            self._text_view.set_background_pattern(GtkSource.BackgroundPatternType.NONE)
-            # Get buffer from source view
-            self._buffer = self._text_view.get_buffer()
-        else:
-            self._text_view = Gtk.TextView()
-            self._buffer = self._text_view.get_buffer()
-
-        self._text_view.set_editable(False)
-        self._text_view.set_monospace(True)
-        self._text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._text_view.add_css_class("log-view")
-
-        # Setup text tags for syntax highlighting
-        self._setup_text_tags()
-
-        scrolled.set_child(self._text_view)
-        content.append(scrolled)
-
-        self.set_content(content)
-        self._apply_styles()
-
-    def _setup_text_tags(self) -> None:
-        """Create text tags for syntax highlighting."""
-        tag_table = self._buffer.get_tag_table()
-
-        # DEBUG - Gray
-        debug_tag = self._buffer.create_tag("DEBUG", foreground="#808080")
-
-        # INFO - Cyan
-        info_tag = self._buffer.create_tag("INFO", foreground="#4EC9B0")
-
-        # WARNING - Yellow
-        warning_tag = self._buffer.create_tag("WARNING", foreground="#DCDCAA")
-
-        # ERROR - Red + Bold
-        error_tag = self._buffer.create_tag("ERROR", foreground="#F48771", weight=700)
-
-        # CRITICAL - Bright Red + Bold
-        critical_tag = self._buffer.create_tag(
-            "CRITICAL", foreground="#FF6B6B", weight=700
-        )
-
-        # Date format - Cyan
-        date_tag = self._buffer.create_tag("date", foreground="#4EC9B0")
-
-        # Time format - Light blue
-        time_tag = self._buffer.create_tag("time", foreground="#9CDCFE")
-
-        # Milliseconds format - Gray/blue
-        milliseconds_tag = self._buffer.create_tag("milliseconds", foreground="#6A9FB5")
-
-        # Brackets format - Dim gray
-        bracket_tag = self._buffer.create_tag("bracket", foreground="#808080")
-
-        # Module names - Light blue
-        module_tag = self._buffer.create_tag("module", foreground="#9CDCFE")
-
-        # Separator (pipes) - Dim
-        separator_tag = self._buffer.create_tag("separator", foreground="#6A6A6A")
-
-        # Container name - Purple
-        container_tag = self._buffer.create_tag("container", foreground="#C586C0")
-
-    def _apply_highlighting(self, start_iter, text: str) -> None:
-        """Apply syntax highlighting to newly added text."""
-        if not text:
-            return
-
-        import re
-
-        # Helper to apply tag at specific position
-        def apply_tag(tag_name: str, start_pos: int, length: int) -> None:
-            tag_start = start_iter.copy()
-            tag_start.forward_chars(start_pos)
-            tag_end = tag_start.copy()
-            tag_end.forward_chars(length)
-            self._buffer.apply_tag_by_name(tag_name, tag_start, tag_end)
-
-        # Highlight container name first (if present at start)
-        # Server format: container-name | ...
-        container_match = re.match(r"^([\w-]+)\s*(\|)", text)
-        if container_match:
-            # Container name
-            apply_tag(
-                "container", container_match.start(1), len(container_match.group(1))
-            )
-            # First pipe
-            apply_tag("separator", container_match.start(2), 1)
-
-        # Pattern for bracketed timestamp with milliseconds [YYYY-MM-DD HH:MM:SS,mmm]
-        bracket_ts_match = re.match(
-            r"^(\[)(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(,\d{3})?(\])", text
-        )
-        if bracket_ts_match:
-            # Opening bracket
-            apply_tag("bracket", bracket_ts_match.start(1), 1)
-            # Date
-            apply_tag("date", bracket_ts_match.start(2), len(bracket_ts_match.group(2)))
-            # Time
-            apply_tag("time", bracket_ts_match.start(3), len(bracket_ts_match.group(3)))
-            # Milliseconds (if present)
-            if bracket_ts_match.group(4):
-                apply_tag(
-                    "milliseconds",
-                    bracket_ts_match.start(4),
-                    len(bracket_ts_match.group(4)),
-                )
-            # Closing bracket
-            apply_tag("bracket", bracket_ts_match.start(5), 1)
-
-        # Pattern for date/time in server logs: YYYY-MM-DD HH:MM:SS
-        # This will match timestamps after the container name
-        datetime_match = re.search(r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})", text)
-        if datetime_match:
-            # Date
-            apply_tag("date", datetime_match.start(1), len(datetime_match.group(1)))
-            # Time
-            apply_tag("time", datetime_match.start(2), len(datetime_match.group(2)))
-
-        # Highlight all pipe separators
-        for match in re.finditer(r"\|", text):
-            apply_tag("separator", match.start(), 1)
-
-        # Highlight log level
-        for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
-            for match in re.finditer(rf"\b{level}\b", text):
-                apply_tag(level, match.start(), len(level))
-
-        # Highlight module names (text after " - ", before ":")
-        if " - " in text:
-            parts = text.split(" - ")
-            if len(parts) >= 2:
-                module_part = parts[1]
-                if ":" in module_part:
-                    module_name = module_part.split(":")[0].strip()
-                    module_idx = text.index(module_name)
-                    apply_tag("module", module_idx, len(module_name))
-
-    def append_log(self, message: str) -> None:
-        """Append a log message to the view with syntax highlighting while preserving scroll position."""
-        # Get scroll position
-        vadj = self._text_view.get_vadjustment()
-        old_value = vadj.get_value()
-        old_upper = vadj.get_upper()
-        was_at_bottom = old_value >= (old_upper - vadj.get_page_size() - 1)
-
-        # Insert text
-        end_iter = self._buffer.get_end_iter()
-        start_offset = end_iter.get_offset()
-        self._buffer.insert(end_iter, message + "\n")
-
-        # Apply highlighting to the newly added text
-        start_iter = self._buffer.get_iter_at_offset(start_offset)
-        self._apply_highlighting(start_iter, message)
-
-        # Restore scroll position (unless user was at bottom)
-        if not was_at_bottom:
-            vadj.set_value(old_value)
-
-    def set_logs(self, logs: str) -> None:
-        """Set the entire log content, only updating if content changed."""
-        # Check if content actually changed using hash
-        new_hash = hash(logs)
-        if new_hash == self._current_content_hash:
-            return  # No change, skip update entirely
-
-        # Split into lines for comparison
-        new_lines = logs.rstrip("\n").split("\n") if logs.strip() else []
-        new_line_count = len(new_lines)
-
-        # If new content has more lines and starts with same content, just append
-        if new_line_count > self._current_line_count and self._current_line_count > 0:
-            current_text = self._buffer.get_text(
-                self._buffer.get_start_iter(), self._buffer.get_end_iter(), False
-            )
-            current_lines = (
-                current_text.rstrip("\n").split("\n") if current_text.strip() else []
-            )
-
-            # Check if current content matches the beginning of new content
-            if new_lines[: len(current_lines)] == current_lines:
-                # Just append the new lines
-                lines_to_add = new_lines[len(current_lines) :]
-                for line in lines_to_add:
-                    self.append_log(line)
-                self._current_line_count = new_line_count
-                self._current_content_hash = new_hash
-                return
-
-        # Content changed significantly - need full replacement
-        # Save scroll position
-        vadj = self._text_view.get_vadjustment()
-        old_value = vadj.get_value()
-
-        # Clear and set new content
-        self._buffer.set_text("")
-
-        # Split by lines and apply highlighting to each
-        for line in logs.split("\n"):
-            if line:
-                end_iter = self._buffer.get_end_iter()
-                start_offset = end_iter.get_offset()
-                self._buffer.insert(end_iter, line + "\n")
-                start_iter = self._buffer.get_iter_at_offset(start_offset)
-                self._apply_highlighting(start_iter, line)
-
-        # Restore scroll position
-        vadj.set_value(old_value)
-
-        # Update tracking
-        self._current_line_count = new_line_count
-        self._current_content_hash = new_hash
-
-    def clear_logs(self) -> None:
-        """Clear all logs."""
-        self._buffer.set_text("")
-        self._current_line_count = 0
-        self._current_content_hash = 0
-
-    def _apply_styles(self) -> None:
-        """Apply dark theme styling."""
-        css = b"""
-        .log-view {
-            background-color: #1e1e1e;
-            color: #d4d4d4;
-            font-family: "CaskaydiaCove Nerd Font", monospace;
-            font-size: 9pt;
-        }
-        .log-view:selected {
-            background-color: #264f78;
-        }
-        .log-view text {
-            background-color: #1e1e1e;
-        }
-        .log-view border {
-            background-color: #252526;
-        }
-        .log-view .line-numbers {
-            background-color: #252526;
-            color: #858585;
-            padding-left: 4px;
-            padding-right: 8px;
-        }
-        """
-        provider = Gtk.CssProvider()
-        provider.load_from_data(css)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+    NOTEBOOK = auto()
 
 
 def _get_dashboard_base():
@@ -533,6 +147,9 @@ class DashboardWindow(_get_dashboard_base()):
         # Docker pull worker for async image pulling
         self._pull_worker: DockerPullWorker | None = None
 
+        # Docker server start worker for async server start
+        self._server_worker: DockerServerWorker | None = None
+
         # UI references (typed as Any since GTK types are dynamic)
         self._stack: Any = None
         self._home_server_status: Any = None
@@ -541,6 +158,7 @@ class DashboardWindow(_get_dashboard_base()):
         self._image_status_label: Any = None
         self._image_date_label: Any = None
         self._image_size_label: Any = None
+        self._image_selector: Any = None
         self._server_token_entry: Any = None
         self._data_volume_status: Any = None
         self._data_volume_size: Any = None
@@ -567,9 +185,9 @@ class DashboardWindow(_get_dashboard_base()):
         self._start_status_timer()
 
     def _setup_ui(self) -> None:
-        """Set up the main UI structure."""
+        """Set up the main UI structure with sidebar navigation."""
         self.set_title("TranscriptionSuite")
-        self.set_default_size(750, 600)
+        self.set_default_size(850, 600)
 
         # Set window icon from app logo
         self._set_window_icon()
@@ -578,12 +196,30 @@ class DashboardWindow(_get_dashboard_base()):
         style_manager = Adw.StyleManager.get_default()
         style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
 
-        # Main content box
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # Main horizontal box (sidebar | content)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
 
-        # Navigation header bar
-        header = self._create_header_bar()
-        main_box.append(header)
+        # Create sidebar
+        sidebar = self._create_sidebar()
+        main_box.append(sidebar)
+
+        # Content area with header
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content_box.set_hexpand(True)
+
+        # Minimal header bar for window controls
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(True)
+        header.set_show_start_title_buttons(False)
+
+        # Menu button in header
+        self._menu_btn = Gtk.MenuButton()
+        self._menu_btn.set_icon_name("open-menu-symbolic")
+        self._menu_btn.set_tooltip_text("Menu")
+        self._setup_menu_button()
+        header.pack_end(self._menu_btn)
+
+        content_box.append(header)
 
         # Stack for views
         self._stack = Gtk.Stack()
@@ -595,81 +231,112 @@ class DashboardWindow(_get_dashboard_base()):
         welcome_view = self._create_welcome_view()
         server_view = self._create_server_view()
         client_view = self._create_client_view()
+        notebook_view = self._create_notebook_view()
 
         self._stack.add_named(welcome_view, "welcome")
         self._stack.add_named(server_view, "server")
         self._stack.add_named(client_view, "client")
+        self._stack.add_named(notebook_view, "notebook")
 
-        main_box.append(self._stack)
+        content_box.append(self._stack)
+        main_box.append(content_box)
 
         self.set_content(main_box)
 
-        # Start on welcome view
+        # Start on home view by default
         self._navigate_to(View.WELCOME, add_to_history=False)
 
         # Connect close request
         self.connect("close-request", self._on_close_request)
 
-    def _set_window_icon(self) -> None:
-        """Set the window icon from the app logo.
+    def _create_sidebar(self) -> Any:
+        """Create the vertical sidebar navigation with status lights."""
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar.set_size_request(200, -1)
+        sidebar.add_css_class("sidebar")
 
-        In GTK4/Wayland, window icons are typically determined by the .desktop file.
-        However, we can add our assets directory to the icon theme search path
-        so the icon can be found.
-        """
-        try:
-            assets_path = _get_assets_path()
+        # Header with title
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        header.set_margin_top(20)
+        header.set_margin_bottom(16)
+        header.set_margin_start(16)
+        header.set_margin_end(16)
+        header.add_css_class("sidebar-header")
 
-            # Add the assets directory to icon theme search path
-            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-            icon_theme.add_search_path(str(assets_path))
+        title = Gtk.Label(label="Transcription")
+        title.add_css_class("sidebar-title")
+        title.set_halign(Gtk.Align.START)
+        header.append(title)
 
-            # Also add parent directories that might contain icons
-            # AppImage structure: usr/share/icons/...
-            if "APPDIR" in os.environ:
-                appdir = Path(os.environ["APPDIR"])
-                icon_dirs = [
-                    appdir / "usr" / "share" / "icons",
-                    appdir / "usr" / "share" / "pixmaps",
-                ]
-                for icon_dir in icon_dirs:
-                    if icon_dir.exists():
-                        icon_theme.add_search_path(str(icon_dir))
-                        logger.debug(f"Added icon search path: {icon_dir}")
+        subtitle = Gtk.Label(label="Suite")
+        subtitle.add_css_class("sidebar-subtitle")
+        subtitle.set_halign(Gtk.Align.START)
+        header.append(subtitle)
 
-            logger.debug(f"Added icon search path: {assets_path}")
-        except Exception as e:
-            logger.warning(f"Failed to configure icon theme: {e}")
+        sidebar.append(header)
 
-    def _create_header_bar(self) -> Any:
-        """Create the navigation header bar."""
-        header = Adw.HeaderBar()
+        # Navigation buttons container
+        nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        nav_box.set_margin_start(8)
+        nav_box.set_margin_end(8)
+        nav_box.set_vexpand(True)
 
-        # Left side: Home, Server, Client buttons
-        home_btn = Gtk.Button(label="Home")
+        # Home button
+        home_btn = Gtk.Button(label="  Home")
         home_btn.set_icon_name("go-home-symbolic")
-        home_btn.add_css_class("nav-button")
+        home_btn.add_css_class("sidebar-button")
         home_btn.connect("clicked", lambda _: self._go_home())
-        header.pack_start(home_btn)
+        nav_box.append(home_btn)
 
-        server_btn = Gtk.Button(label="Server")
+        # Server button with status light
+        server_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        server_btn = Gtk.Button(label="  Docker Server")
         server_btn.set_icon_name("network-server-symbolic")
-        server_btn.add_css_class("nav-button")
+        server_btn.add_css_class("sidebar-button")
+        server_btn.set_hexpand(True)
         server_btn.connect("clicked", lambda _: self._navigate_to(View.SERVER))
-        header.pack_start(server_btn)
+        server_box.append(server_btn)
 
-        client_btn = Gtk.Button(label="Client")
+        self._server_status_light = Gtk.Label(label="⬤")
+        self._server_status_light.add_css_class("status-light-gray")
+        self._server_status_light.set_margin_end(8)
+        server_box.append(self._server_status_light)
+        nav_box.append(server_box)
+
+        # Client button with status light
+        client_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        client_btn = Gtk.Button(label="  Client")
         client_btn.set_icon_name("audio-input-microphone-symbolic")
-        client_btn.add_css_class("nav-button")
+        client_btn.add_css_class("sidebar-button")
+        client_btn.set_hexpand(True)
         client_btn.connect("clicked", lambda _: self._navigate_to(View.CLIENT))
-        header.pack_start(client_btn)
+        client_box.append(client_btn)
 
-        # Right side: Hamburger menu button (☰) with Settings, Help, About
-        self._menu_btn = Gtk.MenuButton()
-        self._menu_btn.set_icon_name("open-menu-symbolic")
-        self._menu_btn.set_tooltip_text("Menu")
-        self._menu_btn.add_css_class("nav-button")
+        self._client_status_light = Gtk.Label(label="⬤")
+        self._client_status_light.add_css_class("status-light-orange")
+        self._client_status_light.set_margin_end(8)
+        client_box.append(self._client_status_light)
+        nav_box.append(client_box)
 
+        # Separator
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(8)
+        sep.set_margin_bottom(8)
+        nav_box.append(sep)
+
+        # Notebook button
+        notebook_btn = Gtk.Button(label="  Notebook")
+        notebook_btn.set_icon_name("accessories-text-editor-symbolic")
+        notebook_btn.add_css_class("sidebar-button")
+        notebook_btn.connect("clicked", lambda _: self._navigate_to(View.NOTEBOOK))
+        nav_box.append(notebook_btn)
+
+        sidebar.append(nav_box)
+
+        return sidebar
+
+    def _setup_menu_button(self) -> None:
+        """Set up the hamburger menu button."""
         # Create menu model
         menu = Gio.Menu()
 
@@ -711,9 +378,75 @@ class DashboardWindow(_get_dashboard_base()):
         about_action.connect("activate", lambda a, p: self._show_about_dialog())
         self.add_action(about_action)
 
-        header.pack_end(self._menu_btn)
+    def _update_sidebar_status_lights(self) -> None:
+        """Update the status light indicators in the sidebar."""
+        # Server status light
+        if hasattr(self, "_server_status_light") and self._server_status_light:
+            status = self._docker_manager.get_server_status()
+            # Remove old classes
+            for cls in [
+                "status-light-green",
+                "status-light-red",
+                "status-light-blue",
+                "status-light-orange",
+                "status-light-gray",
+            ]:
+                self._server_status_light.remove_css_class(cls)
 
-        return header
+            if status == ServerStatus.RUNNING:
+                health = self._docker_manager.get_container_health()
+                if health == "unhealthy":
+                    self._server_status_light.add_css_class("status-light-red")
+                elif health and health != "healthy":
+                    self._server_status_light.add_css_class("status-light-blue")
+                else:
+                    self._server_status_light.add_css_class("status-light-green")
+            elif status == ServerStatus.STOPPED:
+                self._server_status_light.add_css_class("status-light-orange")
+            else:
+                self._server_status_light.add_css_class("status-light-gray")
+
+        # Client status light
+        if hasattr(self, "_client_status_light") and self._client_status_light:
+            # Remove old classes
+            for cls in ["status-light-green", "status-light-orange"]:
+                self._client_status_light.remove_css_class(cls)
+
+            if self._client_running:
+                self._client_status_light.add_css_class("status-light-green")
+            else:
+                self._client_status_light.add_css_class("status-light-orange")
+
+    def _set_window_icon(self) -> None:
+        """Set the window icon from the app logo.
+
+        In GTK4/Wayland, window icons are typically determined by the .desktop file.
+        However, we can add our assets directory to the icon theme search path
+        so the icon can be found.
+        """
+        try:
+            assets_path = _get_assets_path()
+
+            # Add the assets directory to icon theme search path
+            icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            icon_theme.add_search_path(str(assets_path))
+
+            # Also add parent directories that might contain icons
+            # AppImage structure: usr/share/icons/...
+            if "APPDIR" in os.environ:
+                appdir = Path(os.environ["APPDIR"])
+                icon_dirs = [
+                    appdir / "usr" / "share" / "icons",
+                    appdir / "usr" / "share" / "pixmaps",
+                ]
+                for icon_dir in icon_dirs:
+                    if icon_dir.exists():
+                        icon_theme.add_search_path(str(icon_dir))
+                        logger.debug(f"Added icon search path: {icon_dir}")
+
+            logger.debug(f"Added icon search path: {assets_path}")
+        except Exception as e:
+            logger.warning(f"Failed to configure icon theme: {e}")
 
     def _create_welcome_view(self) -> Any:
         """Create the welcome/home view."""
@@ -888,6 +621,23 @@ class DashboardWindow(_get_dashboard_base()):
         self._image_size_label.add_css_class("caption")
         image_row.append(self._image_size_label)
         status_box.append(image_row)
+
+        # Image selector row
+        image_selector_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        selector_label = Gtk.Label(label="Select Image:")
+        selector_label.add_css_class("dim-label")
+        image_selector_row.append(selector_label)
+        self._image_selector = Gtk.ComboBoxText()
+        self._image_selector.set_tooltip_text(
+            "Select which Docker image to use when starting the server.\n"
+            "'Most Recent (auto)' automatically selects the newest image by build date."
+        )
+        self._image_selector.connect("changed", self._on_image_selection_changed)
+        image_selector_row.append(self._image_selector)
+        status_box.append(image_selector_row)
+
+        # Populate image selector
+        self._populate_image_selector()
 
         # Separator
         separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -1252,28 +1002,109 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Language dropdown
         self._live_language_combo = Gtk.ComboBoxText()
-        # Add language options (Whisper-supported languages)
+        # Full Whisper language list (99 languages)
         languages = [
             ("Auto-detect", ""),
-            ("English", "en"),
-            ("Greek", "el"),
-            ("German", "de"),
-            ("French", "fr"),
-            ("Spanish", "es"),
-            ("Italian", "it"),
-            ("Portuguese", "pt"),
-            ("Russian", "ru"),
-            ("Japanese", "ja"),
-            ("Korean", "ko"),
-            ("Chinese", "zh"),
+            ("Afrikaans", "af"),
+            ("Amharic", "am"),
             ("Arabic", "ar"),
+            ("Assamese", "as"),
+            ("Azerbaijani", "az"),
+            ("Bashkir", "ba"),
+            ("Belarusian", "be"),
+            ("Bulgarian", "bg"),
+            ("Bengali", "bn"),
+            ("Tibetan", "bo"),
+            ("Breton", "br"),
+            ("Bosnian", "bs"),
+            ("Catalan", "ca"),
+            ("Czech", "cs"),
+            ("Welsh", "cy"),
+            ("Danish", "da"),
+            ("German", "de"),
+            ("Greek", "el"),
+            ("English", "en"),
+            ("Spanish", "es"),
+            ("Estonian", "et"),
+            ("Basque", "eu"),
+            ("Persian", "fa"),
+            ("Finnish", "fi"),
+            ("Faroese", "fo"),
+            ("French", "fr"),
+            ("Galician", "gl"),
+            ("Gujarati", "gu"),
+            ("Hausa", "ha"),
+            ("Hawaiian", "haw"),
+            ("Hebrew", "he"),
             ("Hindi", "hi"),
+            ("Croatian", "hr"),
+            ("Haitian Creole", "ht"),
+            ("Hungarian", "hu"),
+            ("Armenian", "hy"),
+            ("Indonesian", "id"),
+            ("Icelandic", "is"),
+            ("Italian", "it"),
+            ("Japanese", "ja"),
+            ("Javanese", "jw"),
+            ("Georgian", "ka"),
+            ("Kazakh", "kk"),
+            ("Khmer", "km"),
+            ("Kannada", "kn"),
+            ("Korean", "ko"),
+            ("Latin", "la"),
+            ("Luxembourgish", "lb"),
+            ("Lingala", "ln"),
+            ("Lao", "lo"),
+            ("Lithuanian", "lt"),
+            ("Latvian", "lv"),
+            ("Malagasy", "mg"),
+            ("Maori", "mi"),
+            ("Macedonian", "mk"),
+            ("Malayalam", "ml"),
+            ("Mongolian", "mn"),
+            ("Marathi", "mr"),
+            ("Malay", "ms"),
+            ("Maltese", "mt"),
+            ("Burmese", "my"),
+            ("Nepali", "ne"),
             ("Dutch", "nl"),
+            ("Norwegian Nynorsk", "nn"),
+            ("Norwegian", "no"),
+            ("Occitan", "oc"),
+            ("Punjabi", "pa"),
             ("Polish", "pl"),
-            ("Turkish", "tr"),
-            ("Ukrainian", "uk"),
-            ("Vietnamese", "vi"),
+            ("Pashto", "ps"),
+            ("Portuguese", "pt"),
+            ("Romanian", "ro"),
+            ("Russian", "ru"),
+            ("Sanskrit", "sa"),
+            ("Sindhi", "sd"),
+            ("Sinhala", "si"),
+            ("Slovak", "sk"),
+            ("Slovenian", "sl"),
+            ("Shona", "sn"),
+            ("Somali", "so"),
+            ("Albanian", "sq"),
+            ("Serbian", "sr"),
+            ("Sundanese", "su"),
+            ("Swedish", "sv"),
+            ("Swahili", "sw"),
+            ("Tamil", "ta"),
+            ("Telugu", "te"),
+            ("Tajik", "tg"),
             ("Thai", "th"),
+            ("Turkmen", "tk"),
+            ("Tagalog", "tl"),
+            ("Turkish", "tr"),
+            ("Tatar", "tt"),
+            ("Ukrainian", "uk"),
+            ("Urdu", "ur"),
+            ("Uzbek", "uz"),
+            ("Vietnamese", "vi"),
+            ("Yiddish", "yi"),
+            ("Yoruba", "yo"),
+            ("Chinese", "zh"),
+            ("Cantonese", "yue"),
         ]
         for name, code in languages:
             self._live_language_combo.append(code, name)
@@ -1354,6 +1185,109 @@ class DashboardWindow(_get_dashboard_base()):
 
         scrolled.set_child(box)
         return scrolled
+
+    def _get_api_client(self) -> "APIClient | None":
+        """Create an API client from current config settings for notebook operations.
+
+        GNOME Dashboard runs in a separate process from the tray, so it cannot
+        access the tray's orchestrator directly. This method creates an API client
+        from the current config settings when the server is running.
+        """
+        from dashboard.common.api_client import APIClient
+
+        server_status = self._docker_manager.get_server_status()
+        if server_status != ServerStatus.RUNNING:
+            logger.debug("Server not running, cannot create API client")
+            return None
+
+        use_remote = self.config.get("server", "use_remote", default=False)
+        use_https = self.config.get("server", "use_https", default=False)
+
+        if use_remote:
+            host = self.config.get("server", "remote_host", default="")
+            port = self.config.get("server", "port", default=8443)
+        else:
+            host = "localhost"
+            port = self.config.get("server", "port", default=8000)
+
+        token = self.config.get("server", "token", default="")
+        tls_verify = self.config.get("server", "tls_verify", default=True)
+
+        if not host:
+            logger.debug("No host configured, cannot create API client")
+            return None
+
+        return APIClient(
+            host=host,
+            port=port,
+            use_https=use_https,
+            token=token if token else None,
+            tls_verify=tls_verify,
+        )
+
+    def _create_notebook_view(self) -> Any:
+        """Create the Audio Notebook view."""
+        from dashboard.gnome.notebook_view import NotebookView
+
+        # Create API client from config settings (GNOME runs in separate process, no tray access)
+        api_client = self._get_api_client()
+
+        self._notebook_widget = NotebookView(api_client)
+        self._notebook_widget.recording_requested.connect(self._open_recording_dialog)
+        return self._notebook_widget
+
+    def _refresh_notebook_view(self) -> None:
+        """Refresh the notebook view data."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            # Update API client reference in case connection changed
+            api_client = self._get_api_client()
+            if api_client:
+                self._notebook_widget.set_api_client(api_client)
+            self._notebook_widget.refresh()
+
+    def _update_notebook_api_client(self) -> bool:
+        """Update notebook widgets with current API client (called after connection)."""
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            api_client = self._get_api_client()
+            if api_client:
+                self._notebook_widget.set_api_client(api_client)
+                logger.debug("Notebook API client updated after connection")
+        return False  # Don't repeat
+
+    def _open_recording_dialog(self, recording_id: int) -> None:
+        """Open a recording dialog for the given recording ID."""
+        from dashboard.gnome.recording_dialog import RecordingDialog
+
+        # Create API client from config settings
+        api_client = self._get_api_client()
+
+        if not api_client:
+            logger.error(
+                "Cannot open recording: API client not available (server not running?)"
+            )
+            self._show_notification(
+                "Error", "Cannot open recording: Server not running"
+            )
+            return
+
+        dialog = RecordingDialog(
+            api_client=api_client,
+            recording_id=recording_id,
+            parent=self,
+        )
+        dialog.connect_recording_deleted(self._on_recording_deleted)
+        dialog.connect_recording_updated(self._on_recording_updated)
+        dialog.present()
+
+    def _on_recording_deleted(self, recording_id: int) -> None:
+        """Handle recording deletion - refresh notebook view."""
+        logger.info(f"Recording {recording_id} deleted, refreshing notebook")
+        self._refresh_notebook_view()
+
+    def _on_recording_updated(self, recording_id: int) -> None:
+        """Handle recording update - refresh notebook view."""
+        logger.info(f"Recording {recording_id} updated, refreshing notebook")
+        self._refresh_notebook_view()
 
     def _apply_styles(self) -> None:
         """Apply custom CSS styling matching KDE color scheme."""
@@ -1475,7 +1409,7 @@ class DashboardWindow(_get_dashboard_base()):
             color: #2196f3;
         }
         .status-warning {
-            color: #ff9800;
+            color: #f44336;
         }
 
         /* Nav button */
@@ -1488,6 +1422,61 @@ class DashboardWindow(_get_dashboard_base()):
             background: #2d2d2d;
             border-radius: 4px;
             color: #90caf9;
+        }
+
+        /* Sidebar styles */
+        .sidebar {
+            background-color: #1a1a2e;
+            border-right: 1px solid #2d2d2d;
+        }
+        .sidebar-header {
+            border-bottom: 1px solid #2d2d2d;
+        }
+        .sidebar-title {
+            color: #90caf9;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .sidebar-subtitle {
+            color: #606080;
+            font-size: 16px;
+        }
+        .sidebar-button {
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #a0a0a0;
+        }
+        .sidebar-button:hover {
+            background: #2d2d3d;
+            color: #ffffff;
+        }
+        .sidebar-button:checked {
+            background: #2d4a6d;
+            color: #90caf9;
+        }
+
+        /* Status light colors */
+        .status-light-green {
+            color: #4caf50;
+            font-size: 8px;
+        }
+        .status-light-red {
+            color: #f44336;
+            font-size: 8px;
+        }
+        .status-light-blue {
+            color: #2196f3;
+            font-size: 8px;
+        }
+        .status-light-orange {
+            color: #f44336;
+            font-size: 8px;
+        }
+        .status-light-gray {
+            color: #6c757d;
+            font-size: 8px;
         }
 
         /* Log view */
@@ -1582,6 +1571,7 @@ class DashboardWindow(_get_dashboard_base()):
             View.WELCOME: "welcome",
             View.SERVER: "server",
             View.CLIENT: "client",
+            View.NOTEBOOK: "notebook",
         }
 
         if self._stack:
@@ -1594,6 +1584,8 @@ class DashboardWindow(_get_dashboard_base()):
             self._refresh_server_status()
         elif view == View.CLIENT:
             self._refresh_client_status()
+        elif view == View.NOTEBOOK:
+            self._refresh_notebook_view()
 
     def _go_home(self) -> None:
         """Navigate to home view."""
@@ -1615,7 +1607,7 @@ class DashboardWindow(_get_dashboard_base()):
 
     def _start_status_timer(self) -> None:
         """Start periodic status updates."""
-        self._status_timer_id = GLib.timeout_add_seconds(5, self._on_status_tick)
+        self._status_timer_id = GLib.timeout_add_seconds(1, self._on_status_tick)
         # Initial refresh
         self._refresh_home_status()
         self._refresh_server_status()
@@ -1677,6 +1669,9 @@ class DashboardWindow(_get_dashboard_base()):
                 self._home_client_status.remove_css_class("status-running")
                 self._home_client_status.add_css_class("status-stopped")
 
+        # Update sidebar status lights
+        self._update_sidebar_status_lights()
+
     def _refresh_server_status(self) -> None:
         """Refresh server view status."""
         if not self._server_status_label:
@@ -1718,16 +1713,16 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Volume status
         data_volume_exists = self._docker_manager.volume_exists(
-            "transcription-suite-data"
+            "transcriptionsuite-data"
         )
         models_volume_exists = self._docker_manager.volume_exists(
-            "transcription-suite-models"
+            "transcriptionsuite-models"
         )
 
         if self._data_volume_status:
             if data_volume_exists:
                 self._data_volume_status.set_text("Available")
-                size = self._docker_manager.get_volume_size("transcription-suite-data")
+                size = self._docker_manager.get_volume_size("transcriptionsuite-data")
                 if self._data_volume_size and size:
                     self._data_volume_size.set_text(f"  ({size})")
                 else:
@@ -1740,9 +1735,7 @@ class DashboardWindow(_get_dashboard_base()):
         if self._models_volume_status:
             if models_volume_exists:
                 self._models_volume_status.set_text("Available")
-                size = self._docker_manager.get_volume_size(
-                    "transcription-suite-models"
-                )
+                size = self._docker_manager.get_volume_size("transcriptionsuite-models")
                 if self._models_volume_size and size:
                     self._models_volume_size.set_text(f"  ({size})")
                 else:
@@ -1902,23 +1895,122 @@ class DashboardWindow(_get_dashboard_base()):
             server_stopped = server_status != ServerStatus.RUNNING
             self._notebook_toggle_btn.set_sensitive(not running and server_stopped)
 
+        # Update notebook API client when client starts
+        if running:
+            GLib.timeout_add(2000, self._update_notebook_api_client)
+
     # =========================================================================
     # Server Operations
     # =========================================================================
 
+    def _populate_image_selector(self) -> None:
+        """Populate the image selector dropdown with available local images."""
+        if not self._image_selector:
+            return
+
+        self._image_selector.remove_all()
+
+        # Add "Most Recent (auto)" as first option
+        self._image_selector.append("auto", "Most Recent (auto)")
+
+        # Get list of local images
+        images = self._docker_manager.list_local_images()
+
+        for img in images:
+            display_text = img.display_name()
+            self._image_selector.append(img.tag, display_text)
+
+        # Set default selection to "auto"
+        self._image_selector.set_active_id("auto")
+
+        # If no images found, show a placeholder tooltip
+        if not images:
+            self._image_selector.set_tooltip_text(
+                "No local images found.\n"
+                "Use 'Fetch Fresh' to pull the latest image from the registry."
+            )
+
+    def _on_image_selection_changed(self, combo: Any) -> None:
+        """Handle image selection change."""
+        tag = combo.get_active_id()
+        if tag == "auto":
+            logger.debug("Image selection: auto (most recent)")
+        else:
+            logger.debug(f"Image selection: {tag}")
+
+    def _get_selected_image_tag(self) -> str:
+        """Get the currently selected image tag."""
+        if not self._image_selector:
+            return "auto"
+        tag = self._image_selector.get_active_id()
+        return tag if tag else "auto"
+
     def _on_start_server_local(self) -> None:
-        """Start server in local mode."""
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(ServerMode.LOCAL),
-            "Starting server (local mode)...",
-        )
+        """Start server in local mode (async, non-blocking)."""
+        self._start_server_async(ServerMode.LOCAL)
 
     def _on_start_server_remote(self) -> None:
-        """Start server in remote mode."""
-        self._run_server_operation(
-            lambda: self._docker_manager.start_server(ServerMode.REMOTE),
-            "Starting server (remote mode)...",
+        """Start server in remote mode (async, non-blocking)."""
+        self._start_server_async(ServerMode.REMOTE)
+
+    def _start_server_async(self, mode: ServerMode) -> None:
+        """Start the Docker server asynchronously."""
+        # Prevent starting another server start if one is already in progress
+        if self._server_worker is not None and self._server_worker.is_alive():
+            logger.warning("Server start already in progress")
+            self._show_notification("Docker Server", "Server start already in progress")
+            return
+
+        image_selection = self._get_selected_image_tag()
+        self._show_notification(
+            "Docker Server", f"Starting server ({mode.value} mode)..."
         )
+
+        def on_progress(msg: str) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            GLib.idle_add(self._update_server_start_progress, msg)
+
+        def on_complete(result: DockerResult) -> None:
+            """Called from worker thread - schedule UI update on main thread."""
+            GLib.idle_add(self._on_server_start_complete, result)
+
+        # Start the server asynchronously
+        result = self._docker_manager.start_server_async(
+            mode=mode,
+            progress_callback=on_progress,
+            complete_callback=on_complete,
+            image_selection=image_selection,
+        )
+
+        # Check if pre-flight validation failed (returns DockerResult instead of worker)
+        if isinstance(result, DockerResult):
+            # Validation failed - handle synchronously
+            self._show_notification("Docker Server", f"Error: {result.message}")
+            self._refresh_server_status()
+            self._refresh_home_status()
+        else:
+            # Got a worker - store reference
+            self._server_worker = result
+            logger.info(f"Started async server start ({mode.value} mode)")
+
+    def _update_server_start_progress(self, msg: str) -> bool:
+        """Update with server start progress (main thread via GLib.idle_add)."""
+        logger.info(msg)
+        return False  # Remove from idle queue
+
+    def _on_server_start_complete(self, result: DockerResult) -> bool:
+        """Handle server start completion (main thread via GLib.idle_add)."""
+        self._server_worker = None
+        self._show_notification("Docker Server", result.message)
+        self._refresh_server_status()
+        self._refresh_home_status()
+
+        # Update notebook API client when server starts successfully
+        # (user may use notebook without explicitly starting client)
+        if result.success:
+            GLib.timeout_add(2000, self._update_notebook_api_client)
+
+        return False  # Remove from idle queue
 
     def _on_stop_server(self) -> None:
         """Stop the server."""
@@ -1959,7 +2051,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         self._show_notification(
             "Docker Server",
-            "Starting image download (~15GB). This may take a while...",
+            "Starting image download (~17GB). This may take a while...",
         )
 
         def on_progress(msg: str) -> None:
@@ -2093,6 +2185,9 @@ class DashboardWindow(_get_dashboard_base()):
             self._start_client_callback(False)
         self.set_client_running(True)
 
+        # Schedule notebook API client update after connection establishes
+        GLib.timeout_add(2000, self._update_notebook_api_client)
+
     def _on_start_client_remote(self) -> None:
         """Start client in remote mode."""
         self.config.set("server", "use_remote", value=True)
@@ -2103,6 +2198,9 @@ class DashboardWindow(_get_dashboard_base()):
         if self._start_client_callback:
             self._start_client_callback(True)
         self.set_client_running(True)
+
+        # Schedule notebook API client update after connection establishes
+        GLib.timeout_add(2000, self._update_notebook_api_client)
 
     def _on_stop_client(self) -> None:
         """Stop the client."""

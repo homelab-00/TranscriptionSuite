@@ -195,6 +195,101 @@ class DatabaseBackupManager:
             logger.error(f"Failed to verify backup {backup_path}: {e}")
             return False
 
+    def restore_backup(self, backup_path: Path) -> bool:
+        """
+        Restore the database from a backup file.
+
+        This creates a backup of the current database before restoring,
+        then replaces the main database with the backup.
+
+        Args:
+            backup_path: Path to the backup file to restore from
+
+        Returns:
+            True if restore was successful, False otherwise
+        """
+        if not backup_path.exists():
+            logger.error(f"Backup file does not exist: {backup_path}")
+            return False
+
+        # Verify the backup is valid before restoring
+        if not self.verify_backup(backup_path):
+            logger.error(f"Backup file is invalid or corrupted: {backup_path}")
+            return False
+
+        source_conn = None
+        dest_conn = None
+
+        try:
+            # First, create a safety backup of the current database
+            if self.db_path.exists():
+                safety_backup = self.create_backup()
+                if safety_backup:
+                    logger.info(
+                        f"Created safety backup before restore: {safety_backup}"
+                    )
+                else:
+                    logger.warning("Could not create safety backup - proceeding anyway")
+
+            logger.info(f"Restoring database from {backup_path} to {self.db_path}")
+
+            # Open the backup file as source
+            source_conn = sqlite3.connect(
+                f"file:{backup_path}?mode=ro",
+                uri=True,
+                timeout=30.0,
+            )
+
+            # Open destination (the main database) - this will overwrite
+            dest_conn = sqlite3.connect(self.db_path, timeout=30.0)
+
+            # Use SQLite's backup API to restore
+            source_conn.backup(dest_conn, pages=-1)
+
+            logger.info(f"Database restored successfully from {backup_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Restore failed: {e}", exc_info=True)
+            return False
+
+        finally:
+            if source_conn:
+                source_conn.close()
+            if dest_conn:
+                dest_conn.close()
+
+    def get_backup_info(self, backup_path: Path) -> dict:
+        """
+        Get information about a backup file.
+
+        Args:
+            backup_path: Path to the backup file
+
+        Returns:
+            Dict with backup metadata
+        """
+        if not backup_path.exists():
+            return {}
+
+        stat = backup_path.stat()
+        return {
+            "filename": backup_path.name,
+            "path": str(backup_path),
+            "size_bytes": stat.st_size,
+            "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        }
+
+    def list_backups_with_info(self) -> list[dict]:
+        """
+        Get all backups with their metadata.
+
+        Returns:
+            List of backup info dicts, newest first
+        """
+        backups = self.get_all_backups()
+        return [self.get_backup_info(b) for b in backups]
+
 
 async def run_backup_if_needed(
     db_path: Path,

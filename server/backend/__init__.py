@@ -19,7 +19,7 @@ def _get_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("transcription-suite-server")
+        return version("transcriptionsuite-server")
     except Exception:
         pass
 
