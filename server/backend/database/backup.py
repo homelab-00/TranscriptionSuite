@@ -225,7 +225,9 @@ class DatabaseBackupManager:
             if self.db_path.exists():
                 safety_backup = self.create_backup()
                 if safety_backup:
-                    logger.info(f"Created safety backup before restore: {safety_backup}")
+                    logger.info(
+                        f"Created safety backup before restore: {safety_backup}"
+                    )
                 else:
                     logger.warning("Could not create safety backup - proceeding anyway")
 

@@ -347,7 +347,11 @@ class NotebookView:
                 return
 
             export_format = response
-            file_filter = "Text Files (*.txt)" if export_format == "txt" else "JSON Files (*.json)"
+            file_filter = (
+                "Text Files (*.txt)"
+                if export_format == "txt"
+                else "JSON Files (*.json)"
+            )
             default_ext = ".txt" if export_format == "txt" else ".json"
 
             # Create file chooser
@@ -364,11 +368,15 @@ class NotebookView:
                             loop = asyncio.get_event_loop()
                             if loop.is_running():
                                 asyncio.create_task(
-                                    self._export_recording(recording_id, export_format, file_path)
+                                    self._export_recording(
+                                        recording_id, export_format, file_path
+                                    )
                                 )
                             else:
                                 asyncio.run(
-                                    self._export_recording(recording_id, export_format, file_path)
+                                    self._export_recording(
+                                        recording_id, export_format, file_path
+                                    )
                                 )
                         except RuntimeError:
                             pass
@@ -380,20 +388,23 @@ class NotebookView:
         dialog.connect("response", on_format_response)
         dialog.present()
 
-    async def _export_recording(self, recording_id: int, format: str, file_path: str) -> None:
+    async def _export_recording(
+        self, recording_id: int, format: str, file_path: str
+    ) -> None:
         """Export a recording to a file."""
         try:
             content, _ = await self._api_client.export_recording(recording_id, format)
 
             # Write to file
             from pathlib import Path
+
             Path(file_path).write_bytes(content)
 
             logger.info(f"Exported recording {recording_id} to {file_path}")
             GLib.idle_add(
                 lambda: self._show_info_dialog(
                     "Export Complete",
-                    f"Transcription exported successfully to:\n{file_path}"
+                    f"Transcription exported successfully to:\n{file_path}",
                 )
             )
         except Exception as e:

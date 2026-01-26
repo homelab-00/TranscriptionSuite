@@ -1022,6 +1022,7 @@ class SettingsDialog(QDialog):
             if created:
                 try:
                     from datetime import datetime
+
                     dt = datetime.fromisoformat(created)
                     date_str = dt.strftime("%Y-%m-%d %H:%M")
                 except:
@@ -1069,6 +1070,7 @@ class SettingsDialog(QDialog):
     async def _async_create_backup(self, api_client) -> None:
         """Async version of backup creation."""
         from PyQt6.QtWidgets import QMessageBox
+
         try:
             result = await api_client.create_backup()
             self._handle_backup_result(result)
@@ -1110,7 +1112,9 @@ class SettingsDialog(QDialog):
 
         filename = selected_items[0].data(Qt.ItemDataRole.UserRole)
         if not filename:
-            QMessageBox.warning(self, "Invalid Selection", "Please select a valid backup.")
+            QMessageBox.warning(
+                self, "Invalid Selection", "Please select a valid backup."
+            )
             return
 
         # Confirm restore
@@ -1158,12 +1162,15 @@ class SettingsDialog(QDialog):
     async def _async_restore_backup(self, api_client, filename: str) -> None:
         """Async version of backup restore."""
         from PyQt6.QtWidgets import QMessageBox
+
         try:
             result = await api_client.restore_backup(filename)
             self._handle_restore_result(result)
         except Exception as e:
             logger.error(f"Failed to restore backup: {e}")
-            QMessageBox.critical(self, "Restore Failed", f"Failed to restore backup: {e}")
+            QMessageBox.critical(
+                self, "Restore Failed", f"Failed to restore backup: {e}"
+            )
 
     def _handle_restore_result(self, result) -> None:
         """Handle backup restore result."""

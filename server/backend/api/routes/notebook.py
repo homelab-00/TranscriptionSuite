@@ -855,11 +855,15 @@ async def restore_backup(body: RestoreRequest) -> Dict[str, Any]:
                 break
 
         if not backup_path:
-            raise HTTPException(status_code=404, detail=f"Backup not found: {body.filename}")
+            raise HTTPException(
+                status_code=404, detail=f"Backup not found: {body.filename}"
+            )
 
         # Verify backup is valid
         if not manager.verify_backup(backup_path):
-            raise HTTPException(status_code=400, detail="Backup file is invalid or corrupted")
+            raise HTTPException(
+                status_code=400, detail="Backup file is invalid or corrupted"
+            )
 
         # Perform restore
         success = manager.restore_backup(backup_path)

@@ -333,8 +333,12 @@ class NotebookView(QWidget):
                 background-color: #3d3d3d;
             }
         """)
-        txt_btn = format_dialog.addButton("Text (.txt)", QMessageBox.ButtonRole.AcceptRole)
-        json_btn = format_dialog.addButton("JSON (.json)", QMessageBox.ButtonRole.AcceptRole)
+        txt_btn = format_dialog.addButton(
+            "Text (.txt)", QMessageBox.ButtonRole.AcceptRole
+        )
+        json_btn = format_dialog.addButton(
+            "JSON (.json)", QMessageBox.ButtonRole.AcceptRole
+        )
         format_dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         format_dialog.exec()
 
@@ -365,21 +369,28 @@ class NotebookView(QWidget):
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(self._export_recording(recording_id, export_format, file_path))
+                asyncio.create_task(
+                    self._export_recording(recording_id, export_format, file_path)
+                )
             else:
-                loop.run_until_complete(self._export_recording(recording_id, export_format, file_path))
+                loop.run_until_complete(
+                    self._export_recording(recording_id, export_format, file_path)
+                )
         except RuntimeError:
             asyncio.run(self._export_recording(recording_id, export_format, file_path))
 
-    async def _export_recording(self, recording_id: int, format: str, file_path: str) -> None:
+    async def _export_recording(
+        self, recording_id: int, format: str, file_path: str
+    ) -> None:
         """Export a recording to a file."""
         try:
             content, _ = await self._api_client.export_recording(recording_id, format)
-            
+
             # Write to file
             from pathlib import Path
+
             Path(file_path).write_bytes(content)
-            
+
             logger.info(f"Exported recording {recording_id} to {file_path}")
             QMessageBox.information(
                 self,

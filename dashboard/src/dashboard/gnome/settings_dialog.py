@@ -960,6 +960,7 @@ class SettingsDialog:
             if created:
                 try:
                     from datetime import datetime
+
                     dt = datetime.fromisoformat(created)
                     date_str = dt.strftime("%Y-%m-%d %H:%M")
                 except:
@@ -980,7 +981,9 @@ class SettingsDialog:
 
         api_client = self._get_api_client_gnome()
         if not api_client:
-            self._show_message_gnome("Server Not Running", "The server must be running to create backups.")
+            self._show_message_gnome(
+                "Server Not Running", "The server must be running to create backups."
+            )
             return
 
         async def create_backup():
@@ -1004,10 +1007,14 @@ class SettingsDialog:
         """Handle backup creation result."""
         if result.get("success"):
             filename = result.get("backup", {}).get("filename", "")
-            self._show_message_gnome("Backup Created", f"Backup created successfully.\n\n{filename}")
+            self._show_message_gnome(
+                "Backup Created", f"Backup created successfully.\n\n{filename}"
+            )
             self._refresh_backup_list_gnome()
         else:
-            self._show_message_gnome("Backup Failed", result.get("message", "Unknown error"))
+            self._show_message_gnome(
+                "Backup Failed", result.get("message", "Unknown error")
+            )
 
     def _on_restore_backup_gnome(self) -> None:
         """Handle restore backup button click."""
@@ -1019,7 +1026,9 @@ class SettingsDialog:
 
         selected_row = self._backup_listbox.get_selected_row()
         if not selected_row or not hasattr(selected_row, "filename"):
-            self._show_message_gnome("No Backup Selected", "Please select a backup from the list to restore.")
+            self._show_message_gnome(
+                "No Backup Selected", "Please select a backup from the list to restore."
+            )
             return
 
         filename = selected_row.filename
@@ -1029,7 +1038,7 @@ class SettingsDialog:
             self.dialog,
             "Confirm Restore",
             f"Are you sure you want to restore from:\n\n{filename}\n\n"
-            "This will replace ALL current data.\nA safety backup will be created first."
+            "This will replace ALL current data.\nA safety backup will be created first.",
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("restore", "Restore")
@@ -1051,7 +1060,9 @@ class SettingsDialog:
 
         api_client = self._get_api_client_gnome()
         if not api_client:
-            self._show_message_gnome("Server Not Running", "The server must be running to restore backups.")
+            self._show_message_gnome(
+                "Server Not Running", "The server must be running to restore backups."
+            )
             return
 
         async def restore_backup():
@@ -1060,7 +1071,9 @@ class SettingsDialog:
                 GLib.idle_add(lambda: self._handle_restore_result_gnome(result))
             except Exception as e:
                 logger.error(f"Failed to restore backup: {e}")
-                GLib.idle_add(lambda: self._show_message_gnome("Restore Failed", str(e)))
+                GLib.idle_add(
+                    lambda: self._show_message_gnome("Restore Failed", str(e))
+                )
 
         try:
             loop = asyncio.get_event_loop()
@@ -1078,11 +1091,13 @@ class SettingsDialog:
             self._show_message_gnome(
                 "Restore Complete",
                 f"Database restored successfully from:\n{restored_from}\n\n"
-                "Refresh the Notebook view to see the restored data."
+                "Refresh the Notebook view to see the restored data.",
             )
             self._refresh_backup_list_gnome()
         else:
-            self._show_message_gnome("Restore Failed", result.get("message", "Unknown error"))
+            self._show_message_gnome(
+                "Restore Failed", result.get("message", "Unknown error")
+            )
 
     def _show_message_gnome(self, heading: str, body: str) -> None:
         """Show a message dialog."""
