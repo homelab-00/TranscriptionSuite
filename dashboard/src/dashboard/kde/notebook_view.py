@@ -120,31 +120,12 @@ class NotebookView(QWidget):
             }
         """)
 
+        # Hide the tab bar - tabs are now accessed via sidebar submenu
+        self._tabs.tabBar().setVisible(False)
         self._tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: none;
                 background-color: #060606;
-            }
-
-            QTabBar::tab {
-                background-color: #131313;
-                color: #a0a0a0;
-                padding: 10px 20px;
-                border: none;
-                border-bottom: 2px solid transparent;
-                font-size: 13px;
-                min-width: 80px;
-            }
-
-            QTabBar::tab:selected {
-                color: #0AFCCF;
-                border-bottom: 2px solid #0AFCCF;
-                background-color: #131313;
-            }
-
-            QTabBar::tab:hover:!selected {
-                color: #ffffff;
-                background-color: #1e1e1e;
             }
         """)
 
@@ -178,6 +159,11 @@ class NotebookView(QWidget):
         self._calendar_widget.set_api_client(api_client)
         self._search_widget.set_api_client(api_client)
         self._import_widget.set_api_client(api_client)
+
+    def set_tab(self, index: int) -> None:
+        """Set the active tab by index."""
+        if 0 <= index < self._tabs.count():
+            self._tabs.setCurrentIndex(index)
 
     def _on_delete_requested(self, recording_id: int) -> None:
         """Handle delete request from calendar."""

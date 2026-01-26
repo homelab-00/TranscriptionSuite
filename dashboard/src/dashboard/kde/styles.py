@@ -116,6 +116,30 @@ def get_dashboard_stylesheet() -> str:
             color: #0AFCCF;
         }
 
+        #sidebarSubButton {
+            background-color: transparent;
+            border: none;
+            border-radius: 4px;
+            color: #707070;
+            padding: 6px 10px;
+            font-size: 12px;
+            text-align: left;
+        }
+
+        #sidebarSubButton:hover {
+            background-color: #1a1a1a;
+            color: #a0a0a0;
+        }
+
+        #sidebarSubButton:checked {
+            background-color: #1a1a1a;
+            color: #0AFCCF;
+        }
+
+        #notebookSubmenu {
+            background-color: transparent;
+        }
+
         #sidebarButtonContainer {
             background-color: transparent;
             border-radius: 6px;

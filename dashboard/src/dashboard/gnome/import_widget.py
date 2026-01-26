@@ -145,7 +145,7 @@ class ImportWidget:
         options_box.append(options_label)
 
         self._diarization_check = Gtk.CheckButton(label="Speaker diarization")
-        self._diarization_check.set_active(True)
+        self._diarization_check.set_active(False)
         options_box.append(self._diarization_check)
 
         self._word_timestamps_check = Gtk.CheckButton(label="Word-level timestamps")

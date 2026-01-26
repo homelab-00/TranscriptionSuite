@@ -51,22 +51,13 @@ class ClientControlMixin:
             self._connection_info_label.setText(f"{https}://{host}:{port}")
         else:
             self._client_status_label.setText("Stopped")
-            self._client_status_label.setStyleSheet("color: #ff9800;")  # warning
+            self._client_status_label.setStyleSheet("color: #f44336;")  # red
             self._connection_info_label.setText("Not connected")
 
         # Update button states
         self._start_client_local_btn.setEnabled(not self._client_running)
         self._start_client_remote_btn.setEnabled(not self._client_running)
         self._stop_client_btn.setEnabled(self._client_running)
-
-        # Notebook toggle only allowed when both server and client are stopped
-        # (setting takes effect on next client start)
-        server_status = self._docker_manager.get_server_status()
-        server_stopped = server_status != ServerStatus.RUNNING
-        self._notebook_toggle_btn.setEnabled(
-            not self._client_running and server_stopped
-        )
-        self._update_notebook_toggle_style()
 
         # Update models button based on server health
         self._update_models_button_state()

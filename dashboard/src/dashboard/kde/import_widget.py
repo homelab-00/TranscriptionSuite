@@ -205,7 +205,7 @@ class ImportWidget(QWidget):
 
         self._diarization_checkbox = QCheckBox("Speaker diarization")
         self._diarization_checkbox.setObjectName("optionCheckbox")
-        self._diarization_checkbox.setChecked(True)
+        self._diarization_checkbox.setChecked(False)
         self._diarization_checkbox.setToolTip(
             "Identify and label different speakers in the audio"
         )
@@ -334,8 +334,8 @@ class ImportWidget(QWidget):
             }
 
             #optionCheckbox::indicator:checked {
-                background-color: #90caf9;
-                border-color: #90caf9;
+                background-color: #0AFCCF;
+                border-color: #0AFCCF;
             }
 
             #queueLabel {
@@ -370,16 +370,16 @@ class ImportWidget(QWidget):
             }
 
             #primaryButton {
-                background-color: #1e88e5;
+                background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #ffffff;
+                color: #060606;
                 padding: 8px 16px;
                 font-weight: bold;
             }
 
             #primaryButton:hover {
-                background-color: #2196f3;
+                background-color: #08d9b3;
             }
 
             #primaryButton:disabled {
@@ -407,7 +407,7 @@ class ImportWidget(QWidget):
             }
 
             #importProgress::chunk {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border-radius: 4px;
             }
         """)

@@ -1002,28 +1002,109 @@ class DashboardWindow(_get_dashboard_base()):
 
         # Language dropdown
         self._live_language_combo = Gtk.ComboBoxText()
-        # Add language options (Whisper-supported languages)
+        # Full Whisper language list (99 languages)
         languages = [
             ("Auto-detect", ""),
-            ("English", "en"),
-            ("Greek", "el"),
-            ("German", "de"),
-            ("French", "fr"),
-            ("Spanish", "es"),
-            ("Italian", "it"),
-            ("Portuguese", "pt"),
-            ("Russian", "ru"),
-            ("Japanese", "ja"),
-            ("Korean", "ko"),
-            ("Chinese", "zh"),
+            ("Afrikaans", "af"),
+            ("Amharic", "am"),
             ("Arabic", "ar"),
+            ("Assamese", "as"),
+            ("Azerbaijani", "az"),
+            ("Bashkir", "ba"),
+            ("Belarusian", "be"),
+            ("Bulgarian", "bg"),
+            ("Bengali", "bn"),
+            ("Tibetan", "bo"),
+            ("Breton", "br"),
+            ("Bosnian", "bs"),
+            ("Catalan", "ca"),
+            ("Czech", "cs"),
+            ("Welsh", "cy"),
+            ("Danish", "da"),
+            ("German", "de"),
+            ("Greek", "el"),
+            ("English", "en"),
+            ("Spanish", "es"),
+            ("Estonian", "et"),
+            ("Basque", "eu"),
+            ("Persian", "fa"),
+            ("Finnish", "fi"),
+            ("Faroese", "fo"),
+            ("French", "fr"),
+            ("Galician", "gl"),
+            ("Gujarati", "gu"),
+            ("Hausa", "ha"),
+            ("Hawaiian", "haw"),
+            ("Hebrew", "he"),
             ("Hindi", "hi"),
+            ("Croatian", "hr"),
+            ("Haitian Creole", "ht"),
+            ("Hungarian", "hu"),
+            ("Armenian", "hy"),
+            ("Indonesian", "id"),
+            ("Icelandic", "is"),
+            ("Italian", "it"),
+            ("Japanese", "ja"),
+            ("Javanese", "jw"),
+            ("Georgian", "ka"),
+            ("Kazakh", "kk"),
+            ("Khmer", "km"),
+            ("Kannada", "kn"),
+            ("Korean", "ko"),
+            ("Latin", "la"),
+            ("Luxembourgish", "lb"),
+            ("Lingala", "ln"),
+            ("Lao", "lo"),
+            ("Lithuanian", "lt"),
+            ("Latvian", "lv"),
+            ("Malagasy", "mg"),
+            ("Maori", "mi"),
+            ("Macedonian", "mk"),
+            ("Malayalam", "ml"),
+            ("Mongolian", "mn"),
+            ("Marathi", "mr"),
+            ("Malay", "ms"),
+            ("Maltese", "mt"),
+            ("Burmese", "my"),
+            ("Nepali", "ne"),
             ("Dutch", "nl"),
+            ("Norwegian Nynorsk", "nn"),
+            ("Norwegian", "no"),
+            ("Occitan", "oc"),
+            ("Punjabi", "pa"),
             ("Polish", "pl"),
-            ("Turkish", "tr"),
-            ("Ukrainian", "uk"),
-            ("Vietnamese", "vi"),
+            ("Pashto", "ps"),
+            ("Portuguese", "pt"),
+            ("Romanian", "ro"),
+            ("Russian", "ru"),
+            ("Sanskrit", "sa"),
+            ("Sindhi", "sd"),
+            ("Sinhala", "si"),
+            ("Slovak", "sk"),
+            ("Slovenian", "sl"),
+            ("Shona", "sn"),
+            ("Somali", "so"),
+            ("Albanian", "sq"),
+            ("Serbian", "sr"),
+            ("Sundanese", "su"),
+            ("Swedish", "sv"),
+            ("Swahili", "sw"),
+            ("Tamil", "ta"),
+            ("Telugu", "te"),
+            ("Tajik", "tg"),
             ("Thai", "th"),
+            ("Turkmen", "tk"),
+            ("Tagalog", "tl"),
+            ("Turkish", "tr"),
+            ("Tatar", "tt"),
+            ("Ukrainian", "uk"),
+            ("Urdu", "ur"),
+            ("Uzbek", "uz"),
+            ("Vietnamese", "vi"),
+            ("Yiddish", "yi"),
+            ("Yoruba", "yo"),
+            ("Chinese", "zh"),
+            ("Cantonese", "yue"),
         ]
         for name, code in languages:
             self._live_language_combo.append(code, name)
@@ -1328,7 +1409,7 @@ class DashboardWindow(_get_dashboard_base()):
             color: #2196f3;
         }
         .status-warning {
-            color: #ff9800;
+            color: #f44336;
         }
 
         /* Nav button */
@@ -1390,7 +1471,7 @@ class DashboardWindow(_get_dashboard_base()):
             font-size: 8px;
         }
         .status-light-orange {
-            color: #ff9800;
+            color: #f44336;
             font-size: 8px;
         }
         .status-light-gray {

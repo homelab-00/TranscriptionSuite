@@ -216,7 +216,9 @@ class DashboardWindow(
         self._collapse_btn.setFixedSize(24, 24)
         self._collapse_btn.setToolTip("Collapse sidebar")
         self._collapse_btn.clicked.connect(self._toggle_sidebar)
-        header_layout.addWidget(self._collapse_btn)
+        header_layout.addWidget(
+            self._collapse_btn, alignment=Qt.AlignmentFlag.AlignVCenter
+        )
 
         layout.addWidget(header)
 
@@ -253,8 +255,32 @@ class DashboardWindow(
         nav_layout.addSpacing(8)
 
         self._nav_notebook_btn = self._create_sidebar_button("Notebook", "notebook")
-        self._nav_notebook_btn.clicked.connect(lambda: self._navigate_to(View.NOTEBOOK))
+        self._nav_notebook_btn.clicked.connect(self._toggle_notebook_submenu)
         nav_layout.addWidget(self._nav_notebook_btn)
+
+        # Notebook sub-menu (collapsible)
+        self._notebook_submenu = QWidget()
+        self._notebook_submenu.setObjectName("notebookSubmenu")
+        submenu_layout = QVBoxLayout(self._notebook_submenu)
+        submenu_layout.setContentsMargins(24, 0, 8, 0)
+        submenu_layout.setSpacing(2)
+
+        self._nav_calendar_btn = self._create_sidebar_subbutton("Calendar")
+        self._nav_calendar_btn.clicked.connect(
+            lambda: self._navigate_to_notebook_tab(0)
+        )
+        submenu_layout.addWidget(self._nav_calendar_btn)
+
+        self._nav_search_btn = self._create_sidebar_subbutton("Search")
+        self._nav_search_btn.clicked.connect(lambda: self._navigate_to_notebook_tab(1))
+        submenu_layout.addWidget(self._nav_search_btn)
+
+        self._nav_import_btn = self._create_sidebar_subbutton("Import")
+        self._nav_import_btn.clicked.connect(lambda: self._navigate_to_notebook_tab(2))
+        submenu_layout.addWidget(self._nav_import_btn)
+
+        self._notebook_submenu.hide()
+        nav_layout.addWidget(self._notebook_submenu)
 
         nav_layout.addStretch()
         layout.addWidget(nav_container, 1)
@@ -288,6 +314,9 @@ class DashboardWindow(
             self._nav_menu_btn.setText("  Menu")
             self._server_nav_btn.setText("  Docker Server")
             self._client_nav_btn.setText("  Client")
+            # Show status lights
+            self._server_status_light.show()
+            self._client_status_light.show()
         else:
             self._sidebar.setFixedWidth(56)
             self._collapse_btn.setText("»")
@@ -300,6 +329,11 @@ class DashboardWindow(
             self._nav_menu_btn.setText("")
             self._server_nav_btn.setText("")
             self._client_nav_btn.setText("")
+            # Hide status lights when collapsed (they break the icon layout)
+            self._server_status_light.hide()
+            self._client_status_light.hide()
+            # Hide notebook submenu when collapsed
+            self._notebook_submenu.hide()
 
     def _create_sidebar_button(self, text: str, icon_name: str) -> QPushButton:
         """Create a sidebar navigation button."""
@@ -311,6 +345,32 @@ class DashboardWindow(
         if not icon.isNull():
             btn.setIcon(icon)
         return btn
+
+    def _create_sidebar_subbutton(self, text: str) -> QPushButton:
+        """Create a sidebar sub-navigation button (for notebook submenu)."""
+        btn = QPushButton(text)
+        btn.setObjectName("sidebarSubButton")
+        btn.setCheckable(True)
+        btn.setAutoExclusive(False)
+        return btn
+
+    def _toggle_notebook_submenu(self) -> None:
+        """Toggle the notebook sub-menu visibility and navigate to notebook."""
+        if self._notebook_submenu.isVisible():
+            self._notebook_submenu.hide()
+        else:
+            self._notebook_submenu.show()
+        self._navigate_to(View.NOTEBOOK)
+
+    def _navigate_to_notebook_tab(self, tab_index: int) -> None:
+        """Navigate to a specific notebook tab."""
+        self._navigate_to(View.NOTEBOOK)
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._notebook_widget.set_tab(tab_index)
+        # Update sub-button checked states
+        self._nav_calendar_btn.setChecked(tab_index == 0)
+        self._nav_search_btn.setChecked(tab_index == 1)
+        self._nav_import_btn.setChecked(tab_index == 2)
 
     def _create_sidebar_button_with_status(self, text: str, icon_name: str) -> QWidget:
         """Create a sidebar navigation button with a status light indicator."""
@@ -367,7 +427,7 @@ class DashboardWindow(
                     )
             elif status == ServerStatus.STOPPED:
                 self._server_status_light.setStyleSheet(
-                    "color: #ff9800; font-size: 8px;"
+                    "color: #f44336; font-size: 8px;"
                 )
             else:
                 self._server_status_light.setStyleSheet(
@@ -381,7 +441,7 @@ class DashboardWindow(
                 )
             else:
                 self._client_status_light.setStyleSheet(
-                    "color: #ff9800; font-size: 8px;"
+                    "color: #f44336; font-size: 8px;"
                 )
 
     # =========================================================================
@@ -534,7 +594,7 @@ class DashboardWindow(
                 self._home_server_status.setStyleSheet("color: #4caf50;")
         elif status == ServerStatus.STOPPED:
             self._home_server_status.setText("⬤ Stopped")
-            self._home_server_status.setStyleSheet("color: #ff9800;")
+            self._home_server_status.setStyleSheet("color: #f44336;")
         else:
             self._home_server_status.setText("⬤ Not set up")
             self._home_server_status.setStyleSheet("color: #6c757d;")
@@ -544,7 +604,7 @@ class DashboardWindow(
             self._home_client_status.setStyleSheet("color: #4caf50;")
         else:
             self._home_client_status.setText("⬤ Stopped")
-            self._home_client_status.setStyleSheet("color: #ff9800;")
+            self._home_client_status.setStyleSheet("color: #f44336;")
 
         self._update_sidebar_status_lights()
 
@@ -672,6 +732,12 @@ class DashboardWindow(
             View.NOTEBOOK: 3,
         }
         self._stack.setCurrentIndex(view_map[view])
+
+        # Update sidebar button checked states
+        self._nav_home_btn.setChecked(view == View.WELCOME)
+        self._server_nav_btn.setChecked(view == View.SERVER)
+        self._client_nav_btn.setChecked(view == View.CLIENT)
+        self._nav_notebook_btn.setChecked(view == View.NOTEBOOK)
 
         if view == View.WELCOME:
             self._refresh_home_status()

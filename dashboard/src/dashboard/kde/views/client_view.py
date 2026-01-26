@@ -136,30 +136,6 @@ def create_client_view(dashboard) -> QWidget:
     options_layout.setContentsMargins(12, 10, 12, 10)
     options_layout.setSpacing(16)
 
-    # Auto-add to Audio Notebook toggle
-    notebook_label = QLabel("Auto-add:")
-    notebook_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
-    options_layout.addWidget(notebook_label)
-
-    dashboard._notebook_toggle_btn = QPushButton("Disabled")
-    dashboard._notebook_toggle_btn.setCheckable(True)
-    dashboard._notebook_toggle_btn.setFixedWidth(80)
-    auto_notebook = dashboard.config.get_server_config(
-        "longform_recording", "auto_add_to_audio_notebook", default=False
-    )
-    dashboard._notebook_toggle_btn.setChecked(auto_notebook)
-    dashboard._notebook_toggle_btn.setText("Enabled" if auto_notebook else "Disabled")
-    dashboard._notebook_toggle_btn.setToolTip(
-        "When enabled, recordings are saved to Audio Notebook with diarization\n"
-        "instead of copying transcription to clipboard.\n"
-        "Can only be changed when both server and client are stopped."
-    )
-    dashboard._notebook_toggle_btn.clicked.connect(dashboard._on_notebook_toggle)
-    dashboard._update_notebook_toggle_style()
-    options_layout.addWidget(dashboard._notebook_toggle_btn)
-
-    options_layout.addSpacing(8)
-
     # Live Transcriber toggle
     preview_label = QLabel("Live Transcriber:")
     preview_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
@@ -204,27 +180,109 @@ def create_client_view(dashboard) -> QWidget:
         "color: #e0e0e0; selection-background-color: #404040; padding: 4px; }"
     )
 
+    # Full Whisper language list (99 languages)
     languages = [
         ("Auto-detect", ""),
-        ("English", "en"),
-        ("Greek", "el"),
-        ("German", "de"),
-        ("French", "fr"),
-        ("Spanish", "es"),
-        ("Italian", "it"),
-        ("Portuguese", "pt"),
-        ("Russian", "ru"),
-        ("Japanese", "ja"),
-        ("Korean", "ko"),
-        ("Chinese", "zh"),
+        ("Afrikaans", "af"),
+        ("Amharic", "am"),
         ("Arabic", "ar"),
+        ("Assamese", "as"),
+        ("Azerbaijani", "az"),
+        ("Bashkir", "ba"),
+        ("Belarusian", "be"),
+        ("Bulgarian", "bg"),
+        ("Bengali", "bn"),
+        ("Tibetan", "bo"),
+        ("Breton", "br"),
+        ("Bosnian", "bs"),
+        ("Catalan", "ca"),
+        ("Czech", "cs"),
+        ("Welsh", "cy"),
+        ("Danish", "da"),
+        ("German", "de"),
+        ("Greek", "el"),
+        ("English", "en"),
+        ("Spanish", "es"),
+        ("Estonian", "et"),
+        ("Basque", "eu"),
+        ("Persian", "fa"),
+        ("Finnish", "fi"),
+        ("Faroese", "fo"),
+        ("French", "fr"),
+        ("Galician", "gl"),
+        ("Gujarati", "gu"),
+        ("Hausa", "ha"),
+        ("Hawaiian", "haw"),
+        ("Hebrew", "he"),
         ("Hindi", "hi"),
+        ("Croatian", "hr"),
+        ("Haitian Creole", "ht"),
+        ("Hungarian", "hu"),
+        ("Armenian", "hy"),
+        ("Indonesian", "id"),
+        ("Icelandic", "is"),
+        ("Italian", "it"),
+        ("Japanese", "ja"),
+        ("Javanese", "jw"),
+        ("Georgian", "ka"),
+        ("Kazakh", "kk"),
+        ("Khmer", "km"),
+        ("Kannada", "kn"),
+        ("Korean", "ko"),
+        ("Latin", "la"),
+        ("Luxembourgish", "lb"),
+        ("Lingala", "ln"),
+        ("Lao", "lo"),
+        ("Lithuanian", "lt"),
+        ("Latvian", "lv"),
+        ("Malagasy", "mg"),
+        ("Maori", "mi"),
+        ("Macedonian", "mk"),
+        ("Malayalam", "ml"),
+        ("Mongolian", "mn"),
+        ("Marathi", "mr"),
+        ("Malay", "ms"),
+        ("Maltese", "mt"),
+        ("Burmese", "my"),
+        ("Nepali", "ne"),
         ("Dutch", "nl"),
+        ("Norwegian Nynorsk", "nn"),
+        ("Norwegian", "no"),
+        ("Occitan", "oc"),
+        ("Punjabi", "pa"),
         ("Polish", "pl"),
-        ("Turkish", "tr"),
-        ("Ukrainian", "uk"),
-        ("Vietnamese", "vi"),
+        ("Pashto", "ps"),
+        ("Portuguese", "pt"),
+        ("Romanian", "ro"),
+        ("Russian", "ru"),
+        ("Sanskrit", "sa"),
+        ("Sindhi", "sd"),
+        ("Sinhala", "si"),
+        ("Slovak", "sk"),
+        ("Slovenian", "sl"),
+        ("Shona", "sn"),
+        ("Somali", "so"),
+        ("Albanian", "sq"),
+        ("Serbian", "sr"),
+        ("Sundanese", "su"),
+        ("Swedish", "sv"),
+        ("Swahili", "sw"),
+        ("Tamil", "ta"),
+        ("Telugu", "te"),
+        ("Tajik", "tg"),
         ("Thai", "th"),
+        ("Turkmen", "tk"),
+        ("Tagalog", "tl"),
+        ("Turkish", "tr"),
+        ("Tatar", "tt"),
+        ("Ukrainian", "uk"),
+        ("Urdu", "ur"),
+        ("Uzbek", "uz"),
+        ("Vietnamese", "vi"),
+        ("Yiddish", "yi"),
+        ("Yoruba", "yo"),
+        ("Chinese", "zh"),
+        ("Cantonese", "yue"),
     ]
     for name, code in languages:
         dashboard._live_language_combo.addItem(name, code)

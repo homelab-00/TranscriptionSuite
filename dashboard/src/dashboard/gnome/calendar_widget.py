@@ -565,6 +565,7 @@ class CalendarWidget:
                 background-color: #1a1a2e;
                 border: 1px solid #2d2d2d;
                 border-radius: 4px;
+                min-width: 70px;
                 min-height: 70px;
                 padding: 8px;
             }
@@ -616,28 +617,33 @@ class CalendarWidget:
             }
 
             .time-slot {
-                border-bottom: 1px solid #2d2d2d;
+                background-color: #1E1E1E;
+                border-bottom: 1px solid #1a1a1a;
+                border-radius: 4px;
                 padding: 8px 12px;
                 min-height: 60px;
+                margin: 2px 0;
             }
 
             .time-slot:hover {
-                background-color: #1e1e2e;
+                background-color: #1a1a1a;
+                border: 1px solid #2d2d2d;
             }
 
             .time-label {
-                color: #808080;
-                font-size: 12px;
+                color: #a0a0a0;
+                font-size: 14px;
+                font-weight: bold;
             }
 
             .section-title-morning {
-                color: #90caf9;
+                color: #FFA500;
                 font-size: 16px;
                 font-weight: bold;
             }
 
             .section-title-afternoon {
-                color: #f48fb1;
+                color: #9932CC;
                 font-size: 16px;
                 font-weight: bold;
             }
@@ -653,8 +659,8 @@ class CalendarWidget:
 
             .add-button:hover {
                 background-color: #2d2d2d;
-                border-color: #90caf9;
-                color: #90caf9;
+                border-color: #0AFCCF;
+                color: #0AFCCF;
             }
 
             .recording-card {
@@ -667,7 +673,7 @@ class CalendarWidget:
 
             .recording-card:hover {
                 background-color: #263a4f;
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             .card-title {
@@ -723,8 +729,8 @@ class CalendarWidget:
         self._grid = Gtk.Grid()
         self._grid.set_row_homogeneous(True)
         self._grid.set_column_homogeneous(True)
-        self._grid.set_row_spacing(2)
-        self._grid.set_column_spacing(2)
+        self._grid.set_row_spacing(8)
+        self._grid.set_column_spacing(8)
         self._grid.set_vexpand(True)
 
         container.append(self._grid)
@@ -737,14 +743,26 @@ class CalendarWidget:
         container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
 
         # Morning section (12 AM - 11 AM)
-        morning = self._create_time_section("Morning", range(0, 12))
+        morning, morning_scroll = self._create_time_section("Morning", range(0, 12))
         morning.set_hexpand(True)
         container.append(morning)
 
         # Afternoon section (12 PM - 11 PM)
-        afternoon = self._create_time_section("Afternoon", range(12, 24))
+        afternoon, afternoon_scroll = self._create_time_section(
+            "Afternoon", range(12, 24)
+        )
         afternoon.set_hexpand(True)
         container.append(afternoon)
+
+        # Lock scrollbars together
+        morning_adj = morning_scroll.get_vadjustment()
+        afternoon_adj = afternoon_scroll.get_vadjustment()
+        morning_adj.connect(
+            "value-changed", lambda adj: afternoon_adj.set_value(adj.get_value())
+        )
+        afternoon_adj.connect(
+            "value-changed", lambda adj: morning_adj.set_value(adj.get_value())
+        )
 
         return container
 
@@ -775,7 +793,7 @@ class CalendarWidget:
         scrolled.set_child(slots_box)
         container.append(scrolled)
 
-        return container
+        return container, scrolled
 
     def _create_time_slot(self, hour: int) -> Gtk.Widget:
         """Create a single time slot row."""

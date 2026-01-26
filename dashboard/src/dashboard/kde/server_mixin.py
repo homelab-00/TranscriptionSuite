@@ -164,7 +164,7 @@ class ServerControlMixin:
             else:
                 self._server_status_label.setStyleSheet("color: #4caf50;")  # success
         elif status == ServerStatus.STOPPED:
-            self._server_status_label.setStyleSheet("color: #ff9800;")  # warning
+            self._server_status_label.setStyleSheet("color: #f44336;")  # red
         elif status == ServerStatus.NOT_FOUND:
             self._server_status_label.setStyleSheet("color: #6c757d;")
         else:
@@ -178,14 +178,8 @@ class ServerControlMixin:
         # Update models button state when server status changes
         self._update_models_button_state()
 
-        # Update notebook toggle state when server status changes
-        server_stopped = status != ServerStatus.RUNNING
-        self._notebook_toggle_btn.setEnabled(
-            not self._client_running and server_stopped
-        )
-        self._update_notebook_toggle_style()
-
         # Update live transcriber toggle state when server status changes
+        server_stopped = status != ServerStatus.RUNNING
         if hasattr(self, "_preview_toggle_btn"):
             self._preview_toggle_btn.setEnabled(server_stopped)
             self._update_live_transcriber_toggle_style()

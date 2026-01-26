@@ -102,6 +102,8 @@ class NotebookView:
         self._search_widget.set_recording_callback(self._on_recording_requested)
         self._import_widget.set_recording_created_callback(self._on_import_complete)
 
+        # Hide the tab bar - tabs are now accessed via sidebar submenu
+        self._notebook.set_show_tabs(False)
         self.widget.append(self._notebook)
 
         # Apply styling

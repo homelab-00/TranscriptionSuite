@@ -125,8 +125,8 @@ class SettingsDialog(QDialog):
             }
 
             QTabBar::tab:selected {
-                color: #90caf9;
-                border-bottom: 2px solid #90caf9;
+                color: #0AFCCF;
+                border-bottom: 2px solid #0AFCCF;
             }
 
             QTabBar::tab:hover:!selected {
@@ -150,7 +150,7 @@ class SettingsDialog(QDialog):
             }
 
             QLabel#sectionHeader {
-                color: #90caf9;
+                color: #0AFCCF;
                 font-size: 14px;
                 font-weight: bold;
                 padding-bottom: 4px;
@@ -177,7 +177,7 @@ class SettingsDialog(QDialog):
             }
 
             QLineEdit:focus {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             QLineEdit:disabled {
@@ -195,7 +195,7 @@ class SettingsDialog(QDialog):
             }
 
             QSpinBox:focus {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             QSpinBox::up-button, QSpinBox::down-button {
@@ -219,7 +219,7 @@ class SettingsDialog(QDialog):
             }
 
             QComboBox:focus {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             QComboBox::drop-down {
@@ -241,7 +241,7 @@ class SettingsDialog(QDialog):
                 border-radius: 6px;
                 color: #ffffff;
                 selection-background-color: #2d2d2d;
-                selection-color: #90caf9;
+                selection-color: #0AFCCF;
             }
 
             QCheckBox {
@@ -259,8 +259,8 @@ class SettingsDialog(QDialog):
             }
 
             QCheckBox::indicator:checked {
-                background-color: #90caf9;
-                border-color: #90caf9;
+                background-color: #0AFCCF;
+                border-color: #0AFCCF;
                 image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxMjEyMTIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
             }
 
@@ -270,15 +270,15 @@ class SettingsDialog(QDialog):
             }
 
             QCheckBox::indicator:checked:hover {
-                background-color: #42a5f5;
-                border-color: #42a5f5;
+                background-color: #08d9b3;
+                border-color: #08d9b3;
             }
 
             #primaryButton {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #121212;
+                color: #060606;
                 padding: 10px 24px;
                 font-size: 13px;
                 font-weight: 500;
@@ -286,7 +286,7 @@ class SettingsDialog(QDialog):
             }
 
             #primaryButton:hover {
-                background-color: #42a5f5;
+                background-color: #08d9b3;
             }
 
             #secondaryButton {
@@ -331,7 +331,7 @@ class SettingsDialog(QDialog):
                 padding-top: 20px;
                 font-size: 13px;
                 font-weight: bold;
-                color: #90caf9;
+                color: #0AFCCF;
             }
 
             QGroupBox::title {
@@ -340,7 +340,7 @@ class SettingsDialog(QDialog):
                 left: 10px;
                 padding: 0 4px;
                 background-color: #1e1e1e;
-                color: #90caf9;
+                color: #0AFCCF;
             }
 
             QFrame#settingsCard {
@@ -559,6 +559,30 @@ class SettingsDialog(QDialog):
         diarization_layout.addWidget(diarization_help)
 
         layout.addWidget(diarization_group)
+
+        # === Audio Notebook Section ===
+        notebook_group = QGroupBox("Audio Notebook")
+        notebook_layout = QVBoxLayout(notebook_group)
+
+        self.auto_add_notebook_check = QCheckBox(
+            "Auto-add recordings to Audio Notebook"
+        )
+        self.auto_add_notebook_check.setToolTip(
+            "When enabled, recordings are saved to Audio Notebook with diarization\n"
+            "instead of copying transcription to clipboard.\n"
+            "Requires server restart to take effect."
+        )
+        notebook_layout.addWidget(self.auto_add_notebook_check)
+
+        notebook_help = QLabel(
+            "When enabled, completed recordings are automatically saved to "
+            "the Audio Notebook with speaker diarization."
+        )
+        notebook_help.setObjectName("helpText")
+        notebook_help.setWordWrap(True)
+        notebook_layout.addWidget(notebook_help)
+
+        layout.addWidget(notebook_group)
 
         # === Connection Section ===
         connection_group = QGroupBox("Connection")
@@ -1231,6 +1255,12 @@ class SettingsDialog(QDialog):
             self.expected_speakers_spin.setValue(2)
             self.expected_speakers_spin.setEnabled(False)
 
+        # Client tab - Audio Notebook
+        auto_add_notebook = self.config.get_server_config(
+            "longform_recording", "auto_add_to_audio_notebook", default=False
+        )
+        self.auto_add_notebook_check.setChecked(auto_add_notebook)
+
         # Client tab - Connection
         self.host_edit.setText(self.config.get("server", "host", default="localhost"))
         self.port_spin.setValue(self.config.get("server", "port", default=8000))
@@ -1285,6 +1315,13 @@ class SettingsDialog(QDialog):
             )
         else:
             self.config.set("diarization", "expected_speakers", value=None)
+
+        # Client tab - Audio Notebook
+        self.config.set_server_config(
+            "longform_recording",
+            "auto_add_to_audio_notebook",
+            value=self.auto_add_notebook_check.isChecked(),
+        )
 
         # Client tab - Connection
         self.config.set(

@@ -60,9 +60,8 @@ class DayCell(QFrame):
         self.setObjectName("dayCell")
         if not self._is_future:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(60)
-        self.setMaximumHeight(70)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(60, 60)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -390,7 +389,7 @@ class DayViewImportDialog(QDialog):
             }
 
             #dayViewDropZone[dragOver="true"] {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
                 background-color: #1e2a3a;
             }
 
@@ -437,8 +436,8 @@ class DayViewImportDialog(QDialog):
             }
 
             #optionCheckbox::indicator:checked {
-                background-color: #90caf9;
-                border-color: #90caf9;
+                background-color: #0AFCCF;
+                border-color: #0AFCCF;
             }
 
             #statusLabel {
@@ -454,22 +453,22 @@ class DayViewImportDialog(QDialog):
             }
 
             #importProgress::chunk {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border-radius: 4px;
             }
 
             #primaryButton {
-                background-color: #1e88e5;
+                background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #ffffff;
+                color: #060606;
                 padding: 10px 24px;
                 font-weight: bold;
                 font-size: 13px;
             }
 
             #primaryButton:hover {
-                background-color: #2196f3;
+                background-color: #08d9b3;
             }
 
             #primaryButton:disabled {
@@ -689,7 +688,7 @@ class CalendarWidget(QWidget):
         self._grid_widget = QWidget()
         self._grid_layout = QGridLayout(self._grid_widget)
         self._grid_layout.setContentsMargins(0, 0, 0, 0)
-        self._grid_layout.setSpacing(2)
+        self._grid_layout.setSpacing(8)
 
         layout.addWidget(self._grid_widget, 1)
         self._rebuild_calendar_grid()
@@ -704,12 +703,24 @@ class CalendarWidget(QWidget):
         layout.setSpacing(24)
 
         # Morning section (12 AM - 11 AM)
-        morning = self._create_time_section("Morning", range(0, 12))
+        morning, self._morning_scroll = self._create_time_section(
+            "Morning", range(0, 12)
+        )
         layout.addWidget(morning, 1)
 
         # Afternoon section (12 PM - 11 PM)
-        afternoon = self._create_time_section("Afternoon", range(12, 24))
+        afternoon, self._afternoon_scroll = self._create_time_section(
+            "Afternoon", range(12, 24)
+        )
         layout.addWidget(afternoon, 1)
+
+        # Lock scrollbars together
+        self._morning_scroll.verticalScrollBar().valueChanged.connect(
+            self._afternoon_scroll.verticalScrollBar().setValue
+        )
+        self._afternoon_scroll.verticalScrollBar().valueChanged.connect(
+            self._morning_scroll.verticalScrollBar().setValue
+        )
 
         return container
 
@@ -725,11 +736,11 @@ class CalendarWidget(QWidget):
         title_label.setObjectName("sectionTitle")
         if "Morning" in title:
             title_label.setStyleSheet(
-                "color: #90caf9; font-size: 16px; font-weight: bold;"
+                "color: #FFA500; font-size: 16px; font-weight: bold;"
             )
         else:
             title_label.setStyleSheet(
-                "color: #f48fb1; font-size: 16px; font-weight: bold;"
+                "color: #9932CC; font-size: 16px; font-weight: bold;"
             )
         layout.addWidget(title_label)
 
@@ -759,7 +770,7 @@ class CalendarWidget(QWidget):
         else:
             self._afternoon_slots = slots_widget
 
-        return container
+        return container, scroll
 
     def _create_time_slot(self, hour: int) -> QFrame:
         """Create a single time slot row."""
@@ -955,17 +966,21 @@ class CalendarWidget(QWidget):
 
             /* Time slots in day view */
             #timeSlot {
-                background-color: transparent;
-                border-bottom: 1px solid #2d2d2d;
+                background-color: #1E1E1E;
+                border-bottom: 1px solid #1a1a1a;
+                border-radius: 4px;
+                margin: 2px 0;
             }
 
             #timeSlot:hover {
-                background-color: #131313;
+                background-color: #1a1a1a;
+                border: 1px solid #2d2d2d;
             }
 
             #timeLabel {
-                color: #808080;
-                font-size: 12px;
+                color: #a0a0a0;
+                font-size: 14px;
+                font-weight: bold;
             }
 
             #addButton {

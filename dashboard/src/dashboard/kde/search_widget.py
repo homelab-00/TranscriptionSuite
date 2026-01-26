@@ -175,7 +175,7 @@ class SearchWidget(QWidget):
             }
 
             #searchInput:focus {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             #searchInput::placeholder {
@@ -207,8 +207,8 @@ class SearchWidget(QWidget):
             }
 
             #filterCheckbox::indicator:checked {
-                background-color: #90caf9;
-                border-color: #90caf9;
+                background-color: #0AFCCF;
+                border-color: #0AFCCF;
             }
 
             #dateInput {
@@ -221,7 +221,7 @@ class SearchWidget(QWidget):
             }
 
             #dateInput:focus {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             #resultsLabel {
@@ -246,8 +246,8 @@ class SearchWidget(QWidget):
             }
 
             #resultsList::item:selected {
-                background-color: #2d4a6d;
-                border: 1px solid #90caf9;
+                background-color: #1e2a3a;
+                border: 1px solid #0AFCCF;
             }
 
             #resultsList::item:hover:!selected {
@@ -255,16 +255,16 @@ class SearchWidget(QWidget):
             }
 
             #primaryButton {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
-                color: #121212;
+                color: #060606;
                 padding: 10px 20px;
                 font-weight: 500;
             }
 
             #primaryButton:hover {
-                background-color: #42a5f5;
+                background-color: #08d9b3;
             }
 
             #primaryButton:disabled {
