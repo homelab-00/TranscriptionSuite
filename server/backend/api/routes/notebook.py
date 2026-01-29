@@ -34,12 +34,15 @@ from server.config import get_config
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
 from server.database.database import (
+    check_time_slot_overlap,
     delete_recording,
     get_all_recordings,
     get_db_path,
+    get_next_available_start_time,
     get_recording,
     get_recordings_by_date_range,
     get_segments,
+    get_time_slot_info,
     get_words,
     save_longform_to_database,
     update_recording_title,
@@ -461,6 +464,17 @@ async def upload_and_transcribe(
                     f"Invalid file_created_at format: {sanitize_for_log(file_created_at)}"
                 )
 
+        # Check for time slot overlap before saving
+        check_time = recorded_at or datetime.now()
+        overlap = check_time_slot_overlap(check_time, result.duration)
+        if overlap:
+            overlap_title = overlap.get("title") or overlap.get("filename", "Unknown")
+            raise HTTPException(
+                status_code=409,
+                detail=f"Time slot conflict: overlaps with existing recording '{overlap_title}' "
+                f"(recorded at {overlap.get('recorded_at', 'unknown time')})",
+            )
+
         # Convert audio to MP3 and save to permanent storage
         config = get_config()
         audio_dir = Path(
@@ -571,6 +585,30 @@ async def get_calendar_data(
 
     except Exception as e:
         logger.error(f"Failed to get calendar data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeslot")
+async def get_timeslot_info(
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    hour: int = Query(..., ge=0, le=23, description="Hour (0-23)"),
+) -> Dict[str, Any]:
+    """
+    Get information about a specific time slot.
+
+    Returns:
+    - recordings: List of recordings in this slot
+    - next_available: ISO timestamp of next available start time (or null if full)
+    - total_duration: Total duration of recordings in seconds
+    - available_seconds: Remaining seconds available in the slot
+    - is_full: Whether the slot is completely full
+    """
+    try:
+        info = get_time_slot_info(date, hour)
+        return info
+
+    except Exception as e:
+        logger.error(f"Failed to get time slot info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

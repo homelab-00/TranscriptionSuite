@@ -844,6 +844,177 @@ def update_recording_date(recording_id: int, recorded_at: str) -> bool:
         return cursor.rowcount > 0
 
 
+def check_time_slot_overlap(
+    start_time: datetime,
+    duration_seconds: float,
+    exclude_recording_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Check if a recording would overlap with existing recordings.
+
+    Args:
+        start_time: Proposed start time for the new recording
+        duration_seconds: Duration of the new recording in seconds
+        exclude_recording_id: Optional recording ID to exclude (for updates)
+
+    Returns:
+        Dict with overlap info if conflict exists, None if no overlap
+    """
+    end_time = start_time.timestamp() + duration_seconds
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Find any recording that overlaps with the proposed time range
+        # Overlap exists when: existing_start < new_end AND existing_end > new_start
+        query = """
+            SELECT id, filename, title, recorded_at, duration_seconds,
+                   datetime(recorded_at, '+' || CAST(duration_seconds AS TEXT) || ' seconds') as end_at
+            FROM recordings
+            WHERE datetime(recorded_at) < datetime(?, 'unixepoch')
+              AND datetime(recorded_at, '+' || CAST(duration_seconds AS TEXT) || ' seconds') > datetime(?, 'unixepoch')
+        """
+        params: List[Any] = [end_time, start_time.timestamp()]
+
+        if exclude_recording_id:
+            query += " AND id != ?"
+            params.append(exclude_recording_id)
+
+        query += " ORDER BY recorded_at ASC LIMIT 1"
+
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+
+        if row:
+            return dict(row)
+        return None
+
+
+def get_next_available_start_time(
+    target_date: str,
+    hour: int,
+) -> Optional[datetime]:
+    """
+    Get the next available start time for a given hour slot.
+
+    If recordings exist in the slot, returns the next minute after the last
+    recording ends. If the slot is full (would overflow to next hour),
+    returns None.
+
+    Args:
+        target_date: Date string in YYYY-MM-DD format
+        hour: Hour (0-23)
+
+    Returns:
+        datetime of next available start, or None if slot is full
+    """
+    # Get all recordings that START in this hour
+    recordings = get_recordings_for_hour(target_date, hour)
+
+    if not recordings:
+        # No recordings in this hour, start at the beginning
+        return datetime.fromisoformat(f"{target_date}T{hour:02d}:00:00")
+
+    # Find the recording with the latest end time
+    latest_end_timestamp = 0.0
+    for rec in recordings:
+        rec_start = datetime.fromisoformat(rec["recorded_at"].replace("Z", "+00:00"))
+        rec_end_timestamp = rec_start.timestamp() + rec["duration_seconds"]
+        if rec_end_timestamp > latest_end_timestamp:
+            latest_end_timestamp = rec_end_timestamp
+
+    # Also check recordings from PREVIOUS hours that might extend into this hour
+    # by checking if any recording's end time falls within this hour
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Find recordings that end within this hour but started before it
+        hour_start = datetime.fromisoformat(f"{target_date}T{hour:02d}:00:00")
+        hour_end = datetime.fromisoformat(f"{target_date}T{hour:02d}:59:59")
+
+        cursor.execute(
+            """
+            SELECT recorded_at, duration_seconds
+            FROM recordings
+            WHERE date(recorded_at) = date(?)
+              AND CAST(strftime('%H', recorded_at) AS INTEGER) < ?
+              AND datetime(recorded_at, '+' || CAST(duration_seconds AS TEXT) || ' seconds') > datetime(?)
+            """,
+            (target_date, hour, hour_start.isoformat()),
+        )
+
+        for row in cursor.fetchall():
+            rec_start = datetime.fromisoformat(
+                row["recorded_at"].replace("Z", "+00:00")
+            )
+            rec_end_timestamp = rec_start.timestamp() + row["duration_seconds"]
+            if rec_end_timestamp > latest_end_timestamp:
+                latest_end_timestamp = rec_end_timestamp
+
+    if latest_end_timestamp == 0.0:
+        # No recordings affect this hour
+        return datetime.fromisoformat(f"{target_date}T{hour:02d}:00:00")
+
+    # Round up to the next full minute
+    latest_end = datetime.fromtimestamp(latest_end_timestamp)
+    if latest_end.second > 0 or latest_end.microsecond > 0:
+        # Round up to next minute
+        next_start = latest_end.replace(second=0, microsecond=0)
+        next_start = datetime.fromtimestamp(next_start.timestamp() + 60)
+    else:
+        next_start = latest_end
+
+    # Check if next_start is still within this hour
+    hour_boundary = (
+        datetime.fromisoformat(f"{target_date}T{hour + 1:02d}:00:00")
+        if hour < 23
+        else datetime.fromisoformat(f"{target_date}T23:59:59")
+    )
+
+    if next_start >= hour_boundary:
+        # Slot is full
+        return None
+
+    return next_start
+
+
+def get_time_slot_info(target_date: str, hour: int) -> Dict[str, Any]:
+    """
+    Get information about a time slot including available time and existing recordings.
+
+    Args:
+        target_date: Date string in YYYY-MM-DD format
+        hour: Hour (0-23)
+
+    Returns:
+        Dict with:
+        - recordings: List of recordings in this slot
+        - next_available: Next available start time (or None if full)
+        - total_duration: Total duration of recordings in seconds
+        - available_seconds: Remaining seconds available in the slot
+    """
+    recordings = get_recordings_for_hour(target_date, hour)
+    next_available = get_next_available_start_time(target_date, hour)
+
+    total_duration = sum(rec["duration_seconds"] for rec in recordings)
+
+    # Calculate available time
+    hour_start = datetime.fromisoformat(f"{target_date}T{hour:02d}:00:00")
+    if next_available:
+        used_seconds = (next_available - hour_start).total_seconds()
+    else:
+        used_seconds = 3600  # Full hour used
+
+    available_seconds = max(0, 3600 - used_seconds)
+
+    return {
+        "recordings": recordings,
+        "next_available": next_available.isoformat() if next_available else None,
+        "total_duration": total_duration,
+        "available_seconds": available_seconds,
+        "is_full": next_available is None,
+    }
+
+
 def get_recording_summary(recording_id: int) -> Optional[str]:
     """Get the AI summary for a recording."""
     with get_connection() as conn:

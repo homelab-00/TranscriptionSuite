@@ -1176,6 +1176,42 @@ class APIClient:
             logger.error(f"File upload failed: {e}")
             raise RuntimeError(f"Upload failed: {e}") from e
 
+    async def get_time_slot_info(
+        self,
+        date: str,
+        hour: int,
+    ) -> dict[str, Any]:
+        """
+        Get information about a specific time slot.
+
+        Args:
+            date: Date in YYYY-MM-DD format
+            hour: Hour (0-23)
+
+        Returns:
+            Dict with:
+            - recordings: List of recordings in this slot
+            - next_available: ISO timestamp of next available start time (or None if full)
+            - total_duration: Total duration of recordings in seconds
+            - available_seconds: Remaining seconds available in the slot
+            - is_full: Whether the slot is completely full
+        """
+        session = await self._get_session()
+
+        try:
+            async with session.get(
+                f"{self.base_url}/api/notebook/timeslot",
+                params={"date": date, "hour": hour},
+                headers=self._get_headers(),
+                **self._get_ssl_kwargs(),
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Failed to get time slot info: {e}")
+            raise RuntimeError(f"Failed to get time slot info: {e}") from e
+
     async def transcribe_audio_data(
         self,
         audio_data: bytes,

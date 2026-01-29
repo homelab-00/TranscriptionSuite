@@ -368,26 +368,70 @@ class DayViewImportDialog:
         self._transcribe_btn.set_sensitive(False)
         self._cancel_btn.set_label("Close")
         self._progress_box.set_visible(True)
-        self._status_label.set_label("Starting transcription...")
+        self._status_label.set_label("Checking time slot availability...")
         self._progress_bar.set_fraction(0)
 
-        target_datetime = datetime(
-            self._target_date.year,
-            self._target_date.month,
-            self._target_date.day,
-            self._hour,
-            0,
-            0,
-        ).isoformat()
-
+        # Start async process (first check availability, then upload)
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(self._upload_file(self._file_path, target_datetime))
+                asyncio.create_task(self._check_and_upload(self._file_path))
             else:
-                asyncio.run(self._upload_file(self._file_path, target_datetime))
+                asyncio.run(self._check_and_upload(self._file_path))
         except RuntimeError:
             pass
+
+    async def _check_and_upload(self, file_path: Path) -> None:
+        """Check time slot availability and upload if space is available."""
+        if self._api_client is None:
+            GLib.idle_add(
+                lambda: self._status_label.set_label("Error: Not connected to server")
+            )
+            self._is_transcribing = False
+            return
+
+        try:
+            # Get time slot info to find next available start time
+            date_str = self._target_date.isoformat()
+            slot_info = await self._api_client.get_time_slot_info(date_str, self._hour)
+
+            if slot_info.get("is_full"):
+
+                def show_error():
+                    self._status_label.set_label(
+                        f"Error: Time slot {self._hour}:00 is full. No space for new recordings."
+                    )
+                    return False
+
+                GLib.idle_add(show_error)
+                self._is_transcribing = False
+                return
+
+            # Use next available start time from the server
+            next_available = slot_info.get("next_available")
+            if next_available:
+                target_datetime = next_available
+            else:
+                # Fallback to hour start if no next_available provided
+                target_datetime = datetime(
+                    self._target_date.year,
+                    self._target_date.month,
+                    self._target_date.day,
+                    self._hour,
+                    0,
+                    0,
+                ).isoformat()
+
+            GLib.idle_add(
+                lambda: self._status_label.set_label("Starting transcription...")
+                or False
+            )
+            await self._upload_file(file_path, target_datetime)
+
+        except Exception as e:
+            logger.error(f"Failed to check time slot: {e}")
+            GLib.idle_add(lambda: self._status_label.set_label(f"Error: {e}") or False)
+            self._is_transcribing = False
 
     async def _upload_file(self, file_path: Path, recorded_at: str) -> None:
         """Upload and transcribe the file."""
@@ -705,6 +749,26 @@ class CalendarWidget:
                 padding: 2px 6px;
             }
 
+            .recording-card-continuation {
+                background-color: #1a1a2a;
+                border: 1px dashed #7B68EE;
+                border-radius: 8px;
+                padding: 12px 16px;
+                min-width: 180px;
+            }
+
+            .recording-card-continuation:hover {
+                background-color: #1e1e2e;
+                border-color: #9370DB;
+            }
+
+            .continuation-indicator {
+                color: #7B68EE;
+                font-size: 10px;
+                font-weight: bold;
+                padding-right: 4px;
+            }
+
             .recordings-scroll {
                 border-radius: 8px;
             }
@@ -1020,15 +1084,41 @@ class CalendarWidget:
         today = date.today()
         now = datetime.now()
 
-        # Group recordings by hour
-        recordings_by_hour: dict[int, list[Recording]] = {}
+        # Group recordings by hour (including overflow continuations)
+        recordings_by_hour: dict[int, list[tuple[Recording, bool]]] = {}
+        # Tuple is (Recording, is_continuation) - is_continuation True means overflow from previous hour
+
         for rec in recordings:
             try:
                 rec_dt = datetime.fromisoformat(rec.recorded_at.replace("Z", "+00:00"))
-                hour = rec_dt.hour
-                if hour not in recordings_by_hour:
-                    recordings_by_hour[hour] = []
-                recordings_by_hour[hour].append(rec)
+                start_hour = rec_dt.hour
+
+                # Add recording to its start hour
+                if start_hour not in recordings_by_hour:
+                    recordings_by_hour[start_hour] = []
+                recordings_by_hour[start_hour].append((rec, False))
+
+                # Check if recording overflows into subsequent hours
+                # Calculate end time based on start + duration
+                end_timestamp = rec_dt.timestamp() + rec.duration_seconds
+                end_dt = datetime.fromtimestamp(end_timestamp)
+
+                # If recording spans multiple hours, add continuation markers
+                if end_dt.hour != start_hour or end_dt.day != rec_dt.day:
+                    # Calculate which hours this recording spans
+                    current_hour = start_hour + 1
+                    while current_hour <= 23:
+                        hour_start = datetime(
+                            rec_dt.year, rec_dt.month, rec_dt.day, current_hour, 0, 0
+                        )
+                        if hour_start.timestamp() >= end_timestamp:
+                            break
+
+                        if current_hour not in recordings_by_hour:
+                            recordings_by_hour[current_hour] = []
+                        recordings_by_hour[current_hour].append((rec, True))
+                        current_hour += 1
+
             except (ValueError, AttributeError):
                 pass
 
@@ -1044,8 +1134,8 @@ class CalendarWidget:
 
             # Add recording cards for this hour
             hour_recordings = recordings_by_hour.get(hour, [])
-            for rec in hour_recordings:
-                card = self._create_recording_card(rec)
+            for rec, is_continuation in hour_recordings:
+                card = self._create_recording_card(rec, is_continuation=is_continuation)
                 recordings_box.append(card)
                 slot_info["recording_widgets"].append(card)
 
@@ -1055,16 +1145,32 @@ class CalendarWidget:
             )
             add_btn.set_sensitive(not is_future)
 
-    def _create_recording_card(self, rec: Recording) -> Gtk.Button:
-        """Create a card widget for a recording entry."""
+    def _create_recording_card(
+        self, rec: Recording, is_continuation: bool = False
+    ) -> Gtk.Button:
+        """Create a card widget for a recording entry.
+
+        Args:
+            rec: The recording to display
+            is_continuation: If True, this card represents a recording that
+                started in a previous time slot and continues into this one
+        """
         card = Gtk.Button()
-        card.add_css_class("recording-card")
+        card.add_css_class(
+            "recording-card-continuation" if is_continuation else "recording-card"
+        )
         card.recording_id = rec.id
 
         layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
 
-        # Top row: title + diarization badge
+        # Top row: title + diarization badge (or continuation indicator)
         top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        if is_continuation:
+            # Show continuation indicator
+            cont_label = Gtk.Label(label="↑ continues")
+            cont_label.add_css_class("continuation-indicator")
+            top_box.append(cont_label)
 
         title = rec.title or rec.filename or "Recording"
         title_label = Gtk.Label(label=title)
@@ -1088,6 +1194,8 @@ class CalendarWidget:
         try:
             rec_dt = datetime.fromisoformat(rec.recorded_at.replace("Z", "+00:00"))
             time_str = rec_dt.strftime("%I:%M %p").lstrip("0")
+            if is_continuation:
+                time_str = f"from {time_str}"
         except (ValueError, AttributeError):
             time_str = ""
 
