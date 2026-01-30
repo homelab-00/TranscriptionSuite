@@ -50,6 +50,7 @@ __all__ = [
     "get_conversation",
     "get_conversations",
     "update_conversation_title",
+    "update_conversation_response_id",
     "get_conversation_with_messages",
     "delete_conversation",
     "add_message",

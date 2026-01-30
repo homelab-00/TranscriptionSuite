@@ -625,37 +625,19 @@ async def list_available_models():
 @router.post("/model/load", response_model=ServerControlResponse)
 async def load_model(request: ModelLoadRequest):
     """
-    Load a model into LM Studio.
+    Load a model into LM Studio using the v1 REST API.
 
-    NOTE: LM Studio does not currently support loading models via HTTP API.
-    This endpoint requires the 'lms' CLI tool, which is not available when
-    running in Docker. Please load models manually through the LM Studio UI.
+    Uses POST /api/v1/models/load endpoint which works from Docker containers
+    without needing CLI access.
 
     If model_id is not provided, uses the model from config.yaml,
     or the first available LLM model.
     """
-    # Check if lms CLI is available
-    if not _check_lms_cli():
-        return ServerControlResponse(
-            success=False,
-            message="Model loading not available - lms CLI not found",
-            detail=(
-                "LM Studio does not currently support loading models via HTTP API. "
-                "When running the server in Docker, please load models manually through "
-                "the LM Studio UI on your host machine. "
-                "See: https://lmstudio.ai/docs/developer/rest/endpoints"
-            ),
-        )
-
     config = get_llm_config()
+    base_url = config["base_url"]
     model_id = request.model_id or config.get("model")
 
     # Use config values as defaults if not specified in request
-    gpu_offload = (
-        request.gpu_offload
-        if request.gpu_offload is not None
-        else config.get("gpu_offload", 1.0)
-    )
     context_length = (
         request.context_length
         if request.context_length is not None
@@ -682,98 +664,166 @@ async def load_model(request: ModelLoadRequest):
             )
 
     logger.info(
-        f"Loading model: {sanitize_for_log(model_id)} (gpu={gpu_offload}, ctx={context_length})"
+        f"Loading model via API: {sanitize_for_log(model_id)} (ctx={context_length})"
     )
 
-    # Build lms load command
-    cmd_args = ["load", model_id]
-
-    if gpu_offload is not None:
-        cmd_args.extend(["--gpu", str(gpu_offload)])
+    # Build load request payload for v1 API
+    payload = {
+        "model": model_id,
+        "flash_attention": True,  # Enable by default for better performance
+        "offload_kv_cache_to_gpu": True,  # Use GPU for KV cache
+    }
 
     if context_length is not None:
-        cmd_args.extend(["--context-length", str(context_length)])
+        payload["context_length"] = context_length
 
-    # Run in thread pool
-    loop = asyncio.get_event_loop()
-    success, output = await loop.run_in_executor(
-        None,
-        _run_lms_command,
-        cmd_args,
-        120,  # Loading can take a while
-    )
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{base_url}/api/v1/models/load",
+                json=payload,
+            )
 
-    if success:
-        logger.info(f"Model {sanitize_for_log(model_id)} loaded successfully")
-        return ServerControlResponse(
-            success=True,
-            message=f"Model '{sanitize_for_log(model_id)}' loaded successfully",
-            detail=output,
-        )
-    else:
-        logger.error(
-            f"Failed to load model {sanitize_for_log(model_id)}: {sanitize_for_log(output, max_length=100)}"
-        )
+            if response.status_code == 200:
+                data = response.json()
+                instance_id = data.get("instance_id", model_id)
+                load_time = data.get("load_time_seconds", 0)
+
+                logger.info(
+                    f"Model {sanitize_for_log(instance_id)} loaded in {load_time:.2f}s"
+                )
+                return ServerControlResponse(
+                    success=True,
+                    message=f"Model '{sanitize_for_log(instance_id)}' loaded successfully in {load_time:.2f}s",
+                    detail=f"Instance ID: {instance_id}",
+                )
+            else:
+                error_text = response.text
+                logger.error(
+                    f"Failed to load model {sanitize_for_log(model_id)}: {response.status_code} - {error_text}"
+                )
+                return ServerControlResponse(
+                    success=False,
+                    message=f"Failed to load model '{sanitize_for_log(model_id)}'",
+                    detail=f"API returned {response.status_code}: {error_text}",
+                )
+
+    except httpx.ConnectError:
         return ServerControlResponse(
             success=False,
-            message=f"Failed to load model '{sanitize_for_log(model_id)}'",
-            detail=output,
+            message="Cannot connect to LM Studio",
+            detail=f"Make sure LM Studio is running and accessible at {base_url}",
+        )
+    except httpx.TimeoutException:
+        return ServerControlResponse(
+            success=False,
+            message="Model loading timed out",
+            detail="The model is taking too long to load. It may still be loading in the background.",
+        )
+    except Exception as e:
+        logger.error(f"Error loading model: {e}", exc_info=True)
+        return ServerControlResponse(
+            success=False,
+            message="Error loading model",
+            detail=str(e),
         )
 
 
 @router.post("/model/unload", response_model=ServerControlResponse)
-async def unload_model(unload_all: bool = False):
+async def unload_model(instance_id: Optional[str] = None):
     """
-    Unload the currently loaded model(s) to free VRAM.
+    Unload a loaded model to free VRAM using the v1 REST API.
 
-    NOTE: LM Studio does not currently support unloading models via HTTP API.
-    This endpoint requires the 'lms' CLI tool, which is not available when
-    running in Docker. Please unload models manually through the LM Studio UI.
+    Uses POST /api/v1/models/unload endpoint which works from Docker containers.
 
     Args:
-        unload_all: If True, unload all models. Otherwise unload current model.
+        instance_id: Instance ID of the model to unload. If None, unloads the first loaded model.
     """
-    # Check if lms CLI is available
-    if not _check_lms_cli():
+    config = get_llm_config()
+    base_url = config["base_url"]
+
+    # If no instance_id provided, get the first loaded model
+    if not instance_id:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{base_url}/api/v0/models")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get("data", [])
+                    loaded_models = [
+                        m
+                        for m in models
+                        if m.get("type") in ("llm", "vlm")
+                        and m.get("state") == "loaded"
+                    ]
+
+                    if loaded_models:
+                        instance_id = loaded_models[0].get("id")
+                    else:
+                        return ServerControlResponse(
+                            success=False,
+                            message="No models loaded",
+                            detail="There are no models currently loaded to unload.",
+                        )
+        except Exception as e:
+            return ServerControlResponse(
+                success=False,
+                message="Failed to get loaded models",
+                detail=str(e),
+            )
+
+    logger.info(f"Unloading model via API: {sanitize_for_log(instance_id)}")
+
+    payload = {"instance_id": instance_id}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{base_url}/api/v1/models/unload",
+                json=payload,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                unloaded_id = data.get("instance_id", instance_id)
+
+                logger.info(
+                    f"Model {sanitize_for_log(unloaded_id)} unloaded successfully"
+                )
+                return ServerControlResponse(
+                    success=True,
+                    message=f"Model '{sanitize_for_log(unloaded_id)}' unloaded successfully",
+                    detail="VRAM has been freed.",
+                )
+            else:
+                error_text = response.text
+                logger.error(
+                    f"Failed to unload model {sanitize_for_log(instance_id)}: {response.status_code} - {error_text}"
+                )
+                return ServerControlResponse(
+                    success=False,
+                    message=f"Failed to unload model '{sanitize_for_log(instance_id)}'",
+                    detail=f"API returned {response.status_code}: {error_text}",
+                )
+
+    except httpx.ConnectError:
         return ServerControlResponse(
             success=False,
-            message="Model unloading not available - lms CLI not found",
-            detail=(
-                "LM Studio does not currently support unloading models via HTTP API. "
-                "When running the server in Docker, please unload models manually through "
-                "the LM Studio UI on your host machine. "
-                "Alternatively, loaded models will auto-unload after their TTL expires. "
-                "See: https://lmstudio.ai/docs/developer/rest/endpoints"
-            ),
+            message="Cannot connect to LM Studio",
+            detail=f"Make sure LM Studio is running and accessible at {base_url}",
         )
-
-    logger.info(f"Unloading model(s) (all={unload_all})...")
-
-    cmd_args = ["unload"]
-    if unload_all:
-        cmd_args.append("--all")
-
-    loop = asyncio.get_event_loop()
-    success, output = await loop.run_in_executor(
-        None,
-        _run_lms_command,
-        cmd_args,
-        30,
-    )
-
-    if success:
-        logger.info("Model(s) unloaded successfully")
-        return ServerControlResponse(
-            success=True,
-            message="Model(s) unloaded successfully",
-            detail=output,
-        )
-    else:
-        logger.error(f"Failed to unload model(s): {output}")
+    except httpx.TimeoutException:
         return ServerControlResponse(
             success=False,
-            message="Failed to unload model(s)",
-            detail=output,
+            message="Model unloading timed out",
+            detail="The operation took too long.",
+        )
+    except Exception as e:
+        logger.error(f"Error unloading model: {e}", exc_info=True)
+        return ServerControlResponse(
+            success=False,
+            message="Error unloading model",
+            detail=str(e),
         )
 
 
@@ -951,19 +1001,20 @@ async def add_message_to_conversation(conversation_id: int, request: MessageCrea
 @router.post("/chat")
 async def chat_with_llm(request: ChatRequest):
     """
-    Send a message in a conversation and get an LLM response.
+    Send a message in a conversation and get an LLM response using stateful v1 API.
 
     This:
     1. Adds the user message to the conversation
-    2. Builds context from conversation history + optional transcription
-    3. Sends to LLM and streams the response
-    4. Saves the assistant response to the conversation
+    2. Uses LM Studio's stateful /api/v1/chat with response_id tracking
+    3. Streams the response from the model
+    4. Saves the assistant response and updates response_id
     """
     from server.database.database import (
         add_message,
         get_conversation_with_messages,
         get_recording,
         get_transcription,
+        update_conversation_response_id,
     )
 
     # Get conversation and verify it exists
@@ -978,17 +1029,15 @@ async def chat_with_llm(request: ChatRequest):
         content=request.user_message,
     )
 
-    # Build messages array for LLM
+    # Build request for stateful LM Studio v1 API
     config = get_llm_config()
     base_url = config["base_url"]
 
-    messages = []
+    # Build input with optional transcription context
+    input_text = request.user_message
 
-    # System prompt with optional transcription context
-    system_content = request.system_prompt or config["default_system_prompt"]
-
-    if request.include_transcription:
-        # Get the recording's transcription
+    # Add transcription context only on first message (when no response_id exists)
+    if request.include_transcription and not conversation.get("response_id"):
         recording = get_recording(conversation["recording_id"])
         if recording:
             transcription = get_transcription(conversation["recording_id"])
@@ -1000,87 +1049,89 @@ async def chat_with_llm(request: ChatRequest):
                     else seg["text"]
                     for seg in transcription["segments"]
                 )
-                system_content += f"\n\nThe following is the transcription for context:\n\n{trans_text}"
+                input_text = f"Context (transcription):\n{trans_text}\n\nUser: {request.user_message}"
 
-    messages.append({"role": "system", "content": system_content})
-
-    # Add conversation history
-    for msg in conversation.get("messages", []):
-        if msg["role"] in ("user", "assistant"):
-            messages.append({"role": msg["role"], "content": msg["content"]})
-
-    # Add the new user message
-    messages.append({"role": "user", "content": request.user_message})
-
-    # Prepare LLM request
+    # Prepare LLM request for v1 API
     payload = {
-        "messages": messages,
-        "max_tokens": request.max_tokens or config["max_tokens"],
+        "input": input_text,
+        "store": True,  # Request response_id for stateful conversation
         "temperature": request.temperature or config["temperature"],
-        "stream": True,
     }
 
+    # Add model if specified
     if config["model"]:
         payload["model"] = config["model"]
+
+    # Add previous response_id to continue conversation
+    if conversation.get("response_id"):
+        payload["response_id"] = conversation["response_id"]
+
+    # Add context length if specified
+    if config.get("context_length"):
+        payload["context_length"] = config["context_length"]
 
     logger.info(
         f"Chat request to {sanitize_for_log(base_url)} for conversation {sanitize_for_log(str(request.conversation_id))}"
     )
 
     async def generate_stream() -> AsyncGenerator[str, None]:
-        """Generate SSE stream from LLM response and save to DB."""
+        """Generate SSE stream from stateful LM Studio v1 API."""
         full_response = ""
+        new_response_id = None
         tokens_used = 0
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base_url}/v1/chat/completions",
+                response = await client.post(
+                    f"{base_url}/api/v1/chat",
                     json=payload,
-                ) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(
-                            f"LLM API error: {response.status_code} - {error_text}"
-                        )
-                        yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
-                        return
+                )
 
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    logger.error(
+                        f"LLM API error: {response.status_code} - {error_text}"
+                    )
+                    yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
+                    return
 
-                            if data_str.strip() == "[DONE]":
-                                # Save the complete response to the conversation
-                                if full_response:
-                                    add_message(
-                                        conversation_id=request.conversation_id,
-                                        role="assistant",
-                                        content=full_response,
-                                        tokens_used=tokens_used
-                                        if tokens_used > 0
-                                        else None,
-                                    )
-                                yield f"data: {json.dumps({'done': True})}\n\n"
-                                break
+                # Parse the response
+                data = response.json()
+                new_response_id = data.get("response_id")
 
-                            try:
-                                data = json.loads(data_str)
-                                delta = data.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
+                # Extract message content from output array
+                output = data.get("output", [])
+                for item in output:
+                    if item.get("type") == "message":
+                        content = item.get("content", "")
+                        if content:
+                            full_response += content
+                            # Stream it to client
+                            yield f"data: {json.dumps({'content': content})}\n\n"
 
-                                if content:
-                                    full_response += content
-                                    yield f"data: {json.dumps({'content': content})}\n\n"
+                # Get token stats
+                stats = data.get("stats", {})
+                tokens_used = stats.get("total_output_tokens", 0)
 
-                                # Track token usage if available
-                                usage = data.get("usage", {})
-                                if usage.get("total_tokens"):
-                                    tokens_used = usage["total_tokens"]
+                # Save the response to database
+                if full_response:
+                    add_message(
+                        conversation_id=request.conversation_id,
+                        role="assistant",
+                        content=full_response,
+                        tokens_used=tokens_used if tokens_used > 0 else None,
+                    )
 
-                            except json.JSONDecodeError:
-                                continue
+                # Update conversation with new response_id for next turn
+                if new_response_id:
+                    update_conversation_response_id(
+                        request.conversation_id, new_response_id
+                    )
+                    logger.info(
+                        f"Conversation {request.conversation_id} updated with response_id: {new_response_id[:20]}..."
+                    )
+
+                yield f"data: {json.dumps({'done': True})}\n\n"
 
         except httpx.ConnectError:
             logger.error("Chat error: Cannot connect to LM Studio")

@@ -186,6 +186,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
 - **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM
+- **LM Studio Integration**: Native v1 REST API support for LM Studio 0.4.0+ with stateful chat sessions and Docker-compatible model management
 
 ### 2.2 Platform Architectures
 
@@ -861,7 +862,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `diarization` - PyAnnote model and speaker detection
 - `remote_server` - Host, port, TLS settings
 - `storage` - Database path, audio storage
-- `local_llm` - LM Studio integration
+- `local_llm` - LM Studio integration (supports v1 REST API for LM Studio 0.4.0+)
 - `backup` - Automatic database backup settings
 
 **Live Mode Configuration:**
@@ -1079,7 +1080,7 @@ ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
 **Solution**: The setup wizard automatically generates platform-specific `docker-compose.yml`:
 - **Linux**: Uses `network_mode: "host"` for direct access
 - **Windows**: Uses explicit port mappings (`8000:8000`, `8443:8443`) with bridge networking
-- **LM Studio URL**: Windows uses `host.docker.internal:1234` to reach host services
+- **LM Studio URL**: Windows uses `host.docker.internal:1234` to reach host services (works with LM Studio 0.4.0+ v1 API)
 
 **For existing installations**, manually edit `docker-compose.yml`:
 ```yaml

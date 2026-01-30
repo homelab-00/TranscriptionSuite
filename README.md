@@ -74,6 +74,7 @@ easy installation.
 - **Speaker Diarization**: PyAnnote-based speaker identification
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
+  - Supports LM Studio 0.4.0+ with native v1 REST API for model management and stateful chats
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 

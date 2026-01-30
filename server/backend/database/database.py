@@ -276,6 +276,7 @@ def init_db() -> None:
                 title TEXT NOT NULL DEFAULT 'New Chat',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                response_id TEXT DEFAULT NULL,
                 FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
             )
         """)
@@ -774,6 +775,22 @@ def update_conversation_title(conversation_id: int, title: str) -> bool:
             WHERE id = ?
             """,
             (title, conversation_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_conversation_response_id(conversation_id: int, response_id: str) -> bool:
+    """Update a conversation's LM Studio response_id for stateful sessions."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE conversations 
+            SET response_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (response_id, conversation_id),
         )
         conn.commit()
         return cursor.rowcount > 0
