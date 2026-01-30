@@ -80,7 +80,7 @@ class RecordingDetailResponse(RecordingResponse):
 class SummaryUpdate(BaseModel):
     """Request body for updating a recording's summary."""
 
-    summary: str
+    summary: Optional[str] = None
 
 
 class TitleUpdate(BaseModel):

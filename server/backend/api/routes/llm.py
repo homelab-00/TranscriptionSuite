@@ -56,6 +56,27 @@ class LLMStatus(BaseModel):
     error: Optional[str] = None
 
 
+async def _get_loaded_model_id(base_url: str) -> Optional[str]:
+    """Get the first loaded LLM/VLM model ID from LM Studio."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{base_url}/api/v0/models")
+            if response.status_code != 200:
+                return None
+            data = response.json()
+            models = data.get("data", [])
+            loaded_models = [
+                m
+                for m in models
+                if m.get("type") in ("llm", "vlm") and m.get("state") == "loaded"
+            ]
+            if loaded_models:
+                return loaded_models[0].get("id")
+    except Exception as e:
+        logger.debug(f"Failed to get loaded model id: {e}")
+    return None
+
+
 class ServerControlResponse(BaseModel):
     """Response from server control operations"""
 
@@ -423,6 +444,40 @@ async def summarize_recording(
 
     # Process with LLM
     return await process_with_llm(
+        LLMRequest(
+            transcription_text=full_text,
+            user_prompt=custom_prompt,
+        )
+    )
+
+
+@router.post("/summarize/{recording_id}/stream")
+async def summarize_recording_stream(
+    recording_id: int,
+    custom_prompt: Optional[str] = None,
+):
+    """Convenience endpoint: fetch transcription and summarize it (streaming)."""
+    from server.database.database import get_recording, get_transcription
+
+    # Fetch the recording
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Fetch transcription
+    transcription = get_transcription(recording_id)
+    if not transcription or not transcription.get("segments"):
+        raise HTTPException(status_code=404, detail="No transcription found")
+
+    # Build full text from segments
+    full_text = "\n".join(
+        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
+        if seg.get("speaker")
+        else seg["text"]
+        for seg in transcription["segments"]
+    )
+
+    return await process_with_llm_stream(
         LLMRequest(
             transcription_text=full_text,
             user_prompt=custom_prompt,
@@ -1032,6 +1087,14 @@ async def chat_with_llm(request: ChatRequest):
     # Build request for stateful LM Studio v1 API
     config = get_llm_config()
     base_url = config["base_url"]
+    model_id = config.get("model")
+    if not model_id:
+        model_id = await _get_loaded_model_id(base_url)
+    if not model_id:
+        raise HTTPException(
+            status_code=503,
+            detail="No model loaded in LM Studio. Load a model first.",
+        )
 
     # Build input with optional transcription context
     input_text = request.user_message
@@ -1060,11 +1123,8 @@ async def chat_with_llm(request: ChatRequest):
         "input": input_text,
         "store": True,  # Request response_id for stateful conversation
         "temperature": request.temperature or config["temperature"],
+        "model": model_id,
     }
-
-    # Add model if specified
-    if config["model"]:
-        payload["model"] = config["model"]
 
     # Add previous response_id to continue conversation
     if conversation.get("response_id"):

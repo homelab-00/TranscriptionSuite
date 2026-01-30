@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTextEdit,
     QVBoxLayout,
@@ -337,6 +338,11 @@ class RecordingDialog(QDialog):
         convo_label.setObjectName("chatSectionLabel")
         convo_header_layout.addWidget(convo_label)
         convo_header_layout.addStretch()
+
+        self._chat_delete_btn = QPushButton("Delete")
+        self._chat_delete_btn.setObjectName("chatActionButton")
+        self._chat_delete_btn.clicked.connect(self._on_delete_chat_clicked)
+        convo_header_layout.addWidget(self._chat_delete_btn)
 
         self._chat_new_btn = QPushButton("New Chat")
         self._chat_new_btn.setObjectName("chatActionButton")
@@ -925,6 +931,40 @@ class RecordingDialog(QDialog):
         except RuntimeError:
             asyncio.run(self._async_create_new_chat())
 
+    def _on_delete_chat_clicked(self) -> None:
+        """Delete the currently selected conversation."""
+        if not self._active_conversation_id:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Delete Conversation",
+            "Delete this conversation and all its messages?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_delete_chat(self._active_conversation_id))
+            else:
+                loop.run_until_complete(
+                    self._async_delete_chat(self._active_conversation_id)
+                )
+        except RuntimeError:
+            asyncio.run(self._async_delete_chat(self._active_conversation_id))
+
+    async def _async_delete_chat(self, conversation_id: int) -> None:
+        try:
+            await self._api_client.delete_conversation(conversation_id)
+            self._active_conversation_id = None
+            await self._async_load_conversations()
+        except Exception as e:
+            logger.error(f"Failed to delete conversation: {e}")
+            self._chat_error_label.setText("Failed to delete conversation.")
+            self._chat_error_label.show()
+
     async def _async_create_new_chat(self) -> None:
         try:
             result = await self._api_client.create_conversation(
@@ -991,11 +1031,15 @@ class RecordingDialog(QDialog):
         bubble.setObjectName(
             "chatBubbleUser" if role == "user" else "chatBubbleAssistant"
         )
+        bubble.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        bubble.setMaximumWidth(260)
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(8, 6, 8, 6)
 
         label = QLabel(content)
         label.setWordWrap(True)
+        label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        label.setMaximumWidth(240)
         bubble_layout.addWidget(label)
 
         if role == "user":
@@ -1026,6 +1070,9 @@ class RecordingDialog(QDialog):
         )
         self._chat_send_btn.setEnabled(can_send)
         self._chat_input.setEnabled(self._lm_available and not self._chat_streaming)
+        self._chat_delete_btn.setEnabled(
+            self._active_conversation_id is not None and not self._chat_streaming
+        )
 
     def _on_send_chat_clicked(self) -> None:
         """Send a chat message."""

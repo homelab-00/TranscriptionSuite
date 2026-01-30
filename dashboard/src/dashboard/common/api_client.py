@@ -1076,7 +1076,7 @@ class APIClient:
 
         try:
             async with session.post(
-                f"{self.base_url}/api/llm/summarize/{recording_id}",
+                f"{self.base_url}/api/llm/summarize/{recording_id}/stream",
                 headers=self._get_headers(),
                 json=request_data,
                 **self._get_ssl_kwargs(),

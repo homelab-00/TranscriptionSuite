@@ -421,7 +421,7 @@ def delete_recording(recording_id: int) -> bool:
         return cursor.rowcount > 0
 
 
-def update_recording_summary(recording_id: int, summary: str) -> bool:
+def update_recording_summary(recording_id: int, summary: Optional[str]) -> bool:
     """Update the summary for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
