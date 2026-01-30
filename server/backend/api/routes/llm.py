@@ -1042,13 +1042,17 @@ async def chat_with_llm(request: ChatRequest):
         if recording:
             transcription = get_transcription(conversation["recording_id"])
             if transcription and transcription.get("segments"):
-                # Build transcription text
-                trans_text = "\n".join(
-                    f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
-                    if seg.get("speaker")
-                    else seg["text"]
-                    for seg in transcription["segments"]
-                )
+                # Build transcription text (pure transcript, no timestamps)
+                diarization_enabled = bool(recording.get("has_diarization"))
+                if diarization_enabled:
+                    trans_text = "\n".join(
+                        f"[{seg.get('speaker') or 'Speaker'}]: {seg.get('text', '')}"
+                        for seg in transcription["segments"]
+                    )
+                else:
+                    trans_text = "\n".join(
+                        seg.get("text", "") for seg in transcription["segments"]
+                    )
                 input_text = f"Context (transcription):\n{trans_text}\n\nUser: {request.user_message}"
 
     # Prepare LLM request for v1 API

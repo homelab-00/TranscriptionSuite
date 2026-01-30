@@ -620,6 +620,10 @@ TAG=my-custom docker compose up -d
 | `/api/search` | GET | Full-text search |
 | `/api/llm/chat` | POST | LLM chat integration |
 
+**LM Studio chat context:** When a new chat is started for a recording, the server injects the
+recording transcript as context using the **pure transcript** (no timestamps). Speaker tags are
+included **only** when diarization is enabled.
+
 ### 7.2 WebSocket Protocol
 
 **Connection flow:**

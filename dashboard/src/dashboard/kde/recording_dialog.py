@@ -6,10 +6,11 @@ Displays a recording with transcript, audio playback, and AI features.
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QDialog,
@@ -17,11 +18,12 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
-    QSplitter,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -45,13 +47,15 @@ class RecordingDialog(QDialog):
     - Transcript display with speaker labels
     - Word-level click-to-seek
     - Title editing
-    - AI summary generation (future)
+    - AI summary generation (inline)
     """
 
     # Signal emitted when recording is deleted
     recording_deleted = pyqtSignal(int)  # recording_id
     # Signal emitted when recording is updated (recording_id, title)
     recording_updated = pyqtSignal(int, str)  # recording_id, title
+
+    _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
     def __init__(
         self,
@@ -65,6 +69,26 @@ class RecordingDialog(QDialog):
 
         self._recording: Recording | None = None
         self._transcription: Transcription | None = None
+
+        # Summary state
+        self._summary_raw = ""
+        self._summary_text = ""
+        self._summary_streaming = False
+        self._summary_task: asyncio.Task | None = None
+        self._summary_dirty = False
+        self._summary_save_timer = QTimer(self)
+        self._summary_save_timer.setSingleShot(True)
+        self._summary_save_timer.timeout.connect(self._save_summary_if_dirty)
+
+        # LLM status
+        self._lm_available = False
+        self._lm_model_name: str | None = None
+
+        # Chat state
+        self._chat_conversations: list[dict] = []
+        self._active_conversation_id: int | None = None
+        self._chat_streaming = False
+        self._chat_streaming_label: QLabel | None = None
 
         # Word positions for click-to-seek
         self._word_positions: list[
@@ -123,14 +147,88 @@ class RecordingDialog(QDialog):
 
         # Main content area
         content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
+        content_layout = QHBoxLayout(content_widget)
         content_layout.setContentsMargins(24, 16, 24, 24)
         content_layout.setSpacing(16)
+
+        main_panel = QWidget()
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(16)
 
         # Audio player
         self._audio_player = AudioPlayer()
         self._audio_player.position_changed.connect(self._on_playback_position_changed)
-        content_layout.addWidget(self._audio_player)
+        main_layout.addWidget(self._audio_player)
+
+        # AI Summary panel
+        self._summary_panel = QFrame()
+        self._summary_panel.setObjectName("summaryPanel")
+        summary_layout = QVBoxLayout(self._summary_panel)
+        summary_layout.setContentsMargins(16, 12, 16, 12)
+        summary_layout.setSpacing(8)
+
+        summary_header = QWidget()
+        summary_header.setObjectName("summaryHeader")
+        summary_header_layout = QHBoxLayout(summary_header)
+        summary_header_layout.setContentsMargins(0, 0, 0, 0)
+        summary_header_layout.setSpacing(8)
+
+        self._summary_title_label = QLabel("AI Summary")
+        self._summary_title_label.setObjectName("summaryTitle")
+        summary_header_layout.addWidget(self._summary_title_label)
+
+        self._summary_model_label = QLabel("")
+        self._summary_model_label.setObjectName("summaryModel")
+        summary_header_layout.addWidget(self._summary_model_label)
+        summary_header_layout.addStretch()
+
+        self._summary_stop_btn = QPushButton("Stop")
+        self._summary_stop_btn.setObjectName("summaryActionButton")
+        self._summary_stop_btn.clicked.connect(self._on_summary_stop_clicked)
+        self._summary_stop_btn.hide()
+        summary_header_layout.addWidget(self._summary_stop_btn)
+
+        self._summary_regen_btn = QPushButton("Regenerate")
+        self._summary_regen_btn.setObjectName("summaryActionButton")
+        self._summary_regen_btn.clicked.connect(self._on_summarize_clicked)
+        summary_header_layout.addWidget(self._summary_regen_btn)
+
+        self._summary_clear_btn = QPushButton("Clear")
+        self._summary_clear_btn.setObjectName("summaryActionButton")
+        self._summary_clear_btn.clicked.connect(self._on_clear_summary_clicked)
+        summary_header_layout.addWidget(self._summary_clear_btn)
+
+        summary_layout.addWidget(summary_header)
+
+        self._summary_stack = QStackedWidget()
+        self._summary_display = QTextEdit()
+        self._summary_display.setObjectName("summaryDisplay")
+        self._summary_display.setReadOnly(True)
+        self._summary_display.setAcceptRichText(True)
+        self._summary_display.mousePressEvent = self._on_summary_display_clicked
+        self._summary_stack.addWidget(self._summary_display)
+
+        self._summary_edit = QTextEdit()
+        self._summary_edit.setObjectName("summaryEdit")
+        self._summary_edit.setAcceptRichText(False)
+        self._summary_edit.textChanged.connect(self._on_summary_text_changed)
+        self._summary_edit.installEventFilter(self)
+        self._summary_stack.addWidget(self._summary_edit)
+
+        summary_layout.addWidget(self._summary_stack)
+
+        self._summary_status_label = QLabel("")
+        self._summary_status_label.setObjectName("summaryStatus")
+        self._summary_status_label.hide()
+        summary_layout.addWidget(self._summary_status_label)
+
+        self._summary_hint_label = QLabel("Click to edit")
+        self._summary_hint_label.setObjectName("summaryHint")
+        summary_layout.addWidget(self._summary_hint_label)
+
+        self._summary_panel.hide()
+        main_layout.addWidget(self._summary_panel)
 
         # Transcript section
         transcript_header = QWidget()
@@ -168,10 +266,7 @@ class RecordingDialog(QDialog):
         self._summarize_btn.clicked.connect(self._on_summarize_clicked)
         transcript_header_layout.addWidget(self._summarize_btn)
 
-        content_layout.addWidget(transcript_header)
-
-        # Check LM Studio status
-        self._check_lm_status()
+        main_layout.addWidget(transcript_header)
 
         # Transcript text area
         self._transcript_edit = QTextEdit()
@@ -179,7 +274,123 @@ class RecordingDialog(QDialog):
         self._transcript_edit.setReadOnly(True)
         self._transcript_edit.setAcceptRichText(True)
         self._transcript_edit.mousePressEvent = self._on_transcript_click
-        content_layout.addWidget(self._transcript_edit, 1)
+        main_layout.addWidget(self._transcript_edit, 1)
+
+        content_layout.addWidget(main_panel, 1)
+
+        # Chat sidebar (hidden by default)
+        self._chat_panel = QFrame()
+        self._chat_panel.setObjectName("chatPanel")
+        self._chat_panel.setFixedWidth(360)
+        self._chat_panel.hide()
+        chat_layout = QVBoxLayout(self._chat_panel)
+        chat_layout.setContentsMargins(12, 12, 12, 12)
+        chat_layout.setSpacing(8)
+
+        chat_header = QWidget()
+        chat_header.setObjectName("chatHeader")
+        chat_header_layout = QHBoxLayout(chat_header)
+        chat_header_layout.setContentsMargins(0, 0, 0, 0)
+        chat_header_layout.setSpacing(8)
+
+        chat_title = QLabel("AI Chat")
+        chat_title.setObjectName("chatTitle")
+        chat_header_layout.addWidget(chat_title)
+        chat_header_layout.addStretch()
+
+        self._chat_close_btn = QPushButton("Close")
+        self._chat_close_btn.setObjectName("chatCloseButton")
+        self._chat_close_btn.clicked.connect(self._toggle_chat_panel)
+        chat_header_layout.addWidget(self._chat_close_btn)
+
+        chat_layout.addWidget(chat_header)
+
+        chat_status_row = QWidget()
+        chat_status_layout = QHBoxLayout(chat_status_row)
+        chat_status_layout.setContentsMargins(0, 0, 0, 0)
+        chat_status_layout.setSpacing(6)
+
+        self._chat_status_dot = QLabel("●")
+        self._chat_status_dot.setObjectName("chatStatusDot")
+        self._chat_status_dot.setFixedWidth(10)
+        chat_status_layout.addWidget(self._chat_status_dot)
+
+        self._chat_status_label = QLabel("LM Studio")
+        self._chat_status_label.setObjectName("chatStatusLabel")
+        chat_status_layout.addWidget(self._chat_status_label)
+        chat_status_layout.addStretch()
+
+        self._chat_refresh_btn = QPushButton("Refresh")
+        self._chat_refresh_btn.setObjectName("chatActionButton")
+        self._chat_refresh_btn.clicked.connect(self._check_lm_status)
+        chat_status_layout.addWidget(self._chat_refresh_btn)
+
+        chat_layout.addWidget(chat_status_row)
+
+        # Conversations list
+        convo_header = QWidget()
+        convo_header_layout = QHBoxLayout(convo_header)
+        convo_header_layout.setContentsMargins(0, 0, 0, 0)
+        convo_header_layout.setSpacing(6)
+
+        convo_label = QLabel("Conversations")
+        convo_label.setObjectName("chatSectionLabel")
+        convo_header_layout.addWidget(convo_label)
+        convo_header_layout.addStretch()
+
+        self._chat_new_btn = QPushButton("New Chat")
+        self._chat_new_btn.setObjectName("chatActionButton")
+        self._chat_new_btn.clicked.connect(self._on_new_chat_clicked)
+        convo_header_layout.addWidget(self._chat_new_btn)
+
+        chat_layout.addWidget(convo_header)
+
+        self._chat_convo_list = QListWidget()
+        self._chat_convo_list.setObjectName("chatConvoList")
+        self._chat_convo_list.itemClicked.connect(self._on_conversation_selected)
+        self._chat_convo_list.setFixedHeight(120)
+        chat_layout.addWidget(self._chat_convo_list)
+
+        # Messages area
+        self._chat_scroll = QScrollArea()
+        self._chat_scroll.setWidgetResizable(True)
+        self._chat_scroll.setObjectName("chatScroll")
+        chat_layout.addWidget(self._chat_scroll, 1)
+
+        self._chat_messages_container = QWidget()
+        self._chat_messages_layout = QVBoxLayout(self._chat_messages_container)
+        self._chat_messages_layout.setContentsMargins(0, 0, 0, 0)
+        self._chat_messages_layout.setSpacing(6)
+        self._chat_scroll.setWidget(self._chat_messages_container)
+
+        self._chat_error_label = QLabel("")
+        self._chat_error_label.setObjectName("chatErrorLabel")
+        self._chat_error_label.hide()
+        chat_layout.addWidget(self._chat_error_label)
+
+        # Input area
+        chat_input_row = QWidget()
+        chat_input_layout = QHBoxLayout(chat_input_row)
+        chat_input_layout.setContentsMargins(0, 0, 0, 0)
+        chat_input_layout.setSpacing(6)
+
+        self._chat_input = QTextEdit()
+        self._chat_input.setObjectName("chatInput")
+        self._chat_input.setFixedHeight(70)
+        self._chat_input.installEventFilter(self)
+        chat_input_layout.addWidget(self._chat_input, 1)
+
+        self._chat_send_btn = QPushButton("Send")
+        self._chat_send_btn.setObjectName("chatSendButton")
+        self._chat_send_btn.clicked.connect(self._on_send_chat_clicked)
+        chat_input_layout.addWidget(self._chat_send_btn)
+
+        chat_layout.addWidget(chat_input_row)
+
+        content_layout.addWidget(self._chat_panel)
+
+        # Check LM Studio status (after chat widgets exist)
+        self._check_lm_status()
 
         layout.addWidget(content_widget, 1)
 
@@ -312,7 +523,604 @@ class RecordingDialog(QDialog):
                 color: #404040;
                 border-color: #2d2d2d;
             }
+
+            #summaryPanel {
+                background-color: #141414;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+            }
+
+            #summaryTitle {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #summaryModel {
+                color: #8a8a8a;
+                font-size: 11px;
+            }
+
+            #summaryDisplay, #summaryEdit {
+                background-color: #0f0f0f;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+                color: #e0e0e0;
+                font-size: 13px;
+                padding: 8px;
+            }
+
+            #summaryActionButton {
+                background-color: transparent;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #a0a0a0;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+
+            #summaryActionButton:hover {
+                background-color: #2d2d2d;
+                border-color: #0AFCCF;
+                color: #0AFCCF;
+            }
+
+            #summaryStatus {
+                color: #f0a020;
+                font-size: 11px;
+            }
+
+            #summaryHint {
+                color: #6a6a6a;
+                font-size: 11px;
+            }
+
+            #chatPanel {
+                background-color: #121212;
+                border-left: 1px solid #2d2d2d;
+            }
+
+            #chatTitle {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #chatCloseButton, #chatActionButton {
+                background-color: transparent;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #a0a0a0;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+
+            #chatCloseButton:hover, #chatActionButton:hover {
+                background-color: #2d2d2d;
+                border-color: #0AFCCF;
+                color: #0AFCCF;
+            }
+
+            #chatStatusDot {
+                color: #606060;
+                font-size: 10px;
+            }
+
+            #chatStatusLabel {
+                color: #a0a0a0;
+                font-size: 11px;
+            }
+
+            #chatSectionLabel {
+                color: #a0a0a0;
+                font-size: 11px;
+            }
+
+            #chatConvoList {
+                background-color: #1a1a1a;
+                border: 1px solid #2d2d2d;
+                color: #d0d0d0;
+            }
+
+            #chatScroll {
+                border: none;
+                background-color: transparent;
+            }
+
+            #chatInput {
+                background-color: #1a1a1a;
+                border: 1px solid #2d2d2d;
+                border-radius: 6px;
+                color: #e0e0e0;
+                font-size: 12px;
+                padding: 6px;
+            }
+
+            #chatSendButton {
+                background-color: #0AFCCF;
+                border: none;
+                border-radius: 6px;
+                color: #121212;
+                padding: 8px 12px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            #chatSendButton:disabled {
+                background-color: #2d2d2d;
+                color: #5a5a5a;
+            }
+
+            #chatErrorLabel {
+                color: #f44336;
+                font-size: 11px;
+            }
+
+            #chatBubbleUser {
+                background-color: #0AFCCF;
+                border-radius: 6px;
+            }
+
+            #chatBubbleAssistant {
+                background-color: #1e1e1e;
+                border-radius: 6px;
+            }
+
+            #chatBubbleUser QLabel {
+                color: #121212;
+            }
+
+            #chatBubbleAssistant QLabel {
+                color: #e0e0e0;
+            }
         """)
+
+    def eventFilter(self, obj, event) -> bool:
+        """Handle key and focus events for chat input and summary editor."""
+        if (
+            obj == getattr(self, "_chat_input", None)
+            and event.type() == QEvent.Type.KeyPress
+        ):
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+                    self._on_send_chat_clicked()
+                    return True
+
+        if (
+            obj == getattr(self, "_summary_edit", None)
+            and event.type() == QEvent.Type.FocusOut
+        ):
+            self._exit_summary_edit(save=True)
+
+        return super().eventFilter(obj, event)
+
+    def _strip_think_blocks(self, text: str) -> str:
+        """Remove <think> blocks from LLM output."""
+        if not text:
+            return ""
+        lower = text.lower()
+        open_idx = lower.find("<think>")
+        if open_idx != -1 and lower.find("</think>", open_idx) == -1:
+            text = text[:open_idx]
+        cleaned = self._THINK_BLOCK_RE.sub("", text)
+        cleaned = re.sub(r"</?think>", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip()
+
+    def _update_summary_display(self, text: str) -> None:
+        """Render summary markdown into the display widget."""
+        if not text.strip():
+            self._summary_display.setPlainText("")
+            return
+        try:
+            self._summary_display.setMarkdown(text)
+        except Exception:
+            self._summary_display.setPlainText(text)
+
+    def _refresh_summary_ui(self) -> None:
+        """Update summary panel visibility and controls."""
+        has_summary = bool(self._summary_text.strip())
+        should_show = (
+            has_summary
+            or self._summary_streaming
+            or self._summary_status_label.isVisible()
+        )
+        self._summary_panel.setVisible(should_show)
+
+        self._summary_stop_btn.setVisible(self._summary_streaming)
+        self._summary_regen_btn.setEnabled(
+            self._lm_available and not self._summary_streaming
+        )
+        self._summary_clear_btn.setEnabled(has_summary and not self._summary_streaming)
+        self._summary_hint_label.setVisible(
+            not self._summary_streaming
+            and self._summary_stack.currentIndex() == 0
+            and has_summary
+        )
+
+    def _on_summary_display_clicked(self, event) -> None:
+        """Switch to edit mode when summary display is clicked."""
+        if self._summary_streaming:
+            return
+        if not self._summary_text.strip():
+            return
+        self._enter_summary_edit()
+        QTextEdit.mousePressEvent(self._summary_display, event)
+
+    def _enter_summary_edit(self) -> None:
+        """Show editable summary text."""
+        if self._summary_streaming:
+            return
+        self._summary_edit.blockSignals(True)
+        self._summary_edit.setPlainText(self._summary_text)
+        self._summary_edit.blockSignals(False)
+        self._summary_stack.setCurrentWidget(self._summary_edit)
+        self._summary_hint_label.setVisible(False)
+        self._summary_edit.setFocus()
+
+    def _exit_summary_edit(self, save: bool = True) -> None:
+        """Exit summary edit mode and optionally save."""
+        if self._summary_stack.currentWidget() != self._summary_edit:
+            return
+        if save:
+            self._summary_text = self._summary_edit.toPlainText().strip()
+            self._update_summary_display(self._summary_text)
+            self._queue_summary_save(self._summary_text)
+        self._summary_stack.setCurrentWidget(self._summary_display)
+        self._refresh_summary_ui()
+
+    def _on_summary_text_changed(self) -> None:
+        """Debounce summary saves while editing."""
+        if self._summary_streaming:
+            return
+        self._summary_dirty = True
+        self._summary_save_timer.start(1200)
+
+    def _save_summary_if_dirty(self) -> None:
+        """Persist summary after debounce."""
+        if not self._summary_dirty or self._summary_streaming:
+            return
+        self._summary_dirty = False
+        self._summary_text = self._summary_edit.toPlainText().strip()
+        self._queue_summary_save(self._summary_text)
+
+    def _queue_summary_save(self, text: str | None) -> None:
+        """Queue summary save to the server."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._do_save_summary(text))
+            else:
+                loop.run_until_complete(self._do_save_summary(text))
+        except RuntimeError:
+            asyncio.run(self._do_save_summary(text))
+
+    async def _do_save_summary(self, text: str | None) -> None:
+        """Persist summary to the backend."""
+        if not self._recording:
+            return
+        summary_value = text if text and text.strip() else None
+        try:
+            await self._api_client.update_summary(self._recording_id, summary_value)
+            self._recording.summary = summary_value
+            self._summary_text = summary_value or ""
+            self._update_summary_display(self._summary_text)
+            self._refresh_summary_ui()
+        except Exception as e:
+            logger.error(f"Failed to save summary: {e}")
+            self._summary_status_label.setText("Failed to save summary.")
+            self._summary_status_label.show()
+            self._refresh_summary_ui()
+
+    def _on_clear_summary_clicked(self) -> None:
+        """Clear summary content."""
+        if self._summary_streaming:
+            return
+        self._summary_text = ""
+        self._summary_raw = ""
+        self._summary_status_label.hide()
+        self._update_summary_display("")
+        self._summary_stack.setCurrentWidget(self._summary_display)
+        self._queue_summary_save(None)
+        self._refresh_summary_ui()
+
+    def _on_summary_stop_clicked(self) -> None:
+        """Stop summary generation."""
+        if self._summary_task and not self._summary_task.done():
+            self._summary_task.cancel()
+        self._handle_summary_cancelled()
+
+    def _finish_summary_stream(self, cleaned: str) -> None:
+        """Finalize summary after successful streaming."""
+        self._summary_streaming = False
+        self._summary_text = cleaned.strip()
+        self._summary_status_label.hide()
+        self._summary_stack.setCurrentWidget(self._summary_display)
+        self._update_summary_display(self._summary_text)
+        self._refresh_summary_ui()
+        self._queue_summary_save(self._summary_text if self._summary_text else None)
+
+    def _handle_summary_error(self, error_msg: str) -> None:
+        """Handle summary generation errors."""
+        self._summary_streaming = False
+        self._summary_status_label.setText(error_msg or "Summary generation failed.")
+        self._summary_status_label.show()
+        self._refresh_summary_ui()
+
+    def _handle_summary_cancelled(self) -> None:
+        """Handle summary generation cancellation."""
+        self._summary_streaming = False
+        self._summary_status_label.setText("Summary generation stopped.")
+        self._summary_status_label.show()
+        self._refresh_summary_ui()
+
+    def _toggle_chat_panel(self) -> None:
+        """Show or hide the chat sidebar."""
+        if self._chat_panel.isVisible():
+            self._chat_panel.hide()
+            return
+        self._chat_panel.show()
+        self._load_chat_panel()
+
+    def _load_chat_panel(self) -> None:
+        """Load chat conversations and status."""
+        self._chat_error_label.hide()
+        self._check_lm_status()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_load_conversations())
+            else:
+                loop.run_until_complete(self._async_load_conversations())
+        except RuntimeError:
+            asyncio.run(self._async_load_conversations())
+
+    async def _async_load_conversations(self) -> None:
+        """Fetch conversations for this recording and select the latest."""
+        try:
+            data = await self._api_client.get_conversations(self._recording_id)
+            conversations = (
+                data.get("conversations") if isinstance(data, dict) else data
+            )
+            self._chat_conversations = conversations or []
+
+            self._chat_convo_list.clear()
+            for convo in self._chat_conversations:
+                item = QListWidgetItem(convo.get("title", "New Chat"))
+                item.setData(Qt.ItemDataRole.UserRole, convo.get("id"))
+                self._chat_convo_list.addItem(item)
+
+            if self._chat_conversations:
+                latest_id = self._chat_conversations[0].get("id")
+                if latest_id is not None:
+                    self._select_conversation_item(latest_id)
+                    await self._async_load_conversation(latest_id)
+            else:
+                result = await self._api_client.create_conversation(
+                    self._recording_id, "New Chat"
+                )
+                new_id = result.get("conversation_id")
+                if new_id:
+                    await self._async_load_conversations()
+        except Exception as e:
+            logger.error(f"Failed to load conversations: {e}")
+            self._chat_error_label.setText("Failed to load conversations.")
+            self._chat_error_label.show()
+
+    def _select_conversation_item(self, conversation_id: int) -> None:
+        """Select a conversation in the list."""
+        for idx in range(self._chat_convo_list.count()):
+            item = self._chat_convo_list.item(idx)
+            if item.data(Qt.ItemDataRole.UserRole) == conversation_id:
+                self._chat_convo_list.setCurrentItem(item)
+                break
+
+    def _on_new_chat_clicked(self) -> None:
+        """Create a new chat conversation."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_create_new_chat())
+            else:
+                loop.run_until_complete(self._async_create_new_chat())
+        except RuntimeError:
+            asyncio.run(self._async_create_new_chat())
+
+    async def _async_create_new_chat(self) -> None:
+        try:
+            result = await self._api_client.create_conversation(
+                self._recording_id, "New Chat"
+            )
+            new_id = result.get("conversation_id")
+            await self._async_load_conversations()
+            if new_id:
+                self._select_conversation_item(new_id)
+                await self._async_load_conversation(new_id)
+        except Exception as e:
+            logger.error(f"Failed to create conversation: {e}")
+            self._chat_error_label.setText("Failed to create conversation.")
+            self._chat_error_label.show()
+
+    def _on_conversation_selected(self, item: QListWidgetItem) -> None:
+        conversation_id = item.data(Qt.ItemDataRole.UserRole)
+        if not conversation_id:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_load_conversation(conversation_id))
+            else:
+                loop.run_until_complete(self._async_load_conversation(conversation_id))
+        except RuntimeError:
+            asyncio.run(self._async_load_conversation(conversation_id))
+
+    async def _async_load_conversation(self, conversation_id: int) -> None:
+        """Load messages for the selected conversation."""
+        try:
+            convo = await self._api_client.get_conversation(conversation_id)
+            self._active_conversation_id = conversation_id
+            self._render_chat_messages(convo.get("messages", []))
+            self._update_chat_controls()
+        except Exception as e:
+            logger.error(f"Failed to load conversation: {e}")
+            self._chat_error_label.setText("Failed to load conversation.")
+            self._chat_error_label.show()
+
+    def _render_chat_messages(self, messages: list[dict]) -> None:
+        """Render chat messages into the scroll area."""
+        while self._chat_messages_layout.count():
+            item = self._chat_messages_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        for msg in messages:
+            role = msg.get("role", "assistant")
+            content = msg.get("content", "")
+            self._add_chat_bubble(role, content)
+
+        self._scroll_chat_to_bottom()
+
+    def _add_chat_bubble(self, role: str, content: str) -> QLabel:
+        """Add a chat bubble and return its label."""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(0)
+
+        bubble = QFrame()
+        bubble.setObjectName(
+            "chatBubbleUser" if role == "user" else "chatBubbleAssistant"
+        )
+        bubble_layout = QVBoxLayout(bubble)
+        bubble_layout.setContentsMargins(8, 6, 8, 6)
+
+        label = QLabel(content)
+        label.setWordWrap(True)
+        bubble_layout.addWidget(label)
+
+        if role == "user":
+            row_layout.addStretch()
+            row_layout.addWidget(bubble)
+        else:
+            row_layout.addWidget(bubble)
+            row_layout.addStretch()
+
+        self._chat_messages_layout.addWidget(row)
+        return label
+
+    def _scroll_chat_to_bottom(self) -> None:
+        """Scroll the chat view to the latest message."""
+        QTimer.singleShot(
+            0,
+            lambda: self._chat_scroll.verticalScrollBar().setValue(
+                self._chat_scroll.verticalScrollBar().maximum()
+            ),
+        )
+
+    def _update_chat_controls(self) -> None:
+        """Enable/disable chat controls based on status."""
+        can_send = (
+            self._lm_available
+            and self._active_conversation_id is not None
+            and not self._chat_streaming
+        )
+        self._chat_send_btn.setEnabled(can_send)
+        self._chat_input.setEnabled(self._lm_available and not self._chat_streaming)
+
+    def _on_send_chat_clicked(self) -> None:
+        """Send a chat message."""
+        if self._chat_streaming:
+            return
+        if not self._active_conversation_id:
+            return
+        if not self._lm_available:
+            self._chat_error_label.setText("LM Studio is offline.")
+            self._chat_error_label.show()
+            return
+
+        message = self._chat_input.toPlainText().strip()
+        if not message:
+            return
+
+        self._chat_error_label.hide()
+        self._chat_input.clear()
+        self._chat_streaming = True
+        self._update_chat_controls()
+
+        self._add_chat_bubble("user", message)
+        self._chat_streaming_label = self._add_chat_bubble("assistant", "")
+        self._scroll_chat_to_bottom()
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(
+                    self._async_send_chat(self._active_conversation_id, message)
+                )
+            else:
+                loop.run_until_complete(
+                    self._async_send_chat(self._active_conversation_id, message)
+                )
+        except RuntimeError:
+            asyncio.run(self._async_send_chat(self._active_conversation_id, message))
+
+    async def _async_send_chat(self, conversation_id: int, message: str) -> None:
+        """Stream a chat response."""
+
+        def on_chunk(content: str) -> None:
+            if not self._chat_streaming_label:
+                return
+            QTimer.singleShot(
+                0,
+                lambda: self._chat_streaming_label.setText(
+                    self._chat_streaming_label.text() + content
+                ),
+            )
+
+        def on_done(_full: str) -> None:
+            QTimer.singleShot(0, lambda: self._finish_chat_stream(conversation_id))
+
+        def on_error(error_msg: str) -> None:
+            QTimer.singleShot(0, lambda: self._handle_chat_error(error_msg))
+
+        await self._api_client.chat_stream(
+            conversation_id=conversation_id,
+            user_message=message,
+            include_transcription=True,
+            on_chunk=on_chunk,
+            on_done=on_done,
+            on_error=on_error,
+        )
+
+    def _finish_chat_stream(self, conversation_id: int) -> None:
+        """Finish streaming and refresh conversation view."""
+        self._chat_streaming = False
+        self._chat_streaming_label = None
+        self._update_chat_controls()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_load_conversations())
+            else:
+                loop.run_until_complete(self._async_load_conversations())
+        except RuntimeError:
+            asyncio.run(self._async_load_conversations())
+
+    def _handle_chat_error(self, error_msg: str) -> None:
+        """Handle chat streaming errors."""
+        self._chat_streaming = False
+        self._chat_streaming_label = None
+        self._chat_error_label.setText(error_msg)
+        self._chat_error_label.show()
+        self._update_chat_controls()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_load_conversations())
+            else:
+                loop.run_until_complete(self._async_load_conversations())
+        except RuntimeError:
+            asyncio.run(self._async_load_conversations())
 
     def _load_recording(self) -> None:
         """Load recording data from server."""
@@ -335,6 +1143,14 @@ class RecordingDialog(QDialog):
             # Update UI with recording info
             self._title_edit.setText(self._recording.title or self._recording.filename)
             self._update_metadata()
+
+            # Load existing summary (if any)
+            self._summary_raw = self._recording.summary or ""
+            self._summary_text = self._strip_think_blocks(self._summary_raw)
+            self._summary_status_label.hide()
+            self._summary_stack.setCurrentWidget(self._summary_display)
+            self._update_summary_display(self._summary_text)
+            self._refresh_summary_ui()
 
             # Load audio
             audio_url = self._api_client.get_audio_url(self._recording_id)
@@ -609,31 +1425,43 @@ class RecordingDialog(QDialog):
             status = await self._api_client.get_llm_status()
             if status.get("available"):
                 model = status.get("model", "unknown")
+                self._lm_available = True
+                self._lm_model_name = model
                 self._lm_status_dot.setStyleSheet("color: #0AFCCF;")
                 self._lm_status_label.setText(f"LM Studio: {model}")
                 self._chat_btn.setEnabled(True)
                 self._summarize_btn.setEnabled(True)
+                self._summary_model_label.setText(model)
+                self._chat_status_dot.setStyleSheet("color: #0AFCCF;")
+                self._chat_status_label.setText(f"LM Studio: {model}")
             else:
+                self._lm_available = False
+                self._lm_model_name = None
                 self._lm_status_dot.setStyleSheet("color: #606060;")
                 self._lm_status_label.setText("LM Studio: Offline")
                 self._chat_btn.setEnabled(False)
                 self._summarize_btn.setEnabled(False)
+                self._summary_model_label.setText("")
+                self._chat_status_dot.setStyleSheet("color: #606060;")
+                self._chat_status_label.setText("LM Studio: Offline")
         except Exception as e:
             logger.debug(f"LM Studio status check failed: {e}")
+            self._lm_available = False
+            self._lm_model_name = None
             self._lm_status_dot.setStyleSheet("color: #606060;")
             self._lm_status_label.setText("LM Studio: Offline")
             self._chat_btn.setEnabled(False)
             self._summarize_btn.setEnabled(False)
+            self._summary_model_label.setText("")
+            self._chat_status_dot.setStyleSheet("color: #606060;")
+            self._chat_status_label.setText("LM Studio: Offline")
+        finally:
+            self._refresh_summary_ui()
+            self._update_chat_controls()
 
     def _on_chat_clicked(self) -> None:
         """Handle chat button click."""
-        # TODO: Open chat dialog with transcript context
-        QMessageBox.information(
-            self,
-            "Chat",
-            "Chat feature coming soon!\n\n"
-            "This will allow you to have a conversation with the AI about this transcript.",
-        )
+        self._toggle_chat_panel()
 
     def _on_summarize_clicked(self) -> None:
         """Handle summarize button click."""
@@ -642,42 +1470,67 @@ class RecordingDialog(QDialog):
                 self, "No Transcript", "No transcript available to summarize."
             )
             return
+        if self._summary_streaming:
+            return
+
+        self._summary_streaming = True
+        self._summary_status_label.setText("Generating summary...")
+        self._summary_status_label.show()
+        self._summary_raw = ""
+        self._summary_text = ""
+        self._summary_stack.setCurrentWidget(self._summary_display)
+        self._update_summary_display("")
+        self._summary_panel.show()
+        self._refresh_summary_ui()
 
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(self._do_summarize())
+                self._summary_task = asyncio.create_task(self._do_summarize())
             else:
                 loop.run_until_complete(self._do_summarize())
         except RuntimeError:
             asyncio.run(self._do_summarize())
 
     async def _do_summarize(self) -> None:
-        """Perform summarization via LLM."""
+        """Perform summarization via LLM (streaming)."""
+        self._summary_streaming = True
         self._summarize_btn.setEnabled(False)
         self._summarize_btn.setText("⏳ Summarizing...")
+        self._summary_stop_btn.show()
+        self._refresh_summary_ui()
+
+        def on_chunk(content: str) -> None:
+            self._summary_raw += content
+            cleaned = self._strip_think_blocks(self._summary_raw)
+            self._summary_text = cleaned
+            QTimer.singleShot(0, lambda: self._update_summary_display(cleaned))
+
+        def on_done(_full: str) -> None:
+            cleaned = self._strip_think_blocks(self._summary_raw)
+            QTimer.singleShot(0, lambda: self._finish_summary_stream(cleaned))
+
+        def on_error(error_msg: str) -> None:
+            QTimer.singleShot(0, lambda: self._handle_summary_error(error_msg))
 
         try:
-            result = await self._api_client.summarize_recording_sync(self._recording_id)
-            summary = result.get("response", "No summary generated.")
-
-            QMessageBox.information(
-                self,
-                "AI Summary",
-                summary,
+            await self._api_client.summarize_recording(
+                self._recording_id,
+                on_chunk=on_chunk,
+                on_done=on_done,
+                on_error=on_error,
             )
+        except asyncio.CancelledError:
+            QTimer.singleShot(0, self._handle_summary_cancelled)
         except Exception as e:
-            logger.error(f"Summarization failed: {e}")
-            QMessageBox.critical(
-                self,
-                "Summarization Failed",
-                f"Failed to generate summary:\n{e}",
-            )
+            QTimer.singleShot(0, lambda: self._handle_summary_error(str(e)))
         finally:
             self._summarize_btn.setEnabled(True)
             self._summarize_btn.setText("✨ Summarize")
 
     def closeEvent(self, event) -> None:
         """Clean up on dialog close."""
+        if self._summary_task and not self._summary_task.done():
+            self._summary_task.cancel()
         self._audio_player.cleanup()
         super().closeEvent(event)

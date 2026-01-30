@@ -939,7 +939,8 @@ class APIClient:
     async def chat_stream(
         self,
         conversation_id: int,
-        message: str,
+        user_message: str,
+        include_transcription: bool = True,
         system_prompt: str | None = None,
         on_chunk: Callable[[str], None] | None = None,
         on_done: Callable[[str], None] | None = None,
@@ -950,7 +951,8 @@ class APIClient:
 
         Args:
             conversation_id: Conversation ID
-            message: User message
+            user_message: User message
+            include_transcription: Include transcription context on first turn
             system_prompt: Optional system prompt override
             on_chunk: Callback for each response chunk
             on_done: Callback when response is complete (receives full text)
@@ -960,7 +962,8 @@ class APIClient:
 
         request_data: dict[str, Any] = {
             "conversation_id": conversation_id,
-            "message": message,
+            "user_message": user_message,
+            "include_transcription": include_transcription,
         }
         if system_prompt:
             request_data["system_prompt"] = system_prompt
@@ -992,6 +995,13 @@ class APIClient:
                             return
                         try:
                             chunk_json = json.loads(chunk_data)
+                            if "error" in chunk_json and on_error:
+                                on_error(chunk_json.get("error", "Chat error"))
+                                return
+                            if chunk_json.get("done"):
+                                if on_done:
+                                    on_done(full_response)
+                                return
                             content = chunk_json.get("content", "")
                             if content and on_chunk:
                                 on_chunk(content)
