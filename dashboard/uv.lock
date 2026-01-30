@@ -360,7 +360,7 @@ wheels = [
 
 [[package]]
 name = "transcriptionsuite-dashboard"
-version = "0.5.3"
+version = "0.5.4"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -376,6 +376,7 @@ audio = [
 ]
 gnome = [
     { name = "pyaudio" },
+    { name = "pyqt6" },
 ]
 kde = [
     { name = "pyaudio" },
@@ -398,6 +399,7 @@ requires-dist = [
     { name = "pyaudio", marker = "extra == 'gnome'", specifier = ">=0.2.14" },
     { name = "pyaudio", marker = "extra == 'kde'", specifier = ">=0.2.14" },
     { name = "pyaudio", marker = "extra == 'windows'", specifier = ">=0.2.14" },
+    { name = "pyqt6", marker = "extra == 'gnome'", specifier = ">=6.10.1" },
     { name = "pyqt6", marker = "extra == 'kde'", specifier = ">=6.10.1" },
     { name = "pyqt6", marker = "extra == 'qt'", specifier = ">=6.10.1" },
     { name = "pyqt6", marker = "extra == 'windows'", specifier = ">=6.10.1" },

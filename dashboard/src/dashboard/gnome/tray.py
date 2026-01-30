@@ -6,7 +6,7 @@ Requires the AppIndicator GNOME extension to be installed.
 Based on the architecture from NATIVE_CLIENT/tray/gtk4_tray.py.
 
 NOTE: The tray uses GTK3 + AppIndicator3 because AppIndicator doesn't have
-a GTK4 version. The Dashboard window uses GTK4/Adwaita for modern look.
+a GTK4 version. The Dashboard window runs as a separate process (Qt by default).
 """
 
 import logging
@@ -75,9 +75,8 @@ except (ImportError, ValueError):
     GLib = None  # type: ignore
     Gtk = None  # type: ignore
 
-# NOTE: GTK4/Adwaita imports removed - GTK3 and GTK4 cannot coexist in the
-# same Python process. The Dashboard (GTK4) runs as a separate subprocess.
-# See dashboard_main.py and dbus_service.py for the IPC architecture.
+# NOTE: GTK4/Adwaita imports removed - the Dashboard runs as a separate
+# subprocess (Qt by default). See dbus_service.py for the IPC architecture.
 
 
 class GtkTray(ServerControlMixin, AbstractTray):
@@ -149,7 +148,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
         # Docker manager for server control
         self._docker_manager = DockerManager()
 
-        # Dashboard process tracking (runs as separate GTK4 process)
+        # Dashboard process tracking (runs as separate process)
         self._dashboard_process: Optional[subprocess.Popen] = None
 
         # D-Bus service for IPC with Dashboard
@@ -438,7 +437,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
                 on_stop_client=self._dbus_stop_client,
                 on_get_status=self._dbus_get_status,
                 on_reconnect=self._dbus_reconnect,
-                on_show_settings=self._dbus_show_settings,
+                on_set_models_loaded=self._dbus_set_models_loaded,
             )
             logger.info("D-Bus service initialized for Dashboard IPC")
         except Exception as e:
@@ -504,42 +503,34 @@ class GtkTray(ServerControlMixin, AbstractTray):
         except Exception as e:
             return False, str(e)
 
-    def _dbus_show_settings(self) -> bool:
-        """D-Bus callback: Show settings dialog."""
+    def _dbus_set_models_loaded(self, loaded: bool) -> bool:
+        """D-Bus callback: Sync models loaded state."""
         try:
-            GLib.idle_add(self.show_settings_dialog)
+            self.update_models_menu_state(loaded)
             return True
         except Exception as e:
-            logger.error(f"Failed to show settings via D-Bus: {e}")
+            logger.error(f"Failed to sync models state via D-Bus: {e}")
             return False
 
     def _show_dashboard(self) -> None:
-        """Show the Dashboard command center window (spawns separate GTK4 process)."""
+        """Show the Dashboard command center window (spawns separate process)."""
         import sys
 
         # Check if Dashboard process is already running
         if self._dashboard_process:
             poll = self._dashboard_process.poll()
             if poll is None:
-                # Process still running - try to present existing window
-                if self._present_dashboard_window():
-                    logger.debug("Existing Dashboard window presented")
-                    return
-
-                logger.debug(
-                    "Dashboard process running but present attempt failed; "
-                    "showing fallback notification"
-                )
+                logger.debug("Dashboard process already running")
                 self.show_notification(
                     "TranscriptionSuite",
-                    "Dashboard is running; click its icon if the window stays hidden.",
+                    "Dashboard is already running; use its window icon to focus.",
                 )
                 return
 
-        # Spawn Dashboard as separate process (GTK4 cannot coexist with GTK3)
+        # Spawn Dashboard as separate process
         try:
-            # Use the same Python interpreter to run dashboard_main
-            cmd = [sys.executable, "-m", "dashboard.gnome.dashboard_main"]
+            # Use the same Python interpreter to run Qt dashboard
+            cmd = [sys.executable, "-m", "dashboard.gnome.qt_dashboard_main"]
 
             # Add config path if available
             if self.config and hasattr(self.config, "_config_path"):
@@ -574,29 +565,6 @@ class GtkTray(ServerControlMixin, AbstractTray):
         except Exception as e:
             logger.error(f"Failed to launch Dashboard: {e}")
             self.show_notification("Show App", f"Error: {e}")
-
-    def _present_dashboard_window(self) -> bool:
-        """Attempt to focus an already-running Dashboard window."""
-
-        commands = [
-            ["gapplication", "launch", "com.transcriptionsuite.dashboard"],
-            ["gio", "launch", "com.transcriptionsuite.dashboard"],
-        ]
-
-        for cmd in commands:
-            try:
-                subprocess.run(cmd, check=True, timeout=5)
-                return True
-            except FileNotFoundError:
-                logger.debug(f"Focus helper not available: {' '.join(cmd)}")
-            except subprocess.CalledProcessError as exc:
-                logger.warning(
-                    "Focus helper %s exited with %s", " ".join(cmd), exc.returncode
-                )
-            except subprocess.TimeoutExpired:
-                logger.warning("Focus helper %s timed out", " ".join(cmd))
-
-        return False
 
     def _on_dashboard_start_client(self, use_remote: bool) -> None:
         """Callback when Dashboard requests to start client (legacy, kept for compatibility)."""
@@ -650,18 +618,6 @@ class GtkTray(ServerControlMixin, AbstractTray):
         path = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
         dialog.destroy()
         return path
-
-    def show_settings_dialog(self) -> None:
-        """Show the settings dialog."""
-        if not self.config:
-            logger.warning("No config available for settings dialog")
-            return
-
-        # Import here to avoid circular imports
-        from dashboard.gnome.settings_dialog import SettingsDialog
-
-        dialog = SettingsDialog(self.config)
-        GLib.idle_add(dialog.show)
 
     def copy_to_clipboard(self, text: str) -> bool:
         """

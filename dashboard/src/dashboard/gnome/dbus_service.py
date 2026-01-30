@@ -1,8 +1,8 @@
 """
-D-Bus service for IPC between GNOME tray (GTK3) and Dashboard (GTK4).
+D-Bus service for IPC between GNOME tray (GTK3) and Dashboard (Qt/GTK).
 
-Since GTK3 and GTK4 cannot coexist in the same Python process, the tray
-and Dashboard run as separate processes. They communicate via D-Bus:
+The GNOME tray runs with GTK3 + AppIndicator. The Dashboard runs in a
+separate process (Qt/PyQt6 by default), and communicates via D-Bus.
 
 - The tray exposes a D-Bus service for controlling the transcription client
 - The Dashboard acts as a D-Bus client to invoke tray methods
@@ -15,7 +15,7 @@ Methods exposed by tray:
     StopClient() -> (success: bool, message: str)
     GetClientStatus() -> (state: str, server_host: str, is_connected: bool)
     Reconnect() -> (success: bool, message: str)
-    ShowSettings() -> (success: bool)
+    SetModelsLoaded(loaded: bool) -> (success: bool)
 
 Signals emitted by tray:
     ClientStateChanged(state: str)
@@ -55,7 +55,8 @@ INTERFACE_XML = """
       <arg direction="out" name="success" type="b"/>
       <arg direction="out" name="message" type="s"/>
     </method>
-    <method name="ShowSettings">
+    <method name="SetModelsLoaded">
+      <arg direction="in" name="loaded" type="b"/>
       <arg direction="out" name="success" type="b"/>
     </method>
     <signal name="ClientStateChanged">
@@ -82,7 +83,7 @@ class TranscriptionSuiteDBusService:
     """
     D-Bus service exposed by the tray process.
 
-    Allows the Dashboard (running in a separate GTK4 process) to
+    Allows the Dashboard (running in a separate process) to
     control the transcription client via D-Bus method calls.
     """
 
@@ -92,7 +93,7 @@ class TranscriptionSuiteDBusService:
         on_stop_client: Callable[[], tuple[bool, str]] | None = None,
         on_get_status: Callable[[], tuple[str, str, bool]] | None = None,
         on_reconnect: Callable[[], tuple[bool, str]] | None = None,
-        on_show_settings: Callable[[], bool] | None = None,
+        on_set_models_loaded: Callable[[bool], bool] | None = None,
     ):
         """
         Initialize the D-Bus service.
@@ -102,13 +103,12 @@ class TranscriptionSuiteDBusService:
             on_stop_client: Callback for StopClient() -> (success, message)
             on_get_status: Callback for GetClientStatus() -> (state, host, connected)
             on_reconnect: Callback for Reconnect() -> (success, message)
-            on_show_settings: Callback for ShowSettings() -> success
         """
         self._on_start_client = on_start_client
         self._on_stop_client = on_stop_client
         self._on_get_status = on_get_status
         self._on_reconnect = on_reconnect
-        self._on_show_settings = on_show_settings
+        self._on_set_models_loaded = on_set_models_loaded
 
         self._connection: Any = None
         self._registration_id: int = 0
@@ -210,9 +210,10 @@ class TranscriptionSuiteDBusService:
                     success, message = False, "Not implemented"
                 invocation.return_value(GLib.Variant("(bs)", (success, message)))
 
-            elif method_name == "ShowSettings":
-                if self._on_show_settings:
-                    success = self._on_show_settings()
+            elif method_name == "SetModelsLoaded":
+                loaded = parameters.unpack()[0]
+                if self._on_set_models_loaded:
+                    success = self._on_set_models_loaded(loaded)
                 else:
                     success = False
                 invocation.return_value(GLib.Variant("(b)", (success,)))
@@ -430,9 +431,12 @@ class DashboardDBusClient:
             logger.error(f"D-Bus call Reconnect failed: {e}")
             return False, str(e)
 
-    def show_settings(self) -> bool:
+    def set_models_loaded(self, loaded: bool) -> bool:
         """
-        Show the settings dialog.
+        Sync models loaded state with tray.
+
+        Args:
+            loaded: True if models are loaded, False if unloaded
 
         Returns:
             True if successful
@@ -441,16 +445,18 @@ class DashboardDBusClient:
             return False
 
         try:
+            from gi.repository import GLib
+
             result = self._proxy.call_sync(
-                "ShowSettings",
-                None,
+                "SetModelsLoaded",
+                GLib.Variant("(b)", (loaded,)),
                 0,
                 -1,
                 None,
             )
             return result.unpack()[0]
         except Exception as e:
-            logger.error(f"D-Bus call ShowSettings failed: {e}")
+            logger.error(f"D-Bus call SetModelsLoaded failed: {e}")
             return False
 
     def connect_state_changed(self, callback: Callable[[str], None]) -> None:

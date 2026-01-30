@@ -528,3 +528,40 @@ class ClientControlMixin:
             self._live_transcription_text_edit.clear()
             self._live_transcription_history.clear()
             logger.debug("Live preview copied to clipboard and cleared")
+
+    def update_live_transcription_text(self, text: str, append: bool = False) -> None:
+        """
+        Update live transcription text display.
+
+        Args:
+            text: The text to display
+            append: If True, append to history. If False, replace current line.
+        """
+        if not hasattr(self, "_live_transcription_text_edit"):
+            return
+
+        if not text:
+            self._live_transcription_text_edit.setPlainText("")
+            return
+
+        if append:
+            # Append text as a new line in history
+            self._live_transcription_history.append(text)
+            # Keep only last 1000 lines to prevent memory bloat
+            if len(self._live_transcription_history) > 1000:
+                self._live_transcription_history = self._live_transcription_history[
+                    -1000:
+                ]
+            display_text = " ".join(self._live_transcription_history)
+        else:
+            # Real-time update: show history + current partial text
+            if self._live_transcription_history:
+                display_text = " ".join(self._live_transcription_history) + " " + text
+            else:
+                display_text = text
+
+        self._live_transcription_text_edit.setPlainText(display_text)
+
+        # Auto-scroll to bottom
+        scrollbar = self._live_transcription_text_edit.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())

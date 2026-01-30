@@ -1,1 +1,1 @@
-"""GNOME specific implementation using GTK + AppIndicator."""
+"""GNOME specific implementation using GTK tray + Qt dashboard."""

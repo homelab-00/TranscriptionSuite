@@ -172,7 +172,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │                            │ D-Bus IPC                  │
 │                      ┌─────┴──────┐                     │
 │                      │ Dashboard  │                     │
-│                      │   (GTK4)   │                     │
+│                      │  (PyQt6)   │                     │
 │                      └────────────┘                     │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -193,9 +193,9 @@ TranscriptionSuite uses a **client-server architecture**:
 |----------|--------------|------------|-------|
 | **KDE Plasma** | Single-process | PyQt6 | Tray and Dashboard share one process |
 | **Windows** | Single-process | PyQt6 | Same as KDE |
-| **GNOME** | Dual-process | GTK3 + GTK4 | Tray (GTK3) and Dashboard (GTK4) via D-Bus |
+| **GNOME** | Dual-process | GTK3 + PyQt6 | Tray (GTK3) and Dashboard (PyQt6) via D-Bus |
 
-**GNOME Dual-Process Design**: GTK3 and GTK4 cannot coexist in the same Python process (GObject Introspection limitation). The tray uses GTK3 + AppIndicator3, while the Dashboard uses GTK4 + libadwaita. They communicate via D-Bus (`com.transcriptionsuite.Dashboard`).
+**GNOME Dual-Process Design**: The tray uses GTK3 + AppIndicator3, while the Dashboard uses PyQt6. They run in separate processes and communicate via D-Bus (`com.transcriptionsuite.Dashboard`).
 
 **Dashboard UI Design**: All platforms feature a **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
@@ -242,15 +242,10 @@ TranscriptionSuite/
 │   │   │   ├── settings_dialog.py # Settings UI
 │   │   │   ├── notebook_view.py  # Audio notebook
 │   │   │   └── ... (other UI components)
-│   │   ├── gnome/                # GNOME (GTK3 tray + GTK4 Dashboard via D-Bus)
-│   │   │   ├── dashboard.py      # Main window (2799 lines)
-│   │   │   ├── log_window.py     # Log viewer with highlighting (282 lines)
-│   │   │   ├── styles.py         # Stylesheets (236 lines)
-│   │   │   ├── utils.py          # Utilities & constants (115 lines)
-│   │   │   ├── tray.py           # System tray
-│   │   │   ├── settings_dialog.py # Settings UI
-│   │   │   ├── notebook_view.py  # Audio notebook
-│   │   │   └── ... (other UI components)
+│   │   ├── gnome/                # GNOME tray + D-Bus IPC
+│   │   │   ├── tray.py           # GTK3 AppIndicator tray
+│   │   │   ├── dbus_service.py   # D-Bus IPC for tray ↔ dashboard
+│   │   │   └── qt_dashboard_main.py # Qt dashboard entrypoint
 │   │   ├── windows/              # Windows (PyQt6)
 │   │   │   ├── tray.py           # System tray
 │   │   │   └── ... (other UI components)
@@ -429,7 +424,7 @@ uv sync    # Installs PyInstaller, build, ruff, pytest
 | Platform | Method | Output | Target Requirements |
 |----------|--------|--------|---------------------|
 | **KDE (Linux)** | PyInstaller + AppImage | Fully standalone | None |
-| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.13+, GTK3, AppIndicator3 |
+| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.13+, GTK3, AppIndicator3, PyQt6 |
 | **Windows** | PyInstaller | Fully standalone | None |
 
 ### 5.3 KDE AppImage (Linux)
@@ -449,10 +444,12 @@ uv sync    # Installs PyInstaller, build, ruff, pytest
 **Target system dependencies:**
 ```bash
 # Arch Linux
-sudo pacman -S --needed python gtk3 libappindicator-gtk3 python-gobject python-numpy python-aiohttp gtksourceview5 wl-clipboard
+sudo pacman -S --needed python gtk3 libappindicator-gtk3 python-gobject python-pyaudio \
+    python-numpy python-aiohttp python-pyqt6 wl-clipboard
 
 # Ubuntu/Debian
-sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio python3-numpy python3-aiohttp gir1.2-gtksource-5 wl-clipboard
+sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio \
+    python3-numpy python3-aiohttp python3-pyqt6 wl-clipboard
 ```
 
 ### 5.5 Windows Executable
@@ -770,21 +767,17 @@ uv run transcription-dashboard --verbose
 | `kde/notebook_view.py` | Audio Notebook with Calendar, Search, Import tabs |  |
 | `kde/calendar_widget.py` | Calendar view with export context menu |  |
 
-**GNOME (GTK4) - Partially Modularized:**
+**GNOME (GTK3 Tray + Qt Dashboard):**
 
-| Module | Purpose | Lines |
-|--------|---------|-------|
-| `gnome/dashboard.py` | Main window with sidebar, navigation, and lifecycle | 2799 |
-| `gnome/log_window.py` | Log viewer with syntax highlighting (extracted) | 282 |
-| `gnome/styles.py` | Stylesheet definitions (extracted) | 236 |
-| `gnome/utils.py` | Utility functions and constants (extracted) | 115 |
-| `gnome/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |  |
-| `gnome/notebook_view.py` | Audio Notebook view for GNOME |  |
-| `gnome/calendar_widget.py` | Calendar view with export context menu |  |
+| Module | Purpose |
+|--------|---------|
+| `gnome/tray.py` | GTK3 AppIndicator tray + D-Bus service |
+| `gnome/dbus_service.py` | D-Bus IPC interface |
+| `gnome/qt_dashboard_main.py` | Qt dashboard entrypoint |
 
 **Architecture Notes:**
 - **KDE**: Fully modularized with mixins (`ServerControlMixin`, `ClientControlMixin`, `DialogsMixin`) for clean separation of concerns. Main dashboard.py is 654 lines.
-- **GNOME**: Partially modularized. Extracted utility modules (utils.py, log_window.py, styles.py) to reduce duplication. Main dashboard.py is 2799 lines (GTK4 API requires more boilerplate).
+- **GNOME**: Uses the same PyQt6 dashboard as KDE/Windows, launched from the GTK3 tray via D-Bus.
 - **View Creation**: KDE uses factory functions in `views/` package for server and client views, keeping dashboard.py focused on navigation and lifecycle.
 
 ### 9.4 Dashboard Architecture & Refactoring
@@ -830,22 +823,8 @@ class DashboardWindow(ServerControlMixin, ClientControlMixin, DialogsMixin, QMai
     # Focuses on: window setup, navigation, view management, lifecycle
 ```
 
-#### GNOME Dashboard Partial Refactoring
-
-The GNOME dashboard was partially refactored to extract common utilities:
-
-| Component | File | Lines | Status |
-|-----------|------|-------|--------|
-| **Main Window** | `dashboard.py` | 2799 | Monolithic (GTK4 API requires more boilerplate) |
-| **Log Viewer** | `log_window.py` | 282 | Extracted (shared with KDE) |
-| **Stylesheets** | `styles.py` | 236 | Extracted (shared with KDE) |
-| **Utilities** | `utils.py` | 115 | Extracted (shared with KDE) |
-
-**Note**: GNOME dashboard remains larger due to GTK4's verbose API requirements. Full mixin-based refactoring would require significant restructuring of GTK4 event handling.
-
 #### Future Refactoring Opportunities
 
-- **GNOME Dashboard**: Extract view creation functions similar to KDE
 - **Windows Dashboard**: Apply mixin pattern once fully implemented
 - **Shared Mixins**: Consider moving `ServerControlMixin` and `ClientControlMixin` to `common/` for potential reuse across platforms
 

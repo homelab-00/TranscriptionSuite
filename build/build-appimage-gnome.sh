@@ -1,13 +1,11 @@
 #!/bin/bash
 # Build AppImage for TranscriptionSuite GNOME dashboard
-# Note: GNOME dashboard uses GTK which is harder to bundle in AppImage
+# Note: GNOME tray uses GTK3 which is harder to bundle in AppImage
 # This creates a "portable" package that expects GTK to be installed on the system
 #
 # Architecture Note:
-# The GNOME dashboard uses a dual-process architecture because GTK3 (AppIndicator3)
-# and GTK4 (libadwaita) cannot coexist in the same Python process. The tray runs
-# with GTK3, and the Dashboard window spawns as a separate GTK4 process.
-# Communication between them happens via D-Bus.
+# The GNOME tray uses GTK3 + AppIndicator3, while the Dashboard window uses PyQt6.
+# They run as separate processes and communicate via D-Bus.
 
 set -e
 
@@ -20,7 +18,7 @@ echo "=================================================="
 echo "Building TranscriptionSuite GNOME Package"
 echo "=================================================="
 echo ""
-echo "NOTE: The GNOME dashboard requires system GTK3, GTK4, and AppIndicator."
+echo "NOTE: The GNOME dashboard requires system GTK3, AppIndicator, and PyQt6."
 echo "This builds a portable package, not a fully standalone AppImage."
 echo ""
 
@@ -61,7 +59,8 @@ if [[ -d "$SITE_PACKAGES" ]]; then
            [[ "$basename" == aiohttp* ]] || \
            [[ "$basename" == multidict* ]] || \
            [[ "$basename" == yarl* ]] || \
-           [[ "$basename" == frozenlist* ]]; then
+           [[ "$basename" == frozenlist* ]] || \
+           [[ "$basename" == PyQt6* ]]; then
             echo "  Skipping $basename (system package required)"
             continue
         fi
@@ -99,7 +98,7 @@ cp "$PROJECT_ROOT/build/assets/logo_wide.png" "$BUILD_DIR/AppDir/usr/share/trans
 cat > "$BUILD_DIR/AppDir/usr/bin/transcriptionsuite-gnome" << 'EOF'
 #!/bin/bash
 # TranscriptionSuite GNOME Launcher
-# Requires: python3, python3-gi, gir1.2-appindicator3-0.1, gir1.2-adw-1
+# Requires: python3, python3-gi, gir1.2-appindicator3-0.1, PyQt6
 
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
@@ -117,17 +116,16 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-# Check GTK4 + libadwaita dependencies (for Dashboard window)
-python3 -c "import gi; gi.require_version('Gtk', '4.0'); gi.require_version('Adw', '1')" 2>/dev/null
+# Check PyQt6 dependency (for Dashboard window)
+python3 -c "import PyQt6" 2>/dev/null
 if [[ $? -ne 0 ]]; then
-    echo "Warning: GTK4/libadwaita not available. Dashboard window will not work."
+    echo "Error: PyQt6 not available. Dashboard window will not work."
     echo ""
     echo "Install with:"
-    echo "  Arch Linux: sudo pacman -S gtk4 libadwaita"
-    echo "  Ubuntu/Debian: sudo apt install gir1.2-adw-1 gir1.2-gtk-4.0"
-    echo "  Fedora: sudo dnf install gtk4 libadwaita"
-    echo ""
-    echo "The tray will still work, but 'Show App' will be unavailable."
+    echo "  Arch Linux: sudo pacman -S python-pyqt6"
+    echo "  Ubuntu/Debian: sudo apt install python3-pyqt6"
+    echo "  Fedora: sudo dnf install python3-qt6"
+    exit 1
 fi
 
 # Check for packages with compiled extensions (required, can't be bundled)
@@ -230,10 +228,10 @@ echo "✓ AppImage created: $DIST_DIR/TranscriptionSuite-GNOME-x86_64.AppImage"
 echo ""
 echo "NOTE: This AppImage requires system packages:"
 echo "  - GTK3 and AppIndicator3 (for tray icon)"
-echo "  - GTK4 and libadwaita (for Dashboard window)"
+echo "  - PyQt6 (for Dashboard window)"
 echo "  - python3-numpy (for audio processing)"
 echo "  - python3-aiohttp (for HTTP client)"
 echo ""
-echo "The tray (GTK3) and Dashboard (GTK4) run as separate processes"
+echo "The tray (GTK3) and Dashboard (Qt) run as separate processes"
 echo "and communicate via D-Bus."
 echo "=================================================="
