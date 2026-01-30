@@ -1010,6 +1010,36 @@ class APIClient:
             if on_error:
                 on_error(str(e))
 
+    async def summarize_recording_sync(
+        self,
+        recording_id: int,
+        custom_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Generate an AI summary for a recording (non-streaming).
+
+        Args:
+            recording_id: Recording ID to summarize
+            custom_prompt: Optional custom summarization prompt
+
+        Returns:
+            Dict with 'response', 'model', 'tokens_used'
+        """
+        session = await self._get_session()
+
+        # Use query param for custom_prompt if provided
+        url = f"{self.base_url}/api/llm/summarize/{recording_id}"
+        if custom_prompt:
+            url += f"?custom_prompt={custom_prompt}"
+
+        async with session.post(
+            url,
+            headers=self._get_headers(),
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
     async def summarize_recording(
         self,
         recording_id: int,

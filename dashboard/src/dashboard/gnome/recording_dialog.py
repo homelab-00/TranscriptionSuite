@@ -161,7 +161,7 @@ class RecordingDialog(Adw.Window):
         self._speaker_tag = self._transcript_buffer.create_tag(
             "speaker",
             weight=Pango.Weight.BOLD,
-            foreground="#90caf9",
+            foreground="#0AFCCF",
         )
         self._timestamp_tag = self._transcript_buffer.create_tag(
             "timestamp",
@@ -208,7 +208,7 @@ class RecordingDialog(Adw.Window):
 
         .title-entry:focus {
             background: #1e1e1e;
-            border-color: #90caf9;
+            border-color: #0AFCCF;
         }
 
         .transcript-view {
@@ -361,7 +361,7 @@ class RecordingDialog(Adw.Window):
                         start_offset = iter_pos.get_offset()
 
                     self._transcript_buffer.insert_with_tags(
-                        iter_pos, word.word, self._text_tag
+                        iter_pos, word.word.lstrip(), self._text_tag
                     )
                     end_offset = iter_pos.get_offset()
 

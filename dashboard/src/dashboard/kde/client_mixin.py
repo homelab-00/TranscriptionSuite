@@ -64,6 +64,15 @@ class ClientControlMixin:
 
     def _update_models_button_state(self) -> None:
         """Update the models button state based on server health and connection type."""
+        # If client isn't running yet, keep the button disabled
+        if not self._client_running:
+            self._unload_models_btn.setEnabled(False)
+            self._unload_models_btn.setStyleSheet(
+                "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; border-radius: 6px; color: #606060; padding: 10px 20px; }"
+                "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
+            )
+            return
+
         # Check if server is running and healthy
         status = self._docker_manager.get_server_status()
         health = self._docker_manager.get_container_health()
@@ -77,15 +86,15 @@ class ClientControlMixin:
             # Server is healthy and local, enable button with appropriate color
             self._unload_models_btn.setEnabled(True)
             if self._models_loaded:
-                # Light blue (models loaded, ready to unload) - color 2
+                # Cyan (models loaded, ready to unload) - color 2
                 self._unload_models_btn.setStyleSheet(
-                    "QPushButton { background-color: #90caf9; border: none; border-radius: 6px; color: #121212; padding: 10px 20px; font-weight: 500; }"
-                    "QPushButton:hover { background-color: #42a5f5; }"
+                    "QPushButton { background-color: #0AFCCF; border: none; border-radius: 6px; color: #141414; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton:hover { background-color: #08d9b3; }"
                 )
             else:
                 # Red (models unloaded, ready to reload) - color 3
                 self._unload_models_btn.setStyleSheet(
-                    "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton { background-color: #ff0000; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
                     "QPushButton:hover { background-color: #d32f2f; }"
                 )
         else:
@@ -258,10 +267,10 @@ class ClientControlMixin:
                 self._unload_models_btn.setToolTip(
                     "Unload transcription models to free GPU memory"
                 )
-                # Light blue background (models loaded) - color 2
+                # Cyan background (models loaded) - color 2
                 self._unload_models_btn.setStyleSheet(
-                    "QPushButton { background-color: #90caf9; border: none; border-radius: 6px; color: #121212; padding: 10px 20px; font-weight: 500; }"
-                    "QPushButton:hover { background-color: #42a5f5; }"
+                    "QPushButton { background-color: #0AFCCF; border: none; border-radius: 6px; color: #141414; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton:hover { background-color: #08d9b3; }"
                 )
             else:
                 self._unload_models_btn.setText("Reload Models")
@@ -270,7 +279,7 @@ class ClientControlMixin:
                 )
                 # Red background (models unloaded) - color 3
                 self._unload_models_btn.setStyleSheet(
-                    "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
+                    "QPushButton { background-color: #ff0000; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
                     "QPushButton:hover { background-color: #d32f2f; }"
                 )
 
@@ -346,10 +355,10 @@ class ClientControlMixin:
                     self._unload_models_btn.setToolTip(
                         "Unload transcription models to free GPU memory"
                     )
-                    # Light blue background (models loaded) - color 2
+                    # Cyan background (models loaded) - color 2
                     self._unload_models_btn.setStyleSheet(
-                        "QPushButton { background-color: #90caf9; border: none; border-radius: 6px; color: #121212; padding: 10px 20px; font-weight: 500; }"
-                        "QPushButton:hover { background-color: #42a5f5; }"
+                        "QPushButton { background-color: #0AFCCF; border: none; border-radius: 6px; color: #141414; padding: 10px 20px; font-weight: 500; }"
+                        "QPushButton:hover { background-color: #08d9b3; }"
                     )
                     self._show_notification(
                         "Models Loaded", "Models ready for transcription"
@@ -361,7 +370,7 @@ class ClientControlMixin:
                     )
                     # Red background (models unloaded) - color 3
                     self._unload_models_btn.setStyleSheet(
-                        "QPushButton { background-color: #f44336; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
+                        "QPushButton { background-color: #ff0000; border: none; border-radius: 6px; color: white; padding: 10px 20px; font-weight: 500; }"
                         "QPushButton:hover { background-color: #d32f2f; }"
                     )
                     self._show_notification(

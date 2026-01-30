@@ -136,6 +136,7 @@ class RecordingDialog(QDialog):
         transcript_header = QWidget()
         transcript_header_layout = QHBoxLayout(transcript_header)
         transcript_header_layout.setContentsMargins(0, 0, 0, 0)
+        transcript_header_layout.setSpacing(12)
 
         transcript_title = QLabel("Transcript")
         transcript_title.setObjectName("sectionTitle")
@@ -143,7 +144,34 @@ class RecordingDialog(QDialog):
 
         transcript_header_layout.addStretch()
 
+        # LM Studio status indicator
+        self._lm_status_dot = QLabel("●")
+        self._lm_status_dot.setObjectName("lmStatusDot")
+        self._lm_status_dot.setFixedWidth(12)
+        transcript_header_layout.addWidget(self._lm_status_dot)
+
+        self._lm_status_label = QLabel("LM Studio")
+        self._lm_status_label.setObjectName("lmStatusLabel")
+        transcript_header_layout.addWidget(self._lm_status_label)
+
+        # Chat button
+        self._chat_btn = QPushButton("💬 Chat")
+        self._chat_btn.setObjectName("lmButton")
+        self._chat_btn.setToolTip("Chat with AI about this transcript")
+        self._chat_btn.clicked.connect(self._on_chat_clicked)
+        transcript_header_layout.addWidget(self._chat_btn)
+
+        # Summarize button
+        self._summarize_btn = QPushButton("✨ Summarize")
+        self._summarize_btn.setObjectName("lmButton")
+        self._summarize_btn.setToolTip("Generate AI summary")
+        self._summarize_btn.clicked.connect(self._on_summarize_clicked)
+        transcript_header_layout.addWidget(self._summarize_btn)
+
         content_layout.addWidget(transcript_header)
+
+        # Check LM Studio status
+        self._check_lm_status()
 
         # Transcript text area
         self._transcript_edit = QTextEdit()
@@ -198,7 +226,7 @@ class RecordingDialog(QDialog):
 
             #titleEdit:focus {
                 background-color: #1e1e1e;
-                border-color: #90caf9;
+                border-color: #0AFCCF;
             }
 
             #metadataLabel {
@@ -228,7 +256,7 @@ class RecordingDialog(QDialog):
             }
 
             #primaryButton {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border: none;
                 border-radius: 6px;
                 color: #121212;
@@ -238,7 +266,7 @@ class RecordingDialog(QDialog):
             }
 
             #primaryButton:hover {
-                background-color: #42a5f5;
+                background-color: #08d9b3;
             }
 
             #dangerButton {
@@ -253,6 +281,36 @@ class RecordingDialog(QDialog):
             #dangerButton:hover {
                 background-color: #f44336;
                 color: #ffffff;
+            }
+
+            #lmStatusDot {
+                color: #606060;
+                font-size: 10px;
+            }
+
+            #lmStatusLabel {
+                color: #a0a0a0;
+                font-size: 12px;
+            }
+
+            #lmButton {
+                background-color: transparent;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                color: #a0a0a0;
+                padding: 4px 10px;
+                font-size: 12px;
+            }
+
+            #lmButton:hover {
+                background-color: #2d2d2d;
+                border-color: #0AFCCF;
+                color: #0AFCCF;
+            }
+
+            #lmButton:disabled {
+                color: #404040;
+                border-color: #2d2d2d;
             }
         """)
 
@@ -338,7 +396,7 @@ class RecordingDialog(QDialog):
         # Text formats
         speaker_format = QTextCharFormat()
         speaker_format.setFontWeight(QFont.Weight.Bold)
-        speaker_format.setForeground(QColor("#90caf9"))
+        speaker_format.setForeground(QColor("#0AFCCF"))
 
         text_format = QTextCharFormat()
         text_format.setForeground(QColor("#e0e0e0"))
@@ -373,7 +431,7 @@ class RecordingDialog(QDialog):
                         cursor.insertText(" ", text_format)
                         start_pos = cursor.position()
 
-                    cursor.insertText(word.word, text_format)
+                    cursor.insertText(word.word.lstrip(), text_format)
                     end_pos = cursor.position()
 
                     # Store word position for click-to-seek
@@ -533,6 +591,91 @@ class RecordingDialog(QDialog):
             return f"{hours}:{minutes:02d}:{secs:02d}"
         else:
             return f"{minutes}:{secs:02d}"
+
+    def _check_lm_status(self) -> None:
+        """Check LM Studio connection status and update UI."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._do_check_lm_status())
+            else:
+                loop.run_until_complete(self._do_check_lm_status())
+        except RuntimeError:
+            asyncio.run(self._do_check_lm_status())
+
+    async def _do_check_lm_status(self) -> None:
+        """Perform LM Studio status check."""
+        try:
+            status = await self._api_client.get_llm_status()
+            if status.get("available"):
+                model = status.get("model", "unknown")
+                self._lm_status_dot.setStyleSheet("color: #0AFCCF;")
+                self._lm_status_label.setText(f"LM Studio: {model}")
+                self._chat_btn.setEnabled(True)
+                self._summarize_btn.setEnabled(True)
+            else:
+                self._lm_status_dot.setStyleSheet("color: #606060;")
+                self._lm_status_label.setText("LM Studio: Offline")
+                self._chat_btn.setEnabled(False)
+                self._summarize_btn.setEnabled(False)
+        except Exception as e:
+            logger.debug(f"LM Studio status check failed: {e}")
+            self._lm_status_dot.setStyleSheet("color: #606060;")
+            self._lm_status_label.setText("LM Studio: Offline")
+            self._chat_btn.setEnabled(False)
+            self._summarize_btn.setEnabled(False)
+
+    def _on_chat_clicked(self) -> None:
+        """Handle chat button click."""
+        # TODO: Open chat dialog with transcript context
+        QMessageBox.information(
+            self,
+            "Chat",
+            "Chat feature coming soon!\n\n"
+            "This will allow you to have a conversation with the AI about this transcript.",
+        )
+
+    def _on_summarize_clicked(self) -> None:
+        """Handle summarize button click."""
+        if not self._transcription:
+            QMessageBox.warning(
+                self, "No Transcript", "No transcript available to summarize."
+            )
+            return
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._do_summarize())
+            else:
+                loop.run_until_complete(self._do_summarize())
+        except RuntimeError:
+            asyncio.run(self._do_summarize())
+
+    async def _do_summarize(self) -> None:
+        """Perform summarization via LLM."""
+        self._summarize_btn.setEnabled(False)
+        self._summarize_btn.setText("⏳ Summarizing...")
+
+        try:
+            result = await self._api_client.summarize_recording_sync(self._recording_id)
+            summary = result.get("response", "No summary generated.")
+
+            QMessageBox.information(
+                self,
+                "AI Summary",
+                summary,
+            )
+        except Exception as e:
+            logger.error(f"Summarization failed: {e}")
+            QMessageBox.critical(
+                self,
+                "Summarization Failed",
+                f"Failed to generate summary:\n{e}",
+            )
+        finally:
+            self._summarize_btn.setEnabled(True)
+            self._summarize_btn.setText("✨ Summarize")
 
     def closeEvent(self, event) -> None:
         """Clean up on dialog close."""

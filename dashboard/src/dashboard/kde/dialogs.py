@@ -210,7 +210,7 @@ class DialogsMixin:
         palette = text_browser.palette()
         palette.setColor(QPalette.ColorRole.Base, QColor("#1e1e1e"))
         palette.setColor(QPalette.ColorRole.Text, QColor("#d4d4d4"))
-        palette.setColor(QPalette.ColorRole.Link, QColor("#90caf9"))
+        palette.setColor(QPalette.ColorRole.Link, QColor("#0AFCCF"))
         palette.setColor(QPalette.ColorRole.LinkVisited, QColor("#81d4fa"))
         text_browser.setPalette(palette)
 

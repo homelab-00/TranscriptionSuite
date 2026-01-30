@@ -146,19 +146,19 @@ class AudioPlayer(Gtk.Box):
         }
 
         .seek-scale highlight {
-            background-color: #90caf9;
+            background-color: #0AFCCF;
             border-radius: 3px;
         }
 
         .seek-scale slider {
-            background-color: #90caf9;
+            background-color: #0AFCCF;
             min-width: 14px;
             min-height: 14px;
             border-radius: 7px;
         }
 
         .seek-scale slider:hover {
-            background-color: #42a5f5;
+            background-color: #08d9b3;
         }
 
         .transport-button {
@@ -176,7 +176,7 @@ class AudioPlayer(Gtk.Box):
         }
 
         .play-button {
-            background: #90caf9;
+            background: #0AFCCF;
             border: none;
             border-radius: 24px;
             color: #121212;
@@ -185,7 +185,7 @@ class AudioPlayer(Gtk.Box):
         }
 
         .play-button:hover {
-            background: #42a5f5;
+            background: #08d9b3;
         }
 
         .volume-icon {
@@ -208,7 +208,7 @@ class AudioPlayer(Gtk.Box):
         }
 
         .volume-scale slider {
-            background-color: #90caf9;
+            background-color: #0AFCCF;
             min-width: 10px;
             min-height: 10px;
             border-radius: 5px;

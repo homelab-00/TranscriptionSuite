@@ -194,7 +194,9 @@ def create_server_view(dashboard) -> QWidget:
 
     container_col_header = QLabel("Container")
     container_col_header.setObjectName("columnHeader")
-    container_col_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    container_col_header.setAlignment(
+        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+    )
     container_col_layout.addWidget(container_col_header)
 
     dashboard._remove_container_btn = QPushButton("Remove")
@@ -203,6 +205,9 @@ def create_server_view(dashboard) -> QWidget:
     dashboard._remove_container_btn.setToolTip("Remove the Docker container")
     dashboard._remove_container_btn.clicked.connect(dashboard._on_remove_container)
     container_col_layout.addWidget(dashboard._remove_container_btn)
+
+    # Add stretch to push button up and fill remaining space
+    container_col_layout.addStretch()
 
     mgmt_grid.addWidget(container_col)
 
@@ -215,7 +220,9 @@ def create_server_view(dashboard) -> QWidget:
 
     image_col_header = QLabel("Image")
     image_col_header.setObjectName("columnHeader")
-    image_col_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    image_col_header.setAlignment(
+        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+    )
     image_col_layout.addWidget(image_col_header)
 
     dashboard._remove_image_btn = QPushButton("Remove")
@@ -248,7 +255,9 @@ def create_server_view(dashboard) -> QWidget:
 
     volumes_col_header = QLabel("Volumes")
     volumes_col_header.setObjectName("columnHeader")
-    volumes_col_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    volumes_col_header.setAlignment(
+        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+    )
     volumes_col_layout.addWidget(volumes_col_header)
 
     dashboard._remove_data_volume_btn = QPushButton("Remove Data")

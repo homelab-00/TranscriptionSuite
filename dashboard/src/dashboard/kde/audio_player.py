@@ -96,8 +96,10 @@ class AudioPlayer(QWidget):
         controls_layout.addStretch()
 
         # Skip backward button
-        self._skip_back_btn = QPushButton("⏪ -10s")
-        self._skip_back_btn.setObjectName("transportButton")
+        self._skip_back_btn = QPushButton("↺")
+        self._skip_back_btn.setObjectName("skipButton")
+        self._skip_back_btn.setFixedSize(36, 36)
+        self._skip_back_btn.setToolTip("-10s")
         self._skip_back_btn.clicked.connect(self._skip_backward)
         controls_layout.addWidget(self._skip_back_btn)
 
@@ -109,15 +111,17 @@ class AudioPlayer(QWidget):
         controls_layout.addWidget(self._play_pause_btn)
 
         # Skip forward button
-        self._skip_forward_btn = QPushButton("+10s ⏩")
-        self._skip_forward_btn.setObjectName("transportButton")
+        self._skip_forward_btn = QPushButton("↻")
+        self._skip_forward_btn.setObjectName("skipButton")
+        self._skip_forward_btn.setFixedSize(36, 36)
+        self._skip_forward_btn.setToolTip("+10s")
         self._skip_forward_btn.clicked.connect(self._skip_forward)
         controls_layout.addWidget(self._skip_forward_btn)
 
         controls_layout.addStretch()
 
         # Volume control
-        volume_label = QLabel("🔊")
+        volume_label = QLabel("◉")
         volume_label.setObjectName("volumeIcon")
         controls_layout.addWidget(volume_label)
 
@@ -151,7 +155,7 @@ class AudioPlayer(QWidget):
             }
 
             #seekSlider::handle:horizontal {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 width: 14px;
                 height: 14px;
                 margin: -4px 0;
@@ -159,30 +163,28 @@ class AudioPlayer(QWidget):
             }
 
             #seekSlider::handle:horizontal:hover {
-                background-color: #42a5f5;
+                background-color: #08d9b3;
             }
 
             #seekSlider::sub-page:horizontal {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border-radius: 3px;
             }
 
-            #transportButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 6px;
-                color: #ffffff;
-                padding: 8px 16px;
-                font-size: 12px;
+            #skipButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 18px;
+                color: #a0a0a0;
+                font-size: 20px;
             }
 
-            #transportButton:hover {
-                background-color: #3d3d3d;
-                border-color: #4d4d4d;
+            #skipButton:hover {
+                color: #0AFCCF;
             }
 
             #playButton {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 border: none;
                 border-radius: 24px;
                 color: #121212;
@@ -191,7 +193,7 @@ class AudioPlayer(QWidget):
             }
 
             #playButton:hover {
-                background-color: #42a5f5;
+                background-color: #08d9b3;
             }
 
             #volumeIcon {
@@ -210,7 +212,7 @@ class AudioPlayer(QWidget):
             }
 
             #volumeSlider::handle:horizontal {
-                background-color: #90caf9;
+                background-color: #0AFCCF;
                 width: 10px;
                 height: 10px;
                 margin: -3px 0;

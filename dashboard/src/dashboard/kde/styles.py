@@ -325,7 +325,7 @@ def get_dashboard_stylesheet() -> str:
             color: white;
             padding: 10px 20px;
             font-size: 13px;
-            min-width: 80px;
+            min-width: 100px;
         }
 
         #stopButton:hover {
@@ -562,11 +562,11 @@ def get_readme_html_css() -> str:
             margin: 0;
             padding: 0;
         }
-        h1 { color: #90caf9; font-size: 28px; margin-top: 24px; border-bottom: 1px solid #3d3d3d; padding-bottom: 8px; }
+        h1 { color: #0AFCCF; font-size: 28px; margin-top: 24px; border-bottom: 1px solid #3d3d3d; padding-bottom: 8px; }
         h2 { color: #81d4fa; font-size: 22px; margin-top: 20px; border-bottom: 1px solid #2d2d2d; padding-bottom: 6px; }
         h3 { color: #b3e5fc; font-size: 18px; margin-top: 16px; }
         h4, h5, h6 { color: #e1f5fe; margin-top: 12px; }
-        a { color: #90caf9; text-decoration: none; }
+        a { color: #0AFCCF; text-decoration: none; }
         a:hover { text-decoration: underline; }
         code {
             background-color: #2d2d2d;
@@ -591,7 +591,7 @@ def get_readme_html_css() -> str:
             color: #d4d4d4;
         }
         blockquote {
-            border-left: 4px solid #90caf9;
+            border-left: 4px solid #0AFCCF;
             margin: 16px 0;
             padding: 8px 16px;
             background-color: #252525;
@@ -599,7 +599,7 @@ def get_readme_html_css() -> str:
         }
         table { border-collapse: collapse; width: 100%; margin: 16px 0; }
         th, td { border: 1px solid #3d3d3d; padding: 10px; text-align: left; }
-        th { background-color: #2d2d2d; color: #90caf9; font-weight: 600; }
+        th { background-color: #2d2d2d; color: #0AFCCF; font-weight: 600; }
         tr:nth-child(even) { background-color: #252525; }
         ul, ol { padding-left: 24px; margin: 12px 0; }
         li { margin: 6px 0; }

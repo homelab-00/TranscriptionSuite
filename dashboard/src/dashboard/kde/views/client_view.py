@@ -87,6 +87,7 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._start_client_local_btn = QPushButton("Start Local")
     dashboard._start_client_local_btn.setObjectName("primaryButton")
     dashboard._start_client_local_btn.clicked.connect(dashboard._on_start_client_local)
+    dashboard._start_client_local_btn.setFixedWidth(120)
     btn_layout.addWidget(dashboard._start_client_local_btn)
 
     dashboard._start_client_remote_btn = QPushButton("Start Remote")
@@ -94,12 +95,14 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._start_client_remote_btn.clicked.connect(
         dashboard._on_start_client_remote
     )
+    dashboard._start_client_remote_btn.setFixedWidth(120)
     btn_layout.addWidget(dashboard._start_client_remote_btn)
 
     dashboard._stop_client_btn = QPushButton("Stop")
     dashboard._stop_client_btn.setObjectName("stopButton")
     dashboard._stop_client_btn.clicked.connect(dashboard._on_stop_client)
     dashboard._stop_client_btn.setEnabled(False)
+    dashboard._stop_client_btn.setFixedWidth(120)
     btn_layout.addWidget(dashboard._stop_client_btn)
 
     layout.addWidget(btn_container, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -108,16 +111,12 @@ def create_client_view(dashboard) -> QWidget:
 
     # Model management button
     dashboard._unload_models_btn = QPushButton("Unload All Models")
-    dashboard._unload_models_btn.setObjectName("secondaryButton")
+    dashboard._unload_models_btn.setObjectName("primaryButton")
     dashboard._unload_models_btn.setToolTip(
         "Unload transcription models to free GPU memory"
     )
     dashboard._unload_models_btn.setEnabled(False)
-    dashboard._unload_models_btn.setStyleSheet(
-        "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
-        "border-radius: 6px; color: #606060; padding: 10px 20px; }"
-        "QPushButton:disabled { background-color: #2d2d2d; border-color: #3d3d3d; color: #606060; }"
-    )
+    dashboard._unload_models_btn.setFixedWidth(150)
     dashboard._unload_models_btn.clicked.connect(dashboard._on_toggle_models)
     layout.addWidget(
         dashboard._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter

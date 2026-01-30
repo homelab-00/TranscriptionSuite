@@ -283,7 +283,7 @@ class ImportWidget(QWidget):
             }
 
             #dropZone[dragOver="true"] {
-                border-color: #90caf9;
+                border-color: #0AFCCF;
                 background-color: #1e2a3a;
             }
 

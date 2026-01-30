@@ -901,6 +901,7 @@ class DashboardWindow(_get_dashboard_base()):
 
         self._start_client_local_btn = Gtk.Button(label="Start Local")
         self._start_client_local_btn.add_css_class("suggested-action")
+        self._start_client_local_btn.set_size_request(120, -1)
         self._start_client_local_btn.connect(
             "clicked", lambda _: self._on_start_client_local()
         )
@@ -908,13 +909,16 @@ class DashboardWindow(_get_dashboard_base()):
 
         self._start_client_remote_btn = Gtk.Button(label="Start Remote")
         self._start_client_remote_btn.add_css_class("suggested-action")
+        self._start_client_remote_btn.set_size_request(120, -1)
         self._start_client_remote_btn.connect(
             "clicked", lambda _: self._on_start_client_remote()
         )
         btn_box.append(self._start_client_remote_btn)
 
         self._stop_client_btn = Gtk.Button(label="Stop")
+        # Use destructive-action to render the stop button in red
         self._stop_client_btn.add_css_class("destructive-action")
+        self._stop_client_btn.set_size_request(120, -1)
         self._stop_client_btn.set_sensitive(False)
         self._stop_client_btn.connect("clicked", lambda _: self._on_stop_client())
         btn_box.append(self._stop_client_btn)
