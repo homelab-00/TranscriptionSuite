@@ -212,10 +212,6 @@ class ClientOrchestrator:
             transcription_timeout=self.config.get(
                 "server", "transcription_timeout", default=300
             ),
-            tls_verify=self.config.get("server", "tls_verify", default=True),
-            allow_insecure_http=self.config.get(
-                "server", "allow_insecure_http", default=False
-            ),
         )
 
         # Test connection

@@ -323,7 +323,6 @@ class ClientControlMixin:
             port = self.config.get("server", "port", default=8000)
 
         token = self.config.get("server", "token", default="")
-        tls_verify = self.config.get("server", "tls_verify", default=True)
 
         if not host:
             self._show_notification("Error", "No server host configured")
@@ -335,7 +334,6 @@ class ClientControlMixin:
             port=port,
             use_https=use_https,
             token=token if token else None,
-            tls_verify=tls_verify,
         )
 
         async def do_toggle():

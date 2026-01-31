@@ -736,7 +736,7 @@ class SettingsDialog(QDialog):
         host_help = QLabel(
             "Enter ONLY the hostname (no http://, no port). Examples:\n"
             "• Local: localhost or 127.0.0.1\n"
-            "• Remote: my-machine.tail1234.ts.net or 100.101.102.103"
+            "• Remote: my-machine.tail1234.ts.net"
         )
         host_help.setObjectName("helpText")
         host_help.setWordWrap(True)
@@ -748,7 +748,7 @@ class SettingsDialog(QDialog):
 
         # Help text for remote
         remote_help = QLabel(
-            "Don't forget to enable HTTPS and switch port to 8443 if using remote server"
+            "Remote access requires Tailscale HTTPS and port 8443."
         )
         remote_help.setObjectName("helpText")
         remote_help.setWordWrap(True)
@@ -796,30 +796,6 @@ class SettingsDialog(QDialog):
         # HTTPS checkbox
         self.https_check = QCheckBox("Use HTTPS")
         connection_layout.addWidget(self.https_check)
-
-        # === Advanced TLS Options Sub-section ===
-        tls_group = QGroupBox("Advanced TLS Options")
-        tls_layout = QVBoxLayout(tls_group)
-
-        # TLS Verify checkbox
-        self.tls_verify_check = QCheckBox("Verify TLS certificates")
-        self.tls_verify_check.setChecked(True)
-        self.tls_verify_check.setToolTip(
-            "Disable for self-signed certificates.\nConnection is still encrypted."
-        )
-        tls_layout.addWidget(self.tls_verify_check)
-
-        # Allow HTTP to remote hosts
-        self.allow_insecure_http_check = QCheckBox(
-            "Allow HTTP to remote hosts (WireGuard encrypts traffic)"
-        )
-        self.allow_insecure_http_check.setToolTip(
-            "Enable for Tailscale without MagicDNS.\n"
-            "Use Tailscale IP (e.g., 100.x.y.z) with port 8000."
-        )
-        tls_layout.addWidget(self.allow_insecure_http_check)
-
-        connection_layout.addWidget(tls_group)
 
         layout.addWidget(connection_group)
 
@@ -1442,7 +1418,6 @@ class SettingsDialog(QDialog):
             port = self.config.get("server", "port", default=8000)
 
         token = self.config.get("server", "token", default="")
-        tls_verify = self.config.get("server", "tls_verify", default=True)
 
         if not host:
             return None
@@ -1452,7 +1427,6 @@ class SettingsDialog(QDialog):
             port=port,
             use_https=use_https,
             token=token if token else None,
-            tls_verify=tls_verify,
         )
 
     def _refresh_backup_list(self) -> None:
@@ -1775,14 +1749,6 @@ class SettingsDialog(QDialog):
             self.config.get("server", "remote_host", default="")
         )
 
-        # Advanced TLS options
-        self.tls_verify_check.setChecked(
-            self.config.get("server", "tls_verify", default=True)
-        )
-        self.allow_insecure_http_check.setChecked(
-            self.config.get("server", "allow_insecure_http", default=False)
-        )
-
     def _save_and_close(self) -> None:
         """Save settings and close the dialog."""
         # App tab
@@ -1828,14 +1794,6 @@ class SettingsDialog(QDialog):
         self.config.set("server", "use_remote", value=self.use_remote_check.isChecked())
         self.config.set(
             "server", "remote_host", value=self.remote_host_edit.text().strip()
-        )
-
-        # Advanced TLS options
-        self.config.set("server", "tls_verify", value=self.tls_verify_check.isChecked())
-        self.config.set(
-            "server",
-            "allow_insecure_http",
-            value=self.allow_insecure_http_check.isChecked(),
         )
 
         # Save to file

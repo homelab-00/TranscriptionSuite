@@ -47,6 +47,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [9.1 Running from Source](#91-running-from-source)
   - [9.2 Verbose Logging](#92-verbose-logging)
   - [9.3 Key Modules](#93-key-modules)
+    - [9.3.1 Settings Exposure Rules](#931-settings-exposure-rules)
   - [9.4 Dashboard Architecture & Refactoring](#94-dashboard-architecture--refactoring)
   - [9.5 Server Busy Handling](#95-server-busy-handling)
   - [9.6 Model Management](#96-model-management)
@@ -900,13 +901,12 @@ Config file: `~/.config/TranscriptionSuite/dashboard.yaml`
 server:
   host: localhost              # Local server hostname
   port: 8000                   # Server port
-  use_https: false             # Enable HTTPS
+  use_https: false             # Enable HTTPS (required for remote/Tailscale)
   token: ""                    # Authentication token
   use_remote: false            # Use remote_host instead of host
   remote_host: ""              # Remote server hostname (no protocol/port)
   auto_reconnect: true         # Auto-reconnect on disconnect
   reconnect_interval: 10       # Seconds between attempts
-  tls_verify: true             # Verify TLS certificates
 
 recording:
   sample_rate: 16000           # Audio sample rate (fixed for Whisper)

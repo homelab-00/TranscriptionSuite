@@ -37,18 +37,15 @@ easy installation.
   - [2.1 Docker](#21-docker)
   - [2.2 Git](#22-git)
 - [3. Installation](#3-installation)
-- [4. Usage](#4-usage)
-  - [4.1 Tray Icon Colors](#41-tray-icon-colors)
-  - [4.2 Dashboard GUI](#42-dashboard-gui)
-- [5. First time setup](#5-first-time-setup)
-  - [5.1 Starting the Server & Client](#51-starting-the-server--client)
+- [4. First time setup](#4-first-time-setup)
+  - [4.1 Starting the Server & Client](#41-starting-the-server--client)
+- [5. Usage](#5-usage)
+  - [5.1 Quick Start](#51-quick-start)
+  - [5.2 Dashboard GUI](#52-dashboard-gui)
+  - [5.3 Tray Icon Colors](#53-system-tray-icon-colors)
 - [6. Remote Access](#6-remote-access)
   - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
   - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
-  - [6.3 Remote Access Without MagicDNS](#63-remote-access-without-magicdns)
-    - [6.3.1 Option 1: IP-Only Mode (Recommended)](#631-option-1-ip-only-mode-recommended)
-    - [6.3.2 Option 2: Self-Signed Certificates](#632-option-2-self-signed-certificates)
-    - [6.3.3 Why MagicDNS is Recommended](#633-why-magicdns-is-recommended)
 - [7. Web Interface](#7-web-interface)
 - [8. Database & Backups](#8-database--backups)
 - [9. Troubleshooting](#9-troubleshooting)
@@ -193,9 +190,55 @@ sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-p
 
 ---
 
-## 4. Usage
+## 4. First time setup
 
-**Quick start:**
+**Before starting either Client or Server, you need to configure a few settings.**
+
+To access them, click on the hamburger menu and select Settings. A new
+window will open up with four tabs: `App`, `Client`, `Server`, and `Notebook`.
+Let's go through each one:
+* The settings in the `App` tab are self explanatory
+* The `Server` tab is just a button that opens the full `config.yaml` for the server.
+  You generally don't need to worry about it unless you want to change the model or
+  other server parameters. Refer to [README_DEV.md](README_DEV.md) for more information.
+* The `Notebook` tab provides database backup and restore functionality:
+  - Create manual backups of your Audio Notebook database
+  - View list of available backups with timestamps and sizes
+  - Restore from any backup (creates safety backup first)
+* For the `Client` tab, the first thing you need to know is whether you want a local or
+  a remote connection. I'll list both cases:
+  * Local: All you need to do is select your input device. Leave everything else default.
+  * Remote: Go through [Section 6: Remote Access](#6-remote-access) first to set up Tailscale.
+    Then:
+    *(Remote access requires Tailscale MagicDNS + HTTPS certificates.)*
+    * In the 'Remote Host' field enter your Tailscale hostname (e.g., `my-machine.tail1234.ts.net`)
+    * Click on the 'Use remote server instead of local' checkbox
+    * Enter your auth token in the field (you'll get this token once you start the server
+      for the first time)
+    * Change the port to 8443
+    * Select the 'Use HTTPS' checkbox
+
+*Settings are saved to:*
+*- Linux: `~/.config/TranscriptionSuite/`*
+*- Windows: `%APPDATA%\TranscriptionSuite\`*
+
+### 4.1 Starting the Server & Client
+
+You're now ready to start both Server & Client. Let's start with the Server:
+* Click on 'Fetch Fresh' and wait for the Docker server image to download
+* Then depending on whether you want to start the server in local or remote mode:
+  * Local: Just click on 'Start Local'
+  * Remote: Click on 'Start Remote', then copy the auth token that appears and
+    paste it over to the client settings (on the remote machine).
+
+Wait until the container has fully started. Then, head over to the Client tab and click
+the appropriate button. You should now be connected.
+
+---
+
+## 5. Usage
+
+### 5.1 Quick Start
 
 * Run the AppImage or executable
 * The tray icon appears in your system tray
@@ -219,21 +262,7 @@ sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-p
 
 Result is automatically copied to clipboard
 
-### 4.1 Tray Icon Colors
-
-| Color | State |
-|-------|-------|
-| 🟢 | Ready |
-| 🟡 | Recording |
-| 🟠 | Transcribing |
-| 🟣 | Live Mode - Listening |
-| 🟤 | Live Mode - Muted |
-| 🔵 | Uploading |
-| ⚫ | (grey) Disconnected |
-| 🟢 | (dark green) Models Unloaded |
-| 🔴 | Error |
-
-### 4.2 Dashboard GUI
+### 5.2 Dashboard GUI
 
 The app includes a full Docker & client management GUI. Click the tray icon and select
 "Show App" to open the Dashboard window, which features a **sidebar navigation** with:
@@ -255,51 +284,17 @@ The app includes a full Docker & client management GUI. Click the tray icon and 
 - 🟠 Orange: Stopped
 - ⚪ Gray: Not set up
 
----
+### 5.3 System Tray Icon Colors
 
-## 5. First time setup
-
-**Before starting either Client or Server, you need to configure a few settings.**
-
-To access them, click on the hamburger menu and select Settings. A new
-window will open up with four tabs: `App`, `Client`, `Server`, and `Notebook`.
-Let's go through each one:
-* The settings in the `App` tab are self explanatory
-* The `Server` tab is just a button that opens the full `config.yaml` for the server.
-  You generally don't need to worry about it unless you want to change the model or
-  other server parameters. Refer to [README_DEV.md](README_DEV.md) for more information.
-* The `Notebook` tab provides database backup and restore functionality:
-  - Create manual backups of your Audio Notebook database
-  - View list of available backups with timestamps and sizes
-  - Restore from any backup (creates safety backup first)
-* For the `Client` tab, the first thing you need to know is whether you want a local or
-  a remote connection. I'll list both cases:
-  * Local: All you need to do is select your input device. Leave everything else default.
-  * Remote: Go through [Section 6: Remote Access](#6-remote-access) first to set up Tailscale.
-    Then:
-    *(Note - These settings are for MagicDNS & HTTPS enabled in Tailscale)*
-    * In the 'Remote Host' field enter your hostname as suggested by the hint
-    * Click on the 'Use remote server instead of local' checkbox
-    * Enter your auth token in the field (you'll get this token once you start the server
-      for the first time)
-    * Change the port to 8443
-    * Select the 'Use HTTPS' checkbox
-
-*Settings are saved to:*
-*- Linux: `~/.config/TranscriptionSuite/`*
-*- Windows: `%APPDATA%\TranscriptionSuite\`*
-
-### 5.1 Starting the Server & Client
-
-You're now ready to start both Server & Client. Let's start with the Server:
-* Click on 'Fetch Fresh' and wait for the Docker server image to download
-* Then depending on whether you want to start the server in local or remote mode:
-  * Local: Just click on 'Start Local'
-  * Remote: Click on 'Start Remote', then copy the auth token that appears and
-    paste it over to the client settings (on the remote machine).
-
-Wait until the container has fully started. Then, head over to the Client tab and click
-the appropriate button. You should now be connected.
+- 🟢 Green: Ready
+- 🟡 Yellow: Recording
+- 🟠 Orange: Transcribing
+- 🟣 Magenta: Live Mode - Listening
+- 🟤 Dark Red: Live Mode - Muted
+- 🔵 Blue: Uploading
+- ⚫ Gray: Disconnected
+- 🟢 Dark Green: Models Unloaded
+- 🔴 Red: Error
 
 ---
 
@@ -360,52 +355,8 @@ For Windows, you also need to edit a couple of lines in `config.yaml`:
 * Change `~/.config/Tailscale/my-machine.crt` to `~/Documents/Tailscale/my-machine.crt`
 * Change `~/.config/Tailscale/my-machine.key` to `~/Documents/Tailscale/my-machine.key`
 
-### 6.3 Remote Access Without MagicDNS
-
-If you cannot or prefer not to use Tailscale MagicDNS, you have alternative options.
-
-#### 6.3.1 Option 1: IP-Only Mode (Recommended)
-
-Use Tailscale IPs directly with HTTP. WireGuard encrypts all traffic at the network layer.
-
-**Server:** Start with `./start-local.sh` (HTTP on port 8000)
-
-**Client:**
-1. Find server's Tailscale IP: `tailscale ip -4`
-2. Configure:
-   - Host: `100.x.y.z` (Tailscale IP)
-   - Port: `8000`
-   - HTTPS: Off
-   - Settings → Advanced TLS Options: Enable "Allow HTTP to remote hosts"
-
-**Security:** WireGuard encrypts all Tailscale traffic. HTTP over Tailscale is secure
-for single-user setups.
-
-#### 6.3.2 Option 2: Self-Signed Certificates
-
-For HTTPS without MagicDNS:
-
-1. Generate certificates:
-   ```bash
-   openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt \
-       -days 365 -nodes -subj "/CN=100.x.y.z"
-   ```
-
-2. Configure server with certificates (see [README_DEV.md](README_DEV.md))
-
-3. Configure client:
-   - Host: `100.x.y.z`
-   - Port: `8443`
-   - HTTPS: On
-   - Settings → Advanced TLS Options: Uncheck "Verify TLS certificates"
-
-#### 6.3.3 Why MagicDNS is Recommended
-
-Tailscale HTTPS certificates require MagicDNS because:
-- Certificates are issued for `.ts.net` hostnames, not IP addresses
-- This is a Let's Encrypt/CA limitation, not Tailscale-specific
-
-Enable MagicDNS in [Tailscale Admin Console](https://login.tailscale.com/admin/dns) for the best experience.
+**Note:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, so MagicDNS
+must be enabled in your Tailnet.
 
 ---
 
@@ -503,8 +454,9 @@ docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 ### 9.3 Connection Issues (Remote Mode)
 
 1. Verify Tailscale is connected: `tailscale status`
-2. Check certificate paths in `config.yaml`
-3. Ensure port 8443 is used for HTTPS
+2. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
+3. Check certificate paths in `config.yaml`
+4. Ensure port 8443 is used for HTTPS
 
 **DNS Resolution Errors:**
 
@@ -515,8 +467,6 @@ If you see errors like `Name or service not known` for `.ts.net` hostnames:
 - **Check for DNS fight:** Run `tailscale status` and look for DNS warnings. If you see
   `/etc/resolv.conf overwritten`, your system's DNS isn't forwarding to
   Tailscale's MagicDNS.
-- **Manual workaround:** Use the Tailscale IP directly: `--host 100.x.x.x` (find IPs
-  with `tailscale status`)
 
 See [README_DEV.md](README_DEV.md#tailscale-dns-resolution-issues) for detailed troubleshooting.
 

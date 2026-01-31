@@ -296,7 +296,7 @@ local_llm:
 # ----------------------------------------------------------------------------
 # Settings for the web-based remote transcription server.
 # This allows clients on other devices to transcribe audio via a web browser
-# interface over a Tailscale VPN or local network.
+# interface over a Tailscale VPN.
 # These paths are Docker container paths by default.
 remote_server:
     # Enable the remote server mode
@@ -322,7 +322,6 @@ remote_server:
         enabled: false # Controlled via TLS_ENABLED env var in Docker
         cert_file: "/certs/cert.crt" # Container path (don't modify)
         key_file: "/certs/cert.key" # Container path (don't modify)
-        auto_generate: false
 
         # HOST paths for TLS certificates (used by startup scripts)
         # These are paths on YOUR machine, not inside the Docker container.

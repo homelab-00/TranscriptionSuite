@@ -73,8 +73,6 @@ def get_default_config() -> dict[str, Any]:
             "transcription_timeout": 300,
             "auto_reconnect": True,
             "reconnect_interval": 10,
-            "tls_verify": True,  # Verify TLS certificates (disable for self-signed)
-            "allow_insecure_http": False,  # Allow HTTP to non-localhost hosts
         },
         "recording": {
             "sample_rate": 16000,

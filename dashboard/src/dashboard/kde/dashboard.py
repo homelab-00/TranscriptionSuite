@@ -767,14 +767,13 @@ class DashboardWindow(
             port = self.config.get("server", "port", default=8000)
 
         token = self.config.get("server", "token", default="")
-        tls_verify = self.config.get("server", "tls_verify", default=True)
 
         if not host:
             logger.debug("No host configured, cannot create API client")
             return None
 
         token_value = token if token else None
-        key = (host, port, use_https, token_value, tls_verify)
+        key = (host, port, use_https, token_value)
         if (
             self._notebook_api_client is not None
             and self._notebook_api_client_key == key
@@ -789,7 +788,6 @@ class DashboardWindow(
             port=port,
             use_https=use_https,
             token=token_value,
-            tls_verify=tls_verify,
         )
         self._notebook_api_client_key = key
         return self._notebook_api_client
