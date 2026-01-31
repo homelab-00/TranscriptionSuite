@@ -136,6 +136,7 @@ class Recording:
     word_count: int
     has_diarization: bool
     summary: str | None = None
+    summary_model: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Recording":
@@ -151,6 +152,7 @@ class Recording:
             word_count=data.get("word_count", 0),
             has_diarization=data.get("has_diarization", False),
             summary=data.get("summary"),
+            summary_model=data.get("summary_model"),
         )
 
 

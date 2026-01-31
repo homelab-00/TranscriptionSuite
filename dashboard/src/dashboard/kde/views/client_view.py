@@ -47,9 +47,12 @@ def create_client_view(dashboard) -> QWidget:
 
     layout.addSpacing(20)
 
+    card_width = 550
+
     # Status card
     status_frame = QFrame()
     status_frame.setObjectName("statusCard")
+    status_frame.setFixedWidth(card_width)
     status_layout = QVBoxLayout(status_frame)
     status_layout.setSpacing(12)
 
@@ -75,7 +78,7 @@ def create_client_view(dashboard) -> QWidget:
     conn_row.addStretch()
     status_layout.addLayout(conn_row)
 
-    layout.addWidget(status_frame)
+    layout.addWidget(status_frame, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(25)
 
@@ -127,6 +130,7 @@ def create_client_view(dashboard) -> QWidget:
     # Options row
     options_frame = QFrame()
     options_frame.setObjectName("optionsRow")
+    options_frame.setFixedWidth(card_width)
     options_frame.setStyleSheet(
         "QFrame#optionsRow { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
         "border-radius: 8px; padding: 8px; }"
@@ -307,13 +311,14 @@ def create_client_view(dashboard) -> QWidget:
 
     options_layout.addStretch()
 
-    layout.addWidget(options_frame)
+    layout.addWidget(options_frame, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(10)
 
     # Collapsible preview display section
     preview_display_frame = QFrame()
     preview_display_frame.setObjectName("previewCard")
+    preview_display_frame.setFixedWidth(card_width)
     preview_display_frame.setStyleSheet(
         "QFrame#previewCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
         "border-radius: 8px; padding: 8px; }"
@@ -379,7 +384,7 @@ def create_client_view(dashboard) -> QWidget:
 
     preview_display_layout.addWidget(dashboard._preview_content)
 
-    layout.addWidget(preview_display_frame)
+    layout.addWidget(preview_display_frame, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(15)
 

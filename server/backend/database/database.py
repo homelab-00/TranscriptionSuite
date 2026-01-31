@@ -246,6 +246,8 @@ def init_db() -> None:
         columns = [col[1] for col in cursor.fetchall()]
         if "summary" not in columns:
             cursor.execute("ALTER TABLE recordings ADD COLUMN summary TEXT")
+        if "summary_model" not in columns:
+            cursor.execute("ALTER TABLE recordings ADD COLUMN summary_model TEXT")
 
         if "title" not in columns:
             cursor.execute("ALTER TABLE recordings ADD COLUMN title TEXT")
@@ -289,6 +291,7 @@ def init_db() -> None:
                 role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
                 content TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                model TEXT,
                 tokens_used INTEGER,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
@@ -301,6 +304,12 @@ def init_db() -> None:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)"
         )
+
+        # Migration: Add model column to messages if it doesn't exist
+        cursor.execute("PRAGMA table_info(messages)")
+        message_columns = [col[1] for col in cursor.fetchall()]
+        if "model" not in message_columns:
+            cursor.execute("ALTER TABLE messages ADD COLUMN model TEXT")
 
         conn.commit()
 
@@ -332,6 +341,7 @@ class Recording:
         self.word_count = data.get("word_count", 0)
         self.has_diarization = bool(data.get("has_diarization", 0))
         self.summary = data.get("summary")
+        self.summary_model = data.get("summary_model")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -345,6 +355,7 @@ class Recording:
             "word_count": self.word_count,
             "has_diarization": self.has_diarization,
             "summary": self.summary,
+            "summary_model": self.summary_model,
         }
 
 
@@ -421,13 +432,17 @@ def delete_recording(recording_id: int) -> bool:
         return cursor.rowcount > 0
 
 
-def update_recording_summary(recording_id: int, summary: Optional[str]) -> bool:
+def update_recording_summary(
+    recording_id: int,
+    summary: Optional[str],
+    summary_model: Optional[str] = None,
+) -> bool:
     """Update the summary for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE recordings SET summary = ? WHERE id = ?",
-            (summary, recording_id),
+            "UPDATE recordings SET summary = ?, summary_model = ? WHERE id = ?",
+            (summary, summary_model if summary else None, recording_id),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -710,6 +725,7 @@ def add_message(
     conversation_id: int,
     role: str,
     content: str,
+    model: Optional[str] = None,
     tokens_used: Optional[int] = None,
 ) -> int:
     """Add a message to a conversation."""
@@ -717,10 +733,10 @@ def add_message(
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO messages (conversation_id, role, content, tokens_used)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO messages (conversation_id, role, content, model, tokens_used)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (conversation_id, role, content, tokens_used),
+            (conversation_id, role, content, model, tokens_used),
         )
         # Update conversation timestamp
         cursor.execute(

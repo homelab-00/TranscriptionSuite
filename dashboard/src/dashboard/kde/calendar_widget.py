@@ -76,6 +76,7 @@ class DayCell(QFrame):
 
         self._day_label = QLabel(str(day_date.day) if day_date else "")
         self._day_label.setObjectName("dayNumber")
+        self._day_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_layout.addWidget(self._day_label)
         header_layout.addStretch()
 
@@ -807,7 +808,7 @@ class CalendarWidget(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 8)
         header_layout.setSpacing(2)
 
-        days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         for day in days:
             lbl = QLabel(day)
             lbl.setObjectName("dayHeader")
@@ -949,16 +950,14 @@ class CalendarWidget(QWidget):
         recordings_layout.setContentsMargins(0, 0, 0, 0)
         recordings_layout.setSpacing(8)
 
-        recordings_layout.addStretch()
-
         # Add button at the END - hidden by default, shown on hover
         add_btn = QPushButton("+")
         add_btn.setObjectName("addButton")
         add_btn.setFixedSize(28, 28)
-        add_btn.setToolTip("Import recording for this time")
         add_btn.clicked.connect(lambda checked, h=hour: self._on_add_clicked(h))
         add_btn.hide()  # Hidden by default, shown on hover
         recordings_layout.addWidget(add_btn)
+        recordings_layout.addStretch()
 
         recordings_scroll.setWidget(recordings_container)
         layout.addWidget(recordings_scroll, 1)
@@ -1042,7 +1041,7 @@ class CalendarWidget(QWidget):
             #dayCell {
                 background-color: #212121;
                 border: 1px solid #2d2d2d;
-                border-radius: 4px;
+                border-radius: 8px;
             }
 
             #dayCell:hover {
@@ -1058,6 +1057,14 @@ class CalendarWidget(QWidget):
             #dayCell[state="today"] {
                 background-color: #1a2a2a;
                 border: 2px solid #0AFCCF;
+            }
+
+            #dayCell[state="today"] #dayNumber {
+                background-color: #0AFCCF;
+                border-radius: 11px;
+                color: #0c1b1b;
+                min-width: 22px;
+                min-height: 22px;
             }
 
             #dayCell[state="other-month"] {
@@ -1148,6 +1155,7 @@ class CalendarWidget(QWidget):
                 min-height: 28px;
                 max-height: 28px;
                 padding: 0px;
+                margin-left: 8px;
                 margin-right: 8px;
             }
 
@@ -1295,7 +1303,7 @@ class CalendarWidget(QWidget):
         self._day_cells.clear()
 
         # Get calendar data for the month
-        cal = calendar.Calendar(firstweekday=6)  # Sunday first
+        cal = calendar.Calendar(firstweekday=0)  # Monday first
         month_days = cal.monthdatescalendar(self._current_year, self._current_month)
 
         # Build grid
@@ -1437,10 +1445,6 @@ class CalendarWidget(QWidget):
                 self._selected_date == today and hour > now.hour
             )
             add_btn.setEnabled(not is_future)
-            if is_future:
-                add_btn.setToolTip("Cannot import to future time slots")
-            else:
-                add_btn.setToolTip("Import recording for this time")
 
     def _create_recording_card(
         self, rec: Recording, is_continuation: bool = False

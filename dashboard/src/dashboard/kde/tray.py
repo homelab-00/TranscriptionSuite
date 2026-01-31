@@ -64,10 +64,10 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         TrayState.ERROR: (255, 0, 0),  # Red
         # Live Mode states
         TrayState.LIVE_LISTENING: (
-            217,
-            7,
-            52,
-        ),  # #d90734 - Bright red (active/listening)
+            255,
+            0,
+            255,
+        ),  # #ff00ff - Magenta (active/listening)
         TrayState.LIVE_MUTED: (89, 50, 58),  # #59323a - Dark maroon (muted)
     }
 

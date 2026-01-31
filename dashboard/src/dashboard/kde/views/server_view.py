@@ -47,9 +47,12 @@ def create_server_view(dashboard) -> QWidget:
 
     layout.addSpacing(20)
 
+    card_width = 550
+
     # Status card
     status_frame = QFrame()
     status_frame.setObjectName("statusCard")
+    status_frame.setFixedWidth(card_width)
     status_layout = QVBoxLayout(status_frame)
     status_layout.setSpacing(8)
 
@@ -143,7 +146,7 @@ def create_server_view(dashboard) -> QWidget:
     token_row.addStretch()
     status_layout.addLayout(token_row)
 
-    layout.addWidget(status_frame)
+    layout.addWidget(status_frame, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(20)
 
@@ -284,6 +287,7 @@ def create_server_view(dashboard) -> QWidget:
     # Volumes status panel
     volumes_frame = QFrame()
     volumes_frame.setObjectName("volumesStatusCard")
+    volumes_frame.setFixedWidth(card_width)
     volumes_layout = QVBoxLayout(volumes_frame)
     volumes_layout.setSpacing(10)
     volumes_layout.setContentsMargins(16, 12, 16, 12)
@@ -341,7 +345,7 @@ def create_server_view(dashboard) -> QWidget:
     path_label.setStyleSheet("color: #6c757d; font-size: 10px; margin-top: 4px;")
     volumes_layout.addWidget(path_label)
 
-    layout.addWidget(volumes_frame)
+    layout.addWidget(volumes_frame, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(15)
 

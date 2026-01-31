@@ -68,6 +68,7 @@ class RecordingResponse(BaseModel):
     word_count: int = 0
     has_diarization: bool = False
     summary: Optional[str] = None
+    summary_model: Optional[str] = None
 
 
 class RecordingDetailResponse(RecordingResponse):
@@ -81,6 +82,7 @@ class SummaryUpdate(BaseModel):
     """Request body for updating a recording's summary."""
 
     summary: Optional[str] = None
+    summary_model: Optional[str] = None
 
 
 class TitleUpdate(BaseModel):
@@ -164,6 +166,7 @@ async def remove_recording(recording_id: int) -> Dict[str, str]:
 async def update_summary_put(
     recording_id: int,
     summary: str,
+    summary_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Update the summary for a recording (PUT with query param).
@@ -171,8 +174,13 @@ async def update_summary_put(
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    if update_recording_summary(recording_id, summary):
-        return {"status": "updated", "id": recording_id, "summary": summary}
+    if update_recording_summary(recording_id, summary, summary_model):
+        return {
+            "status": "updated",
+            "id": recording_id,
+            "summary": summary,
+            "summary_model": summary_model if summary else None,
+        }
     else:
         raise HTTPException(status_code=500, detail="Failed to update summary")
 
@@ -188,8 +196,13 @@ async def update_summary_patch(
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    if update_recording_summary(recording_id, body.summary):
-        return {"status": "updated", "id": recording_id, "summary": body.summary}
+    if update_recording_summary(recording_id, body.summary, body.summary_model):
+        return {
+            "status": "updated",
+            "id": recording_id,
+            "summary": body.summary,
+            "summary_model": body.summary_model if body.summary else None,
+        }
     else:
         raise HTTPException(status_code=500, detail="Failed to update summary")
 

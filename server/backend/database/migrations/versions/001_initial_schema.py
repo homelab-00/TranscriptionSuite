@@ -42,7 +42,8 @@ def upgrade() -> None:
             imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             word_count INTEGER DEFAULT 0,
             has_diarization INTEGER DEFAULT 0,
-            summary TEXT
+            summary TEXT,
+            summary_model TEXT
         )
     """)
     )
@@ -142,6 +143,7 @@ def upgrade() -> None:
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            model TEXT,
             tokens_used INTEGER,
             FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         )

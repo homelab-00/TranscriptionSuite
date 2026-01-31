@@ -800,7 +800,10 @@ class APIClient:
             return data.get("summary")
 
     async def update_summary(
-        self, recording_id: int, summary: str | None
+        self,
+        recording_id: int,
+        summary: str | None,
+        summary_model: str | None = None,
     ) -> dict[str, Any]:
         """
         Update a recording's summary.
@@ -819,7 +822,7 @@ class APIClient:
                 async with session.patch(
                     f"{self.base_url}/api/notebook/recordings/{recording_id}/summary",
                     headers=headers,
-                    json={"summary": summary},
+                    json={"summary": summary, "summary_model": summary_model},
                     **self._get_ssl_kwargs(),
                 ) as resp:
                     resp.raise_for_status()
@@ -951,6 +954,7 @@ class APIClient:
         conversation_id: int,
         role: str,
         content: str,
+        model: str | None = None,
         tokens_used: int | None = None,
     ) -> dict[str, Any]:
         """
@@ -972,6 +976,7 @@ class APIClient:
             json={
                 "role": role,
                 "content": content,
+                "model": model,
                 "tokens_used": tokens_used,
             },
             **self._get_ssl_kwargs(),

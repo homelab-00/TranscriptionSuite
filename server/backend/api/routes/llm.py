@@ -934,6 +934,7 @@ class MessageCreate(BaseModel):
 
     role: str  # "user" or "assistant"
     content: str
+    model: Optional[str] = None
     tokens_used: Optional[int] = None
 
 
@@ -1049,6 +1050,7 @@ async def add_message_to_conversation(conversation_id: int, request: MessageCrea
         conversation_id=conversation_id,
         role=request.role,
         content=request.content,
+        model=request.model,
         tokens_used=request.tokens_used,
     )
 
@@ -1212,6 +1214,7 @@ async def chat_with_llm(request: ChatRequest):
                         conversation_id=request.conversation_id,
                         role="assistant",
                         content=full_response,
+                        model=model_id,
                         tokens_used=tokens_used if tokens_used > 0 else None,
                     )
 

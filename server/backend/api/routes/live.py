@@ -56,7 +56,10 @@ class LiveModeSession:
 
     async def send_message(self, msg_type: str, data: Optional[dict] = None) -> None:
         """Send a JSON message to the client."""
-        if self.websocket.client_state != WebSocketState.CONNECTED:
+        if (
+            self.websocket.client_state != WebSocketState.CONNECTED
+            or self.websocket.application_state != WebSocketState.CONNECTED
+        ):
             return
 
         message = {
@@ -67,7 +70,8 @@ class LiveModeSession:
         try:
             await self.websocket.send_json(message)
         except Exception as e:
-            logger.error(f"Failed to send message: {e}")
+            # Socket can close between state check and send.
+            logger.debug(f"Failed to send message (socket closed): {e}")
 
     def _queue_message(self, msg_type: str, data: Optional[dict] = None) -> None:
         """Queue a message from the engine thread to be sent async."""

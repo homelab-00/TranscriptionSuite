@@ -8,13 +8,15 @@ using Qt's multimedia framework.
 import logging
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QUrl, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QSize, QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSlider,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -104,9 +106,13 @@ class AudioPlayer(QWidget):
         controls_layout.addWidget(self._skip_back_btn)
 
         # Play/Pause button
-        self._play_pause_btn = QPushButton("▶")
+        self._play_icon = self._make_play_icon(QSize(30, 30))
+        self._pause_icon = self._make_pause_icon(QSize(30, 30))
+        self._play_pause_btn = QPushButton()
         self._play_pause_btn.setObjectName("playButton")
-        self._play_pause_btn.setFixedSize(48, 48)
+        self._play_pause_btn.setFixedSize(56, 56)
+        self._play_pause_btn.setIconSize(QSize(30, 30))
+        self._set_play_pause_visual(is_playing=False)
         self._play_pause_btn.clicked.connect(self._toggle_play_pause)
         controls_layout.addWidget(self._play_pause_btn)
 
@@ -121,9 +127,19 @@ class AudioPlayer(QWidget):
         controls_layout.addStretch()
 
         # Volume control
-        volume_label = QLabel("◉")
-        volume_label.setObjectName("volumeIcon")
-        controls_layout.addWidget(volume_label)
+        self._volume_icon_label = QLabel()
+        self._volume_icon_label.setObjectName("volumeIcon")
+        self._volume_icon_label.setFixedSize(16, 16)
+        self._volume_icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        volume_icon = self._get_icon(
+            ["audio-volume-high", "audio-volume-medium", "audio-volume"],
+            QStyle.StandardPixmap.SP_MediaVolume,
+        )
+        if not volume_icon.isNull():
+            self._volume_icon_label.setPixmap(volume_icon.pixmap(14, 14))
+        else:
+            self._volume_icon_label.setText("◉")
+        controls_layout.addWidget(self._volume_icon_label)
 
         self._volume_slider = QSlider(Qt.Orientation.Horizontal)
         self._volume_slider.setObjectName("volumeSlider")
@@ -186,10 +202,11 @@ class AudioPlayer(QWidget):
             #playButton {
                 background-color: #0AFCCF;
                 border: none;
-                border-radius: 24px;
-                color: #121212;
-                font-size: 18px;
+                border-radius: 28px;
+                color: #141414;
+                font-size: 22px;
                 font-weight: bold;
+                padding: 0;
             }
 
             #playButton:hover {
@@ -246,7 +263,7 @@ class AudioPlayer(QWidget):
         """
         logger.debug(f"Loading audio: {url}")
         self._player.setSource(QUrl(url))
-        self._play_pause_btn.setText("▶")
+        self._set_play_pause_visual(is_playing=False)
 
     def play(self) -> None:
         """Start playback."""
@@ -333,8 +350,78 @@ class AudioPlayer(QWidget):
     def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         """Handle playback state changes."""
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self._play_pause_btn.setText("⏸" if is_playing else "▶")
+        self._set_play_pause_visual(is_playing=is_playing)
         self.playing_changed.emit(is_playing)
+
+    def _set_play_pause_visual(self, is_playing: bool) -> None:
+        """Update the play/pause button visual."""
+        icon = self._pause_icon if is_playing else self._play_icon
+        self._play_pause_btn.setIcon(icon)
+        self._play_pause_btn.setText("")
+
+    def _get_icon(
+        self,
+        theme_names: list[str],
+        fallback: QStyle.StandardPixmap,
+    ) -> QIcon:
+        for name in theme_names:
+            icon = QIcon.fromTheme(name)
+            if not icon.isNull():
+                return icon
+        if self.style():
+            return self.style().standardIcon(fallback)
+        return QIcon()
+
+    def _make_play_icon(self, size: QSize) -> QIcon:
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#141414"))
+
+        # Triangle sized and nudged right for optical centering.
+        width = size.width()
+        height = size.height()
+        left = int(width * 0.32) + 1
+        right = int(width * 0.78) + 1
+        top = int(height * 0.22)
+        bottom = int(height * 0.78)
+        mid_y = height // 2
+
+        triangle = QPolygon(
+            [
+                QPoint(left, top),
+                QPoint(right, mid_y),
+                QPoint(left, bottom),
+            ]
+        )
+        painter.drawPolygon(triangle)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _make_pause_icon(self, size: QSize) -> QIcon:
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#141414"))
+
+        width = size.width()
+        height = size.height()
+        bar_width = max(3, int(width * 0.14))
+        bar_height = int(height * 0.64)
+        gap = max(3, int(width * 0.12))
+        x_start = (width - (bar_width * 2 + gap)) // 2
+        y_start = (height - bar_height) // 2
+
+        painter.drawRoundedRect(x_start, y_start, bar_width, bar_height, 2, 2)
+        painter.drawRoundedRect(
+            x_start + bar_width + gap, y_start, bar_width, bar_height, 2, 2
+        )
+        painter.end()
+        return QIcon(pixmap)
 
     def _on_error(self, error: QMediaPlayer.Error, message: str) -> None:
         """Handle media player errors."""

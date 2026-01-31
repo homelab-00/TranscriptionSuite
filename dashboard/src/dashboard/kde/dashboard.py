@@ -156,7 +156,7 @@ class DashboardWindow(
     def _setup_ui(self) -> None:
         """Set up the main UI structure with sidebar navigation."""
         self.setWindowTitle("TranscriptionSuite")
-        self.setMinimumSize(800, 550)
+        self.setMinimumSize(830, 550)
 
         logo_path = get_assets_path() / "logo.png"
         if logo_path.exists():
@@ -415,11 +415,11 @@ class DashboardWindow(
             btn.setIcon(icon)
         layout.addWidget(btn, 1)
 
-        status_light = QLabel("⬤")
+        status_light = QLabel("⚪")
         status_light.setObjectName(f"{icon_name}StatusLight")
         status_light.setFixedWidth(16)
         status_light.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_light.setStyleSheet("color: #6c757d; font-size: 8px;")
+        status_light.setStyleSheet("font-size: 10px;")
         layout.addWidget(status_light)
 
         if icon_name == "server":
@@ -440,35 +440,23 @@ class DashboardWindow(
             if status == ServerStatus.RUNNING:
                 health = self._docker_manager.get_container_health()
                 if health == "unhealthy":
-                    self._server_status_light.setStyleSheet(
-                        "color: #f44336; font-size: 8px;"
-                    )
+                    self._server_status_light.setText("🔴")
                 elif health and health != "healthy":
-                    self._server_status_light.setStyleSheet(
-                        "color: #2196f3; font-size: 8px;"
-                    )
+                    self._server_status_light.setText("🔵")
                 else:
-                    self._server_status_light.setStyleSheet(
-                        "color: #4caf50; font-size: 8px;"
-                    )
+                    self._server_status_light.setText("🟢")
             elif status == ServerStatus.STOPPED:
-                self._server_status_light.setStyleSheet(
-                    "color: #6c757d; font-size: 8px;"
-                )
+                self._server_status_light.setText("🟠")
+            elif status == ServerStatus.NOT_FOUND:
+                self._server_status_light.setText("⚪")
             else:
-                self._server_status_light.setStyleSheet(
-                    "color: #5d0000; font-size: 8px;"
-                )
+                self._server_status_light.setText("🔴")
 
         if hasattr(self, "_client_status_light"):
             if self._client_running:
-                self._client_status_light.setStyleSheet(
-                    "color: #4caf50; font-size: 8px;"
-                )
+                self._client_status_light.setText("🟢")
             else:
-                self._client_status_light.setStyleSheet(
-                    "color: #6c757d; font-size: 8px;"
-                )
+                self._client_status_light.setText("🟠")
 
     # =========================================================================
     # Welcome View
@@ -537,7 +525,7 @@ class DashboardWindow(
         server_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         server_status_layout.addWidget(server_label)
 
-        self._home_server_status = QLabel("⬤ Checking...")
+        self._home_server_status = QLabel("⚪ Checking...")
         self._home_server_status.setObjectName("homeStatusValue")
         self._home_server_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         server_status_layout.addWidget(self._home_server_status)
@@ -557,7 +545,7 @@ class DashboardWindow(
         client_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         client_status_layout.addWidget(client_label)
 
-        self._home_client_status = QLabel("⬤ Stopped")
+        self._home_client_status = QLabel("🟠 Stopped")
         self._home_client_status.setObjectName("homeStatusValue")
         self._home_client_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         client_status_layout.addWidget(self._home_client_status)
@@ -610,27 +598,20 @@ class DashboardWindow(
             health = self._docker_manager.get_container_health()
             if health and health != "healthy":
                 if health == "unhealthy":
-                    self._home_server_status.setText(f"⬤ Unhealthy{mode_str}")
-                    self._home_server_status.setStyleSheet("color: #f44336;")
+                    self._home_server_status.setText(f"🔴 Unhealthy{mode_str}")
                 else:
-                    self._home_server_status.setText(f"⬤ Starting...{mode_str}")
-                    self._home_server_status.setStyleSheet("color: #2196f3;")
+                    self._home_server_status.setText(f"🔵 Starting...{mode_str}")
             else:
-                self._home_server_status.setText(f"⬤ Running{mode_str}")
-                self._home_server_status.setStyleSheet("color: #4caf50;")
+                self._home_server_status.setText(f"🟢 Running{mode_str}")
         elif status == ServerStatus.STOPPED:
-            self._home_server_status.setText("⬤ Stopped")
-            self._home_server_status.setStyleSheet("color: #6c757d;")
+            self._home_server_status.setText("🟠 Stopped")
         else:
-            self._home_server_status.setText("⬤ Not set up")
-            self._home_server_status.setStyleSheet("color: #5d0000;")
+            self._home_server_status.setText("⚪ Not set up")
 
         if self._client_running:
-            self._home_client_status.setText("⬤ Running")
-            self._home_client_status.setStyleSheet("color: #4caf50;")
+            self._home_client_status.setText("🟢 Running")
         else:
-            self._home_client_status.setText("⬤ Stopped")
-            self._home_client_status.setStyleSheet("color: #6c757d;")
+            self._home_client_status.setText("🟠 Stopped")
 
         self._update_sidebar_status_lights()
 

@@ -226,11 +226,12 @@ Result is automatically copied to clipboard
 | 🟢 | Ready |
 | 🟡 | Recording |
 | 🟠 | Transcribing |
+| 🟣 | Live Mode - Listening |
+| 🟤 | Live Mode - Muted |
 | 🔵 | Uploading |
-| ⚫ | Disconnected / Models Unloaded |
+| ⚫ | (grey) Disconnected |
+| 🟢 | (dark green) Models Unloaded |
 | 🔴 | Error |
-| 🔴 (Bright) | Live Mode - Listening |
-| 🟤 (Dark) | Live Mode - Muted |
 
 ### 4.2 Dashboard GUI
 
