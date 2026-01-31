@@ -76,9 +76,6 @@ class TranscriptionSession:
         self._realtime_engine: Optional[Any] = None
         self._use_realtime_engine = False
 
-        # Live transcriber polling task
-        self._live_transcriber_task: Optional[asyncio.Task] = None
-
         # Job tracking for transcription
         self._current_job_id: Optional[str] = None
 
@@ -225,12 +222,6 @@ class TranscriptionSession:
             self._realtime_engine.start_recording(language)
             logger.info(f"Recording started with VAD for {self.client_name}")
 
-            # Start live transcriber polling if enabled
-            if self.capabilities.supports_preview:
-                self._live_transcriber_task = asyncio.create_task(
-                    self._live_transcriber_polling_loop()
-                )
-                logger.info(f"Live transcriber polling started for {self.client_name}")
         else:
             logger.info(f"Recording started for {self.client_name}")
 
@@ -238,8 +229,7 @@ class TranscriptionSession:
             "session_started",
             {
                 "vad_enabled": self._use_realtime_engine,
-                "preview_enabled": self.capabilities.supports_preview
-                and self._use_realtime_engine,
+                "preview_enabled": False,
             },
         )
 
@@ -259,37 +249,12 @@ class TranscriptionSession:
         """Called when VAD detects voice inactivity."""
         await self.send_message("vad_stop")
 
-    async def _live_transcriber_polling_loop(self) -> None:
-        """Poll live transcriber engine and send realtime text updates."""
-        last_text = ""
-        while self.is_recording and self._realtime_engine:
-            try:
-                result = await self._realtime_engine.get_live_transcription()
-                if result and result.text and result.text != last_text:
-                    last_text = result.text
-                    await self.send_message("realtime", {"text": result.text})
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(f"Live transcriber polling error: {e}")
-            await asyncio.sleep(0.3)  # 300ms interval
-
     async def stop_recording(self) -> None:
         """Stop recording and process transcription."""
         if not self.is_recording:
             return
 
         self.is_recording = False
-
-        # Cancel live transcriber polling task
-        if self._live_transcriber_task:
-            self._live_transcriber_task.cancel()
-            try:
-                await self._live_transcriber_task
-            except asyncio.CancelledError:
-                pass
-            self._live_transcriber_task = None
-            logger.info(f"Live transcriber polling stopped for {self.client_name}")
 
         await self.send_message("session_stopped")
         logger.info(f"Recording stopped for {self.client_name}")
@@ -329,7 +294,7 @@ class TranscriptionSession:
         # Notify model manager about client disconnect
         if self.client_type == ClientType.STANDALONE:
             model_manager = get_model_manager()
-            model_manager.on_standalone_client_disconnected()
+            # No special per-client model handling required
 
 
 async def handle_client_message(
@@ -530,7 +495,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             from server.core.model_manager import get_model_manager
 
             model_manager = get_model_manager()
-            model_manager.on_standalone_client_connected()
+            # No special per-client model handling required
 
         # Send auth success with capabilities
         await session.send_message(

@@ -139,29 +139,42 @@ def create_client_view(dashboard) -> QWidget:
     options_layout.setContentsMargins(12, 10, 12, 10)
     options_layout.setSpacing(16)
 
-    # Live Transcriber toggle
-    preview_label = QLabel("Live Transcriber:")
+    # Live Mode toggle
+    preview_label = QLabel("Live Mode:")
     preview_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
     options_layout.addWidget(preview_label)
 
     dashboard._preview_toggle_btn = QPushButton("Disabled")
     dashboard._preview_toggle_btn.setCheckable(True)
     dashboard._preview_toggle_btn.setFixedWidth(80)
-    live_transcriber_enabled = dashboard.config.get_server_config(
+    live_mode_enabled = dashboard.config.get_server_config(
         "live_transcriber", "enabled", default=False
     )
-    dashboard._preview_toggle_btn.setChecked(live_transcriber_enabled)
+    dashboard._preview_toggle_btn.setChecked(live_mode_enabled)
     dashboard._preview_toggle_btn.setText(
-        "Enabled" if live_transcriber_enabled else "Disabled"
+        "Enabled" if live_mode_enabled else "Disabled"
     )
     dashboard._preview_toggle_btn.setToolTip(
-        "Enable live transcriber during recording.\n"
-        "Uses a faster model for real-time feedback.\n"
-        "Only editable when server is stopped."
+        "Start or stop Live Mode.\nRequires the client to be running."
     )
     dashboard._preview_toggle_btn.clicked.connect(dashboard._on_live_transcriber_toggle)
     dashboard._update_live_transcriber_toggle_style()
     options_layout.addWidget(dashboard._preview_toggle_btn)
+
+    options_layout.addSpacing(8)
+
+    # Live Mode mute button
+    dashboard._live_mode_mute_btn = QPushButton("Mute")
+    dashboard._live_mode_mute_btn.setFixedWidth(70)
+    dashboard._live_mode_mute_btn.setEnabled(False)
+    dashboard._live_mode_mute_btn.setStyleSheet(
+        "QPushButton { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
+        "QPushButton:hover { border-color: #505050; }"
+        "QPushButton:disabled { color: #606060; border-color: #2d2d2d; }"
+    )
+    dashboard._live_mode_mute_btn.clicked.connect(dashboard._on_live_mode_mute_click)
+    options_layout.addWidget(dashboard._live_mode_mute_btn)
 
     options_layout.addSpacing(8)
 
@@ -302,7 +315,7 @@ def create_client_view(dashboard) -> QWidget:
         "Force a specific language for Live Mode.\n"
         "Recommended: Select your language for better accuracy.\n"
         "Auto-detect works poorly with short utterances.\n"
-        "Only editable when server is stopped."
+        "Live Mode will restart to apply changes."
     )
     dashboard._live_language_combo.currentIndexChanged.connect(
         dashboard._on_live_language_changed

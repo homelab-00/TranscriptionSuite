@@ -102,13 +102,11 @@ async def transcribe_audio(
 
     # Apply defaults based on client type
     if client_type == "standalone":
-        # Use static_transcription config for standalone clients
-        config = get_config()
-        static_cfg = config.get("static_transcription", default={})
+        # Standalone client defaults (Audio Notebook handles diarization/timestamps)
         if word_timestamps is None:
-            word_timestamps = static_cfg.get("word_timestamps", False)
+            word_timestamps = False
         if diarization is None:
-            diarization = static_cfg.get("enable_diarization", False)
+            diarization = False
         logger.debug(
             f"Standalone client: word_timestamps={word_timestamps}, "
             f"diarization={diarization}"

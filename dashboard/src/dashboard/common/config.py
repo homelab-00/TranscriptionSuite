@@ -104,13 +104,8 @@ def get_default_config() -> dict[str, Any]:
 class ClientConfig:
     """Client configuration manager."""
 
-    _SERVER_CONFIG_ALIASES: dict[tuple[str, ...], list[tuple[str, ...]]] = {
-        ("transcription_options", "enable_live_transcriber"): [
-            ("live_transcriber", "enabled")
-        ],
-        ("live_transcriber", "enabled"): [
-            ("transcription_options", "enable_live_transcriber")
-        ],
+    _SERVER_CONFIG_DEPRECATED: set[tuple[str, ...]] = {
+        ("transcription_options", "enable_live_transcriber"),
     }
 
     def __init__(self, config_path: Path | None = None):
@@ -299,11 +294,6 @@ class ClientConfig:
 
         Preserves comments and formatting via targeted in-place edits.
         """
-        expanded_updates: dict[tuple[str, ...], Any] = dict(updates)
-        for path, value in list(expanded_updates.items()):
-            for alias in self._SERVER_CONFIG_ALIASES.get(path, []):
-                if alias not in expanded_updates:
-                    expanded_updates[alias] = value
         import re
 
         server_config_path = get_config_dir() / "config.yaml"
@@ -361,9 +351,15 @@ class ClientConfig:
                 if value_part.strip() != "":
                     line_map[path] = (i, value_part, False)
 
-            modified = False
+            indices_to_remove = set()
+            for deprecated_path in self._SERVER_CONFIG_DEPRECATED:
+                entry = line_map.get(deprecated_path)
+                if entry:
+                    indices_to_remove.add(entry[0])
 
-            for path, value in expanded_updates.items():
+            modified = bool(indices_to_remove)
+
+            for path, value in updates.items():
                 yaml_value = self._format_yaml_scalar(value)
 
                 entry = line_map.get(path)
@@ -397,7 +393,10 @@ class ClientConfig:
                 if fcntl is not None:
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
-                    f.writelines(lines)
+                    for i, line in enumerate(lines):
+                        if i in indices_to_remove:
+                            continue
+                        f.write(line)
                 finally:
                     if fcntl is not None:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
@@ -415,7 +414,7 @@ class ClientConfig:
             return False
 
     def set_server_config_values(self, updates: dict[tuple[str, ...], Any]) -> bool:
-        """Set multiple server config values at once (with alias syncing)."""
+        """Set multiple server config values at once."""
         return self._set_server_config_values(updates)
 
     def set_server_config(self, *keys: str, value: Any) -> bool:
@@ -456,25 +455,15 @@ class ClientConfig:
                     if fcntl is not None:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-            def _get(path: tuple[str, ...]) -> Any:
-                value: Any = server_config
-                for key in path:
-                    if isinstance(value, dict):
-                        value = value.get(key)
-                    else:
-                        return None
-                    if value is None:
-                        return None
-                return value
-
-            path = tuple(keys)
-            value = _get(path)
-            if value is None:
-                for alias in self._SERVER_CONFIG_ALIASES.get(path, []):
-                    value = _get(alias)
-                    if value is not None:
-                        break
-            return value if value is not None else default
+            value: Any = server_config
+            for key in keys:
+                if isinstance(value, dict):
+                    value = value.get(key)
+                else:
+                    return default
+                if value is None:
+                    return default
+            return value
 
         except Exception as e:
             print(f"Error reading server config: {e}")

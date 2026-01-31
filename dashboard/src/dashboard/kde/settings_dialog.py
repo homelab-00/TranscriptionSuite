@@ -62,9 +62,15 @@ class ConfigNode:
 class CollapsibleSection(QWidget):
     """Collapsible container for nested settings sections."""
 
-    def __init__(self, title: str, description: str | None = None, level: int = 0):
+    def __init__(
+        self,
+        title: str,
+        description: str | None = None,
+        level: int = 0,
+        expanded: bool = False,
+    ):
         super().__init__()
-        self._expanded = True
+        self._expanded = expanded
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -74,8 +80,10 @@ class CollapsibleSection(QWidget):
         self.toggle_button.setObjectName("sectionToggle")
         self.toggle_button.setText(title)
         self.toggle_button.setCheckable(True)
-        self.toggle_button.setChecked(True)
-        self.toggle_button.setArrowType(Qt.ArrowType.DownArrow)
+        self.toggle_button.setChecked(expanded)
+        self.toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
         self.toggle_button.setToolButtonStyle(
             Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         )
@@ -95,6 +103,7 @@ class CollapsibleSection(QWidget):
             self.content_layout.addWidget(desc_label)
 
         layout.addWidget(self.content)
+        self.content.setVisible(expanded)
 
     def _on_toggled(self, checked: bool) -> None:
         self._expanded = checked
@@ -124,6 +133,14 @@ class SettingsDialog(QDialog):
         self._server_field_commented: dict[tuple[str, ...], bool] = {}
         self._server_field_enablers: dict[tuple[str, ...], QCheckBox] = {}
         self._server_row_search: dict[QWidget, str] = {}
+        self._server_hidden_paths: set[tuple[str, ...]] = {
+            ("live_transcriber", "enabled"),
+            ("live_transcriber", "live_language"),
+            ("live_transcriber", "model"),
+            ("longform_recording", "auto_add_to_audio_notebook"),
+            ("main_transcriber", "model"),
+        }
+        self._server_config_exists = False
 
         self.setWindowTitle("Settings")
         self.setMinimumWidth(540)
@@ -848,8 +865,9 @@ class SettingsDialog(QDialog):
         # Settings editor
         config_dir = get_config_dir()
         config_path = config_dir / "config.yaml"
+        self._server_config_exists = config_path.exists()
 
-        if config_path.exists():
+        if self._server_config_exists:
             root = self._parse_server_config(config_path)
             sections_container = QWidget()
             sections_layout = QVBoxLayout(sections_container)
@@ -863,7 +881,6 @@ class SettingsDialog(QDialog):
 
             sections_layout.addStretch()
             layout.addWidget(sections_container)
-            self._sync_server_alias_fields()
         else:
             missing_label = QLabel(
                 "config.yaml not found. Run the setup wizard or open the file manually."
@@ -1050,6 +1067,7 @@ class SettingsDialog(QDialog):
 
     def _infer_expected_type(self, node: ConfigNode) -> type:
         type_hints: dict[tuple[str, ...], type] = {
+            ("longform_recording", "language"): str,
             ("transcription_options", "language"): str,
             ("main_transcriber", "initial_prompt"): str,
             ("diarization", "hf_token"): str,
@@ -1109,13 +1127,8 @@ class SettingsDialog(QDialog):
         top_row.addWidget(input_widget)
         row_layout.addLayout(top_row)
 
-        comment_text = node.comment
-        if node.path == ("transcription_options", "enable_live_transcriber"):
-            note = "Synced with live_transcriber.enabled."
-            comment_text = f"{comment_text}\n{note}" if comment_text else note
-
-        if comment_text:
-            help_label = QLabel(comment_text)
+        if node.comment:
+            help_label = QLabel(node.comment)
             help_label.setObjectName("helpText")
             help_label.setWordWrap(True)
             row_layout.addWidget(help_label)
@@ -1144,6 +1157,8 @@ class SettingsDialog(QDialog):
 
         for child in node.children:
             if child.is_leaf:
+                if child.path in self._server_hidden_paths:
+                    continue
                 row = self._create_config_row(child)
                 section_widget.content_layout.addWidget(row)
                 rows.append(row)
@@ -1153,6 +1168,10 @@ class SettingsDialog(QDialog):
                 )
                 if child_section:
                     children.append(child_section)
+
+        if not rows and not children:
+            section_widget.setVisible(False)
+            return None
 
         return {"section": section_widget, "rows": rows, "children": children}
 
@@ -1178,35 +1197,6 @@ class SettingsDialog(QDialog):
         for section in self._server_section_tree:
             visible = filter_section(section)
             section["section"].setVisible(visible or not query)
-
-    def _sync_server_alias_fields(self) -> None:
-        alias_pairs = [
-            (
-                ("live_transcriber", "enabled"),
-                ("transcription_options", "enable_live_transcriber"),
-            )
-        ]
-        self._alias_sync_guard = False
-
-        def make_handler(target: QCheckBox):
-            def handler(checked: bool) -> None:
-                if self._alias_sync_guard:
-                    return
-                self._alias_sync_guard = True
-                target.setChecked(checked)
-                self._alias_sync_guard = False
-
-            return handler
-
-        for canonical, alias in alias_pairs:
-            canonical_widget = self._server_field_inputs.get(canonical)
-            alias_widget = self._server_field_inputs.get(alias)
-            if isinstance(canonical_widget, QCheckBox) and isinstance(
-                alias_widget, QCheckBox
-            ):
-                alias_widget.setChecked(canonical_widget.isChecked())
-                canonical_widget.toggled.connect(make_handler(alias_widget))
-                alias_widget.toggled.connect(make_handler(canonical_widget))
 
     def _parse_list_value(self, text: str) -> list[Any]:
         try:
@@ -1826,11 +1816,7 @@ class SettingsDialog(QDialog):
             self.config.set("diarization", "expected_speakers", value=None)
 
         # Client tab - Audio Notebook
-        server_auto_add = self._server_field_inputs.get(
-            ("longform_recording", "auto_add_to_audio_notebook")
-        )
-        if server_auto_add and isinstance(server_auto_add, QCheckBox):
-            server_auto_add.setChecked(self.auto_add_notebook_check.isChecked())
+        auto_add_value = self.auto_add_notebook_check.isChecked()
 
         # Client tab - Connection
         self.config.set(
@@ -1859,6 +1845,7 @@ class SettingsDialog(QDialog):
 
         # Save server config edits (if present)
         updates, errors = self._collect_server_config_updates()
+        updates[("longform_recording", "auto_add_to_audio_notebook")] = auto_add_value
         if errors:
             from PyQt6.QtWidgets import QMessageBox
 
@@ -1869,7 +1856,7 @@ class SettingsDialog(QDialog):
             )
             return
 
-        if updates:
+        if self._server_config_exists:
             if not self.config.set_server_config_values(updates):
                 from PyQt6.QtWidgets import QMessageBox
 

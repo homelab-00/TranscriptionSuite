@@ -34,6 +34,13 @@ class ServerControlMixin:
     - Server log display
     """
 
+    MODEL_CHOICES: list[tuple[str, str]] = [
+        ("Systran Faster Whisper Large v3", "Systran/faster-whisper-large-v3"),
+        ("Systran Faster Whisper Medium", "Systran/faster-whisper-medium"),
+    ]
+    MODEL_CUSTOM_VALUE = "__custom__"
+    MODEL_SAME_AS_MAIN_VALUE = "__same_as_main__"
+
     # =========================================================================
     # Server Status
     # =========================================================================
@@ -76,18 +83,25 @@ class ServerControlMixin:
             if health and health != "healthy":
                 if health == "unhealthy":
                     status_text = f"Unhealthy{mode_str}"
+                    self._server_status_label.setStyleSheet("color: #f44336;")
                 else:
                     status_text = f"Starting...{mode_str}"
+                    self._server_status_label.setStyleSheet("color: #2196f3;")
             else:
                 status_text = f"Running{mode_str}"
+                self._server_status_label.setStyleSheet("color: #4caf50;")
         elif status == ServerStatus.STOPPED:
             status_text = "Stopped"
+            self._server_status_label.setStyleSheet("color: #ff9800;")
         elif status == ServerStatus.NOT_FOUND:
             status_text = "Not set up"
+            self._server_status_label.setStyleSheet("color: #6c757d;")
         elif status == ServerStatus.ERROR:
             status_text = "Error"
+            self._server_status_label.setStyleSheet("color: #f44336;")
         else:
             status_text = "Unknown"
+            self._server_status_label.setStyleSheet("color: #f44336;")
 
         self._server_status_label.setText(status_text)
 
@@ -154,22 +168,6 @@ class ServerControlMixin:
         self._remove_data_volume_btn.setEnabled(not is_running)
         self._remove_models_volume_btn.setEnabled(not is_running)
 
-        # Style based on status (using Web UI colors)
-        if status == ServerStatus.RUNNING:
-            if health and health != "healthy":
-                if health == "unhealthy":
-                    self._server_status_label.setStyleSheet("color: #f44336;")  # error
-                else:
-                    self._server_status_label.setStyleSheet("color: #2196f3;")  # info
-            else:
-                self._server_status_label.setStyleSheet("color: #4caf50;")  # success
-        elif status == ServerStatus.STOPPED:
-            self._server_status_label.setStyleSheet("color: #6c757d;")  # grey
-        elif status == ServerStatus.NOT_FOUND:
-            self._server_status_label.setStyleSheet("color: #5d0000;")
-        else:
-            self._server_status_label.setStyleSheet("color: #f44336;")  # error
-
         if self._server_health_timer:
             if status != ServerStatus.RUNNING or health in (None, "healthy"):
                 self._server_health_timer.stop()
@@ -177,16 +175,6 @@ class ServerControlMixin:
 
         # Update models button state when server status changes
         self._update_models_button_state()
-
-        # Update live transcriber toggle state when server status changes
-        server_stopped = status != ServerStatus.RUNNING
-        if hasattr(self, "_preview_toggle_btn"):
-            self._preview_toggle_btn.setEnabled(server_stopped)
-            self._update_live_transcriber_toggle_style()
-
-        # Update live mode language dropdown state when server status changes
-        if hasattr(self, "_live_language_combo"):
-            self._live_language_combo.setEnabled(server_stopped)
 
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
@@ -239,6 +227,166 @@ class ServerControlMixin:
             self._models_volume_status.setStyleSheet("color: #6c757d;")
             self._models_volume_size.setText("")
             self._models_list_label.setVisible(False)
+
+    # =========================================================================
+    # Model Selection
+    # =========================================================================
+
+    def _init_model_selectors(self) -> None:
+        """Populate model selectors and apply current config."""
+        if not hasattr(self, "_main_model_combo") or not hasattr(
+            self, "_live_model_combo"
+        ):
+            return
+
+        self._main_model_combo.blockSignals(True)
+        self._main_model_combo.clear()
+        for label, value in self.MODEL_CHOICES:
+            self._main_model_combo.addItem(label, value)
+        self._main_model_combo.addItem("Custom...", self.MODEL_CUSTOM_VALUE)
+        self._main_model_combo.blockSignals(False)
+
+        self._live_model_combo.blockSignals(True)
+        self._live_model_combo.clear()
+        self._live_model_combo.addItem(
+            "Same as Main Transcriber", self.MODEL_SAME_AS_MAIN_VALUE
+        )
+        for label, value in self.MODEL_CHOICES:
+            self._live_model_combo.addItem(label, value)
+        self._live_model_combo.addItem("Custom...", self.MODEL_CUSTOM_VALUE)
+        self._live_model_combo.blockSignals(False)
+
+        self._apply_model_selector_state()
+
+    def _apply_model_selector_state(self) -> None:
+        """Sync model selectors with current config."""
+        if not hasattr(self, "_main_model_combo") or not hasattr(
+            self, "_live_model_combo"
+        ):
+            return
+
+        main_model = self.config.get_server_config(
+            "main_transcriber",
+            "model",
+            default="Systran/faster-whisper-large-v3",
+        )
+        self._set_model_combo(
+            self._main_model_combo,
+            self._main_model_custom,
+            main_model,
+            allow_same_as_main=False,
+        )
+
+        live_model = self.config.get_server_config(
+            "live_transcriber", "model", default=None
+        )
+        if live_model in (None, ""):
+            self._set_model_combo(
+                self._live_model_combo,
+                self._live_model_custom,
+                self.MODEL_SAME_AS_MAIN_VALUE,
+                allow_same_as_main=True,
+            )
+        else:
+            self._set_model_combo(
+                self._live_model_combo,
+                self._live_model_custom,
+                live_model,
+                allow_same_as_main=True,
+            )
+
+    def _set_model_combo(
+        self,
+        combo,
+        custom_input,
+        model_value: str | None,
+        *,
+        allow_same_as_main: bool,
+    ) -> None:
+        """Select the appropriate combo item and toggle custom input."""
+        combo.blockSignals(True)
+        custom_input.blockSignals(True)
+
+        target = model_value or ""
+        matched_index = -1
+        for i in range(combo.count()):
+            if combo.itemData(i) == target:
+                matched_index = i
+                break
+
+        if matched_index != -1:
+            combo.setCurrentIndex(matched_index)
+            custom_input.setVisible(False)
+        else:
+            if allow_same_as_main and target == self.MODEL_SAME_AS_MAIN_VALUE:
+                combo.setCurrentIndex(combo.findData(self.MODEL_SAME_AS_MAIN_VALUE))
+                custom_input.setVisible(False)
+            else:
+                combo.setCurrentIndex(combo.findData(self.MODEL_CUSTOM_VALUE))
+                custom_input.setText(target)
+                custom_input.setVisible(True)
+
+        combo.blockSignals(False)
+        custom_input.blockSignals(False)
+
+    def _on_main_model_selection_changed(self, index: int) -> None:
+        """Handle main transcriber model selection."""
+        if not hasattr(self, "_main_model_combo"):
+            return
+        selected = self._main_model_combo.currentData()
+        if selected == self.MODEL_CUSTOM_VALUE:
+            self._main_model_custom.setVisible(True)
+            custom_value = self._main_model_custom.text().strip()
+            if custom_value:
+                self.config.set_server_config(
+                    "main_transcriber", "model", value=custom_value
+                )
+        else:
+            self._main_model_custom.setVisible(False)
+            self.config.set_server_config("main_transcriber", "model", value=selected)
+
+    def _on_live_model_selection_changed(self, index: int) -> None:
+        """Handle Live Mode model selection."""
+        if not hasattr(self, "_live_model_combo"):
+            return
+        selected = self._live_model_combo.currentData()
+        if selected == self.MODEL_SAME_AS_MAIN_VALUE:
+            self._live_model_custom.setVisible(False)
+            self.config.set_server_config("live_transcriber", "model", value=None)
+        elif selected == self.MODEL_CUSTOM_VALUE:
+            self._live_model_custom.setVisible(True)
+            custom_value = self._live_model_custom.text().strip()
+            if custom_value:
+                self.config.set_server_config(
+                    "live_transcriber", "model", value=custom_value
+                )
+        else:
+            self._live_model_custom.setVisible(False)
+            self.config.set_server_config("live_transcriber", "model", value=selected)
+
+    def _on_main_model_custom_changed(self) -> None:
+        """Handle custom main transcriber model input."""
+        if not hasattr(self, "_main_model_combo"):
+            return
+        if self._main_model_combo.currentData() != self.MODEL_CUSTOM_VALUE:
+            return
+        custom_value = self._main_model_custom.text().strip()
+        if custom_value:
+            self.config.set_server_config(
+                "main_transcriber", "model", value=custom_value
+            )
+
+    def _on_live_model_custom_changed(self) -> None:
+        """Handle custom Live Mode model input."""
+        if not hasattr(self, "_live_model_combo"):
+            return
+        if self._live_model_combo.currentData() != self.MODEL_CUSTOM_VALUE:
+            return
+        custom_value = self._live_model_custom.text().strip()
+        if custom_value:
+            self.config.set_server_config(
+                "live_transcriber", "model", value=custom_value
+            )
 
     def _populate_image_selector(self) -> None:
         """Populate the image selector dropdown with available local images."""

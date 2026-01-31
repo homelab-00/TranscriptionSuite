@@ -1173,7 +1173,7 @@ class CalendarWidget(QWidget):
             /* Recording card in day view */
             #recordingCard {
                 background-color: #212121;
-                border: 1px solid #0AFCCF;
+                border: 1px solid #2d2d2d;
                 border-radius: 8px;
                 min-width: 180px;
                 padding: 8px;

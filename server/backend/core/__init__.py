@@ -6,7 +6,6 @@ This module contains:
 - diarization_engine: PyAnnote speaker diarization
 - model_manager: AI model lifecycle management
 - realtime_engine: Real-time transcription with VAD
-- live_transcriber_engine: Live transcription for standalone clients
 - client_detector: Client type detection (standalone vs web)
 - audio_utils: Audio processing utilities
 """
@@ -34,10 +33,6 @@ def __getattr__(name: str):
         from server.core.realtime_engine import RealtimeTranscriptionEngine
 
         return RealtimeTranscriptionEngine
-    elif name == "LiveTranscriptionEngine":
-        from server.core.live_transcriber_engine import LiveTranscriptionEngine
-
-        return LiveTranscriptionEngine
     elif name == "ClientType":
         from server.core.client_detector import ClientType
 
@@ -46,11 +41,6 @@ def __getattr__(name: str):
         from server.core.client_detector import ClientDetector
 
         return ClientDetector
-    # Backwards compatibility aliases
-    elif name == "PreviewTranscriptionEngine":
-        from server.core.live_transcriber_engine import LiveTranscriptionEngine
-
-        return LiveTranscriptionEngine
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -60,8 +50,6 @@ __all__ = [
     "ModelManager",
     "DiarizationEngine",
     "RealtimeTranscriptionEngine",
-    "LiveTranscriptionEngine",
-    "PreviewTranscriptionEngine",  # Alias for backwards compatibility
     "ClientType",
     "ClientDetector",
 ]

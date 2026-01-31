@@ -14,12 +14,7 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from dashboard.common.api_client import (
-    APIClient,
-    LiveModeClient,
-    ServerBusyError,
-    StreamingClient,
-)
+from dashboard.common.api_client import APIClient, LiveModeClient, ServerBusyError
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig
 from dashboard.common.models import TrayAction, TrayState
@@ -86,11 +81,6 @@ class ClientOrchestrator:
         self._is_initial_connection = (
             True  # Track if this is the first connection attempt
         )
-
-        # WebSocket streaming for live transcription
-        self._streaming_client: StreamingClient | None = None
-        self._live_transcription_text: str = ""
-        self._use_websocket_streaming: bool = False
 
         # Live Mode state
         self._live_mode_active: bool = False
@@ -188,22 +178,14 @@ class ClientOrchestrator:
         return self.api_client._is_localhost()
 
     @property
-    def live_transcriber_enabled(self) -> bool:
-        """Check if live transcriber is enabled in server config."""
-        return self.config.get_server_config(
-            "live_transcriber", "enabled", default=False
-        )
-
-    @property
     def sample_rate(self) -> int:
         """Get the configured sample rate."""
         return self.config.get("recording", "sample_rate", default=16000)
 
-    def _on_live_transcription_text(self, text: str) -> None:
-        """Handle live transcription text from WebSocket."""
-        self._live_transcription_text = text
-        if self.tray:
-            self.tray.update_live_transcription_text(text)
+    @property
+    def is_live_mode_active(self) -> bool:
+        """Check if Live Mode is currently active."""
+        return self._live_mode_active
 
     # =========================================================================
     # Server Connection
@@ -339,14 +321,7 @@ class ClientOrchestrator:
 
             self.is_recording = True
 
-        # Check if we should use WebSocket streaming for live transcription
-        # Live transcriber mode is only used when: live transcriber enabled AND not notebook mode
-        if self.live_transcriber_enabled and not self.auto_add_to_notebook:
-            self._use_websocket_streaming = True
-            self._schedule_async(self._start_websocket_recording())
-        else:
-            self._use_websocket_streaming = False
-            self._start_http_recording()
+        self._start_http_recording()
 
     def _start_http_recording(self) -> None:
         """Start recording with HTTP batch upload (default mode)."""
@@ -377,33 +352,28 @@ class ClientOrchestrator:
         with self._state_lock:
             if not self.is_recording:
                 return
-            # For WebSocket mode, recorder might be None (chunks sent directly)
-            if not self._use_websocket_streaming and not self.recorder:
+            if not self.recorder:
                 return
             self.is_recording = False
 
-        if self._use_websocket_streaming:
-            # WebSocket streaming mode - send stop command
-            self._schedule_async(self._stop_websocket_recording())
-        else:
-            # HTTP batch mode - upload recorded audio
-            if self.tray:
-                self.tray.set_state(TrayState.UPLOADING)
+        # HTTP batch mode - upload recorded audio
+        if self.tray:
+            self.tray.set_state(TrayState.UPLOADING)
 
-            # Get recorded audio as WAV bytes
-            if self.recorder:
-                try:
-                    audio_data = self.recorder.stop()
-                    self.recorder = None
+        # Get recorded audio as WAV bytes
+        if self.recorder:
+            try:
+                audio_data = self.recorder.stop()
+                self.recorder = None
 
-                    # Transcribe
-                    self._schedule_async(self._transcribe_audio(audio_data))
+                # Transcribe
+                self._schedule_async(self._transcribe_audio(audio_data))
 
-                except Exception as e:
-                    logger.error(f"Failed to stop recording: {e}")
-                    if self.tray:
-                        self.tray.set_state(TrayState.ERROR)
-                        self.tray.show_notification("Error", str(e))
+            except Exception as e:
+                logger.error(f"Failed to stop recording: {e}")
+                if self.tray:
+                    self.tray.set_state(TrayState.ERROR)
+                    self.tray.show_notification("Error", str(e))
 
     def _on_cancel_recording(self) -> None:
         """Handle cancel recording/transcription action."""
@@ -412,10 +382,7 @@ class ClientOrchestrator:
             if self.is_recording:
                 self.is_recording = False
 
-                # Cancel WebSocket streaming if active
-                if self._use_websocket_streaming and self._streaming_client:
-                    self._schedule_async(self._cancel_websocket_recording())
-                elif self.recorder:
+                if self.recorder:
                     try:
                         self.recorder.cancel()
                     except Exception:
@@ -457,75 +424,6 @@ class ClientOrchestrator:
                     "Cancel Failed", result.get("message", "Unknown error")
                 )
 
-    # =========================================================================
-    # WebSocket Streaming (Live Transcriber Mode)
-    # =========================================================================
-
-    async def _start_websocket_recording(self) -> None:
-        """Start recording with WebSocket streaming for real-time live transcription."""
-        if not self.api_client:
-            with self._state_lock:
-                self.is_recording = False
-            return
-
-        self._live_transcription_text = ""
-        if self.tray:
-            self.tray.set_state(TrayState.RECORDING)
-            self.tray.update_live_transcription_text("")
-
-        # Create streaming client with callbacks
-        self._streaming_client = StreamingClient(
-            self.api_client,
-            on_preview=self._on_live_transcription_text,
-            on_final=self._on_websocket_final,
-            on_error=self._on_websocket_error,
-        )
-
-        # Connect to WebSocket
-        if not await self._streaming_client.connect():
-            logger.warning("WebSocket connect failed, falling back to HTTP batch mode")
-            with self._state_lock:
-                self.is_recording = False
-                self._use_websocket_streaming = False
-            # Fall back to HTTP batch mode
-            self._start_http_recording()
-            with self._state_lock:
-                self.is_recording = True
-            return
-
-        # Send start command with VAD enabled for server-side processing
-        await self._streaming_client.send_control("start", {"use_vad": True})
-
-        # Start audio recorder with chunk callback for streaming
-        try:
-            device_index = self.config.get("recording", "device_index")
-
-            self.recorder = AudioRecorder(
-                sample_rate=self.sample_rate,
-                device_index=device_index,
-                on_audio_chunk=self._on_audio_chunk,
-            )
-            self.recorder.start()
-            logger.info(
-                "Recording started (WebSocket streaming mode with live transcriber)"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to start WebSocket recording: {e}")
-            await self._cleanup_websocket()
-            with self._state_lock:
-                self.is_recording = False
-            if self.tray:
-                self.tray.set_state(TrayState.ERROR)
-                self.tray.show_notification("Error", f"Failed to start recording: {e}")
-
-    def _on_audio_chunk(self, chunk: bytes) -> None:
-        """Forward audio chunk to WebSocket (called from AudioRecorder thread)."""
-        if self._streaming_client and self._streaming_client.is_connected:
-            # Format and send via WebSocket
-            formatted = self._format_audio_for_websocket(chunk)
-            self._schedule_async(self._streaming_client.send_audio(formatted))
-
     def _format_audio_for_websocket(self, pcm_data: bytes) -> bytes:
         """Format audio chunk for WebSocket binary protocol."""
         import json
@@ -535,115 +433,6 @@ class ClientOrchestrator:
         metadata_bytes = metadata.encode("utf-8")
         header = struct.pack("<I", len(metadata_bytes))
         return header + metadata_bytes + pcm_data
-
-    async def _stop_websocket_recording(self) -> None:
-        """Stop WebSocket recording and wait for final transcription."""
-        if self.tray:
-            self.tray.set_state(TrayState.TRANSCRIBING)
-
-        # Stop the audio recorder
-        if self.recorder:
-            try:
-                self.recorder.stop()
-            except Exception as e:
-                logger.debug(f"Error stopping recorder: {e}")
-            self.recorder = None
-
-        # Send stop command to server
-        if self._streaming_client and self._streaming_client.is_connected:
-            await self._streaming_client.send_control("stop")
-            logger.info(
-                "WebSocket stop command sent, waiting for final transcription..."
-            )
-            # The final result will be handled by _on_websocket_final callback
-
-    async def _cancel_websocket_recording(self) -> None:
-        """Cancel WebSocket recording without waiting for transcription."""
-        if self.recorder:
-            try:
-                self.recorder.cancel()
-            except Exception:
-                pass
-            self.recorder = None
-
-        await self._cleanup_websocket()
-
-    async def _cleanup_websocket(self) -> None:
-        """Clean up WebSocket resources."""
-        if self._streaming_client:
-            await self._streaming_client.close()
-            self._streaming_client = None
-        self._live_transcription_text = ""
-        self._use_websocket_streaming = False
-
-    def _on_websocket_final(self, result: dict[str, Any]) -> None:
-        """Handle final transcription result from WebSocket (callback from receive loop)."""
-        # Schedule the processing on the async loop
-        self._schedule_async(self._process_websocket_result(result))
-
-    async def _process_websocket_result(self, result: dict[str, Any]) -> None:
-        """Process final WebSocket transcription result."""
-        # Extract text from result (handle both formats)
-        text = result.get("data", {}).get("text", "") or result.get("text", "")
-        self.last_transcription = text
-
-        # Clean up WebSocket
-        await self._cleanup_websocket()
-
-        # Flash icon then set to STANDBY
-        if self.tray:
-            if hasattr(self.tray, "flash_then_set_state"):
-                self.tray.flash_then_set_state(TrayState.STANDBY, flash_duration_ms=500)
-            else:
-                self.tray.set_state(TrayState.STANDBY)
-
-        # Copy to clipboard (only when NOT in notebook mode)
-        # Note: WebSocket streaming should not be used in notebook mode (see _on_start_recording),
-        # but we check anyway for robustness.
-        if text and self.auto_copy_clipboard and not self.auto_add_to_notebook:
-            self._copy_to_clipboard(text)
-
-            # Show notification with preview
-            preview = text[:100]
-            if len(text) > 100:
-                preview += "..."
-
-            if self.tray:
-                self.tray.show_notification(
-                    "Transcription Complete",
-                    f"Copied to clipboard: {preview}",
-                )
-        elif not text:
-            if self.tray:
-                self.tray.show_notification(
-                    "Transcription Complete",
-                    "No speech detected",
-                )
-
-        logger.info("WebSocket transcription complete")
-
-    def _on_websocket_error(self, error: str) -> None:
-        """Handle WebSocket error (callback from receive loop)."""
-        logger.error(f"WebSocket error: {error}")
-
-        # Schedule cleanup and error handling
-        self._schedule_async(self._handle_websocket_error(error))
-
-    async def _handle_websocket_error(self, error: str) -> None:
-        """Handle WebSocket error and clean up."""
-        await self._cleanup_websocket()
-
-        with self._state_lock:
-            self.is_recording = False
-
-        if self.tray:
-            self.tray.set_state(TrayState.ERROR)
-            self.tray.show_notification("Transcription Error", error)
-
-            # Reset to standby after a delay
-            await asyncio.sleep(3)
-            if self.api_client and self.api_client.is_connected:
-                self.tray.set_state(TrayState.STANDBY)
 
     async def _transcribe_audio(self, audio_data: bytes) -> None:
         """Send audio to server for transcription."""
@@ -1000,6 +789,12 @@ class ClientOrchestrator:
 
         self._schedule_async(self._stop_live_mode())
 
+    def request_live_mode_restart(self) -> None:
+        """Request Live Mode restart (used for live config changes)."""
+        if not self._live_mode_active:
+            return
+        self._schedule_async(self._restart_live_mode())
+
     async def _start_live_mode(self) -> None:
         """Start Live Mode WebSocket connection with audio streaming."""
         if not self.api_client:
@@ -1017,6 +812,8 @@ class ClientOrchestrator:
 
             # Connect
             if not await self._live_mode_client.connect():
+                if self.tray and hasattr(self.tray, "set_live_mode_active"):
+                    self.tray.set_live_mode_active(False)
                 return
 
             self._live_mode_active = True
@@ -1032,15 +829,17 @@ class ClientOrchestrator:
                 )
 
             # Send start command with config
+            main_model = self.config.get_server_config(
+                "main_transcriber",
+                "model",
+                default="Systran/faster-whisper-large-v3",
+            )
+            live_model = self.config.get_server_config(
+                "live_transcriber", "model", default=None
+            )
             config = {
-                "model": self.config.get_server_config(
-                    "main_transcriber",
-                    "model",
-                    default="Systran/faster-whisper-large-v3",
-                ),
-                "language": self.config.get_server_config(
-                    "transcription_options", "language", default=""
-                ),
+                "model": live_model or main_model,
+                "language": self._get_live_mode_language(),
                 "post_speech_silence_duration": self.config.get(
                     "live_mode", "grace_period", default=1.0
                 ),
@@ -1130,6 +929,12 @@ class ClientOrchestrator:
     async def _stop_live_mode(self) -> None:
         """Stop Live Mode WebSocket connection."""
         if not self._live_mode_client:
+            self._live_mode_active = False
+            self._live_mode_muted = False
+            if self.tray and hasattr(self.tray, "set_live_mode_active"):
+                self.tray.set_live_mode_active(False)
+            if self.tray:
+                self.tray.set_state(TrayState.STANDBY)
             return
 
         try:
@@ -1153,6 +958,28 @@ class ClientOrchestrator:
                 self.tray.show_notification("Live Mode", "Live Mode stopped")
 
             logger.info("Live Mode stopped")
+
+    async def _restart_live_mode(self) -> None:
+        """Restart Live Mode to apply updated configuration."""
+        if not self._live_mode_active:
+            return
+        await self._stop_live_mode()
+        await self._start_live_mode()
+
+    def _get_live_mode_language(self) -> str:
+        """Resolve the Live Mode language code from config."""
+        live_language = self.config.get_server_config(
+            "live_transcriber", "live_language", default=None
+        )
+        if live_language is None:
+            live_language = self.config.get_server_config(
+                "longform_recording", "language", default=None
+            )
+        if live_language is None:
+            live_language = self.config.get_server_config(
+                "transcription_options", "language", default=""
+            )
+        return live_language or ""
 
     def _on_live_sentence(self, text: str) -> None:
         """Callback for completed Live Mode sentences."""

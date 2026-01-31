@@ -9,13 +9,16 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSpacerItem,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
 
@@ -185,7 +188,7 @@ def create_server_view(dashboard) -> QWidget:
     # 3-column management layout
     mgmt_container = QWidget()
     mgmt_grid = QHBoxLayout(mgmt_container)
-    mgmt_grid.setSpacing(16)
+    mgmt_grid.setSpacing(26)
     mgmt_grid.addStretch()
 
     # Column 1: Container Management
@@ -282,6 +285,97 @@ def create_server_view(dashboard) -> QWidget:
 
     layout.addWidget(mgmt_container, alignment=Qt.AlignmentFlag.AlignCenter)
 
+    layout.addSpacing(12)
+
+    # Model selector panel (under management boxes)
+    models_frame = QFrame()
+    models_frame.setObjectName("statusCard")
+    models_frame.setFixedWidth(card_width)
+    models_layout = QVBoxLayout(models_frame)
+    models_layout.setSpacing(10)
+    models_layout.setContentsMargins(16, 0, 16, 12)
+
+    models_title = QLabel("Transcription Models")
+    models_title.setObjectName("sectionHeader")
+    models_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    models_layout.addWidget(models_title)
+
+    combo_style = (
+        "QComboBox { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
+        "QComboBox:hover { border-color: #505050; }"
+        "QComboBox::drop-down { border: none; width: 20px; }"
+        "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
+        "border-right: 4px solid transparent; border-top: 5px solid #808080; margin-right: 6px; }"
+        "QComboBox QAbstractItemView { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "color: #e0e0e0; selection-background-color: #404040; padding: 4px; }"
+    )
+    custom_style = (
+        "QLineEdit { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
+    )
+
+    models_grid = QGridLayout()
+    models_grid.setHorizontalSpacing(10)
+    models_grid.setVerticalSpacing(10)
+
+    # Main transcriber model row
+    main_label = QLabel("Main Transcriber Model:")
+    main_label.setObjectName("statusLabel")
+    models_grid.addWidget(main_label, 0, 0)
+
+    dashboard._main_model_combo = QComboBox()
+    dashboard._main_model_combo.setMinimumWidth(280)
+    dashboard._main_model_combo.setStyleSheet(combo_style)
+    dashboard._main_model_combo.currentIndexChanged.connect(
+        dashboard._on_main_model_selection_changed
+    )
+    models_grid.addWidget(dashboard._main_model_combo, 0, 1)
+
+    dashboard._main_model_custom = QLineEdit()
+    dashboard._main_model_custom.setPlaceholderText("Custom model id...")
+    dashboard._main_model_custom.setStyleSheet(custom_style)
+    dashboard._main_model_custom.setVisible(False)
+    dashboard._main_model_custom.editingFinished.connect(
+        dashboard._on_main_model_custom_changed
+    )
+    models_layout.addWidget(dashboard._main_model_custom)
+
+    # Live Mode model row
+    live_label = QLabel("Live Mode Model:")
+    live_label.setObjectName("statusLabel")
+    models_grid.addWidget(live_label, 1, 0)
+
+    dashboard._live_model_combo = QComboBox()
+    dashboard._live_model_combo.setMinimumWidth(280)
+    dashboard._live_model_combo.setStyleSheet(combo_style)
+    dashboard._live_model_combo.currentIndexChanged.connect(
+        dashboard._on_live_model_selection_changed
+    )
+    models_grid.addWidget(dashboard._live_model_combo, 1, 1)
+    models_grid.addItem(
+        QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum),
+        0,
+        2,
+        2,
+        1,
+    )
+    models_layout.addLayout(models_grid)
+
+    dashboard._live_model_custom = QLineEdit()
+    dashboard._live_model_custom.setPlaceholderText("Custom model id...")
+    dashboard._live_model_custom.setStyleSheet(custom_style)
+    dashboard._live_model_custom.setVisible(False)
+    dashboard._live_model_custom.editingFinished.connect(
+        dashboard._on_live_model_custom_changed
+    )
+    models_layout.addWidget(dashboard._live_model_custom)
+
+    # Populate model selectors from config
+    dashboard._init_model_selectors()
+
+    layout.addWidget(models_frame, alignment=Qt.AlignmentFlag.AlignCenter)
+
     layout.addSpacing(20)
 
     # Volumes status panel
@@ -291,6 +385,11 @@ def create_server_view(dashboard) -> QWidget:
     volumes_layout = QVBoxLayout(volumes_frame)
     volumes_layout.setSpacing(10)
     volumes_layout.setContentsMargins(16, 12, 16, 12)
+
+    volumes_title = QLabel("Volumes")
+    volumes_title.setObjectName("sectionHeader")
+    volumes_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    volumes_layout.addWidget(volumes_title)
 
     # Data volume row
     data_volume_row = QHBoxLayout()

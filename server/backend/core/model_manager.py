@@ -5,8 +5,7 @@ Handles:
 - Model loading and caching
 - GPU memory management
 - Model switching between modes
-- Real-time and preview transcription engines
-- Client-aware model loading (preview for standalone clients)
+- Real-time transcription engines
 - Graceful cleanup
 
 NOTE: All heavy imports (torch, faster_whisper, pyannote, etc.) are done lazily
@@ -23,7 +22,6 @@ if TYPE_CHECKING:
     from server.core.stt.engine import AudioToTextRecorder
     from server.core.diarization_engine import DiarizationEngine
     from server.core.realtime_engine import RealtimeTranscriptionEngine
-    from server.core.live_transcriber_engine import LiveTranscriptionEngine
     from server.core.client_detector import ClientType
 
 logger = logging.getLogger(__name__)
@@ -161,7 +159,6 @@ class ModelManager:
     Supports:
     - File-based and streaming transcription (AudioToTextRecorder - unified engine)
     - Real-time transcription with VAD (RealtimeTranscriptionEngine)
-    - Live transcriber for standalone clients (LiveTranscriptionEngine)
     - Speaker diarization (DiarizationEngine)
     """
 
@@ -174,16 +171,11 @@ class ModelManager:
         """
         # Lazy imports
         from server.core.audio_utils import check_cuda_available, get_gpu_memory_info
-        from server.core.live_transcriber_engine import LiveTranscriberConfig
 
         self.config = config
         self._transcription_engine: Optional["AudioToTextRecorder"] = None
         self._diarization_engine: Optional[Any] = None  # Will be DiarizationEngine
-        self._live_transcriber_engine: Optional["LiveTranscriptionEngine"] = None
         self._realtime_engines: Dict[str, "RealtimeTranscriptionEngine"] = {}
-
-        # Track connected standalone clients
-        self._standalone_client_count = 0
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -198,23 +190,11 @@ class ModelManager:
         else:
             logger.warning("No GPU available, using CPU for transcription")
 
-        # Check if live transcriber is enabled in config
-        self._live_transcriber_config = LiveTranscriberConfig.from_dict(config)
-        if self._live_transcriber_config.enabled:
-            logger.info(
-                f"Live transcriber configured with model: {self._live_transcriber_config.model}"
-            )
-
     @property
     def main_model_name(self) -> str:
         """Get the configured main transcription model name."""
         main_cfg = self.config.get("main_transcriber", {})
         return main_cfg.get("model", "Systran/faster-whisper-large-v3")
-
-    @property
-    def live_transcriber_model_name(self) -> str:
-        """Get the configured live transcriber model name."""
-        return self._live_transcriber_config.model
 
     def is_same_model(self, model_a: str, model_b: str) -> bool:
         """
@@ -254,7 +234,9 @@ class ModelManager:
         from server.core.stt.engine import AudioToTextRecorder
 
         main_cfg = self.config.get("main_transcriber", {})
-        trans_opts = self.config.get("transcription_options", {})
+        trans_opts = self.config.get("longform_recording", {})
+        if not trans_opts:
+            trans_opts = self.config.get("transcription_options", {})
 
         return AudioToTextRecorder(
             instance_name="file_transcriber",
@@ -362,32 +344,11 @@ class ModelManager:
         if session_id in self._realtime_engines:
             return self._realtime_engines[session_id]
 
-        # Determine if live transcriber should be enabled
-        enable_live_transcriber = (
-            client_type == ClientType.STANDALONE
-            and self._live_transcriber_config.enabled
-        )
-
-        # Get the shared live transcriber engine if available (to avoid duplicate model loading)
-        shared_live_transcriber_engine = None
-        if enable_live_transcriber and self._live_transcriber_engine is not None:
-            # Pass the inner AudioToTextRecorder from the shared LiveTranscriptionEngine
-            shared_live_transcriber_engine = self._live_transcriber_engine._engine
-            logger.info(
-                f"Creating realtime engine with shared live transcriber for session {session_id}"
-            )
-        elif enable_live_transcriber:
-            logger.info(
-                f"Creating realtime engine with live transcriber for session {session_id}"
-            )
-        else:
-            logger.info(f"Creating realtime engine for session {session_id}")
+        logger.info(f"Creating realtime engine for session {session_id}")
 
         # Create the engine
         engine = create_realtime_engine(
             config=self.config,
-            enable_live_transcriber=enable_live_transcriber,
-            live_transcriber_engine=shared_live_transcriber_engine,
             **callbacks,
         )
 
@@ -421,86 +382,6 @@ class ModelManager:
             self.release_realtime_engine(session_id)
 
     # =========================================================================
-    # Live Transcriber Engine
-    # =========================================================================
-
-    @property
-    def live_transcriber_engine(self) -> Optional["LiveTranscriptionEngine"]:
-        """Get the live transcriber engine if available."""
-        return self._live_transcriber_engine
-
-    def load_live_transcriber_engine(self, language: Optional[str] = None) -> bool:
-        """
-        Load the live transcription engine.
-
-        Only loads if live transcriber is enabled in config.
-
-        Args:
-            language: Target language code
-
-        Returns:
-            True if loaded successfully
-        """
-        from server.core.live_transcriber_engine import LiveTranscriptionEngine
-
-        if not self._live_transcriber_config.enabled:
-            logger.debug("Live transcriber engine disabled in config")
-            return False
-
-        if self._live_transcriber_engine is None:
-            self._live_transcriber_engine = LiveTranscriptionEngine(self.config)
-
-        return self._live_transcriber_engine.load(language)
-
-    def unload_live_transcriber_engine(self) -> None:
-        """Unload the live transcriber engine to free memory."""
-        if self._live_transcriber_engine is not None:
-            self._live_transcriber_engine.unload()
-            self._live_transcriber_engine = None
-            logger.info("Live transcriber engine unloaded")
-
-    # =========================================================================
-    # Client Connection Management
-    # =========================================================================
-
-    def on_standalone_client_connected(self) -> None:
-        """
-        Called when a standalone client connects.
-
-        Loads live transcriber if enabled and this is the first
-        standalone client.
-        """
-        self._standalone_client_count += 1
-
-        if self._standalone_client_count == 1 and self._live_transcriber_config.enabled:
-            logger.info(
-                "First standalone client connected - loading live transcriber engine"
-            )
-            self.load_live_transcriber_engine()
-
-    def on_standalone_client_disconnected(self) -> None:
-        """
-        Called when a standalone client disconnects.
-
-        Unloads live transcriber if no standalone clients remain.
-        """
-        self._standalone_client_count = max(0, self._standalone_client_count - 1)
-
-        if (
-            self._standalone_client_count == 0
-            and self._live_transcriber_engine is not None
-        ):
-            logger.info(
-                "No standalone clients remaining - unloading live transcriber engine"
-            )
-            self.unload_live_transcriber_engine()
-
-    @property
-    def has_standalone_clients(self) -> bool:
-        """Check if any standalone clients are connected."""
-        return self._standalone_client_count > 0
-
-    # =========================================================================
     # General Management
     # =========================================================================
 
@@ -511,7 +392,6 @@ class ModelManager:
         logger.info("Unloading all models...")
         self.unload_transcription_model()
         self.unload_diarization_model()
-        self.unload_live_transcriber_engine()
         self.release_all_realtime_engines()
         clear_gpu_cache()
         logger.info("All models unloaded")
@@ -533,19 +413,10 @@ class ModelManager:
             "diarization": {
                 "loaded": self._diarization_engine is not None,
             },
-            "live_transcriber": {
-                "enabled": self._live_transcriber_config.enabled,
-                "loaded": self._live_transcriber_engine is not None
-                and self._live_transcriber_engine.is_loaded,
-                "model": self._live_transcriber_config.model
-                if self._live_transcriber_config.enabled
-                else None,
-            },
             "realtime": {
                 "active_sessions": len(self._realtime_engines),
                 "session_ids": list(self._realtime_engines.keys()),
             },
-            "standalone_clients": self._standalone_client_count,
             "job_tracker": self.job_tracker.get_status(),
         }
         return status

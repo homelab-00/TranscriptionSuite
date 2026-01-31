@@ -2,30 +2,17 @@
 # TranscriptionSuite - Unified Configuration
 # ============================================================================
 # This is the central configuration file for the entire TranscriptionSuite.
-# It combines settings for:
-#   - Core transcription engine (MAIN/)
-#   - Speaker diarization module (DIARIZATION/)
-#   - Audio Notebook web application (AUDIO_NOTEBOOK/)
-# ============================================================================
-
-# ----------------------------------------------------------------------------
-# Global Transcription Options
-# ----------------------------------------------------------------------------
-transcription_options:
-    # Language code for transcription (e.g., "en" for English, "el" for Greek).
-    # Set to null for automatic language detection.
-    # This setting applies to both the main and live transcribers.
-    language: null
-
-    # If true, the live transcriber will be enabled for longform recording.
-    # If false, only the main transcriber is used (saves GPU resources).
-    enable_live_transcriber: false
 
 # ----------------------------------------------------------------------------
 # Longform Recording
 # ----------------------------------------------------------------------------
 # Settings for live recording mode (start/stop dictation).
 longform_recording:
+    # Language code for transcription (e.g., "en" for English, "el" for Greek).
+    # Set to null for automatic language detection.
+    # This setting applies to both the main and live transcribers.
+    language: null
+
     # Automatically add longform recordings to Audio Notebook.
     # When enabled, recordings are sent to the notebook instead of just the clipboard.
     auto_add_to_audio_notebook: false
@@ -36,15 +23,6 @@ longform_recording:
 # Settings for transcribing audio/video files (not live recording).
 # These settings are used as defaults for standalone client file transcriptions.
 static_transcription:
-    # Enable speaker diarization (identifies "who spoke when").
-    # Requires PyAnnote models to be downloaded.
-    # Used as default for standalone client file transcriptions.
-    enable_diarization: false
-
-    # Enable word-level timestamps in the transcription output.
-    # Used as default for standalone client file transcriptions.
-    word_timestamps: false
-
     # Maximum characters per segment in the output (when longer we create a new line)
     # Segments are split when speaker changes or this limit is reached.
     max_segment_chars: 500
@@ -94,27 +72,18 @@ main_transcriber:
     no_log_file: true
 
 # ----------------------------------------------------------------------------
-# Live Transcriber Configuration
+# Live Mode (RealtimeSTT) Configuration
 # ----------------------------------------------------------------------------
-# The transcriber used for live transcription during recording.
-# Only loaded when:
-#   1. enabled: true (below)
-#   2. A standalone client connects (not web browser)
-#
-# NOTE: When enabled, the live transcriber uses the SAME model as main_transcriber
-# by default. This ensures consistent transcription quality. If no model is
-# specified below, the main_transcriber.model is used automatically.
+# Settings used by Live Mode preview in the native client.
+# Live Mode runs continuously over /ws/live when enabled from the dashboard.
 live_transcriber:
-    # Enable/disable live transcription.
-    # When enabled AND a standalone client connects, the live model is loaded.
-    # Web browser clients never use live transcriber to save GPU resources.
+    # Enable/disable Live Mode preview in the dashboard client.
     enabled: false
 
-    # Language for live transcription (e.g., "en", "el").
-    # This is the dedicated setting for Live Mode language.
+    # Language for Live Mode (e.g., "en", "el").
+    # Modified via the dashboard Client view dropdown (Live Mode Language).
     # Default: "en"
-    # TODO: Currently not being respected - needs investigation
-    # live_language: "en"
+    live_language: "en"
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.

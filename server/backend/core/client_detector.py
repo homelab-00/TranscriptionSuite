@@ -3,7 +3,6 @@ Client type detection for TranscriptionSuite server.
 
 Detects whether a connecting client is the standalone desktop app
 or a web browser. This enables features like:
-- Preview transcription for standalone clients
 - Different resource allocation strategies
 - Client-specific optimizations
 
@@ -36,11 +35,6 @@ class ClientCapabilities:
         self.client_type = client_type
 
     @property
-    def supports_preview(self) -> bool:
-        """Whether client supports preview transcription."""
-        return self.client_type == ClientType.STANDALONE
-
-    @property
     def supports_vad_events(self) -> bool:
         """Whether client can receive VAD events."""
         return self.client_type == ClientType.STANDALONE
@@ -61,7 +55,6 @@ class ClientCapabilities:
         """Convert capabilities to dict for API responses."""
         return {
             "client_type": self.client_type.value,
-            "supports_preview": self.supports_preview,
             "supports_vad_events": self.supports_vad_events,
             "supports_binary_audio": self.supports_binary_audio,
         }

@@ -382,6 +382,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self._live_mode_active = active
         # Force a state update to refresh menu labels
         self._do_set_state(self.state)
+        if self._dashboard_window:
+            self._dashboard_window.set_live_mode_active(active)
 
     def _on_toggle_live_mode_click(self) -> None:
         """Handle Start/Stop Live Mode click."""
@@ -493,8 +495,8 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         """
         Forward live transcription text to dashboard for display (thread-safe).
 
-        Called by the orchestrator during WebSocket streaming recording
-        when live transcription updates are received.
+        Called by the orchestrator during Live Mode to display
+        real-time transcription updates.
 
         Args:
             text: The live transcription text to display
@@ -581,6 +583,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if self._dashboard_window is None:
             self._dashboard_window = DashboardWindow(self.config)
             self._dashboard_window.tray = self
+            self._dashboard_window.set_live_mode_active(self._live_mode_active)
             # Connect Dashboard signals
             self._dashboard_window.start_client_requested.connect(
                 self._on_dashboard_start_client

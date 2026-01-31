@@ -785,6 +785,11 @@ uv run transcription-dashboard --verbose
 - **GNOME**: Uses the same PyQt6 dashboard as KDE/Windows, launched from the GTK3 tray via D-Bus.
 - **View Creation**: KDE uses factory functions in `views/` package for server and client views, keeping dashboard.py focused on navigation and lifecycle.
 
+### 9.3.1 Settings Exposure Rules
+
+- **Single-source UI exposure**: Every setting must be shown **either** in one of the Dashboard Client/Server views or the Settings dialog tabs (App/Client/Notebook) **or** in the Settings dialog Server tab — never both.
+- **Server tab descriptions**: The Server tab reads descriptions directly from comments in the active user `config.yaml` (e.g., `~/.config/TranscriptionSuite/config.yaml`). If you change those comments, the UI descriptions update automatically on next open.
+
 ### 9.4 Dashboard Architecture & Refactoring
 
 #### KDE Dashboard Refactoring (Completed)
@@ -872,9 +877,10 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 **Live Mode Configuration:**
 - `live_transcriber.enabled` - Enable/disable Live Mode feature
 - `live_transcriber.post_speech_silence_duration` - Grace period after silence (default: 3.0s)
-- `live_transcriber.live_language` - Language code for Live Mode (currently not respected - see Known Issues)
+- `live_transcriber.live_language` - Language code for Live Mode (default: "en"; modified via Dashboard Client view)
 - Model is inherited from `main_transcriber.model` if not explicitly set
 - Automatically swaps models to free VRAM when Live Mode starts
+- **Note:** Live Mode always unloads the main model and starts its own engine. The dashboard currently sends the main model on Live Mode start unless you explicitly wire `live_transcriber.model` through the client/server path.
 
 **Environment variables:**
 | Variable | Purpose |

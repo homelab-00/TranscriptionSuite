@@ -14,6 +14,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMessageBox
 
 from dashboard.common.docker_manager import ServerStatus
+from dashboard.common.models import TrayAction
 
 if TYPE_CHECKING:
     from dashboard.common.api_client import APIClient
@@ -42,7 +43,7 @@ class ClientControlMixin:
         """Refresh the client status display."""
         if self._client_running:
             self._client_status_label.setText("Running")
-            self._client_status_label.setStyleSheet("color: #4caf50;")  # success
+            self._client_status_label.setStyleSheet("color: #4caf50;")  # match sidebar
 
             # Show connection info
             host = self.config.server_host
@@ -51,7 +52,7 @@ class ClientControlMixin:
             self._connection_info_label.setText(f"{https}://{host}:{port}")
         else:
             self._client_status_label.setText("Stopped")
-            self._client_status_label.setStyleSheet("color: #6c757d;")  # grey
+            self._client_status_label.setStyleSheet("color: #ff9800;")  # match sidebar
             self._connection_info_label.setText("Not connected")
 
         # Update button states
@@ -61,6 +62,13 @@ class ClientControlMixin:
 
         # Update models button based on server health
         self._update_models_button_state()
+
+        # Live Mode toggle is only usable when the client is running
+        if hasattr(self, "_preview_toggle_btn"):
+            self._preview_toggle_btn.setEnabled(self._client_running)
+            self._update_live_transcriber_toggle_style()
+        if hasattr(self, "_live_mode_mute_btn"):
+            self._live_mode_mute_btn.setEnabled(False)
 
     def _update_models_button_state(self) -> None:
         """Update the models button state based on server health and connection type."""
@@ -453,18 +461,35 @@ class ClientControlMixin:
                 )
 
     def _on_live_transcriber_toggle(self) -> None:
-        """Handle live transcriber toggle button click."""
+        """Handle Live Mode toggle button click."""
         is_enabled = self._preview_toggle_btn.isChecked()
         self._preview_toggle_btn.setText("Enabled" if is_enabled else "Disabled")
         self._update_live_transcriber_toggle_style()
 
-        # Save to server config - requires server restart to take effect
+        # Persist UI state to server config
         self.config.set_server_config("live_transcriber", "enabled", value=is_enabled)
 
-        logger.info(f"Live transcriber: {'enabled' if is_enabled else 'disabled'}")
+        # Trigger Live Mode start/stop via tray orchestrator
+        if not self.tray:
+            logger.warning("Live Mode toggle ignored: tray not available")
+            return
+
+        if not self._client_running:
+            self.set_live_mode_active(False)
+            if hasattr(self.tray, "show_notification"):
+                self.tray.show_notification(
+                    "Live Mode",
+                    "Start the client before enabling Live Mode.",
+                )
+            return
+
+        action = TrayAction.START_LIVE_MODE if is_enabled else TrayAction.STOP_LIVE_MODE
+        self.tray._trigger_callback(action)
+
+        logger.info(f"Live Mode: {'enabled' if is_enabled else 'disabled'}")
 
     def _update_live_transcriber_toggle_style(self) -> None:
-        """Update live transcriber toggle button style based on state and editability."""
+        """Update Live Mode toggle button style based on state and editability."""
         is_checked = self._preview_toggle_btn.isChecked()
         is_editable = self._preview_toggle_btn.isEnabled()
 
@@ -508,6 +533,42 @@ class ClientControlMixin:
 
         language_name = self._live_language_combo.currentText()
         logger.info(f"Live mode language set to: {language_name} ({language_code})")
+
+        # If Live Mode is active, restart to apply language change
+        if self.tray and getattr(self.tray, "orchestrator", None):
+            orchestrator = self.tray.orchestrator
+            if getattr(orchestrator, "is_live_mode_active", False):
+                orchestrator.request_live_mode_restart()
+
+    def _on_live_mode_mute_click(self) -> None:
+        """Handle Live Mode mute button click."""
+        if not self.tray:
+            logger.warning("Live Mode mute ignored: tray not available")
+            return
+
+        orchestrator = getattr(self.tray, "orchestrator", None)
+        if not orchestrator or not getattr(orchestrator, "is_live_mode_active", False):
+            if hasattr(self.tray, "show_notification"):
+                self.tray.show_notification(
+                    "Live Mode",
+                    "Live Mode must be running to mute.",
+                )
+            return
+
+        self.tray._trigger_callback(TrayAction.TOGGLE_LIVE_MUTE)
+
+    def set_live_mode_active(self, active: bool) -> None:
+        """Sync the Live Mode toggle UI with the actual runtime state."""
+        if not hasattr(self, "_preview_toggle_btn"):
+            return
+        self._preview_toggle_btn.blockSignals(True)
+        self._preview_toggle_btn.setChecked(active)
+        self._preview_toggle_btn.setText("Enabled" if active else "Disabled")
+        self._preview_toggle_btn.blockSignals(False)
+        self._update_live_transcriber_toggle_style()
+        self.config.set_server_config("live_transcriber", "enabled", value=active)
+        if hasattr(self, "_live_mode_mute_btn"):
+            self._live_mode_mute_btn.setEnabled(active)
 
     def _toggle_live_preview_collapse(self) -> None:
         """Toggle the live preview section collapse state."""
