@@ -176,19 +176,19 @@ If using the GNOME version, you need to also install the following packages:
 **Ubuntu 24.04:**
 ```bash
 sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio \
-    python3-numpy python3-aiohttp python3-pyqt6 wl-clipboard
+                 python3-numpy python3-aiohttp python3-pyqt6 wl-clipboard
 ```
 
 **Fedora:**
 ```bash
 sudo dnf install python3 python3-gobject gtk3 libappindicator-gtk3 python3-pyaudio \
-    python3-numpy python3-aiohttp python3-qt6 wl-clipboard
+                 python3-numpy python3-aiohttp python3-qt6 wl-clipboard
 ```
 
 **Arch Linux:**
 ```bash
 sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
-    python-numpy python-aiohttp python-pyqt6 wl-clipboard
+                        python-numpy python-aiohttp python-pyqt6 wl-clipboard
 ```
 
 ---

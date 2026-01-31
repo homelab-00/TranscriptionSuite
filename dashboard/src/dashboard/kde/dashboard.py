@@ -10,6 +10,7 @@ and the transcription client. It provides a unified GUI for:
 """
 
 import logging
+import asyncio
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
@@ -88,9 +89,16 @@ class DashboardWindow(
     # Expose View enum for mixins
     _View = View
 
-    def __init__(self, config: "ClientConfig", parent: QWidget | None = None):
+    def __init__(
+        self,
+        config: "ClientConfig",
+        parent: QWidget | None = None,
+        *,
+        hide_on_close: bool = True,
+    ):
         super().__init__(parent)
         self.config = config
+        self._hide_on_close = hide_on_close
         self._docker_manager = DockerManager()
         self._icon_loader = IconLoader(self, assets_path=get_assets_path())
 
@@ -117,6 +125,12 @@ class DashboardWindow(
 
         # Tray reference for orchestrator access
         self.tray: Any = None
+
+        # Recording view (embedded)
+        self._recording_view: QWidget | None = None
+        # Shared API client for Notebook/Recording views (avoid leaking aiohttp sessions).
+        self._notebook_api_client: "APIClient | None" = None
+        self._notebook_api_client_key: tuple[Any, ...] | None = None
 
         self._setup_ui()
         self._apply_styles()
@@ -670,17 +684,37 @@ class DashboardWindow(
                 logger.debug("Notebook API client updated after connection")
 
     def _open_recording_dialog(self, recording_id: int) -> None:
-        """Open the recording dialog for a specific recording."""
+        """Open the recording view for a specific recording (embedded)."""
         from dashboard.kde.recording_dialog import RecordingDialog
 
         api_client = self._get_api_client()
-        if api_client:
-            dialog = RecordingDialog(api_client, recording_id, self)
-            dialog.recording_deleted.connect(self._on_recording_deleted)
-            dialog.recording_updated.connect(self._on_recording_updated)
-            dialog.exec()
-        else:
+        if not api_client:
             logger.error("Cannot open recording: API client not available")
+            return
+
+        # Remove existing recording view if present
+        if self._recording_view is not None:
+            self._stack.removeWidget(self._recording_view)
+            self._recording_view.deleteLater()
+            self._recording_view = None
+
+        view = RecordingDialog(api_client, recording_id, self)
+        view.recording_deleted.connect(self._on_recording_deleted)
+        view.recording_updated.connect(self._on_recording_updated)
+        view.close_requested.connect(self._close_recording_view)
+
+        self._recording_view = view
+        self._stack.addWidget(view)
+        self._stack.setCurrentWidget(view)
+
+    def _close_recording_view(self) -> None:
+        """Close the embedded recording view and return to notebook."""
+        if self._recording_view is not None:
+            self._stack.removeWidget(self._recording_view)
+            self._recording_view.deleteLater()
+            self._recording_view = None
+        if hasattr(self, "_notebook_widget") and self._notebook_widget:
+            self._stack.setCurrentWidget(self._notebook_view)
 
     def _on_recording_deleted(self, recording_id: int) -> None:
         """Handle recording deletion - refresh notebook view."""
@@ -701,6 +735,10 @@ class DashboardWindow(
         server_status = self._docker_manager.get_server_status()
         if server_status != ServerStatus.RUNNING:
             logger.debug("Server not running, cannot create API client")
+            if self._notebook_api_client is not None:
+                self._close_api_client(self._notebook_api_client)
+                self._notebook_api_client = None
+                self._notebook_api_client_key = None
             return None
 
         use_remote = self.config.get("server", "use_remote", default=False)
@@ -720,13 +758,37 @@ class DashboardWindow(
             logger.debug("No host configured, cannot create API client")
             return None
 
-        return APIClient(
+        token_value = token if token else None
+        key = (host, port, use_https, token_value, tls_verify)
+        if (
+            self._notebook_api_client is not None
+            and self._notebook_api_client_key == key
+        ):
+            return self._notebook_api_client
+
+        if self._notebook_api_client is not None:
+            self._close_api_client(self._notebook_api_client)
+
+        self._notebook_api_client = APIClient(
             host=host,
             port=port,
             use_https=use_https,
-            token=token if token else None,
+            token=token_value,
             tls_verify=tls_verify,
         )
+        self._notebook_api_client_key = key
+        return self._notebook_api_client
+
+    def _close_api_client(self, api_client: "APIClient") -> None:
+        """Close an APIClient session safely from the Qt thread."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(api_client.close())
+            else:
+                loop.run_until_complete(api_client.close())
+        except RuntimeError:
+            asyncio.run(api_client.close())
 
     # =========================================================================
     # Navigation
@@ -787,14 +849,19 @@ class DashboardWindow(
 
     def closeEvent(self, event) -> None:
         """Handle close event - hide window instead of closing."""
-        if self._server_log_timer:
-            self._server_log_timer.stop()
-            self._server_log_timer = None
-        if self._client_log_timer:
-            self._client_log_timer.stop()
-            self._client_log_timer = None
-        event.ignore()
-        self.hide()
+        if self._hide_on_close:
+            if self._server_log_timer:
+                self._server_log_timer.stop()
+                self._server_log_timer = None
+            if self._client_log_timer:
+                self._client_log_timer.stop()
+                self._client_log_timer = None
+            event.ignore()
+            self.hide()
+            return
+
+        self.force_close()
+        event.accept()
 
     def force_close(self) -> None:
         """Force close the window (called when quitting app)."""

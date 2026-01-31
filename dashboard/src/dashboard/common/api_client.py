@@ -342,7 +342,8 @@ class APIClient:
                 elif resp.status == 503:
                     # Server is up but not ready (models loading)
                     logger.debug("Server is loading models...")
-                    return False
+                    self._connected = True
+                    return True
                 else:
                     # Unexpected status, fall back to health check
                     logger.debug(
@@ -812,14 +813,23 @@ class APIClient:
             Updated recording dict
         """
         session = await self._get_session()
-        async with session.patch(
-            f"{self.base_url}/api/notebook/recordings/{recording_id}/summary",
-            headers=self._get_headers(),
-            json={"summary": summary},
-            **self._get_ssl_kwargs(),
-        ) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+        headers = {**self._get_headers(), "Connection": "close"}
+        for attempt in range(2):
+            try:
+                async with session.patch(
+                    f"{self.base_url}/api/notebook/recordings/{recording_id}/summary",
+                    headers=headers,
+                    json={"summary": summary},
+                    **self._get_ssl_kwargs(),
+                ) as resp:
+                    resp.raise_for_status()
+                    return await resp.json()
+            except (aiohttp.ServerDisconnectedError, aiohttp.ClientConnectionError):
+                if attempt == 0:
+                    await self.close()
+                    session = await self._get_session()
+                    continue
+                raise
 
     async def get_llm_status(self) -> dict[str, Any]:
         """
@@ -936,6 +946,39 @@ class APIClient:
         ) as resp:
             resp.raise_for_status()
 
+    async def add_conversation_message(
+        self,
+        conversation_id: int,
+        role: str,
+        content: str,
+        tokens_used: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Add a message to a conversation (manual insert).
+
+        Args:
+            conversation_id: Conversation ID
+            role: "user", "assistant", or "system"
+            content: Message content
+            tokens_used: Optional token count
+
+        Returns:
+            Dict with message_id
+        """
+        session = await self._get_session()
+        async with session.post(
+            f"{self.base_url}/api/llm/conversation/{conversation_id}/message",
+            headers=self._get_headers(),
+            json={
+                "role": role,
+                "content": content,
+                "tokens_used": tokens_used,
+            },
+            **self._get_ssl_kwargs(),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
     async def chat_stream(
         self,
         conversation_id: int,
@@ -959,6 +1002,12 @@ class APIClient:
             on_error: Callback for errors
         """
         session = await self._get_session()
+        # Streaming can legitimately take a while (model warmup / long responses).
+        stream_timeout = aiohttp.ClientTimeout(
+            total=None,
+            sock_read=max(self.transcription_timeout, 600),
+        )
+        headers = {**self._get_headers(), "Connection": "close"}
 
         request_data: dict[str, Any] = {
             "conversation_id": conversation_id,
@@ -968,57 +1017,73 @@ class APIClient:
         if system_prompt:
             request_data["system_prompt"] = system_prompt
 
-        try:
-            async with session.post(
-                f"{self.base_url}/api/llm/chat",
-                headers=self._get_headers(),
-                json=request_data,
-                **self._get_ssl_kwargs(),
-            ) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    if on_error:
-                        on_error(f"Chat request failed: {error_text}")
-                    return
+        for attempt in range(2):
+            try:
+                async with session.post(
+                    f"{self.base_url}/api/llm/chat",
+                    headers=headers,
+                    json=request_data,
+                    timeout=stream_timeout,
+                    **self._get_ssl_kwargs(),
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        if on_error:
+                            on_error(f"Chat request failed: {error_text}")
+                        return
 
-                # Stream the response
-                full_response = ""
-                async for line in resp.content:
-                    if not line:
-                        continue
-                    decoded = line.decode("utf-8").strip()
-                    if decoded.startswith("data: "):
-                        chunk_data = decoded[6:]  # Remove "data: " prefix
-                        if chunk_data == "[DONE]":
-                            if on_done:
-                                on_done(full_response)
-                            return
-                        try:
-                            chunk_json = json.loads(chunk_data)
-                            if "error" in chunk_json and on_error:
-                                on_error(chunk_json.get("error", "Chat error"))
-                                return
-                            if chunk_json.get("done"):
+                    # Stream the response
+                    full_response = ""
+                    async for line in resp.content:
+                        if not line:
+                            continue
+                        decoded = line.decode("utf-8").strip()
+                        if decoded.startswith("data: "):
+                            chunk_data = decoded[6:]  # Remove "data: " prefix
+                            if chunk_data == "[DONE]":
                                 if on_done:
                                     on_done(full_response)
                                 return
-                            content = chunk_json.get("content", "")
-                            if content and on_chunk:
-                                on_chunk(content)
-                            full_response += content
-                        except json.JSONDecodeError:
-                            # Not JSON, might be plain text chunk
-                            if chunk_data and on_chunk:
-                                on_chunk(chunk_data)
-                            full_response += chunk_data
+                            try:
+                                chunk_json = json.loads(chunk_data)
+                                if "error" in chunk_json and on_error:
+                                    on_error(chunk_json.get("error", "Chat error"))
+                                    return
+                                if chunk_json.get("done"):
+                                    if on_done:
+                                        on_done(full_response)
+                                    return
+                                content = chunk_json.get("content", "")
+                                if content and on_chunk:
+                                    on_chunk(content)
+                                full_response += content
+                            except json.JSONDecodeError:
+                                # Not JSON, might be plain text chunk
+                                if chunk_data and on_chunk:
+                                    on_chunk(chunk_data)
+                                full_response += chunk_data
 
-                if on_done:
-                    on_done(full_response)
+                    if on_done:
+                        on_done(full_response)
+                return
 
-        except Exception as e:
-            logger.error(f"Chat stream error: {e}")
-            if on_error:
-                on_error(str(e))
+            except (
+                aiohttp.ServerDisconnectedError,
+                aiohttp.ClientConnectionError,
+            ) as e:
+                logger.warning(f"Chat stream connection error: {e}")
+                if attempt == 0:
+                    await self.close()
+                    session = await self._get_session()
+                    continue
+                if on_error:
+                    on_error("Server disconnected")
+                return
+            except Exception as e:
+                logger.error(f"Chat stream error: {e}")
+                if on_error:
+                    on_error(str(e))
+                return
 
     async def summarize_recording_sync(
         self,
@@ -1069,54 +1134,76 @@ class APIClient:
             on_error: Callback for errors
         """
         session = await self._get_session()
+        # Streaming summaries can exceed the default request timeout.
+        stream_timeout = aiohttp.ClientTimeout(
+            total=None,
+            sock_read=max(self.transcription_timeout, 600),
+        )
+        headers = {**self._get_headers(), "Connection": "close"}
 
         request_data: dict[str, Any] = {}
         if custom_prompt:
             request_data["custom_prompt"] = custom_prompt
 
-        try:
-            async with session.post(
-                f"{self.base_url}/api/llm/summarize/{recording_id}/stream",
-                headers=self._get_headers(),
-                json=request_data,
-                **self._get_ssl_kwargs(),
-            ) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    if on_error:
-                        on_error(f"Summarize request failed: {error_text}")
-                    return
+        for attempt in range(2):
+            try:
+                async with session.post(
+                    f"{self.base_url}/api/llm/summarize/{recording_id}/stream",
+                    headers=headers,
+                    json=request_data,
+                    timeout=stream_timeout,
+                    **self._get_ssl_kwargs(),
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        if on_error:
+                            on_error(f"Summarize request failed: {error_text}")
+                        return
 
-                # Stream the response
-                full_response = ""
-                async for line in resp.content:
-                    if not line:
-                        continue
-                    decoded = line.decode("utf-8").strip()
-                    if decoded.startswith("data: "):
-                        chunk_data = decoded[6:]
-                        if chunk_data == "[DONE]":
-                            if on_done:
-                                on_done(full_response)
-                            return
-                        try:
-                            chunk_json = json.loads(chunk_data)
-                            content = chunk_json.get("content", "")
-                            if content and on_chunk:
-                                on_chunk(content)
-                            full_response += content
-                        except json.JSONDecodeError:
-                            if chunk_data and on_chunk:
-                                on_chunk(chunk_data)
-                            full_response += chunk_data
+                    # Stream the response
+                    full_response = ""
+                    async for line in resp.content:
+                        if not line:
+                            continue
+                        decoded = line.decode("utf-8").strip()
+                        if decoded.startswith("data: "):
+                            chunk_data = decoded[6:]
+                            if chunk_data == "[DONE]":
+                                if on_done:
+                                    on_done(full_response)
+                                return
+                            try:
+                                chunk_json = json.loads(chunk_data)
+                                content = chunk_json.get("content", "")
+                                if content and on_chunk:
+                                    on_chunk(content)
+                                full_response += content
+                            except json.JSONDecodeError:
+                                if chunk_data and on_chunk:
+                                    on_chunk(chunk_data)
+                                full_response += chunk_data
 
-                if on_done:
-                    on_done(full_response)
+                    if on_done:
+                        on_done(full_response)
+                return
 
-        except Exception as e:
-            logger.error(f"Summarize stream error: {e}")
-            if on_error:
-                on_error(str(e))
+            except (
+                aiohttp.ServerDisconnectedError,
+                aiohttp.ClientConnectionError,
+            ) as e:
+                logger.warning(f"Summarize stream connection error: {e}")
+                if attempt == 0:
+                    await self.close()
+                    session = await self._get_session()
+                    continue
+                if on_error:
+                    on_error("Server disconnected")
+                return
+            except Exception as e:
+                logger.error(f"Summarize stream error: {e}")
+                if on_error:
+                    on_error(str(e))
+                return
 
     async def get_next_available_minute(self, date: str, hour: int) -> dict[str, Any]:
         """

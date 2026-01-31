@@ -14,7 +14,6 @@ authors = [
 keywords = ["transcription", "whisper", "speech-to-text", "diarization"]
 classifiers = [
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]

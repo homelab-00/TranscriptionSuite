@@ -46,6 +46,8 @@ class DayCell(QFrame):
 
     clicked = pyqtSignal(date)
 
+    _MAX_VISIBLE_NOTES = 2
+
     def __init__(
         self, day_date: date | None, is_current_month: bool = True, parent=None
     ):
@@ -67,16 +69,33 @@ class DayCell(QFrame):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(2)
 
-        # Day number label
+        # Header row: day number + note count badge
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(4)
+
         self._day_label = QLabel(str(day_date.day) if day_date else "")
         self._day_label.setObjectName("dayNumber")
-        layout.addWidget(self._day_label)
+        header_layout.addWidget(self._day_label)
+        header_layout.addStretch()
 
-        # Recording indicator
-        self._indicator = QLabel()
-        self._indicator.setObjectName("recordingIndicator")
-        self._indicator.hide()
-        layout.addWidget(self._indicator)
+        self._count_badge = QLabel()
+        self._count_badge.setObjectName("noteCountBadge")
+        self._count_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._count_badge.hide()
+        header_layout.addWidget(self._count_badge)
+
+        layout.addLayout(header_layout)
+
+        # Note names list
+        self._notes_container = QWidget()
+        self._notes_container.setObjectName("noteNamesContainer")
+        self._notes_layout = QVBoxLayout(self._notes_container)
+        self._notes_layout.setContentsMargins(0, 2, 0, 0)
+        self._notes_layout.setSpacing(2)
+        self._note_labels: list[QLabel] = []
+        self._notes_container.hide()
+        layout.addWidget(self._notes_container)
 
         layout.addStretch()
         self._update_style()
@@ -84,17 +103,79 @@ class DayCell(QFrame):
     def set_recording_count(self, count: int) -> None:
         """Set the number of recordings for this day."""
         self._recording_count = count
-        if count > 0:
-            self._indicator.setText(f"● {count}" if count > 1 else "●")
-            self._indicator.show()
-        else:
-            self._indicator.hide()
+        self._update_badge()
+        self._update_note_labels([])
+        self._update_style()
+
+    def set_recordings(self, recordings: list[Recording]) -> None:
+        """Set recordings for this day (count + note names)."""
+        sorted_recordings = sorted(recordings, key=lambda rec: rec.recorded_at or "")
+        self._recording_count = len(sorted_recordings)
+        titles = [rec.title or rec.filename or "Recording" for rec in sorted_recordings]
+        self._update_badge()
+        self._update_note_labels(titles)
         self._update_style()
 
     def set_selected(self, selected: bool) -> None:
         """Set the selected state."""
         self._is_selected = selected
         self._update_style()
+
+    def _update_badge(self) -> None:
+        """Update the note count badge."""
+        if self._recording_count > 0:
+            badge_text = (
+                "99+" if self._recording_count > 99 else str(self._recording_count)
+            )
+            self._count_badge.setText(badge_text)
+            self._count_badge.show()
+        else:
+            self._count_badge.hide()
+
+    def _update_note_labels(self, titles: list[str]) -> None:
+        """Update the visible note name labels."""
+        while self._notes_layout.count():
+            item = self._notes_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self._note_labels.clear()
+
+        if not titles:
+            self._notes_container.hide()
+            return
+
+        visible_titles = titles[: self._MAX_VISIBLE_NOTES]
+        for title in visible_titles:
+            display_text = f"• {title}"
+            label = QLabel(display_text)
+            label.setObjectName("noteName")
+            label.setProperty("fullText", display_text)
+            label.setToolTip(title)
+            label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._notes_layout.addWidget(label)
+            self._note_labels.append(label)
+
+        if len(titles) > self._MAX_VISIBLE_NOTES:
+            more_label = QLabel("…")
+            more_label.setObjectName("noteNameMore")
+            self._notes_layout.addWidget(more_label)
+            self._note_labels.append(more_label)
+
+        self._notes_container.show()
+        self._apply_note_elide()
+
+    def _apply_note_elide(self) -> None:
+        """Elide note names to fit the available width."""
+        for label in self._note_labels:
+            if label.objectName() == "noteNameMore":
+                continue
+            full_text = label.property("fullText") or label.text()
+            metrics = label.fontMetrics()
+            elided = metrics.elidedText(
+                full_text, Qt.TextElideMode.ElideRight, label.width()
+            )
+            label.setText(elided)
 
     def _update_style(self) -> None:
         """Update the cell styling based on state."""
@@ -118,6 +199,12 @@ class DayCell(QFrame):
         if self._date and not self._is_future:
             self.clicked.emit(self._date)
         super().mousePressEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        """Handle resize to re-elide note names."""
+        super().resizeEvent(event)
+        if self._note_labels:
+            self._apply_note_elide()
 
 
 # Supported audio formats (same as ImportWidget)
@@ -155,6 +242,11 @@ class DayViewDropZone(QFrame):
         self._icon_label = QLabel("⬆")
         self._icon_label.setObjectName("dropIcon")
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_label.setMargin(6)
+        self._icon_label.setFixedHeight(72)
+        self._icon_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         layout.addWidget(self._icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._text_label = QLabel("Drag audio file here")
@@ -263,8 +355,8 @@ class DayViewImportDialog(QDialog):
         self._is_transcribing = False
 
         self.setWindowTitle("Add Audio Entry")
-        self.setMinimumWidth(450)
-        self.setMinimumHeight(380)
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(450)
 
         self._setup_ui()
         self._apply_styles()
@@ -273,7 +365,7 @@ class DayViewImportDialog(QDialog):
         """Set up the dialog UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
         # Header with date/time info
         time_str = self._format_time(self._hour)
@@ -281,19 +373,24 @@ class DayViewImportDialog(QDialog):
         header_label = QLabel(f"Adding entry for {date_str} at {time_str}")
         header_label.setObjectName("dialogHeader")
         layout.addWidget(header_label)
+        layout.addSpacing(12)
 
         # Drop zone
         self._drop_zone = DayViewDropZone()
-        self._drop_zone.setMinimumHeight(140)
+        self._drop_zone.setMinimumHeight(150)
+        self._drop_zone.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding
+        )
         self._drop_zone.files_dropped.connect(self._on_file_dropped)
         layout.addWidget(self._drop_zone)
+        layout.addSpacing(6)
 
         # Options section
         options_container = QFrame()
         options_container.setObjectName("optionsCard")
         options_layout = QVBoxLayout(options_container)
         options_layout.setContentsMargins(16, 12, 16, 12)
-        options_layout.setSpacing(12)
+        options_layout.setSpacing(6)
 
         options_label = QLabel("Transcription Options:")
         options_label.setObjectName("optionsLabel")
@@ -316,6 +413,7 @@ class DayViewImportDialog(QDialog):
         options_layout.addWidget(self._word_timestamps_checkbox)
 
         layout.addWidget(options_container)
+        layout.addSpacing(16)
 
         # Progress section (hidden by default)
         self._progress_container = QWidget()
@@ -385,7 +483,7 @@ class DayViewImportDialog(QDialog):
                 background-color: #1e1e1e;
                 border: 2px dashed #3d3d3d;
                 border-radius: 12px;
-                padding: 20px;
+                padding: 14px;
             }
 
             #dayViewDropZone[dragOver="true"] {
@@ -396,6 +494,8 @@ class DayViewImportDialog(QDialog):
             #dropIcon {
                 font-size: 36px;
                 color: #ffffff;
+                padding: 6px 0;
+                line-height: 1.2em;
             }
 
             #dropText {
@@ -982,7 +1082,8 @@ class CalendarWidget(QWidget):
             }
 
             #dayCell[state="has-recordings"] {
-                background-color: #1a2020;
+                background-color: #212121;
+                border: 1px solid #2d2d2d;
             }
 
             #dayNumber {
@@ -991,9 +1092,30 @@ class CalendarWidget(QWidget):
                 font-weight: 500;
             }
 
-            #recordingIndicator {
-                color: #0AFCCF;
+            #noteCountBadge {
+                background-color: #c0392b;
+                border-radius: 9px;
+                color: #ffffff;
                 font-size: 10px;
+                font-weight: 600;
+                min-width: 18px;
+                min-height: 18px;
+                padding: 0 4px;
+            }
+
+            #noteName {
+                color: #9ad8ff;
+                font-size: 10px;
+            }
+
+            #noteNameMore {
+                color: #6b6b6b;
+                font-size: 10px;
+            }
+
+            #dayCell[state="other-month"] #noteName,
+            #dayCell[state="future"] #noteName {
+                color: #404040;
             }
 
             /* Time slots in day view */
@@ -1186,10 +1308,14 @@ class CalendarWidget(QWidget):
                 # Set recording count if available
                 date_str = day_date.isoformat()
                 recordings = self._recordings_cache.get(date_str, [])
-                cell.set_recording_count(len(recordings))
+                cell.set_recordings(recordings)
 
-                # Mark selected
-                if self._selected_date and day_date == self._selected_date:
+                # Mark selected only in day view
+                if (
+                    self._view_mode == "day"
+                    and self._selected_date
+                    and day_date == self._selected_date
+                ):
                     cell.set_selected(True)
 
                 self._grid_layout.addWidget(cell, row, col)
@@ -1226,6 +1352,9 @@ class CalendarWidget(QWidget):
         self._view_mode = "month"
         self._stack.setCurrentIndex(0)
         self._back_btn.hide()
+        for cell in self._day_cells:
+            if cell._is_selected:
+                cell.set_selected(False)
         self._update_title()
 
     def _show_day_view(self) -> None:
@@ -1549,7 +1678,7 @@ class CalendarWidget(QWidget):
             if cell._date:
                 date_str = cell._date.isoformat()
                 recordings = self._recordings_cache.get(date_str, [])
-                cell.set_recording_count(len(recordings))
+                cell.set_recordings(recordings)
 
         # Also refresh day view if currently visible
         if self._view_mode == "day" and self._selected_date:

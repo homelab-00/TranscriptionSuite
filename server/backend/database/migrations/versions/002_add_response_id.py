@@ -20,6 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Add response_id column to conversations table."""
     conn = op.get_bind()
+    # Skip if column already exists (idempotent upgrade)
+    existing = conn.execute(text("PRAGMA table_info(conversations)")).fetchall()
+    if any(row[1] == "response_id" for row in existing):
+        return
     conn.execute(
         text("""
         ALTER TABLE conversations 

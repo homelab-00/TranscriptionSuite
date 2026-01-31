@@ -90,6 +90,7 @@ class DropZone(QFrame):
         self._icon_label = QLabel("⬆")
         self._icon_label.setObjectName("dropIcon")
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_label.setMargin(6)
         layout.addWidget(self._icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         text_label = QLabel("Drag audio files here\nor click to browse")
@@ -294,6 +295,8 @@ class ImportWidget(QWidget):
             #dropIcon {
                 font-size: 42px;
                 color: #ffffff;
+                padding: 6px 0;
+                line-height: 1.2em;
             }
 
             #dropText {

@@ -98,7 +98,8 @@ def main() -> int:
         app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
 
-    window = DashboardWindow(config)
+    # GNOME dashboard runs as a separate process; close should quit so Show App can relaunch.
+    window = DashboardWindow(config, hide_on_close=False)
 
     # Initial connection type from config
     use_remote = config.get("server", "use_remote", default=False)

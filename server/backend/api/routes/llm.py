@@ -257,7 +257,8 @@ async def process_with_llm(request: LLMRequest):
     )
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        # Local models can take a while to respond (warmup / long generations).
+        async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(
                 f"{base_url}/v1/chat/completions",
                 json=payload,
@@ -359,7 +360,8 @@ async def process_with_llm_stream(request: LLMRequest):
         """Generate SSE stream from LLM response"""
         total_content_length = 0
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            # Local models can take a while to respond (warmup / long generations).
+            async with httpx.AsyncClient(timeout=600.0) as client:
                 async with client.stream(
                     "POST",
                     f"{base_url}/v1/chat/completions",
@@ -1099,8 +1101,9 @@ async def chat_with_llm(request: ChatRequest):
     # Build input with optional transcription context
     input_text = request.user_message
 
+    response_id = conversation.get("response_id")
     # Add transcription context only on first message (when no response_id exists)
-    if request.include_transcription and not conversation.get("response_id"):
+    if request.include_transcription and response_id is None:
         recording = get_recording(conversation["recording_id"])
         if recording:
             transcription = get_transcription(conversation["recording_id"])
@@ -1127,8 +1130,8 @@ async def chat_with_llm(request: ChatRequest):
     }
 
     # Add previous response_id to continue conversation
-    if conversation.get("response_id"):
-        payload["response_id"] = conversation["response_id"]
+    if response_id and response_id != "stateless":
+        payload["response_id"] = response_id
 
     # Add context length if specified
     if config.get("context_length"):
@@ -1145,7 +1148,8 @@ async def chat_with_llm(request: ChatRequest):
         tokens_used = 0
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            # Local models can take a while to respond (warmup / long generations).
+            async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(
                     f"{base_url}/api/v1/chat",
                     json=payload,
@@ -1153,11 +1157,36 @@ async def chat_with_llm(request: ChatRequest):
 
                 if response.status_code != 200:
                     error_text = await response.aread()
-                    logger.error(
-                        f"LLM API error: {response.status_code} - {error_text}"
-                    )
-                    yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
-                    return
+                    # Some LM Studio builds don't accept response_id. Retry stateless once.
+                    if (
+                        response.status_code == 400
+                        and payload.get("response_id")
+                        and b"response_id" in error_text
+                    ):
+                        logger.warning(
+                            "LM Studio rejected response_id; retrying without stateful context."
+                        )
+                        payload.pop("response_id", None)
+                        update_conversation_response_id(
+                            request.conversation_id, "stateless"
+                        )
+                        response = await client.post(
+                            f"{base_url}/api/v1/chat",
+                            json=payload,
+                        )
+                        if response.status_code != 200:
+                            error_text = await response.aread()
+                            logger.error(
+                                f"LLM API error: {response.status_code} - {error_text}"
+                            )
+                            yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
+                            return
+                    else:
+                        logger.error(
+                            f"LLM API error: {response.status_code} - {error_text}"
+                        )
+                        yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
+                        return
 
                 # Parse the response
                 data = response.json()

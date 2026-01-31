@@ -780,7 +780,9 @@ def update_conversation_title(conversation_id: int, title: str) -> bool:
         return cursor.rowcount > 0
 
 
-def update_conversation_response_id(conversation_id: int, response_id: str) -> bool:
+def update_conversation_response_id(
+    conversation_id: int, response_id: Optional[str]
+) -> bool:
     """Update a conversation's LM Studio response_id for stateful sessions."""
     with get_connection() as conn:
         cursor = conn.cursor()

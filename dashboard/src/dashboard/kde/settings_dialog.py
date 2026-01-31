@@ -989,6 +989,8 @@ class SettingsDialog(QDialog):
             except Exception as e:
                 logger.error(f"Failed to list backups: {e}")
                 return None
+            finally:
+                await api_client.close()
 
         try:
             loop = asyncio.get_event_loop()
@@ -1010,6 +1012,8 @@ class SettingsDialog(QDialog):
         except Exception as e:
             logger.error(f"Failed to list backups: {e}")
             self._populate_backup_list(None)
+        finally:
+            await api_client.close()
 
     def _populate_backup_list(self, backups) -> None:
         """Populate the backup list widget."""
@@ -1079,6 +1083,8 @@ class SettingsDialog(QDialog):
             except Exception as e:
                 logger.error(f"Failed to create backup: {e}")
                 return {"success": False, "message": str(e)}
+            finally:
+                await api_client.close()
 
         try:
             loop = asyncio.get_event_loop()
@@ -1101,6 +1107,8 @@ class SettingsDialog(QDialog):
         except Exception as e:
             logger.error(f"Failed to create backup: {e}")
             QMessageBox.critical(self, "Backup Failed", f"Failed to create backup: {e}")
+        finally:
+            await api_client.close()
 
     def _handle_backup_result(self, result) -> None:
         """Handle backup creation result."""
@@ -1171,6 +1179,8 @@ class SettingsDialog(QDialog):
             except Exception as e:
                 logger.error(f"Failed to restore backup: {e}")
                 return {"success": False, "message": str(e)}
+            finally:
+                await api_client.close()
 
         try:
             loop = asyncio.get_event_loop()
@@ -1195,6 +1205,8 @@ class SettingsDialog(QDialog):
             QMessageBox.critical(
                 self, "Restore Failed", f"Failed to restore backup: {e}"
             )
+        finally:
+            await api_client.close()
 
     def _handle_restore_result(self, result) -> None:
         """Handle backup restore result."""

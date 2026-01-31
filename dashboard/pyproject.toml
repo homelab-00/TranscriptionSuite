@@ -14,7 +14,6 @@ authors = [
 keywords = ["transcription", "tray", "desktop", "client"]
 classifiers = [
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows :: Windows 11",
     "Topic :: Desktop Environment",

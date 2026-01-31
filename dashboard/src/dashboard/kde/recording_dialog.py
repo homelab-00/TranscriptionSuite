@@ -5,19 +5,30 @@ Displays a recording with transcript, audio playback, and AI features.
 """
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
-from PyQt6.QtCore import QEvent, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QEvent,
+    QEasingCurve,
+    QPropertyAnimation,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
-    QDialog,
+    QApplication,
+    QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -39,7 +50,117 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class RecordingDialog(QDialog):
+class ChatBubble(QWidget):
+    """Chat bubble with hover copy button."""
+
+    def __init__(self, role: str, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._role = role
+        self._text = text
+        self.setMouseTracking(True)
+        # Let the bubble size to its contents while still allowing word-wrap.
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._bubble_frame = QFrame()
+        # Ensure stylesheet background/border-radius are painted for this frame.
+        self._bubble_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._bubble_frame.setFrameShape(QFrame.Shape.NoFrame)
+        self._bubble_frame.setObjectName(
+            "chatBubbleUser" if role == "user" else "chatBubbleAssistant"
+        )
+        self._bubble_frame.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        self._bubble_frame.setMaximumWidth(260)
+        self.setMaximumWidth(self._bubble_frame.maximumWidth())
+
+        bubble_layout = QVBoxLayout(self._bubble_frame)
+        bubble_layout.setContentsMargins(10, 8, 10, 8)
+        bubble_layout.setSpacing(4)
+
+        self._copy_btn = QPushButton("Copy", self._bubble_frame)
+        self._copy_btn.setObjectName("chatCopyButton")
+        self._copy_btn.clicked.connect(self._copy_text)
+        self._copy_btn.hide()
+
+        self._label = QLabel()
+        self._label.setObjectName(
+            "chatBubbleTextUser" if role == "user" else "chatBubbleTextAssistant"
+        )
+        self._label.setWordWrap(True)
+        self._label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        self._label.setMaximumWidth(240)
+        bubble_layout.addWidget(self._label)
+
+        outer.addWidget(self._bubble_frame)
+        self._render_text(text)
+        self._position_copy_button()
+
+    def update_text(self, text: str) -> None:
+        self._text = text
+        self._render_text(text)
+
+    def get_text(self) -> str:
+        return self._text
+
+    def enterEvent(self, event) -> None:
+        self._position_copy_button()
+        self._copy_btn.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._copy_btn.hide()
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_copy_button()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._position_copy_button()
+
+    def _position_copy_button(self) -> None:
+        if not self._copy_btn or not self._bubble_frame:
+            return
+        padding = 6
+        size = self._copy_btn.sizeHint()
+        x = max(self._bubble_frame.width() - size.width() - padding, padding)
+        y = padding
+        self._copy_btn.setGeometry(x, y, size.width(), size.height())
+        self._copy_btn.raise_()
+
+    def _render_text(self, text: str) -> None:
+        if not text:
+            self._label.setText("")
+            self._label.setTextFormat(Qt.TextFormat.PlainText)
+            return
+        try:
+            import markdown
+
+            html = markdown.markdown(
+                text,
+                extensions=["fenced_code", "sane_lists", "nl2br", "tables"],
+            )
+            self._label.setTextFormat(Qt.TextFormat.RichText)
+            self._label.setText(html)
+        except Exception:
+            self._label.setTextFormat(Qt.TextFormat.PlainText)
+            self._label.setText(text)
+
+    def _copy_text(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(self._text)
+
+
+class RecordingDialog(QWidget):
     """
     Dialog for viewing and playing a recording.
 
@@ -55,6 +176,8 @@ class RecordingDialog(QDialog):
     recording_deleted = pyqtSignal(int)  # recording_id
     # Signal emitted when recording is updated (recording_id, title)
     recording_updated = pyqtSignal(int, str)  # recording_id, title
+    # Signal emitted when the view should close
+    close_requested = pyqtSignal()
 
     _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
@@ -89,7 +212,9 @@ class RecordingDialog(QDialog):
         self._chat_conversations: list[dict] = []
         self._active_conversation_id: int | None = None
         self._chat_streaming = False
-        self._chat_streaming_label: QLabel | None = None
+        self._chat_streaming_label: ChatBubble | None = None
+        self._chat_opacity_effect: QGraphicsOpacityEffect | None = None
+        self._chat_fade_anim: QPropertyAnimation | None = None
 
         # Word positions for click-to-seek
         self._word_positions: list[
@@ -108,7 +233,8 @@ class RecordingDialog(QDialog):
     def _setup_ui(self) -> None:
         """Set up the dialog UI."""
         self.setWindowTitle("Recording")
-        self.setMinimumSize(800, 600)
+        self.setObjectName("recordingView")
+        self.setMinimumSize(600, 500)
         self.resize(1000, 700)
 
         layout = QVBoxLayout(self)
@@ -148,9 +274,12 @@ class RecordingDialog(QDialog):
 
         # Main content area
         content_widget = QWidget()
-        content_layout = QHBoxLayout(content_widget)
+        content_widget.setObjectName("recordingContent")
+        self._content_widget = content_widget
+        content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(24, 16, 24, 24)
         content_layout.setSpacing(16)
+        self._content_layout = content_layout
 
         main_panel = QWidget()
         main_layout = QVBoxLayout(main_panel)
@@ -299,6 +428,16 @@ class RecordingDialog(QDialog):
         chat_header_layout.addWidget(chat_title)
         chat_header_layout.addStretch()
 
+        self._chat_import_btn = QPushButton("Import")
+        self._chat_import_btn.setObjectName("chatActionButton")
+        self._chat_import_btn.clicked.connect(self._on_import_chat_clicked)
+        chat_header_layout.addWidget(self._chat_import_btn)
+
+        self._chat_export_btn = QPushButton("Export")
+        self._chat_export_btn.setObjectName("chatActionButton")
+        self._chat_export_btn.clicked.connect(self._on_export_chat_clicked)
+        chat_header_layout.addWidget(self._chat_export_btn)
+
         self._chat_close_btn = QPushButton("Close")
         self._chat_close_btn.setObjectName("chatCloseButton")
         self._chat_close_btn.clicked.connect(self._toggle_chat_panel)
@@ -307,6 +446,7 @@ class RecordingDialog(QDialog):
         chat_layout.addWidget(chat_header)
 
         chat_status_row = QWidget()
+        chat_status_row.setObjectName("chatStatusRow")
         chat_status_layout = QHBoxLayout(chat_status_row)
         chat_status_layout.setContentsMargins(0, 0, 0, 0)
         chat_status_layout.setSpacing(6)
@@ -330,6 +470,7 @@ class RecordingDialog(QDialog):
 
         # Conversations list
         convo_header = QWidget()
+        convo_header.setObjectName("chatConvoHeader")
         convo_header_layout = QHBoxLayout(convo_header)
         convo_header_layout.setContentsMargins(0, 0, 0, 0)
         convo_header_layout.setSpacing(6)
@@ -343,6 +484,11 @@ class RecordingDialog(QDialog):
         self._chat_delete_btn.setObjectName("chatActionButton")
         self._chat_delete_btn.clicked.connect(self._on_delete_chat_clicked)
         convo_header_layout.addWidget(self._chat_delete_btn)
+
+        self._chat_rename_btn = QPushButton("Rename")
+        self._chat_rename_btn.setObjectName("chatActionButton")
+        self._chat_rename_btn.clicked.connect(self._on_rename_chat_clicked)
+        convo_header_layout.addWidget(self._chat_rename_btn)
 
         self._chat_new_btn = QPushButton("New Chat")
         self._chat_new_btn.setObjectName("chatActionButton")
@@ -376,6 +522,7 @@ class RecordingDialog(QDialog):
 
         # Input area
         chat_input_row = QWidget()
+        chat_input_row.setObjectName("chatInputRow")
         chat_input_layout = QHBoxLayout(chat_input_row)
         chat_input_layout.setContentsMargins(0, 0, 0, 0)
         chat_input_layout.setSpacing(6)
@@ -393,8 +540,10 @@ class RecordingDialog(QDialog):
 
         chat_layout.addWidget(chat_input_row)
 
-        content_layout.addWidget(self._chat_panel)
-
+        self._chat_panel.setParent(content_widget)
+        self._chat_opacity_effect = QGraphicsOpacityEffect(self._chat_panel)
+        self._chat_opacity_effect.setOpacity(0.0)
+        self._chat_panel.setGraphicsEffect(self._chat_opacity_effect)
         # Check LM Studio status (after chat widgets exist)
         self._check_lm_status()
 
@@ -408,9 +557,9 @@ class RecordingDialog(QDialog):
 
         footer_layout.addStretch()
 
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton("Back")
         close_btn.setObjectName("primaryButton")
-        close_btn.clicked.connect(self.accept)
+        close_btn.clicked.connect(self.close_requested.emit)
         footer_layout.addWidget(close_btn)
 
         layout.addWidget(footer)
@@ -418,7 +567,7 @@ class RecordingDialog(QDialog):
     def _apply_styles(self) -> None:
         """Apply styling to dialog components."""
         self.setStyleSheet("""
-            QDialog {
+            #recordingView {
                 background-color: #0a0a0a;
             }
 
@@ -586,6 +735,10 @@ class RecordingDialog(QDialog):
                 border-left: 1px solid #2d2d2d;
             }
 
+            #chatHeader, #chatStatusRow, #chatConvoHeader, #chatInputRow {
+                background-color: transparent;
+            }
+
             #chatTitle {
                 color: #ffffff;
                 font-size: 14px;
@@ -623,18 +776,31 @@ class RecordingDialog(QDialog):
             }
 
             #chatConvoList {
-                background-color: #1a1a1a;
+                background-color: #121212;
                 border: 1px solid #2d2d2d;
                 color: #d0d0d0;
             }
 
-            #chatScroll {
-                border: none;
+            #chatConvoList::item {
                 background-color: transparent;
             }
 
+            #chatConvoList::item:selected {
+                background-color: #1e3a5f;
+                color: #ffffff;
+            }
+
+            #chatScroll {
+                border: none;
+                background-color: #121212;
+            }
+
+            #chatScroll QWidget#qt_scrollarea_viewport {
+                background-color: #121212;
+            }
+
             #chatInput {
-                background-color: #1a1a1a;
+                background-color: #121212;
                 border: 1px solid #2d2d2d;
                 border-radius: 6px;
                 color: #e0e0e0;
@@ -663,21 +829,45 @@ class RecordingDialog(QDialog):
             }
 
             #chatBubbleUser {
-                background-color: #0AFCCF;
+                background-color: #2b2b2b;
+                border: none;
                 border-radius: 6px;
             }
 
             #chatBubbleAssistant {
-                background-color: #1e1e1e;
+                background-color: #ff007a;
+                border: none;
                 border-radius: 6px;
             }
 
-            #chatBubbleUser QLabel {
-                color: #121212;
+            #chatBubbleTextUser {
+                background-color: transparent;
+                color: #ffffff;
+                font-weight: 500;
             }
 
-            #chatBubbleAssistant QLabel {
-                color: #e0e0e0;
+            #chatBubbleTextAssistant {
+                background-color: transparent;
+                color: #ffffff;
+            }
+
+            /* Prevent nested widgets (labels/buttons) from painting a different background inside bubbles. */
+            #chatBubbleUser *, #chatBubbleAssistant * {
+                background-color: transparent;
+            }
+
+            #chatCopyButton {
+                background-color: #3a3a3a;
+                border: none;
+                border-radius: 4px;
+                color: #d6d6d6;
+                padding: 2px 6px;
+                font-size: 10px;
+            }
+
+            #chatCopyButton:hover {
+                background-color: #4a4a4a;
+                color: #0AFCCF;
             }
         """)
 
@@ -699,6 +889,27 @@ class RecordingDialog(QDialog):
             self._exit_summary_edit(save=True)
 
         return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event) -> None:
+        """Keep the chat panel overlaid on resize."""
+        super().resizeEvent(event)
+        self._position_chat_panel()
+
+    def _position_chat_panel(self) -> None:
+        """Position chat sidebar overlay."""
+        if not hasattr(self, "_chat_panel") or self._chat_panel is None:
+            return
+        if not hasattr(self, "_content_widget") or self._content_widget is None:
+            return
+        if not self._chat_panel.isVisible():
+            return
+        margins = self._content_layout.contentsMargins()
+        width = self._chat_panel.width()
+        height = self._content_widget.height() - margins.top() - margins.bottom()
+        x = self._content_widget.width() - margins.right() - width
+        y = margins.top()
+        self._chat_panel.setGeometry(x, y, width, max(height, 0))
+        self._chat_panel.raise_()
 
     def _strip_think_blocks(self, text: str) -> str:
         """Remove <think> blocks from LLM output."""
@@ -810,6 +1021,7 @@ class RecordingDialog(QDialog):
             self._recording.summary = summary_value
             self._summary_text = summary_value or ""
             self._update_summary_display(self._summary_text)
+            self._summary_status_label.hide()
             self._refresh_summary_ui()
         except Exception as e:
             logger.error(f"Failed to save summary: {e}")
@@ -862,10 +1074,42 @@ class RecordingDialog(QDialog):
     def _toggle_chat_panel(self) -> None:
         """Show or hide the chat sidebar."""
         if self._chat_panel.isVisible():
-            self._chat_panel.hide()
-            return
+            self._hide_chat_panel()
+        else:
+            self._show_chat_panel()
+
+    def _show_chat_panel(self) -> None:
+        """Fade in the chat sidebar."""
         self._chat_panel.show()
+        self._position_chat_panel()
+        self._chat_panel.raise_()
+        self._start_chat_fade(0.0, 1.0)
         self._load_chat_panel()
+
+    def _hide_chat_panel(self) -> None:
+        """Fade out the chat sidebar."""
+        self._start_chat_fade(
+            self._chat_opacity_effect.opacity() if self._chat_opacity_effect else 1.0,
+            0.0,
+            on_finished=self._chat_panel.hide,
+        )
+
+    def _start_chat_fade(
+        self, start: float, end: float, on_finished: Callable[[], None] | None = None
+    ) -> None:
+        if not self._chat_opacity_effect:
+            return
+        if self._chat_fade_anim:
+            self._chat_fade_anim.stop()
+        anim = QPropertyAnimation(self._chat_opacity_effect, b"opacity", self)
+        anim.setDuration(180)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        if on_finished:
+            anim.finished.connect(on_finished)
+        self._chat_fade_anim = anim
+        anim.start()
 
     def _load_chat_panel(self) -> None:
         """Load chat conversations and status."""
@@ -947,13 +1191,53 @@ class RecordingDialog(QDialog):
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(self._async_delete_chat(self._active_conversation_id))
+                asyncio.create_task(
+                    self._async_delete_chat(self._active_conversation_id)
+                )
             else:
                 loop.run_until_complete(
                     self._async_delete_chat(self._active_conversation_id)
                 )
         except RuntimeError:
             asyncio.run(self._async_delete_chat(self._active_conversation_id))
+
+    def _on_rename_chat_clicked(self) -> None:
+        """Rename the currently selected conversation."""
+        if not self._active_conversation_id:
+            return
+
+        current_title = None
+        for convo in self._chat_conversations:
+            if convo.get("id") == self._active_conversation_id:
+                current_title = convo.get("title", "")
+                break
+
+        new_title, ok = QInputDialog.getText(
+            self,
+            "Rename Conversation",
+            "New title:",
+            text=current_title or "",
+        )
+        if not ok:
+            return
+        new_title = new_title.strip()
+        if not new_title:
+            return
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(
+                    self._async_rename_chat(self._active_conversation_id, new_title)
+                )
+            else:
+                loop.run_until_complete(
+                    self._async_rename_chat(self._active_conversation_id, new_title)
+                )
+        except RuntimeError:
+            asyncio.run(
+                self._async_rename_chat(self._active_conversation_id, new_title)
+            )
 
     async def _async_delete_chat(self, conversation_id: int) -> None:
         try:
@@ -963,6 +1247,116 @@ class RecordingDialog(QDialog):
         except Exception as e:
             logger.error(f"Failed to delete conversation: {e}")
             self._chat_error_label.setText("Failed to delete conversation.")
+            self._chat_error_label.show()
+
+    async def _async_rename_chat(self, conversation_id: int, title: str) -> None:
+        try:
+            await self._api_client.update_conversation_title(conversation_id, title)
+            await self._async_load_conversations()
+        except Exception as e:
+            logger.error(f"Failed to rename conversation: {e}")
+            self._chat_error_label.setText("Failed to rename conversation.")
+            self._chat_error_label.show()
+
+    def _on_export_chat_clicked(self) -> None:
+        """Export the active conversation to JSON."""
+        if not self._active_conversation_id:
+            return
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Conversation",
+            f"conversation_{self._active_conversation_id}.json",
+            "JSON Files (*.json)",
+        )
+        if not file_path:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_export_chat(file_path))
+            else:
+                loop.run_until_complete(self._async_export_chat(file_path))
+        except RuntimeError:
+            asyncio.run(self._async_export_chat(file_path))
+
+    async def _async_export_chat(self, file_path: str) -> None:
+        try:
+            convo = await self._api_client.get_conversation(
+                self._active_conversation_id
+            )
+            export_data = {
+                "format_version": 1,
+                "recording_id": self._recording_id,
+                "title": convo.get("title", "Conversation"),
+                "messages": [
+                    {
+                        "role": msg.get("role"),
+                        "content": msg.get("content"),
+                        "created_at": msg.get("created_at"),
+                    }
+                    for msg in convo.get("messages", [])
+                ],
+            }
+            with open(file_path, "w", encoding="utf-8") as handle:
+                json.dump(export_data, handle, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to export conversation: {e}")
+            self._chat_error_label.setText("Failed to export conversation.")
+            self._chat_error_label.show()
+
+    def _on_import_chat_clicked(self) -> None:
+        """Import a conversation from JSON."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Conversation",
+            "",
+            "JSON Files (*.json)",
+        )
+        if not file_path:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._async_import_chat(file_path))
+            else:
+                loop.run_until_complete(self._async_import_chat(file_path))
+        except RuntimeError:
+            asyncio.run(self._async_import_chat(file_path))
+
+    async def _async_import_chat(self, file_path: str) -> None:
+        try:
+            with open(file_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+
+            title = payload.get("title") or "Imported Chat"
+            messages = payload.get("messages", [])
+            if not isinstance(messages, list):
+                raise ValueError("Invalid conversation format")
+
+            result = await self._api_client.create_conversation(
+                self._recording_id, title
+            )
+            conversation_id = result.get("conversation_id")
+            if not conversation_id:
+                raise ValueError("Failed to create conversation")
+
+            for msg in messages:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role not in ("user", "assistant", "system"):
+                    continue
+                await self._api_client.add_conversation_message(
+                    conversation_id=conversation_id,
+                    role=role,
+                    content=content,
+                )
+
+            await self._async_load_conversations()
+            self._select_conversation_item(conversation_id)
+            await self._async_load_conversation(conversation_id)
+        except Exception as e:
+            logger.error(f"Failed to import conversation: {e}")
+            self._chat_error_label.setText("Failed to import conversation.")
             self._chat_error_label.show()
 
     async def _async_create_new_chat(self) -> None:
@@ -1018,39 +1412,42 @@ class RecordingDialog(QDialog):
             content = msg.get("content", "")
             self._add_chat_bubble(role, content)
 
+        self._chat_messages_layout.addStretch(1)
         self._scroll_chat_to_bottom()
 
-    def _add_chat_bubble(self, role: str, content: str) -> QLabel:
-        """Add a chat bubble and return its label."""
+    def _add_chat_bubble(self, role: str, content: str) -> ChatBubble:
+        """Add a chat bubble and return its widget."""
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(0)
+        row_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
-        bubble = QFrame()
-        bubble.setObjectName(
-            "chatBubbleUser" if role == "user" else "chatBubbleAssistant"
-        )
-        bubble.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        bubble.setMaximumWidth(260)
-        bubble_layout = QVBoxLayout(bubble)
-        bubble_layout.setContentsMargins(8, 6, 8, 6)
-
-        label = QLabel(content)
-        label.setWordWrap(True)
-        label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        label.setMaximumWidth(240)
-        bubble_layout.addWidget(label)
+        bubble = ChatBubble(role, content)
 
         if role == "user":
             row_layout.addStretch()
             row_layout.addWidget(bubble)
+            row_layout.setAlignment(
+                bubble,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+            )
         else:
             row_layout.addWidget(bubble)
             row_layout.addStretch()
+            row_layout.setAlignment(
+                bubble,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
 
-        self._chat_messages_layout.addWidget(row)
-        return label
+        # Keep the bottom spacer (stretch) at the end so new messages don't end up after it.
+        insert_at = self._chat_messages_layout.count()
+        if insert_at and self._chat_messages_layout.itemAt(insert_at - 1).spacerItem():
+            self._chat_messages_layout.insertWidget(insert_at - 1, row)
+        else:
+            self._chat_messages_layout.addWidget(row)
+        return bubble
 
     def _scroll_chat_to_bottom(self) -> None:
         """Scroll the chat view to the latest message."""
@@ -1071,6 +1468,12 @@ class RecordingDialog(QDialog):
         self._chat_send_btn.setEnabled(can_send)
         self._chat_input.setEnabled(self._lm_available and not self._chat_streaming)
         self._chat_delete_btn.setEnabled(
+            self._active_conversation_id is not None and not self._chat_streaming
+        )
+        self._chat_rename_btn.setEnabled(
+            self._active_conversation_id is not None and not self._chat_streaming
+        )
+        self._chat_export_btn.setEnabled(
             self._active_conversation_id is not None and not self._chat_streaming
         )
 
@@ -1119,8 +1522,8 @@ class RecordingDialog(QDialog):
                 return
             QTimer.singleShot(
                 0,
-                lambda: self._chat_streaming_label.setText(
-                    self._chat_streaming_label.text() + content
+                lambda: self._chat_streaming_label.update_text(
+                    self._chat_streaming_label.get_text() + content
                 ),
             )
 
@@ -1433,7 +1836,7 @@ class RecordingDialog(QDialog):
             await self._api_client.delete_recording(self._recording_id)
             logger.info(f"Recording deleted: {self._recording_id}")
             self.recording_deleted.emit(self._recording_id)
-            self.accept()
+            self.close_requested.emit()
         except Exception as e:
             logger.error(f"Failed to delete recording: {e}")
             QMessageBox.critical(
