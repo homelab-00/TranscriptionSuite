@@ -104,6 +104,15 @@ def get_default_config() -> dict[str, Any]:
 class ClientConfig:
     """Client configuration manager."""
 
+    _SERVER_CONFIG_ALIASES: dict[tuple[str, ...], list[tuple[str, ...]]] = {
+        ("transcription_options", "enable_live_transcriber"): [
+            ("live_transcriber", "enabled")
+        ],
+        ("live_transcriber", "enabled"): [
+            ("transcription_options", "enable_live_transcriber")
+        ],
+    }
+
     def __init__(self, config_path: Path | None = None):
         """
         Initialize client configuration.
@@ -259,39 +268,52 @@ class ClientConfig:
         self.set("server", "token", value=value)
         self.save()
 
-    def set_server_config(self, *keys: str, value: Any) -> bool:
+    def _format_yaml_scalar(self, value: Any) -> str:
+        """Format a Python value as a single-line YAML scalar."""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if value is None:
+            return "null"
+        if isinstance(value, list):
+            return yaml.safe_dump(
+                value, default_flow_style=True, sort_keys=False
+            ).strip()
+        if isinstance(value, str):
+            if value == "":
+                return '""'
+            needs_quotes = (
+                value.strip() != value
+                or value.lower()
+                in {"null", "true", "false", "yes", "no", "on", "off", "~"}
+                or any(c in value for c in ":#{}[]&*!|>'\"%@`")
+            )
+            if needs_quotes:
+                escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+                return f'"{escaped}"'
+            return value
+        return str(value)
+
+    def _set_server_config_values(self, updates: dict[tuple[str, ...], Any]) -> bool:
         """
-        Set a configuration value in the server's config.yaml file.
+        Update multiple values in the server's config.yaml file.
 
-        This modifies ~/.config/TranscriptionSuite/config.yaml (the server config),
-        not the dashboard's dashboard.yaml file.
-
-        Uses targeted in-place editing to preserve comments and formatting.
-
-        Args:
-            *keys: Path to the configuration key (e.g., "longform_recording", "auto_add_to_audio_notebook")
-            value: Value to set
-
-        Returns:
-            True if successful, False otherwise
+        Preserves comments and formatting via targeted in-place edits.
         """
+        expanded_updates: dict[tuple[str, ...], Any] = dict(updates)
+        for path, value in list(expanded_updates.items()):
+            for alias in self._SERVER_CONFIG_ALIASES.get(path, []):
+                if alias not in expanded_updates:
+                    expanded_updates[alias] = value
         import re
 
         server_config_path = get_config_dir() / "config.yaml"
-
         if not server_config_path.exists():
             print(f"Warning: Server config not found at {server_config_path}")
             return False
 
-        if len(keys) != 2:
-            print(f"Error: set_server_config only supports 2-level keys (section.key)")
-            return False
-
-        section, key = keys
         tmp_path = None
 
         try:
-            # Read the file content
             with open(server_config_path, "r") as f:
                 if fcntl is not None:
                     fcntl.flock(f.fileno(), fcntl.LOCK_SH)
@@ -301,66 +323,75 @@ class ClientConfig:
                     if fcntl is not None:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-            # Convert value to YAML string representation
-            if isinstance(value, bool):
-                yaml_value = "true" if value else "false"
-            elif value is None:
-                yaml_value = "null"
-            elif isinstance(value, str):
-                # Quote strings if they contain special characters
-                if any(c in value for c in ":#{}[]&*!|>'\"%@`"):
-                    yaml_value = f'"{value}"'
-                else:
-                    yaml_value = value
-            else:
-                yaml_value = str(value)
-
-            # Find the section and key, then update the value
-            in_target_section = False
-            section_indent = 0
-            modified = False
+            # Build path -> line index mapping (supports commented-out keys)
+            line_map: dict[tuple[str, ...], tuple[int, str, bool]] = {}
+            stack: list[tuple[int, str]] = []
 
             for i, line in enumerate(lines):
                 stripped = line.lstrip()
-                current_indent = len(line) - len(stripped)
-
-                # Check if this is the target section header
-                if stripped.startswith(f"{section}:"):
-                    in_target_section = True
-                    section_indent = current_indent
+                if not stripped:
                     continue
 
-                # Check if we've left the target section (new section at same or lower indent)
-                if in_target_section and stripped and not stripped.startswith("#"):
-                    if current_indent <= section_indent and ":" in stripped:
-                        # This is a new top-level section
-                        in_target_section = False
-                        continue
+                indent = len(line) - len(stripped)
 
-                # Look for the key within the target section
-                if in_target_section and current_indent > section_indent:
-                    # Match the key (with possible comment after)
-                    key_pattern = rf"^(\s*){re.escape(key)}:\s*(.*)$"
-                    match = re.match(key_pattern, line)
+                # Commented-out key (e.g. "    # live_language: \"en\"")
+                if stripped.startswith("#"):
+                    match = re.match(r"#\s*([a-z0-9_]+)\s*:(.*)$", stripped)
                     if match:
-                        indent = match.group(1)
-                        # Preserve inline comment if present
-                        old_value_and_comment = match.group(2)
-                        if "#" in old_value_and_comment:
-                            # There's an inline comment
-                            comment_idx = old_value_and_comment.index("#")
-                            comment = old_value_and_comment[comment_idx:]
-                            lines[i] = f"{indent}{key}: {yaml_value}  {comment}\n"
-                        else:
-                            lines[i] = f"{indent}{key}: {yaml_value}\n"
-                        modified = True
-                        break
+                        key = match.group(1)
+                        while stack and indent <= stack[-1][0]:
+                            stack.pop()
+                        path = tuple([p for _, p in stack] + [key])
+                        line_map[path] = (i, match.group(2), True)
+                    continue
+
+                # Active key
+                match = re.match(r"(\s*)([A-Za-z0-9_]+)\s*:(.*)$", line)
+                if not match:
+                    continue
+                key = match.group(2)
+                value_part = match.group(3)
+
+                while stack and indent <= stack[-1][0]:
+                    stack.pop()
+                stack.append((indent, key))
+                path = tuple([p for _, p in stack])
+
+                # Only map leaf keys (with value on the same line)
+                if value_part.strip() != "":
+                    line_map[path] = (i, value_part, False)
+
+            modified = False
+
+            for path, value in expanded_updates.items():
+                yaml_value = self._format_yaml_scalar(value)
+
+                entry = line_map.get(path)
+                if entry:
+                    idx, old_value_and_comment, is_commented = entry
+                    # Preserve inline comments (for active keys)
+                    inline_comment = ""
+                    if "#" in old_value_and_comment:
+                        comment_idx = old_value_and_comment.index("#")
+                        inline_comment = (
+                            "  " + old_value_and_comment[comment_idx:].rstrip()
+                        )
+
+                    indent = re.match(r"^(\s*)", lines[idx]).group(1)
+                    key = path[-1]
+                    lines[idx] = f"{indent}{key}: {yaml_value}{inline_comment}\n"
+                    modified = True
+                    continue
+
+                # If not found, append to end of file (best-effort)
+                indent = " " * (4 * (len(path) - 1))
+                key = path[-1]
+                lines.append(f"{indent}{key}: {yaml_value}\n")
+                modified = True
 
             if not modified:
-                print(f"Warning: Could not find {section}.{key} in config file")
-                return False
+                return True
 
-            # Write back atomically
             tmp_path = server_config_path.with_suffix(".tmp")
             with open(tmp_path, "w") as f:
                 if fcntl is not None:
@@ -382,6 +413,22 @@ class ClientConfig:
                 except Exception:
                     pass
             return False
+
+    def set_server_config_values(self, updates: dict[tuple[str, ...], Any]) -> bool:
+        """Set multiple server config values at once (with alias syncing)."""
+        return self._set_server_config_values(updates)
+
+    def set_server_config(self, *keys: str, value: Any) -> bool:
+        """
+        Set a configuration value in the server's config.yaml file.
+
+        This modifies ~/.config/TranscriptionSuite/config.yaml (the server config),
+        not the dashboard's dashboard.yaml file.
+        """
+        if not keys:
+            print("Error: set_server_config requires at least one key")
+            return False
+        return self._set_server_config_values({tuple(keys): value})
 
     def get_server_config(self, *keys: str, default: Any = None) -> Any:
         """
@@ -409,15 +456,25 @@ class ClientConfig:
                     if fcntl is not None:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-            value = server_config
-            for key in keys:
-                if isinstance(value, dict):
-                    value = value.get(key)
-                else:
-                    return default
-                if value is None:
-                    return default
-            return value
+            def _get(path: tuple[str, ...]) -> Any:
+                value: Any = server_config
+                for key in path:
+                    if isinstance(value, dict):
+                        value = value.get(key)
+                    else:
+                        return None
+                    if value is None:
+                        return None
+                return value
+
+            path = tuple(keys)
+            value = _get(path)
+            if value is None:
+                for alias in self._SERVER_CONFIG_ALIASES.get(path, []):
+                    value = _get(alias)
+                    if value is not None:
+                        break
+            return value if value is not None else default
 
         except Exception as e:
             print(f"Error reading server config: {e}")

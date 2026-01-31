@@ -7,10 +7,13 @@ Styled to match the Dashboard UI design language.
 Tabs:
 - App: Clipboard, notifications, stop server on quit behavior
 - Client: Audio input device + connection settings
-- Server: Open config.yaml button + path display
+- Server: Nested config editor + config.yaml file access
 """
 
 import logging
+import re
+from dataclasses import dataclass
+from typing import Any
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
@@ -28,15 +31,83 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
+import yaml
 
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig, get_config_dir
 from dashboard.common.docker_manager import DockerManager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConfigNode:
+    key: str
+    path: tuple[str, ...]
+    value: Any | None
+    comment: str
+    commented: bool
+    children: list["ConfigNode"]
+
+    @property
+    def is_leaf(self) -> bool:
+        return not self.children
+
+
+class CollapsibleSection(QWidget):
+    """Collapsible container for nested settings sections."""
+
+    def __init__(self, title: str, description: str | None = None, level: int = 0):
+        super().__init__()
+        self._expanded = True
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.toggle_button = QToolButton()
+        self.toggle_button.setObjectName("sectionToggle")
+        self.toggle_button.setText(title)
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(True)
+        self.toggle_button.setArrowType(Qt.ArrowType.DownArrow)
+        self.toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.toggle_button.clicked.connect(self._on_toggled)
+        layout.addWidget(self.toggle_button)
+
+        self.content = QWidget()
+        self.content.setObjectName("sectionContent")
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(12 + (level * 8), 4, 0, 0)
+        self.content_layout.setSpacing(10)
+
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setObjectName("helpText")
+            desc_label.setWordWrap(True)
+            self.content_layout.addWidget(desc_label)
+
+        layout.addWidget(self.content)
+
+    def _on_toggled(self, checked: bool) -> None:
+        self._expanded = checked
+        self.content.setVisible(checked)
+        self.toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
+        )
+
+    def set_expanded(self, expanded: bool) -> None:
+        if self._expanded == expanded:
+            return
+        self.toggle_button.setChecked(expanded)
+        self._on_toggled(expanded)
 
 
 class SettingsDialog(QDialog):
@@ -46,6 +117,13 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self._docker_manager = DockerManager()
+        self._server_section_tree: list[dict[str, Any]] = []
+        self._server_field_inputs: dict[tuple[str, ...], QWidget] = {}
+        self._server_field_types: dict[tuple[str, ...], type] = {}
+        self._server_field_original: dict[tuple[str, ...], Any] = {}
+        self._server_field_commented: dict[tuple[str, ...], bool] = {}
+        self._server_field_enablers: dict[tuple[str, ...], QCheckBox] = {}
+        self._server_row_search: dict[QWidget, str] = {}
 
         self.setWindowTitle("Settings")
         self.setMinimumWidth(540)
@@ -183,6 +261,34 @@ class SettingsDialog(QDialog):
             QLineEdit:disabled {
                 background-color: #141414;
                 color: #606060;
+            }
+
+            QLineEdit#searchField {
+                background-color: #1a1a1a;
+                border: 1px solid #2d2d2d;
+                border-radius: 8px;
+                padding: 8px 12px;
+                color: #ffffff;
+            }
+
+            QToolButton#sectionToggle {
+                background: transparent;
+                border: none;
+                color: #0AFCCF;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 4px 0;
+            }
+
+            QToolButton#sectionToggle:hover {
+                color: #ffffff;
+            }
+
+            QWidget#configRow {
+                background-color: #171717;
+                border: 1px solid #2a2a2a;
+                border-radius: 8px;
+                padding: 8px;
             }
 
             QSpinBox {
@@ -706,7 +812,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(scroll, "Client")
 
     def _create_server_tab(self) -> None:
-        """Create the Server settings tab (open config.yaml + path info)."""
+        """Create the Server settings tab (nested config editor + file access)."""
         # Create scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -719,38 +825,64 @@ class SettingsDialog(QDialog):
         tab.setObjectName("tabContent")
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
 
-        # === Server Configuration Section ===
-        config_group = QGroupBox("Server Configuration")
+        # Header + search
+        header_label = QLabel(
+            "Server settings are stored in config.yaml. Changes apply after a server restart."
+        )
+        header_label.setWordWrap(True)
+        layout.addWidget(header_label)
+
+        self._server_search = QLineEdit()
+        self._server_search.setObjectName("searchField")
+        self._server_search.setPlaceholderText("Search server settings...")
+        self._server_search.textChanged.connect(self._filter_server_settings)
+        layout.addWidget(self._server_search)
+
+        separator = QFrame()
+        separator.setObjectName("sectionSeparator")
+        separator.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(separator)
+
+        # Settings editor
+        config_dir = get_config_dir()
+        config_path = config_dir / "config.yaml"
+
+        if config_path.exists():
+            root = self._parse_server_config(config_path)
+            sections_container = QWidget()
+            sections_layout = QVBoxLayout(sections_container)
+            sections_layout.setContentsMargins(0, 0, 0, 0)
+            sections_layout.setSpacing(12)
+
+            for section_node in root.children:
+                section_info = self._build_server_section(section_node, sections_layout)
+                if section_info:
+                    self._server_section_tree.append(section_info)
+
+            sections_layout.addStretch()
+            layout.addWidget(sections_container)
+            self._sync_server_alias_fields()
+        else:
+            missing_label = QLabel(
+                "config.yaml not found. Run the setup wizard or open the file manually."
+            )
+            missing_label.setWordWrap(True)
+            layout.addWidget(missing_label)
+            self._server_search.setEnabled(False)
+
+        # Config file access
+        config_group = QGroupBox("Config File")
         config_layout = QVBoxLayout(config_group)
         config_layout.setSpacing(12)
 
-        # Description
-        desc_label = QLabel(
-            "Server settings are stored in config.yaml. Click below to open "
-            "it in your default text editor."
-        )
-        desc_label.setWordWrap(True)
-        config_layout.addWidget(desc_label)
-
-        # Open config button
         open_config_btn = QPushButton("Open config.yaml in Text Editor")
         open_config_btn.setObjectName("primaryButton")
         open_config_btn.clicked.connect(self._on_open_config_file)
         config_layout.addWidget(open_config_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # Separator
-        separator = QFrame()
-        separator.setObjectName("sectionSeparator")
-        separator.setFrameShape(QFrame.Shape.HLine)
-        config_layout.addWidget(separator)
-
-        # Path info
-        config_dir = get_config_dir()
-        config_path = config_dir / "config.yaml"
-
-        path_info_label = QLabel("You can also edit the config file directly at:")
+        path_info_label = QLabel("Location:")
         path_info_label.setObjectName("helpText")
         config_layout.addWidget(path_info_label)
 
@@ -761,11 +893,376 @@ class SettingsDialog(QDialog):
         config_layout.addWidget(path_label)
 
         layout.addWidget(config_group)
-
         layout.addStretch()
 
         scroll.setWidget(tab)
         self.tabs.addTab(scroll, "Server")
+
+    def _clean_comment_block(self, lines: list[str]) -> str:
+        cleaned: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if all(ch in "-=" for ch in stripped):
+                continue
+            cleaned.append(stripped)
+        return "\n".join(cleaned).strip()
+
+    def _parse_server_config(self, config_path) -> ConfigNode:
+        text = config_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
+        root = ConfigNode(
+            key="root",
+            path=(),
+            value=None,
+            comment="",
+            commented=False,
+            children=[],
+        )
+
+        pending_comments: list[str] = []
+        stack: list[tuple[int, ConfigNode]] = [(-1, root)]
+
+        def get_value(path: tuple[str, ...]) -> Any:
+            value: Any = data
+            for key in path:
+                if isinstance(value, dict):
+                    value = value.get(key)
+                else:
+                    return None
+            return value
+
+        for line in text.splitlines():
+            if not line.strip():
+                pending_comments = []
+                continue
+
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+
+            if stripped.startswith("#"):
+                comment_body = stripped[1:].lstrip()
+                key_match = re.match(r"([a-z0-9_]+)\s*:(.*)$", comment_body)
+                if key_match:
+                    key = key_match.group(1)
+                    value_part = key_match.group(2).strip()
+                    inline_comment = ""
+                    if "#" in value_part:
+                        value_part, inline_comment = value_part.split("#", 1)
+                        value_part = value_part.strip()
+                        inline_comment = inline_comment.strip()
+
+                    while stack and indent <= stack[-1][0]:
+                        stack.pop()
+                    parent = stack[-1][1]
+
+                    comment_text = self._clean_comment_block(pending_comments)
+                    pending_comments = []
+                    if inline_comment:
+                        comment_text = (
+                            f"{comment_text}\n{inline_comment}"
+                            if comment_text
+                            else inline_comment
+                        )
+
+                    try:
+                        value = yaml.safe_load(value_part) if value_part else None
+                    except Exception:
+                        value = value_part if value_part else None
+
+                    node = ConfigNode(
+                        key=key,
+                        path=parent.path + (key,),
+                        value=value,
+                        comment=comment_text,
+                        commented=True,
+                        children=[],
+                    )
+                    parent.children.append(node)
+                else:
+                    if comment_body:
+                        pending_comments.append(comment_body)
+                continue
+
+            match = re.match(r"(\s*)([A-Za-z0-9_]+)\s*:(.*)$", line)
+            if not match:
+                continue
+
+            key = match.group(2)
+            value_part = match.group(3)
+            inline_comment = ""
+            if "#" in value_part:
+                value_part, inline_comment = value_part.split("#", 1)
+                inline_comment = inline_comment.strip()
+            value_part = value_part.strip()
+
+            while stack and indent <= stack[-1][0]:
+                stack.pop()
+            parent = stack[-1][1]
+
+            comment_text = self._clean_comment_block(pending_comments)
+            pending_comments = []
+            if inline_comment:
+                comment_text = (
+                    f"{comment_text}\n{inline_comment}"
+                    if comment_text
+                    else inline_comment
+                )
+
+            if value_part == "":
+                node = ConfigNode(
+                    key=key,
+                    path=parent.path + (key,),
+                    value=None,
+                    comment=comment_text,
+                    commented=False,
+                    children=[],
+                )
+                parent.children.append(node)
+                stack.append((indent, node))
+            else:
+                value = get_value(parent.path + (key,))
+                node = ConfigNode(
+                    key=key,
+                    path=parent.path + (key,),
+                    value=value,
+                    comment=comment_text,
+                    commented=False,
+                    children=[],
+                )
+                parent.children.append(node)
+
+        return root
+
+    def _titleize(self, key: str) -> str:
+        return key.replace("_", " ").strip().title()
+
+    def _section_title_and_description(self, node: ConfigNode) -> tuple[str, str]:
+        if node.comment:
+            lines = [line.strip() for line in node.comment.splitlines() if line.strip()]
+            if lines:
+                first = lines[0]
+                if len(first) <= 60 and not first.endswith("."):
+                    description = "\n".join(lines[1:]).strip()
+                    return first, description
+        return self._titleize(node.key), node.comment
+
+    def _infer_expected_type(self, node: ConfigNode) -> type:
+        type_hints: dict[tuple[str, ...], type] = {
+            ("transcription_options", "language"): str,
+            ("main_transcriber", "initial_prompt"): str,
+            ("diarization", "hf_token"): str,
+            ("diarization", "min_speakers"): int,
+            ("diarization", "max_speakers"): int,
+            ("audio", "input_device_index"): int,
+        }
+        if node.value is not None:
+            return type(node.value)
+        if node.commented and node.value is not None:
+            return type(node.value)
+        return type_hints.get(node.path, str)
+
+    def _format_config_value(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return yaml.safe_dump(
+                value, default_flow_style=True, sort_keys=False
+            ).strip()
+        return str(value)
+
+    def _create_config_row(self, node: ConfigNode) -> QWidget:
+        row = QWidget()
+        row.setObjectName("configRow")
+        row_layout = QVBoxLayout(row)
+        row_layout.setContentsMargins(12, 10, 12, 10)
+        row_layout.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        label = QLabel(self._titleize(node.key))
+        label.setObjectName("fieldLabel")
+        top_row.addWidget(label)
+        top_row.addStretch()
+
+        expected_type = self._infer_expected_type(node)
+        self._server_field_types[node.path] = expected_type
+        self._server_field_original[node.path] = node.value
+        self._server_field_commented[node.path] = node.commented
+
+        if expected_type is bool:
+            input_widget = QCheckBox()
+            input_widget.setChecked(bool(node.value))
+        else:
+            input_widget = QLineEdit()
+            input_widget.setText(self._format_config_value(node.value))
+            input_widget.setPlaceholderText("null")
+
+        if node.commented:
+            enable_check = QCheckBox("Enable")
+            enable_check.setChecked(False)
+            enable_check.toggled.connect(input_widget.setEnabled)
+            input_widget.setEnabled(False)
+            self._server_field_enablers[node.path] = enable_check
+            top_row.addWidget(enable_check)
+
+        top_row.addWidget(input_widget)
+        row_layout.addLayout(top_row)
+
+        comment_text = node.comment
+        if node.path == ("transcription_options", "enable_live_transcriber"):
+            note = "Synced with live_transcriber.enabled."
+            comment_text = f"{comment_text}\n{note}" if comment_text else note
+
+        if comment_text:
+            help_label = QLabel(comment_text)
+            help_label.setObjectName("helpText")
+            help_label.setWordWrap(True)
+            row_layout.addWidget(help_label)
+
+        self._server_field_inputs[node.path] = input_widget
+
+        search_text = " ".join(
+            [node.key, " ".join(node.path), node.comment or ""]
+        ).lower()
+        self._server_row_search[row] = search_text
+
+        return row
+
+    def _build_server_section(
+        self, node: ConfigNode, parent_layout: QVBoxLayout, level: int = 0
+    ) -> dict[str, Any] | None:
+        if node.is_leaf:
+            return None
+
+        title, description = self._section_title_and_description(node)
+        section_widget = CollapsibleSection(title, description, level=level)
+        parent_layout.addWidget(section_widget)
+
+        rows: list[QWidget] = []
+        children: list[dict[str, Any]] = []
+
+        for child in node.children:
+            if child.is_leaf:
+                row = self._create_config_row(child)
+                section_widget.content_layout.addWidget(row)
+                rows.append(row)
+            else:
+                child_section = self._build_server_section(
+                    child, section_widget.content_layout, level=level + 1
+                )
+                if child_section:
+                    children.append(child_section)
+
+        return {"section": section_widget, "rows": rows, "children": children}
+
+    def _filter_server_settings(self, text: str) -> None:
+        query = text.strip().lower()
+
+        def filter_section(section_info: dict[str, Any]) -> bool:
+            any_visible = False
+            for row in section_info["rows"]:
+                match = not query or query in self._server_row_search.get(row, "")
+                row.setVisible(match)
+                any_visible = any_visible or match
+
+            for child in section_info["children"]:
+                child_visible = filter_section(child)
+                child["section"].setVisible(child_visible)
+                any_visible = any_visible or child_visible
+
+            if query:
+                section_info["section"].set_expanded(any_visible)
+            return any_visible
+
+        for section in self._server_section_tree:
+            visible = filter_section(section)
+            section["section"].setVisible(visible or not query)
+
+    def _sync_server_alias_fields(self) -> None:
+        alias_pairs = [
+            (
+                ("live_transcriber", "enabled"),
+                ("transcription_options", "enable_live_transcriber"),
+            )
+        ]
+        self._alias_sync_guard = False
+
+        def make_handler(target: QCheckBox):
+            def handler(checked: bool) -> None:
+                if self._alias_sync_guard:
+                    return
+                self._alias_sync_guard = True
+                target.setChecked(checked)
+                self._alias_sync_guard = False
+
+            return handler
+
+        for canonical, alias in alias_pairs:
+            canonical_widget = self._server_field_inputs.get(canonical)
+            alias_widget = self._server_field_inputs.get(alias)
+            if isinstance(canonical_widget, QCheckBox) and isinstance(
+                alias_widget, QCheckBox
+            ):
+                alias_widget.setChecked(canonical_widget.isChecked())
+                canonical_widget.toggled.connect(make_handler(alias_widget))
+                alias_widget.toggled.connect(make_handler(canonical_widget))
+
+    def _parse_list_value(self, text: str) -> list[Any]:
+        try:
+            parsed = yaml.safe_load(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        if "," in text:
+            parts = [p.strip() for p in text.split(",") if p.strip()]
+            return [yaml.safe_load(part) for part in parts]
+        raise ValueError("Invalid list format")
+
+    def _collect_server_config_updates(
+        self,
+    ) -> tuple[dict[tuple[str, ...], Any], list[str]]:
+        updates: dict[tuple[str, ...], Any] = {}
+        errors: list[str] = []
+
+        for path, widget in self._server_field_inputs.items():
+            expected = self._server_field_types.get(path, str)
+            original = self._server_field_original.get(path)
+            is_commented = self._server_field_commented.get(path, False)
+            enable_check = self._server_field_enablers.get(path)
+
+            if is_commented and enable_check and not enable_check.isChecked():
+                continue
+
+            try:
+                if expected is bool:
+                    value = widget.isChecked()  # type: ignore[union-attr]
+                else:
+                    text = widget.text().strip()  # type: ignore[union-attr]
+                    if text == "":
+                        value = None
+                    elif expected is str:
+                        value = text
+                    elif expected is int:
+                        value = int(text)
+                    elif expected is float:
+                        value = float(text)
+                    elif expected is list:
+                        value = self._parse_list_value(text)
+                    else:
+                        value = yaml.safe_load(text)
+            except Exception:
+                errors.append(".".join(path))
+                continue
+
+            if is_commented:
+                updates[path] = value
+            else:
+                if value != original:
+                    updates[path] = value
+
+        return updates, errors
 
     def _toggle_token_visibility(self, checked: bool) -> None:
         """Toggle token visibility."""
@@ -1329,11 +1826,11 @@ class SettingsDialog(QDialog):
             self.config.set("diarization", "expected_speakers", value=None)
 
         # Client tab - Audio Notebook
-        self.config.set_server_config(
-            "longform_recording",
-            "auto_add_to_audio_notebook",
-            value=self.auto_add_notebook_check.isChecked(),
+        server_auto_add = self._server_field_inputs.get(
+            ("longform_recording", "auto_add_to_audio_notebook")
         )
+        if server_auto_add and isinstance(server_auto_add, QCheckBox):
+            server_auto_add.setChecked(self.auto_add_notebook_check.isChecked())
 
         # Client tab - Connection
         self.config.set(
@@ -1356,9 +1853,33 @@ class SettingsDialog(QDialog):
         )
 
         # Save to file
-        if self.config.save():
-            logger.info("Settings saved successfully")
-        else:
+        if not self.config.save():
             logger.error("Failed to save settings")
+            return
+
+        # Save server config edits (if present)
+        updates, errors = self._collect_server_config_updates()
+        if errors:
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self,
+                "Invalid Server Settings",
+                "Some values could not be parsed:\n\n" + "\n".join(errors),
+            )
+            return
+
+        if updates:
+            if not self.config.set_server_config_values(updates):
+                from PyQt6.QtWidgets import QMessageBox
+
+                QMessageBox.critical(
+                    self,
+                    "Server Settings Not Saved",
+                    "Failed to update config.yaml. Check file permissions.",
+                )
+                return
+
+        logger.info("Settings saved successfully")
 
         self.accept()

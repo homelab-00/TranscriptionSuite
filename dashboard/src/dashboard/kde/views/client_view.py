@@ -148,7 +148,7 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._preview_toggle_btn.setCheckable(True)
     dashboard._preview_toggle_btn.setFixedWidth(80)
     live_transcriber_enabled = dashboard.config.get_server_config(
-        "transcription_options", "enable_live_transcriber", default=False
+        "live_transcriber", "enabled", default=False
     )
     dashboard._preview_toggle_btn.setChecked(live_transcriber_enabled)
     dashboard._preview_toggle_btn.setText(

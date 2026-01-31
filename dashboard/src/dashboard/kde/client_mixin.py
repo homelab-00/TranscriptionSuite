@@ -459,9 +459,7 @@ class ClientControlMixin:
         self._update_live_transcriber_toggle_style()
 
         # Save to server config - requires server restart to take effect
-        self.config.set_server_config(
-            "transcription_options", "enable_live_transcriber", value=is_enabled
-        )
+        self.config.set_server_config("live_transcriber", "enabled", value=is_enabled)
 
         logger.info(f"Live transcriber: {'enabled' if is_enabled else 'disabled'}")
 

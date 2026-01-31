@@ -191,7 +191,7 @@ class ClientOrchestrator:
     def live_transcriber_enabled(self) -> bool:
         """Check if live transcriber is enabled in server config."""
         return self.config.get_server_config(
-            "transcription_options", "enable_live_transcriber", default=False
+            "live_transcriber", "enabled", default=False
         )
 
     @property
@@ -1034,12 +1034,12 @@ class ClientOrchestrator:
             # Send start command with config
             config = {
                 "model": self.config.get_server_config(
-                    "transcription_options",
-                    "model_id",
+                    "main_transcriber",
+                    "model",
                     default="Systran/faster-whisper-large-v3",
                 ),
                 "language": self.config.get_server_config(
-                    "live_transcriber", "language", default=""
+                    "transcription_options", "language", default=""
                 ),
                 "post_speech_silence_duration": self.config.get(
                     "live_mode", "grace_period", default=1.0
