@@ -88,6 +88,9 @@ class DashboardWindow(
 
     # Expose View enum for mixins
     _View = View
+    _VIEWPORT_MIN_WIDTH = 650
+    _SIDEBAR_EXPANDED_WIDTH = 200
+    _SIDEBAR_COLLAPSED_WIDTH = 56
 
     def __init__(
         self,
@@ -156,7 +159,7 @@ class DashboardWindow(
     def _setup_ui(self) -> None:
         """Set up the main UI structure with sidebar navigation."""
         self.setWindowTitle("TranscriptionSuite")
-        self.setMinimumSize(830, 550)
+        self.setMinimumHeight(550)
 
         logo_path = get_assets_path() / "logo.png"
         if logo_path.exists():
@@ -185,6 +188,7 @@ class DashboardWindow(
         self._stack.addWidget(self._notebook_view)
 
         self._navigate_to(View.WELCOME, add_to_history=False)
+        self._update_minimum_width()
 
     def _apply_styles(self) -> None:
         """Apply stylesheet to the window."""
@@ -194,7 +198,7 @@ class DashboardWindow(
         """Create the vertical sidebar navigation with status lights."""
         self._sidebar = QFrame()
         self._sidebar.setObjectName("sidebar")
-        self._sidebar.setFixedWidth(200)
+        self._sidebar.setFixedWidth(self._SIDEBAR_EXPANDED_WIDTH)
         self._sidebar_expanded = True
         layout = QVBoxLayout(self._sidebar)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -318,7 +322,7 @@ class DashboardWindow(
         """Toggle sidebar between expanded and collapsed state."""
         self._sidebar_expanded = not self._sidebar_expanded
         if self._sidebar_expanded:
-            self._sidebar.setFixedWidth(200)
+            self._sidebar.setFixedWidth(self._SIDEBAR_EXPANDED_WIDTH)
             self._collapse_btn.setText("«")
             self._collapse_btn.setToolTip("Collapse sidebar")
             self._sidebar_title_container.show()
@@ -339,7 +343,7 @@ class DashboardWindow(
             self._server_status_light.show()
             self._client_status_light.show()
         else:
-            self._sidebar.setFixedWidth(56)
+            self._sidebar.setFixedWidth(self._SIDEBAR_COLLAPSED_WIDTH)
             self._collapse_btn.setText("»")
             self._collapse_btn.setToolTip("Expand sidebar")
             self._sidebar_title_container.hide()
@@ -360,6 +364,17 @@ class DashboardWindow(
             self._client_status_light.hide()
             # Hide notebook submenu when collapsed
             self._notebook_submenu.hide()
+        self._update_minimum_width()
+
+    def _update_minimum_width(self) -> None:
+        """Ensure the main content viewport stays at least the minimum width."""
+        self._stack.setMinimumWidth(self._VIEWPORT_MIN_WIDTH)
+        sidebar_width = (
+            self._SIDEBAR_EXPANDED_WIDTH
+            if self._sidebar_expanded
+            else self._SIDEBAR_COLLAPSED_WIDTH
+        )
+        self.setMinimumWidth(sidebar_width + self._VIEWPORT_MIN_WIDTH)
 
     def _create_sidebar_button(self, text: str, icon_name: str) -> QPushButton:
         """Create a sidebar navigation button."""

@@ -105,20 +105,44 @@ class ServerConfig:
 
         return None
 
+    def _find_config_candidates(self) -> list[Path]:
+        """Return readable config file candidates in priority order."""
+        if self._config_path:
+            if self._config_path.exists():
+                try:
+                    with self._config_path.open("r", encoding="utf-8"):
+                        pass
+                    return [self._config_path]
+                except (PermissionError, OSError):
+                    return []
+            return []
+
+        user_config_dir = get_user_config_dir()
+        candidates = [
+            user_config_dir / "config.yaml",
+            Path("/app/config.yaml"),
+            Path(__file__).parent.parent / "config.yaml",
+            Path.cwd() / "config.yaml",
+        ]
+
+        readable: list[Path] = []
+        for path in candidates:
+            if not (path.exists() and path.is_file()):
+                continue
+            try:
+                with path.open("r", encoding="utf-8"):
+                    pass
+                readable.append(path)
+            except (PermissionError, OSError):
+                continue
+
+        return readable
+
     def _load_config(self) -> None:
         """Load configuration from file."""
-        config_file = self._find_config_file()
+        candidates = self._find_config_candidates()
 
-        if config_file:
-            try:
-                with config_file.open("r", encoding="utf-8") as f:
-                    self.config = yaml.safe_load(f) or {}
-                self._loaded_from = config_file
-                print(f"Loaded configuration from: {config_file}")
-            except (yaml.YAMLError, OSError) as e:
-                print(f"ERROR: Could not load config file {config_file}: {e}")
-                raise RuntimeError(f"Failed to load configuration: {e}") from e
-        else:
+        if not candidates:
             raise RuntimeError(
                 "No configuration file found. "
                 "Expected one of:\n"
@@ -127,6 +151,30 @@ class ServerConfig:
                 "  - server/config.yaml (development)\n"
                 "  - ./config.yaml (current directory)"
             )
+
+        errors: list[tuple[Path, Exception]] = []
+        for config_file in candidates:
+            try:
+                with config_file.open("r", encoding="utf-8") as f:
+                    self.config = yaml.safe_load(f) or {}
+                self._loaded_from = config_file
+                if errors:
+                    print(
+                        "WARNING: Skipped invalid config file(s): "
+                        + ", ".join(str(path) for path, _ in errors)
+                    )
+                print(f"Loaded configuration from: {config_file}")
+                return
+            except (yaml.YAMLError, OSError) as e:
+                print(f"ERROR: Could not load config file {config_file}: {e}")
+                errors.append((config_file, e))
+                if self._config_path:
+                    break
+
+        if errors:
+            details = "\n".join(f"  - {path}: {err}" for path, err in errors)
+            raise RuntimeError("Failed to load configuration. Tried:\n" + details)
+        raise RuntimeError("Failed to load configuration for unknown reasons.")
 
     @property
     def loaded_from(self) -> Optional[Path]:

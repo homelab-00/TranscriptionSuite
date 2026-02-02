@@ -495,29 +495,31 @@ class ClientControlMixin:
             # Enabled state - green (or desaturated green if not editable)
             if is_editable:
                 self._preview_toggle_btn.setStyleSheet(
-                    "QPushButton { background-color: #4caf50; border: none; border-radius: 4px; "
-                    "color: white; padding: 6px 12px; font-weight: 500; min-width: 70px; }"
+                    "QPushButton { background-color: #4caf50; border: none; border-radius: 6px; "
+                    "color: white; padding: 6px 10px; font-weight: 500; min-width: 70px; "
+                    "font-size: 12px; }"
                     "QPushButton:hover { background-color: #43a047; }"
                 )
             else:
-                # Desaturated green when not editable
+                # Keep the enabled state visibly green even when not editable
                 self._preview_toggle_btn.setStyleSheet(
-                    "QPushButton { background-color: #3d5d3d; border: none; border-radius: 4px; "
-                    "color: #7a9a7a; padding: 6px 12px; min-width: 70px; }"
+                    "QPushButton { background-color: #388e3c; border: none; border-radius: 6px; "
+                    "color: #c8e6c9; padding: 6px 10px; min-width: 70px; font-size: 12px; }"
                 )
         else:
             # Disabled state - red (or desaturated red if not editable)
             if is_editable:
                 self._preview_toggle_btn.setStyleSheet(
-                    "QPushButton { background-color: #f44336; border: none; border-radius: 4px; "
-                    "color: white; padding: 6px 12px; font-weight: 500; min-width: 70px; }"
+                    "QPushButton { background-color: #f44336; border: none; border-radius: 6px; "
+                    "color: white; padding: 6px 10px; font-weight: 500; min-width: 70px; "
+                    "font-size: 12px; }"
                     "QPushButton:hover { background-color: #e53935; }"
                 )
             else:
                 # Desaturated red when not editable
                 self._preview_toggle_btn.setStyleSheet(
-                    "QPushButton { background-color: #5d3d3d; border: none; border-radius: 4px; "
-                    "color: #9a7a7a; padding: 6px 12px; min-width: 70px; }"
+                    "QPushButton { background-color: #5d3d3d; border: none; border-radius: 6px; "
+                    "color: #9a7a7a; padding: 6px 10px; min-width: 70px; font-size: 12px; }"
                 )
 
     def _on_live_language_changed(self, index: int) -> None:

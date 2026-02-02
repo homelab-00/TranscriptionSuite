@@ -747,9 +747,7 @@ class SettingsDialog(QDialog):
         connection_layout.addWidget(self.use_remote_check)
 
         # Help text for remote
-        remote_help = QLabel(
-            "Remote access requires Tailscale HTTPS and port 8443."
-        )
+        remote_help = QLabel("Remote access requires Tailscale HTTPS and port 8443.")
         remote_help.setObjectName("helpText")
         remote_help.setWordWrap(True)
         connection_layout.addWidget(remote_help)

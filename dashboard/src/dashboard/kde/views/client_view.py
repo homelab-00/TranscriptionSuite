@@ -146,7 +146,7 @@ def create_client_view(dashboard) -> QWidget:
 
     dashboard._preview_toggle_btn = QPushButton("Disabled")
     dashboard._preview_toggle_btn.setCheckable(True)
-    dashboard._preview_toggle_btn.setFixedWidth(80)
+    dashboard._preview_toggle_btn.setFixedWidth(70)
     live_mode_enabled = dashboard.config.get_server_config(
         "live_transcriber", "enabled", default=False
     )

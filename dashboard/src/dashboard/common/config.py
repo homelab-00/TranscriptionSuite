@@ -274,6 +274,15 @@ class ClientConfig:
         if isinstance(value, str):
             if value == "":
                 return '""'
+            if "\n" in value or "\r" in value:
+                normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+                escaped = (
+                    normalized.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\t", "\\t")
+                    .replace("\n", "\\n")
+                )
+                return f'"{escaped}"'
             needs_quotes = (
                 value.strip() != value
                 or value.lower()
@@ -372,8 +381,19 @@ class ClientConfig:
                         )
 
                     indent = re.match(r"^(\s*)", lines[idx]).group(1)
+                    indent_len = len(indent)
                     key = path[-1]
                     lines[idx] = f"{indent}{key}: {yaml_value}{inline_comment}\n"
+                    if old_value_and_comment.lstrip().startswith(("|", ">")):
+                        j = idx + 1
+                        while j < len(lines):
+                            next_line = lines[j]
+                            next_indent = len(next_line) - len(next_line.lstrip())
+                            if next_indent > indent_len:
+                                indices_to_remove.add(j)
+                                j += 1
+                                continue
+                            break
                     modified = True
                     continue
 

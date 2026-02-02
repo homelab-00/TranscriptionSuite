@@ -12,6 +12,7 @@ adapted for server use. Key differences from the original:
 The core recording state machine and VAD logic is preserved from MAIN.
 
 Portions inspired by/adapted from RealtimeSTT by Kolja Beigel (MIT License).
+Copyright (c) Kolja Beigel.
 https://github.com/KoljaB/RealtimeSTT
 Major modifications: removed multiprocessing, PyAudio, wake word detection;
 added file transcription, WebSocket streaming support, server integration.
