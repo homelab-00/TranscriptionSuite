@@ -65,13 +65,12 @@ easy installation.
 - **Fully featured GUI**: Native app for KDE, GNOME, and Windows
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
+- **Speaker Diarization**: PyAnnote-based speaker identification
 - **Static File Transcription**: Transcribe an existing audio/video file
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
   (utilizing Tailscale)
-- **Speaker Diarization**: PyAnnote-based speaker identification
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
-  - Supports LM Studio 0.4.0+ with native v1 REST API for model management and stateful chats
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
@@ -79,22 +78,18 @@ easy installation.
 
 #### Screenshots
 
-##### Dashboard
 <table>
   <tr>
-    <td><img src="./build/assets/shot-1.png" alt="Dashboard Home" width="400"/></td>
-    <td><img src="./build/assets/shot-2.png" alt="Server Management" width="400"/></td>
-  </tr>
-</table>
-
-##### Audio Notebook
-<table>
-  <tr>
-    <td><img src="./build/assets/shot-3.png" alt="Calendar View" width="400"/></td>
-    <td><img src="./build/assets/shot-4.png" alt="AI Summary" width="400"/></td>
+    <td><img src="./build/assets/shot-1.png" alt="Home tab" width="400"/></td>
+    <td><img src="./build/assets/shot-2.png" alt="Docker Server tab" width="400"/></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="./build/assets/shot-5.png" alt="Speaker Diarization" width="400"/></td>
+    <td><img src="./build/assets/shot-3.png" alt="Audio Notebook - Calendar view" width="400"/></td>
+    <td><img src="./build/assets/shot-4.png" alt="Audio Notebook - Day view" width="400"/></td>
+  </tr>
+  <tr>
+    <td><img src="./build/assets/shot-5.png" alt="Audio Notebook - Note view" width="400"/></td>
+    <td><img src="./build/assets/shot-6.png" alt="Audio Notebook - Note view w/ diarization" width="400"/></td>
   </tr>
 </table>
 
@@ -103,19 +98,9 @@ easy installation.
 
 <div align="center">
 
-#### Videos
+#### Video Demo
 
-Longform Transcription demo:
-
-https://github.com/user-attachments/assets/b38955c6-12d3-4810-979d-ce1475d2b165
-
-Live Transcription demo:
-
-https://github.com/user-attachments/assets/aaada672-08aa-4735-8beb-3825ead031bd
-
-Audio Notebook demo:
-
-https://github.com/user-attachments/assets/afc55551-98b9-4be6-98b2-a7f426d7025a
+https://github.com/user-attachments/assets/ea801ae2-d263-493b-a6c5-d431b59601ee
 
 </div>
 

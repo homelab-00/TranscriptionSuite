@@ -252,9 +252,9 @@ async def process_with_llm(request: LLMRequest):
         else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
-    logger.info(
-        f"  Max tokens: {payload['max_tokens']}, Temperature: {payload['temperature']}"
-    )
+    max_tokens_log = sanitize_for_log(str(payload["max_tokens"]))
+    temperature_log = sanitize_for_log(str(payload["temperature"]))
+    logger.info(f"  Max tokens: {max_tokens_log}, Temperature: {temperature_log}")
 
     try:
         # Local models can take a while to respond (warmup / long generations).
@@ -720,8 +720,9 @@ async def load_model(request: ModelLoadRequest):
                 detail=str(e),
             )
 
+    context_length_log = sanitize_for_log(str(context_length))
     logger.info(
-        f"Loading model via API: {sanitize_for_log(model_id)} (ctx={context_length})"
+        f"Loading model via API: {sanitize_for_log(model_id)} (ctx={context_length_log})"
     )
 
     # Build load request payload for v1 API
