@@ -32,6 +32,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+WORD_TIMESTAMPS_TOOLTIP = "Include precise timestamps for each word"
+WORD_TIMESTAMPS_REQUIRED_TOOLTIP = (
+    "Word-level timestamps are required when speaker diarization is enabled"
+)
+
 
 # Supported audio formats
 AUDIO_EXTENSIONS = {
@@ -215,10 +220,10 @@ class ImportWidget(QWidget):
         self._word_timestamps_checkbox = QCheckBox("Word-level timestamps")
         self._word_timestamps_checkbox.setObjectName("optionCheckbox")
         self._word_timestamps_checkbox.setChecked(True)
-        self._word_timestamps_checkbox.setToolTip(
-            "Include precise timestamps for each word"
-        )
+        self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
         options_layout.addWidget(self._word_timestamps_checkbox)
+        self._diarization_checkbox.toggled.connect(self._on_diarization_toggled)
+        self._on_diarization_toggled(self._diarization_checkbox.isChecked())
 
         options_layout.addStretch()
 
@@ -272,6 +277,17 @@ class ImportWidget(QWidget):
         status_layout.addWidget(self._progress_bar)
 
         layout.addWidget(status_container)
+
+    def _on_diarization_toggled(self, enabled: bool) -> None:
+        """Enforce diarization dependency on word-level timestamps."""
+        if enabled:
+            self._word_timestamps_checkbox.setChecked(True)
+            self._word_timestamps_checkbox.setEnabled(False)
+            self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_REQUIRED_TOOLTIP)
+            return
+
+        self._word_timestamps_checkbox.setEnabled(True)
+        self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
 
     def _apply_styles(self) -> None:
         """Apply styling to import components."""

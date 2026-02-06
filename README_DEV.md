@@ -612,7 +612,7 @@ TAG=my-custom docker compose up -d
 | `/ws/live` | WebSocket | Live Mode continuous transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
-| `/api/notebook/recordings/{id}/export` | GET | Export recording (txt/json with timestamps) |
+| `/api/notebook/recordings/{id}/export` | GET | Export recording (`txt` for pure notes, `srt`/`ass` for timestamp-capable notes) |
 | `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization |
 | `/api/notebook/calendar` | GET | Get recordings by date range |
 | `/backups` | GET | List available database backups |
@@ -971,11 +971,12 @@ The Dashboard provides a graphical interface for backup management in Settings â
 
 Recordings can be exported from the Audio Notebook Calendar view:
 - Right-click on any recording â†’ "Export transcription"
-- **Text format (.txt)**: Human-readable with speaker labels and timestamps
-- **JSON format (.json)**: Machine-readable with word-level timestamps, confidence scores, and diarization data
+- **Text format (.txt)**: Available only for pure transcription notes (no word-level timestamps, no diarization)
+- **SubRip format (.srt)**: Available for timestamp-capable notes (word timestamps enabled, with or without diarization)
+- **Advanced SubStation Alpha (.ass)**: Available for timestamp-capable notes (word timestamps enabled, with or without diarization)
 
 **API Endpoints:**
-- `GET /api/notebook/recordings/{id}/export?format=txt|json` - Export recording
+- `GET /api/notebook/recordings/{id}/export?format=txt|srt|ass` - Export recording (capability-gated)
 - `GET /backups` - List available backups
 - `POST /backup` - Create new backup
 - `POST /restore` - Restore from backup (requires `filename` in request body)

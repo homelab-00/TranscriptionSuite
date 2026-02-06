@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
+from server.core.subtitle_export import build_subtitle_cues, render_ass, render_srt
 
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
@@ -628,21 +629,29 @@ async def get_timeslot_info(
 @router.get("/recordings/{recording_id}/export")
 async def export_recording(
     recording_id: int,
-    format: str = Query("txt", description="Export format: 'txt' or 'json'"),
+    format: str = Query("txt", description="Export format: 'txt', 'srt', or 'ass'"),
 ) -> Response:
     """
-    Export a recording's transcription in a human-readable format.
+    Export a recording's transcription.
 
     Includes:
     - Recording metadata (title, date, duration)
     - Full transcription text
-    - Word-level timestamps (if present)
-    - Speaker diarization labels (if present)
+    - Subtitle cue rendering from word-level timestamps (if present)
+    - Speaker labels (if diarization is present)
 
     Formats:
-    - txt: Human-readable text format
-    - json: Machine-readable JSON format
+    - txt: Human-readable text format for pure transcription notes
+    - srt: SubRip subtitle format
+    - ass: Advanced SubStation Alpha subtitle format
     """
+    requested_format = format.strip().lower()
+    if requested_format not in {"txt", "srt", "ass"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported export format. Supported formats: txt, srt, ass.",
+        )
+
     recording = get_recording(recording_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -673,50 +682,26 @@ async def export_recording(
 
     title = recording.get("title") or recording.get("filename") or "Recording"
     has_diarization = bool(recording.get("has_diarization"))
+    has_words = len(words) > 0
+    is_pure_note = (not has_diarization) and (not has_words)
 
-    if format.lower() == "json":
-        # JSON export with full data
-        import json
+    if is_pure_note and requested_format != "txt":
+        raise HTTPException(
+            status_code=400,
+            detail="This recording only supports TXT export. SRT/ASS require word timestamps or diarization.",
+        )
 
-        export_data = {
-            "metadata": {
-                "title": title,
-                "recorded_at": recorded_at,
-                "duration_seconds": duration,
-                "word_count": recording.get("word_count", 0),
-                "has_diarization": has_diarization,
-                "summary": recording.get("summary"),
-            },
-            "segments": [
-                {
-                    "speaker": seg.get("speaker"),
-                    "text": seg.get("text", ""),
-                    "start_time": seg.get("start_time", 0),
-                    "end_time": seg.get("end_time", 0),
-                }
-                for seg in segments
-            ],
-            "words": [
-                {
-                    "word": w.get("word", ""),
-                    "start_time": w.get("start_time", 0),
-                    "end_time": w.get("end_time", 0),
-                    "confidence": w.get("confidence"),
-                }
-                for w in words
-            ]
-            if words
-            else None,
-        }
+    if (not is_pure_note) and requested_format == "txt":
+        raise HTTPException(
+            status_code=400,
+            detail="This recording supports subtitle export only. Use SRT or ASS.",
+        )
 
-        content = json.dumps(export_data, indent=2, ensure_ascii=False)
-        filename = f"{title.replace(' ', '_')}_export.json"
-        media_type = "application/json"
-    else:
+    if requested_format == "txt":
         # Human-readable text export
         lines = []
         lines.append("=" * 60)
-        lines.append(f"TRANSCRIPTION EXPORT")
+        lines.append("TRANSCRIPTION EXPORT")
         lines.append("=" * 60)
         lines.append("")
         lines.append(f"Title: {title}")
@@ -806,6 +791,21 @@ async def export_recording(
         content = "\n".join(lines)
         filename = f"{title.replace(' ', '_')}_export.txt"
         media_type = "text/plain; charset=utf-8"
+    else:
+        cues = build_subtitle_cues(
+            segments=segments,
+            words=words,
+            has_diarization=has_diarization,
+        )
+
+        if requested_format == "srt":
+            content = render_srt(cues)
+            filename = f"{title.replace(' ', '_')}_export.srt"
+            media_type = "application/x-subrip; charset=utf-8"
+        else:
+            content = render_ass(cues, title=title)
+            filename = f"{title.replace(' ', '_')}_export.ass"
+            media_type = "text/x-ass; charset=utf-8"
 
     return Response(
         content=content,

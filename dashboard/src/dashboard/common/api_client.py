@@ -674,7 +674,7 @@ class APIClient:
 
         Args:
             recording_id: Recording ID
-            format: Export format ('txt' or 'json')
+            format: Export format ('txt', 'srt', or 'ass')
 
         Returns:
             Tuple of (content bytes, suggested filename)
@@ -686,11 +686,30 @@ class APIClient:
             headers=self._get_headers(),
             **self._get_ssl_kwargs(),
         ) as resp:
-            resp.raise_for_status()
+            if resp.status >= 400:
+                error_text = None
+                try:
+                    error_data = await resp.json()
+                    if isinstance(error_data, dict):
+                        error_text = error_data.get("detail")
+                except (json.JSONDecodeError, aiohttp.ContentTypeError):
+                    pass
+
+                if not error_text:
+                    error_text = await resp.text()
+                if not error_text:
+                    error_text = f"Export failed with status {resp.status}"
+                raise RuntimeError(str(error_text))
+
             content = await resp.read()
             # Extract filename from Content-Disposition header
             cd = resp.headers.get("Content-Disposition", "")
-            filename = "export.txt"
+            requested_format = format.lower()
+            filename = (
+                f"export.{requested_format}"
+                if requested_format in {"txt", "srt", "ass"}
+                else "export.txt"
+            )
             if 'filename="' in cd:
                 filename = cd.split('filename="')[1].split('"')[0]
             return content, filename

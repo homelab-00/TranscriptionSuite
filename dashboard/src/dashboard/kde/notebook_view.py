@@ -304,9 +304,34 @@ class NotebookView(QWidget):
 
     def _on_export_requested(self, recording_id: int) -> None:
         """Handle export request from calendar."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._prompt_and_export_recording(recording_id))
+            else:
+                loop.run_until_complete(self._prompt_and_export_recording(recording_id))
+        except RuntimeError:
+            asyncio.run(self._prompt_and_export_recording(recording_id))
+
+    async def _prompt_and_export_recording(self, recording_id: int) -> None:
+        """Resolve export capabilities, prompt for format, then export."""
         from PyQt6.QtWidgets import QFileDialog
 
-        # Ask user for export format
+        try:
+            recording = await self._api_client.get_recording(recording_id)
+        except Exception as e:
+            logger.error(f"Failed to fetch recording details for export: {e}")
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Failed to prepare export: {e}",
+            )
+            return
+
+        has_diarization = bool(recording.get("has_diarization"))
+        has_words = bool(recording.get("words"))
+        is_pure_note = (not has_diarization) and (not has_words)
+
         format_dialog = QMessageBox(self)
         format_dialog.setWindowTitle("Export Format")
         format_dialog.setText("Choose export format:")
@@ -329,51 +354,46 @@ class NotebookView(QWidget):
                 background-color: #3d3d3d;
             }
         """)
-        txt_btn = format_dialog.addButton(
-            "Text (.txt)", QMessageBox.ButtonRole.AcceptRole
-        )
-        json_btn = format_dialog.addButton(
-            "JSON (.json)", QMessageBox.ButtonRole.AcceptRole
-        )
+
+        format_buttons = {}
+        if is_pure_note:
+            txt_btn = format_dialog.addButton(
+                "Text (.txt)", QMessageBox.ButtonRole.AcceptRole
+            )
+            format_buttons[txt_btn] = ("txt", "Text Files (*.txt)", ".txt")
+        else:
+            srt_btn = format_dialog.addButton(
+                "SubRip (.srt)", QMessageBox.ButtonRole.AcceptRole
+            )
+            ass_btn = format_dialog.addButton(
+                "Advanced SubStation Alpha (.ass)",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            format_buttons[srt_btn] = ("srt", "SubRip Files (*.srt)", ".srt")
+            format_buttons[ass_btn] = (
+                "ass",
+                "ASS Subtitle Files (*.ass)",
+                ".ass",
+            )
+
         format_dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         format_dialog.exec()
 
         clicked = format_dialog.clickedButton()
-        if clicked == txt_btn:
-            export_format = "txt"
-            file_filter = "Text Files (*.txt)"
-            default_ext = ".txt"
-        elif clicked == json_btn:
-            export_format = "json"
-            file_filter = "JSON Files (*.json)"
-            default_ext = ".json"
-        else:
-            return  # Cancelled
+        if clicked not in format_buttons:
+            return
 
-        # Get save location
+        export_format, file_filter, default_ext = format_buttons[clicked]
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Transcription",
             f"transcription_export{default_ext}",
             file_filter,
         )
-
         if not file_path:
-            return  # Cancelled
+            return
 
-        # Perform export
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(
-                    self._export_recording(recording_id, export_format, file_path)
-                )
-            else:
-                loop.run_until_complete(
-                    self._export_recording(recording_id, export_format, file_path)
-                )
-        except RuntimeError:
-            asyncio.run(self._export_recording(recording_id, export_format, file_path))
+        await self._export_recording(recording_id, export_format, file_path)
 
     async def _export_recording(
         self, recording_id: int, format: str, file_path: str

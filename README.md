@@ -361,7 +361,9 @@ transcription service on devices without Dashboard app builds.
 - Audio playback with click-to-seek timestamps
 - AI chat about recordings (requires LM Studio)
 - Import external audio files with drag-and-drop
-- Export transcriptions in text or JSON format (with word-level timestamps and diarization data)
+- Conditional export formats per note capability:
+  - `TXT` for pure transcription notes (no word timestamps, no diarization)
+  - `SRT` / `ASS` for timestamp-capable notes (word timestamps with or without diarization)
 - Context menu actions: Export, Change date/time, Delete
 
 ---
@@ -409,10 +411,13 @@ docker compose up -d
 You can export individual transcriptions from the Audio Notebook:
 1. Right-click on any recording in the Calendar view
 2. Select "Export transcription"
-3. Choose format (Text or JSON)
+3. Choose format based on note data:
+   - `Text (.txt)` for pure transcription notes
+   - `SubRip (.srt)` or `Advanced SubStation Alpha (.ass)` for timestamp-capable notes
 4. Select save location
 
-The JSON format includes word-level timestamps and speaker diarization data.
+When diarization is present, subtitle exports include normalized speaker labels
+(`Speaker 1`, `Speaker 2`, ...).
 
 ---
 

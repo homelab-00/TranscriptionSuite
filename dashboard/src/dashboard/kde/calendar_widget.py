@@ -40,6 +40,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+WORD_TIMESTAMPS_TOOLTIP = "Include precise timestamps for each word"
+WORD_TIMESTAMPS_REQUIRED_TOOLTIP = (
+    "Word-level timestamps are required when speaker diarization is enabled"
+)
+
 
 class DayCell(QFrame):
     """A single day cell in the calendar grid."""
@@ -408,10 +413,10 @@ class DayViewImportDialog(QDialog):
         self._word_timestamps_checkbox = QCheckBox("Word-level timestamps")
         self._word_timestamps_checkbox.setObjectName("optionCheckbox")
         self._word_timestamps_checkbox.setChecked(True)
-        self._word_timestamps_checkbox.setToolTip(
-            "Include precise timestamps for each word"
-        )
+        self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
         options_layout.addWidget(self._word_timestamps_checkbox)
+        self._diarization_checkbox.toggled.connect(self._on_diarization_toggled)
+        self._on_diarization_toggled(self._diarization_checkbox.isChecked())
 
         layout.addWidget(options_container)
         layout.addSpacing(16)
@@ -455,6 +460,17 @@ class DayViewImportDialog(QDialog):
         button_layout.addWidget(self._transcribe_btn)
 
         layout.addLayout(button_layout)
+
+    def _on_diarization_toggled(self, enabled: bool) -> None:
+        """Enforce diarization dependency on word-level timestamps."""
+        if enabled:
+            self._word_timestamps_checkbox.setChecked(True)
+            self._word_timestamps_checkbox.setEnabled(False)
+            self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_REQUIRED_TOOLTIP)
+            return
+
+        self._word_timestamps_checkbox.setEnabled(True)
+        self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
 
     def _format_time(self, hour: int) -> str:
         """Format hour to 12-hour time string."""
