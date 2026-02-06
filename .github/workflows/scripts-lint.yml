@@ -60,6 +60,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install PowerShell (if missing)
+        run: |
+          if ! command -v pwsh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y powershell
+          fi
+
       - name: Validate PowerShell syntax and lint
         shell: pwsh
         run: |
@@ -107,7 +114,11 @@ jobs:
           }
 
           if (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) {
-              $results = Invoke-ScriptAnalyzer -Path ($scriptPaths.FullName) -Severity Error
+              $results = @()
+              foreach ($script in $scriptPaths) {
+                  $results += Invoke-ScriptAnalyzer -Path $script.FullName -Severity Error
+              }
+
               if ($results.Count -gt 0) {
                   $results | Format-Table -AutoSize | Out-String | Write-Host
                   throw "PSScriptAnalyzer reported issues"
