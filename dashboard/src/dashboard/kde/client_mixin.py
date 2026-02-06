@@ -15,6 +15,10 @@ from PyQt6.QtWidgets import QMessageBox
 
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.docker_manager import ServerStatus
+from dashboard.common.model_capabilities import (
+    supports_english_translation,
+    translation_unsupported_reason,
+)
 from dashboard.common.models import TrayAction
 
 if TYPE_CHECKING:
@@ -70,6 +74,8 @@ class ClientControlMixin:
             self._update_live_transcriber_toggle_style()
         if hasattr(self, "_live_mode_mute_btn"):
             self._live_mode_mute_btn.setEnabled(False)
+
+        self._refresh_translation_capabilities()
 
     def _update_models_button_state(self) -> None:
         """Update the models button state based on server health and connection type."""
@@ -428,6 +434,210 @@ class ClientControlMixin:
             self._main_language_combo.currentText(),
             language_code or "auto",
         )
+
+    def _on_main_translation_toggled(self, checked: bool) -> None:
+        """Handle main translation toggle change."""
+        if not hasattr(self, "_main_translation_checkbox") or not hasattr(
+            self, "_main_translation_target_combo"
+        ):
+            return
+
+        if checked and not self._main_translation_checkbox.isEnabled():
+            self._main_translation_checkbox.blockSignals(True)
+            self._main_translation_checkbox.setChecked(False)
+            self._main_translation_checkbox.blockSignals(False)
+            return
+
+        self.config.set_server_config(
+            "longform_recording", "translation_enabled", value=checked
+        )
+        if checked:
+            target = self._main_translation_target_combo.currentData() or "en"
+            self.config.set_server_config(
+                "longform_recording",
+                "translation_target_language",
+                value=target,
+            )
+        self._refresh_translation_capabilities()
+
+    def _on_main_translation_target_changed(self, index: int) -> None:
+        """Handle main translation target language change."""
+        del index
+        if not hasattr(self, "_main_translation_target_combo"):
+            return
+        target = self._main_translation_target_combo.currentData() or "en"
+        self.config.set_server_config(
+            "longform_recording", "translation_target_language", value=target
+        )
+
+    def _on_live_translation_toggled(self, checked: bool) -> None:
+        """Handle live translation toggle change."""
+        if not hasattr(self, "_live_translation_checkbox") or not hasattr(
+            self, "_live_translation_target_combo"
+        ):
+            return
+
+        if checked and not self._live_translation_checkbox.isEnabled():
+            self._live_translation_checkbox.blockSignals(True)
+            self._live_translation_checkbox.setChecked(False)
+            self._live_translation_checkbox.blockSignals(False)
+            return
+
+        self.config.set_server_config(
+            "live_transcriber", "translation_enabled", value=checked
+        )
+        if checked:
+            target = self._live_translation_target_combo.currentData() or "en"
+            self.config.set_server_config(
+                "live_transcriber",
+                "translation_target_language",
+                value=target,
+            )
+        self._refresh_translation_capabilities()
+
+        # If Live Mode is active, restart to apply change.
+        if self.tray and getattr(self.tray, "orchestrator", None):
+            orchestrator = self.tray.orchestrator
+            if getattr(orchestrator, "is_live_mode_active", False):
+                orchestrator.request_live_mode_restart()
+
+    def _on_live_translation_target_changed(self, index: int) -> None:
+        """Handle live translation target language change."""
+        del index
+        if not hasattr(self, "_live_translation_target_combo"):
+            return
+        target = self._live_translation_target_combo.currentData() or "en"
+        self.config.set_server_config(
+            "live_transcriber", "translation_target_language", value=target
+        )
+
+        # If Live Mode is active, restart to apply change.
+        if self.tray and getattr(self.tray, "orchestrator", None):
+            orchestrator = self.tray.orchestrator
+            if getattr(orchestrator, "is_live_mode_active", False):
+                orchestrator.request_live_mode_restart()
+
+    def _refresh_translation_capabilities(self) -> None:
+        """Enable/disable translation controls based on selected models."""
+        if not hasattr(self, "_main_translation_checkbox") or not hasattr(
+            self, "_main_translation_target_combo"
+        ):
+            return
+        if not hasattr(self, "_live_translation_checkbox") or not hasattr(
+            self, "_live_translation_target_combo"
+        ):
+            return
+
+        main_model = self.config.get_server_config(
+            "main_transcriber",
+            "model",
+            default="Systran/faster-whisper-large-v3",
+        )
+        live_model = self.config.get_server_config(
+            "live_transcriber", "model", default=None
+        )
+        effective_live_model = live_model or main_model
+
+        main_supported = supports_english_translation(main_model)
+        live_supported = supports_english_translation(effective_live_model)
+
+        main_reason = translation_unsupported_reason(main_model)
+        live_reason = translation_unsupported_reason(effective_live_model)
+
+        main_cfg_enabled = bool(
+            self.config.get_server_config(
+                "longform_recording", "translation_enabled", default=False
+            )
+        )
+        main_target_cfg = self.config.get_server_config(
+            "longform_recording", "translation_target_language", default="en"
+        )
+        live_cfg_enabled = bool(
+            self.config.get_server_config(
+                "live_transcriber", "translation_enabled", default=False
+            )
+        )
+        live_target_cfg = self.config.get_server_config(
+            "live_transcriber", "translation_target_language", default="en"
+        )
+
+        # Main controls
+        if not main_supported and main_cfg_enabled:
+            self.config.set_server_config(
+                "longform_recording", "translation_enabled", value=False
+            )
+            self._show_notification(
+                "Translation Disabled",
+                "Main model does not support translation.",
+            )
+            main_cfg_enabled = False
+        self._main_translation_checkbox.blockSignals(True)
+        self._main_translation_checkbox.setEnabled(main_supported)
+        self._main_translation_checkbox.setChecked(main_cfg_enabled and main_supported)
+        self._main_translation_checkbox.blockSignals(False)
+        if (main_target_cfg or "en") != "en":
+            self.config.set_server_config(
+                "longform_recording", "translation_target_language", value="en"
+            )
+        if self._main_translation_target_combo.count() > 0:
+            self._main_translation_target_combo.blockSignals(True)
+            self._main_translation_target_combo.setCurrentIndex(0)
+            self._main_translation_target_combo.blockSignals(False)
+        self._main_translation_target_combo.setEnabled(
+            main_supported and self._main_translation_checkbox.isChecked()
+        )
+
+        if main_supported:
+            self._main_translation_checkbox.setToolTip(
+                "Translate transcription output to English."
+            )
+            self._main_translation_target_combo.setToolTip(
+                "Translation target language.\nv1 supports English only."
+            )
+        else:
+            reason = main_reason or "Selected model does not support translation."
+            self._main_translation_checkbox.setToolTip(reason)
+            self._main_translation_target_combo.setToolTip(reason)
+
+        # Live controls
+        if not live_supported and live_cfg_enabled:
+            self.config.set_server_config(
+                "live_transcriber", "translation_enabled", value=False
+            )
+            self._show_notification(
+                "Translation Disabled",
+                "Live Mode model does not support translation.",
+            )
+            live_cfg_enabled = False
+        self._live_translation_checkbox.blockSignals(True)
+        self._live_translation_checkbox.setEnabled(live_supported)
+        self._live_translation_checkbox.setChecked(live_cfg_enabled and live_supported)
+        self._live_translation_checkbox.blockSignals(False)
+        if (live_target_cfg or "en") != "en":
+            self.config.set_server_config(
+                "live_transcriber", "translation_target_language", value="en"
+            )
+        if self._live_translation_target_combo.count() > 0:
+            self._live_translation_target_combo.blockSignals(True)
+            self._live_translation_target_combo.setCurrentIndex(0)
+            self._live_translation_target_combo.blockSignals(False)
+        self._live_translation_target_combo.setEnabled(
+            live_supported and self._live_translation_checkbox.isChecked()
+        )
+
+        if live_supported:
+            self._live_translation_checkbox.setToolTip(
+                "Translate Live Mode sentence output to English."
+            )
+            self._live_translation_target_combo.setToolTip(
+                "Translation target language.\n"
+                "v1 supports English only.\n"
+                "Live Mode will restart to apply changes."
+            )
+        else:
+            reason = live_reason or "Selected model does not support translation."
+            self._live_translation_checkbox.setToolTip(reason)
+            self._live_translation_target_combo.setToolTip(reason)
 
     def _refresh_source_devices(self) -> None:
         """Refresh microphone/system-audio source dropdowns."""

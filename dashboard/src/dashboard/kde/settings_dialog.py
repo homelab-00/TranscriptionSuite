@@ -134,8 +134,12 @@ class SettingsDialog(QDialog):
         self._server_hidden_paths: set[tuple[str, ...]] = {
             ("live_transcriber", "enabled"),
             ("live_transcriber", "live_language"),
+            ("live_transcriber", "translation_enabled"),
+            ("live_transcriber", "translation_target_language"),
             ("live_transcriber", "model"),
             ("longform_recording", "language"),
+            ("longform_recording", "translation_enabled"),
+            ("longform_recording", "translation_target_language"),
             ("longform_recording", "auto_add_to_audio_notebook"),
             ("transcription_options", "language"),
             ("main_transcriber", "model"),

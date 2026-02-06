@@ -7,6 +7,7 @@ extracted to keep the main dashboard.py file smaller.
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -28,6 +29,8 @@ def _apply_combo_style(combo: QComboBox, *, min_width: int = 140) -> None:
         "QComboBox { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
         "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
         "QComboBox:hover { border-color: #505050; }"
+        "QComboBox:disabled { background-color: #1f1f1f; border: 1px solid #2a2a2a; "
+        "color: #6f6f6f; }"
         "QComboBox::drop-down { border: none; width: 20px; }"
         "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
         "border-right: 4px solid transparent; border-top: 5px solid #808080; margin-right: 6px; }"
@@ -192,6 +195,58 @@ def create_client_view(dashboard) -> QWidget:
     main_row.addStretch()
     main_layout.addLayout(main_row)
 
+    main_translation_row = QHBoxLayout()
+    main_translation_row.setSpacing(10)
+
+    dashboard._main_translation_checkbox = QCheckBox("Translation")
+    dashboard._main_translation_checkbox.setStyleSheet(
+        "QCheckBox { color: #a0a0a0; font-size: 12px; }"
+        "QCheckBox:disabled { color: #6f6f6f; }"
+    )
+    dashboard._main_translation_checkbox.setToolTip(
+        "Translate transcription output to English."
+    )
+    main_translation_enabled = dashboard.config.get_server_config(
+        "longform_recording", "translation_enabled", default=False
+    )
+    dashboard._main_translation_checkbox.setChecked(main_translation_enabled)
+    main_translation_row.addWidget(dashboard._main_translation_checkbox)
+
+    main_translation_target_label = QLabel("Target:")
+    main_translation_target_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    main_translation_row.addWidget(main_translation_target_label)
+
+    dashboard._main_translation_target_combo = QComboBox()
+    _apply_combo_style(dashboard._main_translation_target_combo, min_width=150)
+    dashboard._main_translation_target_combo.addItem("English", "en")
+    set_combo_language(
+        dashboard._main_translation_target_combo,
+        dashboard.config.get_server_config(
+            "longform_recording", "translation_target_language", default="en"
+        ),
+    )
+    dashboard._main_translation_target_combo.setToolTip(
+        "Translation target language.\nv1 supports English only."
+    )
+    dashboard._main_translation_target_combo.setEnabled(main_translation_enabled)
+    main_translation_row.addWidget(dashboard._main_translation_target_combo)
+    main_translation_row.addStretch()
+    main_layout.addLayout(main_translation_row)
+
+    main_scope_note = QLabel(
+        "Translation scope: longform recording, static file transcription, and Audio Notebook uploads."
+    )
+    main_scope_note.setStyleSheet("color: #808080; font-size: 11px;")
+    main_scope_note.setWordWrap(True)
+    main_layout.addWidget(main_scope_note)
+
+    dashboard._main_translation_checkbox.toggled.connect(
+        dashboard._on_main_translation_toggled
+    )
+    dashboard._main_translation_target_combo.currentIndexChanged.connect(
+        dashboard._on_main_translation_target_changed
+    )
+
     layout.addWidget(main_card, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(12)
@@ -342,6 +397,53 @@ def create_client_view(dashboard) -> QWidget:
 
     live_layout.addLayout(controls_row)
 
+    live_translation_row = QHBoxLayout()
+    live_translation_row.setSpacing(10)
+
+    dashboard._live_translation_checkbox = QCheckBox("Translation")
+    dashboard._live_translation_checkbox.setStyleSheet(
+        "QCheckBox { color: #a0a0a0; font-size: 12px; }"
+        "QCheckBox:disabled { color: #6f6f6f; }"
+    )
+    dashboard._live_translation_checkbox.setToolTip(
+        "Translate Live Mode sentence output to English."
+    )
+    live_translation_enabled = dashboard.config.get_server_config(
+        "live_transcriber", "translation_enabled", default=False
+    )
+    dashboard._live_translation_checkbox.setChecked(live_translation_enabled)
+    live_translation_row.addWidget(dashboard._live_translation_checkbox)
+
+    live_translation_target_label = QLabel("Target:")
+    live_translation_target_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    live_translation_row.addWidget(live_translation_target_label)
+
+    dashboard._live_translation_target_combo = QComboBox()
+    _apply_combo_style(dashboard._live_translation_target_combo, min_width=150)
+    dashboard._live_translation_target_combo.addItem("English", "en")
+    set_combo_language(
+        dashboard._live_translation_target_combo,
+        dashboard.config.get_server_config(
+            "live_transcriber", "translation_target_language", default="en"
+        ),
+    )
+    dashboard._live_translation_target_combo.setToolTip(
+        "Translation target language.\n"
+        "v1 supports English only.\n"
+        "Live Mode will restart to apply changes."
+    )
+    dashboard._live_translation_target_combo.setEnabled(live_translation_enabled)
+    live_translation_row.addWidget(dashboard._live_translation_target_combo)
+    live_translation_row.addStretch()
+    live_layout.addLayout(live_translation_row)
+
+    dashboard._live_translation_checkbox.toggled.connect(
+        dashboard._on_live_translation_toggled
+    )
+    dashboard._live_translation_target_combo.currentIndexChanged.connect(
+        dashboard._on_live_translation_target_changed
+    )
+
     preview_header = QHBoxLayout()
     dashboard._preview_collapse_btn = QPushButton("\u25bc")
     dashboard._preview_collapse_btn.setFixedSize(24, 24)
@@ -413,4 +515,8 @@ def create_client_view(dashboard) -> QWidget:
     layout.addStretch()
 
     scroll.setWidget(view)
+
+    if hasattr(dashboard, "_refresh_translation_capabilities"):
+        dashboard._refresh_translation_capabilities()
+
     return scroll

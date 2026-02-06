@@ -502,6 +502,11 @@ class ClientOrchestrator:
         if not self.api_client:
             return
 
+        language = self._get_main_transcription_language()
+        translation_enabled, translation_target_language = (
+            self._get_main_translation_config()
+        )
+
         with self._state_lock:
             self.is_transcribing = True
 
@@ -514,6 +519,9 @@ class ClientOrchestrator:
                 # Use notebook endpoint - saves to notebook with diarization, no clipboard
                 result = await self.api_client.upload_to_notebook(
                     audio_data,
+                    language=language,
+                    translation_enabled=translation_enabled,
+                    translation_target_language=translation_target_language,
                     on_progress=lambda msg: logger.info(msg),
                 )
                 self.last_transcription = result.get("transcription", "")
@@ -535,6 +543,9 @@ class ClientOrchestrator:
                 # Regular flow - transcribe and copy to clipboard
                 result = await self.api_client.transcribe_audio_data(
                     audio_data,
+                    language=language,
+                    translation_enabled=translation_enabled,
+                    translation_target_language=translation_target_language,
                     on_progress=lambda msg: logger.info(msg),
                 )
 
@@ -635,6 +646,11 @@ class ClientOrchestrator:
         if not self.api_client:
             return
 
+        language = self._get_main_transcription_language()
+        translation_enabled, translation_target_language = (
+            self._get_main_translation_config()
+        )
+
         with self._state_lock:
             self.is_transcribing = True
 
@@ -644,6 +660,9 @@ class ClientOrchestrator:
 
             result = await self.api_client.transcribe_file(
                 path,
+                language=language,
+                translation_enabled=translation_enabled,
+                translation_target_language=translation_target_language,
                 on_progress=lambda msg: logger.info(msg),
             )
 
@@ -900,9 +919,14 @@ class ClientOrchestrator:
             live_model = self.config.get_server_config(
                 "live_transcriber", "model", default=None
             )
+            live_translation_enabled, live_translation_target = (
+                self._get_live_mode_translation_config()
+            )
             config = {
                 "model": live_model or main_model,
                 "language": self._get_live_mode_language(),
+                "translation_enabled": live_translation_enabled,
+                "translation_target_language": live_translation_target,
                 "post_speech_silence_duration": self.config.get(
                     "live_mode", "grace_period", default=1.0
                 ),
@@ -1035,6 +1059,37 @@ class ClientOrchestrator:
                 "longform_recording", "language", default=None
             )
         return live_language or ""
+
+    def _get_main_transcription_language(self) -> str | None:
+        """Resolve language for main transcription flows."""
+        language = self.config.get_server_config(
+            "longform_recording", "language", default=None
+        )
+        return language or None
+
+    def _get_main_translation_config(self) -> tuple[bool, str]:
+        """Resolve translation settings for main transcription flows."""
+        enabled = bool(
+            self.config.get_server_config(
+                "longform_recording", "translation_enabled", default=False
+            )
+        )
+        target = self.config.get_server_config(
+            "longform_recording", "translation_target_language", default="en"
+        )
+        return enabled, (target or "en")
+
+    def _get_live_mode_translation_config(self) -> tuple[bool, str]:
+        """Resolve translation settings for Live Mode."""
+        enabled = bool(
+            self.config.get_server_config(
+                "live_transcriber", "translation_enabled", default=False
+            )
+        )
+        target = self.config.get_server_config(
+            "live_transcriber", "translation_target_language", default="en"
+        )
+        return enabled, (target or "en")
 
     def _on_live_sentence(self, text: str) -> None:
         """Callback for completed Live Mode sentences."""

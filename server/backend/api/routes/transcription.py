@@ -28,6 +28,8 @@ class TranscriptionRequest(BaseModel):
     """Request model for transcription."""
 
     language: Optional[str] = None
+    translation_enabled: bool = False
+    translation_target_language: Optional[str] = None
     word_timestamps: bool = True
     diarization: bool = False
 
@@ -50,6 +52,8 @@ async def transcribe_audio(
     request: Request,
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
+    translation_enabled: bool = Form(False),
+    translation_target_language: Optional[str] = Form(None),
     word_timestamps: Optional[bool] = Form(None),
     diarization: Optional[bool] = Form(None),
     expected_speakers: Optional[int] = Form(None),
@@ -134,6 +138,10 @@ async def transcribe_audio(
         result = engine.transcribe_file(
             tmp_path,
             language=language,
+            task="translate" if translation_enabled else "transcribe",
+            translation_target_language=(
+                translation_target_language if translation_enabled else None
+            ),
             word_timestamps=word_timestamps,
             cancellation_check=model_manager.job_tracker.is_cancelled,
         )
@@ -167,6 +175,9 @@ async def transcribe_audio(
 
         return result.to_dict()
 
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     except TranscriptionCancelledError:
         logger.info(f"Transcription cancelled for file: {file.filename}")
         raise HTTPException(status_code=499, detail="Transcription cancelled by user")
@@ -191,6 +202,8 @@ async def transcribe_quick(
     request: Request,
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
+    translation_enabled: bool = Form(False),
+    translation_target_language: Optional[str] = Form(None),
 ) -> Dict[str, Any]:
     """
     Quick transcription for Record view - text only, no word timestamps or diarization.
@@ -230,11 +243,18 @@ async def transcribe_quick(
         result = engine.transcribe_file(
             tmp_path,
             language=language,
+            task="translate" if translation_enabled else "transcribe",
+            translation_target_language=(
+                translation_target_language if translation_enabled else None
+            ),
             word_timestamps=False,  # No word timestamps for speed
             cancellation_check=model_manager.job_tracker.is_cancelled,
         )
 
         return result.to_dict()
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     except TranscriptionCancelledError:
         logger.info(f"Quick transcription cancelled for file: {file.filename}")

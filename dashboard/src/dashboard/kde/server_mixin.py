@@ -295,6 +295,9 @@ class ServerControlMixin:
                 allow_same_as_main=True,
             )
 
+        if hasattr(self, "_refresh_translation_capabilities"):
+            self._refresh_translation_capabilities()
+
     def _set_model_combo(
         self,
         combo,
@@ -344,6 +347,8 @@ class ServerControlMixin:
         else:
             self._main_model_custom.setVisible(False)
             self.config.set_server_config("main_transcriber", "model", value=selected)
+        if hasattr(self, "_refresh_translation_capabilities"):
+            self._refresh_translation_capabilities()
 
     def _on_live_model_selection_changed(self, index: int) -> None:
         """Handle Live Mode model selection."""
@@ -363,6 +368,8 @@ class ServerControlMixin:
         else:
             self._live_model_custom.setVisible(False)
             self.config.set_server_config("live_transcriber", "model", value=selected)
+        if hasattr(self, "_refresh_translation_capabilities"):
+            self._refresh_translation_capabilities()
 
     def _on_main_model_custom_changed(self) -> None:
         """Handle custom main transcriber model input."""
@@ -375,6 +382,8 @@ class ServerControlMixin:
             self.config.set_server_config(
                 "main_transcriber", "model", value=custom_value
             )
+        if hasattr(self, "_refresh_translation_capabilities"):
+            self._refresh_translation_capabilities()
 
     def _on_live_model_custom_changed(self) -> None:
         """Handle custom Live Mode model input."""
@@ -387,6 +396,8 @@ class ServerControlMixin:
             self.config.set_server_config(
                 "live_transcriber", "model", value=custom_value
             )
+        if hasattr(self, "_refresh_translation_capabilities"):
+            self._refresh_translation_capabilities()
 
     def _populate_image_selector(self) -> None:
         """Populate the image selector dropdown with available local images."""

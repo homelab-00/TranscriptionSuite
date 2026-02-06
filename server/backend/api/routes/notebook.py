@@ -369,6 +369,9 @@ class UploadResponse(BaseModel):
 async def upload_and_transcribe(
     request: Request,
     file: UploadFile = File(...),
+    language: Optional[str] = Form(None),
+    translation_enabled: bool = Form(False),
+    translation_target_language: Optional[str] = Form(None),
     enable_diarization: bool = Form(False),
     enable_word_timestamps: bool = Form(True),
     file_created_at: Optional[str] = Form(None),
@@ -431,7 +434,11 @@ async def upload_and_transcribe(
         logger.info(f"Transcribing uploaded file for notebook: {file.filename}")
         result = engine.transcribe_file(
             str(tmp_path),
-            language=None,
+            language=language,
+            task="translate" if translation_enabled else "transcribe",
+            translation_target_language=(
+                translation_target_language if translation_enabled else None
+            ),
             word_timestamps=need_word_timestamps,
         )
 
@@ -546,6 +553,12 @@ async def upload_and_transcribe(
             "recording_id": recording_id,
             "message": f"Successfully transcribed and saved: {file.filename}",
         }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"Upload transcription failed: {e}", exc_info=True)

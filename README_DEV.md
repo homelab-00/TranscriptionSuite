@@ -606,14 +606,14 @@ TAG=my-custom docker compose up -d
 | `/api/auth/login` | POST | Authenticate with token |
 | `/api/admin/models/load` | POST | Load transcription models (admin only) |
 | `/api/admin/models/unload` | POST | Unload models to free GPU memory (admin only) |
-| `/api/transcribe/audio` | POST | Transcribe uploaded audio |
+| `/api/transcribe/audio` | POST | Transcribe uploaded audio (`translation_enabled`, `translation_target_language` supported) |
 | `/api/transcribe/cancel` | POST | Cancel running transcription |
 | `/ws` | WebSocket | Real-time audio streaming |
 | `/ws/live` | WebSocket | Live Mode continuous transcription |
 | `/api/notebook/recordings` | GET | List all recordings |
 | `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
 | `/api/notebook/recordings/{id}/export` | GET | Export recording (`txt` for pure notes, `srt`/`ass` for timestamp-capable notes) |
-| `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization |
+| `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization (`translation_enabled`, `translation_target_language` supported) |
 | `/api/notebook/calendar` | GET | Get recordings by date range |
 | `/backups` | GET | List available database backups |
 | `/backup` | POST | Create new database backup |
@@ -646,7 +646,8 @@ included **only** when diarization is enabled.
 1. Connect to `/ws/live`
 2. Send auth: `{"type": "auth", "data": {"token": "<token>"}}`
 3. Receive: `{"type": "auth_ok"}`
-4. Send start: `{"type": "start", "data": {"language": "en"}}`
+4. Send start:
+   `{"type": "start", "data": {"config": {"model": "Systran/faster-whisper-large-v3", "language": "el", "translation_enabled": true, "translation_target_language": "en"}}}`
 5. Stream binary audio (16kHz PCM Int16)
 6. Receive real-time updates:
    - `{"type": "partial", "data": {"text": "..."}}` - Interim transcription
@@ -879,9 +880,16 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `live_transcriber.enabled` - Enable/disable Live Mode feature
 - `live_transcriber.post_speech_silence_duration` - Grace period after silence (default: 3.0s)
 - `live_transcriber.live_language` - Language code for Live Mode (default: "en"; modified via Dashboard Client view)
+- `live_transcriber.translation_enabled` - Enable source-language -> English translation in Live Mode
+- `live_transcriber.translation_target_language` - Translation target (v1: `"en"` only)
 - Model is inherited from `main_transcriber.model` if not explicitly set
 - Automatically swaps models to free VRAM when Live Mode starts
 - **Note:** Live Mode always unloads the main model and starts its own engine. The dashboard currently sends the main model on Live Mode start unless you explicitly wire `live_transcriber.model` through the client/server path.
+
+**Main Transcription Translation (v1):**
+- `longform_recording.translation_enabled` - Enable translation for longform/static/notebook transcription flows
+- `longform_recording.translation_target_language` - Translation target (v1: `"en"` only)
+- Translation uses native Whisper/Faster-Whisper `task="translate"` (source-language -> English)
 
 **Environment variables:**
 | Variable | Purpose |

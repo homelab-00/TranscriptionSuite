@@ -237,6 +237,10 @@ the appropriate button. You should now be connected.
     * On GNOME left click on the system tray icon and the select 'Stop Recording'
 * **Static transcription**
   * Right click on the system tray and select 'Transcribe File...'
+* **Main Translation (English-only, optional)**
+  * In the `Main Transcription` card, enable `Translation` to translate output to English
+  * Scope: longform recordings, static file transcription, and Audio Notebook uploads
+  * `Translation` is disabled by default
 * **Live Mode** (Dashboard only)
   * Open the Dashboard window and navigate to the Client View
   * In the `Live Mode` card, enable the status toggle to activate continuous transcription
@@ -245,6 +249,7 @@ the appropriate button. You should now be connected.
   * Use the `Source` card to choose whether Live Mode listens to microphone input or system audio
   * Completed sentences are shown in the transcription display
   * Optionally select a specific language for better accuracy (auto-detect may struggle with short utterances)
+  * Optionally enable `Translation` to output English translations in real time
 
 Result is automatically copied to clipboard
 

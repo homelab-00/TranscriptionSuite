@@ -244,6 +244,14 @@ class ModelManager:
             beam_size=main_cfg.get("beam_size", 5),
             batch_size=main_cfg.get("batch_size", 16),
             language=trans_opts.get("language", ""),
+            task=(
+                "translate"
+                if trans_opts.get("translation_enabled", False)
+                else "transcribe"
+            ),
+            translation_target_language=trans_opts.get(
+                "translation_target_language", "en"
+            ),
             faster_whisper_vad_filter=main_cfg.get("faster_whisper_vad_filter", True),
             initial_prompt=main_cfg.get("initial_prompt"),
         )

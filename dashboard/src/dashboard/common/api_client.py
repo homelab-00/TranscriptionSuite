@@ -421,6 +421,8 @@ class APIClient:
         self,
         file_path: Path,
         language: str | None = None,
+        translation_enabled: bool = False,
+        translation_target_language: str | None = None,
         word_timestamps: bool = True,
         diarization: bool = False,
         expected_speakers: int | None = None,
@@ -432,6 +434,8 @@ class APIClient:
         Args:
             file_path: Path to the audio file
             language: Language code (None for auto-detect)
+            translation_enabled: Enable source-language -> English translation
+            translation_target_language: Translation output language (v1: "en")
             word_timestamps: Include word-level timestamps
             diarization: Enable speaker diarization
             expected_speakers: Exact number of speakers (2-10, None for auto-detect)
@@ -453,6 +457,9 @@ class APIClient:
         )
         if language:
             data.add_field("language", language)
+        data.add_field("translation_enabled", str(translation_enabled).lower())
+        if translation_enabled and translation_target_language:
+            data.add_field("translation_target_language", translation_target_language)
         data.add_field("word_timestamps", str(word_timestamps).lower())
         data.add_field("diarization", str(diarization).lower())
         if expected_speakers is not None:
@@ -1336,6 +1343,8 @@ class APIClient:
         self,
         audio_data: bytes,
         language: str | None = None,
+        translation_enabled: bool = False,
+        translation_target_language: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """
@@ -1344,6 +1353,8 @@ class APIClient:
         Args:
             audio_data: WAV audio bytes
             language: Language code (None for auto-detect)
+            translation_enabled: Enable source-language -> English translation
+            translation_target_language: Translation output language (v1: "en")
             on_progress: Optional callback for progress updates
 
         Returns:
@@ -1364,6 +1375,9 @@ class APIClient:
         )
         if language:
             data.add_field("language", language)
+        data.add_field("translation_enabled", str(translation_enabled).lower())
+        if translation_enabled and translation_target_language:
+            data.add_field("translation_target_language", translation_target_language)
         data.add_field("word_timestamps", "true")
 
         # Use longer timeout for transcription
@@ -1441,6 +1455,8 @@ class APIClient:
         self,
         audio_data: bytes,
         language: str | None = None,
+        translation_enabled: bool = False,
+        translation_target_language: str | None = None,
         on_progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """
@@ -1452,6 +1468,8 @@ class APIClient:
         Args:
             audio_data: WAV audio bytes
             language: Language code (None for auto-detect)
+            translation_enabled: Enable source-language -> English translation
+            translation_target_language: Translation output language (v1: "en")
             on_progress: Optional callback for progress updates
 
         Returns:
@@ -1472,6 +1490,9 @@ class APIClient:
         )
         if language:
             data.add_field("language", language)
+        data.add_field("translation_enabled", str(translation_enabled).lower())
+        if translation_enabled and translation_target_language:
+            data.add_field("translation_target_language", translation_target_language)
 
         # Use longer timeout for transcription with diarization
         timeout = aiohttp.ClientTimeout(total=self.transcription_timeout)

@@ -13,6 +13,13 @@ longform_recording:
     # This setting applies to both the main and live transcribers.
     language: null
 
+    # Enable translation for main transcription flows (longform/static/notebook).
+    # v1 supports source-language -> English only.
+    translation_enabled: false
+
+    # Translation output target language. v1 must be "en".
+    translation_target_language: "en"
+
     # Automatically add longform recordings to Audio Notebook.
     # When enabled, recordings are sent to the notebook instead of just the clipboard.
     auto_add_to_audio_notebook: false
@@ -84,6 +91,13 @@ live_transcriber:
     # Modified via the dashboard Client view dropdown (Live Mode Language).
     # Default: "en"
     live_language: "en"
+
+    # Enable translation in Live Mode sentence output.
+    # v1 supports source-language -> English only.
+    translation_enabled: false
+
+    # Translation output target language. v1 must be "en".
+    translation_target_language: "en"
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.

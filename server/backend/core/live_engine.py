@@ -41,6 +41,8 @@ class LiveModeConfig:
     # Whisper model settings
     model: str = "Systran/faster-whisper-large-v3"
     language: str = ""
+    translation_enabled: bool = False
+    translation_target_language: str = "en"
     compute_type: str = "float16"
     device: str = "cuda"
     gpu_device_index: int = 0
@@ -172,6 +174,8 @@ class LiveModeEngine:
                 instance_name="live_mode",
                 model=self.config.model,
                 language=self.config.language if self.config.language else "",
+                task="translate" if self.config.translation_enabled else "transcribe",
+                translation_target_language=self.config.translation_target_language,
                 compute_type=self.config.compute_type,
                 device=self.config.device,
                 gpu_device_index=self.config.gpu_device_index,

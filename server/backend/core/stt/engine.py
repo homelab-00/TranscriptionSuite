@@ -37,6 +37,7 @@ from faster_whisper import BatchedInferencePipeline
 from scipy.signal import resample
 
 from server.config import get_config
+from server.core.stt.capabilities import validate_translation_request
 from server.core.stt.vad import VoiceActivityDetector
 
 # Mathematical constant for 16-bit audio normalization
@@ -97,6 +98,8 @@ class AudioToTextRecorder:
         model: Optional[str] = None,
         download_root: Optional[str] = None,
         language: str = "",
+        task: str = "transcribe",
+        translation_target_language: str = "en",
         compute_type: Optional[str] = None,
         gpu_device_index: Union[int, List[int]] = 0,
         device: Optional[str] = None,
@@ -138,6 +141,8 @@ class AudioToTextRecorder:
             model: Whisper model name or path
             download_root: Directory for model downloads
             language: Target language code (empty for auto-detect)
+            task: Whisper task ("transcribe" or "translate")
+            translation_target_language: Translation output target language (v1: "en")
             compute_type: Compute type for faster-whisper
             gpu_device_index: GPU device index(es) to use
             device: Device type ("cuda" or "cpu")
@@ -178,6 +183,10 @@ class AudioToTextRecorder:
         )
         self.download_root = download_root
         self.language = language
+        self.task = (task or "transcribe").strip().lower()
+        self.translation_target_language = (
+            (translation_target_language or "en").strip().lower()
+        )
         self.compute_type = compute_type or main_cfg.get("compute_type", "default")
         self.gpu_device_index = gpu_device_index
         self.batch_size = (
@@ -597,12 +606,18 @@ class AudioToTextRecorder:
                     if peak > 0:
                         audio = (audio / peak) * 0.95
 
+                _ = validate_translation_request(
+                    model_name=self.model_name,
+                    task=self.task,
+                    translation_target_language=self.translation_target_language,
+                )
                 start_time = time.time()
 
                 # Transcribe
                 segments, info = self._model.transcribe(
                     audio,
                     language=self.language if self.language else None,
+                    task=self.task,
                     beam_size=self.beam_size,
                     initial_prompt=self.initial_prompt,
                     suppress_tokens=self.suppress_tokens,
@@ -663,6 +678,8 @@ class AudioToTextRecorder:
         self,
         file_path: str,
         language: Optional[str] = None,
+        task: Optional[str] = None,
+        translation_target_language: Optional[str] = None,
         word_timestamps: bool = True,
         apply_vad_preprocessing: bool = True,
         cancellation_check: Optional[Callable[[], bool]] = None,
@@ -678,6 +695,8 @@ class AudioToTextRecorder:
         Args:
             file_path: Path to the audio/video file
             language: Language code (overrides instance language if provided)
+            task: Whisper task ("transcribe" or "translate")
+            translation_target_language: Translation output target language (v1: "en")
             word_timestamps: Whether to include word-level timestamps
             apply_vad_preprocessing: Apply WebRTC VAD to remove silence (Stage 1)
             cancellation_check: Optional callback that returns True if transcription should be cancelled
@@ -717,6 +736,8 @@ class AudioToTextRecorder:
         return self.transcribe_audio(
             audio_data,
             language=language,
+            task=task,
+            translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
             cancellation_check=cancellation_check,
         )
@@ -725,6 +746,8 @@ class AudioToTextRecorder:
         self,
         audio_data: np.ndarray,
         language: Optional[str] = None,
+        task: Optional[str] = None,
+        translation_target_language: Optional[str] = None,
         word_timestamps: bool = True,
         initial_prompt: Optional[str] = None,
         cancellation_check: Optional[Callable[[], bool]] = None,
@@ -740,6 +763,8 @@ class AudioToTextRecorder:
         Args:
             audio_data: Audio samples as float32 numpy array (16kHz, mono)
             language: Language code (overrides instance language if provided)
+            task: Whisper task ("transcribe" or "translate")
+            translation_target_language: Translation output target language (v1: "en")
             word_timestamps: Whether to include word-level timestamps
             initial_prompt: Optional prompt for context
             cancellation_check: Optional callback that returns True if transcription should be cancelled
@@ -766,6 +791,16 @@ class AudioToTextRecorder:
                 lang = (
                     language if language else (self.language if self.language else None)
                 )
+                effective_task = (task or self.task or "transcribe").strip().lower()
+                _ = validate_translation_request(
+                    model_name=self.model_name,
+                    task=effective_task,
+                    translation_target_language=(
+                        translation_target_language
+                        if translation_target_language is not None
+                        else self.translation_target_language
+                    ),
+                )
                 prompt = initial_prompt if initial_prompt else self.initial_prompt
 
                 start_time = time.time()
@@ -774,6 +809,7 @@ class AudioToTextRecorder:
                 segments, info = self._model.transcribe(
                     audio_data,
                     language=lang,
+                    task=effective_task,
                     beam_size=self.beam_size,
                     initial_prompt=prompt,
                     suppress_tokens=self.suppress_tokens,
@@ -826,7 +862,7 @@ class AudioToTextRecorder:
                 elapsed = time.time() - start_time
                 logger.info(
                     f"Transcription completed in {elapsed:.2f}s: "
-                    f"{len(all_segments)} segments, language={info.language}"
+                    f"{len(all_segments)} segments, language={info.language}, task={effective_task}"
                 )
 
                 return TranscriptionResult(
@@ -1043,6 +1079,8 @@ class AudioToTextRecorder:
             "compute_type": self.compute_type,
             "loaded": self._model_loaded,
             "language": self.language if self.language else None,
+            "task": self.task,
+            "translation_target_language": self.translation_target_language,
             "state": self.state,
         }
 

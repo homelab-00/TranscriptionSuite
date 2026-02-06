@@ -22,6 +22,7 @@ from server.core.live_engine import (
     LiveModeState,
 )
 from server.core.model_manager import get_model_manager
+from server.core.stt.capabilities import supports_english_translation
 from server.core.token_store import get_token_store
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
@@ -120,12 +121,50 @@ class LiveModeSession:
                     config.model = config_data["model"]
                 if "language" in config_data:
                     config.language = config_data["language"]
+                if "translation_enabled" in config_data:
+                    raw_enabled = config_data["translation_enabled"]
+                    if isinstance(raw_enabled, str):
+                        config.translation_enabled = raw_enabled.strip().lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                            "on",
+                        )
+                    else:
+                        config.translation_enabled = bool(raw_enabled)
+                if "translation_target_language" in config_data:
+                    config.translation_target_language = (
+                        str(config_data["translation_target_language"] or "en")
+                        .strip()
+                        .lower()
+                    )
                 if "silero_sensitivity" in config_data:
                     config.silero_sensitivity = float(config_data["silero_sensitivity"])
                 if "post_speech_silence_duration" in config_data:
                     config.post_speech_silence_duration = float(
                         config_data["post_speech_silence_duration"]
                     )
+
+            if config.translation_enabled:
+                if config.translation_target_language != "en":
+                    await self.send_message(
+                        "error",
+                        {
+                            "message": "Live Mode translation target must be English ('en') in v1."
+                        },
+                    )
+                    return False
+                if not supports_english_translation(config.model):
+                    await self.send_message(
+                        "error",
+                        {
+                            "message": (
+                                "Selected Live Mode model does not support translation. "
+                                "Use a multilingual non-turbo Whisper model."
+                            )
+                        },
+                    )
+                    return False
 
             # Check if Live Mode model is the same as main model
             model_manager = get_model_manager()
