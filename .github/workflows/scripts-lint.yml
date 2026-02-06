@@ -1,0 +1,117 @@
+name: Script Syntax and Lint
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  shell-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Validate Bash syntax
+        run: |
+          set -euo pipefail
+          scripts=(server/docker/*.sh build/*.sh build/user-setup/*.sh)
+          valid_scripts=()
+          for script in "${scripts[@]}"; do
+              if [[ -f "$script" ]]; then
+                  valid_scripts+=("$script")
+              fi
+          done
+
+          if [[ ${#valid_scripts[@]} -eq 0 ]]; then
+              echo "No shell scripts found to validate"
+              exit 0
+          fi
+
+          bash -n "${valid_scripts[@]}"
+
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          scripts=(server/docker/*.sh build/*.sh build/user-setup/*.sh)
+          valid_scripts=()
+          for script in "${scripts[@]}"; do
+              if [[ -f "$script" ]]; then
+                  valid_scripts+=("$script")
+              fi
+          done
+
+          if [[ ${#valid_scripts[@]} -eq 0 ]]; then
+              echo "No shell scripts found to lint"
+              exit 0
+          fi
+
+          shellcheck -x "${valid_scripts[@]}"
+
+  powershell-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate PowerShell syntax and lint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $scriptPaths = @()
+          $scriptPaths += Get-ChildItem -Path "server/docker" -Filter "*.ps1" -File
+          $scriptPaths += Get-ChildItem -Path "build" -Filter "*.ps1" -File -ErrorAction SilentlyContinue
+          $scriptPaths += Get-ChildItem -Path "build/user-setup" -Filter "*.ps1" -File -ErrorAction SilentlyContinue
+
+          if ($scriptPaths.Count -eq 0) {
+              Write-Host "No PowerShell scripts found to validate"
+              exit 0
+          }
+
+          $hadParseErrors = $false
+          foreach ($script in $scriptPaths) {
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile(
+                  $script.FullName,
+                  [ref]$tokens,
+                  [ref]$errors
+              )
+
+              if ($errors.Count -gt 0) {
+                  $hadParseErrors = $true
+                  Write-Host "Parse errors in $($script.FullName):"
+                  foreach ($error in $errors) {
+                      Write-Host "  - $($error.Message)"
+                  }
+              }
+          }
+
+          if ($hadParseErrors) {
+              throw "PowerShell syntax validation failed"
+          }
+
+          if (-not (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue)) {
+              try {
+                  Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -ErrorAction Stop
+              } catch {
+                  Write-Host "PSScriptAnalyzer install failed; syntax checks already passed."
+              }
+          }
+
+          if (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) {
+              $results = Invoke-ScriptAnalyzer -Path ($scriptPaths.FullName) -Severity Error
+              if ($results.Count -gt 0) {
+                  $results | Format-Table -AutoSize | Out-String | Write-Host
+                  throw "PSScriptAnalyzer reported issues"
+              }
+          } else {
+              Write-Host "PSScriptAnalyzer not available; static linting limited to parser checks."
+          }

@@ -653,8 +653,7 @@ included **only** when diarization is enabled.
    - `{"type": "partial", "data": {"text": "..."}}` - Interim transcription
    - `{"type": "sentence", "data": {"text": "..."}}` - Completed sentence
    - `{"type": "state", "data": {"state": "LISTENING|PROCESSING"}}` - Engine state changes
-7. Send mute: `{"type": "mute"}` or unmute: `{"type": "unmute"}`
-8. Send stop: `{"type": "stop"}`
+7. Send stop: `{"type": "stop"}`
 
 **Key differences from `/ws`:**
 - Continuous operation: Engine stays active between utterances
@@ -664,7 +663,7 @@ included **only** when diarization is enabled.
 
 **Audio format:**
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
-- Raw PCM bytes sent directly (no metadata wrapper)
+- Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
 
 ---
 
@@ -678,11 +677,10 @@ server/backend/
 │   ├── main.py                   # App factory, lifespan, routing
 │   └── routes/                   # API endpoint modules
 ├── core/
-│   ├── transcription_engine.py   # faster-whisper wrapper
+│   ├── stt/engine.py             # AudioToTextRecorder (main STT engine)
 │   ├── diarization_engine.py     # PyAnnote wrapper
 │   ├── model_manager.py          # Model lifecycle, job tracking
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
-│   ├── live_transcriber_engine.py # Live transcription for standalone clients
 │   ├── live_engine.py            # Live Mode engine (RealtimeSTT)
 │   └── stt/                      # Real-time speech-to-text engine
 │       ├── engine.py             # AudioToTextRecorder with VAD
@@ -950,7 +948,7 @@ TranscriptionSuite uses Alembic for schema versioning. Migrations run automatica
 **Migration files:** `server/backend/database/migrations/versions/`
 
 **Creating new migrations:**
-1. Add a new file in `migrations/versions/` (e.g., `002_add_column.py`)
+1. Add a new file in `migrations/versions/` (e.g., `004_schema_sanity_and_segment_backfill.py`)
 2. Follow the pattern in `001_initial_schema.py`
 3. Use `op.batch_alter_table()` for SQLite compatibility
 

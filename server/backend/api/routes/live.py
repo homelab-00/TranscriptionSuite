@@ -16,6 +16,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from server.api.routes.utils import authenticate_websocket_from_message
 from server.core.live_engine import (
     LiveModeConfig,
     LiveModeEngine,
@@ -23,7 +24,6 @@ from server.core.live_engine import (
 )
 from server.core.model_manager import get_model_manager
 from server.core.stt.capabilities import supports_english_translation
-from server.core.token_store import get_token_store
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
 
@@ -335,62 +335,26 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     session: Optional[LiveModeSession] = None
 
-    # Check if connection is from localhost
+    # Check source host for logging
     client_host = websocket.client.host if websocket.client else None
-    is_localhost = client_host in ("127.0.0.1", "::1", "localhost")
 
     logger.debug(f"Live Mode WebSocket connection from host: {client_host}")
 
     try:
-        # Wait for authentication message
-        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
-
-        if auth_msg.get("type") != "auth":
-            await websocket.send_json(
-                {
-                    "type": "auth_fail",
-                    "data": {"message": "Expected auth message"},
-                    "timestamp": asyncio.get_event_loop().time(),
-                }
-            )
-            await websocket.close()
+        auth = await authenticate_websocket_from_message(
+            websocket,
+            allow_localhost_bypass=True,
+            failure_type="auth_fail",
+        )
+        if auth is None:
             return
 
-        # Validate token (skip for localhost)
-        token = auth_msg.get("data", {}).get("token")
-
-        if is_localhost:
-            client_name = "localhost-user"
+        if auth.is_localhost_bypass:
             logger.info(
                 "Live Mode connection from localhost - bypassing authentication"
             )
-        else:
-            if not token:
-                await websocket.send_json(
-                    {
-                        "type": "auth_fail",
-                        "data": {"message": "No token provided"},
-                        "timestamp": asyncio.get_event_loop().time(),
-                    }
-                )
-                await websocket.close()
-                return
 
-            token_store = get_token_store()
-            stored_token = token_store.validate_token(token)
-
-            if not stored_token:
-                await websocket.send_json(
-                    {
-                        "type": "auth_fail",
-                        "data": {"message": "Invalid or expired token"},
-                        "timestamp": asyncio.get_event_loop().time(),
-                    }
-                )
-                await websocket.close()
-                return
-
-            client_name = stored_token.client_name
+        client_name = auth.client_name
 
         # Check if another session is active
         async with _session_lock:

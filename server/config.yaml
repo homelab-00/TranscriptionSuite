@@ -173,7 +173,7 @@ diarization:
 # ----------------------------------------------------------------------------
 audio:
     # Audio input device index for microphone.
-    # Run `python .list_audio_devices.py` to find available devices.
+    # Run `transcription-dashboard --list-devices` to find available devices.
     # Set to null if using use_default_input: true
     input_device_index: null
 

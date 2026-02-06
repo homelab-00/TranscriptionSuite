@@ -162,7 +162,7 @@ else
 fi
 
 # Copy start/stop scripts
-for script in start-local.sh start-remote.sh stop.sh; do
+for script in start-common.sh start-local.sh start-remote.sh stop.sh; do
     if [[ -f "$DOCKER_DIR/$script" ]]; then
         cp "$DOCKER_DIR/$script" "$CONFIG_DIR/$script"
         chmod +x "$CONFIG_DIR/$script"

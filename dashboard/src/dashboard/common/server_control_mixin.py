@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class _ServerControlHost(Protocol):
-    """Protocol defining required attributes for ServerControlMixin."""
+    """Protocol defining required attributes for TrayServerControlMixin."""
 
     _docker_manager: DockerManager
 
@@ -25,7 +25,7 @@ class _ServerControlHost(Protocol):
     ) -> None: ...
 
 
-class ServerControlMixin:
+class TrayServerControlMixin:
     """
     Mixin providing server control operations for tray implementations.
 

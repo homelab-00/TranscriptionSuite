@@ -2,7 +2,6 @@
 Admin API endpoints for TranscriptionSuite server.
 
 Handles:
-- Token management
 - Server configuration
 - Log access
 - Model management
@@ -10,7 +9,7 @@ Handles:
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import (
     APIRouter,
@@ -20,30 +19,15 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel
 
-from server.api.routes.utils import require_admin
+from server.api.routes.utils import (
+    authenticate_websocket_from_headers,
+    require_admin,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-class TokenCreateRequest(BaseModel):
-    """Request to create a new token."""
-
-    name: str
-    is_admin: bool = False
-
-
-class TokenResponse(BaseModel):
-    """Response for token operations."""
-
-    token_id: str
-    name: str
-    is_admin: bool
-    created_at: str
-    token: Optional[str] = None  # Only set on creation
 
 
 @router.get("/status")
@@ -104,7 +88,20 @@ async def load_models_stream(websocket: WebSocket) -> None:
     - Connection closes after complete/error
     """
     await websocket.accept()
-    logger.info("WebSocket connected for model loading with progress")
+
+    auth = await authenticate_websocket_from_headers(
+        websocket,
+        require_admin=True,
+        allow_localhost_bypass=True,
+        failure_type="error",
+    )
+    if auth is None:
+        return
+
+    logger.info(
+        "WebSocket connected for model loading with progress "
+        f"(client={auth.client_name})"
+    )
 
     try:
         # Get model manager from app state
@@ -112,6 +109,7 @@ async def load_models_stream(websocket: WebSocket) -> None:
 
         # Track messages to send
         message_queue: asyncio.Queue[Dict[str, str]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
 
         async def send_progress(msg: str) -> None:
             """Queue a progress message for sending."""
@@ -119,8 +117,6 @@ async def load_models_stream(websocket: WebSocket) -> None:
 
         def progress_callback(msg: str) -> None:
             """Called from model loading thread - queue message for async send."""
-            # Use run_coroutine_threadsafe to safely queue from thread
-            loop = asyncio.get_event_loop()
             asyncio.run_coroutine_threadsafe(send_progress(msg), loop)
 
         # Start message sender task
@@ -144,7 +140,6 @@ async def load_models_stream(websocket: WebSocket) -> None:
         )
 
         # Run model loading in thread pool
-        loop = asyncio.get_event_loop()
         try:
             await loop.run_in_executor(
                 None,
@@ -303,34 +298,3 @@ async def get_logs(
     except Exception as e:
         logger.error(f"Failed to get logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# Token management endpoints (placeholder - implement with proper auth)
-@router.get("/tokens")
-async def list_tokens() -> Dict[str, Any]:
-    """List all tokens (admin only)."""
-    # TODO: Implement proper token store integration
-    return {
-        "tokens": [],
-        "message": "Token management not yet implemented in unified server",
-    }
-
-
-@router.post("/tokens")
-async def create_token(request: TokenCreateRequest) -> Dict[str, Any]:
-    """Create a new token (admin only)."""
-    # TODO: Implement proper token creation
-    raise HTTPException(
-        status_code=501,
-        detail="Token management not yet implemented in unified server",
-    )
-
-
-@router.delete("/tokens/{token_id}")
-async def revoke_token(token_id: str) -> Dict[str, str]:
-    """Revoke a token (admin only)."""
-    # TODO: Implement proper token revocation
-    raise HTTPException(
-        status_code=501,
-        detail="Token management not yet implemented in unified server",
-    )

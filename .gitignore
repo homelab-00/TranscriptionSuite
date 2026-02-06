@@ -17,7 +17,9 @@ build/assets/videos/
 ## .hidden folders
 .*/
 ### GitHub workflows folder exception
+!.github/
 !.github/workflows/
+!.github/workflows/*.yml
 
 ## .md files
 *.md

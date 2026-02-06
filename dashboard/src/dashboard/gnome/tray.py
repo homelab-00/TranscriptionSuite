@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from dashboard.common.docker_manager import DockerManager, ServerStatus
 from dashboard.common.models import TrayAction, TrayState
-from dashboard.common.server_control_mixin import ServerControlMixin
+from dashboard.common.server_control_mixin import TrayServerControlMixin
 from dashboard.common.tray_base import AbstractTray
 
 if TYPE_CHECKING:
@@ -79,7 +79,7 @@ except (ImportError, ValueError):
 # subprocess (Qt by default). See dbus_service.py for the IPC architecture.
 
 
-class GtkTray(ServerControlMixin, AbstractTray):
+class GtkTray(TrayServerControlMixin, AbstractTray):
     """GTK + AppIndicator3 tray implementation for GNOME."""
 
     # Icon names for different states (using system theme icons)
@@ -714,7 +714,7 @@ class GtkTray(ServerControlMixin, AbstractTray):
         logger.error("All clipboard methods failed. No text copied.")
         return False
 
-    # Server control methods are provided by ServerControlMixin
+    # Server control methods are provided by TrayServerControlMixin
     # (_on_server_start_local, _on_server_start_remote, _on_server_stop,
     #  _on_server_status)
 

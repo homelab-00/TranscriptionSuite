@@ -14,7 +14,7 @@ import queue
 import threading
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -330,43 +330,3 @@ class LiveModeEngine:
     def clear_history(self) -> None:
         """Clear sentence history."""
         self._sentence_history.clear()
-
-
-# Singleton instance for server-wide use
-_live_engine: Optional[LiveModeEngine] = None
-
-
-def get_live_engine() -> Optional[LiveModeEngine]:
-    """Get the global Live Mode engine instance."""
-    return _live_engine
-
-
-def create_live_engine(
-    config: Optional[LiveModeConfig] = None, **kwargs: Any
-) -> LiveModeEngine:
-    """
-    Create or reconfigure the global Live Mode engine.
-
-    Args:
-        config: Configuration for the engine
-        **kwargs: Additional arguments passed to LiveModeEngine
-
-    Returns:
-        The Live Mode engine instance
-    """
-    global _live_engine
-
-    # Stop existing engine if running
-    if _live_engine and _live_engine.is_running:
-        _live_engine.stop()
-
-    _live_engine = LiveModeEngine(config=config, **kwargs)
-    return _live_engine
-
-
-def shutdown_live_engine() -> None:
-    """Shutdown the global Live Mode engine."""
-    global _live_engine
-    if _live_engine:
-        _live_engine.stop()
-        _live_engine = None

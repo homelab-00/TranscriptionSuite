@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ServerControlMixin:
+class DashboardServerControlMixin:
     """
     Mixin class providing server control functionality for DashboardWindow.
 

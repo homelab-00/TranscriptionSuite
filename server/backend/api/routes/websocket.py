@@ -26,7 +26,7 @@ from starlette.websockets import WebSocketState
 # NOTE: model_manager is imported lazily inside functions to avoid
 # loading heavy ML libraries (torch, faster_whisper) at module import time.
 # This reduces server startup time by ~10 seconds.
-from server.core.token_store import get_token_store
+from server.api.routes.utils import authenticate_websocket_from_message
 from server.core.client_detector import (
     ClientType,
     ClientDetector,
@@ -404,74 +404,25 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     query_params = _get_websocket_query_params(websocket)
     client_type = ClientDetector.detect(headers, query_params)
 
-    # Check if connection is from localhost
+    # Check source host for logging
     client_host = websocket.client.host if websocket.client else None
-    is_localhost = client_host in ("127.0.0.1", "::1", "localhost")
 
     logger.debug(
         f"WebSocket connection from client type: {client_type.value}, host: {client_host}"
     )
 
     try:
-        # Wait for authentication message
-        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
-
-        if auth_msg.get("type") != "auth":
-            await websocket.send_json(
-                {
-                    "type": "auth_fail",
-                    "data": {"message": "Expected auth message"},
-                    "timestamp": asyncio.get_event_loop().time(),
-                }
-            )
-            await websocket.close()
+        auth = await authenticate_websocket_from_message(
+            websocket,
+            allow_localhost_bypass=True,
+            failure_type="auth_fail",
+        )
+        if auth is None:
             return
-
-        # Validate token (skip validation for localhost connections)
-        token = auth_msg.get("data", {}).get("token")
-
-        if is_localhost:
-            # For localhost, allow connection without token validation
-            # Use a default token for tracking purposes
-            from datetime import datetime, timezone
-            from server.core.token_store import StoredToken
-
-            stored_token = StoredToken(
-                token="localhost",  # Note: 'token' not 'token_hash' (stores the hash)
-                client_name="localhost-user",
-                is_admin=True,
-                is_revoked=False,
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
+        if auth.is_localhost_bypass:
             logger.info(
                 "WebSocket connection from localhost - bypassing authentication"
             )
-        else:
-            # For remote connections, require valid token
-            if not token:
-                await websocket.send_json(
-                    {
-                        "type": "auth_fail",
-                        "data": {"message": "No token provided"},
-                        "timestamp": asyncio.get_event_loop().time(),
-                    }
-                )
-                await websocket.close()
-                return
-
-            token_store = get_token_store()
-            stored_token = token_store.validate_token(token)
-
-            if not stored_token:
-                await websocket.send_json(
-                    {
-                        "type": "auth_fail",
-                        "data": {"message": "Invalid or expired token"},
-                        "timestamp": asyncio.get_event_loop().time(),
-                    }
-                )
-                await websocket.close()
-                return
 
         # Generate unique session ID
         session_id = str(uuid.uuid4())
@@ -480,8 +431,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         # controls who can actually start recording)
         session = TranscriptionSession(
             websocket=websocket,
-            client_name=stored_token.client_name,
-            is_admin=stored_token.is_admin,
+            client_name=auth.client_name,
+            is_admin=auth.is_admin,
             client_type=client_type,
             session_id=session_id,
         )
@@ -501,13 +452,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await session.send_message(
             "auth_ok",
             {
-                "client_name": stored_token.client_name,
+                "client_name": auth.client_name,
                 "client_type": client_type.value,
                 "capabilities": session.capabilities.to_dict(),
             },
         )
         logger.info(
-            f"WebSocket session started for {stored_token.client_name} "
+            f"WebSocket session started for {auth.client_name} "
             f"(type: {client_type.value}, id: {session_id})"
         )
 

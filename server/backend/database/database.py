@@ -136,182 +136,115 @@ def run_migrations() -> bool:
         return False
 
 
+def _assert_schema_sanity(conn: sqlite3.Connection) -> None:
+    """
+    Validate that required tables/columns exist after migrations.
+
+    Raises RuntimeError if the database schema is not compatible.
+    """
+    required_schema: dict[str, set[str]] = {
+        "recordings": {
+            "id",
+            "filename",
+            "filepath",
+            "title",
+            "duration_seconds",
+            "recorded_at",
+            "imported_at",
+            "word_count",
+            "has_diarization",
+            "summary",
+            "summary_model",
+        },
+        "segments": {
+            "id",
+            "recording_id",
+            "segment_index",
+            "speaker",
+            "text",
+            "start_time",
+            "end_time",
+        },
+        "words": {
+            "id",
+            "recording_id",
+            "segment_id",
+            "word_index",
+            "word",
+            "start_time",
+            "end_time",
+            "confidence",
+        },
+        "conversations": {
+            "id",
+            "recording_id",
+            "title",
+            "created_at",
+            "updated_at",
+            "response_id",
+        },
+        "messages": {
+            "id",
+            "conversation_id",
+            "role",
+            "content",
+            "created_at",
+            "model",
+            "tokens_used",
+        },
+    }
+    required_virtual_tables = {"words_fts"}
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = {row[0] for row in cursor.fetchall()}
+
+    missing_tables = [name for name in required_schema if name not in tables]
+    if missing_tables:
+        raise RuntimeError(
+            "Database schema validation failed; missing tables: "
+            + ", ".join(sorted(missing_tables))
+        )
+
+    missing_virtual = [name for name in required_virtual_tables if name not in tables]
+    if missing_virtual:
+        raise RuntimeError(
+            "Database schema validation failed; missing virtual tables: "
+            + ", ".join(sorted(missing_virtual))
+        )
+
+    for table_name, required_columns in required_schema.items():
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        missing_columns = sorted(required_columns - existing_columns)
+        if missing_columns:
+            raise RuntimeError(
+                f"Database schema validation failed; table '{table_name}' is missing "
+                f"columns: {', '.join(missing_columns)}"
+            )
+
+
 def init_db() -> None:
     """Initialize database schema with FTS5 for word search.
 
     This function:
     1. Ensures the database directory exists
-    2. Runs any pending Alembic migrations
-    3. Applies manual migrations for column additions (legacy support)
-    4. Enables WAL mode for crash safety
+    2. Runs pending Alembic migrations
+    3. Validates required schema objects exist
+    4. Enables runtime SQLite pragmas (WAL, synchronous, FK)
     """
     logger.info(f"Initializing database at {get_db_path()}")
 
-    # Run Alembic migrations first (creates tables if needed)
-    run_migrations()
+    # Migrations are required. Do not silently continue on failure.
+    if not run_migrations():
+        raise RuntimeError(
+            "Database migration failed; refusing to start with potentially invalid schema"
+        )
 
     with get_connection() as conn:
+        _assert_schema_sanity(conn)
+
         cursor = conn.cursor()
-
-        # Main recordings table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS recordings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                filepath TEXT NOT NULL UNIQUE,
-                title TEXT,
-                duration_seconds REAL NOT NULL,
-                recorded_at TIMESTAMP NOT NULL,
-                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                word_count INTEGER DEFAULT 0,
-                has_diarization INTEGER DEFAULT 0,
-                summary TEXT
-            )
-        """)
-
-        # Segments table (for speaker turns or time-based segments)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS segments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recording_id INTEGER NOT NULL,
-                segment_index INTEGER NOT NULL,
-                speaker TEXT,
-                text TEXT NOT NULL,
-                start_time REAL NOT NULL,
-                end_time REAL NOT NULL,
-                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
-            )
-        """)
-
-        # Words table with timing information
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS words (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recording_id INTEGER NOT NULL,
-                segment_id INTEGER NOT NULL,
-                word_index INTEGER NOT NULL,
-                word TEXT NOT NULL,
-                start_time REAL NOT NULL,
-                end_time REAL NOT NULL,
-                confidence REAL,
-                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE,
-                FOREIGN KEY (segment_id) REFERENCES segments(id) ON DELETE CASCADE
-            )
-        """)
-
-        # FTS5 virtual table for full-text search
-        cursor.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS words_fts USING fts5(
-                word,
-                content='words',
-                content_rowid='id',
-                tokenize='unicode61'
-            )
-        """)
-
-        # Triggers to keep FTS in sync
-        cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS words_ai AFTER INSERT ON words BEGIN
-                INSERT INTO words_fts(rowid, word) VALUES (new.id, new.word);
-            END
-        """)
-
-        cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS words_ad AFTER DELETE ON words BEGIN
-                INSERT INTO words_fts(words_fts, rowid, word) VALUES('delete', old.id, old.word);
-            END
-        """)
-
-        cursor.execute("""
-            CREATE TRIGGER IF NOT EXISTS words_au AFTER UPDATE ON words BEGIN
-                INSERT INTO words_fts(words_fts, rowid, word) VALUES('delete', old.id, old.word);
-                INSERT INTO words_fts(rowid, word) VALUES (new.id, new.word);
-            END
-        """)
-
-        # Indexes for common queries
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings(recorded_at)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_words_recording ON words(recording_id)"
-        )
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_words_time ON words(start_time)")
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_segments_recording ON segments(recording_id)"
-        )
-
-        # Migration: Add summary column if it doesn't exist
-        cursor.execute("PRAGMA table_info(recordings)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if "summary" not in columns:
-            cursor.execute("ALTER TABLE recordings ADD COLUMN summary TEXT")
-        if "summary_model" not in columns:
-            cursor.execute("ALTER TABLE recordings ADD COLUMN summary_model TEXT")
-
-        if "title" not in columns:
-            cursor.execute("ALTER TABLE recordings ADD COLUMN title TEXT")
-            cursor.execute("UPDATE recordings SET title = filename WHERE title IS NULL")
-
-        cursor.execute(
-            """
-            UPDATE segments
-            SET text = (
-                SELECT TRIM(GROUP_CONCAT(TRIM(word), ' '))
-                FROM (
-                    SELECT word
-                    FROM words
-                    WHERE words.segment_id = segments.id
-                    ORDER BY start_time
-                )
-            )
-            WHERE (text IS NULL OR text = '')
-              AND EXISTS (SELECT 1 FROM words WHERE words.segment_id = segments.id)
-            """
-        )
-
-        # Conversations table - each recording can have multiple conversations
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recording_id INTEGER NOT NULL,
-                title TEXT NOT NULL DEFAULT 'New Chat',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                response_id TEXT DEFAULT NULL,
-                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
-            )
-        """)
-
-        # Messages table - each conversation has multiple messages
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id INTEGER NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                model TEXT,
-                tokens_used INTEGER,
-                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-            )
-        """)
-
-        # Indexes for conversation queries
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_conversations_recording ON conversations(recording_id)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)"
-        )
-
-        # Migration: Add model column to messages if it doesn't exist
-        cursor.execute("PRAGMA table_info(messages)")
-        message_columns = [col[1] for col in cursor.fetchall()]
-        if "model" not in message_columns:
-            cursor.execute("ALTER TABLE messages ADD COLUMN model TEXT")
-
-        conn.commit()
 
         # Enable WAL mode for crash safety and concurrent access
         # WAL provides better concurrency and crash recovery than rollback journal

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 
 from dashboard.common.docker_manager import DockerManager, ServerStatus
 from dashboard.common.models import TrayAction, TrayState
-from dashboard.common.server_control_mixin import ServerControlMixin
+from dashboard.common.server_control_mixin import TrayServerControlMixin
 from dashboard.common.tray_base import AbstractTray
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ except ImportError:
     TraySignals = None  # type: ignore
 
 
-class Qt6Tray(ServerControlMixin, AbstractTray):
+class Qt6Tray(TrayServerControlMixin, AbstractTray):
     """PyQt6 system tray implementation for KDE Plasma."""
 
     # State colors (RGB) - used when client is running
@@ -633,7 +633,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         if self._dashboard_window:
             self._dashboard_window.set_client_running(False)
 
-    # Server control methods are provided by ServerControlMixin
+    # Server control methods are provided by TrayServerControlMixin
     # (_on_server_start_local, _on_server_start_remote, _on_server_stop,
     #  _on_server_status)
 

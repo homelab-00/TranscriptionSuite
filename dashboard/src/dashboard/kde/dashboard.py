@@ -36,7 +36,7 @@ from dashboard.common.icon_loader import IconLoader
 from dashboard.kde.client_mixin import ClientControlMixin
 from dashboard.kde.dialogs import DialogsMixin
 from dashboard.kde.log_window import LogWindow
-from dashboard.kde.server_mixin import ServerControlMixin
+from dashboard.kde.server_mixin import DashboardServerControlMixin
 from dashboard.kde.styles import get_dashboard_stylesheet
 from dashboard.kde.utils import get_assets_path
 
@@ -58,7 +58,7 @@ class View(Enum):
 
 
 class DashboardWindow(
-    ServerControlMixin, ClientControlMixin, DialogsMixin, QMainWindow
+    DashboardServerControlMixin, ClientControlMixin, DialogsMixin, QMainWindow
 ):
     """
     Main Dashboard window - the command center for TranscriptionSuite.

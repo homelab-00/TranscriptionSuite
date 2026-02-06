@@ -163,7 +163,7 @@ if (Test-Path $SourceCompose) {
 }
 
 # Copy start/stop scripts
-$Scripts = @("start-local.ps1", "start-remote.ps1", "stop.ps1")
+$Scripts = @("start-common.ps1", "start-local.ps1", "start-remote.ps1", "stop.ps1")
 foreach ($script in $Scripts) {
     $SourceScript = Join-Path $DockerDir $script
     $DestScript = Join-Path $ConfigDir $script
