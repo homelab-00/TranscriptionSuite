@@ -8,7 +8,6 @@ This is the central controller for all client operations.
 import asyncio
 import concurrent.futures
 import logging
-import os
 import threading
 import webbrowser
 from pathlib import Path
@@ -20,7 +19,9 @@ from dashboard.common.config import ClientConfig
 from dashboard.common.models import TrayAction, TrayState
 
 if TYPE_CHECKING:
-    from dashboard.common.tray_base import AbstractTray
+    from dashboard.common.tray_base import (  # lgtm [py/unsafe-cyclic-import]
+        AbstractTray,  # lgtm [py/unused-import]
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -977,16 +978,16 @@ class ClientOrchestrator:
         if self._live_mode_recorder:
             try:
                 self._live_mode_recorder.cancel()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error while stopping Live Mode recorder: %s", e)
             self._live_mode_recorder = None
 
         # Close WebSocket client
         if self._live_mode_client:
             try:
                 await self._live_mode_client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error while closing Live Mode client: %s", e)
             self._live_mode_client = None
 
     def _on_toggle_live_mute(self) -> None:

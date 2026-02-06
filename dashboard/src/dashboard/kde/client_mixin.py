@@ -22,7 +22,7 @@ from dashboard.common.model_capabilities import (
 from dashboard.common.models import TrayAction
 
 if TYPE_CHECKING:
-    from dashboard.common.api_client import APIClient
+    from dashboard.common.api_client import APIClient  # lgtm [py/unused-import]
 
 logger = logging.getLogger(__name__)
 

@@ -97,13 +97,6 @@ class APIClient:
                 "APIClient being destroyed with unclosed session. "
                 "Please call close() explicitly."
             )
-            # Note: We can't await in __del__, but we can close the session synchronously
-            # This will trigger the asyncio warning but prevents resource leaks
-            try:
-                if self._session.connector:
-                    self._session.connector._close()
-            except Exception:
-                pass
 
     @property
     def base_url(self) -> str:
@@ -700,7 +693,7 @@ class APIClient:
                     if isinstance(error_data, dict):
                         error_text = error_data.get("detail")
                 except (json.JSONDecodeError, aiohttp.ContentTypeError):
-                    pass
+                    logger.debug("Export error response was not valid JSON")
 
                 if not error_text:
                     error_text = await resp.text()
@@ -828,6 +821,8 @@ class APIClient:
                     session = await self._get_session()
                     continue
                 raise
+
+        raise RuntimeError("Failed to update summary after retry")
 
     async def get_llm_status(self) -> dict[str, Any]:
         """

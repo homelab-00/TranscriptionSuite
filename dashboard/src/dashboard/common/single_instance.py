@@ -43,7 +43,6 @@ def acquire_instance_lock() -> Optional[object]:
         # Windows: Use ctypes to create a named mutex
         try:
             import ctypes
-            from ctypes import wintypes
 
             # Create kernel32 reference
             kernel32 = ctypes.windll.kernel32
@@ -51,16 +50,16 @@ def acquire_instance_lock() -> Optional[object]:
             # Define CreateMutex
             CreateMutexW = kernel32.CreateMutexW
             CreateMutexW.argtypes = [
-                wintypes.LPVOID,  # lpMutexAttributes
-                wintypes.BOOL,  # bInitialOwner
-                wintypes.LPCWSTR,  # lpName
+                ctypes.wintypes.LPVOID,  # lpMutexAttributes
+                ctypes.wintypes.BOOL,  # bInitialOwner
+                ctypes.wintypes.LPCWSTR,  # lpName
             ]
-            CreateMutexW.restype = wintypes.HANDLE
+            CreateMutexW.restype = ctypes.wintypes.HANDLE
 
             # Define GetLastError
             GetLastError = kernel32.GetLastError
             GetLastError.argtypes = []
-            GetLastError.restype = wintypes.DWORD
+            GetLastError.restype = ctypes.wintypes.DWORD
 
             # Create named mutex
             mutex_name = "Global\\TranscriptionSuite-Dashboard-Instance-Lock"

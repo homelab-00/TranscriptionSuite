@@ -17,13 +17,10 @@ from typing import TYPE_CHECKING, Any
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -31,7 +28,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dashboard.common.docker_manager import DockerManager, DockerResult, ServerStatus
+from dashboard.common.docker_manager import DockerManager, ServerStatus
 from dashboard.common.icon_loader import IconLoader
 from dashboard.kde.client_mixin import ClientControlMixin
 from dashboard.kde.dialogs import DialogsMixin
@@ -41,9 +38,12 @@ from dashboard.kde.styles import get_dashboard_stylesheet
 from dashboard.kde.utils import get_assets_path
 
 if TYPE_CHECKING:
-    from dashboard.common.api_client import APIClient
-    from dashboard.common.config import ClientConfig
-    from dashboard.common.docker_manager import DockerPullWorker, DockerServerWorker
+    from dashboard.common.api_client import APIClient  # lgtm [py/unused-import]
+    from dashboard.common.config import ClientConfig  # lgtm [py/unused-import]
+    from dashboard.common.docker_manager import (  # lgtm [py/unused-import]
+        DockerPullWorker,
+        DockerServerWorker,
+    )
 
 logger = logging.getLogger(__name__)
 

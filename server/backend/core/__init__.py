@@ -46,10 +46,10 @@ def __getattr__(name: str):
 
 __all__ = [
     "AudioToTextRecorder",
-    "TranscriptionResult",
-    "ModelManager",
-    "DiarizationEngine",
-    "RealtimeTranscriptionEngine",
+    "TranscriptionResult",  # lgtm [py/undefined-export]
+    "ModelManager",  # lgtm [py/undefined-export]
+    "DiarizationEngine",  # lgtm [py/undefined-export]
+    "RealtimeTranscriptionEngine",  # lgtm [py/undefined-export]
     "ClientType",
     "ClientDetector",
 ]

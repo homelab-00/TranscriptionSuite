@@ -36,9 +36,6 @@ build/
 dist/
 *.spec
 
-# Node modules
-node_modules/
-
 # Test files
 tests/
 *.test.py

@@ -10,12 +10,15 @@ Thread/process safety:
 - Uses atomic writes (write to temp file, then rename)
 """
 
+import logging
 import os
 import platform
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # File locking support (Linux/Unix only)
 # Windows doesn't have fcntl - skip locking there
@@ -26,7 +29,7 @@ try:
 
     fcntl = _fcntl
 except ImportError:
-    pass
+    _fcntl = None
 
 
 def get_config_dir() -> Path:
@@ -182,8 +185,12 @@ class ClientConfig:
             if tmp_path and tmp_path.exists():
                 try:
                     tmp_path.unlink()
-                except Exception:
-                    pass
+                except Exception as cleanup_error:
+                    logger.debug(
+                        "Failed to remove temporary config file %s: %s",
+                        tmp_path,
+                        cleanup_error,
+                    )
             return False
 
     def get(self, *keys: str, default: Any = None) -> Any:
@@ -431,8 +438,12 @@ class ClientConfig:
             if tmp_path and tmp_path.exists():
                 try:
                     tmp_path.unlink()
-                except Exception:
-                    pass
+                except Exception as cleanup_error:
+                    logger.debug(
+                        "Failed to remove temporary server config file %s: %s",
+                        tmp_path,
+                        cleanup_error,
+                    )
             return False
 
     def set_server_config_values(self, updates: dict[tuple[str, ...], Any]) -> bool:

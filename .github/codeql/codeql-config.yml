@@ -1,0 +1,10 @@
+paths:
+  - build/
+  - dashboard/
+  - server/
+paths-ignore:
+  - dist
+  - '**/*.test.*'
+  - '**/*.spec.*'
+queries:
+  - uses: security-and-quality

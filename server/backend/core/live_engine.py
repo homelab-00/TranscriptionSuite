@@ -215,8 +215,8 @@ class LiveModeEngine:
             if self._recorder:
                 try:
                     self._recorder.shutdown()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Error while shutting down Live Mode recorder: %s", e)
                 self._recorder = None
 
             if self._state != LiveModeState.ERROR:
@@ -312,8 +312,8 @@ class LiveModeEngine:
         if self._recorder:
             try:
                 self._recorder.shutdown()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error while stopping Live Mode recorder: %s", e)
 
         # Wait for threads to finish
         if self._loop_thread and self._loop_thread.is_alive():

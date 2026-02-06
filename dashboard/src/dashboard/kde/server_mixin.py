@@ -8,15 +8,11 @@ extracted to keep the main dashboard.py file smaller and more maintainable.
 import logging
 import re
 import threading
-from typing import TYPE_CHECKING, Callable
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QCheckBox, QMessageBox
 
 from dashboard.common.docker_manager import DockerResult, ServerMode, ServerStatus
-
-if TYPE_CHECKING:
-    from dashboard.common.docker_manager import DockerPullWorker, DockerServerWorker
 
 logger = logging.getLogger(__name__)
 

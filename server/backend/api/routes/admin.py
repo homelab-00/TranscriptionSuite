@@ -166,13 +166,15 @@ async def load_models_stream(websocket: WebSocket) -> None:
         logger.error(f"WebSocket error during model loading: {e}")
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
+        except Exception as send_error:
+            logger.debug(
+                "Failed to send model loading error to websocket: %s", send_error
+            )
     finally:
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as close_error:
+            logger.debug("Failed to close model loading websocket: %s", close_error)
 
 
 @router.post("/models/unload")

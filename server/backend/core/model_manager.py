@@ -339,12 +339,7 @@ class ModelManager:
         Returns:
             RealtimeTranscriptionEngine for the session
         """
-        from server.core.client_detector import ClientType
         from server.core.realtime_engine import create_realtime_engine
-
-        # Default to WEB client type
-        if client_type is None:
-            client_type = ClientType.WEB
 
         # Check if engine already exists for this session
         if session_id in self._realtime_engines:

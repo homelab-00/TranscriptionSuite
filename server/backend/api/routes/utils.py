@@ -3,6 +3,7 @@ Shared utilities for API routes.
 """
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
@@ -12,6 +13,8 @@ from fastapi import Request, WebSocket
 from starlette.websockets import WebSocketState
 
 from server.core.token_store import get_token_store
+
+logger = logging.getLogger(__name__)
 
 # Check if TLS mode is enabled
 TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
@@ -92,14 +95,18 @@ async def send_websocket_auth_failure(
     if websocket.client_state == WebSocketState.CONNECTED:
         try:
             await websocket.send_json(payload)
-        except Exception:
-            pass
+        except Exception as send_error:
+            logger.debug(
+                "Failed to send websocket auth failure payload: %s", send_error
+            )
 
     if close:
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as close_error:
+            logger.debug(
+                "Failed to close websocket after auth failure: %s", close_error
+            )
 
 
 async def authenticate_websocket_from_message(

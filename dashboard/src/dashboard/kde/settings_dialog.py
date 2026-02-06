@@ -1480,7 +1480,7 @@ class SettingsDialog(QDialog):
 
                     dt = datetime.fromisoformat(created)
                     date_str = dt.strftime("%Y-%m-%d %H:%M")
-                except:
+                except (TypeError, ValueError):
                     date_str = created[:16] if len(created) > 16 else created
             else:
                 date_str = "Unknown date"

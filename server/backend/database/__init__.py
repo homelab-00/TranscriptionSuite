@@ -46,11 +46,11 @@ __all__ = [
     "search_words_enhanced",
     "search_recordings",
     # Conversations
-    "create_conversation",
-    "get_conversation",
-    "get_conversations",
-    "update_conversation_title",
-    "update_conversation_response_id",
+    "create_conversation",  # lgtm [py/undefined-export]
+    "get_conversation",  # lgtm [py/undefined-export]
+    "get_conversations",  # lgtm [py/undefined-export]
+    "update_conversation_title",  # lgtm [py/undefined-export]
+    "update_conversation_response_id",  # lgtm [py/undefined-export]
     "get_conversation_with_messages",
     "delete_conversation",
     "add_message",

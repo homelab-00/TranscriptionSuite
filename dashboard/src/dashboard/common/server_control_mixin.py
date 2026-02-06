@@ -18,11 +18,13 @@ class _ServerControlHost(Protocol):
 
     _docker_manager: DockerManager
 
-    def show_notification(self, title: str, message: str) -> None: ...
+    def show_notification(self, title: str, message: str) -> None:
+        pass
 
     def _run_server_operation(
         self, operation: Callable[[], Any], progress_msg: str
-    ) -> None: ...
+    ) -> None:
+        pass
 
 
 class TrayServerControlMixin:

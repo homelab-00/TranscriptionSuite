@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING
 from dashboard.common.models import TrayAction, TrayState
 
 if TYPE_CHECKING:
-    from dashboard.common.orchestrator import ClientOrchestrator
+    from dashboard.common.orchestrator import (  # lgtm [py/unsafe-cyclic-import]
+        ClientOrchestrator,  # lgtm [py/unused-import]
+    )
 
 
 class AbstractTray(ABC):

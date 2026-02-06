@@ -897,7 +897,6 @@ def get_next_available_start_time(
         cursor = conn.cursor()
         # Find recordings that end within this hour but started before it
         hour_start = datetime.fromisoformat(f"{target_date}T{hour:02d}:00:00")
-        hour_end = datetime.fromisoformat(f"{target_date}T{hour:02d}:59:59")
 
         cursor.execute(
             """

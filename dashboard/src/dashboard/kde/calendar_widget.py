@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 from pathlib import Path
 
-from PyQt6.QtCore import QDate, QLocale, Qt, QMetaObject, QTimer, pyqtSignal, Q_ARG
-from PyQt6.QtGui import QAction, QColor, QFont
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -1434,8 +1434,8 @@ class CalendarWidget(QWidget):
                         recordings_by_hour[current_hour].append((rec, True))
                         current_hour += 1
 
-            except (ValueError, AttributeError):
-                pass
+            except (ValueError, AttributeError) as e:
+                logger.debug("Skipping recording with invalid datetime data: %s", e)
 
         # Update time slot widgets
         for hour, slot_info in self._time_slots.items():

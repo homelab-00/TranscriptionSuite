@@ -61,6 +61,7 @@ Technical documentation for developing and building TranscriptionSuite.
 - [12. Code Quality Checks](#12-code-quality-checks)
   - [12.1 Python Code Quality](#121-python-code-quality)
   - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
+  - [12.3 GitHub CodeQL Layout](#123-github-codeql-layout)
 - [13. Troubleshooting](#13-troubleshooting)
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
   - [13.2 Health Check Issues](#132-health-check-issues)
@@ -1038,6 +1039,15 @@ Run all checks across the entire codebase:
 # 2. Python tests
 ./build/.venv/bin/pytest server/backend/tests
 ```
+
+### 12.3 GitHub CodeQL Layout
+
+The repository uses two different `.github` locations for different purposes:
+
+- `.github/workflows/`: GitHub Actions workflow definitions (when jobs run, trigger rules, runner setup).
+- `.github/codeql/`: CodeQL configuration consumed by workflows (for example, `codeql-config.yml` path filters and query configuration).
+
+Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs and conflicting results.
 
 ---
 

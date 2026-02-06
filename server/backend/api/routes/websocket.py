@@ -293,7 +293,7 @@ class TranscriptionSession:
 
         # Notify model manager about client disconnect
         if self.client_type == ClientType.STANDALONE:
-            model_manager = get_model_manager()
+            get_model_manager()
             # No special per-client model handling required
 
 
@@ -445,7 +445,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if client_type == ClientType.STANDALONE:
             from server.core.model_manager import get_model_manager
 
-            model_manager = get_model_manager()
+            get_model_manager()
             # No special per-client model handling required
 
         # Send auth success with capabilities

@@ -54,7 +54,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from dashboard.common.models import Recording, Segment, Transcription, Word
+from dashboard.common.models import Recording, Transcription
 from dashboard.kde.audio_player import AudioPlayer
 
 if TYPE_CHECKING:

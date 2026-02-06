@@ -15,10 +15,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
-
-if TYPE_CHECKING:
-    from typing import Self
+from typing import Callable
 
 from dashboard.common.config import get_config_dir
 
@@ -215,7 +212,7 @@ class DockerPullWorker(threading.Thread):
                     layer_id = line.split(":")[0][:12] if ":" in line else "layer"
                     return f"Downloading {layer_id}: {size_info}"
             except Exception:
-                pass
+                logger.debug("Failed to parse docker pull output line: %s", line)
             return line
 
         # Report status messages
@@ -255,7 +252,9 @@ class DockerPullWorker(threading.Thread):
                         try:
                             self._process.stdout.close()
                         except Exception:
-                            pass
+                            logger.debug(
+                                "Failed to close docker pull stdout during cancel"
+                            )
 
                     # Terminate the process
                     self._process.terminate()
@@ -430,7 +429,9 @@ class DockerServerWorker(threading.Thread):
                         try:
                             self._process.stdout.close()
                         except Exception:
-                            pass
+                            logger.debug(
+                                "Failed to close docker compose stdout during cancel"
+                            )
 
                     # Terminate the process
                     self._process.terminate()
@@ -891,6 +892,16 @@ class DockerManager:
                 return []
 
             # Use docker exec to list models from inside the container
+            shell_script = "".join(
+                [
+                    "for d in /models/hub/models--*/; do ",
+                    'if [ -d "$d" ]; then ',
+                    'name=$(basename "$d"); ',
+                    'size=$(du -sh "$d" 2>/dev/null | cut -f1); ',
+                    'echo "$name|$size"; ',
+                    "fi; done",
+                ]
+            )
             result = self._run_command(
                 [
                     "docker",
@@ -898,12 +909,7 @@ class DockerManager:
                     self.CONTAINER_NAME,
                     "sh",
                     "-c",
-                    "for d in /models/hub/models--*/; do "
-                    'if [ -d "$d" ]; then '
-                    'name=$(basename "$d"); '
-                    'size=$(du -sh "$d" 2>/dev/null | cut -f1); '
-                    'echo "$name|$size"; '
-                    "fi; done",
+                    shell_script,
                 ]
             )
 

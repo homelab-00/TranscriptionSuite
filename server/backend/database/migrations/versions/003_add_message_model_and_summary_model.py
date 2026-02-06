@@ -13,10 +13,12 @@ from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
-revision: str = "003"
-down_revision: Union[str, None] = "002"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "003"  # lgtm [py/unused-global-variable]
+down_revision: Union[str, None] = "002"  # lgtm [py/unused-global-variable]
+branch_labels: Union[str, Sequence[str], None] = (
+    None  # lgtm [py/unused-global-variable]
+)
+depends_on: Union[str, Sequence[str], None] = None  # lgtm [py/unused-global-variable]
 
 
 def upgrade() -> None:

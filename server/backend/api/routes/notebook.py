@@ -39,7 +39,6 @@ from server.database.database import (
     delete_recording,
     get_all_recordings,
     get_db_path,
-    get_next_available_start_time,
     get_recording,
     get_recordings_by_date_range,
     get_segments,

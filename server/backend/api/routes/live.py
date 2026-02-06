@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # Track active Live Mode session (only one at a time)
-_active_session: Optional["LiveModeSession"] = None
+_active_session: Optional["LiveModeSession"] = None  # lgtm [py/unused-global-variable]
 _session_lock = asyncio.Lock()
 
 
@@ -421,7 +421,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
             try:
                 await message_task
             except asyncio.CancelledError:
-                pass
+                logger.debug("Live Mode message task cancelled during cleanup")
 
     except WebSocketDisconnect:
         logger.info("Live Mode WebSocket disconnected")
@@ -434,8 +434,10 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
         logger.error(f"Live Mode WebSocket error: {e}", exc_info=True)
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except Exception as close_error:
+            logger.debug(
+                "Failed to close Live Mode websocket after error: %s", close_error
+            )
 
     finally:
         # Clean up session
@@ -443,5 +445,5 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
             await session.cleanup()
             async with _session_lock:
                 if _active_session is session:
-                    _active_session = None
+                    _active_session = None  # lgtm [py/unused-global-variable]
             logger.info(f"Live Mode session ended for {session.client_name}")

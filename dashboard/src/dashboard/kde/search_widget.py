@@ -20,12 +20,11 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from dashboard.common.models import Recording, SearchResult
+from dashboard.common.models import SearchResult
 
 if TYPE_CHECKING:
     from dashboard.common.api_client import APIClient

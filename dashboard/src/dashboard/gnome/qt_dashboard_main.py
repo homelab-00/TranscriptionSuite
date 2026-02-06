@@ -168,8 +168,8 @@ def main() -> int:
                 "Limited Mode",
                 "Client control unavailable. Start the tray first for full functionality.",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to show limited mode notification: %s", e)
 
     # Pump GLib main loop so D-Bus signals are delivered
     try:
@@ -185,7 +185,7 @@ def main() -> int:
         glib_timer.timeout.connect(pump_glib)
         glib_timer.start(50)
     except Exception:
-        pass
+        logger.debug("GLib integration unavailable; continuing without D-Bus pump")
 
     window.show()
     window.raise_()
