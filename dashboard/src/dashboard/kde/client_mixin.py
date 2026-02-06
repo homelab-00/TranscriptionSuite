@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMessageBox
 
+from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.docker_manager import ServerStatus
 from dashboard.common.models import TrayAction
 
@@ -410,6 +411,142 @@ class ClientControlMixin:
     # =========================================================================
     # Toggle Button Handlers
     # =========================================================================
+
+    def _on_main_language_changed(self, index: int) -> None:
+        """Handle main transcription language selection change."""
+        del index
+        if not hasattr(self, "_main_language_combo"):
+            return
+
+        language_code = self._main_language_combo.currentData()
+        language_value = language_code or None
+        self.config.set_server_config(
+            "longform_recording", "language", value=language_value
+        )
+        logger.info(
+            "Main transcription language set to: %s (%s)",
+            self._main_language_combo.currentText(),
+            language_code or "auto",
+        )
+
+    def _refresh_source_devices(self) -> None:
+        """Refresh microphone/system-audio source dropdowns."""
+        if not hasattr(self, "_microphone_combo") or not hasattr(
+            self, "_system_audio_combo"
+        ):
+            return
+
+        selected_mic = self.config.get("recording", "device_index", default=None)
+        selected_output = self.config.get("recording", "system_output_id", default=None)
+
+        self._microphone_combo.blockSignals(True)
+        self._system_audio_combo.blockSignals(True)
+
+        self._microphone_combo.clear()
+        self._microphone_combo.addItem("System Default", None)
+        try:
+            for device in AudioRecorder.list_input_devices():
+                name = device.get("name", f"Input {device.get('index', '?')}")
+                self._microphone_combo.addItem(name, device.get("index"))
+        except Exception as e:
+            logger.warning(f"Failed to list microphone devices: {e}")
+
+        self._system_audio_combo.clear()
+        self._system_audio_combo.addItem("System Default", None)
+        try:
+            for device in AudioRecorder.list_output_devices():
+                name = device.get("name", "Output device")
+                self._system_audio_combo.addItem(name, device.get("id"))
+        except Exception as e:
+            logger.warning(f"Failed to list system audio devices: {e}")
+
+        self._microphone_combo.setCurrentIndex(0)
+        if selected_mic is not None:
+            for i in range(self._microphone_combo.count()):
+                if self._microphone_combo.itemData(i) == selected_mic:
+                    self._microphone_combo.setCurrentIndex(i)
+                    break
+
+        self._system_audio_combo.setCurrentIndex(0)
+        if selected_output is not None:
+            for i in range(self._system_audio_combo.count()):
+                if self._system_audio_combo.itemData(i) == selected_output:
+                    self._system_audio_combo.setCurrentIndex(i)
+                    break
+
+        self._microphone_combo.blockSignals(False)
+        self._system_audio_combo.blockSignals(False)
+        self._sync_audio_source_ui()
+
+    def _on_audio_source_toggled(self, checked: bool) -> None:
+        """Handle microphone/system-audio source toggle."""
+        source_type = "system_audio" if checked else "microphone"
+        self.config.set("recording", "source_type", value=source_type)
+        self.config.save()
+        self._sync_audio_source_ui()
+        logger.info("Recording source set to: %s", source_type)
+
+    def _on_microphone_device_changed(self, index: int) -> None:
+        """Handle microphone dropdown selection change."""
+        del index
+        if not hasattr(self, "_microphone_combo"):
+            return
+        self.config.set(
+            "recording", "device_index", value=self._microphone_combo.currentData()
+        )
+        self.config.save()
+
+    def _on_system_audio_device_changed(self, index: int) -> None:
+        """Handle system-audio output dropdown selection change."""
+        del index
+        if not hasattr(self, "_system_audio_combo"):
+            return
+        self.config.set(
+            "recording",
+            "system_output_id",
+            value=self._system_audio_combo.currentData(),
+        )
+        self.config.save()
+
+    def _sync_audio_source_ui(self) -> None:
+        """Sync source labels and toggle state with stored source configuration."""
+        if not hasattr(self, "_source_switch"):
+            return
+
+        source_type = self.config.get("recording", "source_type", default="microphone")
+        is_system_audio = source_type == "system_audio"
+
+        self._source_switch.blockSignals(True)
+        self._source_switch.setChecked(is_system_audio)
+        self._source_switch.blockSignals(False)
+
+        if hasattr(self, "_source_mic_label"):
+            if is_system_audio:
+                self._source_mic_label.setStyleSheet(
+                    "color: #7f7f7f; font-size: 12px; font-weight: 500;"
+                )
+            else:
+                self._source_mic_label.setStyleSheet(
+                    "color: #d0d0d0; font-size: 12px; font-weight: 600;"
+                )
+
+        if hasattr(self, "_source_system_label"):
+            if is_system_audio:
+                self._source_system_label.setStyleSheet(
+                    "color: #d0d0d0; font-size: 12px; font-weight: 600;"
+                )
+            else:
+                self._source_system_label.setStyleSheet(
+                    "color: #7f7f7f; font-size: 12px; font-weight: 500;"
+                )
+
+    def set_recording_source(self, source_type: str) -> None:
+        """Force-select the recording source and sync the Client tab UI."""
+        if source_type not in {"microphone", "system_audio"}:
+            return
+        self.config.set("recording", "source_type", value=source_type)
+        self.config.save()
+        self._sync_audio_source_ui()
 
     def _on_notebook_toggle(self) -> None:
         """Handle notebook toggle button click."""

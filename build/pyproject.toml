@@ -29,6 +29,7 @@ dependencies = [
     # Client dependencies for AppImage builds
     "PyQt6>=6.6.0",
     "pyaudio>=0.2.13",
+    "soundcard>=0.4.3",
     "aiohttp>=3.13.3",
     "pyyaml>=6.0",
     "numpy>=1.26.0",

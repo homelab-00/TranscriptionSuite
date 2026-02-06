@@ -43,6 +43,7 @@ try:
         settings_dialog_requested = pyqtSignal()  # show settings dialog
         flash_requested = pyqtSignal(object, int)  # target_state, duration_ms
         live_transcription_update = pyqtSignal(str, bool)  # text, append
+        recording_source_sync = pyqtSignal(str)  # "microphone" | "system_audio"
 
 except ImportError:
     # Provide stub for type checking only
@@ -144,6 +145,7 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         self._signals.live_transcription_update.connect(
             self._do_update_live_transcription
         )
+        self._signals.recording_source_sync.connect(self._do_sync_recording_source)
 
         # Dialog instances (created lazily)
         self._settings_dialog = None
@@ -508,6 +510,15 @@ class Qt6Tray(ServerControlMixin, AbstractTray):
         """Actually update the dashboard (must be called on main thread)."""
         if self._dashboard_window:
             self._dashboard_window.update_live_transcription_text(text, append)
+
+    def sync_recording_source(self, source_type: str) -> None:
+        """Sync recording source selection to dashboard UI from async thread."""
+        self._signals.recording_source_sync.emit(source_type)
+
+    def _do_sync_recording_source(self, source_type: str) -> None:
+        """Apply source selection sync on Qt main thread."""
+        if self._dashboard_window:
+            self._dashboard_window.set_recording_source(source_type)
 
     def copy_to_clipboard(self, text: str) -> bool:
         """Copy text to clipboard (thread-safe)."""

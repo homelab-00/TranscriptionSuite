@@ -77,6 +77,8 @@ def get_default_config() -> dict[str, Any]:
         "recording": {
             "sample_rate": 16000,
             "device_index": None,
+            "source_type": "microphone",
+            "system_output_id": None,
         },
         "clipboard": {
             "auto_copy": True,
@@ -104,6 +106,8 @@ class ClientConfig:
 
     _SERVER_CONFIG_DEPRECATED: set[tuple[str, ...]] = {
         ("transcription_options", "enable_live_transcriber"),
+        ("transcription_options", "language"),
+        ("main_transcriber", "language"),
     }
 
     def __init__(self, config_path: Path | None = None):

@@ -87,24 +87,32 @@ def parse_args() -> argparse.Namespace:
 
 
 def list_audio_devices() -> None:
-    """List available audio input devices."""
+    """List available audio input/output devices."""
     print("\nAvailable Audio Input Devices:")
     print("-" * 50)
 
-    devices = AudioRecorder.list_devices()
-    if not devices:
+    input_devices = AudioRecorder.list_input_devices()
+    if not input_devices:
         print("No audio input devices found.")
         print("Install PyAudio:")
         print("  Arch: sudo pacman -S python-pyaudio")
         print("  Ubuntu/Debian: sudo apt install python3-pyaudio")
         print("  Fedora: sudo dnf install python3-pyaudio")
-        return
+    else:
+        for device in input_devices:
+            print(f"  [{device['index']}] {device['name']}")
+            print(
+                f"      Channels: {device['channels']}, Sample Rate: {device['sample_rate']}"
+            )
 
-    for device in devices:
-        print(f"  [{device['index']}] {device['name']}")
-        print(
-            f"      Channels: {device['channels']}, Sample Rate: {device['sample_rate']}"
-        )
+    print("\nAvailable System Audio Outputs (loopback sources):")
+    print("-" * 50)
+    output_devices = AudioRecorder.list_output_devices()
+    if not output_devices:
+        print("No system output devices found (or soundcard dependency missing).")
+    else:
+        for device in output_devices:
+            print(f"  [{device['id']}] {device['name']}")
 
     print()
 

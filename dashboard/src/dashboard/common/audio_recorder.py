@@ -1,9 +1,10 @@
 """
 Cross-platform audio recording for TranscriptionSuite client.
 
-Handles microphone recording with:
-- PyAudio for audio capture
-- Configurable sample rate and device
+Handles recording from:
+- Microphone input (PyAudio)
+- System audio loopback (soundcard)
+- Configurable sample rate and device/source selection
 - WAV output for server transcription
 """
 
@@ -12,7 +13,7 @@ import logging
 import threading
 import wave
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
@@ -36,10 +37,22 @@ else:
     except ImportError:
         pyaudio = None
 
+# Try to import soundcard (system audio loopback)
+HAS_SOUNDCARD = False
+if TYPE_CHECKING:
+    import soundcard
+else:
+    try:
+        import soundcard
+
+        HAS_SOUNDCARD = True
+    except ImportError:
+        soundcard = None
+
 
 class AudioRecorder:
     """
-    Cross-platform audio recorder using PyAudio.
+    Cross-platform audio recorder for microphone and system-audio sources.
     """
 
     def __init__(
@@ -48,6 +61,8 @@ class AudioRecorder:
         channels: int = 1,
         chunk_size: int = 1024,
         device_index: int | None = None,
+        source_type: Literal["microphone", "system_audio"] = "microphone",
+        system_output_id: str | None = None,
         on_audio_chunk: Callable[[bytes], None] | None = None,
     ):
         """
@@ -58,19 +73,30 @@ class AudioRecorder:
             channels: Number of audio channels (default 1 for mono)
             chunk_size: Size of audio chunks
             device_index: Input device index (None for default)
+            source_type: Audio source ("microphone" or "system_audio")
+            system_output_id: System output device id (None for default output)
             on_audio_chunk: Callback for audio data
         """
-        if not HAS_PYAUDIO:
-            raise ImportError("PyAudio is required for audio recording")
+        if source_type not in {"microphone", "system_audio"}:
+            raise ValueError(f"Invalid source_type: {source_type}")
+
+        if source_type == "microphone" and not HAS_PYAUDIO:
+            raise ImportError("PyAudio is required for microphone recording")
+        if source_type == "system_audio" and not HAS_SOUNDCARD:
+            raise ImportError("soundcard is required for system audio recording")
 
         self.sample_rate = sample_rate
         self.channels = channels
         self.chunk_size = chunk_size
         self.device_index = device_index
+        self.source_type = source_type
+        self.system_output_id = system_output_id
         self.on_audio_chunk = on_audio_chunk
 
         self._audio: Any = None
         self._stream: Any = None
+        self._system_recorder: Any = None
+        self._system_recorder_ctx: Any = None
         self._recording = False
         self._thread: threading.Thread | None = None
         self._frames: list[bytes] = []
@@ -93,6 +119,29 @@ class AudioRecorder:
         except Exception as e:
             logger.warning(f"Could not get default input device: {e}")
             return None
+
+    def _get_output_device(self):
+        """Resolve the system output device for loopback capture."""
+        if not HAS_SOUNDCARD:
+            raise RuntimeError("soundcard dependency is not available")
+
+        speakers = soundcard.all_speakers()
+        if not speakers:
+            raise RuntimeError("No system output devices available")
+
+        if self.system_output_id:
+            for speaker in speakers:
+                speaker_id = str(getattr(speaker, "id", ""))
+                if speaker_id == self.system_output_id:
+                    return speaker
+            raise RuntimeError(
+                f"Configured system audio device not found: {self.system_output_id}"
+            )
+
+        default_speaker = soundcard.default_speaker()
+        if default_speaker is None:
+            raise RuntimeError("No default system output device found")
+        return default_speaker
 
     def _get_supported_channels(
         self, device_index: int | None, sample_rate: int
@@ -225,6 +274,16 @@ class AudioRecorder:
             logger.warning("Already recording")
             return False
 
+        if self.source_type == "system_audio":
+            return self._start_system_audio_recording()
+        return self._start_microphone_recording()
+
+    def _start_microphone_recording(self) -> bool:
+        """Start microphone recording via PyAudio."""
+        if not HAS_PYAUDIO:
+            logger.error("PyAudio is not available")
+            return False
+
         try:
             self._audio = pyaudio.PyAudio()
             device_index = self._get_device_index()
@@ -273,7 +332,7 @@ class AudioRecorder:
             self._frames = []
 
             # Start recording thread
-            self._thread = threading.Thread(target=self._record_loop)
+            self._thread = threading.Thread(target=self._record_microphone_loop)
             self._thread.daemon = True
             self._thread.start()
 
@@ -285,8 +344,44 @@ class AudioRecorder:
             self._cleanup()
             return False
 
-    def _record_loop(self) -> None:
-        """Recording loop that runs in a separate thread."""
+    def _start_system_audio_recording(self) -> bool:
+        """Start system audio loopback recording via soundcard."""
+        if not HAS_SOUNDCARD:
+            logger.error("soundcard is not available")
+            return False
+
+        try:
+            output_device = self._get_output_device()
+            self._system_recorder_ctx = output_device.recorder(
+                samplerate=self.sample_rate,
+                channels=2,
+                blocksize=self.chunk_size,
+            )
+            self._system_recorder = self._system_recorder_ctx.__enter__()
+            self._recording = True
+            self._frames = []
+            self._actual_sample_rate = self.sample_rate
+            self._actual_channels = self.channels
+            self._needs_resampling = False
+            self._needs_channel_conversion = False
+
+            # Start recording thread
+            self._thread = threading.Thread(target=self._record_system_audio_loop)
+            self._thread.daemon = True
+            self._thread.start()
+
+            logger.info(
+                "System audio recording started from %s",
+                getattr(output_device, "name", "default output"),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to start system audio recording: {e}")
+            self._cleanup()
+            return False
+
+    def _record_microphone_loop(self) -> None:
+        """Microphone recording loop that runs in a separate thread."""
         while self._recording and self._stream:
             try:
                 data = self._stream.read(self.chunk_size, exception_on_overflow=False)
@@ -297,6 +392,34 @@ class AudioRecorder:
 
             except Exception as e:
                 logger.error(f"Recording error: {e}")
+                break
+
+    def _record_system_audio_loop(self) -> None:
+        """System audio recording loop that runs in a separate thread."""
+        while self._recording and self._system_recorder is not None:
+            try:
+                frame = self._system_recorder.record(numframes=self.chunk_size)
+                if frame is None:
+                    continue
+
+                audio_array = np.asarray(frame, dtype=np.float32)
+                if audio_array.size == 0:
+                    continue
+
+                if audio_array.ndim == 2:
+                    mono = audio_array.mean(axis=1)
+                else:
+                    mono = audio_array
+
+                mono = np.clip(mono, -1.0, 1.0)
+                data = (mono * 32767.0).astype(np.int16).tobytes()
+                self._frames.append(data)
+
+                if self.on_audio_chunk:
+                    self.on_audio_chunk(data)
+
+            except Exception as e:
+                logger.error(f"System audio recording error: {e}")
                 break
 
     def stop(self) -> bytes:
@@ -448,6 +571,14 @@ class AudioRecorder:
                 logger.debug("Failed to terminate PyAudio during cleanup")
             self._audio = None
 
+        if self._system_recorder_ctx is not None:
+            try:
+                self._system_recorder_ctx.__exit__(None, None, None)
+            except Exception:
+                logger.debug("Failed to close system audio recorder during cleanup")
+            self._system_recorder_ctx = None
+            self._system_recorder = None
+
     @property
     def is_recording(self) -> bool:
         """Check if currently recording."""
@@ -467,12 +598,12 @@ class AudioRecorder:
         return audio_array.astype(np.float32) / 32768.0
 
     @staticmethod
-    def list_devices() -> list:
-        """List available audio input devices."""
+    def list_input_devices() -> list[dict[str, Any]]:
+        """List available microphone input devices."""
         if not HAS_PYAUDIO:
             return []
 
-        devices = []
+        devices: list[dict[str, Any]] = []
         try:
             audio = pyaudio.PyAudio()
             for i in range(audio.get_device_count()):
@@ -492,6 +623,28 @@ class AudioRecorder:
                     continue
             audio.terminate()
         except Exception as e:
-            logger.error(f"Error listing devices: {e}")
+            logger.error(f"Error listing input devices: {e}")
 
         return devices
+
+    @staticmethod
+    def list_output_devices() -> list[dict[str, Any]]:
+        """List available system output devices for loopback capture."""
+        if not HAS_SOUNDCARD:
+            return []
+
+        devices: list[dict[str, Any]] = []
+        try:
+            for speaker in soundcard.all_speakers():
+                name = str(getattr(speaker, "name", "Output device"))
+                speaker_id = str(getattr(speaker, "id", name))
+                devices.append({"id": speaker_id, "name": name})
+        except Exception as e:
+            logger.error(f"Error listing output devices: {e}")
+
+        return devices
+
+    @staticmethod
+    def list_devices() -> list[dict[str, Any]]:
+        """Backward-compatible alias for microphone input devices."""
+        return AudioRecorder.list_input_devices()

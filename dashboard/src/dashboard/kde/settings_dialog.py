@@ -6,7 +6,7 @@ Styled to match the Dashboard UI design language.
 
 Tabs:
 - App: Clipboard, notifications, stop server on quit behavior
-- Client: Audio input device + connection settings
+- Client: Connection, diarization, and runtime behavior
 - Server: Nested config editor + config.yaml file access
 """
 
@@ -19,7 +19,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFrame,
@@ -38,7 +37,6 @@ from PyQt6.QtWidgets import (
 
 import yaml
 
-from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig, get_config_dir
 from dashboard.common.docker_manager import DockerManager
 
@@ -137,8 +135,11 @@ class SettingsDialog(QDialog):
             ("live_transcriber", "enabled"),
             ("live_transcriber", "live_language"),
             ("live_transcriber", "model"),
+            ("longform_recording", "language"),
             ("longform_recording", "auto_add_to_audio_notebook"),
+            ("transcription_options", "language"),
             ("main_transcriber", "model"),
+            ("main_transcriber", "language"),
         }
         self._server_config_exists = False
 
@@ -559,7 +560,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(scroll, "App")
 
     def _create_client_tab(self) -> None:
-        """Create the Client settings tab (audio + connection in one tab)."""
+        """Create the Client settings tab (runtime + connection in one tab)."""
         # Create scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -577,22 +578,6 @@ class SettingsDialog(QDialog):
         # === Audio Section ===
         audio_group = QGroupBox("Audio")
         audio_layout = QVBoxLayout(audio_group)
-
-        # Device selector row
-        device_row = QHBoxLayout()
-        device_label = QLabel("Input Device:")
-        device_label.setObjectName("fieldLabel")
-        device_row.addWidget(device_label)
-
-        self.device_combo = QComboBox()
-        device_row.addWidget(self.device_combo, 1)
-
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setObjectName("smallButton")
-        refresh_btn.clicked.connect(self._refresh_devices)
-        device_row.addWidget(refresh_btn)
-
-        audio_layout.addLayout(device_row)
 
         # Sample rate info
         sample_rate_label = QLabel("Sample Rate: 16000 Hz (fixed for Whisper)")
@@ -633,9 +618,6 @@ class SettingsDialog(QDialog):
         audio_layout.addWidget(grace_help)
 
         layout.addWidget(audio_group)
-
-        # Populate devices
-        self._refresh_devices()
 
         # === Diarization Section ===
         diarization_group = QGroupBox("Diarization")
@@ -1041,8 +1023,6 @@ class SettingsDialog(QDialog):
 
     def _infer_expected_type(self, node: ConfigNode) -> type:
         type_hints: dict[tuple[str, ...], type] = {
-            ("longform_recording", "language"): str,
-            ("transcription_options", "language"): str,
             ("main_transcriber", "initial_prompt"): str,
             ("diarization", "hf_token"): str,
             ("diarization", "min_speakers"): int,
@@ -1240,22 +1220,6 @@ class SettingsDialog(QDialog):
     def _on_constrain_speakers_toggled(self, checked: bool) -> None:
         """Enable/disable the expected speakers spinbox based on checkbox state."""
         self.expected_speakers_spin.setEnabled(checked)
-
-    def _refresh_devices(self) -> None:
-        """Refresh the audio device list."""
-        self.device_combo.clear()
-
-        # Add default option
-        self.device_combo.addItem("Default Device", None)
-
-        # List available devices
-        try:
-            devices = AudioRecorder.list_devices()
-            for device in devices:
-                name = device.get("name", f"Device {device['index']}")
-                self.device_combo.addItem(name, device["index"])
-        except Exception as e:
-            logger.warning(f"Failed to list audio devices: {e}")
 
     def _on_open_config_file(self) -> None:
         """Open the server config.yaml file in default text editor."""
@@ -1699,16 +1663,6 @@ class SettingsDialog(QDialog):
             self.config.get("dashboard", "stop_server_on_quit", default=True)
         )
 
-        # Client tab - Audio
-        current_device = self.config.get("recording", "device_index")
-        if current_device is None:
-            self.device_combo.setCurrentIndex(0)  # Default
-        else:
-            for i in range(self.device_combo.count()):
-                if self.device_combo.itemData(i) == current_device:
-                    self.device_combo.setCurrentIndex(i)
-                    break
-
         # Live Mode grace period
         grace_period = self.config.get("live_mode", "grace_period", default=1.0)
         self.grace_period_spin.setValue(grace_period)
@@ -1759,10 +1713,6 @@ class SettingsDialog(QDialog):
         self.config.set(
             "dashboard", "stop_server_on_quit", value=self.stop_server_check.isChecked()
         )
-
-        # Client tab - Audio
-        device_index = self.device_combo.currentData()
-        self.config.set("recording", "device_index", value=device_index)
 
         # Live Mode grace period
         self.config.set(

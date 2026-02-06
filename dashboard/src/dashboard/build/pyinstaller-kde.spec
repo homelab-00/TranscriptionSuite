@@ -53,6 +53,7 @@ a = Analysis(
         "aiohttp",
         "numpy",
         "pyaudio",
+        "soundcard",
         "requests",
         "yaml",
         "toml",

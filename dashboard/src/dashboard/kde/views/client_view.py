@@ -18,6 +18,42 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dashboard.kde.apple_switch import AppleSwitch
+from dashboard.kde.language_options import populate_language_combo, set_combo_language
+
+
+def _apply_combo_style(combo: QComboBox, *, min_width: int = 140) -> None:
+    combo.setMinimumWidth(min_width)
+    combo.setStyleSheet(
+        "QComboBox { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
+        "QComboBox:hover { border-color: #505050; }"
+        "QComboBox::drop-down { border: none; width: 20px; }"
+        "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
+        "border-right: 4px solid transparent; border-top: 5px solid #808080; margin-right: 6px; }"
+        "QComboBox QAbstractItemView { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
+        "color: #e0e0e0; selection-background-color: #404040; padding: 4px; }"
+    )
+
+
+def _create_client_card(title: str, width: int) -> tuple[QFrame, QVBoxLayout]:
+    frame = QFrame()
+    frame.setObjectName("clientCard")
+    frame.setFixedWidth(width)
+    frame.setStyleSheet(
+        "QFrame#clientCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
+        "border-radius: 8px; padding: 8px; }"
+    )
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(12, 10, 12, 10)
+    layout.setSpacing(10)
+
+    title_label = QLabel(title)
+    title_label.setStyleSheet("color: #a0a0a0; font-size: 14px; font-weight: 600;")
+    layout.addWidget(title_label)
+
+    return frame, layout
+
 
 def create_client_view(dashboard) -> QWidget:
     """Create the client management view.
@@ -125,28 +161,134 @@ def create_client_view(dashboard) -> QWidget:
         dashboard._unload_models_btn, alignment=Qt.AlignmentFlag.AlignCenter
     )
 
-    layout.addSpacing(20)
+    layout.addSpacing(18)
 
-    # Options row
-    options_frame = QFrame()
-    options_frame.setObjectName("optionsRow")
-    options_frame.setFixedWidth(card_width)
-    options_frame.setStyleSheet(
-        "QFrame#optionsRow { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
-        "border-radius: 8px; padding: 8px; }"
+    # Main transcription card
+    main_card, main_layout = _create_client_card("Main Transcription", card_width)
+    main_row = QHBoxLayout()
+    main_label = QLabel("Language:")
+    main_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    main_row.addWidget(main_label)
+
+    dashboard._main_language_combo = QComboBox()
+    _apply_combo_style(dashboard._main_language_combo, min_width=200)
+    populate_language_combo(dashboard._main_language_combo, include_auto_detect=True)
+    set_combo_language(
+        dashboard._main_language_combo,
+        dashboard.config.get_server_config(
+            "longform_recording",
+            "language",
+            default=None,
+        ),
     )
-    options_layout = QHBoxLayout(options_frame)
-    options_layout.setContentsMargins(12, 10, 12, 10)
-    options_layout.setSpacing(16)
+    dashboard._main_language_combo.setToolTip(
+        "Language for main (longform/static/notebook) transcription.\n"
+        "Auto-detect is recommended unless you always speak one language."
+    )
+    dashboard._main_language_combo.currentIndexChanged.connect(
+        dashboard._on_main_language_changed
+    )
+    main_row.addWidget(dashboard._main_language_combo)
+    main_row.addStretch()
+    main_layout.addLayout(main_row)
 
-    # Live Mode toggle
-    preview_label = QLabel("Live Mode:")
-    preview_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
-    options_layout.addWidget(preview_label)
+    layout.addWidget(main_card, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    layout.addSpacing(12)
+
+    # Source card
+    source_card, source_layout = _create_client_card("Source", card_width)
+
+    source_toggle_row = QHBoxLayout()
+    source_label = QLabel("Input Source:")
+    source_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    source_toggle_row.addWidget(source_label)
+
+    dashboard._source_mic_label = QLabel("Microphone")
+    dashboard._source_mic_label.setStyleSheet(
+        "color: #d0d0d0; font-size: 12px; font-weight: 600;"
+    )
+    source_toggle_row.addWidget(dashboard._source_mic_label)
+
+    dashboard._source_switch = AppleSwitch()
+    source_type = dashboard.config.get("recording", "source_type", default="microphone")
+    is_system_audio = source_type == "system_audio"
+    dashboard._source_switch.setChecked(is_system_audio)
+    dashboard._source_switch.setToolTip(
+        "Toggle between microphone and system audio loopback capture."
+    )
+    source_toggle_row.addWidget(dashboard._source_switch)
+
+    dashboard._source_system_label = QLabel("System Audio")
+    dashboard._source_system_label.setStyleSheet(
+        "color: #7f7f7f; font-size: 12px; font-weight: 500;"
+    )
+    source_toggle_row.addWidget(dashboard._source_system_label)
+    source_toggle_row.addStretch()
+
+    source_layout.addLayout(source_toggle_row)
+
+    mic_row = QHBoxLayout()
+    mic_label = QLabel("Microphone:")
+    mic_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    mic_row.addWidget(mic_label)
+
+    dashboard._microphone_combo = QComboBox()
+    _apply_combo_style(dashboard._microphone_combo, min_width=260)
+    mic_row.addWidget(dashboard._microphone_combo, 1)
+    source_layout.addLayout(mic_row)
+
+    sys_row = QHBoxLayout()
+    sys_label = QLabel("System Audio:")
+    sys_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    sys_row.addWidget(sys_label)
+
+    dashboard._system_audio_combo = QComboBox()
+    _apply_combo_style(dashboard._system_audio_combo, min_width=260)
+    sys_row.addWidget(dashboard._system_audio_combo, 1)
+
+    dashboard._refresh_sources_btn = QPushButton("Refresh")
+    dashboard._refresh_sources_btn.setObjectName("secondaryButton")
+    dashboard._refresh_sources_btn.setFixedWidth(84)
+    sys_row.addWidget(dashboard._refresh_sources_btn)
+    source_layout.addLayout(sys_row)
+
+    source_help = QLabel(
+        "Default devices are used unless you explicitly choose a specific one."
+    )
+    source_help.setStyleSheet("color: #808080; font-size: 11px;")
+    source_help.setWordWrap(True)
+    source_layout.addWidget(source_help)
+
+    dashboard._source_switch.toggled.connect(dashboard._on_audio_source_toggled)
+    dashboard._microphone_combo.currentIndexChanged.connect(
+        dashboard._on_microphone_device_changed
+    )
+    dashboard._system_audio_combo.currentIndexChanged.connect(
+        dashboard._on_system_audio_device_changed
+    )
+    dashboard._refresh_sources_btn.clicked.connect(dashboard._refresh_source_devices)
+
+    dashboard._refresh_source_devices()
+    dashboard._sync_audio_source_ui()
+
+    layout.addWidget(source_card, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    layout.addSpacing(12)
+
+    # Live Mode card
+    live_card, live_layout = _create_client_card("Live Mode", card_width)
+
+    controls_row = QHBoxLayout()
+    controls_row.setSpacing(12)
+
+    live_status_label = QLabel("Status:")
+    live_status_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    controls_row.addWidget(live_status_label)
 
     dashboard._preview_toggle_btn = QPushButton("Disabled")
     dashboard._preview_toggle_btn.setCheckable(True)
-    dashboard._preview_toggle_btn.setFixedWidth(70)
+    dashboard._preview_toggle_btn.setFixedWidth(78)
     live_mode_enabled = dashboard.config.get_server_config(
         "live_transcriber", "enabled", default=False
     )
@@ -159,11 +301,8 @@ def create_client_view(dashboard) -> QWidget:
     )
     dashboard._preview_toggle_btn.clicked.connect(dashboard._on_live_transcriber_toggle)
     dashboard._update_live_transcriber_toggle_style()
-    options_layout.addWidget(dashboard._preview_toggle_btn)
+    controls_row.addWidget(dashboard._preview_toggle_btn)
 
-    options_layout.addSpacing(8)
-
-    # Live Mode mute button
     dashboard._live_mode_mute_btn = QPushButton("Mute")
     dashboard._live_mode_mute_btn.setFixedWidth(70)
     dashboard._live_mode_mute_btn.setEnabled(False)
@@ -174,143 +313,21 @@ def create_client_view(dashboard) -> QWidget:
         "QPushButton:disabled { color: #606060; border-color: #2d2d2d; }"
     )
     dashboard._live_mode_mute_btn.clicked.connect(dashboard._on_live_mode_mute_click)
-    options_layout.addWidget(dashboard._live_mode_mute_btn)
+    controls_row.addWidget(dashboard._live_mode_mute_btn)
 
-    options_layout.addSpacing(8)
-
-    # Live Mode Language selector
-    language_label = QLabel("Language:")
-    language_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
-    options_layout.addWidget(language_label)
+    live_language_label = QLabel("Language:")
+    live_language_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+    controls_row.addWidget(live_language_label)
 
     dashboard._live_language_combo = QComboBox()
-    dashboard._live_language_combo.setMinimumWidth(120)
-    dashboard._live_language_combo.setStyleSheet(
-        "QComboBox { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
-        "border-radius: 6px; padding: 6px 10px; color: #e0e0e0; font-size: 12px; }"
-        "QComboBox:hover { border-color: #505050; }"
-        "QComboBox::drop-down { border: none; width: 20px; }"
-        "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; "
-        "border-right: 4px solid transparent; border-top: 5px solid #808080; margin-right: 6px; }"
-        "QComboBox QAbstractItemView { background-color: #2d2d2d; border: 1px solid #3d3d3d; "
-        "color: #e0e0e0; selection-background-color: #404040; padding: 4px; }"
+    _apply_combo_style(dashboard._live_language_combo, min_width=150)
+    populate_language_combo(dashboard._live_language_combo, include_auto_detect=True)
+    set_combo_language(
+        dashboard._live_language_combo,
+        dashboard.config.get_server_config(
+            "live_transcriber", "live_language", default="en"
+        ),
     )
-
-    # Full Whisper language list (99 languages)
-    languages = [
-        ("Auto-detect", ""),
-        ("Afrikaans", "af"),
-        ("Amharic", "am"),
-        ("Arabic", "ar"),
-        ("Assamese", "as"),
-        ("Azerbaijani", "az"),
-        ("Bashkir", "ba"),
-        ("Belarusian", "be"),
-        ("Bulgarian", "bg"),
-        ("Bengali", "bn"),
-        ("Tibetan", "bo"),
-        ("Breton", "br"),
-        ("Bosnian", "bs"),
-        ("Catalan", "ca"),
-        ("Czech", "cs"),
-        ("Welsh", "cy"),
-        ("Danish", "da"),
-        ("German", "de"),
-        ("Greek", "el"),
-        ("English", "en"),
-        ("Spanish", "es"),
-        ("Estonian", "et"),
-        ("Basque", "eu"),
-        ("Persian", "fa"),
-        ("Finnish", "fi"),
-        ("Faroese", "fo"),
-        ("French", "fr"),
-        ("Galician", "gl"),
-        ("Gujarati", "gu"),
-        ("Hausa", "ha"),
-        ("Hawaiian", "haw"),
-        ("Hebrew", "he"),
-        ("Hindi", "hi"),
-        ("Croatian", "hr"),
-        ("Haitian Creole", "ht"),
-        ("Hungarian", "hu"),
-        ("Armenian", "hy"),
-        ("Indonesian", "id"),
-        ("Icelandic", "is"),
-        ("Italian", "it"),
-        ("Japanese", "ja"),
-        ("Javanese", "jw"),
-        ("Georgian", "ka"),
-        ("Kazakh", "kk"),
-        ("Khmer", "km"),
-        ("Kannada", "kn"),
-        ("Korean", "ko"),
-        ("Latin", "la"),
-        ("Luxembourgish", "lb"),
-        ("Lingala", "ln"),
-        ("Lao", "lo"),
-        ("Lithuanian", "lt"),
-        ("Latvian", "lv"),
-        ("Malagasy", "mg"),
-        ("Maori", "mi"),
-        ("Macedonian", "mk"),
-        ("Malayalam", "ml"),
-        ("Mongolian", "mn"),
-        ("Marathi", "mr"),
-        ("Malay", "ms"),
-        ("Maltese", "mt"),
-        ("Burmese", "my"),
-        ("Nepali", "ne"),
-        ("Dutch", "nl"),
-        ("Norwegian Nynorsk", "nn"),
-        ("Norwegian", "no"),
-        ("Occitan", "oc"),
-        ("Punjabi", "pa"),
-        ("Polish", "pl"),
-        ("Pashto", "ps"),
-        ("Portuguese", "pt"),
-        ("Romanian", "ro"),
-        ("Russian", "ru"),
-        ("Sanskrit", "sa"),
-        ("Sindhi", "sd"),
-        ("Sinhala", "si"),
-        ("Slovak", "sk"),
-        ("Slovenian", "sl"),
-        ("Shona", "sn"),
-        ("Somali", "so"),
-        ("Albanian", "sq"),
-        ("Serbian", "sr"),
-        ("Sundanese", "su"),
-        ("Swedish", "sv"),
-        ("Swahili", "sw"),
-        ("Tamil", "ta"),
-        ("Telugu", "te"),
-        ("Tajik", "tg"),
-        ("Thai", "th"),
-        ("Turkmen", "tk"),
-        ("Tagalog", "tl"),
-        ("Turkish", "tr"),
-        ("Tatar", "tt"),
-        ("Ukrainian", "uk"),
-        ("Urdu", "ur"),
-        ("Uzbek", "uz"),
-        ("Vietnamese", "vi"),
-        ("Yiddish", "yi"),
-        ("Yoruba", "yo"),
-        ("Chinese", "zh"),
-        ("Cantonese", "yue"),
-    ]
-    for name, code in languages:
-        dashboard._live_language_combo.addItem(name, code)
-
-    saved_language = dashboard.config.get_server_config(
-        "live_transcriber", "live_language", default="en"
-    )
-    for i in range(dashboard._live_language_combo.count()):
-        if dashboard._live_language_combo.itemData(i) == saved_language:
-            dashboard._live_language_combo.setCurrentIndex(i)
-            break
-
     dashboard._live_language_combo.setToolTip(
         "Force a specific language for Live Mode.\n"
         "Recommended: Select your language for better accuracy.\n"
@@ -320,27 +337,11 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._live_language_combo.currentIndexChanged.connect(
         dashboard._on_live_language_changed
     )
-    options_layout.addWidget(dashboard._live_language_combo)
+    controls_row.addWidget(dashboard._live_language_combo)
+    controls_row.addStretch()
 
-    options_layout.addStretch()
+    live_layout.addLayout(controls_row)
 
-    layout.addWidget(options_frame, alignment=Qt.AlignmentFlag.AlignCenter)
-
-    layout.addSpacing(10)
-
-    # Collapsible preview display section
-    preview_display_frame = QFrame()
-    preview_display_frame.setObjectName("previewCard")
-    preview_display_frame.setFixedWidth(card_width)
-    preview_display_frame.setStyleSheet(
-        "QFrame#previewCard { background-color: #1e1e1e; border: 1px solid #2d2d2d; "
-        "border-radius: 8px; padding: 8px; }"
-    )
-    preview_display_layout = QVBoxLayout(preview_display_frame)
-    preview_display_layout.setContentsMargins(12, 8, 12, 8)
-    preview_display_layout.setSpacing(8)
-
-    # Header with collapse toggle
     preview_header = QHBoxLayout()
     dashboard._preview_collapse_btn = QPushButton("\u25bc")
     dashboard._preview_collapse_btn.setFixedSize(24, 24)
@@ -371,12 +372,11 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._copy_clear_btn.clicked.connect(dashboard._copy_and_clear_live_preview)
     preview_header.addWidget(dashboard._copy_clear_btn)
 
-    preview_display_layout.addLayout(preview_header)
+    live_layout.addLayout(preview_header)
 
-    # Collapsible content
     dashboard._preview_content = QWidget()
     preview_content_layout = QVBoxLayout(dashboard._preview_content)
-    preview_content_layout.setContentsMargins(0, 4, 0, 0)
+    preview_content_layout.setContentsMargins(0, 2, 0, 0)
     preview_content_layout.setSpacing(8)
 
     dashboard._live_transcription_text_edit = QPlainTextEdit()
@@ -388,16 +388,14 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._live_transcription_text_edit.setMaximumHeight(250)
     dashboard._live_transcription_text_edit.setStyleSheet(
         "QPlainTextEdit { background-color: #252526; border-radius: 4px; "
-        "padding: 8px; color: #e0e0e0; font-family: 'Inter', sans-serif; "
-        "font-size: 13px; border: none; }"
+        "padding: 8px; color: #e0e0e0; font-size: 13px; border: none; }"
         "QPlainTextEdit::placeholder { color: #808080; }"
     )
     dashboard._live_transcription_history = []
     preview_content_layout.addWidget(dashboard._live_transcription_text_edit)
+    live_layout.addWidget(dashboard._preview_content)
 
-    preview_display_layout.addWidget(dashboard._preview_content)
-
-    layout.addWidget(preview_display_frame, alignment=Qt.AlignmentFlag.AlignCenter)
+    layout.addWidget(live_card, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(15)
 

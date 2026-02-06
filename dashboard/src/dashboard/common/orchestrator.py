@@ -182,6 +182,79 @@ class ClientOrchestrator:
         """Get the configured sample rate."""
         return self.config.get("recording", "sample_rate", default=16000)
 
+    def _get_recording_source_config(self) -> tuple[str, int | None, str | None]:
+        """Resolve recording source settings from dashboard config."""
+        source_type = self.config.get("recording", "source_type", default="microphone")
+        if source_type not in {"microphone", "system_audio"}:
+            source_type = "microphone"
+        mic_device_index = self.config.get("recording", "device_index", default=None)
+        system_output_id = self.config.get(
+            "recording", "system_output_id", default=None
+        )
+        return source_type, mic_device_index, system_output_id
+
+    def _build_audio_recorder(
+        self,
+        *,
+        on_audio_chunk=None,
+    ) -> AudioRecorder:
+        """
+        Build an AudioRecorder using the selected source with system-audio fallback.
+
+        If system-audio setup fails, force-switch to microphone, notify user, and
+        continue with normal microphone startup.
+        """
+        source_type, mic_device_index, system_output_id = (
+            self._get_recording_source_config()
+        )
+
+        def create_recorder(
+            resolved_source: str,
+            resolved_output_id: str | None,
+        ) -> AudioRecorder:
+            return AudioRecorder(
+                sample_rate=self.sample_rate,
+                device_index=mic_device_index,
+                source_type=resolved_source,
+                system_output_id=resolved_output_id,
+                on_audio_chunk=on_audio_chunk,
+            )
+
+        def fallback_to_microphone(reason: Exception | str) -> AudioRecorder:
+            logger.warning(
+                "System audio source unavailable, falling back to microphone: %s",
+                reason,
+            )
+            self.config.set("recording", "source_type", value="microphone")
+            self.config.save()
+
+            if self.tray:
+                self.tray.show_notification(
+                    "System Audio Unavailable",
+                    "Switched back to microphone and continued.",
+                )
+                if hasattr(self.tray, "sync_recording_source"):
+                    self.tray.sync_recording_source("microphone")
+
+            fallback = create_recorder("microphone", None)
+            if not fallback.start():
+                raise RuntimeError("Audio recorder failed to start")
+            return fallback
+
+        try:
+            recorder = create_recorder(source_type, system_output_id)
+        except Exception as e:
+            if source_type != "system_audio":
+                raise
+            return fallback_to_microphone(e)
+
+        if recorder.start():
+            return recorder
+
+        if source_type == "system_audio":
+            return fallback_to_microphone("recorder start failed")
+        raise RuntimeError("Audio recorder failed to start")
+
     @property
     def is_live_mode_active(self) -> bool:
         """Check if Live Mode is currently active."""
@@ -326,13 +399,7 @@ class ClientOrchestrator:
 
         # Initialize recorder
         try:
-            device_index = self.config.get("recording", "device_index")
-
-            self.recorder = AudioRecorder(
-                sample_rate=self.sample_rate,
-                device_index=device_index,
-            )
-            self.recorder.start()
+            self.recorder = self._build_audio_recorder()
             logger.info("Recording started (HTTP batch mode)")
 
         except Exception as e:
@@ -844,13 +911,9 @@ class ClientOrchestrator:
 
             # Start audio recording and streaming
             try:
-                device_index = self.config.get("recording", "device_index")
-                self._live_mode_recorder = AudioRecorder(
-                    sample_rate=self.sample_rate,
-                    device_index=device_index,
-                    on_audio_chunk=self._on_live_audio_chunk,
+                self._live_mode_recorder = self._build_audio_recorder(
+                    on_audio_chunk=self._on_live_audio_chunk
                 )
-                self._live_mode_recorder.start()
                 logger.info("Live Mode audio recording started")
             except Exception as e:
                 logger.error(f"Failed to start audio recording for Live Mode: {e}")
@@ -970,10 +1033,6 @@ class ClientOrchestrator:
         if live_language is None:
             live_language = self.config.get_server_config(
                 "longform_recording", "language", default=None
-            )
-        if live_language is None:
-            live_language = self.config.get_server_config(
-                "transcription_options", "language", default=""
             )
         return live_language or ""
 

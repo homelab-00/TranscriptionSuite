@@ -235,8 +235,6 @@ class ModelManager:
 
         main_cfg = self.config.get("main_transcriber", {})
         trans_opts = self.config.get("longform_recording", {})
-        if not trans_opts:
-            trans_opts = self.config.get("transcription_options", {})
 
         return AudioToTextRecorder(
             instance_name="file_transcriber",

@@ -192,7 +192,7 @@ Let's go through each one:
   - Restore from any backup (creates safety backup first)
 * For the `Client` tab, the first thing you need to know is whether you want a local or
   a remote connection. I'll list both cases:
-  * Local: All you need to do is select your input device. Leave everything else default.
+  * Local: In the Dashboard Client page, use the `Source` card to choose `Microphone` or `System Audio`, then optionally pick specific devices instead of system defaults.
   * Remote: Go through [Section 6: Remote Access](#6-remote-access) first to set up Tailscale.
     Then:
     *(Remote access requires Tailscale MagicDNS + HTTPS certificates.)*
@@ -239,9 +239,10 @@ the appropriate button. You should now be connected.
   * Right click on the system tray and select 'Transcribe File...'
 * **Live Mode** (Dashboard only)
   * Open the Dashboard window and navigate to the Client View
-  * Enable "Live Transcriber" toggle to activate continuous transcription
+  * In the `Live Mode` card, enable the status toggle to activate continuous transcription
   * Speak naturally with pauses - sentences appear in real-time as you speak
   * Mute/unmute with the toggle button to control when audio is captured
+  * Use the `Source` card to choose whether Live Mode listens to microphone input or system audio
   * Completed sentences are shown in the transcription display
   * Optionally select a specific language for better accuracy (auto-detect may struggle with short utterances)
 

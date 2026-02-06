@@ -24,6 +24,7 @@ dependencies = [
     "numpy>=2.3.5",
     "pyyaml>=6.0.3",
     "requests>=2.32.0",
+    "soundcard>=0.4.3",
     "markdown>=3.7",
 ]
 
@@ -33,19 +34,23 @@ qt = [
 ]
 audio = [
     "pyaudio>=0.2.14",
+    "soundcard>=0.4.3",
 ]
 kde = [
     "PyQt6>=6.10.1",
     "pyaudio>=0.2.14",
+    "soundcard>=0.4.3",
 ]
 gnome = [
     "pyaudio>=0.2.14",
+    "soundcard>=0.4.3",
     # Note: GTK and AppIndicator are system packages on Linux
     "PyQt6>=6.10.1",
 ]
 windows = [
     "PyQt6>=6.10.1",
     "pyaudio>=0.2.14",
+    "soundcard>=0.4.3",
 ]
 
 [project.scripts]
