@@ -3,7 +3,7 @@ name = "transcriptionsuite-build"
 version = "0.5.5"
 description = "TranscriptionSuite build env for the standalone client"
 requires-python = ">=3.13,<3.14"
-license = "MIT"
+license = "GPL-3.0-or-later"
 authors = [
     { name = "homelab-00" }
 ]

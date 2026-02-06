@@ -71,7 +71,7 @@ LABEL org.opencontainers.image.vendor="homelab-00"
 LABEL org.opencontainers.image.source="https://github.com/homelab-00/TranscriptionSuite"
 LABEL org.opencontainers.image.url="https://github.com/homelab-00/TranscriptionSuite"
 LABEL org.opencontainers.image.documentation="https://github.com/homelab-00/TranscriptionSuite/blob/main/README.md"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 
 # Install only runtime dependencies (no build-essential, no python-dev)
 # gosu is used to drop privileges from root to appuser after TLS cert setup

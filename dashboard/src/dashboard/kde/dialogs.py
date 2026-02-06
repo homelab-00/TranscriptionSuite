@@ -372,7 +372,7 @@ class DialogsMixin:
         layout.addWidget(description)
 
         # Copyright notice
-        copyright_label = QLabel("© 2025-2026 homelab-00 • MIT License")
+        copyright_label = QLabel("© 2025-2026 homelab-00 • GPLv3+ License")
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         copyright_label.setStyleSheet("color: #6c757d; font-size: 11px;")
         layout.addWidget(copyright_label)

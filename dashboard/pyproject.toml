@@ -7,7 +7,7 @@ name = "transcriptionsuite-dashboard"
 version = "0.5.5"
 description = "TranscriptionSuite Dashboard for desktop integration"
 requires-python = ">=3.13,<3.14"
-license = "MIT"
+license = "GPL-3.0-or-later"
 authors = [
     { name = "homelab-00" }
 ]

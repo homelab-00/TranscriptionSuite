@@ -459,7 +459,7 @@ See [README_DEV.md](README_DEV.md#tailscale-dns-resolution-issues) for detailed 
 
 ## 10. License
 
-MIT License — See [LICENSE](LICENSE).
+GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](LICENSE).
 
 ---
 

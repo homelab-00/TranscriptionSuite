@@ -7,7 +7,7 @@ name = "transcriptionsuite-server"
 version = "0.5.5"
 description = "TranscriptionSuite unified server for transcription services"
 requires-python = ">=3.13,<3.14"
-license = "MIT"
+license = "GPL-3.0-or-later"
 authors = [
     { name = "homelab-00" }
 ]
