@@ -8,7 +8,6 @@ extracted to keep the main dashboard.py file smaller and more maintainable.
 import asyncio
 import logging
 import subprocess
-from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMessageBox
@@ -20,9 +19,6 @@ from dashboard.common.model_capabilities import (
     translation_unsupported_reason,
 )
 from dashboard.common.models import TrayAction
-
-if TYPE_CHECKING:
-    from dashboard.common.api_client import APIClient  # lgtm [py/unused-import]
 
 logger = logging.getLogger(__name__)
 

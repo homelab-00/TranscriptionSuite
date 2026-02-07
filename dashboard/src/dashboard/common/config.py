@@ -28,8 +28,8 @@ try:
     import fcntl as _fcntl
 
     fcntl = _fcntl
-except ImportError:
-    _fcntl = None
+except ImportError as import_error:
+    logger.debug("fcntl is unavailable on this platform: %s", import_error)
 
 
 def get_config_dir() -> Path:

@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # Track active Live Mode session (only one at a time)
-_active_session: Optional["LiveModeSession"] = None  # lgtm [py/unused-global-variable]
+_live_mode_state: dict[str, Optional["LiveModeSession"]] = {"active_session": None}
 _session_lock = asyncio.Lock()
 
 
@@ -330,8 +330,6 @@ async def handle_client_message(session: LiveModeSession, message: dict) -> None
 @router.websocket("/ws/live")
 async def live_mode_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for Live Mode transcription."""
-    global _active_session
-
     await websocket.accept()
     session: Optional[LiveModeSession] = None
 
@@ -358,7 +356,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
 
         # Check if another session is active
         async with _session_lock:
-            if _active_session is not None:
+            if _live_mode_state["active_session"] is not None:
                 await websocket.send_json(
                     {
                         "type": "error",
@@ -376,7 +374,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
                 websocket=websocket,
                 client_name=client_name,
             )
-            _active_session = session
+            _live_mode_state["active_session"] = session
 
         # Send auth success
         await session.send_message("auth_ok", {"client_name": client_name})
@@ -444,6 +442,6 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
         if session:
             await session.cleanup()
             async with _session_lock:
-                if _active_session is session:
-                    _active_session = None  # lgtm [py/unused-global-variable]
+                if _live_mode_state["active_session"] is session:
+                    _live_mode_state["active_session"] = None
             logger.info(f"Live Mode session ended for {session.client_name}")

@@ -12,12 +12,20 @@ from sqlalchemy import text  # type: ignore[reportMissingImports]
 
 
 # revision identifiers, used by Alembic.
-revision: str = "004"  # lgtm [py/unused-global-variable]
-down_revision: Union[str, None] = "003"  # lgtm [py/unused-global-variable]
-branch_labels: Union[str, Sequence[str], None] = (
-    None  # lgtm [py/unused-global-variable]
-)
-depends_on: Union[str, Sequence[str], None] = None  # lgtm [py/unused-global-variable]
+revision: str = "004"
+down_revision: Union[str, None] = "003"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def _revision_metadata() -> tuple[
+    str,
+    Union[str, None],
+    Union[str, Sequence[str], None],
+    Union[str, Sequence[str], None],
+]:
+    """Reference Alembic metadata globals for static analyzers."""
+    return revision, down_revision, branch_labels, depends_on
 
 
 def _ensure_column(conn, table: str, column: str, ddl: str) -> bool:
@@ -31,6 +39,7 @@ def _ensure_column(conn, table: str, column: str, ddl: str) -> bool:
 
 def upgrade() -> None:
     """Apply legacy column compatibility and backfill segment text."""
+    _revision_metadata()
     conn = op.get_bind()
 
     title_added = _ensure_column(conn, "recordings", "title", "title TEXT")

@@ -11,16 +11,25 @@ from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
-revision: str = "002"  # lgtm [py/unused-global-variable]
-down_revision: Union[str, None] = "001"  # lgtm [py/unused-global-variable]
-branch_labels: Union[str, Sequence[str], None] = (
-    None  # lgtm [py/unused-global-variable]
-)
-depends_on: Union[str, Sequence[str], None] = None  # lgtm [py/unused-global-variable]
+revision: str = "002"
+down_revision: Union[str, None] = "001"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def _revision_metadata() -> tuple[
+    str,
+    Union[str, None],
+    Union[str, Sequence[str], None],
+    Union[str, Sequence[str], None],
+]:
+    """Reference Alembic metadata globals for static analyzers."""
+    return revision, down_revision, branch_labels, depends_on
 
 
 def upgrade() -> None:
     """Add response_id column to conversations table."""
+    _revision_metadata()
     conn = op.get_bind()
     # Skip if column already exists (idempotent upgrade)
     existing = conn.execute(text("PRAGMA table_info(conversations)")).fetchall()

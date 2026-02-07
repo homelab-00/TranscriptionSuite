@@ -12,7 +12,7 @@ and the transcription client. It provides a unified GUI for:
 import logging
 import asyncio
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
@@ -36,14 +36,6 @@ from dashboard.kde.log_window import LogWindow
 from dashboard.kde.server_mixin import DashboardServerControlMixin
 from dashboard.kde.styles import get_dashboard_stylesheet
 from dashboard.kde.utils import get_assets_path
-
-if TYPE_CHECKING:
-    from dashboard.common.api_client import APIClient  # lgtm [py/unused-import]
-    from dashboard.common.config import ClientConfig  # lgtm [py/unused-import]
-    from dashboard.common.docker_manager import (  # lgtm [py/unused-import]
-        DockerPullWorker,
-        DockerServerWorker,
-    )
 
 logger = logging.getLogger(__name__)
 

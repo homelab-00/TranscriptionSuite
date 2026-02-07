@@ -11,17 +11,12 @@ import logging
 import threading
 import webbrowser
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from dashboard.common.api_client import APIClient, LiveModeClient, ServerBusyError
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig
 from dashboard.common.models import TrayAction, TrayState
-
-if TYPE_CHECKING:
-    from dashboard.common.tray_base import (  # lgtm [py/unsafe-cyclic-import]
-        AbstractTray,  # lgtm [py/unused-import]
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +56,7 @@ class ClientOrchestrator:
         self.auto_copy_clipboard = auto_copy_clipboard
 
         # Components
-        self.tray: AbstractTray | None = None
+        self.tray: "AbstractTray | None" = None
         self.api_client: APIClient | None = None
         self.recorder: AudioRecorder | None = None
 

@@ -4,6 +4,20 @@ Database layer for TranscriptionSuite.
 Provides SQLite + FTS5 database for Audio Notebook recordings.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from server.database.database import (
+        create_conversation,
+        get_conversation,
+        get_conversations,
+        search_recordings,
+        search_words,
+        search_words_enhanced,
+        update_conversation_response_id,
+        update_conversation_title,
+    )
+
 
 # Lazy imports to avoid circular dependencies
 def __getattr__(name: str):
@@ -46,11 +60,11 @@ __all__ = [
     "search_words_enhanced",
     "search_recordings",
     # Conversations
-    "create_conversation",  # lgtm [py/undefined-export]
-    "get_conversation",  # lgtm [py/undefined-export]
-    "get_conversations",  # lgtm [py/undefined-export]
-    "update_conversation_title",  # lgtm [py/undefined-export]
-    "update_conversation_response_id",  # lgtm [py/undefined-export]
+    "create_conversation",
+    "get_conversation",
+    "get_conversations",
+    "update_conversation_title",
+    "update_conversation_response_id",
     "get_conversation_with_messages",
     "delete_conversation",
     "add_message",

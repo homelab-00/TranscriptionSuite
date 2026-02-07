@@ -10,6 +10,15 @@ This module contains:
 - audio_utils: Audio processing utilities
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from server.core.client_detector import ClientDetector, ClientType
+    from server.core.diarization_engine import DiarizationEngine
+    from server.core.model_manager import ModelManager
+    from server.core.realtime_engine import RealtimeTranscriptionEngine
+    from server.core.stt.engine import AudioToTextRecorder, TranscriptionResult
+
 
 # Lazy imports to avoid circular dependencies
 def __getattr__(name: str):
@@ -46,10 +55,10 @@ def __getattr__(name: str):
 
 __all__ = [
     "AudioToTextRecorder",
-    "TranscriptionResult",  # lgtm [py/undefined-export]
-    "ModelManager",  # lgtm [py/undefined-export]
-    "DiarizationEngine",  # lgtm [py/undefined-export]
-    "RealtimeTranscriptionEngine",  # lgtm [py/undefined-export]
+    "TranscriptionResult",
+    "ModelManager",
+    "DiarizationEngine",
+    "RealtimeTranscriptionEngine",
     "ClientType",
     "ClientDetector",
 ]
