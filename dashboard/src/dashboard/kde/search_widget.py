@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDateEdit,
     QFrame,
     QHBoxLayout,
@@ -25,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dashboard.common.models import SearchResult
+from dashboard.kde.apple_switch import AppleSwitch
 
 if TYPE_CHECKING:
     from dashboard.common.api_client import APIClient
@@ -94,7 +94,7 @@ class SearchWidget(QWidget):
         filters_layout.setSpacing(20)
 
         # Fuzzy search toggle
-        self._fuzzy_checkbox = QCheckBox("Fuzzy matching")
+        self._fuzzy_checkbox = AppleSwitch("Fuzzy matching")
         self._fuzzy_checkbox.setObjectName("filterCheckbox")
         self._fuzzy_checkbox.setToolTip("Enable fuzzy matching to find similar words")
         filters_layout.addWidget(self._fuzzy_checkbox)
@@ -195,19 +195,6 @@ class SearchWidget(QWidget):
             #filterCheckbox {
                 color: #e0e0e0;
                 font-size: 13px;
-            }
-
-            #filterCheckbox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                background-color: #1e1e1e;
-            }
-
-            #filterCheckbox::indicator:checked {
-                background-color: #0AFCCF;
-                border-color: #0AFCCF;
             }
 
             #dateInput {

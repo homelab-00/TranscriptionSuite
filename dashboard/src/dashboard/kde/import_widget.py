@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -26,6 +25,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from dashboard.kde.apple_switch import AppleSwitch
 
 if TYPE_CHECKING:
     from dashboard.common.api_client import APIClient
@@ -209,7 +210,7 @@ class ImportWidget(QWidget):
         options_label.setObjectName("optionsLabel")
         options_layout.addWidget(options_label)
 
-        self._diarization_checkbox = QCheckBox("Speaker diarization")
+        self._diarization_checkbox = AppleSwitch("Speaker diarization")
         self._diarization_checkbox.setObjectName("optionCheckbox")
         self._diarization_checkbox.setChecked(False)
         self._diarization_checkbox.setToolTip(
@@ -217,7 +218,7 @@ class ImportWidget(QWidget):
         )
         options_layout.addWidget(self._diarization_checkbox)
 
-        self._word_timestamps_checkbox = QCheckBox("Word-level timestamps")
+        self._word_timestamps_checkbox = AppleSwitch("Word-level timestamps")
         self._word_timestamps_checkbox.setObjectName("optionCheckbox")
         self._word_timestamps_checkbox.setChecked(True)
         self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
@@ -342,19 +343,6 @@ class ImportWidget(QWidget):
             #optionCheckbox {
                 color: #e0e0e0;
                 font-size: 13px;
-            }
-
-            #optionCheckbox::indicator {
-                width: 16px;
-                height: 16px;
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                background-color: #1e1e1e;
-            }
-
-            #optionCheckbox::indicator:checked {
-                background-color: #0AFCCF;
-                border-color: #0AFCCF;
             }
 
             #queueLabel {

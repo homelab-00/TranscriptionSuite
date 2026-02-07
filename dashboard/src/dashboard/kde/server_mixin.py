@@ -10,9 +10,10 @@ import re
 import threading
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QCheckBox, QMessageBox
+from PyQt6.QtWidgets import QMessageBox
 
 from dashboard.common.docker_manager import DockerResult, ServerMode, ServerStatus
+from dashboard.kde.apple_switch import AppleSwitch
 
 logger = logging.getLogger(__name__)
 
@@ -772,7 +773,7 @@ class DashboardServerControlMixin:
         )
 
         # Add checkbox for also removing config directory
-        config_checkbox = QCheckBox("Also remove config directory")
+        config_checkbox = AppleSwitch("Also remove config directory")
         config_checkbox.setToolTip(
             f"Remove {self._docker_manager.config_dir}\n"
             "(contains dashboard.yaml, docker-compose.yml, etc.)"

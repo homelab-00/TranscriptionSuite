@@ -18,7 +18,6 @@ from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QDoubleSpinBox,
     QFrame,
@@ -39,6 +38,7 @@ import yaml
 
 from dashboard.common.config import ClientConfig, get_config_dir
 from dashboard.common.docker_manager import DockerManager
+from dashboard.kde.apple_switch import AppleSwitch
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ class SettingsDialog(QDialog):
         self._server_field_types: dict[tuple[str, ...], type] = {}
         self._server_field_original: dict[tuple[str, ...], Any] = {}
         self._server_field_commented: dict[tuple[str, ...], bool] = {}
-        self._server_field_enablers: dict[tuple[str, ...], QCheckBox] = {}
+        self._server_field_enablers: dict[tuple[str, ...], AppleSwitch] = {}
         self._server_row_search: dict[QWidget, str] = {}
         self._server_hidden_paths: set[tuple[str, ...]] = {
             ("live_transcriber", "enabled"),
@@ -372,34 +372,9 @@ class SettingsDialog(QDialog):
                 selection-color: #0AFCCF;
             }
 
-            QCheckBox {
+            AppleSwitch {
                 color: #ffffff;
                 font-size: 13px;
-                spacing: 8px;
-            }
-
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 3px;
-                border: 2px solid #505050;
-                background-color: #1e1e1e;
-            }
-
-            QCheckBox::indicator:checked {
-                background-color: #0AFCCF;
-                border-color: #0AFCCF;
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMxMjEyMTIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIyMCA2IDkgMTcgNCAxMiI+PC9wb2x5bGluZT48L3N2Zz4=);
-            }
-
-            QCheckBox::indicator:unchecked:hover {
-                border-color: #707070;
-                background-color: #252525;
-            }
-
-            QCheckBox::indicator:checked:hover {
-                background-color: #08d9b3;
-                border-color: #08d9b3;
             }
 
             #primaryButton {
@@ -533,7 +508,7 @@ class SettingsDialog(QDialog):
         clipboard_group = QGroupBox("Clipboard")
         clipboard_layout = QVBoxLayout(clipboard_group)
 
-        self.auto_copy_check = QCheckBox(
+        self.auto_copy_check = AppleSwitch(
             "Automatically copy transcription to clipboard"
         )
         clipboard_layout.addWidget(self.auto_copy_check)
@@ -544,7 +519,7 @@ class SettingsDialog(QDialog):
         notifications_group = QGroupBox("Notifications")
         notifications_layout = QVBoxLayout(notifications_group)
 
-        self.notifications_check = QCheckBox("Show desktop notifications")
+        self.notifications_check = AppleSwitch("Show desktop notifications")
         notifications_layout.addWidget(self.notifications_check)
 
         layout.addWidget(notifications_group)
@@ -553,7 +528,7 @@ class SettingsDialog(QDialog):
         docker_group = QGroupBox("Docker Server")
         docker_layout = QVBoxLayout(docker_group)
 
-        self.stop_server_check = QCheckBox("Stop server when quitting dashboard")
+        self.stop_server_check = AppleSwitch("Stop server when quitting dashboard")
         docker_layout.addWidget(self.stop_server_check)
 
         layout.addWidget(docker_group)
@@ -628,7 +603,7 @@ class SettingsDialog(QDialog):
         diarization_layout = QVBoxLayout(diarization_group)
 
         # Constrain speakers checkbox
-        self.constrain_speakers_check = QCheckBox(
+        self.constrain_speakers_check = AppleSwitch(
             "Constrain to expected number of speakers"
         )
         self.constrain_speakers_check.setToolTip(
@@ -673,7 +648,7 @@ class SettingsDialog(QDialog):
         notebook_group = QGroupBox("Audio Notebook")
         notebook_layout = QVBoxLayout(notebook_group)
 
-        self.auto_add_notebook_check = QCheckBox(
+        self.auto_add_notebook_check = AppleSwitch(
             "Auto-add recordings to Audio Notebook"
         )
         self.auto_add_notebook_check.setToolTip(
@@ -729,7 +704,7 @@ class SettingsDialog(QDialog):
         connection_layout.addWidget(host_help)
 
         # Use remote checkbox
-        self.use_remote_check = QCheckBox("Use remote server instead of local")
+        self.use_remote_check = AppleSwitch("Use remote server instead of local")
         connection_layout.addWidget(self.use_remote_check)
 
         # Help text for remote
@@ -778,7 +753,7 @@ class SettingsDialog(QDialog):
         connection_layout.addLayout(port_row)
 
         # HTTPS checkbox
-        self.https_check = QCheckBox("Use HTTPS")
+        self.https_check = AppleSwitch("Use HTTPS")
         connection_layout.addWidget(self.https_check)
 
         layout.addWidget(connection_group)
@@ -1067,7 +1042,7 @@ class SettingsDialog(QDialog):
         self._server_field_commented[node.path] = node.commented
 
         if expected_type is bool:
-            input_widget = QCheckBox()
+            input_widget = AppleSwitch()
             input_widget.setChecked(bool(node.value))
         else:
             input_widget = QLineEdit()
@@ -1075,7 +1050,7 @@ class SettingsDialog(QDialog):
             input_widget.setPlaceholderText("null")
 
         if node.commented:
-            enable_check = QCheckBox("Enable")
+            enable_check = AppleSwitch("Enable")
             enable_check.setChecked(False)
             enable_check.toggled.connect(input_widget.setEnabled)
             input_widget.setEnabled(False)

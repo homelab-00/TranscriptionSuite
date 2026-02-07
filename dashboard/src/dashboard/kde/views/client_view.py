@@ -7,7 +7,6 @@ extracted to keep the main dashboard.py file smaller.
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -198,10 +197,9 @@ def create_client_view(dashboard) -> QWidget:
     main_translation_row = QHBoxLayout()
     main_translation_row.setSpacing(10)
 
-    dashboard._main_translation_checkbox = QCheckBox("Translation")
+    dashboard._main_translation_checkbox = AppleSwitch("Translation")
     dashboard._main_translation_checkbox.setStyleSheet(
-        "QCheckBox { color: #a0a0a0; font-size: 12px; }"
-        "QCheckBox:disabled { color: #6f6f6f; }"
+        "color: #a0a0a0; font-size: 12px;"
     )
     dashboard._main_translation_checkbox.setToolTip(
         "Translate transcription output to English."
@@ -400,10 +398,9 @@ def create_client_view(dashboard) -> QWidget:
     live_translation_row = QHBoxLayout()
     live_translation_row.setSpacing(10)
 
-    dashboard._live_translation_checkbox = QCheckBox("Translation")
+    dashboard._live_translation_checkbox = AppleSwitch("Translation")
     dashboard._live_translation_checkbox.setStyleSheet(
-        "QCheckBox { color: #a0a0a0; font-size: 12px; }"
-        "QCheckBox:disabled { color: #6f6f6f; }"
+        "color: #a0a0a0; font-size: 12px;"
     )
     dashboard._live_translation_checkbox.setToolTip(
         "Translate Live Mode sentence output to English."
