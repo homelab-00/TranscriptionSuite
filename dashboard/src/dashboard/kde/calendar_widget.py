@@ -8,6 +8,7 @@ and a day view with hourly time slots matching the web UI design.
 import asyncio
 import calendar
 import logging
+import threading
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,12 @@ WORD_TIMESTAMPS_TOOLTIP = "Include precise timestamps for each word"
 WORD_TIMESTAMPS_REQUIRED_TOOLTIP = (
     "Word-level timestamps are required when speaker diarization is enabled"
 )
+DIARIZATION_REASON_MESSAGES = {
+    "token_missing": "HuggingFace token is not configured.",
+    "token_invalid": "Configured HuggingFace token is invalid.",
+    "terms_not_accepted": "PyAnnote model terms have not been accepted on HuggingFace.",
+    "unavailable": "Diarization service is currently unavailable.",
+}
 
 
 class DayCell(QFrame):
@@ -346,6 +353,7 @@ class DayViewImportDialog(QDialog):
     """
 
     transcription_complete = pyqtSignal(int)  # recording_id
+    diarization_status_loaded = pyqtSignal(bool, object)
 
     def __init__(
         self,
@@ -359,6 +367,7 @@ class DayViewImportDialog(QDialog):
         self._target_date = target_date
         self._hour = hour
         self._is_transcribing = False
+        self._diarization_available = True
 
         self.setWindowTitle("Add Audio Entry")
         self.setMinimumWidth(400)
@@ -366,6 +375,8 @@ class DayViewImportDialog(QDialog):
 
         self._setup_ui()
         self._apply_styles()
+        self.diarization_status_loaded.connect(self._on_diarization_status_loaded)
+        self._refresh_diarization_availability()
 
     def _setup_ui(self) -> None:
         """Set up the dialog UI."""
@@ -419,6 +430,10 @@ class DayViewImportDialog(QDialog):
         self._on_diarization_toggled(self._diarization_checkbox.isChecked())
 
         layout.addWidget(options_container)
+        self._diarization_notice = QLabel("")
+        self._diarization_notice.setObjectName("statusLabel")
+        self._diarization_notice.setVisible(False)
+        layout.addWidget(self._diarization_notice)
         layout.addSpacing(16)
 
         # Progress section (hidden by default)
@@ -463,6 +478,11 @@ class DayViewImportDialog(QDialog):
 
     def _on_diarization_toggled(self, enabled: bool) -> None:
         """Enforce diarization dependency on word-level timestamps."""
+        if not self._diarization_available:
+            self._word_timestamps_checkbox.setEnabled(True)
+            self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
+            return
+
         if enabled:
             self._word_timestamps_checkbox.setChecked(True)
             self._word_timestamps_checkbox.setEnabled(False)
@@ -471,6 +491,62 @@ class DayViewImportDialog(QDialog):
 
         self._word_timestamps_checkbox.setEnabled(True)
         self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
+
+    def _reason_to_text(self, reason: str | None) -> str:
+        if reason is None:
+            return DIARIZATION_REASON_MESSAGES["unavailable"]
+        return DIARIZATION_REASON_MESSAGES.get(
+            reason, DIARIZATION_REASON_MESSAGES["unavailable"]
+        )
+
+    def _on_diarization_status_loaded(self, available: bool, reason: object) -> None:
+        reason_text = reason if isinstance(reason, str) else None
+        self._apply_diarization_availability(available, reason_text)
+
+    def _apply_diarization_availability(
+        self, available: bool, reason: str | None
+    ) -> None:
+        self._diarization_available = available
+        if available:
+            self._diarization_checkbox.setEnabled(True)
+            self._diarization_checkbox.setToolTip(
+                "Identify and label different speakers in the audio"
+            )
+            self._diarization_notice.setVisible(False)
+            self._on_diarization_toggled(self._diarization_checkbox.isChecked())
+            return
+
+        self._diarization_checkbox.setChecked(False)
+        self._diarization_checkbox.setEnabled(False)
+        reason_text = self._reason_to_text(reason)
+        self._diarization_checkbox.setToolTip(f"Diarization unavailable: {reason_text}")
+        self._diarization_notice.setText(f"Diarization unavailable: {reason_text}")
+        self._diarization_notice.setVisible(True)
+        self._on_diarization_toggled(False)
+
+    def _refresh_diarization_availability(self) -> None:
+        if self._api_client is None:
+            self._apply_diarization_availability(False, "unavailable")
+            return
+
+        def worker() -> None:
+            available = True
+            reason: str | None = None
+            try:
+                status = asyncio.run(self._api_client.get_status())
+                available, reason = self._api_client.get_diarization_feature(status)
+            except Exception as e:
+                logger.debug(f"Could not load diarization feature status: {e}")
+                available = False
+                reason = "unavailable"
+
+            self.diarization_status_loaded.emit(available, reason)
+
+        threading.Thread(
+            target=worker,
+            name="DayViewDiarizationFeatureCheck",
+            daemon=True,
+        ).start()
 
     def _format_time(self, hour: int) -> str:
         """Format hour to 12-hour time string."""
@@ -693,7 +769,14 @@ class DayViewImportDialog(QDialog):
 
             recording_id = result.get("id") or result.get("recording_id")
             self._progress_bar.setValue(100)
-            self._status_label.setText("Transcription complete!")
+            diarization = result.get("diarization", {})
+            if diarization.get("requested") and not diarization.get("performed"):
+                reason_text = self._reason_to_text(diarization.get("reason"))
+                self._status_label.setText(
+                    f"Transcription complete (without diarization: {reason_text})"
+                )
+            else:
+                self._status_label.setText("Transcription complete!")
 
             logger.info(
                 f"Day view import complete: {file_path.name} -> ID {recording_id}"

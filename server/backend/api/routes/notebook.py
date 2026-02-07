@@ -362,6 +362,7 @@ class UploadResponse(BaseModel):
 
     recording_id: int
     message: str
+    diarization: Dict[str, Any]
 
 
 @router.post("/transcribe/upload", response_model=UploadResponse)
@@ -443,6 +444,11 @@ async def upload_and_transcribe(
 
         # Run diarization if enabled
         diarization_segments = None
+        diarization_outcome: Dict[str, Any] = {
+            "requested": bool(enable_diarization),
+            "performed": False,
+            "reason": None,
+        }
         if enable_diarization:
             try:
                 logger.info(f"Running diarization for: {file.filename}")
@@ -459,6 +465,8 @@ async def upload_and_transcribe(
 
                 # Convert to list of dicts for database
                 diarization_segments = [seg.to_dict() for seg in diar_result.segments]
+                diarization_outcome["performed"] = True
+                diarization_outcome["reason"] = "ready"
                 logger.info(
                     f"Diarization complete: {diar_result.num_speakers} speakers found"
                 )
@@ -468,9 +476,19 @@ async def upload_and_transcribe(
                 logger.error(
                     "Set HUGGINGFACE_TOKEN env var when starting docker compose"
                 )
+                diarization_outcome["reason"] = (
+                    model_manager.get_diarization_feature_status().get(
+                        "reason", "token_missing"
+                    )
+                )
             except Exception as e:
                 logger.error(f"Diarization failed (continuing without): {e}")
                 # Don't fail the whole upload if diarization fails
+                diarization_outcome["reason"] = (
+                    model_manager.get_diarization_feature_status().get(
+                        "reason", "unavailable"
+                    )
+                )
 
         # Determine recorded_at timestamp
         recorded_at = None
@@ -551,6 +569,7 @@ async def upload_and_transcribe(
         return {
             "recording_id": recording_id,
             "message": f"Successfully transcribed and saved: {file.filename}",
+            "diarization": diarization_outcome,
         }
 
     except ValueError as e:

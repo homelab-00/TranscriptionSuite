@@ -1,8 +1,10 @@
 #!/bin/bash
-# Docker entrypoint script for TranscriptionSuite
-# 
-# This script runs as root to handle TLS certificate permissions,
-# then drops privileges to 'appuser' to run the Python application.
+# Docker entrypoint script for TranscriptionSuite.
+#
+# This script runs as root to:
+# 1) handle TLS certificate permissions,
+# 2) bootstrap runtime dependencies into /runtime/.venv,
+# 3) drop privileges to appuser and launch the Python server.
 
 set -e
 
@@ -52,9 +54,27 @@ if [ "${TLS_ENABLED:-false}" = "true" ]; then
     log "TLS certificates prepared successfully"
 fi
 
-# Ensure data directories are owned by appuser
-chown -R appuser:appuser /data
+# Ensure runtime directories are writable by appuser
+mkdir -p /data /models /user-config /runtime
+chown -R appuser:appuser /data /models /user-config /runtime
+
+# Bootstrap runtime dependencies and feature status.
+log "Bootstrapping runtime environment..."
+gosu appuser /usr/bin/python3.13 docker/bootstrap_runtime.py
+
+RUNTIME_VENV="${BOOTSTRAP_RUNTIME_DIR:-/runtime}/.venv"
+RUNTIME_PYTHON="$RUNTIME_VENV/bin/python"
+if [ ! -x "$RUNTIME_PYTHON" ]; then
+    log "ERROR: Runtime Python not found at $RUNTIME_PYTHON"
+    exit 1
+fi
+
+export PATH="$RUNTIME_VENV/bin:$PATH"
+export VIRTUAL_ENV="$RUNTIME_VENV"
+
+# Keep runtime CUDA library path in sync with dynamically bootstrapped venv
+export LD_LIBRARY_PATH="$RUNTIME_VENV/lib/python3.13/site-packages/nvidia/cudnn/lib:$RUNTIME_VENV/lib/python3.13/site-packages/torch/lib:${LD_LIBRARY_PATH:-}"
 
 # Drop privileges and run the Python entrypoint
 log "Starting application as appuser..."
-exec gosu appuser python docker/entrypoint.py "$@"
+exec gosu appuser "$RUNTIME_PYTHON" docker/entrypoint.py "$@"

@@ -175,6 +175,10 @@ services:
       # HuggingFace token for downloading models (optional)
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
+      - BOOTSTRAP_RUNTIME_DIR=/runtime
+      - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
+      - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
+      - BOOTSTRAP_REQUIRE_HF_TOKEN=false
       # LM Studio URL for chat features (localhost works with host network mode)
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
       # TLS settings for remote access (optional)
@@ -186,6 +190,7 @@ services:
     volumes:
       - transcription-data:/data  # Database, audio files, tokens, logs
       - huggingface-models:/models  # Whisper and diarization models cache
+      - runtime-cache:/runtime  # First-run Python dependency environment
       # User config directory (optional - for custom config.yaml and logs)
       - ${USER_CONFIG_DIR:-./.empty}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
@@ -208,6 +213,8 @@ volumes:
     name: transcriptionsuite-data
   huggingface-models:
     name: transcriptionsuite-models
+  runtime-cache:
+    name: transcriptionsuite-runtime
 """
 
 DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
@@ -258,6 +265,10 @@ services:
       # HuggingFace token for downloading models (optional)
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
+      - BOOTSTRAP_RUNTIME_DIR=/runtime
+      - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
+      - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
+      - BOOTSTRAP_REQUIRE_HF_TOKEN=false
       # LM Studio URL for chat features
       # NOTE: On Windows, use host.docker.internal to reach host services
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
@@ -270,6 +281,7 @@ services:
     volumes:
       - transcription-data:/data  # Database, audio files, tokens, logs
       - huggingface-models:/models  # Whisper and diarization models cache
+      - runtime-cache:/runtime  # First-run Python dependency environment
       # User config directory (optional - for custom config.yaml and logs)
       - ${USER_CONFIG_DIR:-./.empty}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
@@ -292,6 +304,8 @@ volumes:
     name: transcriptionsuite-data
   huggingface-models:
     name: transcriptionsuite-models
+  runtime-cache:
+    name: transcriptionsuite-runtime
 """
 
 ENV_EXAMPLE = """# TranscriptionSuite - Environment variables
@@ -309,6 +323,7 @@ ENV_EXAMPLE = """# TranscriptionSuite - Environment variables
 #   https://huggingface.co/pyannote/speaker-diarization-community-1
 # Leave empty if you don't need diarization.
 HUGGINGFACE_TOKEN=
+HUGGINGFACE_TOKEN_DECISION=unset
 
 # Log level (optional)
 # Options: DEBUG, INFO, WARNING, ERROR
@@ -693,8 +708,8 @@ class SetupWizard:
                 f"Setup complete!\n\n"
                 f"All files are in: {self.config_dir}\n\n"
                 f"Next steps:\n"
-                f"1. Edit .env file to add HuggingFace token (for diarization)\n"
-                f"2. Use 'Start Server (Local)' from the tray menu\n"
+                f"1. Use 'Start Server (Local)' from the tray menu\n"
+                f"2. Optional: enter HuggingFace token when prompted for diarization\n"
                 f"3. Wait ~10 seconds for the server to initialize"
             ),
         )

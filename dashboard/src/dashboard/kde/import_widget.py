@@ -8,6 +8,7 @@ with transcription options.
 import asyncio
 import logging
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,6 +38,12 @@ WORD_TIMESTAMPS_TOOLTIP = "Include precise timestamps for each word"
 WORD_TIMESTAMPS_REQUIRED_TOOLTIP = (
     "Word-level timestamps are required when speaker diarization is enabled"
 )
+DIARIZATION_REASON_MESSAGES = {
+    "token_missing": "HuggingFace token is not configured.",
+    "token_invalid": "Configured HuggingFace token is invalid.",
+    "terms_not_accepted": "PyAnnote model terms have not been accepted on HuggingFace.",
+    "unavailable": "Diarization service is currently unavailable.",
+}
 
 
 # Supported audio formats
@@ -167,6 +174,7 @@ class ImportWidget(QWidget):
 
     # Signal emitted when a recording is created
     recording_created = pyqtSignal(int)  # recording_id
+    diarization_status_loaded = pyqtSignal(bool, object)
 
     def __init__(
         self,
@@ -183,9 +191,12 @@ class ImportWidget(QWidget):
 
         # Target date/time for imports from Day View (overrides file date)
         self._target_recorded_at: str | None = None
+        self._diarization_available = True
 
         self._setup_ui()
         self._apply_styles()
+        self.diarization_status_loaded.connect(self._on_diarization_status_loaded)
+        self._refresh_diarization_availability()
 
     def _setup_ui(self) -> None:
         """Set up the import widget UI."""
@@ -229,6 +240,11 @@ class ImportWidget(QWidget):
         options_layout.addStretch()
 
         layout.addWidget(options_container)
+
+        self._diarization_notice = QLabel("")
+        self._diarization_notice.setObjectName("statusLabel")
+        self._diarization_notice.setVisible(False)
+        layout.addWidget(self._diarization_notice)
 
         # Queue section
         queue_header = QWidget()
@@ -281,6 +297,11 @@ class ImportWidget(QWidget):
 
     def _on_diarization_toggled(self, enabled: bool) -> None:
         """Enforce diarization dependency on word-level timestamps."""
+        if not self._diarization_available:
+            self._word_timestamps_checkbox.setEnabled(True)
+            self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
+            return
+
         if enabled:
             self._word_timestamps_checkbox.setChecked(True)
             self._word_timestamps_checkbox.setEnabled(False)
@@ -289,6 +310,62 @@ class ImportWidget(QWidget):
 
         self._word_timestamps_checkbox.setEnabled(True)
         self._word_timestamps_checkbox.setToolTip(WORD_TIMESTAMPS_TOOLTIP)
+
+    def _reason_to_text(self, reason: str | None) -> str:
+        if reason is None:
+            return DIARIZATION_REASON_MESSAGES["unavailable"]
+        return DIARIZATION_REASON_MESSAGES.get(
+            reason, DIARIZATION_REASON_MESSAGES["unavailable"]
+        )
+
+    def _on_diarization_status_loaded(self, available: bool, reason: object) -> None:
+        reason_text = reason if isinstance(reason, str) else None
+        self._apply_diarization_availability(available, reason_text)
+
+    def _apply_diarization_availability(
+        self, available: bool, reason: str | None
+    ) -> None:
+        self._diarization_available = available
+        if available:
+            self._diarization_checkbox.setEnabled(True)
+            self._diarization_checkbox.setToolTip(
+                "Identify and label different speakers in the audio"
+            )
+            self._diarization_notice.setVisible(False)
+            self._on_diarization_toggled(self._diarization_checkbox.isChecked())
+            return
+
+        self._diarization_checkbox.setChecked(False)
+        self._diarization_checkbox.setEnabled(False)
+        reason_text = self._reason_to_text(reason)
+        self._diarization_checkbox.setToolTip(f"Diarization unavailable: {reason_text}")
+        self._diarization_notice.setText(f"Diarization unavailable: {reason_text}")
+        self._diarization_notice.setVisible(True)
+        self._on_diarization_toggled(False)
+
+    def _refresh_diarization_availability(self) -> None:
+        if self._api_client is None:
+            self._apply_diarization_availability(False, "unavailable")
+            return
+
+        def worker() -> None:
+            available = True
+            reason: str | None = None
+            try:
+                status = asyncio.run(self._api_client.get_status())
+                available, reason = self._api_client.get_diarization_feature(status)
+            except Exception as e:
+                logger.debug(f"Could not load diarization feature status: {e}")
+                available = False
+                reason = "unavailable"
+
+            self.diarization_status_loaded.emit(available, reason)
+
+        threading.Thread(
+            target=worker,
+            name="DiarizationFeatureCheck",
+            daemon=True,
+        ).start()
 
     def _apply_styles(self) -> None:
         """Apply styling to import components."""
@@ -465,7 +542,8 @@ class ImportWidget(QWidget):
         elif job.status == "failed" and job.message:
             text += f"\n    Error: {job.message}"
         elif job.status == "completed":
-            text += "  - Transcription complete"
+            completion_text = job.message or "Transcription complete"
+            text += f"  - {completion_text}"
 
         item.setText(text)
 
@@ -556,7 +634,14 @@ class ImportWidget(QWidget):
 
             job.status = "completed"
             job.recording_id = result.get("id") or result.get("recording_id")
-            job.message = None
+            diarization = result.get("diarization", {})
+            if diarization.get("requested") and not diarization.get("performed"):
+                reason_text = self._reason_to_text(diarization.get("reason"))
+                job.message = (
+                    f"Transcription complete (without diarization: {reason_text})"
+                )
+            else:
+                job.message = "Transcription complete"
             job.progress = 1.0
 
             logger.info(f"Import complete: {job.filename} -> ID {job.recording_id}")
@@ -622,6 +707,7 @@ class ImportWidget(QWidget):
     def set_api_client(self, api_client: "APIClient") -> None:
         """Update the API client reference."""
         self._api_client = api_client
+        self._refresh_diarization_availability()
 
     def import_for_datetime(self, target_date, hour: int) -> None:
         """Open file browser with a preset target date/time for the import."""

@@ -410,6 +410,30 @@ class APIClient:
             resp.raise_for_status()
             return await resp.json()
 
+    @staticmethod
+    def get_diarization_feature(
+        status_payload: dict[str, Any],
+    ) -> tuple[bool, str | None]:
+        """
+        Extract diarization feature availability from /api/status payload.
+
+        Supports both:
+        - top-level features (preferred)
+        - nested under models.features (backward-compatible)
+        """
+        features = status_payload.get("features", {})
+        if not features:
+            features = status_payload.get("models", {}).get("features", {})
+
+        diarization = features.get("diarization", {})
+        if not diarization:
+            return (True, None)
+
+        return (
+            bool(diarization.get("available", True)),
+            diarization.get("reason"),
+        )
+
     async def transcribe_file(
         self,
         file_path: Path,

@@ -468,6 +468,9 @@ class DockerManager:
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
     CONTAINER_NAME = "transcriptionsuite-container"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
+    HF_TOKEN_KEY = "HUGGINGFACE_TOKEN"
+    HF_TOKEN_DECISION_KEY = "HUGGINGFACE_TOKEN_DECISION"
+    HF_TOKEN_DECISIONS = {"unset", "provided", "skipped"}
 
     def __init__(self, config_dir: Path | None = None):
         """
@@ -628,6 +631,127 @@ class DockerManager:
         if env_file.exists():
             return env_file
         return None
+
+    def _read_env_map(self, env_file: Path) -> dict[str, str]:
+        """Parse key/value pairs from a .env file (best-effort)."""
+        values: dict[str, str] = {}
+        if not env_file.exists():
+            return values
+
+        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+        return values
+
+    def _upsert_env_values(self, env_file: Path, updates: dict[str, str]) -> None:
+        """Update or append keys in a .env file while preserving unrelated lines."""
+        lines = []
+        if env_file.exists():
+            lines = env_file.read_text(encoding="utf-8").splitlines()
+        else:
+            env_file.parent.mkdir(parents=True, exist_ok=True)
+
+        seen: set[str] = set()
+        updated_lines: list[str] = []
+
+        for line in lines:
+            if "=" not in line or line.strip().startswith("#"):
+                updated_lines.append(line)
+                continue
+            key, _ = line.split("=", 1)
+            key = key.strip()
+            if key in updates:
+                if key in seen:
+                    # Drop duplicate definitions for managed keys
+                    continue
+                updated_lines.append(f"{key}={updates[key]}")
+                seen.add(key)
+            else:
+                updated_lines.append(line)
+
+        for key, value in updates.items():
+            if key not in seen:
+                updated_lines.append(f"{key}={value}")
+
+        env_file.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
+
+    def ensure_hf_env_defaults(self) -> Path:
+        """
+        Ensure .env exists and contains HuggingFace token decision defaults.
+
+        Returns:
+            Path to the .env file.
+        """
+        env_file = self.config_dir / ".env"
+        values = self._read_env_map(env_file)
+
+        token = values.get(self.HF_TOKEN_KEY, "").strip()
+        decision = values.get(self.HF_TOKEN_DECISION_KEY, "").strip().lower()
+
+        if decision not in self.HF_TOKEN_DECISIONS:
+            decision = "provided" if token else "unset"
+
+        if token and decision != "provided":
+            decision = "provided"
+
+        self._upsert_env_values(
+            env_file,
+            {
+                self.HF_TOKEN_KEY: token,
+                self.HF_TOKEN_DECISION_KEY: decision,
+            },
+        )
+        return env_file
+
+    def get_hf_token_state(self) -> tuple[str, str, Path]:
+        """
+        Get the persisted HuggingFace token onboarding state.
+
+        Returns:
+            Tuple of (token, decision, env_file_path).
+        """
+        env_file = self.ensure_hf_env_defaults()
+        values = self._read_env_map(env_file)
+
+        token = values.get(self.HF_TOKEN_KEY, "").strip()
+        decision = values.get(self.HF_TOKEN_DECISION_KEY, "unset").strip().lower()
+        if decision not in self.HF_TOKEN_DECISIONS:
+            decision = "provided" if token else "unset"
+            self._upsert_env_values(env_file, {self.HF_TOKEN_DECISION_KEY: decision})
+
+        return token, decision, env_file
+
+    def update_hf_token_state(self, token: str, decision: str) -> Path:
+        """
+        Persist HuggingFace token onboarding state in .env.
+
+        Args:
+            token: Token value (empty string allowed)
+            decision: One of unset|provided|skipped
+
+        Returns:
+            Path to the .env file.
+        """
+        normalized_decision = decision.strip().lower()
+        if normalized_decision not in self.HF_TOKEN_DECISIONS:
+            raise ValueError(f"Invalid HF token decision: {decision}")
+
+        env_file = self.ensure_hf_env_defaults()
+        clean_token = token.strip()
+        if clean_token:
+            normalized_decision = "provided"
+
+        self._upsert_env_values(
+            env_file,
+            {
+                self.HF_TOKEN_KEY: clean_token,
+                self.HF_TOKEN_DECISION_KEY: normalized_decision,
+            },
+        )
+        return env_file
 
     def _find_compose_file(self) -> Path | None:
         """Find the docker-compose.yml file."""
@@ -1277,7 +1401,7 @@ class DockerManager:
 
         # Find config and env files
         config_file = self._find_config_file()
-        env_file = self._find_env_file()
+        env_file = self.ensure_hf_env_defaults()
 
         # Build environment variables
         env = {}
@@ -1300,8 +1424,6 @@ class DockerManager:
         if env_file:
             log(f"Using secrets from: {env_file}")
             env_file_args = ["--env-file", str(env_file)]
-        else:
-            log("No .env file found (diarization may not work without HF token)")
 
         # Handle mode-specific configuration
         if mode == ServerMode.REMOTE:
@@ -1445,7 +1567,7 @@ class DockerManager:
 
         # Find config and env files
         config_file = self._find_config_file()
-        env_file = self._find_env_file()
+        env_file = self.ensure_hf_env_defaults()
 
         # Build environment variables
         env = {}
@@ -1468,8 +1590,6 @@ class DockerManager:
         if env_file:
             log(f"Using secrets from: {env_file}")
             env_file_args = ["--env-file", str(env_file)]
-        else:
-            log("No .env file found (diarization may not work without HF token)")
 
         # Handle mode-specific configuration
         if mode == ServerMode.REMOTE:

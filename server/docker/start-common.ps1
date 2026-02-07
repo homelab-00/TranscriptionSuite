@@ -103,6 +103,124 @@ function Get-ResolvedEnvFile {
     return ""
 }
 
+function Get-EnvValue {
+    param(
+        [string]$EnvFilePath,
+        [string]$Key
+    )
+
+    if (-not (Test-Path $EnvFilePath)) {
+        return ""
+    }
+
+    foreach ($line in Get-Content $EnvFilePath) {
+        if ($line -match "^\s*#") {
+            continue
+        }
+        if ($line -match "^$Key=(.*)$") {
+            return $matches[1].Trim()
+        }
+    }
+
+    return ""
+}
+
+function Set-EnvValue {
+    param(
+        [string]$EnvFilePath,
+        [string]$Key,
+        [string]$Value
+    )
+
+    if (-not (Test-Path $EnvFilePath)) {
+        New-Item -ItemType File -Path $EnvFilePath -Force | Out-Null
+    }
+
+    $lines = Get-Content $EnvFilePath -ErrorAction SilentlyContinue
+    if (-not $lines) {
+        $lines = @()
+    }
+
+    $updated = $false
+    $result = @()
+    foreach ($line in $lines) {
+        if ($line -match "^$Key=") {
+            if (-not $updated) {
+                $result += "$Key=$Value"
+                $updated = $true
+            }
+        } else {
+            $result += $line
+        }
+    }
+
+    if (-not $updated) {
+        $result += "$Key=$Value"
+    }
+
+    Set-Content -Path $EnvFilePath -Value $result
+}
+
+function Test-IsInteractive {
+    try {
+        return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+    } catch {
+        return $false
+    }
+}
+
+function Initialize-HFTokenDecision {
+    param(
+        [string]$EnvFilePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($EnvFilePath)) {
+        $EnvFilePath = Join-Path $ScriptDir ".env"
+        Write-Info "No .env file found, creating: $EnvFilePath"
+    } else {
+        Write-Info "Using secrets from: $EnvFilePath"
+    }
+
+    if (-not (Test-Path $EnvFilePath)) {
+        New-Item -ItemType File -Path $EnvFilePath -Force | Out-Null
+    }
+
+    $token = Get-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN"
+    $decision = (Get-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN_DECISION").ToLowerInvariant()
+
+    if ([string]::IsNullOrWhiteSpace($decision) -or @("unset", "provided", "skipped") -notcontains $decision) {
+        $decision = if ([string]::IsNullOrWhiteSpace($token)) { "unset" } else { "provided" }
+        Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN_DECISION" -Value $decision
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($token) -and $decision -ne "provided") {
+        $decision = "provided"
+        Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN_DECISION" -Value "provided"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($token) -and $decision -eq "unset") {
+        if (Test-IsInteractive) {
+            Write-Info "Optional setup: HuggingFace token enables speaker diarization."
+            Write-Info "You can skip now and add it later in .env."
+            $promptToken = Read-Host "Enter HuggingFace token (leave empty to skip)"
+
+            if (-not [string]::IsNullOrWhiteSpace($promptToken)) {
+                Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN" -Value $promptToken.Trim()
+                Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN_DECISION" -Value "provided"
+                Write-Info "HuggingFace token saved."
+            } else {
+                Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN_DECISION" -Value "skipped"
+                Write-Info "Diarization token setup skipped for now."
+            }
+        } else {
+            Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN_DECISION" -Value "skipped"
+            Write-Info "Non-interactive startup detected. Marked diarization token setup as skipped."
+        }
+    }
+
+    return $EnvFilePath
+}
+
 # ============================================================================
 # Pre-flight Checks
 # ============================================================================
@@ -135,13 +253,8 @@ $ConfigDirToMount = $config.ConfigDir
 $env:USER_CONFIG_DIR = $ConfigDirToMount
 
 $EnvFile = Get-ResolvedEnvFile
-$EnvFileArg = @()
-if ($EnvFile -ne "") {
-    Write-Info "Using secrets from: $EnvFile"
-    $EnvFileArg = @("--env-file", $EnvFile)
-} else {
-    Write-Info "No .env file found (diarization may not work without HF token)"
-}
+$EnvFile = Initialize-HFTokenDecision -EnvFilePath $EnvFile
+$EnvFileArg = @("--env-file", $EnvFile)
 
 $HostCertPath = ""
 $HostKeyPath = ""

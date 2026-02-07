@@ -83,12 +83,101 @@ find_env_file() {
     fi
 
     ENV_FILE="$env_file"
-    ENV_FILE_ARGS=()
-    if [[ -n "$ENV_FILE" ]]; then
-        print_info "Using secrets from: $ENV_FILE"
-        ENV_FILE_ARGS=("--env-file" "$ENV_FILE")
+}
+
+read_env_var() {
+    local key="$1"
+    if [[ -z "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
+        echo ""
+        return
+    fi
+    grep -E "^${key}=" "$ENV_FILE" | tail -n1 | cut -d'=' -f2-
+}
+
+upsert_env_var() {
+    local key="$1"
+    local value="$2"
+    local tmp_file
+    tmp_file="$(mktemp)"
+
+    if [[ ! -f "$ENV_FILE" ]]; then
+        touch "$ENV_FILE"
+    fi
+
+    if grep -q -E "^${key}=" "$ENV_FILE"; then
+        awk -v k="$key" -v v="$value" '
+            BEGIN { updated = 0 }
+            {
+                if ($0 ~ "^" k "=") {
+                    if (updated == 0) {
+                        print k "=" v
+                        updated = 1
+                    }
+                } else {
+                    print $0
+                }
+            }
+            END {
+                if (updated == 0) {
+                    print k "=" v
+                }
+            }
+        ' "$ENV_FILE" > "$tmp_file"
+        mv "$tmp_file" "$ENV_FILE"
     else
-        print_info "No .env file found (diarization may not work without HF token)"
+        cat "$ENV_FILE" > "$tmp_file"
+        printf "%s=%s\n" "$key" "$value" >> "$tmp_file"
+        mv "$tmp_file" "$ENV_FILE"
+    fi
+}
+
+prepare_hf_token_decision() {
+    if [[ -z "$ENV_FILE" ]]; then
+        ENV_FILE="$SCRIPT_DIR/.env"
+        print_info "No .env file found, creating: $ENV_FILE"
+    else
+        print_info "Using secrets from: $ENV_FILE"
+    fi
+
+    touch "$ENV_FILE"
+    ENV_FILE_ARGS=("--env-file" "$ENV_FILE")
+
+    local token decision
+    token="$(read_env_var "HUGGINGFACE_TOKEN" | tr -d '\r')"
+    decision="$(read_env_var "HUGGINGFACE_TOKEN_DECISION" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+
+    if [[ -z "$decision" || ( "$decision" != "unset" && "$decision" != "provided" && "$decision" != "skipped" ) ]]; then
+        if [[ -n "$token" ]]; then
+            decision="provided"
+        else
+            decision="unset"
+        fi
+        upsert_env_var "HUGGINGFACE_TOKEN_DECISION" "$decision"
+    fi
+
+    if [[ -n "$token" && "$decision" != "provided" ]]; then
+        decision="provided"
+        upsert_env_var "HUGGINGFACE_TOKEN_DECISION" "$decision"
+    fi
+
+    if [[ -z "$token" && "$decision" == "unset" ]]; then
+        if [[ -t 0 && -t 1 ]]; then
+            print_info "Optional setup: HuggingFace token enables speaker diarization."
+            print_info "You can skip now and add it later in .env."
+            local prompt_token=""
+            read -r -p "Enter HuggingFace token (leave empty to skip): " prompt_token
+            if [[ -n "$prompt_token" ]]; then
+                upsert_env_var "HUGGINGFACE_TOKEN" "$prompt_token"
+                upsert_env_var "HUGGINGFACE_TOKEN_DECISION" "provided"
+                print_info "HuggingFace token saved."
+            else
+                upsert_env_var "HUGGINGFACE_TOKEN_DECISION" "skipped"
+                print_info "Diarization token setup skipped for now."
+            fi
+        else
+            upsert_env_var "HUGGINGFACE_TOKEN_DECISION" "skipped"
+            print_info "Non-interactive startup detected. Marked diarization token setup as skipped."
+        fi
     fi
 }
 
@@ -145,6 +234,7 @@ HOST_KEY_PATH=""
 
 find_config
 find_env_file
+prepare_hf_token_decision
 
 export USER_CONFIG_DIR="$CONFIG_DIR_TO_MOUNT"
 

@@ -67,4 +67,5 @@ async def get_status(request: Request) -> Dict[str, Any]:
         "status": "running",
         "version": __version__,
         "models": status,
+        "features": status.get("features", {}),
     }

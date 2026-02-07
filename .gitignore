@@ -16,10 +16,10 @@ build/assets/videos/
 
 ## .hidden folders
 .*/
-### GitHub workflows folder exception
+### GitHub folder exception (needed for workflows)
 !.github/
-!.github/workflows/
-!.github/workflows/*.yml
+### Making sure that the instructions folder is excluded
+.github/instructions/
 
 ## .md files
 *.md
@@ -35,3 +35,4 @@ __pycache__/
 *.log
 *.mp3
 .directory
+codeql-agent-results/

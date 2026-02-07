@@ -13,6 +13,7 @@ inside methods to avoid loading them at module import time.
 """
 
 import logging
+import os
 import threading
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
@@ -176,6 +177,8 @@ class ModelManager:
         self._transcription_engine: Optional["AudioToTextRecorder"] = None
         self._diarization_engine: Optional[Any] = None  # Will be DiarizationEngine
         self._realtime_engines: Dict[str, "RealtimeTranscriptionEngine"] = {}
+        self._diarization_feature_available: bool = False
+        self._diarization_feature_reason: str = "token_missing"
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -189,6 +192,79 @@ class ModelManager:
             )
         else:
             logger.warning("No GPU available, using CPU for transcription")
+
+        # Initialize diarization feature status from bootstrap output if available.
+        self._initialize_diarization_feature_status()
+
+    def _initialize_diarization_feature_status(self) -> None:
+        """Initialize diarization feature availability from bootstrap state/env."""
+        status_file = os.environ.get(
+            "BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json"
+        )
+        try:
+            from pathlib import Path
+            import json
+
+            path = Path(status_file)
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                diar = payload.get("features", {}).get("diarization", {})
+                available = bool(diar.get("available", False))
+                reason = str(diar.get("reason", "unavailable") or "unavailable")
+                self._set_diarization_feature_status(available, reason)
+                logger.info(
+                    "Loaded diarization feature status from bootstrap: "
+                    f"available={available}, reason={reason}"
+                )
+                return
+        except Exception as e:
+            logger.debug(f"Could not load bootstrap feature status: {e}")
+
+        # Fallback to env/config signal only.
+        diar_cfg = self.config.get("diarization", {})
+        token = (
+            os.environ.get("HF_TOKEN", "").strip()
+            or str(diar_cfg.get("hf_token") or "").strip()
+        )
+        if token:
+            self._set_diarization_feature_status(True, "ready")
+        else:
+            self._set_diarization_feature_status(False, "token_missing")
+
+    def _set_diarization_feature_status(self, available: bool, reason: str) -> None:
+        """Set diarization feature availability metadata."""
+        self._diarization_feature_available = available
+        self._diarization_feature_reason = reason
+
+    def _classify_diarization_error(self, exc: Exception) -> str:
+        """Map diarization exceptions to capability reasons."""
+        message = str(exc).lower()
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+
+        if "huggingface token required" in message or "set hf_token" in message:
+            return "token_missing"
+        if (
+            status_code == 401
+            or "invalid token" in message
+            or "unauthorized" in message
+        ):
+            return "token_invalid"
+        if status_code == 403 and (
+            "gated" in message or "terms" in message or "accept" in message
+        ):
+            return "terms_not_accepted"
+        if status_code == 403:
+            return "token_invalid"
+        if "gated" in message or "terms" in message or "accept" in message:
+            return "terms_not_accepted"
+        return "unavailable"
+
+    def get_diarization_feature_status(self) -> Dict[str, Any]:
+        """Return diarization capability metadata for API clients."""
+        return {
+            "available": self._diarization_feature_available,
+            "reason": self._diarization_feature_reason,
+        }
 
     @property
     def main_model_name(self) -> str:
@@ -300,8 +376,17 @@ class ModelManager:
         engine = self.diarization_engine
         if not engine.is_loaded():
             logger.info("Loading diarization model...")
-            engine.load()
+            try:
+                engine.load()
+            except Exception as e:
+                reason = self._classify_diarization_error(e)
+                self._set_diarization_feature_status(False, reason)
+                logger.warning(
+                    f"Diarization model load failed: reason={reason}, error={e}"
+                )
+                raise
             logger.info("Diarization model ready")
+            self._set_diarization_feature_status(True, "ready")
 
     def unload_diarization_model(self) -> None:
         """Unload the diarization model."""
@@ -419,6 +504,9 @@ class ModelManager:
                 "session_ids": list(self._realtime_engines.keys()),
             },
             "job_tracker": self.job_tracker.get_status(),
+            "features": {
+                "diarization": self.get_diarization_feature_status(),
+            },
         }
         return status
 

@@ -10,7 +10,7 @@ import re
 import threading
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QInputDialog, QLineEdit, QMessageBox
 
 from dashboard.common.docker_manager import DockerResult, ServerMode, ServerStatus
 from dashboard.kde.apple_switch import AppleSwitch
@@ -437,6 +437,90 @@ class DashboardServerControlMixin:
     # Server Start/Stop
     # =========================================================================
 
+    def _ensure_hf_token_onboarding(self) -> bool:
+        """
+        Resolve one-time HuggingFace token onboarding before server start.
+
+        Returns:
+            True if startup should continue, False if user cancelled.
+        """
+        try:
+            token, decision, _ = self._docker_manager.get_hf_token_state()
+        except Exception as e:
+            logger.error(f"Failed to read HuggingFace token state: {e}")
+            QMessageBox.warning(
+                self,
+                "Startup Blocked",
+                "Could not read or create .env for HuggingFace token onboarding.\n"
+                "Check config directory permissions and try again.",
+            )
+            return False
+
+        if token:
+            if decision != "provided":
+                self._docker_manager.update_hf_token_state(
+                    token=token, decision="provided"
+                )
+            return True
+
+        if decision == "skipped":
+            return True
+
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Optional Diarization Setup")
+        prompt.setIcon(QMessageBox.Icon.Question)
+        prompt.setText("Set up HuggingFace token for speaker diarization?")
+        prompt.setInformativeText(
+            "You can skip this now. Core transcription will still work.\n\n"
+            "If skipped, diarization stays disabled until you add "
+            "HUGGINGFACE_TOKEN in your .env file."
+        )
+        enter_btn = prompt.addButton("Enter Token", QMessageBox.ButtonRole.AcceptRole)
+        skip_btn = prompt.addButton(
+            "Skip for now", QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel_btn = prompt.addButton(QMessageBox.StandardButton.Cancel)
+        prompt.setDefaultButton(enter_btn)
+        prompt.exec()
+
+        clicked = prompt.clickedButton()
+        if clicked == cancel_btn:
+            return False
+
+        if clicked == skip_btn:
+            self._docker_manager.update_hf_token_state(token="", decision="skipped")
+            self._update_server_start_progress(
+                "Diarization token setup skipped. Core transcription will remain available."
+            )
+            return True
+
+        token_value, ok = QInputDialog.getText(
+            self,
+            "HuggingFace Token",
+            (
+                "Paste your HuggingFace token.\n"
+                "You must also accept the PyAnnote model terms on HuggingFace."
+            ),
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return False
+
+        token_value = token_value.strip()
+        if not token_value:
+            self._docker_manager.update_hf_token_state(token="", decision="skipped")
+            self._update_server_start_progress(
+                "No token entered. Diarization token setup marked as skipped."
+            )
+            return True
+
+        self._docker_manager.update_hf_token_state(
+            token=token_value,
+            decision="provided",
+        )
+        self._update_server_start_progress("HuggingFace token saved to .env.")
+        return True
+
     def _on_start_server_local(self) -> None:
         """Start server in local mode."""
         self._start_server(ServerMode.LOCAL)
@@ -447,6 +531,10 @@ class DashboardServerControlMixin:
 
     def _start_server(self, mode: ServerMode) -> None:
         """Start the Docker server asynchronously."""
+        if not self._ensure_hf_token_onboarding():
+            self._update_server_start_progress("Server start cancelled.")
+            return
+
         # Check if a server start is already in progress
         if self._server_worker is not None and self._server_worker.is_alive():
             logger.warning("Server start already in progress")
