@@ -37,6 +37,9 @@ class DashboardServerControlMixin:
     ]
     MODEL_CUSTOM_VALUE = "__custom__"
     MODEL_SAME_AS_MAIN_VALUE = "__same_as_main__"
+    DIARIZATION_TERMS_URL = (
+        "https://huggingface.co/pyannote/speaker-diarization-community-1"
+    )
 
     # =========================================================================
     # Server Status
@@ -165,6 +168,7 @@ class DashboardServerControlMixin:
         self._remove_data_volume_btn.setEnabled(not is_running)
         self._remove_models_volume_btn.setEnabled(not is_running)
         self._reset_runtime_volume_btn.setEnabled(not is_running)
+        self._remove_uv_cache_volume_btn.setEnabled(not is_running)
 
         if self._server_health_timer:
             if status != ServerStatus.RUNNING or health in (None, "healthy"):
@@ -514,7 +518,9 @@ class DashboardServerControlMixin:
         prompt.setInformativeText(
             "You can skip this now. Core transcription will still work.\n\n"
             "If skipped, diarization stays disabled until you add "
-            "HUGGINGFACE_TOKEN in your .env file."
+            "HUGGINGFACE_TOKEN in your .env file.\n\n"
+            "Important: after adding a token, you must also accept model terms at:\n"
+            f"{self.DIARIZATION_TERMS_URL}"
         )
         enter_btn = prompt.addButton("Enter Token", QMessageBox.ButtonRole.AcceptRole)
         skip_btn = prompt.addButton(
@@ -540,7 +546,8 @@ class DashboardServerControlMixin:
             "HuggingFace Token",
             (
                 "Paste your HuggingFace token.\n"
-                "You must also accept the PyAnnote model terms on HuggingFace."
+                "You must also accept the PyAnnote model terms on HuggingFace:\n"
+                f"{self.DIARIZATION_TERMS_URL}"
             ),
             QLineEdit.EchoMode.Password,
         )
@@ -562,6 +569,70 @@ class DashboardServerControlMixin:
         self._update_server_start_progress("HuggingFace token saved to .env.")
         return True
 
+    def _ensure_uv_cache_onboarding(self) -> bool:
+        """
+        Resolve one-time UV cache onboarding before server start.
+
+        Returns:
+            True if startup should continue, False if user cancelled.
+        """
+        try:
+            decision, _, _ = self._docker_manager.get_uv_cache_state()
+        except Exception as e:
+            logger.error(f"Failed to read UV cache onboarding state: {e}")
+            QMessageBox.warning(
+                self,
+                "Startup Blocked",
+                "Could not read or create .env for UV cache onboarding.\n"
+                "Check config directory permissions and try again.",
+            )
+            return False
+
+        if decision in {"enabled", "skipped"}:
+            return True
+
+        if self._docker_manager.volume_exists(self._docker_manager.UV_CACHE_VOLUME):
+            self._docker_manager.update_uv_cache_state(decision="enabled")
+            self._update_server_start_progress(
+                "Detected existing UV cache volume. Persistent cache auto-enabled."
+            )
+            return True
+
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Optional Update Cache")
+        prompt.setIcon(QMessageBox.Icon.Question)
+        prompt.setText("Enable persistent UV cache for faster future updates?")
+        prompt.setInformativeText(
+            "Recommended for smoother Docker image/dependency updates.\n"
+            "Estimated disk usage: up to ~8GB.\n\n"
+            "If skipped, the server still works normally, but future updates "
+            "may take longer to download."
+        )
+        enable_btn = prompt.addButton("Enable Cache", QMessageBox.ButtonRole.AcceptRole)
+        skip_btn = prompt.addButton(
+            "Skip for now", QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel_btn = prompt.addButton(QMessageBox.StandardButton.Cancel)
+        prompt.setDefaultButton(enable_btn)
+        prompt.exec()
+
+        clicked = prompt.clickedButton()
+        if clicked == cancel_btn:
+            return False
+
+        if clicked == skip_btn:
+            self._docker_manager.update_uv_cache_state(decision="skipped")
+            self._update_server_start_progress(
+                "Persistent UV cache skipped. Future dependency updates may take longer."
+            )
+            return True
+
+        self._docker_manager.update_uv_cache_state(decision="enabled")
+        self._update_server_start_progress(
+            "Persistent UV cache enabled for faster future updates."
+        )
+        return True
+
     def _on_start_server_local(self) -> None:
         """Start server in local mode."""
         self._start_server(ServerMode.LOCAL)
@@ -573,6 +644,9 @@ class DashboardServerControlMixin:
     def _start_server(self, mode: ServerMode) -> None:
         """Start the Docker server asynchronously."""
         if not self._ensure_hf_token_onboarding():
+            self._update_server_start_progress("Server start cancelled.")
+            return
+        if not self._ensure_uv_cache_onboarding():
             self._update_server_start_progress("Server start cancelled.")
             return
 
@@ -989,7 +1063,7 @@ class DashboardServerControlMixin:
         QTimer.singleShot(1000, self._refresh_server_status)
 
     def _on_reset_runtime_dependencies(self) -> None:
-        """Reset runtime dependency volume while optionally keeping package cache."""
+        """Remove runtime dependency volume."""
         status = self._docker_manager.get_server_status()
         if status != ServerStatus.NOT_FOUND:
             msg_box = QMessageBox(self)
@@ -1009,16 +1083,9 @@ class DashboardServerControlMixin:
         msg_box.setText("Remove runtime Python dependencies?")
         msg_box.setInformativeText(
             "This removes the runtime virtual environment volume.\n"
-            "On next start, dependencies will be re-synced using delta updates.\n\n"
-            "Keep package cache enabled for faster reinstall (recommended)."
+            "On next start, dependencies will be re-synced."
         )
 
-        clear_cache_checkbox = AppleSwitch("Also remove package cache volume")
-        clear_cache_checkbox.setToolTip(
-            "If enabled, transcriptionsuite-uv-cache is removed too.\n"
-            "Next bootstrap may require larger downloads."
-        )
-        msg_box.setCheckBox(clear_cache_checkbox)
         msg_box.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -1028,7 +1095,6 @@ class DashboardServerControlMixin:
         if msg_box.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        also_remove_cache = clear_cache_checkbox.isChecked()
         self._reset_runtime_volume_btn.setEnabled(False)
 
         def progress(msg: str) -> None:
@@ -1037,9 +1103,57 @@ class DashboardServerControlMixin:
                 self._server_log_view.appendPlainText(msg)
 
         result = self._docker_manager.remove_runtime_dependencies(
-            progress_callback=progress,
-            also_remove_cache=also_remove_cache,
+            progress_callback=progress
         )
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_remove_uv_cache_volume(self) -> None:
+        """Remove the uv cache volume."""
+        status = self._docker_manager.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cannot Remove Volume")
+            msg_box.setText("Container must be removed first")
+            msg_box.setInformativeText(
+                "Docker volumes cannot be removed while the container exists.\n\n"
+                "Please remove the container first, then try removing the volume again."
+            )
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Remove UV Cache Volume")
+        msg_box.setText("Remove UV cache volume?")
+        msg_box.setInformativeText(
+            "The server will continue to run normally without this cache.\n"
+            "Future image/dependency updates may take longer to download "
+            "until cache files are rebuilt."
+        )
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._remove_uv_cache_volume_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.remove_uv_cache_volume(progress_callback=progress)
 
         if result.success:
             progress(result.message)

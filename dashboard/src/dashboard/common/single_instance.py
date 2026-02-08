@@ -149,8 +149,11 @@ def acquire_instance_lock() -> Optional[object]:
                     try:
                         if hasattr(held, "close"):
                             held.close()
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        logger.debug(
+                            "Failed to close acquired lock handle during rollback: %s",
+                            cleanup_error,
+                        )
                 return None
 
             # Write PID to lock file for debugging (best effort)
@@ -159,8 +162,12 @@ def acquire_instance_lock() -> Optional[object]:
                 fd.truncate()
                 fd.write(str(os.getpid()))
                 fd.flush()
-            except Exception:
-                pass
+            except Exception as pid_write_error:
+                logger.debug(
+                    "Failed to write PID into lock file %s: %s",
+                    lock_file,
+                    pid_write_error,
+                )
 
             acquired_fds.append(fd)
 

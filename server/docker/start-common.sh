@@ -17,6 +17,7 @@ shift || true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server:latest"
 CONTAINER_NAME="transcriptionsuite-container"
+HF_DIARIZATION_TERMS_URL="https://huggingface.co/pyannote/speaker-diarization-community-1"
 
 # ============================================================================
 # Helper Functions
@@ -163,6 +164,7 @@ prepare_hf_token_decision() {
     if [[ -z "$token" && "$decision" == "unset" ]]; then
         if [[ -t 0 && -t 1 ]]; then
             print_info "Optional setup: HuggingFace token enables speaker diarization."
+            print_info "Model terms must be accepted first: $HF_DIARIZATION_TERMS_URL"
             print_info "You can skip now and add it later in .env."
             local prompt_token=""
             read -r -p "Enter HuggingFace token (leave empty to skip): " prompt_token
@@ -179,6 +181,138 @@ prepare_hf_token_decision() {
             print_info "Non-interactive startup detected. Marked diarization token setup as skipped."
         fi
     fi
+}
+
+apply_uv_cache_compose_mode() {
+    local decision="$1"
+    local compose_file="$SCRIPT_DIR/docker-compose.yml"
+    local cache_dir="/runtime-cache"
+    local tmp_file
+
+    if [[ "$decision" == "skipped" ]]; then
+        cache_dir="/tmp/uv-cache"
+    fi
+
+    # Keep BOOTSTRAP_CACHE_DIR aligned with decision.
+    sed -i -E \
+        "s|^([[:space:]]*-[[:space:]]*BOOTSTRAP_CACHE_DIR=).*|\\1${cache_dir}|" \
+        "$compose_file"
+
+    if [[ "$decision" == "enabled" ]]; then
+        if ! grep -Eq '^[[:space:]]*-[[:space:]]*uv-cache:/runtime-cache' "$compose_file"; then
+            tmp_file="$(mktemp)"
+            awk '
+                /-[[:space:]]*(runtime-deps|runtime-cache):\/runtime([[:space:]]|$)/ && !inserted {
+                    print $0
+                    print "      - uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates"
+                    inserted=1
+                    next
+                }
+                { print $0 }
+            ' "$compose_file" > "$tmp_file"
+            mv "$tmp_file" "$compose_file"
+        fi
+
+        if ! grep -Eq '^  uv-cache:[[:space:]]*$' "$compose_file"; then
+            tmp_file="$(mktemp)"
+            awk '
+                /name:[[:space:]]*transcriptionsuite-runtime/ && !inserted {
+                    print $0
+                    print "  uv-cache:"
+                    print "    name: transcriptionsuite-uv-cache"
+                    inserted=1
+                    next
+                }
+                { print $0 }
+            ' "$compose_file" > "$tmp_file"
+            mv "$tmp_file" "$compose_file"
+        fi
+    else
+        sed -i -E '/^[[:space:]]*-[[:space:]]*uv-cache:\/runtime-cache\b/d' "$compose_file"
+
+        tmp_file="$(mktemp)"
+        awk '
+            BEGIN { skip = 0 }
+            {
+                if ($0 ~ /^  uv-cache:[[:space:]]*$/) {
+                    skip = 1
+                    next
+                }
+                if (skip == 1) {
+                    if ($0 ~ /^  [A-Za-z0-9_.-]+:[[:space:]]*$/) {
+                        skip = 0
+                        print $0
+                        next
+                    }
+                    if ($0 ~ /^[A-Za-z0-9_.-]+:[[:space:]]*$/) {
+                        skip = 0
+                        print $0
+                        next
+                    }
+                    next
+                }
+                print $0
+            }
+        ' "$compose_file" > "$tmp_file"
+        mv "$tmp_file" "$compose_file"
+    fi
+}
+
+prepare_uv_cache_decision() {
+    local decision cache_dir
+    decision="$(read_env_var "UV_CACHE_VOLUME_DECISION" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+
+    if [[ -z "$decision" || ( "$decision" != "unset" && "$decision" != "enabled" && "$decision" != "skipped" ) ]]; then
+        decision="unset"
+        upsert_env_var "UV_CACHE_VOLUME_DECISION" "$decision"
+    fi
+
+    if [[ "$decision" == "unset" ]]; then
+        if docker volume ls --format '{{.Name}}' | grep -q "^transcriptionsuite-uv-cache$"; then
+            decision="enabled"
+            upsert_env_var "UV_CACHE_VOLUME_DECISION" "$decision"
+            print_info "Detected existing UV cache volume. Persistent cache auto-enabled."
+        elif [[ -t 0 && -t 1 ]]; then
+            print_info "Optional setup: persistent UV cache speeds future updates."
+            print_info "Disk usage may grow to ~8GB."
+            print_info "Skipping keeps server functionality unchanged but can slow future updates."
+            local prompt_choice=""
+            while true; do
+                read -r -p "Enable UV cache volume? [Y]es / [n]o / [c]ancel: " prompt_choice
+                case "${prompt_choice,,}" in
+                    ""|y|yes)
+                        decision="enabled"
+                        break
+                        ;;
+                    n|no)
+                        decision="skipped"
+                        break
+                        ;;
+                    c|cancel)
+                        print_info "Startup cancelled."
+                        return 1
+                        ;;
+                    *)
+                        print_info "Please answer yes, no, or cancel."
+                        ;;
+                esac
+            done
+            upsert_env_var "UV_CACHE_VOLUME_DECISION" "$decision"
+        else
+            decision="skipped"
+            upsert_env_var "UV_CACHE_VOLUME_DECISION" "$decision"
+            print_info "Non-interactive startup detected. UV cache setup marked as skipped."
+        fi
+    fi
+
+    if [[ "$decision" == "enabled" ]]; then
+        cache_dir="/runtime-cache"
+    else
+        cache_dir="/tmp/uv-cache"
+    fi
+
+    upsert_env_var "BOOTSTRAP_CACHE_DIR" "$cache_dir"
+    apply_uv_cache_compose_mode "$decision"
 }
 
 check_existing_container_mode() {
@@ -235,6 +369,9 @@ HOST_KEY_PATH=""
 find_config
 find_env_file
 prepare_hf_token_decision
+if ! prepare_uv_cache_decision; then
+    exit 0
+fi
 
 export USER_CONFIG_DIR="$CONFIG_DIR_TO_MOUNT"
 

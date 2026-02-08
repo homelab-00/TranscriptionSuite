@@ -644,7 +644,7 @@ In short: an image update mainly changes code and runtime tooling; dependency do
   - Marker exists but is from an older bootstrap schema/fingerprint mode.
 - `rebuild-sync` (fresh venv + sync) happens when:
   - `/runtime/.venv` is missing.
-  - Runtime reset is requested (Dashboard: `Reset Runtime Deps`).
+  - Runtime reset is requested (Dashboard: `Remove Runtime`).
   - ABI/arch incompatibility is detected (with `BOOTSTRAP_REBUILD_POLICY=abi_only`).
 
 **How runtime updates minimize download size**
@@ -972,11 +972,16 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 | Variable | Purpose |
 |----------|---------|
 | `HF_TOKEN` | HuggingFace token for PyAnnote models |
+| `HUGGINGFACE_TOKEN_DECISION` | One-time onboarding state: `unset`, `provided`, `skipped` |
+| `UV_CACHE_VOLUME_DECISION` | One-time UV cache onboarding state: `unset`, `enabled`, `skipped` |
+| `BOOTSTRAP_CACHE_DIR` | Runtime package cache path (`/runtime-cache` when enabled, `/tmp/uv-cache` when skipped) |
 | `USER_CONFIG_DIR` | Path to user config directory |
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, WARNING) |
 | `TLS_ENABLED` | Enable HTTPS |
 | `TLS_CERT_PATH` | Path to TLS certificate |
 | `TLS_KEY_PATH` | Path to TLS private key |
+
+**Diarization prerequisites:** a valid HuggingFace token is not enough by itself; users must also accept the model terms at `https://huggingface.co/pyannote/speaker-diarization-community-1`.
 
 ### 10.2 Dashboard Configuration
 

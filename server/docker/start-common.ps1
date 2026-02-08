@@ -16,6 +16,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DockerImage = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
 $ContainerName = "transcriptionsuite-container"
+$HfDiarizationTermsUrl = "https://huggingface.co/pyannote/speaker-diarization-community-1"
 
 # ============================================================================
 # Helper Functions
@@ -201,6 +202,7 @@ function Initialize-HFTokenDecision {
     if ([string]::IsNullOrWhiteSpace($token) -and $decision -eq "unset") {
         if (Test-IsInteractive) {
             Write-Info "Optional setup: HuggingFace token enables speaker diarization."
+            Write-Info "Model terms must be accepted first: $HfDiarizationTermsUrl"
             Write-Info "You can skip now and add it later in .env."
             $promptToken = Read-Host "Enter HuggingFace token (leave empty to skip)"
 
@@ -219,6 +221,112 @@ function Initialize-HFTokenDecision {
     }
 
     return $EnvFilePath
+}
+
+function Update-ComposeUVCacheMode {
+    param(
+        [string]$ComposeFilePath,
+        [ValidateSet("enabled", "skipped")]
+        [string]$Decision
+    )
+
+    if (-not (Test-Path $ComposeFilePath)) {
+        return
+    }
+
+    $cacheDir = if ($Decision -eq "enabled") { "/runtime-cache" } else { "/tmp/uv-cache" }
+    $content = Get-Content -Path $ComposeFilePath -Raw
+
+    $content = [regex]::Replace(
+        $content,
+        '(?m)^(\s*-\s*BOOTSTRAP_CACHE_DIR=).*$',
+        "`$1$cacheDir"
+    )
+
+    if ($Decision -eq "enabled") {
+        if (-not [regex]::IsMatch($content, '(?m)^\s*-\s*uv-cache:/runtime-cache\b')) {
+            $runtimeMountRegex = [regex]::new('(?m)^(\s*-\s*(runtime-deps|runtime-cache):/runtime\b.*)$')
+            $content = $runtimeMountRegex.Replace(
+                $content,
+                "`$1`n      - uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates",
+                1
+            )
+        }
+
+        if (-not [regex]::IsMatch($content, '(?m)^  uv-cache:\s*$')) {
+            $runtimeNameRegex = [regex]::new('(?m)^(\s*name:\s*transcriptionsuite-runtime\s*)$')
+            $content = $runtimeNameRegex.Replace(
+                $content,
+                "`$1`n  uv-cache:`n    name: transcriptionsuite-uv-cache",
+                1
+            )
+        }
+    } else {
+        $content = [regex]::Replace(
+            $content,
+            '(?m)^\s*-\s*uv-cache:/runtime-cache\b.*\r?\n?',
+            ''
+        )
+        $content = [regex]::Replace(
+            $content,
+            '(?ms)^  uv-cache:\s*\r?\n(?:    .*\r?\n)*',
+            ''
+        )
+    }
+
+    Set-Content -Path $ComposeFilePath -Value $content
+}
+
+function Initialize-UVCacheDecision {
+    param(
+        [string]$EnvFilePath,
+        [string]$ComposeFilePath
+    )
+
+    $decision = (Get-EnvValue -EnvFilePath $EnvFilePath -Key "UV_CACHE_VOLUME_DECISION").ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($decision) -or @("unset", "enabled", "skipped") -notcontains $decision) {
+        $decision = "unset"
+        Set-EnvValue -EnvFilePath $EnvFilePath -Key "UV_CACHE_VOLUME_DECISION" -Value $decision
+    }
+
+    if ($decision -eq "unset") {
+        $cacheVolumeExists = docker volume ls --format "{{.Name}}" 2>$null | Where-Object { $_ -eq "transcriptionsuite-uv-cache" }
+        if ($cacheVolumeExists) {
+            $decision = "enabled"
+            Set-EnvValue -EnvFilePath $EnvFilePath -Key "UV_CACHE_VOLUME_DECISION" -Value $decision
+            Write-Info "Detected existing UV cache volume. Persistent cache auto-enabled."
+        } elseif (Test-IsInteractive) {
+            Write-Info "Optional setup: persistent UV cache speeds future updates."
+            Write-Info "Disk usage may grow to ~8GB."
+            Write-Info "Skipping keeps server functionality unchanged but can slow future updates."
+            while ($true) {
+                $choice = (Read-Host "Enable UV cache volume? [Y]es / [n]o / [c]ancel").Trim().ToLowerInvariant()
+                if ([string]::IsNullOrWhiteSpace($choice) -or @("y", "yes") -contains $choice) {
+                    $decision = "enabled"
+                    break
+                }
+                if (@("n", "no") -contains $choice) {
+                    $decision = "skipped"
+                    break
+                }
+                if (@("c", "cancel") -contains $choice) {
+                    Write-Info "Startup cancelled."
+                    return $false
+                }
+                Write-Info "Please answer yes, no, or cancel."
+            }
+            Set-EnvValue -EnvFilePath $EnvFilePath -Key "UV_CACHE_VOLUME_DECISION" -Value $decision
+        } else {
+            $decision = "skipped"
+            Set-EnvValue -EnvFilePath $EnvFilePath -Key "UV_CACHE_VOLUME_DECISION" -Value $decision
+            Write-Info "Non-interactive startup detected. UV cache setup marked as skipped."
+        }
+    }
+
+    $cacheDir = if ($decision -eq "enabled") { "/runtime-cache" } else { "/tmp/uv-cache" }
+    Set-EnvValue -EnvFilePath $EnvFilePath -Key "BOOTSTRAP_CACHE_DIR" -Value $cacheDir
+    Update-ComposeUVCacheMode -ComposeFilePath $ComposeFilePath -Decision $decision
+    return $true
 }
 
 # ============================================================================
@@ -254,6 +362,9 @@ $env:USER_CONFIG_DIR = $ConfigDirToMount
 
 $EnvFile = Get-ResolvedEnvFile
 $EnvFile = Initialize-HFTokenDecision -EnvFilePath $EnvFile
+if (-not (Initialize-UVCacheDecision -EnvFilePath $EnvFile -ComposeFilePath $ComposeFile)) {
+    exit 0
+}
 $EnvFileArg = @("--env-file", $EnvFile)
 
 $HostCertPath = ""

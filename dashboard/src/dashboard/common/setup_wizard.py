@@ -338,6 +338,7 @@ ENV_EXAMPLE = """# TranscriptionSuite - Environment variables
 # Leave empty if you don't need diarization.
 HUGGINGFACE_TOKEN=
 HUGGINGFACE_TOKEN_DECISION=unset
+UV_CACHE_VOLUME_DECISION=unset
 
 # Log level (optional)
 # Options: DEBUG, INFO, WARNING, ERROR
@@ -345,6 +346,10 @@ HUGGINGFACE_TOKEN_DECISION=unset
 # LOG_LEVEL=INFO
 
 # Runtime bootstrap tuning (optional)
+# Enable cache volume path (fastest updates):
+# BOOTSTRAP_CACHE_DIR=/runtime-cache
+# Skip persistent cache volume (smaller disk usage, slower updates):
+# BOOTSTRAP_CACHE_DIR=/tmp/uv-cache
 # BOOTSTRAP_FINGERPRINT_SOURCE=lockfile
 # BOOTSTRAP_REBUILD_POLICY=abi_only
 # BOOTSTRAP_LOG_CHANGES=true

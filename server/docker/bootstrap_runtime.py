@@ -132,6 +132,37 @@ def run_command(
     return result
 
 
+def run_best_effort_uv_cache_prune(
+    cache_dir: Path,
+    timeout_seconds: int,
+    env: dict[str, str],
+) -> None:
+    """Prune stale cache entries without failing bootstrap."""
+    prune_timeout = max(60, min(timeout_seconds, 600))
+    try:
+        result = subprocess.run(
+            ["uv", "cache", "prune"],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=prune_timeout,
+            check=False,
+        )
+    except Exception as exc:
+        log(f"UV cache prune failed (non-fatal): {exc}")
+        return
+
+    if result.returncode == 0:
+        log(f"UV cache prune complete ({cache_dir})")
+        return
+
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    if output:
+        log(f"UV cache prune failed (non-fatal): {output}")
+    else:
+        log("UV cache prune failed (non-fatal)")
+
+
 def load_marker(marker_file: Path) -> dict[str, Any]:
     if not marker_file.exists():
         return {}
@@ -139,8 +170,8 @@ def load_marker(marker_file: Path) -> dict[str, Any]:
         payload = json.loads(marker_file.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
             return payload
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"Marker file is unreadable; ignoring ({marker_file}): {exc}")
     return {}
 
 
@@ -240,7 +271,6 @@ def ensure_runtime_dependencies(
         arch=arch,
     )
 
-    sync_mode = "delta-sync"
     package_delta: dict[str, int] = {
         "added": 0,
         "removed": 0,
@@ -291,12 +321,9 @@ def ensure_runtime_dependencies(
         if log_changes and venv_exists:
             before_packages = collect_installed_packages(venv_python, timeout_seconds)
 
-        if not venv_exists:
-            sync_mode = "rebuild-sync"
-        elif rebuild_required:
-            sync_mode = "rebuild-sync"
-        else:
-            sync_mode = "delta-sync"
+        sync_mode = (
+            "rebuild-sync" if (not venv_exists or rebuild_required) else "delta-sync"
+        )
 
         if sync_mode == "rebuild-sync" and venv_dir.exists():
             log(
@@ -345,6 +372,12 @@ def ensure_runtime_dependencies(
                 log(f"Sample updated packages: {', '.join(samples['updated'])}")
             if samples["removed"]:
                 log(f"Sample removed packages: {', '.join(samples['removed'])}")
+
+        run_best_effort_uv_cache_prune(
+            cache_dir=cache_dir,
+            timeout_seconds=timeout_seconds,
+            env=env,
+        )
 
         write_marker(
             marker_file,

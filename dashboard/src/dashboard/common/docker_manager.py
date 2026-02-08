@@ -476,6 +476,11 @@ class DockerManager:
     HF_TOKEN_KEY = "HUGGINGFACE_TOKEN"
     HF_TOKEN_DECISION_KEY = "HUGGINGFACE_TOKEN_DECISION"
     HF_TOKEN_DECISIONS = {"unset", "provided", "skipped"}
+    UV_CACHE_DECISION_KEY = "UV_CACHE_VOLUME_DECISION"
+    UV_CACHE_DECISIONS = {"unset", "enabled", "skipped"}
+    BOOTSTRAP_CACHE_DIR_KEY = "BOOTSTRAP_CACHE_DIR"
+    UV_CACHE_PERSISTENT_DIR = "/runtime-cache"
+    UV_CACHE_EPHEMERAL_DIR = "/tmp/uv-cache"
 
     def __init__(self, config_dir: Path | None = None):
         """
@@ -708,13 +713,8 @@ class DockerManager:
 
         env_file.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
 
-    def ensure_hf_env_defaults(self) -> Path:
-        """
-        Ensure .env exists and contains HuggingFace token decision defaults.
-
-        Returns:
-            Path to the .env file.
-        """
+    def _ensure_managed_env_file(self) -> Path:
+        """Resolve and seed the managed .env file when fallback storage is needed."""
         primary_env_file = self.config_dir / ".env"
         env_file = self._get_managed_env_file_path()
 
@@ -730,6 +730,27 @@ class DockerManager:
                 primary_env_file.read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
+
+        if not env_file.exists():
+            env_file.parent.mkdir(parents=True, exist_ok=True)
+            env_file.write_text("", encoding="utf-8")
+
+        return env_file
+
+    def _default_cache_dir_for_uv_decision(self, decision: str) -> str:
+        """Map UV cache decision to bootstrap cache directory."""
+        if decision == "skipped":
+            return self.UV_CACHE_EPHEMERAL_DIR
+        return self.UV_CACHE_PERSISTENT_DIR
+
+    def ensure_hf_env_defaults(self) -> Path:
+        """
+        Ensure .env exists and contains HuggingFace token decision defaults.
+
+        Returns:
+            Path to the .env file.
+        """
+        env_file = self._ensure_managed_env_file()
 
         values = self._read_env_map(env_file)
 
@@ -747,6 +768,41 @@ class DockerManager:
             {
                 self.HF_TOKEN_KEY: token,
                 self.HF_TOKEN_DECISION_KEY: decision,
+            },
+        )
+        return env_file
+
+    def ensure_uv_cache_env_defaults(self) -> Path:
+        """
+        Ensure .env contains UV cache onboarding defaults and bootstrap cache path.
+
+        Returns:
+            Path to the .env file.
+        """
+        env_file = self._ensure_managed_env_file()
+        values = self._read_env_map(env_file)
+
+        decision = values.get(self.UV_CACHE_DECISION_KEY, "").strip().lower()
+        cache_dir = values.get(self.BOOTSTRAP_CACHE_DIR_KEY, "").strip()
+
+        if decision not in self.UV_CACHE_DECISIONS:
+            if cache_dir == self.UV_CACHE_PERSISTENT_DIR:
+                decision = "enabled"
+            elif cache_dir == self.UV_CACHE_EPHEMERAL_DIR:
+                decision = "skipped"
+            else:
+                decision = "unset"
+
+        if not cache_dir:
+            cache_dir = self._default_cache_dir_for_uv_decision(decision)
+        elif decision in {"enabled", "skipped"}:
+            cache_dir = self._default_cache_dir_for_uv_decision(decision)
+
+        self._upsert_env_values(
+            env_file,
+            {
+                self.UV_CACHE_DECISION_KEY: decision,
+                self.BOOTSTRAP_CACHE_DIR_KEY: cache_dir,
             },
         )
         return env_file
@@ -798,6 +854,66 @@ class DockerManager:
         )
         return env_file
 
+    def get_uv_cache_state(self) -> tuple[str, str, Path]:
+        """
+        Get persisted UV cache onboarding state.
+
+        Returns:
+            Tuple of (decision, bootstrap_cache_dir, env_file_path).
+        """
+        env_file = self.ensure_uv_cache_env_defaults()
+        values = self._read_env_map(env_file)
+
+        decision = values.get(self.UV_CACHE_DECISION_KEY, "unset").strip().lower()
+        if decision not in self.UV_CACHE_DECISIONS:
+            decision = "unset"
+
+        cache_dir = values.get(self.BOOTSTRAP_CACHE_DIR_KEY, "").strip()
+        if not cache_dir or decision in {"enabled", "skipped"}:
+            cache_dir = self._default_cache_dir_for_uv_decision(decision)
+
+        self._upsert_env_values(
+            env_file,
+            {
+                self.UV_CACHE_DECISION_KEY: decision,
+                self.BOOTSTRAP_CACHE_DIR_KEY: cache_dir,
+            },
+        )
+        return decision, cache_dir, env_file
+
+    def update_uv_cache_state(
+        self, decision: str, cache_dir: str | None = None
+    ) -> Path:
+        """
+        Persist UV cache onboarding state in .env.
+
+        Args:
+            decision: One of unset|enabled|skipped
+            cache_dir: Optional explicit bootstrap cache directory override
+
+        Returns:
+            Path to the .env file.
+        """
+        normalized_decision = decision.strip().lower()
+        if normalized_decision not in self.UV_CACHE_DECISIONS:
+            raise ValueError(f"Invalid UV cache decision: {decision}")
+
+        env_file = self.ensure_uv_cache_env_defaults()
+        normalized_cache_dir = (cache_dir or "").strip()
+        if not normalized_cache_dir or normalized_decision in {"enabled", "skipped"}:
+            normalized_cache_dir = self._default_cache_dir_for_uv_decision(
+                normalized_decision
+            )
+
+        self._upsert_env_values(
+            env_file,
+            {
+                self.UV_CACHE_DECISION_KEY: normalized_decision,
+                self.BOOTSTRAP_CACHE_DIR_KEY: normalized_cache_dir,
+            },
+        )
+        return env_file
+
     def _find_compose_file(self) -> Path | None:
         """Find the docker-compose.yml file."""
         compose_file = self.config_dir / "docker-compose.yml"
@@ -808,13 +924,15 @@ class DockerManager:
     def _ensure_compose_compatibility(
         self,
         compose_file: Path,
+        uv_cache_enabled: bool = True,
         progress_callback: Callable[[str], None] | None = None,
     ) -> None:
         """
         Best-effort migration for existing user docker-compose files.
 
         Ensures:
-        - uv cache mount/volume exists for runtime delta updates
+        - uv cache mount/volume reflects onboarding decision
+        - BOOTSTRAP_CACHE_DIR points at persistent or ephemeral cache path
         - healthcheck start_period is long enough for first-run model preload
         """
 
@@ -831,59 +949,173 @@ class DockerManager:
 
         lines = raw.splitlines()
         changed = False
+        desired_cache_dir = (
+            self.UV_CACHE_PERSISTENT_DIR
+            if uv_cache_enabled
+            else self.UV_CACHE_EPHEMERAL_DIR
+        )
 
-        # Ensure uv cache mount line exists under service volumes.
-        has_runtime_cache_mount = any("/runtime-cache" in line for line in lines)
-        if not has_runtime_cache_mount:
-            runtime_mount_idx = next(
+        # Ensure BOOTSTRAP_CACHE_DIR matches desired cache mode.
+        cache_line_idx = next(
+            (
+                i
+                for i, line in enumerate(lines)
+                if re.match(r"^\s*-\s*BOOTSTRAP_CACHE_DIR=", line)
+            ),
+            None,
+        )
+        if cache_line_idx is not None:
+            cache_prefix = re.match(
+                r"^(\s*-\s*BOOTSTRAP_CACHE_DIR=)",
+                lines[cache_line_idx],
+            )
+            desired_cache_line = (
+                f"{cache_prefix.group(1)}{desired_cache_dir}"
+                if cache_prefix
+                else f"      - BOOTSTRAP_CACHE_DIR={desired_cache_dir}"
+            )
+            if lines[cache_line_idx] != desired_cache_line:
+                lines[cache_line_idx] = desired_cache_line
+                changed = True
+        else:
+            runtime_dir_line_idx = next(
                 (
                     i
                     for i, line in enumerate(lines)
-                    if re.search(r"-\s*(runtime-deps|runtime-cache):/runtime\b", line)
+                    if re.match(r"^\s*-\s*BOOTSTRAP_RUNTIME_DIR=", line)
                 ),
                 None,
             )
-            if runtime_mount_idx is not None:
-                indent_match = re.match(r"^(\s*)", lines[runtime_mount_idx])
+            if runtime_dir_line_idx is not None:
+                indent_match = re.match(r"^(\s*)", lines[runtime_dir_line_idx])
                 indent = indent_match.group(1) if indent_match else "      "
                 lines.insert(
-                    runtime_mount_idx + 1,
-                    f"{indent}- uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates",
+                    runtime_dir_line_idx + 1,
+                    f"{indent}- BOOTSTRAP_CACHE_DIR={desired_cache_dir}",
                 )
                 changed = True
 
-        # Ensure uv cache named volume definition exists.
-        has_uv_cache_volume = any(
-            "transcriptionsuite-uv-cache" in line for line in lines
+        # Ensure service-level uv cache mount is present/absent based on decision.
+        service_volumes_idx = next(
+            (
+                i
+                for i, line in enumerate(lines)
+                if re.match(r"^\s{4}volumes:\s*$", line)
+            ),
+            None,
         )
-        if not has_uv_cache_volume:
-            runtime_volume_key_idx = next(
-                (
-                    i
-                    for i, line in enumerate(lines)
-                    if re.match(r"^\s*(runtime-deps|runtime-cache):\s*$", line)
-                ),
-                None,
-            )
-            if runtime_volume_key_idx is not None:
-                runtime_volume_name_idx = None
-                for i in range(runtime_volume_key_idx + 1, len(lines)):
-                    candidate = lines[i]
-                    if "name: transcriptionsuite-runtime" in candidate:
-                        runtime_volume_name_idx = i
-                        break
-                    if re.match(r"^\s*[A-Za-z0-9_.-]+:\s*$", candidate):
-                        break
+        if service_volumes_idx is not None:
+            service_start = service_volumes_idx + 1
+            service_end = len(lines)
+            for i in range(service_start, len(lines)):
+                candidate = lines[i]
+                if not candidate.strip():
+                    continue
+                indent = len(candidate) - len(candidate.lstrip(" "))
+                if indent <= 4:
+                    service_end = i
+                    break
 
-                if runtime_volume_name_idx is not None:
-                    indent_match = re.match(r"^(\s*)", lines[runtime_volume_key_idx])
-                    indent = indent_match.group(1) if indent_match else "  "
-                    lines.insert(runtime_volume_name_idx + 1, f"{indent}uv-cache:")
-                    lines.insert(
-                        runtime_volume_name_idx + 2,
-                        f"{indent}  name: transcriptionsuite-uv-cache",
+            uv_mount_indices = [
+                i
+                for i in range(service_start, service_end)
+                if re.match(r"^\s*-\s*uv-cache:/runtime-cache\b", lines[i])
+            ]
+            if uv_cache_enabled:
+                desired_mount_line = "      - uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates"
+                if uv_mount_indices:
+                    first_uv_idx = uv_mount_indices[0]
+                    if lines[first_uv_idx] != desired_mount_line:
+                        lines[first_uv_idx] = desired_mount_line
+                        changed = True
+                    for idx in reversed(uv_mount_indices[1:]):
+                        del lines[idx]
+                        changed = True
+                else:
+                    runtime_mount_idx = next(
+                        (
+                            i
+                            for i in range(service_start, service_end)
+                            if re.search(
+                                r"-\s*(runtime-deps|runtime-cache):/runtime\b",
+                                lines[i],
+                            )
+                        ),
+                        None,
                     )
+                    insert_at = (
+                        runtime_mount_idx + 1
+                        if runtime_mount_idx is not None
+                        else service_end
+                    )
+                    lines.insert(insert_at, desired_mount_line)
                     changed = True
+            else:
+                for idx in reversed(uv_mount_indices):
+                    del lines[idx]
+                    changed = True
+
+        # Ensure named uv-cache volume definition is present/absent based on decision.
+        root_volumes_idx = next(
+            (i for i, line in enumerate(lines) if re.match(r"^volumes:\s*$", line)),
+            None,
+        )
+        if root_volumes_idx is not None:
+            root_start = root_volumes_idx + 1
+
+            def find_uv_volume_key_index() -> int | None:
+                for i in range(root_start, len(lines)):
+                    if re.match(r"^\s{2}uv-cache:\s*$", lines[i]):
+                        return i
+                return None
+
+            if uv_cache_enabled:
+                uv_key_idx = find_uv_volume_key_index()
+                if uv_key_idx is None:
+                    runtime_name_idx = next(
+                        (
+                            i
+                            for i in range(root_start, len(lines))
+                            if "name: transcriptionsuite-runtime" in lines[i]
+                        ),
+                        None,
+                    )
+                    insert_at = len(lines)
+                    if runtime_name_idx is not None:
+                        insert_at = runtime_name_idx + 1
+                    lines.insert(insert_at, "  uv-cache:")
+                    lines.insert(insert_at + 1, f"    name: {self.UV_CACHE_VOLUME}")
+                    changed = True
+                else:
+                    desired_name_line = f"    name: {self.UV_CACHE_VOLUME}"
+                    name_line_idx = uv_key_idx + 1
+                    if name_line_idx >= len(lines) or not re.match(
+                        r"^\s{4}name:\s*", lines[name_line_idx]
+                    ):
+                        lines.insert(name_line_idx, desired_name_line)
+                        changed = True
+                    elif lines[name_line_idx] != desired_name_line:
+                        lines[name_line_idx] = desired_name_line
+                        changed = True
+            else:
+                while True:
+                    uv_key_idx = find_uv_volume_key_index()
+                    if uv_key_idx is None:
+                        break
+                    del lines[uv_key_idx]
+                    changed = True
+                    while uv_key_idx < len(lines):
+                        candidate = lines[uv_key_idx]
+                        if not candidate.strip():
+                            del lines[uv_key_idx]
+                            changed = True
+                            continue
+                        if re.match(r"^\s{2}[A-Za-z0-9_.-]+:\s*$", candidate):
+                            break
+                        if re.match(r"^[A-Za-z0-9_.-]+:\s*$", candidate):
+                            break
+                        del lines[uv_key_idx]
+                        changed = True
 
         # Increase start period to avoid false "unhealthy" during first-run preload.
         for i, line in enumerate(lines):
@@ -903,9 +1135,7 @@ class DockerManager:
 
         try:
             compose_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-            log(
-                "Updated docker-compose.yml for runtime cache and startup healthcheck compatibility."
-            )
+            log("Updated docker-compose.yml compatibility settings.")
         except Exception as e:
             logger.warning(f"Could not update compose file compatibility settings: {e}")
 
@@ -1550,17 +1780,12 @@ class DockerManager:
     def remove_runtime_dependencies(
         self,
         progress_callback: Callable[[str], None] | None = None,
-        also_remove_cache: bool = False,
     ) -> DockerResult:
         """
-        Remove runtime dependency volumes.
-
-        By default only removes the runtime venv volume and keeps uv cache to
-        accelerate re-bootstrap. Optionally removes cache as well.
+        Remove the runtime dependency volume.
 
         Args:
             progress_callback: Optional callback for progress messages
-            also_remove_cache: If True, remove uv cache volume too
 
         Returns:
             DockerResult with success status and message
@@ -1578,14 +1803,12 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        messages: list[str] = []
-
         log(f"Removing runtime volume {self.RUNTIME_VOLUME}...")
         runtime_result = self._run_command(
             ["docker", "volume", "rm", self.RUNTIME_VOLUME]
         )
         if runtime_result.returncode == 0:
-            messages.append("Runtime dependency volume removed successfully.")
+            return DockerResult(True, "Runtime dependency volume removed successfully.")
         else:
             runtime_err = (
                 runtime_result.stderr.strip()
@@ -1593,39 +1816,49 @@ class DockerManager:
                 else "Unknown error"
             )
             if "No such volume" in runtime_err or "not found" in runtime_err.lower():
-                messages.append("Runtime dependency volume does not exist.")
+                return DockerResult(True, "Runtime dependency volume does not exist.")
             else:
                 return DockerResult(
                     False,
                     f"Failed to remove runtime dependency volume: {runtime_err}",
                 )
 
-        if also_remove_cache:
-            log(f"Removing cache volume {self.UV_CACHE_VOLUME}...")
-            cache_result = self._run_command(
-                ["docker", "volume", "rm", self.UV_CACHE_VOLUME]
-            )
-            if cache_result.returncode == 0:
-                messages.append("Package cache volume removed successfully.")
-            else:
-                cache_err = (
-                    cache_result.stderr.strip()
-                    if cache_result.stderr
-                    else "Unknown error"
-                )
-                if "No such volume" in cache_err or "not found" in cache_err.lower():
-                    messages.append("Package cache volume does not exist.")
-                else:
-                    return DockerResult(
-                        False,
-                        f"Failed to remove package cache volume: {cache_err}",
-                    )
-        else:
-            messages.append(
-                "Package cache volume kept to speed up the next dependency bootstrap."
+    def remove_uv_cache_volume(
+        self,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> DockerResult:
+        """
+        Remove the UV cache volume used for faster dependency updates.
+
+        Args:
+            progress_callback: Optional callback for progress messages
+
+        Returns:
+            DockerResult with success status and message
+        """
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        status = self.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            return DockerResult(
+                False,
+                "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        return DockerResult(True, " ".join(messages))
+        log(f"Removing UV cache volume {self.UV_CACHE_VOLUME}...")
+        result = self._run_command(["docker", "volume", "rm", self.UV_CACHE_VOLUME])
+
+        if result.returncode == 0:
+            return DockerResult(True, "UV cache volume removed successfully.")
+
+        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+        if "No such volume" in error_msg or "not found" in error_msg.lower():
+            return DockerResult(True, "UV cache volume does not exist.")
+        return DockerResult(False, f"Failed to remove UV cache volume: {error_msg}")
 
     def start_server(
         self,
@@ -1663,14 +1896,18 @@ class DockerManager:
                 False,
                 f"docker-compose.yml not found in {self.config_dir}. Run setup first.",
             )
+
+        env_file = self.ensure_hf_env_defaults()
+        self.ensure_uv_cache_env_defaults()
+        uv_cache_decision, _, _ = self.get_uv_cache_state()
         self._ensure_compose_compatibility(
             compose_file,
+            uv_cache_enabled=(uv_cache_decision != "skipped"),
             progress_callback=progress_callback,
         )
 
         # Find config and env files
         config_file = self._find_config_file()
-        env_file = self.ensure_hf_env_defaults()
 
         # Build environment variables
         env = {}
@@ -1833,14 +2070,18 @@ class DockerManager:
                 False,
                 f"docker-compose.yml not found in {self.config_dir}. Run setup first.",
             )
+
+        env_file = self.ensure_hf_env_defaults()
+        self.ensure_uv_cache_env_defaults()
+        uv_cache_decision, _, _ = self.get_uv_cache_state()
         self._ensure_compose_compatibility(
             compose_file,
+            uv_cache_enabled=(uv_cache_decision != "skipped"),
             progress_callback=progress_callback,
         )
 
         # Find config and env files
         config_file = self._find_config_file()
-        env_file = self.ensure_hf_env_defaults()
 
         # Build environment variables
         env = {}

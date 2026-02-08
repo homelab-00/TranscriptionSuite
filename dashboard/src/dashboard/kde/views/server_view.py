@@ -289,6 +289,15 @@ def create_server_view(dashboard) -> QWidget:
     )
     volumes_col_layout.addWidget(dashboard._reset_runtime_volume_btn)
 
+    dashboard._remove_uv_cache_volume_btn = QPushButton("Remove UV Cache")
+    dashboard._remove_uv_cache_volume_btn.setObjectName("dangerButton")
+    dashboard._remove_uv_cache_volume_btn.setMinimumWidth(140)
+    dashboard._remove_uv_cache_volume_btn.clicked.connect(
+        dashboard._on_remove_uv_cache_volume
+    )
+    volumes_col_layout.addWidget(dashboard._remove_uv_cache_volume_btn)
+    volumes_col_layout.addStretch()
+
     mgmt_grid.addWidget(volumes_col)
     mgmt_grid.addStretch()
 
