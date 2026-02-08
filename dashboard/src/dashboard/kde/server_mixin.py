@@ -1005,8 +1005,8 @@ class DashboardServerControlMixin:
             return
 
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Reset Runtime Dependencies")
-        msg_box.setText("Reset runtime Python dependencies?")
+        msg_box.setWindowTitle("Remove Runtime Volume")
+        msg_box.setText("Remove runtime Python dependencies?")
         msg_box.setInformativeText(
             "This removes the runtime virtual environment volume.\n"
             "On next start, dependencies will be re-synced using delta updates.\n\n"

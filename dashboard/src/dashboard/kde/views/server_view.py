@@ -249,6 +249,7 @@ def create_server_view(dashboard) -> QWidget:
     dashboard._pull_cancel_btn.clicked.connect(dashboard._on_cancel_pull)
     dashboard._pull_cancel_btn.setVisible(False)
     image_col_layout.addWidget(dashboard._pull_cancel_btn)
+    image_col_layout.addStretch()
 
     mgmt_grid.addWidget(image_col)
 
@@ -280,8 +281,8 @@ def create_server_view(dashboard) -> QWidget:
     )
     volumes_col_layout.addWidget(dashboard._remove_models_volume_btn)
 
-    dashboard._reset_runtime_volume_btn = QPushButton("Reset Runtime Deps")
-    dashboard._reset_runtime_volume_btn.setObjectName("secondaryButton")
+    dashboard._reset_runtime_volume_btn = QPushButton("Remove Runtime")
+    dashboard._reset_runtime_volume_btn.setObjectName("dangerButton")
     dashboard._reset_runtime_volume_btn.setMinimumWidth(140)
     dashboard._reset_runtime_volume_btn.clicked.connect(
         dashboard._on_reset_runtime_dependencies

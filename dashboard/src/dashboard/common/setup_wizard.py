@@ -211,7 +211,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 600s
 
 volumes:
   transcription-data:
@@ -309,7 +309,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 600s
 
 volumes:
   transcription-data:

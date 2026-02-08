@@ -805,6 +805,110 @@ class DockerManager:
             return compose_file
         return None
 
+    def _ensure_compose_compatibility(
+        self,
+        compose_file: Path,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> None:
+        """
+        Best-effort migration for existing user docker-compose files.
+
+        Ensures:
+        - uv cache mount/volume exists for runtime delta updates
+        - healthcheck start_period is long enough for first-run model preload
+        """
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        try:
+            raw = compose_file.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Could not read compose file for compatibility check: {e}")
+            return
+
+        lines = raw.splitlines()
+        changed = False
+
+        # Ensure uv cache mount line exists under service volumes.
+        has_runtime_cache_mount = any("/runtime-cache" in line for line in lines)
+        if not has_runtime_cache_mount:
+            runtime_mount_idx = next(
+                (
+                    i
+                    for i, line in enumerate(lines)
+                    if re.search(r"-\s*(runtime-deps|runtime-cache):/runtime\b", line)
+                ),
+                None,
+            )
+            if runtime_mount_idx is not None:
+                indent_match = re.match(r"^(\s*)", lines[runtime_mount_idx])
+                indent = indent_match.group(1) if indent_match else "      "
+                lines.insert(
+                    runtime_mount_idx + 1,
+                    f"{indent}- uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates",
+                )
+                changed = True
+
+        # Ensure uv cache named volume definition exists.
+        has_uv_cache_volume = any(
+            "transcriptionsuite-uv-cache" in line for line in lines
+        )
+        if not has_uv_cache_volume:
+            runtime_volume_key_idx = next(
+                (
+                    i
+                    for i, line in enumerate(lines)
+                    if re.match(r"^\s*(runtime-deps|runtime-cache):\s*$", line)
+                ),
+                None,
+            )
+            if runtime_volume_key_idx is not None:
+                runtime_volume_name_idx = None
+                for i in range(runtime_volume_key_idx + 1, len(lines)):
+                    candidate = lines[i]
+                    if "name: transcriptionsuite-runtime" in candidate:
+                        runtime_volume_name_idx = i
+                        break
+                    if re.match(r"^\s*[A-Za-z0-9_.-]+:\s*$", candidate):
+                        break
+
+                if runtime_volume_name_idx is not None:
+                    indent_match = re.match(r"^(\s*)", lines[runtime_volume_key_idx])
+                    indent = indent_match.group(1) if indent_match else "  "
+                    lines.insert(runtime_volume_name_idx + 1, f"{indent}uv-cache:")
+                    lines.insert(
+                        runtime_volume_name_idx + 2,
+                        f"{indent}  name: transcriptionsuite-uv-cache",
+                    )
+                    changed = True
+
+        # Increase start period to avoid false "unhealthy" during first-run preload.
+        for i, line in enumerate(lines):
+            match = re.match(r"^(\s*start_period:\s*)(\d+)s\s*$", line)
+            if not match:
+                continue
+            try:
+                current_seconds = int(match.group(2))
+            except ValueError:
+                continue
+            if current_seconds < 600:
+                lines[i] = f"{match.group(1)}600s"
+                changed = True
+
+        if not changed:
+            return
+
+        try:
+            compose_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            log(
+                "Updated docker-compose.yml for runtime cache and startup healthcheck compatibility."
+            )
+        except Exception as e:
+            logger.warning(f"Could not update compose file compatibility settings: {e}")
+
     def _get_container_user_config_dir(self) -> Path:
         """
         Get bind-mount directory for /user-config used by the container.
@@ -1559,6 +1663,10 @@ class DockerManager:
                 False,
                 f"docker-compose.yml not found in {self.config_dir}. Run setup first.",
             )
+        self._ensure_compose_compatibility(
+            compose_file,
+            progress_callback=progress_callback,
+        )
 
         # Find config and env files
         config_file = self._find_config_file()
@@ -1725,6 +1833,10 @@ class DockerManager:
                 False,
                 f"docker-compose.yml not found in {self.config_dir}. Run setup first.",
             )
+        self._ensure_compose_compatibility(
+            compose_file,
+            progress_callback=progress_callback,
+        )
 
         # Find config and env files
         config_file = self._find_config_file()
