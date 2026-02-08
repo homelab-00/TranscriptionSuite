@@ -176,9 +176,13 @@ services:
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
       - BOOTSTRAP_RUNTIME_DIR=/runtime
+      - BOOTSTRAP_CACHE_DIR=/runtime-cache
       - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
       - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
       - BOOTSTRAP_REQUIRE_HF_TOKEN=false
+      - BOOTSTRAP_FINGERPRINT_SOURCE=${BOOTSTRAP_FINGERPRINT_SOURCE:-lockfile}
+      - BOOTSTRAP_REBUILD_POLICY=${BOOTSTRAP_REBUILD_POLICY:-abi_only}
+      - BOOTSTRAP_LOG_CHANGES=${BOOTSTRAP_LOG_CHANGES:-true}
       # LM Studio URL for chat features (localhost works with host network mode)
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
       # TLS settings for remote access (optional)
@@ -190,7 +194,8 @@ services:
     volumes:
       - transcription-data:/data  # Database, audio files, tokens, logs
       - huggingface-models:/models  # Whisper and diarization models cache
-      - runtime-cache:/runtime  # First-run Python dependency environment
+      - runtime-deps:/runtime  # Runtime virtualenv and bootstrap marker state
+      - uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates
       # User config directory (optional - for custom config.yaml and logs)
       - ${USER_CONFIG_DIR:-./.empty}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
@@ -213,8 +218,10 @@ volumes:
     name: transcriptionsuite-data
   huggingface-models:
     name: transcriptionsuite-models
-  runtime-cache:
+  runtime-deps:
     name: transcriptionsuite-runtime
+  uv-cache:
+    name: transcriptionsuite-uv-cache
 """
 
 DOCKER_COMPOSE_WINDOWS = """# TranscriptionSuite Docker Compose Configuration
@@ -266,9 +273,13 @@ services:
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
       - BOOTSTRAP_RUNTIME_DIR=/runtime
+      - BOOTSTRAP_CACHE_DIR=/runtime-cache
       - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
       - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
       - BOOTSTRAP_REQUIRE_HF_TOKEN=false
+      - BOOTSTRAP_FINGERPRINT_SOURCE=${BOOTSTRAP_FINGERPRINT_SOURCE:-lockfile}
+      - BOOTSTRAP_REBUILD_POLICY=${BOOTSTRAP_REBUILD_POLICY:-abi_only}
+      - BOOTSTRAP_LOG_CHANGES=${BOOTSTRAP_LOG_CHANGES:-true}
       # LM Studio URL for chat features
       # NOTE: On Windows, use host.docker.internal to reach host services
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}
@@ -281,7 +292,8 @@ services:
     volumes:
       - transcription-data:/data  # Database, audio files, tokens, logs
       - huggingface-models:/models  # Whisper and diarization models cache
-      - runtime-cache:/runtime  # First-run Python dependency environment
+      - runtime-deps:/runtime  # Runtime virtualenv and bootstrap marker state
+      - uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates
       # User config directory (optional - for custom config.yaml and logs)
       - ${USER_CONFIG_DIR:-./.empty}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
@@ -304,8 +316,10 @@ volumes:
     name: transcriptionsuite-data
   huggingface-models:
     name: transcriptionsuite-models
-  runtime-cache:
+  runtime-deps:
     name: transcriptionsuite-runtime
+  uv-cache:
+    name: transcriptionsuite-uv-cache
 """
 
 ENV_EXAMPLE = """# TranscriptionSuite - Environment variables
@@ -329,6 +343,11 @@ HUGGINGFACE_TOKEN_DECISION=unset
 # Options: DEBUG, INFO, WARNING, ERROR
 # Default: INFO
 # LOG_LEVEL=INFO
+
+# Runtime bootstrap tuning (optional)
+# BOOTSTRAP_FINGERPRINT_SOURCE=lockfile
+# BOOTSTRAP_REBUILD_POLICY=abi_only
+# BOOTSTRAP_LOG_CHANGES=true
 """
 
 # GitHub raw URL for downloading config.yaml

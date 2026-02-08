@@ -164,6 +164,7 @@ class DashboardServerControlMixin:
         self._pull_image_btn.setEnabled(True)  # Can always pull
         self._remove_data_volume_btn.setEnabled(not is_running)
         self._remove_models_volume_btn.setEnabled(not is_running)
+        self._reset_runtime_volume_btn.setEnabled(not is_running)
 
         if self._server_health_timer:
             if status != ServerStatus.RUNNING or health in (None, "healthy"):
@@ -175,17 +176,25 @@ class DashboardServerControlMixin:
 
         # Update volumes status
         data_volume_exists = self._docker_manager.volume_exists(
-            "transcriptionsuite-data"
+            self._docker_manager.DATA_VOLUME
         )
         models_volume_exists = self._docker_manager.volume_exists(
-            "transcriptionsuite-models"
+            self._docker_manager.MODELS_VOLUME
+        )
+        runtime_volume_exists = self._docker_manager.volume_exists(
+            self._docker_manager.RUNTIME_VOLUME
+        )
+        uv_cache_volume_exists = self._docker_manager.volume_exists(
+            self._docker_manager.UV_CACHE_VOLUME
         )
 
         if data_volume_exists:
             self._data_volume_status.setText("✓ Exists")
             self._data_volume_status.setStyleSheet("color: #4caf50;")  # success
             # Get volume size
-            size = self._docker_manager.get_volume_size("transcriptionsuite-data")
+            size = self._docker_manager.get_volume_size(
+                self._docker_manager.DATA_VOLUME
+            )
             if size:
                 self._data_volume_size.setText(f"({size})")
             else:
@@ -199,7 +208,9 @@ class DashboardServerControlMixin:
             self._models_volume_status.setText("✓ Exists")
             self._models_volume_status.setStyleSheet("color: #4caf50;")  # success
             # Get volume size
-            size = self._docker_manager.get_volume_size("transcriptionsuite-models")
+            size = self._docker_manager.get_volume_size(
+                self._docker_manager.MODELS_VOLUME
+            )
             if size:
                 self._models_volume_size.setText(f"({size})")
             else:
@@ -224,6 +235,36 @@ class DashboardServerControlMixin:
             self._models_volume_status.setStyleSheet("color: #6c757d;")
             self._models_volume_size.setText("")
             self._models_list_label.setVisible(False)
+
+        if runtime_volume_exists:
+            self._runtime_volume_status.setText("✓ Exists")
+            self._runtime_volume_status.setStyleSheet("color: #4caf50;")
+            size = self._docker_manager.get_volume_size(
+                self._docker_manager.RUNTIME_VOLUME
+            )
+            if size:
+                self._runtime_volume_size.setText(f"({size})")
+            else:
+                self._runtime_volume_size.setText("")
+        else:
+            self._runtime_volume_status.setText("✗ Not found")
+            self._runtime_volume_status.setStyleSheet("color: #6c757d;")
+            self._runtime_volume_size.setText("")
+
+        if uv_cache_volume_exists:
+            self._uv_cache_volume_status.setText("✓ Exists")
+            self._uv_cache_volume_status.setStyleSheet("color: #4caf50;")
+            size = self._docker_manager.get_volume_size(
+                self._docker_manager.UV_CACHE_VOLUME
+            )
+            if size:
+                self._uv_cache_volume_size.setText(f"({size})")
+            else:
+                self._uv_cache_volume_size.setText("")
+        else:
+            self._uv_cache_volume_status.setText("✗ Not found")
+            self._uv_cache_volume_status.setStyleSheet("color: #6c757d;")
+            self._uv_cache_volume_size.setText("")
 
     # =========================================================================
     # Model Selection
@@ -734,8 +775,8 @@ class DashboardServerControlMixin:
         msg_box.setWindowTitle("Fetch Fresh Image")
         msg_box.setText("Pull a fresh copy of the Docker image?")
         msg_box.setInformativeText(
-            "This will download the latest server image (~17GB). "
-            "This may take several minutes to hours depending on your connection speed.\n\n"
+            "This will download the latest server image (typically around 1GB).\n"
+            "Runtime dependencies stay in Docker volumes and are reused when compatible.\n\n"
             "The download runs in the background - you can continue using the app."
         )
         msg_box.setStandardButtons(
@@ -939,6 +980,66 @@ class DashboardServerControlMixin:
                 self._server_log_view.appendPlainText(msg)
 
         result = self._docker_manager.remove_models_volume(progress_callback=progress)
+
+        if result.success:
+            progress(result.message)
+        else:
+            progress(f"Error: {result.message}")
+
+        QTimer.singleShot(1000, self._refresh_server_status)
+
+    def _on_reset_runtime_dependencies(self) -> None:
+        """Reset runtime dependency volume while optionally keeping package cache."""
+        status = self._docker_manager.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cannot Reset Runtime")
+            msg_box.setText("Container must be removed first")
+            msg_box.setInformativeText(
+                "Docker volumes cannot be removed while the container exists.\n\n"
+                "Please remove the container first, then try again."
+            )
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.exec()
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Reset Runtime Dependencies")
+        msg_box.setText("Reset runtime Python dependencies?")
+        msg_box.setInformativeText(
+            "This removes the runtime virtual environment volume.\n"
+            "On next start, dependencies will be re-synced using delta updates.\n\n"
+            "Keep package cache enabled for faster reinstall (recommended)."
+        )
+
+        clear_cache_checkbox = AppleSwitch("Also remove package cache volume")
+        clear_cache_checkbox.setToolTip(
+            "If enabled, transcriptionsuite-uv-cache is removed too.\n"
+            "Next bootstrap may require larger downloads."
+        )
+        msg_box.setCheckBox(clear_cache_checkbox)
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.No)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+
+        if msg_box.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        also_remove_cache = clear_cache_checkbox.isChecked()
+        self._reset_runtime_volume_btn.setEnabled(False)
+
+        def progress(msg: str) -> None:
+            logger.info(msg)
+            if self._show_server_logs_btn.isChecked():
+                self._server_log_view.appendPlainText(msg)
+
+        result = self._docker_manager.remove_runtime_dependencies(
+            progress_callback=progress,
+            also_remove_cache=also_remove_cache,
+        )
 
         if result.success:
             progress(result.message)

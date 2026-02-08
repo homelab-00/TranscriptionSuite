@@ -13,8 +13,10 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
+import sysconfig
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,10 @@ USER_CONFIG_FILE = Path("/user-config/config.yaml")
 
 DEFAULT_MAIN_MODEL = "Systran/faster-whisper-large-v3"
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+
+BOOTSTRAP_SCHEMA_VERSION = 2
+FINGERPRINT_SOURCES = {"lockfile", "legacy"}
+REBUILD_POLICIES = {"abi_only", "always", "never"}
 
 
 def log(message: str) -> None:
@@ -51,19 +57,65 @@ def parse_int_env(name: str, default: int) -> int:
         return default
 
 
-def compute_dependency_fingerprint() -> str:
-    hasher = hashlib.sha256()
-    hasher.update(f"python={sys.version}".encode("utf-8"))
-    hasher.update(f"machine={platform.machine()}".encode("utf-8"))
-    for path in (PYPROJECT_FILE, LOCK_FILE):
-        if not path.exists():
-            continue
-        hasher.update(path.name.encode("utf-8"))
+def parse_choice_env(name: str, default: str, choices: set[str]) -> str:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in choices:
+        return value
+    log(
+        f"Invalid value for {name}: {raw!r}. Using default {default!r}. "
+        f"Allowed values: {', '.join(sorted(choices))}"
+    )
+    return default
+
+
+def python_abi_tag() -> str:
+    soabi = sysconfig.get_config_var("SOABI")
+    if soabi:
+        return str(soabi)
+    cache_tag = getattr(sys.implementation, "cache_tag", None)
+    if cache_tag:
+        return str(cache_tag)
+    return f"py{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def update_hash_with_file(hasher: Any, label: str, path: Path) -> None:
+    hasher.update(f"{label}:".encode("utf-8"))
+    hasher.update(path.name.encode("utf-8"))
+    if path.exists():
         hasher.update(path.read_bytes())
+    else:
+        hasher.update(b"<missing>")
+
+
+def compute_dependency_fingerprint(
+    fingerprint_source: str,
+    python_abi: str,
+    arch: str,
+) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode("utf-8"))
+    hasher.update(f"source={fingerprint_source}".encode("utf-8"))
+    hasher.update(f"abi={python_abi}".encode("utf-8"))
+    hasher.update(f"arch={arch}".encode("utf-8"))
+
+    # Recommended mode: lockfile-only (dependency-resolving source of truth).
+    update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
+
+    # Backward-compatible mode for legacy behavior.
+    if fingerprint_source == "legacy":
+        update_hash_with_file(hasher, "pyproject", PYPROJECT_FILE)
+
     return hasher.hexdigest()
 
 
-def run_command(cmd: list[str], timeout_seconds: int, env: dict[str, str]) -> None:
+def run_command(
+    cmd: list[str],
+    timeout_seconds: int,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         cmd,
         env=env,
@@ -77,31 +129,183 @@ def run_command(cmd: list[str], timeout_seconds: int, env: dict[str, str]) -> No
         raise RuntimeError(
             f"Command failed ({result.returncode}): {' '.join(cmd)}\n{output}"
         )
+    return result
 
 
-def ensure_runtime_dependencies(runtime_dir: Path, timeout_seconds: int) -> Path:
+def load_marker(marker_file: Path) -> dict[str, Any]:
+    if not marker_file.exists():
+        return {}
+    try:
+        payload = json.loads(marker_file.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {}
+
+
+def collect_installed_packages(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> dict[str, str]:
+    if not venv_python.exists():
+        return {}
+
+    inspector = r"""
+import importlib.metadata as md
+import json
+
+packages = {}
+for dist in md.distributions():
+    name = (dist.metadata.get("Name") or dist.name or "").strip()
+    if not name:
+        continue
+    packages[name.lower()] = dist.version
+
+print(json.dumps(packages, sort_keys=True))
+"""
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", inspector],
+            text=True,
+            capture_output=True,
+            timeout=max(30, min(timeout_seconds, 300)),
+            check=False,
+        )
+        if result.returncode != 0:
+            return {}
+        output = (result.stdout or "").strip().splitlines()
+        if not output:
+            return {}
+        payload = json.loads(output[-1])
+        if isinstance(payload, dict):
+            return {str(k): str(v) for k, v in payload.items()}
+    except Exception:
+        return {}
+    return {}
+
+
+def summarize_package_delta(
+    before: dict[str, str],
+    after: dict[str, str],
+) -> tuple[dict[str, int], dict[str, list[str]]]:
+    before_keys = set(before)
+    after_keys = set(after)
+
+    added = sorted(after_keys - before_keys)
+    removed = sorted(before_keys - after_keys)
+    updated = sorted(
+        key for key in (before_keys & after_keys) if before.get(key) != after.get(key)
+    )
+
+    summary = {
+        "added": len(added),
+        "removed": len(removed),
+        "updated": len(updated),
+        "before_count": len(before),
+        "after_count": len(after),
+    }
+    samples = {
+        "added": added[:10],
+        "removed": removed[:10],
+        "updated": updated[:10],
+    }
+    return summary, samples
+
+
+def write_marker(marker_file: Path, payload: dict[str, Any]) -> None:
+    marker_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def ensure_runtime_dependencies(
+    runtime_dir: Path,
+    cache_dir: Path,
+    timeout_seconds: int,
+    fingerprint_source: str,
+    rebuild_policy: str,
+    log_changes: bool,
+) -> tuple[Path, str, dict[str, int]]:
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    venv_dir = runtime_dir / ".venv"
-    cache_dir = runtime_dir / ".uv-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    venv_dir = runtime_dir / ".venv"
     marker_file = runtime_dir / ".runtime-bootstrap-marker.json"
     lock_file = runtime_dir / ".runtime-bootstrap.lock"
-    fingerprint = compute_dependency_fingerprint()
+
+    python_abi = python_abi_tag()
+    arch = platform.machine()
+    fingerprint = compute_dependency_fingerprint(
+        fingerprint_source=fingerprint_source,
+        python_abi=python_abi,
+        arch=arch,
+    )
+
+    sync_mode = "delta-sync"
+    package_delta: dict[str, int] = {
+        "added": 0,
+        "removed": 0,
+        "updated": 0,
+        "before_count": 0,
+        "after_count": 0,
+    }
 
     with lock_file.open("w", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
 
-        if marker_file.exists() and venv_dir.joinpath("bin/python").exists():
-            try:
-                marker_data = json.loads(marker_file.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                marker_data = {}
-            if marker_data.get("fingerprint") == fingerprint:
-                log("Runtime dependencies already up-to-date")
-                return venv_dir
+        marker_data = load_marker(marker_file)
+        venv_python = venv_dir / "bin/python"
+        venv_exists = venv_python.exists()
 
-        log("Installing Python runtime dependencies...")
+        marker_abi = str(marker_data.get("python_abi", ""))
+        marker_arch = str(marker_data.get("arch", ""))
+        marker_has_abi_info = bool(marker_abi and marker_arch)
+        abi_compatible = bool(
+            venv_exists
+            and marker_has_abi_info
+            and marker_abi == python_abi
+            and marker_arch == arch
+        )
+
+        if rebuild_policy == "always":
+            rebuild_required = True
+        elif rebuild_policy == "never":
+            rebuild_required = False
+        else:  # abi_only
+            rebuild_required = bool(
+                venv_exists and marker_has_abi_info and not abi_compatible
+            )
+
+        marker_matches = bool(
+            venv_exists
+            and marker_data.get("schema_version") == BOOTSTRAP_SCHEMA_VERSION
+            and marker_data.get("fingerprint_source") == fingerprint_source
+            and marker_data.get("fingerprint") == fingerprint
+            and not rebuild_required
+        )
+
+        if marker_matches:
+            log("Runtime dependencies already up-to-date (mode=skip)")
+            return venv_dir, "skip", package_delta
+
+        before_packages: dict[str, str] = {}
+        if log_changes and venv_exists:
+            before_packages = collect_installed_packages(venv_python, timeout_seconds)
+
+        if not venv_exists:
+            sync_mode = "rebuild-sync"
+        elif rebuild_required:
+            sync_mode = "rebuild-sync"
+        else:
+            sync_mode = "delta-sync"
+
+        if sync_mode == "rebuild-sync" and venv_dir.exists():
+            log(
+                "Rebuilding runtime virtual environment "
+                f"(policy={rebuild_policy}, abi_compatible={abi_compatible})"
+            )
+            shutil.rmtree(venv_dir, ignore_errors=True)
+
+        log(f"Installing Python runtime dependencies (mode={sync_mode})...")
         env = os.environ.copy()
         env["UV_PROJECT_ENVIRONMENT"] = str(venv_dir)
         env["UV_CACHE_DIR"] = str(cache_dir)
@@ -120,20 +324,46 @@ def ensure_runtime_dependencies(runtime_dir: Path, timeout_seconds: int) -> Path
             env=env,
         )
 
-        marker_file.write_text(
-            json.dumps(
-                {
-                    "fingerprint": fingerprint,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                },
-                indent=2,
+        venv_python = venv_dir / "bin/python"
+        if not venv_python.exists():
+            raise RuntimeError("Runtime Python not found after dependency sync")
+
+        if log_changes:
+            after_packages = collect_installed_packages(venv_python, timeout_seconds)
+            package_delta, samples = summarize_package_delta(
+                before_packages, after_packages
             )
-            + "\n",
-            encoding="utf-8",
+            log(
+                "Package delta: "
+                f"added={package_delta['added']} "
+                f"updated={package_delta['updated']} "
+                f"removed={package_delta['removed']}"
+            )
+            if samples["added"]:
+                log(f"Sample added packages: {', '.join(samples['added'])}")
+            if samples["updated"]:
+                log(f"Sample updated packages: {', '.join(samples['updated'])}")
+            if samples["removed"]:
+                log(f"Sample removed packages: {', '.join(samples['removed'])}")
+
+        write_marker(
+            marker_file,
+            {
+                "schema_version": BOOTSTRAP_SCHEMA_VERSION,
+                "fingerprint": fingerprint,
+                "fingerprint_source": fingerprint_source,
+                "python_abi": python_abi,
+                "arch": arch,
+                "rebuild_policy": rebuild_policy,
+                "sync_mode": sync_mode,
+                "package_delta": package_delta,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
         )
+
         log("Runtime dependencies installed")
 
-    return venv_dir
+    return venv_dir, sync_mode, package_delta
 
 
 def extract_config_value(content: str, section: str, key: str, default: str) -> str:
@@ -253,6 +483,7 @@ def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
 
 def main() -> int:
     runtime_dir = Path(os.environ.get("BOOTSTRAP_RUNTIME_DIR", "/runtime"))
+    cache_dir = Path(os.environ.get("BOOTSTRAP_CACHE_DIR", "/runtime-cache"))
     status_file = Path(
         os.environ.get(
             "BOOTSTRAP_STATUS_FILE",
@@ -261,6 +492,18 @@ def main() -> int:
     )
     timeout_seconds = parse_int_env("BOOTSTRAP_TIMEOUT_SECONDS", 1800)
     require_hf_token = parse_bool_env("BOOTSTRAP_REQUIRE_HF_TOKEN", False)
+    fingerprint_source = parse_choice_env(
+        "BOOTSTRAP_FINGERPRINT_SOURCE",
+        "lockfile",
+        FINGERPRINT_SOURCES,
+    )
+    rebuild_policy = parse_choice_env(
+        "BOOTSTRAP_REBUILD_POLICY",
+        "abi_only",
+        REBUILD_POLICIES,
+    )
+    log_changes = parse_bool_env("BOOTSTRAP_LOG_CHANGES", True)
+
     hf_token = (os.environ.get("HF_TOKEN") or "").strip() or None
     hf_home = os.environ.get("HF_HOME", "/models")
 
@@ -268,7 +511,16 @@ def main() -> int:
         log("HF token required by configuration but not provided")
         return 1
 
-    venv_dir = ensure_runtime_dependencies(runtime_dir, timeout_seconds)
+    venv_dir, sync_mode, package_delta = ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=timeout_seconds,
+        fingerprint_source=fingerprint_source,
+        rebuild_policy=rebuild_policy,
+        log_changes=log_changes,
+    )
+    log(f"Dependency update path: {sync_mode}")
+
     venv_python = venv_dir / "bin/python"
     if not venv_python.exists():
         log("Runtime Python not found after bootstrap")
@@ -297,6 +549,13 @@ def main() -> int:
         status_file,
         {
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "bootstrap": {
+                "schema_version": BOOTSTRAP_SCHEMA_VERSION,
+                "sync_mode": sync_mode,
+                "package_delta": package_delta,
+                "fingerprint_source": fingerprint_source,
+                "rebuild_policy": rebuild_policy,
+            },
             "features": {
                 "diarization": diarization_status,
             },

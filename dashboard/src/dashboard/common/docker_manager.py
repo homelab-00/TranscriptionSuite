@@ -467,6 +467,10 @@ class DockerManager:
 
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
     CONTAINER_NAME = "transcriptionsuite-container"
+    DATA_VOLUME = "transcriptionsuite-data"
+    MODELS_VOLUME = "transcriptionsuite-models"
+    RUNTIME_VOLUME = "transcriptionsuite-runtime"
+    UV_CACHE_VOLUME = "transcriptionsuite-uv-cache"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
     AUTH_TOKEN_FALLBACK_DIR = ".dashboard"
     HF_TOKEN_KEY = "HUGGINGFACE_TOKEN"
@@ -1335,7 +1339,7 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        volume_name = "transcriptionsuite-data"
+        volume_name = self.DATA_VOLUME
         log(f"Removing data volume {volume_name}...")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
@@ -1425,7 +1429,7 @@ class DockerManager:
                 "Container must be removed before deleting volumes. Remove the container first.",
             )
 
-        volume_name = "transcriptionsuite-models"
+        volume_name = self.MODELS_VOLUME
         log(f"Removing models volume {volume_name}...")
 
         result = self._run_command(["docker", "volume", "rm", volume_name])
@@ -1438,6 +1442,86 @@ class DockerManager:
             if "No such volume" in error_msg or "not found" in error_msg.lower():
                 return DockerResult(True, "Models volume does not exist.")
             return DockerResult(False, f"Failed to remove models volume: {error_msg}")
+
+    def remove_runtime_dependencies(
+        self,
+        progress_callback: Callable[[str], None] | None = None,
+        also_remove_cache: bool = False,
+    ) -> DockerResult:
+        """
+        Remove runtime dependency volumes.
+
+        By default only removes the runtime venv volume and keeps uv cache to
+        accelerate re-bootstrap. Optionally removes cache as well.
+
+        Args:
+            progress_callback: Optional callback for progress messages
+            also_remove_cache: If True, remove uv cache volume too
+
+        Returns:
+            DockerResult with success status and message
+        """
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        status = self.get_server_status()
+        if status != ServerStatus.NOT_FOUND:
+            return DockerResult(
+                False,
+                "Container must be removed before deleting volumes. Remove the container first.",
+            )
+
+        messages: list[str] = []
+
+        log(f"Removing runtime volume {self.RUNTIME_VOLUME}...")
+        runtime_result = self._run_command(
+            ["docker", "volume", "rm", self.RUNTIME_VOLUME]
+        )
+        if runtime_result.returncode == 0:
+            messages.append("Runtime dependency volume removed successfully.")
+        else:
+            runtime_err = (
+                runtime_result.stderr.strip()
+                if runtime_result.stderr
+                else "Unknown error"
+            )
+            if "No such volume" in runtime_err or "not found" in runtime_err.lower():
+                messages.append("Runtime dependency volume does not exist.")
+            else:
+                return DockerResult(
+                    False,
+                    f"Failed to remove runtime dependency volume: {runtime_err}",
+                )
+
+        if also_remove_cache:
+            log(f"Removing cache volume {self.UV_CACHE_VOLUME}...")
+            cache_result = self._run_command(
+                ["docker", "volume", "rm", self.UV_CACHE_VOLUME]
+            )
+            if cache_result.returncode == 0:
+                messages.append("Package cache volume removed successfully.")
+            else:
+                cache_err = (
+                    cache_result.stderr.strip()
+                    if cache_result.stderr
+                    else "Unknown error"
+                )
+                if "No such volume" in cache_err or "not found" in cache_err.lower():
+                    messages.append("Package cache volume does not exist.")
+                else:
+                    return DockerResult(
+                        False,
+                        f"Failed to remove package cache volume: {cache_err}",
+                    )
+        else:
+            messages.append(
+                "Package cache volume kept to speed up the next dependency bootstrap."
+            )
+
+        return DockerResult(True, " ".join(messages))
 
     def start_server(
         self,

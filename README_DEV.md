@@ -34,6 +34,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
   - [6.3 Docker Volume Structure](#63-docker-volume-structure)
   - [6.4 Docker Image Selection](#64-docker-image-selection)
+  - [6.5 Server Update Lifecycle](#65-server-update-lifecycle)
 - [7. API Reference](#7-api-reference)
   - [7.1 API Endpoints](#71-api-endpoints)
   - [7.2 WebSocket Protocol](#72-websocket-protocol)
@@ -264,7 +265,7 @@ TranscriptionSuite/
 │
 ├── server/                       # Server source code
 │   ├── docker/                   # Docker infrastructure
-│   │   ├── Dockerfile            # Multi-stage build
+│   │   ├── Dockerfile            # Runtime-bootstrap image (small base + first-run sync)
 │   │   ├── docker-compose.yml    # Container orchestration
 │   │   └── entrypoint.py         # Container entrypoint
 │   ├── backend/                  # FastAPI backend
@@ -317,8 +318,9 @@ docker compose build
 ```
 
 **What happens:**
-1. Python builder stage: Installs server dependencies
-2. Python runtime stage: Sets up minimal runtime environment
+1. Builds a small server image with app code and bootstrap tooling
+2. Defers Python dependency install to first startup (`bootstrap_runtime.py`)
+3. Stores runtime venv in `transcriptionsuite-runtime` and uv cache in `transcriptionsuite-uv-cache`
 
 **Build with specific tag:**
 To build an image with a specific tag (instead of default `latest`):
@@ -558,6 +560,20 @@ docker compose up -d
 |------|-------------|
 | `/models/hub/` | HuggingFace models cache (Whisper, PyAnnote) |
 
+**`transcriptionsuite-runtime`** (mounted to `/runtime`):
+
+| Path | Description |
+|------|-------------|
+| `/runtime/.venv/` | Runtime Python virtualenv used by the server |
+| `/runtime/.runtime-bootstrap-marker.json` | Fingerprint + sync metadata |
+| `/runtime/bootstrap-status.json` | Bootstrap feature status (diarization availability, etc.) |
+
+**`transcriptionsuite-uv-cache`** (mounted to `/runtime-cache`):
+
+| Path | Description |
+|------|-------------|
+| `/runtime-cache/` | uv package cache used for delta dependency updates |
+
 **Optional user config** (bind mount to `/user-config`):
 
 When `USER_CONFIG_DIR` is set, mounts custom config and logs.
@@ -572,6 +588,8 @@ The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcription
 - Each image entry shows: tag, build date, and size
 - The "Most Recent (auto)" option (default) picks the newest image by build date
 - If no local images exist, the system falls back to pulling `:latest` from the registry
+- Runtime dependency volumes are preserved across normal image updates
+- Dependency refresh uses `uv sync` against existing runtime venv (delta update path)
 
 **Using specific versions:**
 ```bash
@@ -593,6 +611,66 @@ TAG=my-custom docker compose up -d
 ```
 
 **Note:** The `TAG` environment variable is the only way to override which image version is used. If you have multiple local images with different tags, you must explicitly specify which one via `TAG=...` or it defaults to looking for the `latest` tag.
+
+### 6.5 Server Update Lifecycle
+
+This section describes exactly what updates when the Docker image changes versus when runtime dependency volumes change.
+
+**At server start (`docker compose up -d`)**
+1. Docker starts/recreates the container from the selected image tag.
+2. `docker-entrypoint.sh` runs `bootstrap_runtime.py`.
+3. Bootstrap checks `/runtime/.runtime-bootstrap-marker.json` against current dependency fingerprint (`uv.lock` + Python ABI + arch + schema version).
+4. Bootstrap chooses one path:
+   - `skip`: existing runtime venv is compatible and up to date.
+   - `delta-sync`: run incremental `uv sync` against existing `/runtime/.venv`.
+   - `rebuild-sync`: recreate `/runtime/.venv`, then run `uv sync`.
+
+**What changes when the Docker image is updated**
+- Updated:
+  - Application code in the image (`/app/server`).
+  - Bootstrap scripts and defaults shipped in the image.
+  - Any base OS/image-layer changes included in the new tag.
+- Usually not updated:
+  - `transcriptionsuite-runtime` (`/runtime/.venv`) unless bootstrap decides sync/rebuild is needed.
+  - `transcriptionsuite-uv-cache` (`/runtime-cache`) unless explicitly removed.
+  - `transcriptionsuite-data` and `transcriptionsuite-models`.
+
+In short: an image update mainly changes code and runtime tooling; dependency downloads happen only if bootstrap detects dependency drift or incompatible runtime state.
+
+**When the runtime dependency volume is updated**
+- `delta-sync` (incremental update) happens when:
+  - `uv.lock` content changed between image versions.
+  - Marker fingerprint no longer matches current runtime fingerprint.
+  - Marker exists but is from an older bootstrap schema/fingerprint mode.
+- `rebuild-sync` (fresh venv + sync) happens when:
+  - `/runtime/.venv` is missing.
+  - Runtime reset is requested (Dashboard: `Reset Runtime Deps`).
+  - ABI/arch incompatibility is detected (with `BOOTSTRAP_REBUILD_POLICY=abi_only`).
+
+**How runtime updates minimize download size**
+- Bootstrap runs `uv sync --frozen --no-dev` against existing `/runtime/.venv` for delta updates.
+- `UV_CACHE_DIR` is persisted in `transcriptionsuite-uv-cache` (`/runtime-cache`), so rebuilt venvs can reuse cached wheels.
+- Only changed packages are downloaded when possible; unchanged packages are reused.
+- Large dependency jumps (for example major torch/CUDA changes) may still require large downloads.
+
+**Operational scenarios**
+
+| Scenario | Image Pull | Runtime Venv (`/runtime`) | UV Cache (`/runtime-cache`) | Expected Network Cost |
+|----------|------------|---------------------------|-----------------------------|-----------------------|
+| App-only release, unchanged `uv.lock` | Yes (new image layers) | `skip` | Reused | Low (image only) |
+| Release with dependency changes in `uv.lock` | Yes | `delta-sync` | Reused | Medium (changed deps only) |
+| Runtime venv removed, cache kept | No/Yes | `rebuild-sync` | Reused | Medium (often reduced via cache) |
+| Runtime + cache removed | No/Yes | `rebuild-sync` | Recreated empty | High (full dependency fetch) |
+| Python ABI/arch incompatibility | Usually Yes | `rebuild-sync` | Reused | Medium to High |
+
+**Recommended update flow (least disruption)**
+```bash
+cd server/docker
+docker compose pull
+docker compose up -d
+```
+
+Use runtime reset only for recovery/maintenance. Prefer keeping `transcriptionsuite-uv-cache` unless you explicitly want a fully cold reinstall.
 
 ---
 

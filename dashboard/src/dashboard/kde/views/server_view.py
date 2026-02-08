@@ -280,6 +280,14 @@ def create_server_view(dashboard) -> QWidget:
     )
     volumes_col_layout.addWidget(dashboard._remove_models_volume_btn)
 
+    dashboard._reset_runtime_volume_btn = QPushButton("Reset Runtime Deps")
+    dashboard._reset_runtime_volume_btn.setObjectName("secondaryButton")
+    dashboard._reset_runtime_volume_btn.setMinimumWidth(140)
+    dashboard._reset_runtime_volume_btn.clicked.connect(
+        dashboard._on_reset_runtime_dependencies
+    )
+    volumes_col_layout.addWidget(dashboard._reset_runtime_volume_btn)
+
     mgmt_grid.addWidget(volumes_col)
     mgmt_grid.addStretch()
 
@@ -426,6 +434,42 @@ def create_server_view(dashboard) -> QWidget:
 
     models_volume_row.addStretch()
     volumes_layout.addLayout(models_volume_row)
+
+    # Runtime dependency volume row
+    runtime_volume_row = QHBoxLayout()
+    runtime_volume_label = QLabel("Runtime Volume:")
+    runtime_volume_label.setObjectName("statusLabel")
+    runtime_volume_label.setMinimumWidth(110)
+    runtime_volume_row.addWidget(runtime_volume_label)
+
+    dashboard._runtime_volume_status = QLabel("Not found")
+    dashboard._runtime_volume_status.setObjectName("statusValue")
+    runtime_volume_row.addWidget(dashboard._runtime_volume_status)
+
+    dashboard._runtime_volume_size = QLabel("")
+    dashboard._runtime_volume_size.setObjectName("statusDateInline")
+    runtime_volume_row.addWidget(dashboard._runtime_volume_size)
+
+    runtime_volume_row.addStretch()
+    volumes_layout.addLayout(runtime_volume_row)
+
+    # Runtime package cache volume row
+    uv_cache_volume_row = QHBoxLayout()
+    uv_cache_volume_label = QLabel("UV Cache Volume:")
+    uv_cache_volume_label.setObjectName("statusLabel")
+    uv_cache_volume_label.setMinimumWidth(110)
+    uv_cache_volume_row.addWidget(uv_cache_volume_label)
+
+    dashboard._uv_cache_volume_status = QLabel("Not found")
+    dashboard._uv_cache_volume_status.setObjectName("statusValue")
+    uv_cache_volume_row.addWidget(dashboard._uv_cache_volume_status)
+
+    dashboard._uv_cache_volume_size = QLabel("")
+    dashboard._uv_cache_volume_size.setObjectName("statusDateInline")
+    uv_cache_volume_row.addWidget(dashboard._uv_cache_volume_size)
+
+    uv_cache_volume_row.addStretch()
+    volumes_layout.addLayout(uv_cache_volume_row)
 
     # Models list
     dashboard._models_list_label = QLabel("")
