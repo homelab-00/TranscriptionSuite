@@ -468,6 +468,7 @@ class DockerManager:
     DOCKER_IMAGE = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
     CONTAINER_NAME = "transcriptionsuite-container"
     AUTH_TOKEN_FILE = "docker_server_auth_token.txt"
+    AUTH_TOKEN_FALLBACK_DIR = ".dashboard"
     HF_TOKEN_KEY = "HUGGINGFACE_TOKEN"
     HF_TOKEN_DECISION_KEY = "HUGGINGFACE_TOKEN_DECISION"
     HF_TOKEN_DECISIONS = {"unset", "provided", "skipped"}
@@ -632,6 +633,31 @@ class DockerManager:
             return env_file
         return None
 
+    def _get_external_state_dir(self) -> Path:
+        """Get writable external state directory for dashboard fallbacks."""
+        xdg_cache = os.environ.get("XDG_CACHE_HOME")
+        if xdg_cache:
+            return Path(xdg_cache) / "TranscriptionSuite"
+        return Path.home() / ".cache" / "TranscriptionSuite"
+
+    def _get_managed_env_file_path(self) -> Path:
+        """
+        Resolve which .env file should be managed by dashboard.
+
+        Prefers config_dir/.env when writable. Falls back to a cache-managed
+        .env when the config directory or file is read-only.
+        """
+        primary = self.config_dir / ".env"
+
+        if primary.exists():
+            if os.access(primary, os.W_OK):
+                return primary
+        else:
+            if self.config_dir.exists() and os.access(self.config_dir, os.W_OK):
+                return primary
+
+        return self._get_external_state_dir() / ".env"
+
     def _read_env_map(self, env_file: Path) -> dict[str, str]:
         """Parse key/value pairs from a .env file (best-effort)."""
         values: dict[str, str] = {}
@@ -685,7 +711,22 @@ class DockerManager:
         Returns:
             Path to the .env file.
         """
-        env_file = self.config_dir / ".env"
+        primary_env_file = self.config_dir / ".env"
+        env_file = self._get_managed_env_file_path()
+
+        # If fallback is required, seed it once from the primary .env when readable.
+        if (
+            env_file != primary_env_file
+            and not env_file.exists()
+            and primary_env_file.exists()
+            and os.access(primary_env_file, os.R_OK)
+        ):
+            env_file.parent.mkdir(parents=True, exist_ok=True)
+            env_file.write_text(
+                primary_env_file.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
         values = self._read_env_map(env_file)
 
         token = values.get(self.HF_TOKEN_KEY, "").strip()
@@ -759,6 +800,42 @@ class DockerManager:
         if compose_file.exists():
             return compose_file
         return None
+
+    def _get_container_user_config_dir(self) -> Path:
+        """
+        Get bind-mount directory for /user-config used by the container.
+
+        Uses an isolated dashboard-managed directory to avoid container-side
+        ownership changes on the main host config directory. Syncs config.yaml
+        from the primary config dir when available.
+        """
+        target_dir = self._get_external_state_dir() / "docker-user-config"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        source_config = self._find_config_file()
+        target_config = target_dir / "config.yaml"
+
+        if source_config and source_config.exists():
+            should_copy = False
+            if not target_config.exists():
+                should_copy = True
+            else:
+                try:
+                    should_copy = (
+                        source_config.stat().st_mtime > target_config.stat().st_mtime
+                    )
+                except Exception:
+                    should_copy = True
+
+            if should_copy:
+                try:
+                    shutil.copy2(source_config, target_config)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to sync config.yaml into container user-config dir: {e}"
+                    )
+
+        return target_dir
 
     def _parse_tls_paths_from_config(
         self, config_path: Path
@@ -1406,8 +1483,8 @@ class DockerManager:
         # Build environment variables
         env = {}
 
-        # Set USER_CONFIG_DIR for the compose file
-        env["USER_CONFIG_DIR"] = str(self.config_dir)
+        # Set USER_CONFIG_DIR for the compose file (isolated mount path)
+        env["USER_CONFIG_DIR"] = str(self._get_container_user_config_dir())
 
         # Determine which image to use based on selection
         selected_image = self.get_image_for_selection(image_selection)
@@ -1572,8 +1649,8 @@ class DockerManager:
         # Build environment variables
         env = {}
 
-        # Set USER_CONFIG_DIR for the compose file
-        env["USER_CONFIG_DIR"] = str(self.config_dir)
+        # Set USER_CONFIG_DIR for the compose file (isolated mount path)
+        env["USER_CONFIG_DIR"] = str(self._get_container_user_config_dir())
 
         # Determine which image to use based on selection
         selected_image = self.get_image_for_selection(image_selection)
@@ -1812,6 +1889,36 @@ class DockerManager:
         logger.warning("Could not find admin token in logs")
         return None
 
+    def _get_auth_token_paths(self) -> list[Path]:
+        """
+        Return preferred auth token file paths in write/read order.
+
+        Order:
+        1. Legacy path in config root (for backward compatibility)
+        2. Fallback path under config/.dashboard for permission recovery
+        3. External fallback in user cache dir for fully read-only config dirs
+        """
+        primary = self.config_dir / self.AUTH_TOKEN_FILE
+        fallback_in_config = (
+            self.config_dir / self.AUTH_TOKEN_FALLBACK_DIR / self.AUTH_TOKEN_FILE
+        )
+
+        fallback_external = self._get_external_state_dir() / self.AUTH_TOKEN_FILE
+
+        if primary.exists() and not os.access(primary, os.W_OK):
+            candidates = [fallback_external, fallback_in_config, primary]
+        else:
+            candidates = [primary, fallback_in_config, fallback_external]
+
+        unique: list[Path] = []
+        seen: set[Path] = set()
+        for path in candidates:
+            if path not in seen:
+                unique.append(path)
+                seen.add(path)
+
+        return unique
+
     def save_server_auth_token(self, token: str) -> None:
         """
         Save Docker server authentication token to persistent storage.
@@ -1819,12 +1926,42 @@ class DockerManager:
         Args:
             token: The authentication token to save
         """
-        try:
-            token_file = self.config_dir / self.AUTH_TOKEN_FILE
-            token_file.write_text(token.strip())
-            logger.info(f"Saved Docker server auth token to {token_file}")
-        except Exception as e:
-            logger.error(f"Failed to save auth token: {e}")
+        clean_token = token.strip()
+        if not clean_token:
+            return
+
+        last_error: Exception | None = None
+        primary = self.config_dir / self.AUTH_TOKEN_FILE
+        for index, token_file in enumerate(self._get_auth_token_paths()):
+            try:
+                if token_file.exists() and not os.access(token_file, os.W_OK):
+                    continue
+                token_file.parent.mkdir(parents=True, exist_ok=True)
+                token_file.write_text(clean_token, encoding="utf-8")
+                if token_file == primary:
+                    logger.info(f"Saved Docker server auth token to {token_file}")
+                else:
+                    if index == 0:
+                        logger.warning(
+                            "Primary auth token path appears read-only; "
+                            f"saved token to fallback path: {token_file}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Saved Docker server auth token to fallback path: {token_file}"
+                        )
+                return
+            except PermissionError as e:
+                last_error = e
+                logger.warning(
+                    f"No permission to write auth token file {token_file}: {e}"
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Failed to write auth token file {token_file}: {e}")
+
+        if last_error:
+            logger.error(f"Failed to save auth token to any path: {last_error}")
 
     def load_server_auth_token(self) -> str | None:
         """
@@ -1833,27 +1970,44 @@ class DockerManager:
         Returns:
             The saved authentication token, or None if not found
         """
-        try:
-            token_file = self.config_dir / self.AUTH_TOKEN_FILE
-            if token_file.exists():
-                token = token_file.read_text().strip()
+        for token_file in self._get_auth_token_paths():
+            try:
+                if not token_file.exists():
+                    continue
+                if not os.access(token_file, os.R_OK):
+                    continue
+                token = token_file.read_text(encoding="utf-8").strip()
                 if token:
-                    logger.info("Loaded Docker server auth token from file")
+                    logger.info(f"Loaded Docker server auth token from {token_file}")
                     return token
-        except Exception as e:
-            logger.error(f"Failed to load auth token: {e}")
+            except PermissionError as e:
+                logger.warning(
+                    f"No permission to read auth token file {token_file}: {e}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to read auth token file {token_file}: {e}")
         return None
 
     def clear_server_auth_token(self) -> None:
         """Clear the cached and stored authentication token."""
         self._cached_auth_token = None
-        try:
-            token_file = self.config_dir / self.AUTH_TOKEN_FILE
-            if token_file.exists():
-                token_file.unlink()
-                logger.info("Cleared Docker server auth token")
-        except Exception as e:
-            logger.error(f"Failed to clear auth token: {e}")
+        cleared_any = False
+        for token_file in self._get_auth_token_paths():
+            try:
+                if token_file.exists():
+                    if not os.access(token_file, os.W_OK):
+                        continue
+                    token_file.unlink()
+                    cleared_any = True
+            except PermissionError as e:
+                logger.warning(
+                    f"No permission to delete auth token file {token_file}: {e}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to delete auth token file {token_file}: {e}")
+
+        if cleared_any:
+            logger.info("Cleared Docker server auth token")
 
     def open_volumes_location(self) -> bool:
         """

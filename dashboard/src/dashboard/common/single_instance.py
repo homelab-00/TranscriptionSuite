@@ -13,21 +13,58 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def get_lock_file_path() -> Path:
-    """Get the path to the lock file."""
+def get_lock_file_paths() -> list[Path]:
+    """Get candidate lock file paths (most preferred first)."""
+    candidates: list[Path] = []
+
     if sys.platform == "win32":
         # Windows: Use AppData
         appdata = os.environ.get("APPDATA", "")
         if appdata:
-            lock_dir = Path(appdata) / "TranscriptionSuite"
+            candidates.append(Path(appdata) / "TranscriptionSuite" / "dashboard.lock")
         else:
-            lock_dir = Path.home() / "AppData" / "Roaming" / "TranscriptionSuite"
-    else:
-        # Linux/macOS: Use XDG config directory
-        lock_dir = Path.home() / ".config" / "TranscriptionSuite"
+            candidates.append(
+                Path.home()
+                / "AppData"
+                / "Roaming"
+                / "TranscriptionSuite"
+                / "dashboard.lock"
+            )
+        return candidates
 
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    return lock_dir / "dashboard.lock"
+    # Linux/macOS: Prefer runtime/cache locations that are user-owned.
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime:
+        candidates.append(Path(xdg_runtime) / "TranscriptionSuite" / "dashboard.lock")
+
+    if sys.platform == "darwin":
+        candidates.append(
+            Path.home() / "Library" / "Caches" / "TranscriptionSuite" / "dashboard.lock"
+        )
+    else:
+        xdg_cache = os.environ.get("XDG_CACHE_HOME")
+        if xdg_cache:
+            candidates.append(Path(xdg_cache) / "TranscriptionSuite" / "dashboard.lock")
+        else:
+            candidates.append(
+                Path.home() / ".cache" / "TranscriptionSuite" / "dashboard.lock"
+            )
+        candidates.append(
+            Path("/tmp") / f"transcriptionsuite-{os.getuid()}" / "dashboard.lock"
+        )
+
+    # Legacy path (kept last for backward compatibility with older instances).
+    candidates.append(Path.home() / ".config" / "TranscriptionSuite" / "dashboard.lock")
+
+    # De-duplicate while preserving order.
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        if path not in seen:
+            unique.append(path)
+            seen.add(path)
+
+    return unique
 
 
 def acquire_instance_lock() -> Optional[object]:
@@ -37,8 +74,6 @@ def acquire_instance_lock() -> Optional[object]:
     Returns:
         Lock file descriptor/handle if successful, None if another instance is running
     """
-    lock_file = get_lock_file_path()
-
     if sys.platform == "win32":
         # Windows: Use ctypes to create a named mutex
         try:
@@ -83,21 +118,58 @@ def acquire_instance_lock() -> Optional[object]:
     try:
         import fcntl
 
-        # Open lock file
-        fd = open(lock_file, "w")
+        acquired_fds: list[object] = []
+        lock_paths = get_lock_file_paths()
 
-        # Try to acquire exclusive lock (non-blocking)
-        try:
-            fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Write PID to lock file for debugging
-            fd.write(str(os.getpid()))
-            fd.flush()
-            logger.debug(f"Acquired instance lock: {lock_file}")
-            return fd
-        except (IOError, OSError) as e:
-            logger.info(f"Another instance is already running (fcntl lock): {e}")
-            fd.close()
-            return None
+        for lock_file in lock_paths:
+            try:
+                lock_file.parent.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.debug(
+                    f"Skipping lock path {lock_file} (cannot create directory): {e}"
+                )
+                continue
+
+            try:
+                fd = open(lock_file, "a+", encoding="utf-8")
+            except PermissionError as e:
+                logger.debug(f"Skipping lock path {lock_file} (permission denied): {e}")
+                continue
+            except Exception as e:
+                logger.debug(f"Skipping lock path {lock_file} (open failed): {e}")
+                continue
+
+            # Try to acquire exclusive lock (non-blocking)
+            try:
+                fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (IOError, OSError) as e:
+                logger.info(f"Another instance is already running (fcntl lock): {e}")
+                fd.close()
+                for held in acquired_fds:
+                    try:
+                        if hasattr(held, "close"):
+                            held.close()
+                    except Exception:
+                        pass
+                return None
+
+            # Write PID to lock file for debugging (best effort)
+            try:
+                fd.seek(0)
+                fd.truncate()
+                fd.write(str(os.getpid()))
+                fd.flush()
+            except Exception:
+                pass
+
+            acquired_fds.append(fd)
+
+        if acquired_fds:
+            logger.debug(f"Acquired instance lock(s): {lock_paths}")
+            return acquired_fds
+
+        logger.error("Failed to acquire instance lock: no writable lock path available")
+        return None
 
     except Exception as e:
         logger.error(f"Failed to acquire instance lock: {e}")
@@ -125,10 +197,16 @@ def release_instance_lock(lock_fd: Optional[object]) -> None:
         except Exception as e:
             logger.warning(f"Failed to release Windows mutex: {e}")
     else:
-        # Linux/macOS: Close file descriptor (releases fcntl lock)
+        # Linux/macOS: Close file descriptor(s) (releases fcntl locks)
         try:
-            if hasattr(lock_fd, "close"):
-                lock_fd.close()
+            if isinstance(lock_fd, (list, tuple)):
+                lock_handles = list(lock_fd)
+            else:
+                lock_handles = [lock_fd]
+
+            for handle in lock_handles:
+                if hasattr(handle, "close"):
+                    handle.close()
             logger.debug("Released instance lock (fcntl)")
         except Exception as e:
             logger.warning(f"Failed to release file lock: {e}")

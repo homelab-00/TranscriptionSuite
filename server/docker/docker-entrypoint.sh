@@ -54,9 +54,11 @@ if [ "${TLS_ENABLED:-false}" = "true" ]; then
     log "TLS certificates prepared successfully"
 fi
 
-# Ensure runtime directories are writable by appuser
+# Ensure runtime directories are writable by appuser.
+# Do NOT chown /user-config because it is typically a host bind mount
+# and changing ownership here can break host-side dashboard permissions.
 mkdir -p /data /models /user-config /runtime
-chown -R appuser:appuser /data /models /user-config /runtime
+chown -R appuser:appuser /data /models /runtime
 
 # Bootstrap runtime dependencies and feature status.
 log "Bootstrapping runtime environment..."
