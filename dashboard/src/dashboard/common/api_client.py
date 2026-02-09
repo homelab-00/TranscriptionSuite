@@ -77,6 +77,7 @@ class APIClient:
         self.transcription_timeout = transcription_timeout
 
         self._session: aiohttp.ClientSession | None = None
+        self._session_loop: asyncio.AbstractEventLoop | None = None
         self._connected = False
 
         # Tailscale IP fallback state
@@ -142,6 +143,30 @@ class APIClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create the aiohttp session with SSL configuration."""
+        current_loop = asyncio.get_running_loop()
+
+        # aiohttp sessions are bound to a single event loop.
+        # The dashboard sometimes uses asyncio.run() from worker threads,
+        # which creates a new loop each time. Recreate the session when
+        # loop affinity changes to avoid cross-loop runtime errors.
+        if (
+            self._session is not None
+            and not self._session.closed
+            and self._session_loop is not None
+            and self._session_loop is not current_loop
+        ):
+            logger.debug(
+                "Recreating aiohttp session due to event loop change "
+                f"(old={id(self._session_loop)}, new={id(current_loop)})"
+            )
+            try:
+                await self._session.close()
+            except Exception as e:
+                logger.debug(f"Could not close previous aiohttp session cleanly: {e}")
+            finally:
+                self._session = None
+                self._session_loop = None
+
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
 
@@ -169,6 +194,7 @@ class APIClient:
                 timeout=timeout,
                 connector=connector,
             )
+            self._session_loop = current_loop
 
             logger.debug(f"New aiohttp session created (HTTPS: {self.use_https})")
 
@@ -178,7 +204,8 @@ class APIClient:
         """Close the client session."""
         if self._session and not self._session.closed:
             await self._session.close()
-            self._session = None
+        self._session = None
+        self._session_loop = None
         self._connected = False
 
     async def update_connection(
