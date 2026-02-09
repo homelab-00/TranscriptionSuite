@@ -649,7 +649,14 @@ model = sys.argv[1]
 token = sys.argv[2]
 
 try:
+    # Validate token/model access first to surface auth errors clearly.
     HfApi().model_info(repo_id=model, token=token)
+    # Force model materialization into HF_HOME so first diarization request
+    # does not trigger a large cold download.
+    from pyannote.audio import Pipeline
+
+    pipeline = Pipeline.from_pretrained(model, token=token)
+    del pipeline
     print(json.dumps({"available": True, "reason": "ready"}))
 except Exception as exc:
     status_code = None
@@ -680,7 +687,7 @@ except Exception as exc:
         [str(venv_python), "-c", checker, diarization_model, hf_token],
         text=True,
         capture_output=True,
-        timeout=max(60, min(timeout_seconds, 600)),
+        timeout=max(120, min(timeout_seconds, 1800)),
         env=env,
         check=False,
     )

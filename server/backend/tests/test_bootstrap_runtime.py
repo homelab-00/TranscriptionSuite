@@ -314,3 +314,67 @@ def test_marker_mismatch_and_abi_incompatible_selects_rebuild_sync(
     assert diagnostics["selection_reason"] == "abi_incompatible"
     assert len(sync_calls) == 1
     assert len(checks_called) == 1
+
+
+def test_check_diarization_access_without_token_skips_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+
+    def fail_run(**_: object) -> None:
+        raise AssertionError("subprocess.run should not be called when token missing")
+
+    monkeypatch.setattr(module.subprocess, "run", fail_run)
+
+    status = module.check_diarization_access(
+        venv_python=Path("/runtime/.venv/bin/python"),
+        diarization_model=module.DEFAULT_DIARIZATION_MODEL,
+        hf_token=None,
+        hf_home="/models",
+        timeout_seconds=1800,
+    )
+
+    assert status == {"available": False, "reason": "token_missing"}
+
+
+def test_check_diarization_access_preloads_pipeline_and_clamps_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    seen: dict[str, object] = {}
+
+    class FakeResult:
+        def __init__(self) -> None:
+            self.stdout = '{"available": true, "reason": "ready"}\n'
+
+    def fake_run(cmd, text, capture_output, timeout, env, check):  # type: ignore[no-untyped-def]
+        seen["cmd"] = cmd
+        seen["timeout"] = timeout
+        seen["env"] = env
+        assert text is True
+        assert capture_output is True
+        assert check is False
+        return FakeResult()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    status = module.check_diarization_access(
+        venv_python=Path("/runtime/.venv/bin/python"),
+        diarization_model=module.DEFAULT_DIARIZATION_MODEL,
+        hf_token="hf_test_token",
+        hf_home="/models",
+        timeout_seconds=5000,
+    )
+
+    assert status == {"available": True, "reason": "ready"}
+    assert seen["timeout"] == 1800
+
+    cmd = seen["cmd"]
+    assert isinstance(cmd, list)
+    assert cmd[0] == "/runtime/.venv/bin/python"
+    assert cmd[1] == "-c"
+    assert "Pipeline.from_pretrained" in cmd[2]
+
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["HF_HOME"] == "/models"
