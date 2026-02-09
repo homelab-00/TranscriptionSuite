@@ -48,6 +48,7 @@ dependencies = [
     "alembic>=1.17.1",
 
     # Utilities
+    "setuptools<81",          # webrtcvad imports pkg_resources, removed in setuptools>=81
     "pyyaml>=6.0.3",
     "psutil>=7.2.0",
     "filelock>=3.20.1",
