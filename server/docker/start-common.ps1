@@ -17,6 +17,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DockerImage = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
 $ContainerName = "transcriptionsuite-container"
 $HfDiarizationTermsUrl = "https://huggingface.co/pyannote/speaker-diarization-community-1"
+$script:PromptTimeOffsetSeconds = 0
 
 # ============================================================================
 # Helper Functions
@@ -34,6 +35,68 @@ function Write-ErrorMsg($message) {
 function Write-Info($message) {
     Write-Host "Info: " -ForegroundColor Cyan -NoNewline
     Write-Host $message
+}
+
+function Add-PromptElapsedSeconds {
+    param(
+        [long]$StartedAtEpochSeconds
+    )
+
+    $endedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if ($StartedAtEpochSeconds -le 0 -or $endedAt -lt $StartedAtEpochSeconds) {
+        return
+    }
+
+    $script:PromptTimeOffsetSeconds += ($endedAt - $StartedAtEpochSeconds)
+}
+
+function Convert-ToPositiveIntOrDefault {
+    param(
+        [string]$RawValue,
+        [int]$DefaultValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RawValue)) {
+        return $DefaultValue
+    }
+
+    $parsed = 0
+    if (-not [int]::TryParse($RawValue.Trim(), [ref]$parsed)) {
+        return $DefaultValue
+    }
+
+    if ($parsed -le 0) {
+        return $DefaultValue
+    }
+
+    return $parsed
+}
+
+function Resolve-BootstrapTimeoutSeconds {
+    param(
+        [string]$EnvFilePath
+    )
+
+    $raw = $env:BOOTSTRAP_TIMEOUT_SECONDS
+    if ([string]::IsNullOrWhiteSpace($raw) -and -not [string]::IsNullOrWhiteSpace($EnvFilePath)) {
+        $raw = Get-EnvValue -EnvFilePath $EnvFilePath -Key "BOOTSTRAP_TIMEOUT_SECONDS"
+    }
+
+    return Convert-ToPositiveIntOrDefault -RawValue $raw -DefaultValue 1800
+}
+
+function Set-BootstrapTimeoutForPromptDelay {
+    param(
+        [string]$EnvFilePath
+    )
+
+    $baseTimeout = Resolve-BootstrapTimeoutSeconds -EnvFilePath $EnvFilePath
+    $effectiveTimeout = $baseTimeout + $script:PromptTimeOffsetSeconds
+    $env:BOOTSTRAP_TIMEOUT_SECONDS = "$effectiveTimeout"
+
+    if ($script:PromptTimeOffsetSeconds -gt 0) {
+        Write-Info "Extending BOOTSTRAP_TIMEOUT_SECONDS by prompt wait ($($script:PromptTimeOffsetSeconds)s): ${baseTimeout}s -> ${effectiveTimeout}s"
+    }
 }
 
 function Get-ResolvedConfig {
@@ -204,7 +267,9 @@ function Initialize-HFTokenDecision {
             Write-Info "Optional setup: HuggingFace token enables speaker diarization."
             Write-Info "Model terms must be accepted first: $HfDiarizationTermsUrl"
             Write-Info "You can skip now and add it later in .env."
+            $promptStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
             $promptToken = Read-Host "Enter HuggingFace token (leave empty to skip)"
+            Add-PromptElapsedSeconds -StartedAtEpochSeconds $promptStartedAt
 
             if (-not [string]::IsNullOrWhiteSpace($promptToken)) {
                 Set-EnvValue -EnvFilePath $EnvFilePath -Key "HUGGINGFACE_TOKEN" -Value $promptToken.Trim()
@@ -299,6 +364,7 @@ function Initialize-UVCacheDecision {
             Write-Info "Optional setup: persistent UV cache speeds future updates."
             Write-Info "Disk usage may grow to ~8GB."
             Write-Info "Skipping keeps server functionality unchanged but can slow future updates."
+            $promptStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
             while ($true) {
                 $choice = (Read-Host "Enable UV cache volume? [Y]es / [n]o / [c]ancel").Trim().ToLowerInvariant()
                 if ([string]::IsNullOrWhiteSpace($choice) -or @("y", "yes") -contains $choice) {
@@ -310,11 +376,13 @@ function Initialize-UVCacheDecision {
                     break
                 }
                 if (@("c", "cancel") -contains $choice) {
+                    Add-PromptElapsedSeconds -StartedAtEpochSeconds $promptStartedAt
                     Write-Info "Startup cancelled."
                     return $false
                 }
                 Write-Info "Please answer yes, no, or cancel."
             }
+            Add-PromptElapsedSeconds -StartedAtEpochSeconds $promptStartedAt
             Set-EnvValue -EnvFilePath $EnvFilePath -Key "UV_CACHE_VOLUME_DECISION" -Value $decision
         } else {
             $decision = "skipped"
@@ -372,6 +440,7 @@ $EnvFile = Initialize-HFTokenDecision -EnvFilePath $EnvFile
 if (-not (Initialize-UVCacheDecision -EnvFilePath $EnvFile -ComposeFilePath $ComposeFile)) {
     exit 0
 }
+Set-BootstrapTimeoutForPromptDelay -EnvFilePath $EnvFile
 $EnvFileArg = @("--env-file", $EnvFile)
 
 $HostCertPath = ""

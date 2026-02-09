@@ -18,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server:latest"
 CONTAINER_NAME="transcriptionsuite-container"
 HF_DIARIZATION_TERMS_URL="https://huggingface.co/pyannote/speaker-diarization-community-1"
+PROMPT_TIME_OFFSET_SECONDS=0
 
 # ============================================================================
 # Helper Functions
@@ -32,6 +33,50 @@ print_error() {
 
 print_info() {
     echo -e "\033[1;34mInfo:\033[0m $1"
+}
+
+current_epoch_seconds() {
+    date +%s
+}
+
+add_prompt_elapsed_seconds() {
+    local started_at="$1"
+    local ended_at elapsed
+    ended_at="$(current_epoch_seconds)"
+
+    if [[ "$started_at" =~ ^[0-9]+$ && "$ended_at" =~ ^[0-9]+$ && "$ended_at" -ge "$started_at" ]]; then
+        elapsed=$((ended_at - started_at))
+        PROMPT_TIME_OFFSET_SECONDS=$((PROMPT_TIME_OFFSET_SECONDS + elapsed))
+    fi
+}
+
+parse_positive_int_or_default() {
+    local raw="$1"
+    local default_value="$2"
+    if [[ "$raw" =~ ^[0-9]+$ ]] && (( raw > 0 )); then
+        echo "$raw"
+    else
+        echo "$default_value"
+    fi
+}
+
+resolve_bootstrap_timeout_seconds() {
+    local raw="${BOOTSTRAP_TIMEOUT_SECONDS:-}"
+    if [[ -z "$raw" ]]; then
+        raw="$(read_env_var "BOOTSTRAP_TIMEOUT_SECONDS" | tr -d '\r')"
+    fi
+    parse_positive_int_or_default "$raw" "1800"
+}
+
+apply_prompt_timeout_offset() {
+    local base_timeout adjusted_timeout
+    base_timeout="$(resolve_bootstrap_timeout_seconds)"
+    adjusted_timeout=$((base_timeout + PROMPT_TIME_OFFSET_SECONDS))
+    export BOOTSTRAP_TIMEOUT_SECONDS="$adjusted_timeout"
+
+    if (( PROMPT_TIME_OFFSET_SECONDS > 0 )); then
+        print_info "Extending BOOTSTRAP_TIMEOUT_SECONDS by prompt wait (${PROMPT_TIME_OFFSET_SECONDS}s): ${base_timeout}s -> ${adjusted_timeout}s"
+    fi
 }
 
 find_config() {
@@ -167,7 +212,10 @@ prepare_hf_token_decision() {
             print_info "Model terms must be accepted first: $HF_DIARIZATION_TERMS_URL"
             print_info "You can skip now and add it later in .env."
             local prompt_token=""
+            local prompt_started_at
+            prompt_started_at="$(current_epoch_seconds)"
             read -r -p "Enter HuggingFace token (leave empty to skip): " prompt_token
+            add_prompt_elapsed_seconds "$prompt_started_at"
             if [[ -n "$prompt_token" ]]; then
                 upsert_env_var "HUGGINGFACE_TOKEN" "$prompt_token"
                 upsert_env_var "HUGGINGFACE_TOKEN_DECISION" "provided"
@@ -277,6 +325,8 @@ prepare_uv_cache_decision() {
             print_info "Disk usage may grow to ~8GB."
             print_info "Skipping keeps server functionality unchanged but can slow future updates."
             local prompt_choice=""
+            local prompt_started_at
+            prompt_started_at="$(current_epoch_seconds)"
             while true; do
                 read -r -p "Enable UV cache volume? [Y]es / [n]o / [c]ancel: " prompt_choice
                 case "${prompt_choice,,}" in
@@ -289,6 +339,7 @@ prepare_uv_cache_decision() {
                         break
                         ;;
                     c|cancel)
+                        add_prompt_elapsed_seconds "$prompt_started_at"
                         print_info "Startup cancelled."
                         return 1
                         ;;
@@ -297,6 +348,7 @@ prepare_uv_cache_decision() {
                         ;;
                 esac
             done
+            add_prompt_elapsed_seconds "$prompt_started_at"
             upsert_env_var "UV_CACHE_VOLUME_DECISION" "$decision"
         else
             decision="skipped"
@@ -378,6 +430,7 @@ prepare_hf_token_decision
 if ! prepare_uv_cache_decision; then
     exit 0
 fi
+apply_prompt_timeout_offset
 
 export USER_CONFIG_DIR="$CONFIG_DIR_TO_MOUNT"
 

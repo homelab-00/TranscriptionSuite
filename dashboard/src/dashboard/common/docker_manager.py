@@ -6,6 +6,7 @@ the TranscriptionSuite server container directly from the client.
 """
 
 import logging
+import math
 import os
 import platform
 import re
@@ -531,6 +532,70 @@ class DockerManager:
             timeout=timeout,
             startupinfo=startupinfo,
         )
+
+    def _parse_positive_int_or_default(self, raw: str | None, default: int) -> int:
+        """Parse a positive integer, falling back to default on invalid values."""
+        if raw is None:
+            return default
+        value = raw.strip()
+        if not value:
+            return default
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        if parsed <= 0:
+            return default
+        return parsed
+
+    def _resolve_bootstrap_timeout_seconds(
+        self,
+        env_file: Path | None,
+        default_seconds: int = 1800,
+    ) -> int:
+        """
+        Resolve BOOTSTRAP_TIMEOUT_SECONDS from process environment or .env file.
+
+        Process environment takes precedence over env file values.
+        """
+        raw = os.environ.get("BOOTSTRAP_TIMEOUT_SECONDS", "").strip()
+        if not raw and env_file is not None and env_file.exists():
+            try:
+                raw = (
+                    self._read_env_map(env_file)
+                    .get("BOOTSTRAP_TIMEOUT_SECONDS", "")
+                    .strip()
+                )
+            except Exception:
+                raw = ""
+        return self._parse_positive_int_or_default(raw, default_seconds)
+
+    def _apply_bootstrap_timeout_override(
+        self,
+        env: dict[str, str],
+        env_file: Path | None,
+        prompt_wait_seconds: float = 0.0,
+        report: Callable[[str], None] | None = None,
+    ) -> None:
+        """
+        Apply BOOTSTRAP_TIMEOUT_SECONDS override, extending by prompt wait time.
+
+        This ensures interactive onboarding prompts do not consume bootstrap timeout.
+        """
+        base_timeout = self._resolve_bootstrap_timeout_seconds(env_file)
+        prompt_offset = max(0, int(math.ceil(prompt_wait_seconds)))
+        effective_timeout = base_timeout + prompt_offset
+        env["BOOTSTRAP_TIMEOUT_SECONDS"] = str(effective_timeout)
+
+        if prompt_offset > 0:
+            msg = (
+                "Extending BOOTSTRAP_TIMEOUT_SECONDS by interactive prompt time: "
+                f"base={base_timeout}s + prompt_wait={prompt_offset}s -> {effective_timeout}s"
+            )
+            if report:
+                report(msg)
+            else:
+                logger.info(msg)
 
     def is_docker_available(self) -> tuple[bool, str]:
         """
@@ -1957,6 +2022,7 @@ class DockerManager:
         mode: ServerMode = ServerMode.LOCAL,
         progress_callback: Callable[[str], None] | None = None,
         image_selection: str = "auto",
+        bootstrap_prompt_wait_seconds: float = 0.0,
     ) -> DockerResult:
         """
         Start the TranscriptionSuite server.
@@ -1966,6 +2032,8 @@ class DockerManager:
             progress_callback: Optional callback for progress messages
             image_selection: Image to use - "auto" for most recent by build date,
                            or a specific tag name
+            bootstrap_prompt_wait_seconds: Seconds spent in pre-start interactive
+                                         prompts; added to bootstrap timeout.
 
         Returns:
             DockerResult with success status and message
@@ -2023,6 +2091,12 @@ class DockerManager:
         if env_file:
             log(f"Using secrets from: {env_file}")
             env_file_args = ["--env-file", str(env_file)]
+        self._apply_bootstrap_timeout_override(
+            env=env,
+            env_file=env_file,
+            prompt_wait_seconds=bootstrap_prompt_wait_seconds,
+            report=log,
+        )
 
         # Handle mode-specific configuration
         if mode == ServerMode.REMOTE:
@@ -2122,6 +2196,7 @@ class DockerManager:
         progress_callback: Callable[[str], None],
         complete_callback: Callable[[DockerResult], None],
         image_selection: str = "auto",
+        bootstrap_prompt_wait_seconds: float = 0.0,
     ) -> DockerServerWorker | DockerResult:
         """
         Start the TranscriptionSuite server asynchronously.
@@ -2141,6 +2216,8 @@ class DockerManager:
                               thread-safe UI updates.
             image_selection: Image to use - "auto" for most recent by build date,
                            or a specific tag name
+            bootstrap_prompt_wait_seconds: Seconds spent in pre-start interactive
+                                         prompts; added to bootstrap timeout.
 
         Returns:
             DockerServerWorker instance if validation passed (call .cancel() to abort),
@@ -2198,6 +2275,12 @@ class DockerManager:
         if env_file:
             log(f"Using secrets from: {env_file}")
             env_file_args = ["--env-file", str(env_file)]
+        self._apply_bootstrap_timeout_override(
+            env=env,
+            env_file=env_file,
+            prompt_wait_seconds=bootstrap_prompt_wait_seconds,
+            report=log,
+        )
 
         # Handle mode-specific configuration
         if mode == ServerMode.REMOTE:

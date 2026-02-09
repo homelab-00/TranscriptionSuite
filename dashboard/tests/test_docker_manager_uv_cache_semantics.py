@@ -113,3 +113,57 @@ def test_get_container_user_config_dir_removes_stale_target_config(
 
     assert target_dir == external_dir / "docker-user-config"
     assert not stale_target.exists()
+
+
+def test_resolve_bootstrap_timeout_prefers_process_env(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    env_file = config_dir / ".env"
+    env_file.write_text("BOOTSTRAP_TIMEOUT_SECONDS=900\n", encoding="utf-8")
+
+    manager = DockerManager(config_dir=config_dir)
+    monkeypatch.setenv("BOOTSTRAP_TIMEOUT_SECONDS", "1200")
+
+    timeout_seconds = manager._resolve_bootstrap_timeout_seconds(env_file)
+    assert timeout_seconds == 1200
+
+
+def test_resolve_bootstrap_timeout_uses_env_file_when_process_env_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    env_file = config_dir / ".env"
+    env_file.write_text("BOOTSTRAP_TIMEOUT_SECONDS=900\n", encoding="utf-8")
+
+    manager = DockerManager(config_dir=config_dir)
+    monkeypatch.delenv("BOOTSTRAP_TIMEOUT_SECONDS", raising=False)
+
+    timeout_seconds = manager._resolve_bootstrap_timeout_seconds(env_file)
+    assert timeout_seconds == 900
+
+
+def test_apply_bootstrap_timeout_override_adds_prompt_wait_and_logs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    env_file = config_dir / ".env"
+    env_file.write_text("BOOTSTRAP_TIMEOUT_SECONDS=600\n", encoding="utf-8")
+
+    manager = DockerManager(config_dir=config_dir)
+    monkeypatch.delenv("BOOTSTRAP_TIMEOUT_SECONDS", raising=False)
+
+    env: dict[str, str] = {}
+    messages: list[str] = []
+    manager._apply_bootstrap_timeout_override(
+        env=env,
+        env_file=env_file,
+        prompt_wait_seconds=30.2,
+        report=messages.append,
+    )
+
+    assert env["BOOTSTRAP_TIMEOUT_SECONDS"] == "631"
+    assert any("prompt_wait=31s" in msg for msg in messages)

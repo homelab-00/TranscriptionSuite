@@ -8,6 +8,7 @@ extracted to keep the main dashboard.py file smaller and more maintainable.
 import logging
 import re
 import threading
+import time
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QInputDialog, QLineEdit, QMessageBox
@@ -643,12 +644,19 @@ class DashboardServerControlMixin:
 
     def _start_server(self, mode: ServerMode) -> None:
         """Start the Docker server asynchronously."""
+        prompt_wait_seconds = 0.0
+
+        prompt_started = time.monotonic()
         if not self._ensure_hf_token_onboarding():
             self._update_server_start_progress("Server start cancelled.")
             return
+        prompt_wait_seconds += time.monotonic() - prompt_started
+
+        prompt_started = time.monotonic()
         if not self._ensure_uv_cache_onboarding():
             self._update_server_start_progress("Server start cancelled.")
             return
+        prompt_wait_seconds += time.monotonic() - prompt_started
 
         # Check if a server start is already in progress
         if self._server_worker is not None and self._server_worker.is_alive():
@@ -681,6 +689,7 @@ class DashboardServerControlMixin:
             progress_callback=on_progress,
             complete_callback=on_complete,
             image_selection=image_selection,
+            bootstrap_prompt_wait_seconds=prompt_wait_seconds,
         )
 
         # Check if pre-flight validation failed (returns DockerResult instead of worker)
