@@ -50,13 +50,13 @@ if platform.startswith("linux"):
             )
 
             def _alsa_error_handler(
-                filename: bytes,
-                line: int,
-                function: bytes,
-                err: int,
-                fmt: bytes,
+                _filename: bytes,
+                _line: int,
+                _function: bytes,
+                _err: int,
+                _fmt: bytes,
             ) -> None:
-                del filename, line, function, err, fmt
+                pass
 
             _ALSA_ERROR_HANDLER = _ALSA_ERROR_HANDLER_FUNC(_alsa_error_handler)
     except Exception:
