@@ -306,6 +306,12 @@ prepare_uv_cache_decision() {
     fi
 
     if [[ "$decision" == "enabled" ]]; then
+        if ! docker volume ls --format '{{.Name}}' | grep -q "^transcriptionsuite-uv-cache$"; then
+            print_info "UV cache volume missing; cold cache expected. Volume will be recreated on start."
+        fi
+    fi
+
+    if [[ "$decision" == "enabled" ]]; then
         cache_dir="/runtime-cache"
     else
         cache_dir="/tmp/uv-cache"

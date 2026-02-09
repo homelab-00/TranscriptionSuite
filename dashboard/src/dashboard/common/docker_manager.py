@@ -881,6 +881,49 @@ class DockerManager:
         )
         return decision, cache_dir, env_file
 
+    def reconcile_uv_cache_state(
+        self,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> tuple[str, str, bool]:
+        """
+        Reconcile UV cache decision with actual Docker volume presence.
+
+        Returns:
+            Tuple of (decision, bootstrap_cache_dir, cold_cache_expected).
+        """
+
+        def log(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        decision, cache_dir, _ = self.get_uv_cache_state()
+        cold_cache_expected = False
+
+        # Keep onboarding semantics for unset decisions.
+        if decision == "unset":
+            return decision, cache_dir, cold_cache_expected
+
+        uv_cache_volume_exists = self.volume_exists(self.UV_CACHE_VOLUME)
+
+        if decision == "enabled":
+            cache_dir = self.UV_CACHE_PERSISTENT_DIR
+            if not uv_cache_volume_exists:
+                cold_cache_expected = True
+                log(
+                    "UV cache volume missing; cold cache expected. "
+                    "Volume will be recreated on start."
+                )
+            return decision, cache_dir, cold_cache_expected
+
+        # decision == "skipped"
+        cache_dir = self.UV_CACHE_EPHEMERAL_DIR
+        if uv_cache_volume_exists:
+            log(
+                "UV cache decision is skipped; existing UV cache volume will be ignored."
+            )
+        return decision, cache_dir, cold_cache_expected
+
     def update_uv_cache_state(
         self, decision: str, cache_dir: str | None = None
     ) -> Path:
@@ -1172,6 +1215,18 @@ class DockerManager:
                     logger.warning(
                         f"Failed to sync config.yaml into container user-config dir: {e}"
                     )
+        elif target_config.exists():
+            # If host config.yaml is removed, ensure /user-config falls back to image defaults.
+            try:
+                target_config.unlink()
+                logger.info(
+                    "Removed stale container user-config copy because source config.yaml is missing."
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to remove stale config.yaml from container user-config dir: "
+                    f"{e}"
+                )
 
         return target_dir
 
@@ -1703,12 +1758,15 @@ class DockerManager:
         progress_callback: Callable[[str], None] | None = None,
     ) -> DockerResult:
         """
-        Remove the TranscriptionSuite config directory.
+        Remove TranscriptionSuite config and dashboard-managed external state.
 
         This removes:
         - Linux: ~/.config/TranscriptionSuite/
         - Windows: ~/Documents/TranscriptionSuite/
         - macOS: ~/Library/Application Support/TranscriptionSuite/
+        - Dashboard external cache state:
+          - ~/.cache/TranscriptionSuite/ (or $XDG_CACHE_HOME/TranscriptionSuite)
+          - Includes docker-user-config mirror, fallback .env, and token fallbacks
 
         Args:
             progress_callback: Optional callback for progress messages
@@ -1716,25 +1774,59 @@ class DockerManager:
         Returns:
             DockerResult with success status and message
         """
-        import shutil
 
         def log(msg: str) -> None:
             logger.info(msg)
             if progress_callback:
                 progress_callback(msg)
 
-        log(f"Removing config directory {self.config_dir}...")
+        targets: list[tuple[str, Path]] = []
+        seen_paths: set[Path] = set()
+        for label, path in (
+            ("config directory", self.config_dir),
+            ("dashboard external state directory", self._get_external_state_dir()),
+        ):
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            targets.append((label, path))
+
+        removed_labels: list[str] = []
+        missing_labels: list[str] = []
 
         try:
-            if self.config_dir.exists():
-                shutil.rmtree(self.config_dir)
-                return DockerResult(True, "Config directory removed successfully.")
-            else:
-                return DockerResult(True, "Config directory does not exist.")
+            for label, path in targets:
+                log(f"Removing {label} {path}...")
+                if not path.exists():
+                    missing_labels.append(label)
+                    continue
+                shutil.rmtree(path)
+                removed_labels.append(label)
         except PermissionError as e:
             return DockerResult(False, f"Permission denied: {e}")
         except Exception as e:
-            return DockerResult(False, f"Failed to remove config directory: {e}")
+            return DockerResult(False, f"Failed to remove config data: {e}")
+
+        self._cached_auth_token = None
+
+        if removed_labels and missing_labels:
+            return DockerResult(
+                True,
+                "Removed: "
+                + ", ".join(removed_labels)
+                + ". Already absent: "
+                + ", ".join(missing_labels)
+                + ".",
+            )
+        if removed_labels:
+            return DockerResult(
+                True,
+                "Removed: " + ", ".join(removed_labels) + ".",
+            )
+        return DockerResult(
+            True,
+            "Config directory and dashboard external state directory do not exist.",
+        )
 
     def remove_models_volume(
         self,
@@ -1898,8 +1990,9 @@ class DockerManager:
             )
 
         env_file = self.ensure_hf_env_defaults()
-        self.ensure_uv_cache_env_defaults()
-        uv_cache_decision, _, _ = self.get_uv_cache_state()
+        uv_cache_decision, _, _ = self.reconcile_uv_cache_state(
+            progress_callback=progress_callback
+        )
         self._ensure_compose_compatibility(
             compose_file,
             uv_cache_enabled=(uv_cache_decision != "skipped"),
@@ -2072,8 +2165,9 @@ class DockerManager:
             )
 
         env_file = self.ensure_hf_env_defaults()
-        self.ensure_uv_cache_env_defaults()
-        uv_cache_decision, _, _ = self.get_uv_cache_state()
+        uv_cache_decision, _, _ = self.reconcile_uv_cache_state(
+            progress_callback=progress_callback
+        )
         self._ensure_compose_compatibility(
             compose_file,
             uv_cache_enabled=(uv_cache_decision != "skipped"),

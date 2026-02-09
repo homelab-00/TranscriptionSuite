@@ -17,7 +17,7 @@ longform_recording:
     # v1 supports source-language -> English only.
     translation_enabled: false
 
-    # Translation output target language. v1 must be "en".
+    # Translation output target language. Faster-whisper only offers English tranlsation.
     translation_target_language: "en"
 
     # Automatically add longform recordings to Audio Notebook.
@@ -96,7 +96,7 @@ live_transcriber:
     # v1 supports source-language -> English only.
     translation_enabled: false
 
-    # Translation output target language. v1 must be "en".
+    # Translation output target language. Faster-whisper only offers English tranlsation.
     translation_target_language: "en"
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.

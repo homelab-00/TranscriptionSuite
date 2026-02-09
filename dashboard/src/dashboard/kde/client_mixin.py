@@ -867,6 +867,7 @@ class ClientControlMixin:
 
     def _on_live_language_changed(self, index: int) -> None:
         """Handle live mode language selection change."""
+        del index
         language_code = self._live_language_combo.currentData()
 
         # Save to server config

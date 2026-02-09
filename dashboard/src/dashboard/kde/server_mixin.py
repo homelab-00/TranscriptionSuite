@@ -978,8 +978,8 @@ class DashboardServerControlMixin:
         # Add checkbox for also removing config directory
         config_checkbox = AppleSwitch("Also remove config directory")
         config_checkbox.setToolTip(
-            f"Remove {self._docker_manager.config_dir}\n"
-            "(contains dashboard.yaml, docker-compose.yml, etc.)"
+            f"Remove {self._docker_manager.config_dir} and dashboard cache state\n"
+            "(includes docker-compose.yml, dashboard.yaml, fallback .env/token, and docker-user-config mirror)"
         )
         msg_box.setCheckBox(config_checkbox)
 

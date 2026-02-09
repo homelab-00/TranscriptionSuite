@@ -620,10 +620,13 @@ This section describes exactly what updates when the Docker image changes versus
 1. Docker starts/recreates the container from the selected image tag.
 2. `docker-entrypoint.sh` runs `bootstrap_runtime.py`.
 3. Bootstrap checks `/runtime/.runtime-bootstrap-marker.json` against current dependency fingerprint (`uv.lock` + Python ABI + arch + schema version).
-4. Bootstrap chooses one path:
-   - `skip`: existing runtime venv is compatible and up to date.
-   - `delta-sync`: run incremental `uv sync` against existing `/runtime/.venv`.
-   - `rebuild-sync`: recreate `/runtime/.venv`, then run `uv sync`.
+4. If marker + fingerprint match, bootstrap runs full runtime integrity validation:
+   - `uv sync --check --frozen --no-dev --project /app/server`
+   - with `UV_PROJECT_ENVIRONMENT=/runtime/.venv`
+5. Bootstrap chooses one path:
+   - `skip`: marker matches **and** integrity check passes.
+   - `delta-sync`: marker mismatch, or marker matches but integrity check fails.
+   - `rebuild-sync`: `/runtime/.venv` missing, ABI/arch incompatibility, or `delta-sync` fails/does not heal integrity.
 
 **What changes when the Docker image is updated**
 - Updated:
@@ -635,23 +638,26 @@ This section describes exactly what updates when the Docker image changes versus
   - `transcriptionsuite-uv-cache` (`/runtime-cache`) unless explicitly removed.
   - `transcriptionsuite-data` and `transcriptionsuite-models`.
 
-In short: an image update mainly changes code and runtime tooling; dependency downloads happen only if bootstrap detects dependency drift or incompatible runtime state.
+In short: an image update mainly changes code and runtime tooling; dependency downloads happen only if bootstrap detects dependency drift, runtime incompatibility, or runtime integrity failure.
 
 **When the runtime dependency volume is updated**
 - `delta-sync` (incremental update) happens when:
   - `uv.lock` content changed between image versions.
   - Marker fingerprint no longer matches current runtime fingerprint.
   - Marker exists but is from an older bootstrap schema/fingerprint mode.
+  - Marker matches but lock-level runtime integrity check fails.
 - `rebuild-sync` (fresh venv + sync) happens when:
   - `/runtime/.venv` is missing.
   - Runtime reset is requested (Dashboard: `Remove Runtime`).
   - ABI/arch incompatibility is detected (with `BOOTSTRAP_REBUILD_POLICY=abi_only`).
+  - `delta-sync` fails or post-sync integrity check still fails.
 
 **How runtime updates minimize download size**
 - Bootstrap runs `uv sync --frozen --no-dev` against existing `/runtime/.venv` for delta updates.
 - `UV_CACHE_DIR` is persisted in `transcriptionsuite-uv-cache` (`/runtime-cache`), so rebuilt venvs can reuse cached wheels.
 - Only changed packages are downloaded when possible; unchanged packages are reused.
 - Large dependency jumps (for example major torch/CUDA changes) may still require large downloads.
+- If UV cache is enabled in `.env` but the Docker `transcriptionsuite-uv-cache` volume is manually deleted, startup keeps cache mode enabled, logs a cold-cache warning, and Docker recreates the volume on next `up -d`.
 
 **Operational scenarios**
 
@@ -661,6 +667,7 @@ In short: an image update mainly changes code and runtime tooling; dependency do
 | Release with dependency changes in `uv.lock` | Yes | `delta-sync` | Reused | Medium (changed deps only) |
 | Runtime venv removed, cache kept | No/Yes | `rebuild-sync` | Reused | Medium (often reduced via cache) |
 | Runtime + cache removed | No/Yes | `rebuild-sync` | Recreated empty | High (full dependency fetch) |
+| UV cache removed manually (decision still enabled) | No/Yes | `skip`/`delta-sync` based on runtime integrity and lock drift | Recreated empty | Low to High (depends on dependency drift) |
 | Python ABI/arch incompatibility | Usually Yes | `rebuild-sync` | Reused | Medium to High |
 
 **Recommended update flow (least disruption)**
@@ -671,6 +678,17 @@ docker compose up -d
 ```
 
 Use runtime reset only for recovery/maintenance. Prefer keeping `transcriptionsuite-uv-cache` unless you explicitly want a fully cold reinstall.
+
+**Config reset semantics**
+- Normal image/runtime updates do **not** require deleting `~/.config/TranscriptionSuite` (or platform equivalent).
+- Manually deleting UV cache volume does **not** require config removal.
+- Remove config only for full reset or severe config corruption/recovery scenarios.
+- Dashboard "Also remove config directory" now performs a full dashboard state reset:
+  - Removes primary config directory (`~/.config/TranscriptionSuite` on Linux).
+  - Removes dashboard external state cache (`~/.cache/TranscriptionSuite` or `$XDG_CACHE_HOME/TranscriptionSuite`), including:
+    - `docker-user-config/` (effective `/user-config` bind mount copy),
+    - fallback managed `.env`,
+    - fallback saved Docker auth token.
 
 ---
 
@@ -1207,20 +1225,34 @@ Then restart: `docker compose down && docker compose up -d`
 
 ### 13.6 Checking Installed Packages
 
-To inspect the Python packages installed in the *running* `transcriptionsuite-container` server container:
+To inspect packages in the runtime venv used by the server:
 
 ```bash
-docker exec transcriptionsuite-container python -c "
+docker exec transcriptionsuite-container /runtime/.venv/bin/python -c "
 from importlib.metadata import distributions
 for dist in sorted(distributions(), key=lambda d: d.name.lower()):
     print(f'{dist.name:40} {dist.version}')
 "
 ```
 
-This lists all installed packages and their versions, sorted alphabetically. Useful for:
+To validate full lock-level runtime integrity (all packages, not piecemeal checks):
+
+```bash
+docker exec transcriptionsuite-container env \
+  UV_PROJECT_ENVIRONMENT=/runtime/.venv \
+  UV_CACHE_DIR=/runtime-cache \
+  UV_PYTHON=/usr/bin/python3.13 \
+  uv sync --check --frozen --no-dev --project /app/server
+```
+
+If persistent UV cache is disabled, use `UV_CACHE_DIR=/tmp/uv-cache` instead.
+
+If this command exits non-zero, the runtime environment is not fully aligned with `uv.lock`.
+
+These checks are useful for:
 - Verifying package versions
 - Debugging dependency conflicts
-- Confirming successful installations after rebuilds
+- Confirming successful repair after bootstrap `delta-sync` or `rebuild-sync`
 
 ---
 

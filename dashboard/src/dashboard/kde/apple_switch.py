@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QPoint,
     QPropertyAnimation,
     QRectF,
     QSize,
@@ -66,6 +67,15 @@ class AppleSwitch(QCheckBox):
     def _switch_rect(self) -> QRectF:
         y = (self.height() - self._SWITCH_HEIGHT) / 2.0
         return QRectF(0.0, y, self._SWITCH_WIDTH, self._SWITCH_HEIGHT)
+
+    def hitButton(self, pos: QPoint) -> bool:
+        """
+        Use the full custom widget bounds as clickable area.
+
+        QCheckBox default hit testing depends on style indicator geometry,
+        which can make custom-painted switches hard to toggle reliably.
+        """
+        return self.rect().contains(pos)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         del event

@@ -120,28 +120,105 @@ class AudioRecorder:
             logger.warning(f"Could not get default input device: {e}")
             return None
 
-    def _get_output_device(self):
-        """Resolve the system output device for loopback capture."""
+    def _iter_loopback_microphones(self) -> list[Any]:
+        """Return all loopback-capable microphones from soundcard."""
+        if not HAS_SOUNDCARD:
+            return []
+
+        try:
+            microphones = soundcard.all_microphones(include_loopback=True)
+        except TypeError:
+            # Older soundcard variants may not support include_loopback kwarg.
+            microphones = soundcard.all_microphones()
+        except Exception:
+            return []
+
+        loopbacks: list[Any] = []
+        for mic in microphones:
+            is_loopback = bool(getattr(mic, "isloopback", False))
+            if is_loopback:
+                loopbacks.append(mic)
+        return loopbacks
+
+    def _get_loopback_microphone(self) -> Any:
+        """
+        Resolve a loopback microphone for system audio capture.
+
+        The soundcard API records loopback from microphone-style devices,
+        not directly from speaker objects.
+        """
         if not HAS_SOUNDCARD:
             raise RuntimeError("soundcard dependency is not available")
 
-        speakers = soundcard.all_speakers()
-        if not speakers:
-            raise RuntimeError("No system output devices available")
+        loopbacks = self._iter_loopback_microphones()
+        if not loopbacks:
+            raise RuntimeError("No loopback capture devices available")
 
         if self.system_output_id:
-            for speaker in speakers:
-                speaker_id = str(getattr(speaker, "id", ""))
-                if speaker_id == self.system_output_id:
-                    return speaker
+            target_id = str(self.system_output_id)
+
+            # First try direct lookup by selected output id.
+            try:
+                mic = soundcard.get_microphone(target_id, include_loopback=True)
+                if mic is not None:
+                    return mic
+            except Exception:
+                pass
+
+            # Fallback: match by loopback microphone id/name.
+            for mic in loopbacks:
+                mic_id = str(getattr(mic, "id", ""))
+                mic_name = str(getattr(mic, "name", ""))
+                if target_id in {mic_id, mic_name}:
+                    return mic
+
+            # Additional fallback: map selected speaker id -> similarly named loopback mic.
+            try:
+                for speaker in soundcard.all_speakers():
+                    speaker_id = str(getattr(speaker, "id", ""))
+                    if speaker_id != target_id:
+                        continue
+                    speaker_name = str(getattr(speaker, "name", ""))
+                    if not speaker_name:
+                        break
+                    for mic in loopbacks:
+                        mic_name = str(getattr(mic, "name", ""))
+                        if speaker_name in mic_name:
+                            return mic
+                    break
+            except Exception:
+                pass
+
             raise RuntimeError(
                 f"Configured system audio device not found: {self.system_output_id}"
             )
 
-        default_speaker = soundcard.default_speaker()
-        if default_speaker is None:
-            raise RuntimeError("No default system output device found")
-        return default_speaker
+        # Prefer loopback for the current default speaker when available.
+        default_speaker = None
+        try:
+            default_speaker = soundcard.default_speaker()
+        except Exception:
+            default_speaker = None
+
+        if default_speaker is not None:
+            speaker_id = str(getattr(default_speaker, "id", ""))
+            if speaker_id:
+                try:
+                    mic = soundcard.get_microphone(speaker_id, include_loopback=True)
+                    if mic is not None:
+                        return mic
+                except Exception:
+                    pass
+
+            speaker_name = str(getattr(default_speaker, "name", ""))
+            if speaker_name:
+                for mic in loopbacks:
+                    mic_name = str(getattr(mic, "name", ""))
+                    if speaker_name in mic_name:
+                        return mic
+
+        # Final fallback: first available loopback device.
+        return loopbacks[0]
 
     def _get_supported_channels(
         self, device_index: int | None, sample_rate: int
@@ -351,17 +428,27 @@ class AudioRecorder:
             return False
 
         try:
-            output_device = self._get_output_device()
-            self._system_recorder_ctx = output_device.recorder(
-                samplerate=self.sample_rate,
-                channels=2,
-                blocksize=self.chunk_size,
-            )
+            loopback_mic = self._get_loopback_microphone()
+            recorder_ctx = None
+            for channels in (2, 1):
+                try:
+                    recorder_ctx = loopback_mic.recorder(
+                        samplerate=self.sample_rate,
+                        channels=channels,
+                        blocksize=self.chunk_size,
+                    )
+                    break
+                except Exception:
+                    recorder_ctx = None
+            if recorder_ctx is None:
+                raise RuntimeError("No supported loopback recorder format found")
+
+            self._system_recorder_ctx = recorder_ctx
             self._system_recorder = self._system_recorder_ctx.__enter__()
             self._recording = True
             self._frames = []
             self._actual_sample_rate = self.sample_rate
-            self._actual_channels = self.channels
+            self._actual_channels = 1
             self._needs_resampling = False
             self._needs_channel_conversion = False
 
@@ -372,7 +459,7 @@ class AudioRecorder:
 
             logger.info(
                 "System audio recording started from %s",
-                getattr(output_device, "name", "default output"),
+                getattr(loopback_mic, "name", "default loopback device"),
             )
             return True
         except Exception as e:
@@ -636,9 +723,32 @@ class AudioRecorder:
         devices: list[dict[str, Any]] = []
         try:
             for speaker in soundcard.all_speakers():
-                name = str(getattr(speaker, "name", "Output device"))
-                speaker_id = str(getattr(speaker, "id", name))
-                devices.append({"id": speaker_id, "name": name})
+                speaker_id = str(getattr(speaker, "id", ""))
+                speaker_name = str(getattr(speaker, "name", "Output device"))
+                if not speaker_id:
+                    continue
+                try:
+                    loopback = soundcard.get_microphone(
+                        speaker_id, include_loopback=True
+                    )
+                except Exception:
+                    loopback = None
+                if loopback is None:
+                    continue
+                devices.append({"id": speaker_id, "name": speaker_name})
+
+            # Fallback for environments where speaker->loopback mapping is unavailable.
+            if not devices:
+                try:
+                    microphones = soundcard.all_microphones(include_loopback=True)
+                except TypeError:
+                    microphones = soundcard.all_microphones()
+                for mic in microphones:
+                    if not bool(getattr(mic, "isloopback", False)):
+                        continue
+                    mic_name = str(getattr(mic, "name", "Loopback device"))
+                    mic_id = str(getattr(mic, "id", mic_name))
+                    devices.append({"id": mic_id, "name": mic_name})
         except Exception as e:
             logger.error(f"Error listing output devices: {e}")
 

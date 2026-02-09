@@ -16,6 +16,11 @@ from typing import Any
 from dashboard.common.api_client import APIClient, LiveModeClient, ServerBusyError
 from dashboard.common.audio_recorder import AudioRecorder
 from dashboard.common.config import ClientConfig
+from dashboard.common.live_mode_config import (
+    build_live_mode_start_config,
+    resolve_live_mode_language,
+    resolve_live_mode_translation_config,
+)
 from dashboard.common.models import TrayAction, TrayState
 
 logger = logging.getLogger(__name__)
@@ -217,17 +222,21 @@ class ClientOrchestrator:
             )
 
         def fallback_to_microphone(reason: Exception | str) -> AudioRecorder:
+            reason_text = str(reason)
             logger.warning(
                 "System audio source unavailable, falling back to microphone: %s",
-                reason,
+                reason_text,
             )
             self.config.set("recording", "source_type", value="microphone")
             self.config.save()
 
             if self.tray:
+                short_reason = reason_text.strip() or "unavailable"
+                if len(short_reason) > 96:
+                    short_reason = short_reason[:93] + "..."
                 self.tray.show_notification(
                     "System Audio Unavailable",
-                    "Switched back to microphone and continued.",
+                    f"Switched to microphone ({short_reason}).",
                 )
                 if hasattr(self.tray, "sync_recording_source"):
                     self.tray.sync_recording_source("microphone")
@@ -907,26 +916,16 @@ class ClientOrchestrator:
                 )
 
             # Send start command with config
-            main_model = self.config.get_server_config(
-                "main_transcriber",
-                "model",
-                default="Systran/faster-whisper-large-v3",
+            config, effective_task = self._build_live_mode_start_config()
+            language = config.get("language") or "auto"
+            language_mode = "forced" if config.get("language") else "auto"
+            logger.info(
+                "Live Mode start config: language=%s (%s), task=%s, translation_enabled=%s",
+                language,
+                language_mode,
+                effective_task,
+                config.get("translation_enabled"),
             )
-            live_model = self.config.get_server_config(
-                "live_transcriber", "model", default=None
-            )
-            live_translation_enabled, live_translation_target = (
-                self._get_live_mode_translation_config()
-            )
-            config = {
-                "model": live_model or main_model,
-                "language": self._get_live_mode_language(),
-                "translation_enabled": live_translation_enabled,
-                "translation_target_language": live_translation_target,
-                "post_speech_silence_duration": self.config.get(
-                    "live_mode", "grace_period", default=1.0
-                ),
-            }
             await self._live_mode_client.start(config)
 
             # Start audio recording and streaming
@@ -1045,16 +1044,13 @@ class ClientOrchestrator:
         await self._stop_live_mode()
         await self._start_live_mode()
 
+    def _build_live_mode_start_config(self) -> tuple[dict[str, Any], str]:
+        """Build the Live Mode start payload and effective Whisper task."""
+        return build_live_mode_start_config(self.config)
+
     def _get_live_mode_language(self) -> str:
         """Resolve the Live Mode language code from config."""
-        live_language = self.config.get_server_config(
-            "live_transcriber", "live_language", default=None
-        )
-        if live_language is None:
-            live_language = self.config.get_server_config(
-                "longform_recording", "language", default=None
-            )
-        return live_language or ""
+        return resolve_live_mode_language(self.config)
 
     def _get_main_transcription_language(self) -> str | None:
         """Resolve language for main transcription flows."""
@@ -1077,15 +1073,7 @@ class ClientOrchestrator:
 
     def _get_live_mode_translation_config(self) -> tuple[bool, str]:
         """Resolve translation settings for Live Mode."""
-        enabled = bool(
-            self.config.get_server_config(
-                "live_transcriber", "translation_enabled", default=False
-            )
-        )
-        target = self.config.get_server_config(
-            "live_transcriber", "translation_target_language", default="en"
-        )
-        return enabled, (target or "en")
+        return resolve_live_mode_translation_config(self.config)
 
     def _on_live_sentence(self, text: str) -> None:
         """Callback for completed Live Mode sentences."""

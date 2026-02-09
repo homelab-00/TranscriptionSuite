@@ -91,6 +91,7 @@ def get_default_config() -> dict[str, Any]:
             "start_minimized": False,
             "left_click": "start_recording",
             "middle_click": "stop_transcribe",
+            "live_language_default_migrated_v1": False,
         },
         "behavior": {
             "auto_start_client": False,  # Start client when app launches
@@ -213,6 +214,30 @@ class ClientConfig:
                 d[key] = {}
             d = d[key]
         d[keys[-1]] = value
+
+    def migrate_live_language_default_v1(self) -> bool:
+        """
+        Apply one-time migration forcing Live Mode language to English.
+
+        Returns:
+            True when migration succeeds or was already applied, False on failure.
+        """
+        if self.get("ui", "live_language_default_migrated_v1", default=False):
+            return True
+
+        updated = self.set_server_config(
+            "live_transcriber",
+            "live_language",
+            value="en",
+        )
+        if not updated:
+            logger.warning(
+                "Skipping live language migration: failed to update server config"
+            )
+            return False
+
+        self.set("ui", "live_language_default_migrated_v1", value=True)
+        return self.save()
 
     @property
     def server_host(self) -> str:

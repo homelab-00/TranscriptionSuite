@@ -245,10 +245,6 @@ def create_client_view(dashboard) -> QWidget:
         dashboard._on_main_translation_target_changed
     )
 
-    layout.addWidget(main_card, alignment=Qt.AlignmentFlag.AlignCenter)
-
-    layout.addSpacing(12)
-
     # Source card
     source_card, source_layout = _create_client_card("Source", card_width)
 
@@ -307,7 +303,8 @@ def create_client_view(dashboard) -> QWidget:
     source_layout.addLayout(sys_row)
 
     source_help = QLabel(
-        "Default devices are used unless you explicitly choose a specific one."
+        "Scope: applies to Longform Recording and Live Mode only. "
+        "Does not affect Static File Transcription or Audio Notebook uploads."
     )
     source_help.setStyleSheet("color: #808080; font-size: 11px;")
     source_help.setWordWrap(True)
@@ -326,6 +323,10 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._sync_audio_source_ui()
 
     layout.addWidget(source_card, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    layout.addSpacing(12)
+
+    layout.addWidget(main_card, alignment=Qt.AlignmentFlag.AlignCenter)
 
     layout.addSpacing(12)
 
@@ -368,7 +369,7 @@ def create_client_view(dashboard) -> QWidget:
     dashboard._live_mode_mute_btn.clicked.connect(dashboard._on_live_mode_mute_click)
     controls_row.addWidget(dashboard._live_mode_mute_btn)
 
-    live_language_label = QLabel("Language:")
+    live_language_label = QLabel("Input Language (forced):")
     live_language_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
     controls_row.addWidget(live_language_label)
 
@@ -382,9 +383,10 @@ def create_client_view(dashboard) -> QWidget:
         ),
     )
     dashboard._live_language_combo.setToolTip(
-        "Force a specific language for Live Mode.\n"
-        "Recommended: Select your language for better accuracy.\n"
-        "Auto-detect works poorly with short utterances.\n"
+        "Forces decoding toward the selected input language.\n"
+        "This setting does not enable translation.\n"
+        "If set to English, non-English speech may be decoded as English-like text.\n"
+        "Use Auto only if you accept short-utterance language drift.\n"
         "Live Mode will restart to apply changes."
     )
     dashboard._live_language_combo.currentIndexChanged.connect(
@@ -394,6 +396,14 @@ def create_client_view(dashboard) -> QWidget:
     controls_row.addStretch()
 
     live_layout.addLayout(controls_row)
+
+    live_language_note = QLabel(
+        "Translation OFF still transcribes using the selected input language.\n"
+        "Use Auto only if you accept short-utterance language drift."
+    )
+    live_language_note.setStyleSheet("color: #808080; font-size: 11px;")
+    live_language_note.setWordWrap(True)
+    live_layout.addWidget(live_language_note)
 
     live_translation_row = QHBoxLayout()
     live_translation_row.setSpacing(10)

@@ -181,6 +181,9 @@ def main() -> int:
     # Load configuration
     config = ClientConfig()
 
+    # One-time migration: force Live Mode default language to English.
+    config.migrate_live_language_default_v1()
+
     # Apply command line overrides
     if args.host:
         config.set("server", "host", value=args.host)

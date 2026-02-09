@@ -323,6 +323,13 @@ function Initialize-UVCacheDecision {
         }
     }
 
+    if ($decision -eq "enabled") {
+        $cacheVolumeExists = docker volume ls --format "{{.Name}}" 2>$null | Where-Object { $_ -eq "transcriptionsuite-uv-cache" }
+        if (-not $cacheVolumeExists) {
+            Write-Info "UV cache volume missing; cold cache expected. Volume will be recreated on start."
+        }
+    }
+
     $cacheDir = if ($decision -eq "enabled") { "/runtime-cache" } else { "/tmp/uv-cache" }
     Set-EnvValue -EnvFilePath $EnvFilePath -Key "BOOTSTRAP_CACHE_DIR" -Value $cacheDir
     Update-ComposeUVCacheMode -ComposeFilePath $ComposeFilePath -Decision $decision
