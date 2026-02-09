@@ -8,9 +8,13 @@ from typing import Any, Protocol
 class LiveModeConfigSource(Protocol):
     """Config interface required by Live Mode config helpers."""
 
-    def get(self, *keys: str, default: Any = None) -> Any: ...
+    def get(self, *keys: str, default: Any = None) -> Any:
+        # Protocol runtime stub (typed implementations provide behavior).
+        pass
 
-    def get_server_config(self, *keys: str, default: Any = None) -> Any: ...
+    def get_server_config(self, *keys: str, default: Any = None) -> Any:
+        # Protocol runtime stub (typed implementations provide behavior).
+        pass
 
 
 def resolve_live_mode_language(config: LiveModeConfigSource) -> str:

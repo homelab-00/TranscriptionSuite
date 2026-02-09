@@ -13,6 +13,10 @@ import logging
 import threading
 import wave
 from collections.abc import Callable
+from contextlib import contextmanager
+from ctypes import CFUNCTYPE, cdll, c_char_p, c_int
+from ctypes.util import find_library
+from sys import platform
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -24,6 +28,78 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_SIZE = 1024
 SAMPLE_WIDTH = 2  # 16-bit audio
+
+# Suppress noisy ALSA stderr probes on Linux while PyAudio enumerates devices.
+_ALSA = None
+_ALSA_ERROR_HANDLER = None
+_ALSA_HANDLER_DEPTH = 0
+_ALSA_HANDLER_LOCK = threading.Lock()
+
+if platform.startswith("linux"):
+    try:
+        asound_path = find_library("asound")
+        if asound_path:
+            _ALSA = cdll.LoadLibrary(asound_path)
+            _ALSA_ERROR_HANDLER_FUNC = CFUNCTYPE(
+                None,
+                c_char_p,
+                c_int,
+                c_char_p,
+                c_int,
+                c_char_p,
+            )
+
+            def _alsa_error_handler(
+                filename: bytes,
+                line: int,
+                function: bytes,
+                err: int,
+                fmt: bytes,
+            ) -> None:
+                del filename, line, function, err, fmt
+
+            _ALSA_ERROR_HANDLER = _ALSA_ERROR_HANDLER_FUNC(_alsa_error_handler)
+    except Exception:
+        _ALSA = None
+        _ALSA_ERROR_HANDLER = None
+
+
+@contextmanager
+def _suppress_alsa_stderr() -> Any:
+    """
+    Temporarily disable ALSA library stderr logging.
+
+    PortAudio probes many ALSA PCM aliases, and ALSA logs expected failures
+    directly to stderr during this process.
+    """
+    global _ALSA_HANDLER_DEPTH
+
+    if _ALSA is None or _ALSA_ERROR_HANDLER is None:
+        yield
+        return
+
+    enabled = False
+    with _ALSA_HANDLER_LOCK:
+        try:
+            if _ALSA_HANDLER_DEPTH == 0:
+                _ALSA.snd_lib_error_set_handler(_ALSA_ERROR_HANDLER)
+            _ALSA_HANDLER_DEPTH += 1
+            enabled = True
+        except Exception:
+            enabled = False
+
+    try:
+        yield
+    finally:
+        if enabled:
+            with _ALSA_HANDLER_LOCK:
+                _ALSA_HANDLER_DEPTH = max(_ALSA_HANDLER_DEPTH - 1, 0)
+                if _ALSA_HANDLER_DEPTH == 0:
+                    try:
+                        _ALSA.snd_lib_error_set_handler(None)
+                    except Exception:
+                        logger.debug("Failed to restore ALSA stderr handler")
+
 
 # Try to import PyAudio
 HAS_PYAUDIO = False
@@ -162,8 +238,12 @@ class AudioRecorder:
                 mic = soundcard.get_microphone(target_id, include_loopback=True)
                 if mic is not None:
                     return mic
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    "Loopback lookup by configured device id failed for %s: %s",
+                    target_id,
+                    exc,
+                )
 
             # Fallback: match by loopback microphone id/name.
             for mic in loopbacks:
@@ -186,8 +266,12 @@ class AudioRecorder:
                         if speaker_name in mic_name:
                             return mic
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    "Speaker-to-loopback mapping failed for configured device id %s: %s",
+                    target_id,
+                    exc,
+                )
 
             raise RuntimeError(
                 f"Configured system audio device not found: {self.system_output_id}"
@@ -207,8 +291,12 @@ class AudioRecorder:
                     mic = soundcard.get_microphone(speaker_id, include_loopback=True)
                     if mic is not None:
                         return mic
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(
+                        "Loopback lookup by default speaker id failed for %s: %s",
+                        speaker_id,
+                        exc,
+                    )
 
             speaker_name = str(getattr(default_speaker, "name", ""))
             if speaker_name:
@@ -362,48 +450,51 @@ class AudioRecorder:
             return False
 
         try:
-            self._audio = pyaudio.PyAudio()
-            device_index = self._get_device_index()
+            with _suppress_alsa_stderr():
+                self._audio = pyaudio.PyAudio()
+                device_index = self._get_device_index()
 
-            # First, find supported channels (try mono, fallback to stereo)
-            # Use device default sample rate for initial channel detection
-            try:
-                if device_index is not None:
-                    device_info = self._audio.get_device_info_by_index(device_index)
-                else:
-                    device_info = self._audio.get_default_input_device_info()
-                test_rate = int(device_info.get("defaultSampleRate", 44100))
-            except Exception:
-                test_rate = 44100
+                # First, find supported channels (try mono, fallback to stereo)
+                # Use device default sample rate for initial channel detection
+                try:
+                    if device_index is not None:
+                        device_info = self._audio.get_device_info_by_index(device_index)
+                    else:
+                        device_info = self._audio.get_default_input_device_info()
+                    test_rate = int(device_info.get("defaultSampleRate", 44100))
+                except Exception:
+                    test_rate = 44100
 
-            actual_channels = self._get_supported_channels(device_index, test_rate)
+                actual_channels = self._get_supported_channels(device_index, test_rate)
 
-            # Now get supported sample rate using the actual channels
-            actual_rate = self._get_supported_sample_rate(device_index, actual_channels)
-
-            # Store actual recording parameters for conversion later
-            self._actual_sample_rate = actual_rate
-            self._actual_channels = actual_channels
-            self._needs_resampling = actual_rate != self.sample_rate
-            self._needs_channel_conversion = actual_channels != self.channels
-
-            if self._needs_resampling:
-                logger.info(
-                    f"Will resample from {actual_rate} Hz to {self.sample_rate} Hz after recording"
-                )
-            if self._needs_channel_conversion:
-                logger.info(
-                    f"Will convert from {actual_channels} channels to {self.channels} channel(s) after recording"
+                # Now get supported sample rate using the actual channels
+                actual_rate = self._get_supported_sample_rate(
+                    device_index, actual_channels
                 )
 
-            self._stream = self._audio.open(
-                format=pyaudio.paInt16,
-                channels=actual_channels,
-                rate=actual_rate,
-                input=True,
-                frames_per_buffer=self.chunk_size,
-                input_device_index=device_index,
-            )
+                # Store actual recording parameters for conversion later
+                self._actual_sample_rate = actual_rate
+                self._actual_channels = actual_channels
+                self._needs_resampling = actual_rate != self.sample_rate
+                self._needs_channel_conversion = actual_channels != self.channels
+
+                if self._needs_resampling:
+                    logger.info(
+                        f"Will resample from {actual_rate} Hz to {self.sample_rate} Hz after recording"
+                    )
+                if self._needs_channel_conversion:
+                    logger.info(
+                        f"Will convert from {actual_channels} channels to {self.channels} channel(s) after recording"
+                    )
+
+                self._stream = self._audio.open(
+                    format=pyaudio.paInt16,
+                    channels=actual_channels,
+                    rate=actual_rate,
+                    input=True,
+                    frames_per_buffer=self.chunk_size,
+                    input_device_index=device_index,
+                )
 
             self._recording = True
             self._frames = []
@@ -691,26 +782,34 @@ class AudioRecorder:
             return []
 
         devices: list[dict[str, Any]] = []
+        audio = None
         try:
-            audio = pyaudio.PyAudio()
-            for i in range(audio.get_device_count()):
-                try:
-                    info = audio.get_device_info_by_index(i)
-                    max_input_channels = int(info.get("maxInputChannels", 0))
-                    if max_input_channels > 0:
-                        devices.append(
-                            {
-                                "index": i,
-                                "name": info.get("name", f"Device {i}"),
-                                "channels": max_input_channels,
-                                "sample_rate": info.get("defaultSampleRate"),
-                            }
-                        )
-                except Exception:
-                    continue
-            audio.terminate()
+            with _suppress_alsa_stderr():
+                audio = pyaudio.PyAudio()
+                for i in range(audio.get_device_count()):
+                    try:
+                        info = audio.get_device_info_by_index(i)
+                        max_input_channels = int(info.get("maxInputChannels", 0))
+                        if max_input_channels > 0:
+                            devices.append(
+                                {
+                                    "index": i,
+                                    "name": info.get("name", f"Device {i}"),
+                                    "channels": max_input_channels,
+                                    "sample_rate": info.get("defaultSampleRate"),
+                                }
+                            )
+                    except Exception:
+                        continue
         except Exception as e:
             logger.error(f"Error listing input devices: {e}")
+        finally:
+            if audio is not None:
+                try:
+                    with _suppress_alsa_stderr():
+                        audio.terminate()
+                except Exception:
+                    logger.debug("Failed to terminate PyAudio after device enumeration")
 
         return devices
 
