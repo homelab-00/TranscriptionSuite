@@ -23,7 +23,6 @@ from server.core.live_engine import (
     LiveModeState,
 )
 from server.core.model_manager import get_model_manager
-from server.core.stt.capabilities import supports_english_translation
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
 
@@ -146,6 +145,8 @@ class LiveModeSession:
                     )
 
             if config.translation_enabled:
+                from server.core.stt.capabilities import supports_english_translation
+
                 if config.translation_target_language != "en":
                     await self.send_message(
                         "error",

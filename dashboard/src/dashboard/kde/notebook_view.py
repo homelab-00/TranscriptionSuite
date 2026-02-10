@@ -317,7 +317,7 @@ class NotebookView(QWidget):
     @staticmethod
     def _default_export_basename(recording: dict[str, object]) -> str:
         """Build a filesystem-safe default basename for exports."""
-        raw_title = (recording.get("title") or recording.get("filename") or "recording")
+        raw_title = recording.get("title") or recording.get("filename") or "recording"
         title = " ".join(str(raw_title).split()).strip()
         sanitized = re.sub(r'[\\/:*?"<>|]+', "_", title).strip(" .")
         return sanitized or "recording"

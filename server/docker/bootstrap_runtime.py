@@ -474,7 +474,9 @@ def ensure_runtime_dependencies(
                     "Bootstrap path selected: mode=skip reason=marker_match_integrity_ok"
                 )
                 log("Runtime dependencies already up-to-date (mode=skip)")
-                log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
+                log_timing(
+                    "ensure_runtime_dependencies complete (mode=skip)", ensure_start
+                )
                 return venv_dir, "skip", package_delta, diagnostics
             diagnostics["selection_reason"] = "marker_match_integrity_failed"
             log(
@@ -737,7 +739,9 @@ def compute_diarization_preload_cache_key(
         "schema_version": 1,
         "model": diarization_model.strip(),
         "token_hash": token_hash,
-        "cache_state": collect_hf_model_cache_state(hf_home=hf_home, model_id=diarization_model),
+        "cache_state": collect_hf_model_cache_state(
+            hf_home=hf_home, model_id=diarization_model
+        ),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

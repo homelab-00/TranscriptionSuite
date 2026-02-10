@@ -41,7 +41,6 @@ def upgrade() -> None:
         ADD COLUMN response_id TEXT DEFAULT NULL
         """)
     )
-    conn.commit()
 
 
 def downgrade() -> None:
@@ -76,4 +75,3 @@ def downgrade() -> None:
         """)
     )
     conn.execute(text("DROP TABLE conversations_backup"))
-    conn.commit()

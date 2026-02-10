@@ -13,7 +13,6 @@ import shutil
 import subprocess
 from typing import AsyncGenerator, Optional
 
-import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -23,6 +22,13 @@ from server.config import get_config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _get_httpx():
+    """Import httpx lazily to avoid startup cost for non-LLM flows."""
+    import httpx
+
+    return httpx
 
 
 # --- Pydantic Models ---
@@ -58,6 +64,7 @@ class LLMStatus(BaseModel):
 
 async def _get_loaded_model_id(base_url: str) -> Optional[str]:
     """Get the first loaded LLM/VLM model ID from LM Studio."""
+    httpx = _get_httpx()
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(f"{base_url}/api/v0/models")
@@ -141,6 +148,7 @@ def get_llm_config() -> dict:
 @router.get("/status", response_model=LLMStatus)
 async def get_llm_status():
     """Check if LM Studio server is available and what model is loaded"""
+    httpx = _get_httpx()
     config = get_llm_config()
     base_url = config["base_url"]
 
@@ -207,6 +215,7 @@ async def get_llm_status():
 @router.post("/process", response_model=LLMResponse)
 async def process_with_llm(request: LLMRequest):
     """Send transcription to LLM for processing (non-streaming)"""
+    httpx = _get_httpx()
     config = get_llm_config()
 
     if not config["enabled"]:
@@ -307,6 +316,7 @@ async def process_with_llm(request: LLMRequest):
 @router.post("/process/stream")
 async def process_with_llm_stream(request: LLMRequest):
     """Send transcription to LLM for processing with streaming response"""
+    httpx = _get_httpx()
     config = get_llm_config()
 
     if not config["enabled"]:
@@ -535,6 +545,7 @@ async def start_lm_studio_server():
     This endpoint will check if LM Studio is running and load a model if needed.
     """
     logger.info("Checking LM Studio server status...")
+    httpx = _get_httpx()
 
     config = get_llm_config()
     base_url = config["base_url"]
@@ -634,6 +645,7 @@ async def list_available_models():
     """
     config = get_llm_config()
     base_url = config["base_url"]
+    httpx = _get_httpx()
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -692,6 +704,7 @@ async def load_model(request: ModelLoadRequest):
     """
     config = get_llm_config()
     base_url = config["base_url"]
+    httpx = _get_httpx()
     model_id = request.model_id or config.get("model")
 
     # Use config values as defaults if not specified in request
@@ -799,6 +812,7 @@ async def unload_model(instance_id: Optional[str] = None):
     """
     config = get_llm_config()
     base_url = config["base_url"]
+    httpx = _get_httpx()
 
     # If no instance_id provided, get the first loaded model
     if not instance_id:
@@ -1092,6 +1106,7 @@ async def chat_with_llm(request: ChatRequest):
     # Build request for stateful LM Studio v1 API
     config = get_llm_config()
     base_url = config["base_url"]
+    httpx = _get_httpx()
     model_id = config.get("model")
     if not model_id:
         model_id = await _get_loaded_model_id(base_url)

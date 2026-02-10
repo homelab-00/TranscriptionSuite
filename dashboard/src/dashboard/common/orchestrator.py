@@ -25,8 +25,10 @@ from dashboard.common.models import TrayAction, TrayState
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of automatic reconnection attempts
-# 60 attempts * 10s interval = 10 minutes (enough for model loading)
+# Maximum number of automatic reconnection attempts.
+# With progressive back-off (2s → 4s → 8s → 10s cap), the first ~4
+# attempts complete in ~16s, then each subsequent attempt takes 10s.
+# 60 attempts ≈ 9.5 minutes total (enough for model loading).
 MAX_RECONNECT_ATTEMPTS = 60
 
 
@@ -342,12 +344,19 @@ class ClientOrchestrator:
             self._reconnect_task = self._schedule_async(self._reconnect_loop())
 
     async def _reconnect_loop(self) -> None:
-        """Periodically attempt to reconnect (up to MAX_RECONNECT_ATTEMPTS times)."""
-        interval = self.config.get("server", "reconnect_interval", default=10)
+        """Periodically attempt to reconnect (up to MAX_RECONNECT_ATTEMPTS times).
+
+        Uses progressive back-off: starts with fast 2-second polling so the
+        tray icon updates promptly when the server comes online, then
+        gradually increases to the configured reconnect_interval.
+        """
+        max_interval = self.config.get("server", "reconnect_interval", default=10)
+        initial_interval = 2  # fast initial polling interval (seconds)
+        current_interval = initial_interval
         attempt = 0
 
         while attempt < MAX_RECONNECT_ATTEMPTS:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(current_interval)
 
             if self.api_client and self.api_client.is_connected:
                 break  # Already connected
@@ -362,6 +371,10 @@ class ClientOrchestrator:
                     self.tray.set_state(TrayState.STANDBY)
                     self.tray.show_notification("Reconnected", "Connection restored")
                 break
+
+            # Progressive back-off: double the interval each attempt,
+            # capped at the configured maximum
+            current_interval = min(current_interval * 2, max_interval)
         else:
             # Max retries reached
             logger.warning(

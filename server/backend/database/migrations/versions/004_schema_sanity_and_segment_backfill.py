@@ -69,8 +69,6 @@ def upgrade() -> None:
         )
     )
 
-    conn.commit()
-
 
 def downgrade() -> None:
     """

@@ -42,8 +42,6 @@ def upgrade() -> None:
     if not any(row[1] == "model" for row in existing):
         conn.execute(text("ALTER TABLE messages ADD COLUMN model TEXT"))
 
-    conn.commit()
-
 
 def downgrade() -> None:
     """Remove summary_model and message model columns (table rebuild)."""
@@ -114,4 +112,3 @@ def downgrade() -> None:
         """)
     )
     conn.execute(text("DROP TABLE messages_backup"))
-    conn.commit()

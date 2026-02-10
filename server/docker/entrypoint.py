@@ -197,16 +197,8 @@ def main() -> None:
     # Print banner
     print_banner(data_dir, log_dir, port, tls_enabled)
 
-    # Initialize database
-    _log_time("importing database module...")
-    from server.database.database import init_db, set_data_directory
-
-    _log_time("database module imported")
-
-    set_data_directory(data_dir)
-    _log_time("data directory set")
-    init_db()
-    _log_time("database initialized")
+    # Database initialization now runs once in API lifespan startup.
+    _log_time("database initialization deferred to API lifespan")
 
     # Prepare uvicorn config
     uvicorn_config = {

@@ -95,6 +95,11 @@ def run_migrations_online() -> None:
         # Re-enable foreign keys after migration
         connection.execute(text("PRAGMA foreign_keys=ON"))
 
+        # SQLite + Alembic online mode can leave version table writes in an
+        # implicit transaction when transactional DDL is disabled. Commit so
+        # alembic_version updates persist across process restarts.
+        connection.commit()
+
 
 if context.is_offline_mode():
     run_migrations_offline()
