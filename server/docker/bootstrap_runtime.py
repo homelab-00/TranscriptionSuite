@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,10 +35,19 @@ DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 BOOTSTRAP_SCHEMA_VERSION = 2
 FINGERPRINT_SOURCES = {"lockfile", "legacy"}
 REBUILD_POLICIES = {"abi_only", "always", "never"}
+_BOOTSTRAP_START = time.perf_counter()
 
 
 def log(message: str) -> None:
     print(f"[bootstrap] {message}", flush=True)
+
+
+def log_timing(message: str, start_time: float | None = None) -> None:
+    if start_time is None:
+        elapsed = time.perf_counter() - _BOOTSTRAP_START
+    else:
+        elapsed = time.perf_counter() - start_time
+    log(f"[TIMING] {elapsed:.3f}s - {message}")
 
 
 def parse_bool_env(name: str, default: bool) -> bool:
@@ -348,6 +358,7 @@ def ensure_runtime_dependencies(
     rebuild_policy: str,
     log_changes: bool,
 ) -> tuple[Path, str, dict[str, int], dict[str, Any]]:
+    ensure_start = time.perf_counter()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -436,11 +447,13 @@ def ensure_runtime_dependencies(
             selected_mode = "rebuild-sync"
             diagnostics["selection_reason"] = "abi_incompatible"
         elif marker_matches:
+            pre_check_start = time.perf_counter()
             pre_ok, pre_msg = check_runtime_environment_integrity(
                 venv_dir=venv_dir,
                 cache_dir=cache_dir,
                 timeout_seconds=timeout_seconds,
             )
+            log_timing("pre-skip integrity check complete", pre_check_start)
             record_integrity_check("pre_skip_gate", pre_ok, pre_msg)
             if pre_ok:
                 diagnostics["selection_reason"] = "marker_match_integrity_ok"
@@ -449,6 +462,7 @@ def ensure_runtime_dependencies(
                     "Bootstrap path selected: mode=skip reason=marker_match_integrity_ok"
                 )
                 log("Runtime dependencies already up-to-date (mode=skip)")
+                log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
                 return venv_dir, "skip", package_delta, diagnostics
             diagnostics["selection_reason"] = "marker_match_integrity_failed"
             log(
@@ -490,13 +504,22 @@ def ensure_runtime_dependencies(
                 shutil.rmtree(venv_dir, ignore_errors=True)
 
             log(f"Installing Python runtime dependencies (mode={attempt_mode})...")
+            sync_start = time.perf_counter()
             try:
                 run_dependency_sync(
                     venv_dir=venv_dir,
                     cache_dir=cache_dir,
                     timeout_seconds=timeout_seconds,
                 )
+                log_timing(
+                    f"dependency sync complete (mode={attempt_mode})",
+                    sync_start,
+                )
             except Exception as exc:
+                log_timing(
+                    f"dependency sync failed (mode={attempt_mode})",
+                    sync_start,
+                )
                 failure_snippet = str(exc).strip()
                 if len(failure_snippet) > 240:
                     failure_snippet = f"{failure_snippet[:237]}..."
@@ -516,10 +539,15 @@ def ensure_runtime_dependencies(
                     f"Dependency sync failed for mode={attempt_mode}: {failure_snippet}"
                 ) from exc
 
+            post_check_start = time.perf_counter()
             post_ok, post_msg = check_runtime_environment_integrity(
                 venv_dir=venv_dir,
                 cache_dir=cache_dir,
                 timeout_seconds=timeout_seconds,
+            )
+            log_timing(
+                f"post-sync integrity check complete (mode={attempt_mode})",
+                post_check_start,
             )
             record_integrity_check(f"post_{attempt_mode}", post_ok, post_msg)
             if post_ok:
@@ -564,12 +592,15 @@ def ensure_runtime_dependencies(
             if samples["removed"]:
                 log(f"Sample removed packages: {', '.join(samples['removed'])}")
 
+        prune_start = time.perf_counter()
         run_best_effort_uv_cache_prune(
             cache_dir=cache_dir,
             timeout_seconds=timeout_seconds,
             env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
         )
+        log_timing("uv cache prune step complete", prune_start)
 
+        marker_write_start = time.perf_counter()
         write_marker(
             marker_file,
             {
@@ -586,9 +617,14 @@ def ensure_runtime_dependencies(
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             },
         )
+        log_timing("runtime bootstrap marker write complete", marker_write_start)
 
         log("Runtime dependencies installed")
 
+    log_timing(
+        f"ensure_runtime_dependencies complete (mode={final_sync_mode})",
+        ensure_start,
+    )
     return venv_dir, final_sync_mode, package_delta, diagnostics
 
 
@@ -715,6 +751,7 @@ def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    log_timing("bootstrap main() started")
     runtime_dir = Path(os.environ.get("BOOTSTRAP_RUNTIME_DIR", "/runtime"))
     cache_dir = Path(os.environ.get("BOOTSTRAP_CACHE_DIR", "/runtime-cache"))
     status_file = Path(
@@ -744,6 +781,7 @@ def main() -> int:
         log("HF token required by configuration but not provided")
         return 1
 
+    deps_start = time.perf_counter()
     venv_dir, sync_mode, package_delta, diagnostics = ensure_runtime_dependencies(
         runtime_dir=runtime_dir,
         cache_dir=cache_dir,
@@ -752,6 +790,7 @@ def main() -> int:
         rebuild_policy=rebuild_policy,
         log_changes=log_changes,
     )
+    log_timing("runtime dependency bootstrap phase complete", deps_start)
     log(f"Dependency update path: {sync_mode}")
 
     venv_python = venv_dir / "bin/python"
@@ -759,10 +798,13 @@ def main() -> int:
         log("Runtime Python not found after bootstrap")
         return 1
 
+    model_config_start = time.perf_counter()
     main_model, diarization_model = load_config_models()
+    log_timing("model config load complete", model_config_start)
     log(f"Configured main model: {main_model}")
     log(f"Configured diarization model: {diarization_model}")
 
+    diarization_start = time.perf_counter()
     diarization_status = check_diarization_access(
         venv_python=venv_python,
         diarization_model=diarization_model,
@@ -770,6 +812,7 @@ def main() -> int:
         hf_home=hf_home,
         timeout_seconds=timeout_seconds,
     )
+    log_timing("diarization capability check complete", diarization_start)
     if diarization_status["available"]:
         log("Diarization capability check: ready")
     else:
@@ -778,6 +821,7 @@ def main() -> int:
             f"({diarization_status.get('reason', 'unavailable')})"
         )
 
+    status_write_start = time.perf_counter()
     write_status_file(
         status_file,
         {
@@ -797,6 +841,8 @@ def main() -> int:
             },
         },
     )
+    log_timing("bootstrap status file write complete", status_write_start)
+    log_timing("bootstrap main() complete")
     return 0
 
 

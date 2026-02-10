@@ -62,7 +62,14 @@ chown -R appuser:appuser /data /models /runtime /runtime-cache
 
 # Bootstrap runtime dependencies and feature status.
 log "Bootstrapping runtime environment..."
+BOOTSTRAP_START_NS="$(date +%s%N)"
 gosu appuser /usr/bin/python3.13 docker/bootstrap_runtime.py
+BOOTSTRAP_END_NS="$(date +%s%N)"
+BOOTSTRAP_ELAPSED_MS="$(( (BOOTSTRAP_END_NS - BOOTSTRAP_START_NS) / 1000000 ))"
+BOOTSTRAP_ELAPSED_S="$(( BOOTSTRAP_ELAPSED_MS / 1000 ))"
+BOOTSTRAP_ELAPSED_MS_REMAINDER="$(( BOOTSTRAP_ELAPSED_MS % 1000 ))"
+printf -v BOOTSTRAP_ELAPSED_FMT "%d.%03d" "$BOOTSTRAP_ELAPSED_S" "$BOOTSTRAP_ELAPSED_MS_REMAINDER"
+log "Bootstrap runtime environment complete (${BOOTSTRAP_ELAPSED_FMT}s)"
 
 RUNTIME_VENV="${BOOTSTRAP_RUNTIME_DIR:-/runtime}/.venv"
 RUNTIME_PYTHON="$RUNTIME_VENV/bin/python"
