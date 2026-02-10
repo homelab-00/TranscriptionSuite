@@ -6,6 +6,7 @@ for managing audio recordings and transcriptions.
 """
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 import asyncio
@@ -313,6 +314,14 @@ class NotebookView(QWidget):
         except RuntimeError:
             asyncio.run(self._prompt_and_export_recording(recording_id))
 
+    @staticmethod
+    def _default_export_basename(recording: dict[str, object]) -> str:
+        """Build a filesystem-safe default basename for exports."""
+        raw_title = (recording.get("title") or recording.get("filename") or "recording")
+        title = " ".join(str(raw_title).split()).strip()
+        sanitized = re.sub(r'[\\/:*?"<>|]+', "_", title).strip(" .")
+        return sanitized or "recording"
+
     async def _prompt_and_export_recording(self, recording_id: int) -> None:
         """Resolve export capabilities, prompt for format, then export."""
         from PyQt6.QtWidgets import QFileDialog
@@ -357,24 +366,13 @@ class NotebookView(QWidget):
 
         format_buttons = {}
         if is_pure_note:
-            txt_btn = format_dialog.addButton(
-                "Text (.txt)", QMessageBox.ButtonRole.AcceptRole
-            )
+            txt_btn = format_dialog.addButton(".txt", QMessageBox.ButtonRole.AcceptRole)
             format_buttons[txt_btn] = ("txt", "Text Files (*.txt)", ".txt")
         else:
-            srt_btn = format_dialog.addButton(
-                "SubRip (.srt)", QMessageBox.ButtonRole.AcceptRole
-            )
-            ass_btn = format_dialog.addButton(
-                "Advanced SubStation Alpha (.ass)",
-                QMessageBox.ButtonRole.AcceptRole,
-            )
+            srt_btn = format_dialog.addButton(".srt", QMessageBox.ButtonRole.AcceptRole)
+            ass_btn = format_dialog.addButton(".ass", QMessageBox.ButtonRole.AcceptRole)
             format_buttons[srt_btn] = ("srt", "SubRip Files (*.srt)", ".srt")
-            format_buttons[ass_btn] = (
-                "ass",
-                "ASS Subtitle Files (*.ass)",
-                ".ass",
-            )
+            format_buttons[ass_btn] = ("ass", "ASS Subtitle Files (*.ass)", ".ass")
 
         format_dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         format_dialog.exec()
@@ -384,10 +382,11 @@ class NotebookView(QWidget):
             return
 
         export_format, file_filter, default_ext = format_buttons[clicked]
+        default_basename = self._default_export_basename(recording)
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Transcription",
-            f"transcription_export{default_ext}",
+            f"{default_basename}{default_ext}",
             file_filter,
         )
         if not file_path:
