@@ -185,6 +185,18 @@ def load_marker(marker_file: Path) -> dict[str, Any]:
     return {}
 
 
+def load_status_file(status_file: Path) -> dict[str, Any]:
+    if not status_file.exists():
+        return {}
+    try:
+        payload = json.loads(status_file.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
+    except Exception as exc:
+        log(f"Status file is unreadable; ignoring ({status_file}): {exc}")
+    return {}
+
+
 def collect_installed_packages(
     venv_python: Path,
     timeout_seconds: int,
@@ -665,6 +677,91 @@ def load_config_models() -> tuple[str, str]:
     return (main_model, diar_model)
 
 
+def collect_hf_model_cache_state(
+    hf_home: str,
+    model_id: str,
+) -> dict[str, Any]:
+    model_cache_name = model_id.strip().replace("/", "--")
+    hub_dir = Path(hf_home) / "hub"
+    repo_dir = hub_dir / f"models--{model_cache_name}"
+    refs_main = repo_dir / "refs" / "main"
+    snapshots_dir = repo_dir / "snapshots"
+
+    refs_main_value = ""
+    try:
+        if refs_main.exists():
+            refs_main_value = refs_main.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).strip()
+    except Exception:
+        refs_main_value = ""
+
+    snapshot_names: list[str] = []
+    try:
+        if snapshots_dir.exists():
+            for entry in snapshots_dir.iterdir():
+                if not entry.is_dir():
+                    continue
+                snapshot_names.append(entry.name)
+    except Exception:
+        snapshot_names = []
+
+    snapshot_names.sort()
+    snapshot_name_hasher = hashlib.sha256()
+    for name in snapshot_names:
+        snapshot_name_hasher.update(name.encode("utf-8"))
+        snapshot_name_hasher.update(b"\0")
+
+    return {
+        "hf_home": str(Path(hf_home)),
+        "repo_cache_dir": str(repo_dir),
+        "repo_exists": repo_dir.exists(),
+        "refs_main": refs_main_value,
+        "snapshots_dir_exists": snapshots_dir.exists(),
+        "snapshots_count": len(snapshot_names),
+        "snapshots_hash": snapshot_name_hasher.hexdigest() if snapshot_names else "",
+    }
+
+
+def compute_diarization_preload_cache_key(
+    diarization_model: str,
+    hf_token: str | None,
+    hf_home: str,
+) -> str:
+    token_hash = ""
+    if hf_token:
+        token_hash = hashlib.sha256(hf_token.encode("utf-8")).hexdigest()
+
+    payload = {
+        "schema_version": 1,
+        "model": diarization_model.strip(),
+        "token_hash": token_hash,
+        "cache_state": collect_hf_model_cache_state(hf_home=hf_home, model_id=diarization_model),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def should_reuse_cached_diarization_status(
+    previous_status_payload: dict[str, Any],
+    preload_cache_key: str,
+) -> bool:
+    features = previous_status_payload.get("features")
+    if not isinstance(features, dict):
+        return False
+
+    diarization = features.get("diarization")
+    if not isinstance(diarization, dict):
+        return False
+
+    available = bool(diarization.get("available", False))
+    reason = str(diarization.get("reason", "") or "")
+    cached_key = str(diarization.get("preload_cache_key", "") or "")
+
+    return available and reason == "ready" and cached_key == preload_cache_key
+
+
 def check_diarization_access(
     venv_python: Path,
     diarization_model: str,
@@ -776,6 +873,7 @@ def main() -> int:
 
     hf_token = (os.environ.get("HF_TOKEN") or "").strip() or None
     hf_home = os.environ.get("HF_HOME", "/models")
+    previous_status_payload = load_status_file(status_file)
 
     if require_hf_token and not hf_token:
         log("HF token required by configuration but not provided")
@@ -805,16 +903,41 @@ def main() -> int:
     log(f"Configured diarization model: {diarization_model}")
 
     diarization_start = time.perf_counter()
-    diarization_status = check_diarization_access(
-        venv_python=venv_python,
+    preload_cache_key = compute_diarization_preload_cache_key(
         diarization_model=diarization_model,
         hf_token=hf_token,
         hf_home=hf_home,
-        timeout_seconds=timeout_seconds,
     )
+    if should_reuse_cached_diarization_status(
+        previous_status_payload=previous_status_payload,
+        preload_cache_key=preload_cache_key,
+    ):
+        diarization_status = {
+            "available": True,
+            "reason": "ready",
+            "preload_mode": "cached",
+            "preload_cache_key": preload_cache_key,
+        }
+    else:
+        diarization_status = check_diarization_access(
+            venv_python=venv_python,
+            diarization_model=diarization_model,
+            hf_token=hf_token,
+            hf_home=hf_home,
+            timeout_seconds=timeout_seconds,
+        )
+        diarization_status["preload_mode"] = "performed"
+        diarization_status["preload_cache_key"] = compute_diarization_preload_cache_key(
+            diarization_model=diarization_model,
+            hf_token=hf_token,
+            hf_home=hf_home,
+        )
     log_timing("diarization capability check complete", diarization_start)
     if diarization_status["available"]:
-        log("Diarization capability check: ready")
+        if diarization_status.get("preload_mode") == "cached":
+            log("Diarization capability check: ready (cached)")
+        else:
+            log("Diarization capability check: ready")
     else:
         log(
             "Diarization capability check: unavailable "

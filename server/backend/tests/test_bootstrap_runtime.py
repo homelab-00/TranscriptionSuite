@@ -378,3 +378,167 @@ def test_check_diarization_access_preloads_pipeline_and_clamps_timeout(
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["HF_HOME"] == "/models"
+
+
+def test_compute_diarization_preload_cache_key_changes_with_context(
+    tmp_path: Path,
+) -> None:
+    module = _load_bootstrap_module()
+    hf_home = tmp_path / "models"
+    diar_model = module.DEFAULT_DIARIZATION_MODEL
+
+    key_without_cache = module.compute_diarization_preload_cache_key(
+        diarization_model=diar_model,
+        hf_token="hf_test_token_a",
+        hf_home=str(hf_home),
+    )
+
+    repo_dir = hf_home / "hub" / "models--pyannote--speaker-diarization-community-1"
+    (repo_dir / "refs").mkdir(parents=True, exist_ok=True)
+    (repo_dir / "refs" / "main").write_text("revision-a\n", encoding="utf-8")
+    (repo_dir / "snapshots" / "revision-a").mkdir(parents=True, exist_ok=True)
+
+    key_with_cache = module.compute_diarization_preload_cache_key(
+        diarization_model=diar_model,
+        hf_token="hf_test_token_a",
+        hf_home=str(hf_home),
+    )
+    key_with_other_token = module.compute_diarization_preload_cache_key(
+        diarization_model=diar_model,
+        hf_token="hf_test_token_b",
+        hf_home=str(hf_home),
+    )
+    key_with_other_model = module.compute_diarization_preload_cache_key(
+        diarization_model="pyannote/speaker-diarization-3.1",
+        hf_token="hf_test_token_a",
+        hf_home=str(hf_home),
+    )
+
+    assert key_without_cache != key_with_cache
+    assert key_with_cache != key_with_other_token
+    assert key_with_cache != key_with_other_model
+
+
+def test_should_reuse_cached_diarization_status_gate() -> None:
+    module = _load_bootstrap_module()
+
+    assert module.should_reuse_cached_diarization_status(
+        previous_status_payload={
+            "features": {
+                "diarization": {
+                    "available": True,
+                    "reason": "ready",
+                    "preload_cache_key": "match-key",
+                }
+            }
+        },
+        preload_cache_key="match-key",
+    )
+
+    assert not module.should_reuse_cached_diarization_status(
+        previous_status_payload={
+            "features": {
+                "diarization": {
+                    "available": True,
+                    "reason": "ready",
+                    "preload_cache_key": "stale-key",
+                }
+            }
+        },
+        preload_cache_key="match-key",
+    )
+
+    assert not module.should_reuse_cached_diarization_status(
+        previous_status_payload={
+            "features": {
+                "diarization": {
+                    "available": False,
+                    "reason": "unavailable",
+                    "preload_cache_key": "match-key",
+                }
+            }
+        },
+        preload_cache_key="match-key",
+    )
+
+
+def test_main_reuses_cached_diarization_status_when_preload_key_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    status_file.write_text(
+        json.dumps(
+            {
+                "features": {
+                    "diarization": {
+                        "available": True,
+                        "reason": "ready",
+                        "preload_cache_key": "cache-key-match",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
+        diagnostics = {
+            "selection_reason": "marker_match_integrity_ok",
+            "escalated_to_rebuild": False,
+            "integrity": {},
+        }
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    def fail_diarization_check(**_: object) -> None:  # type: ignore[no-untyped-def]
+        raise AssertionError(
+            "check_diarization_access should be skipped when cache key matches"
+        )
+
+    captured_status: dict[str, object] = {}
+
+    def fake_write_status_file(path: Path, payload: dict[str, object]) -> None:
+        captured_status["path"] = path
+        captured_status["payload"] = payload
+
+    monkeypatch.setattr(
+        module,
+        "ensure_runtime_dependencies",
+        fake_ensure_runtime_dependencies,
+    )
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: ("Systran/faster-whisper-large-v3", module.DEFAULT_DIARIZATION_MODEL),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_diarization_preload_cache_key",
+        lambda **_: "cache-key-match",
+    )
+    monkeypatch.setattr(module, "check_diarization_access", fail_diarization_check)
+    monkeypatch.setattr(module, "write_status_file", fake_write_status_file)
+
+    monkeypatch.setenv("HF_TOKEN", "hf_test_token")
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+
+    rc = module.main()
+
+    assert rc == 0
+    payload = captured_status.get("payload")
+    assert isinstance(payload, dict)
+    diarization = payload["features"]["diarization"]  # type: ignore[index]
+    assert diarization["available"] is True  # type: ignore[index]
+    assert diarization["reason"] == "ready"  # type: ignore[index]
+    assert diarization["preload_mode"] == "cached"  # type: ignore[index]
+    assert diarization["preload_cache_key"] == "cache-key-match"  # type: ignore[index]
