@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcriptionsuite-server"
-version = "0.5.6"
+version = "1.0.0"
 description = "TranscriptionSuite unified server for transcription services"
 requires-python = ">=3.13,<3.14"
 license = "GPL-3.0-or-later"

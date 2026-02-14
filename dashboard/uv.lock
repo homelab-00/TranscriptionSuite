@@ -405,7 +405,7 @@ wheels = [
 
 [[package]]
 name = "transcriptionsuite-dashboard"
-version = "0.5.6"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
