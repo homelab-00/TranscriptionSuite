@@ -47,7 +47,7 @@ export interface UseDockerReturn {
 
   // Container state
   container: ContainerStatus;
-  startContainer: (mode: 'local' | 'remote', runtimeProfile?: RuntimeProfile, tlsEnv?: Record<string, string>) => Promise<void>;
+  startContainer: (mode: 'local' | 'remote', runtimeProfile?: RuntimeProfile, tlsEnv?: Record<string, string>, imageTag?: string) => Promise<void>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
 
@@ -173,11 +173,11 @@ export function useDocker(): UseDockerReturn {
     });
   }, [withOperation, refreshImages]);
 
-  const startContainer = useCallback(async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile = 'gpu', tlsEnv?: Record<string, string>) => {
+  const startContainer = useCallback(async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile = 'gpu', tlsEnv?: Record<string, string>, imageTag?: string) => {
     const docker = api();
     if (!docker) return;
     await withOperation(async () => {
-      await docker.startContainer({ mode, runtimeProfile, tlsEnv });
+      await docker.startContainer({ mode, runtimeProfile, tlsEnv, imageTag });
       // Wait a moment then refresh status
       await new Promise(r => setTimeout(r, 2000));
       setContainer(await docker.getContainerStatus());

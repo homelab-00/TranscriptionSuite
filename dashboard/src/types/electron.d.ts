@@ -12,6 +12,7 @@ type RuntimeProfile = 'gpu' | 'cpu';
 interface StartContainerOptions {
   mode: 'local' | 'remote';
   runtimeProfile: RuntimeProfile;
+  imageTag?: string;
   tlsEnv?: Record<string, string>;
 }
 

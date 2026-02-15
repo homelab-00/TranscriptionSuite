@@ -9,7 +9,7 @@ interface StatusLightProps {
 export const StatusLight: React.FC<StatusLightProps> = ({ status, className = '', animate = true }) => {
   const colors = {
     active: 'bg-green-500 shadow-green-500/50',
-    inactive: 'bg-slate-500 shadow-slate-500/50',
+    inactive: 'bg-slate-500',
     warning: 'bg-accent-orange shadow-accent-orange/50',
     error: 'bg-red-500 shadow-red-500/50',
     loading: 'bg-blue-400 shadow-blue-400/50',
@@ -41,7 +41,7 @@ export const StatusLight: React.FC<StatusLightProps> = ({ status, className = ''
             style={{ animationDelay: syncDelay }}
         ></span>
       )}
-      <span className={`relative inline-flex rounded-full h-3 w-3 shadow-lg ${colors[status]}`}></span>
+      <span className={`relative inline-flex rounded-full h-3 w-3 ${status !== 'inactive' ? 'shadow-lg' : ''} ${colors[status]}`}></span>
     </span>
   );
 };

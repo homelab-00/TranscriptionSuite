@@ -394,6 +394,12 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
     const startOffset = (firstDay + 6) % 7; 
     const emptyDays = Array.from({ length: startOffset });
     const monthDays = Array.from({ length: daysInMonth });
+    const totalCells = startOffset + daysInMonth;
+    const gridRows = Math.ceil(totalCells / 7);
+    const trailingCount = (gridRows * 7) - totalCells;
+    const trailingDays = Array.from({ length: trailingCount });
+    // Day numbers for leading/trailing cells
+    const prevMonthDays = new Date(year, month, 0).getDate(); // last day of prev month
     const monthTitle = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
     const handlePrevMonth = (e: React.MouseEvent) => { e.stopPropagation(); setSlideDirection('left'); setAnimKey(prev => prev + 1); setCurrentDate(new Date(year, month - 1, 1)); setSelectedDay(null); };
     const handleNextMonth = (e: React.MouseEvent) => { e.stopPropagation(); setSlideDirection('right'); setAnimKey(prev => prev + 1); setCurrentDate(new Date(year, month + 1, 1)); setSelectedDay(null); };
@@ -449,9 +455,9 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
             `}</style>
             <div className="lg:col-span-2 flex flex-col min-h-0">
                 <GlassCard className="flex flex-col h-full" title={calendarHeader} action={ <div className="flex gap-2"><Button variant="ghost" size="sm" icon={<Clock size={14}/>} onClick={() => { if (gridRef.current) { setTriggerRect(gridRef.current.getBoundingClientRect()); setIsHistoryOpen(true); } }} className={isHistoryOpen ? 'bg-white/10 text-white' : ''} >Month/Year</Button></div> } >
-                    <div ref={gridRef} key={animKey} className={`grid grid-cols-7 grid-rows-[auto_repeat(5,1fr)] gap-px bg-white/5 rounded-2xl overflow-hidden border border-white/10 h-full ${slideDirection === 'right' ? 'anim-slide-right' : ''} ${slideDirection === 'left' ? 'anim-slide-left' : ''}`} >
+                    <div ref={gridRef} key={animKey} className={`grid grid-cols-7 gap-px bg-white/5 rounded-2xl overflow-hidden border border-white/10 h-full ${slideDirection === 'right' ? 'anim-slide-right' : ''} ${slideDirection === 'left' ? 'anim-slide-left' : ''}`} style={{ gridTemplateRows: `auto repeat(${gridRows}, 1fr)` }} >
                         {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d, i) => ( <div key={i} className="py-1 text-center text-[10px] font-bold text-slate-500 bg-glass-100/50 uppercase tracking-widest border-b border-white/5 flex items-center justify-center">{d.slice(0, 3)}</div> ))}
-                        {emptyDays.map((_, i) => ( <div key={`empty-${i}`} className="bg-glass-100/10 border-t border-r border-white/5"></div> ))}
+                        {emptyDays.map((_, i) => ( <div key={`empty-${i}`} className="bg-black/20 border-t border-r border-white/5 p-2"><span className="text-xs text-slate-600">{prevMonthDays - startOffset + 1 + i}</span></div> ))}
                         {monthDays.map((_, i) => {
                             const dayNum = i + 1;
                             const dayEvents = eventsByDay[dayNum] || [];
@@ -472,6 +478,7 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
                                 </div>
                             );
                         })}
+                        {trailingDays.map((_, i) => ( <div key={`trail-${i}`} className="bg-black/20 border-t border-r border-white/5 p-2"><span className="text-xs text-slate-600">{i + 1}</span></div> ))}
                     </div>
                 </GlassCard>
             </div>

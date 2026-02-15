@@ -14,7 +14,9 @@ import { useTranscription } from '../../src/hooks/useTranscription';
 import { useLiveMode } from '../../src/hooks/useLiveMode';
 import { useDocker } from '../../src/hooks/useDocker';
 import { useTraySync } from '../../src/hooks/useTraySync';
+import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { apiClient } from '../../src/api/client';
+import { setConfig } from '../../src/config/store';
 
 export const SessionView: React.FC = () => {
   // Global State
@@ -121,9 +123,46 @@ export const SessionView: React.FC = () => {
   // Control Center State — real Docker container status
   const docker = useDocker();
   const serverRunning = docker.container.running;
-  // Derive client connection from hook states
-  const clientConnected = transcription.status === 'recording' || transcription.status === 'processing'
-    || live.status === 'listening' || live.status === 'processing' || live.status === 'starting';
+  // Client connection state — tracks explicit connect/disconnect
+  const [clientRunning, setClientRunning] = useState(false);
+  const serverConnection = useServerStatus();
+  // Derive active client connection from explicit state + hook activity
+  const clientConnected = clientRunning && (
+    serverConnection.reachable
+    || transcription.status === 'recording' || transcription.status === 'processing'
+    || live.status === 'listening' || live.status === 'processing' || live.status === 'starting'
+  );
+
+  // Client connection status label
+  const clientStatusLabel = clientConnected
+    ? 'Connected to Server'
+    : clientRunning && !serverConnection.reachable
+    ? 'Server Unreachable'
+    : transcription.status === 'connecting' || live.status === 'connecting'
+    ? 'Connecting...'
+    : 'Disconnected';
+
+  // Client start/stop handlers (mirrors v0.5.6 ClientControlMixin)
+  const handleStartClientLocal = useCallback(async () => {
+    await setConfig('connection.useRemote', false);
+    await setConfig('connection.useHttps', false);
+    await setConfig('connection.localHost', 'localhost');
+    await setConfig('connection.port', 8000);
+    await apiClient.syncFromConfig();
+    setClientRunning(true);
+    serverConnection.refresh();
+  }, [serverConnection]);
+
+  const handleStartClientRemote = useCallback(async () => {
+    await setConfig('connection.useRemote', true);
+    await apiClient.syncFromConfig();
+    setClientRunning(true);
+    serverConnection.refresh();
+  }, [serverConnection]);
+
+  const handleStopClient = useCallback(() => {
+    setClientRunning(false);
+  }, []);
 
   // System Health Check for Visual Effects
   const isSystemHealthy = serverRunning && (clientConnected || transcription.status === 'idle');
@@ -444,10 +483,15 @@ export const SessionView: React.FC = () => {
                                 </div>
                                 <div className="flex items-center gap-2.5">
                                     <span className="text-xs font-medium text-slate-400">
-                                      {clientConnected ? 'Connected to Socket' : transcription.status === 'connecting' || live.status === 'connecting' ? 'Connecting...' : 'Disconnected'}
+                                      {clientStatusLabel}
                                     </span>
-                                    <StatusLight status={clientConnected ? 'active' : 'inactive'} className="w-2 h-2" animate={clientConnected} />
+                                    <StatusLight status={clientConnected ? 'active' : clientRunning ? 'warning' : 'inactive'} className="w-2 h-2" animate={clientConnected} />
                                 </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button variant="secondary" size="sm" onClick={handleStartClientLocal} disabled={clientRunning} className="text-xs px-3">Start Local</Button>
+                                <Button variant="secondary" size="sm" onClick={handleStartClientRemote} disabled={clientRunning} className="text-xs px-3">Start Remote</Button>
+                                <Button variant="danger" size="sm" onClick={handleStopClient} disabled={!clientRunning} className="text-xs px-3">Stop</Button>
                             </div>
                         </div>
                     </div>

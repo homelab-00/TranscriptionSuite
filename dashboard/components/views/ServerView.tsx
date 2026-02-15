@@ -57,7 +57,7 @@ export const ServerView: React.FC = () => {
   // Image selection state
   const imageOptions = docker.images.length > 0
     ? docker.images.map(i => i.fullName)
-    : ['transcription-suite:latest'];
+    : ['ghcr.io/homelab-00/transcriptionsuite-server:latest'];
   const [selectedImage, setSelectedImage] = useState(imageOptions[0]);
   const selectedTag = selectedImage.split(':').pop() || 'latest';
 
@@ -193,10 +193,10 @@ export const ServerView: React.FC = () => {
 
                         <div className="flex-1 flex flex-wrap items-center justify-between gap-4 min-w-0">
                             <div className="flex gap-2">
-                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('local', runtimeProfile)} disabled={docker.operating || isRunning}>
+                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('local', runtimeProfile, undefined, selectedTag)} disabled={docker.operating || isRunning}>
                                   {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
                                 </Button>
-                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('remote', runtimeProfile)} disabled={docker.operating || isRunning}>Start Remote</Button>
+                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('remote', runtimeProfile, undefined, selectedTag)} disabled={docker.operating || isRunning}>Start Remote</Button>
                                 <Button variant="danger" className="h-9 px-4" onClick={() => docker.stopContainer()} disabled={docker.operating || !isRunning}>Stop</Button>
                             </div>
                             <Button variant="danger" className="h-9 px-4" onClick={() => docker.removeContainer()} disabled={docker.operating || isRunning}>

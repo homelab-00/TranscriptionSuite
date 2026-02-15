@@ -67,6 +67,7 @@ export interface VolumeInfo {
 export interface StartContainerOptions {
   mode: 'local' | 'remote';
   runtimeProfile: RuntimeProfile;
+  imageTag?: string;
   tlsEnv?: Record<string, string>;
 }
 
@@ -192,8 +193,13 @@ async function getContainerStatus(): Promise<ContainerStatus> {
 async function startContainer(
   options: StartContainerOptions,
 ): Promise<string> {
-  const { mode, runtimeProfile, tlsEnv } = options;
+  const { mode, runtimeProfile, imageTag, tlsEnv } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
+
+  // Pass the selected image tag to docker-compose (defaults to 'latest' in compose file)
+  if (imageTag) {
+    composeEnv['TAG'] = imageTag;
+  }
 
   if (mode === 'remote') {
     composeEnv['TLS_ENABLED'] = 'true';
