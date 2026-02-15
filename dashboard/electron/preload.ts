@@ -34,6 +34,7 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
+    openExternal: (url: string) => Promise<void>;
   };
   docker: {
     available: () => Promise<boolean>;
@@ -88,6 +89,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
+    openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
   },
   docker: {
     available: () => ipcRenderer.invoke('docker:available'),

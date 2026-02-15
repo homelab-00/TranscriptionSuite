@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import fs from 'fs';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
@@ -10,6 +11,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const isDev = !app.isPackaged;
+
+function getResolvedAppVersion(): string {
+  const version = app.getVersion();
+  if (version && version !== '0.0.0') {
+    return version;
+  }
+
+  try {
+    const packageJsonPath = path.resolve(__dirname, '../package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version?: string };
+    if (packageJson.version) {
+      return packageJson.version;
+    }
+  } catch {
+    // Fall back to app.getVersion() result.
+  }
+
+  return version;
+}
 
 // ─── Persistent Config Store ────────────────────────────────────────────────
 const store = new Store({
@@ -97,6 +117,7 @@ function createWindow(): void {
     minHeight: 600,
     show: !startMinimized,
     frame: true,
+    autoHideMenuBar: true,
     backgroundColor: '#0f172a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -106,12 +127,31 @@ function createWindow(): void {
     },
   });
 
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      void shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const isLocalDevUrl = /^https?:\/\/(localhost|127\.0\.0\.1):3000(\/|$)/i.test(url);
+    const isPackagedFileUrl = url.startsWith('file://');
+    if (!isLocalDevUrl && !isPackagedFileUrl && /^https?:\/\//i.test(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
+  });
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  mainWindow.removeMenu();
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -139,7 +179,14 @@ ipcMain.handle('config:getAll', async () => {
 
 // App metadata
 ipcMain.handle('app:getVersion', () => {
-  return app.getVersion();
+  return getResolvedAppVersion();
+});
+
+ipcMain.handle('app:openExternal', async (_event, url: string) => {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(`Blocked non-http(s) URL: ${url}`);
+  }
+  await shell.openExternal(url);
 });
 
 // ─── Docker Management IPC ──────────────────────────────────────────────────

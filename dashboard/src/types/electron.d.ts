@@ -31,6 +31,7 @@ interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
+    openExternal: (url: string) => Promise<void>;
   };
   docker: {
     available: () => Promise<boolean>;

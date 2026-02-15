@@ -29,7 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onO
     <div 
       className={`
         bg-glass-surface backdrop-blur-2xl border-r border-glass-border h-full flex flex-col transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative
-        ${collapsed ? 'w-20' : 'w-50'}
+        ${collapsed ? 'w-20' : 'w-56'}
       `}
     >
         {/* Toggle Button */}
