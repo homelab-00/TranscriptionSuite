@@ -4,6 +4,8 @@ import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Datab
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { useBackups } from '../../src/hooks/useBackups';
+import { apiClient } from '../../src/api/client';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -26,7 +28,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const { backups, loading: backupsLoading, refresh: refreshBackups, createBackup, restoreBackup, operating, operationResult } = useBackups();
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
-  // Mock State for Settings
+  // Admin status for Server tab (read-only config display)
+  const { status: adminStatus, loading: adminLoading } = useAdminStatus();
+
+  // Derive server config sections from admin status
+  const serverConfig = React.useMemo(() => {
+    if (!adminStatus?.config) return [];
+    const cfg = adminStatus.config as Record<string, unknown>;
+    const sections: Array<{ category: string; description: string; settings: Array<{ key: string; value: string; type: string; description: string }> }> = [];
+
+    const flatten = (obj: Record<string, unknown>, prefix = ''): Array<{ key: string; value: string }> => {
+      const entries: Array<{ key: string; value: string }> = [];
+      for (const [k, v] of Object.entries(obj)) {
+        const fullKey = prefix ? `${prefix}.${k}` : k;
+        if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+          entries.push(...flatten(v as Record<string, unknown>, fullKey));
+        } else {
+          entries.push({ key: fullKey, value: String(v ?? '') });
+        }
+      }
+      return entries;
+    };
+
+    // Group by top-level key
+    for (const [topKey, topVal] of Object.entries(cfg)) {
+      if (topVal !== null && typeof topVal === 'object' && !Array.isArray(topVal)) {
+        const settings = flatten(topVal as Record<string, unknown>).map(s => ({
+          ...s,
+          type: typeof s.value === 'number' ? 'number' : 'string',
+          description: '',
+        }));
+        if (settings.length > 0) {
+          sections.push({
+            category: topKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            description: `${topKey} configuration`,
+            settings,
+          });
+        }
+      }
+    }
+    return sections;
+  }, [adminStatus]);
+
+  // Settings state
   const [appSettings, setAppSettings] = useState({
     autoCopy: false,
     showNotifications: true,
@@ -45,37 +89,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     port: 9000,
     useHttps: false,
   });
-
-  // Server Configuration Mock Data
-  const serverConfig = [
-    {
-      category: 'Model Defaults',
-      description: 'Default parameters for the Whisper inference engine.',
-      settings: [
-        { key: 'beam_size', value: '5', type: 'int', description: 'Number of beams in beam search' },
-        { key: 'best_of', value: '5', type: 'int', description: 'Number of candidates when sampling' },
-        { key: 'patience', value: '1.0', type: 'float', description: 'Beam search patience factor' },
-      ]
-    },
-    {
-      category: 'VAD Parameters',
-      description: 'Voice Activity Detection settings.',
-      settings: [
-        { key: 'vad_onset', value: '0.5', type: 'float', description: 'Speech start threshold' },
-        { key: 'vad_offset', value: '0.363', type: 'float', description: 'Speech end threshold' },
-        { key: 'min_silence_duration_ms', value: '1000', type: 'int', description: 'Minimum silence to split segments' },
-      ]
-    },
-    {
-      category: 'Compute Settings',
-      description: 'Hardware acceleration and thread management.',
-      settings: [
-        { key: 'device', value: 'cuda', type: 'string', description: 'Compute device (cuda/cpu)' },
-        { key: 'compute_type', value: 'float16', type: 'string', description: 'Quantization type' },
-        { key: 'num_workers', value: '4', type: 'int', description: 'DataLoader workers' },
-      ]
-    }
-  ];
 
   // Animation Lifecycle + Load Settings from Config Store
   useEffect(() => {
@@ -146,6 +159,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
     }
+
+    // Sync API client with new config so connection target updates immediately
+    await apiClient.syncFromConfig();
+    if (clientSettings.authToken) {
+      apiClient.setAuthToken(clientSettings.authToken);
+    }
+
     setIsDirty(false);
     onClose();
   }, [clientSettings, appSettings, onClose]);
@@ -320,7 +340,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
        </div>
 
        <div className="space-y-4">
-            {serverConfig.map((section) => (
+            {adminLoading ? (
+                <div className="flex items-center justify-center py-8 text-slate-500">
+                    <Loader2 size={16} className="animate-spin mr-2" /> Loading server configuration…
+                </div>
+            ) : serverConfig.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-sm">
+                    Could not retrieve server configuration. Is the server running?
+                </div>
+            ) : serverConfig.map((section) => (
                 <CollapsibleSection key={section.category} title={section.category} description={section.description}>
                     <div className="space-y-3 pt-2">
                         {section.settings.filter(s => s.key.toLowerCase().includes(serverSearch.toLowerCase())).map((setting) => (
@@ -332,8 +360,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                                 <div className="w-32">
                                     <input 
                                         type="text" 
-                                        defaultValue={setting.value}
-                                        className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white font-mono text-right focus:outline-none focus:border-accent-magenta/50 focus:bg-white/5 transition-all"
+                                        readOnly
+                                        value={setting.value}
+                                        className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white/60 font-mono text-right cursor-default"
                                     />
                                 </div>
                             </div>

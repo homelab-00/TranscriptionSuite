@@ -222,12 +222,18 @@ export interface WordSearchResponse {
 export interface AdminStatus {
   status: string;
   models: Record<string, unknown>;
+  models_loaded?: boolean;
   config: {
     server: Record<string, unknown>;
     transcription: {
       model: string;
       device: string;
     };
+    live_transcription?: {
+      model: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
   };
 }
 

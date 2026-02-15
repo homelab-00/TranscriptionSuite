@@ -12,6 +12,19 @@ interface ElectronAPI {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
   };
+  docker: {
+    available: () => Promise<boolean>;
+    listImages: () => Promise<Array<{ tag: string; fullName: string; size: string; created: string; id: string }>>;
+    pullImage: (tag: string) => Promise<string>;
+    removeImage: (tag: string) => Promise<string>;
+    getContainerStatus: () => Promise<{ exists: boolean; running: boolean; status: string; health?: string; startedAt?: string }>;
+    startContainer: (mode: 'local' | 'remote', env?: Record<string, string>) => Promise<string>;
+    stopContainer: () => Promise<string>;
+    removeContainer: () => Promise<string>;
+    getVolumes: () => Promise<Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>>;
+    removeVolume: (name: string) => Promise<string>;
+    getLogs: (tail?: number) => Promise<string[]>;
+  };
 }
 
 interface Window {
