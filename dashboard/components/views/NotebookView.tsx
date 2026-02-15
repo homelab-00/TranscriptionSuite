@@ -1,13 +1,18 @@
 
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { NotebookTab } from '../../types';
-import { Calendar, Search, Upload, Filter, FileText, Trash2, Download, Clock, MoreHorizontal, Play, ChevronLeft, ChevronRight, Check, Plus, Mic, Minus, CalendarDays, Edit2, Share } from 'lucide-react';
+import { Calendar, Search, Upload, Filter, FileText, Trash2, Download, Clock, MoreHorizontal, Play, ChevronLeft, ChevronRight, Check, Plus, Mic, Minus, CalendarDays, Edit2, Share, Loader2 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { AudioNoteModal } from './AudioNoteModal';
 import { AddNoteModal } from './AddNoteModal';
+import { useCalendar } from '../../src/hooks/useCalendar';
+import { useSearch } from '../../src/hooks/useSearch';
+import { useUpload } from '../../src/hooks/useUpload';
+import { apiClient } from '../../src/api/client';
+import type { Recording } from '../../src/api/types';
 
 export const NotebookView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
@@ -238,7 +243,7 @@ const HistoryPicker: React.FC<HistoryPickerProps> = ({ isOpen, onClose, selected
 };
 
 // --- Sub-components for Calendar View ---
-interface EventData { id: string; title: string; duration?: string; tag?: string; startTime: number; }
+interface EventData { id: string; title: string; duration?: string; tag?: string; startTime: number; recordingId?: number; }
 
 const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient: string; startHour: number; endHour: number; events: EventData[]; visibleSlots: number; onZoomChange: (slots: number) => void; onNoteClick: (note: EventData) => void; onAddNote: (hour: number) => void; }> = ({ title, headerColor, headerGradient, startHour, endHour, events, visibleSlots, onZoomChange, onNoteClick, onAddNote }) => {
     const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
@@ -306,8 +311,30 @@ const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient
     );
 }
 
+/** Convert seconds to a human-readable duration string */
+const formatDuration = (seconds: number): string => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}m ${s.toString().padStart(2, '0')}s`;
+};
+
+/** Convert a Recording to an EventData for the TimeSection cards */
+const recordingToEvent = (rec: Recording): EventData => {
+    const d = new Date(rec.recorded_at);
+    const startTime = d.getHours() + d.getMinutes() / 60;
+    return {
+        id: String(rec.id),
+        title: rec.title || rec.filename,
+        startTime,
+        duration: formatDuration(rec.duration_seconds),
+        tag: rec.has_diarization ? 'Diarized' : undefined,
+        recordingId: rec.id,
+    };
+};
+
 const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour: number) => void }> = ({ onNoteClick, onAddNote }) => {
-    const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 1)); 
+    const [currentDate, setCurrentDate] = useState(() => new Date()); 
+    const [selectedDay, setSelectedDay] = useState<string | null>(null);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null);
     const gridRef = useRef<HTMLDivElement>(null);
@@ -322,13 +349,49 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
     const emptyDays = Array.from({ length: startOffset });
     const monthDays = Array.from({ length: daysInMonth });
     const monthTitle = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-    const handlePrevMonth = (e: React.MouseEvent) => { e.stopPropagation(); setSlideDirection('left'); setAnimKey(prev => prev + 1); setCurrentDate(new Date(year, month - 1, 1)); };
-    const handleNextMonth = (e: React.MouseEvent) => { e.stopPropagation(); setSlideDirection('right'); setAnimKey(prev => prev + 1); setCurrentDate(new Date(year, month + 1, 1)); };
+    const handlePrevMonth = (e: React.MouseEvent) => { e.stopPropagation(); setSlideDirection('left'); setAnimKey(prev => prev + 1); setCurrentDate(new Date(year, month - 1, 1)); setSelectedDay(null); };
+    const handleNextMonth = (e: React.MouseEvent) => { e.stopPropagation(); setSlideDirection('right'); setAnimKey(prev => prev + 1); setCurrentDate(new Date(year, month + 1, 1)); setSelectedDay(null); };
     const calendarHeader = ( <div className="flex items-center gap-3"><span>{monthTitle}</span><div className="flex items-center bg-white/5 rounded-full border border-white/10 p-0.5 ml-1"><button onClick={handlePrevMonth} className="p-1 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors"><ChevronLeft size={14} /></button><button onClick={handleNextMonth} className="p-1 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors"><ChevronRight size={14} /></button></div></div> );
-    const isJan2026 = year === 2026 && month === 0;
-    const eventsByDay: Record<number, { title: string }[]> = isJan2026 ? { 14: [{ title: 'Design Sync' }], 16: [{ title: 'Product Strategy' }, { title: 'Quick Voice Note' }, { title: 'Client Sync' }] } : {}; 
-    const morningEvents: EventData[] = [{ id: '1', title: 'Design Sync', startTime: 10.5, duration: '14m 20s', tag: 'Diarized' }];
-    const afternoonEvents: EventData[] = [{ id: '2', title: 'Product Strategy', startTime: 14, duration: '45m 10s' }, { id: '3', title: 'Quick Voice Note', startTime: 14.1, duration: '2m 05s' }, { id: '4', title: 'Client Sync', startTime: 16.25, duration: '58m 00s', tag: 'Diarized' }];
+
+    // Live calendar data from API
+    const calendar = useCalendar(year, month);
+
+    // Build calendar grid: day-of-month (1-indexed) → array of recording summaries
+    const eventsByDay: Record<number, { title: string; id: number }[]> = useMemo(() => {
+        const result: Record<number, { title: string; id: number }[]> = {};
+        for (const [dateKey, recordings] of Object.entries(calendar.days)) {
+            const day = new Date(dateKey).getDate();
+            result[day] = recordings.map(r => ({ title: r.title || r.filename, id: r.id }));
+        }
+        return result;
+    }, [calendar.days]);
+
+    // Recordings for the currently selected day, split into morning/afternoon
+    const selectedDayRecordings = useMemo<Recording[]>(() => {
+        if (!selectedDay || !calendar.days[selectedDay]) return [];
+        return calendar.days[selectedDay];
+    }, [selectedDay, calendar.days]);
+
+    const morningEvents: EventData[] = useMemo(
+        () => selectedDayRecordings.filter(r => new Date(r.recorded_at).getHours() < 12).map(recordingToEvent),
+        [selectedDayRecordings],
+    );
+    const afternoonEvents: EventData[] = useMemo(
+        () => selectedDayRecordings.filter(r => new Date(r.recorded_at).getHours() >= 12).map(recordingToEvent),
+        [selectedDayRecordings],
+    );
+
+    // Auto-select today if it has events and nothing else is selected
+    useEffect(() => {
+        if (selectedDay) return;
+        const todayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+        if (calendar.days[todayKey]?.length) setSelectedDay(todayKey);
+    }, [calendar.days, selectedDay, year, month]);
+
+    const handleDayClick = (dayOfMonth: number) => {
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+        setSelectedDay(key);
+    };
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full min-h-0">
@@ -344,17 +407,21 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
                         {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d, i) => ( <div key={i} className="py-1 text-center text-[10px] font-bold text-slate-500 bg-glass-100/50 uppercase tracking-widest border-b border-white/5 flex items-center justify-center">{d.slice(0, 3)}</div> ))}
                         {emptyDays.map((_, i) => ( <div key={`empty-${i}`} className="bg-glass-100/10 border-t border-r border-white/5"></div> ))}
                         {monthDays.map((_, i) => {
-                            const dayEvents = eventsByDay[i] || [];
+                            const dayNum = i + 1;
+                            const dayEvents = eventsByDay[dayNum] || [];
                             const hasEvents = dayEvents.length > 0;
                             const count = dayEvents.length;
+                            const dayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                            const isSelected = selectedDay === dayKey;
                             return (
-                                <div key={i} className="bg-glass-100/30 hover:bg-glass-100 transition-colors p-2 relative group cursor-pointer border-t border-r border-white/5 flex flex-col items-start min-h-0 overflow-hidden" onClick={() => hasEvents ? onNoteClick({ title: dayEvents[0].title, duration: '20m', tag: 'Diarized' }) : null} >
+                                <div key={i} className={`bg-glass-100/30 hover:bg-glass-100 transition-colors p-2 relative group cursor-pointer border-t border-r border-white/5 flex flex-col items-start min-h-0 overflow-hidden ${isSelected ? 'ring-1 ring-accent-cyan/50 bg-accent-cyan/5' : ''}`} onClick={() => handleDayClick(dayNum)} >
                                     <div className="flex justify-between items-center w-full mb-1">
-                                        <span className={`text-xs w-6 h-6 flex items-center justify-center rounded-full transition-all shrink-0 ${hasEvents && isJan2026 && i === 14 ? 'bg-[rgb(230,230,230)] text-black font-bold' : 'text-slate-400 group-hover:text-white'}`}>{i + 1}</span>
+                                        <span className={`text-xs w-6 h-6 flex items-center justify-center rounded-full transition-all shrink-0 ${isSelected ? 'bg-accent-cyan text-black font-bold' : hasEvents ? 'bg-[rgb(230,230,230)] text-black font-bold' : 'text-slate-400 group-hover:text-white'}`}>{dayNum}</span>
                                         {hasEvents && <div className="flex items-center justify-center px-2 h-4 min-w-[24px] rounded-full bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)] mr-1"><span className="text-[9px] text-white font-bold leading-none">{count}</span></div>}
                                     </div>
                                     <div className="flex-1 w-full min-h-0 flex flex-col gap-1 overflow-hidden pt-1">
-                                        {dayEvents.map((evt, idx) => ( <div key={idx} className="px-2 py-0.5 rounded-full bg-accent-cyan text-black text-[10px] font-medium truncate w-full shadow-sm">{evt.title}</div> ))}
+                                        {dayEvents.slice(0, 2).map((evt, idx) => ( <div key={idx} className="px-2 py-0.5 rounded-full bg-accent-cyan text-black text-[10px] font-medium truncate w-full shadow-sm">{evt.title}</div> ))}
+                                        {dayEvents.length > 2 && <div className="text-[9px] text-slate-500 pl-2">+{dayEvents.length - 2} more</div>}
                                     </div>
                                 </div>
                             );
@@ -371,69 +438,180 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
     );
 };
 
-const SearchTab: React.FC<{onNoteClick: (note: any) => void}> = ({ onNoteClick }) => (
+const SearchTab: React.FC<{onNoteClick: (note: any) => void}> = ({ onNoteClick }) => {
+    const [query, setQuery] = useState('');
+    const [fuzzy, setFuzzy] = useState(true);
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const { results, count, loading, error, search } = useSearch();
+
+    // Trigger search whenever inputs change
+    useEffect(() => {
+        search(query, {
+            fuzzy,
+            startDate: startDate || undefined,
+            endDate: endDate || undefined,
+        });
+    }, [query, fuzzy, startDate, endDate, search]);
+
+    return (
     <div className="max-w-3xl mx-auto space-y-6">
         <div className="relative">
             <Search className="absolute left-4 top-3.5 text-slate-400" size={20} />
             <input 
                 type="text" 
                 placeholder="Search transcripts, speakers, or dates..." 
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
                 className="w-full bg-glass-100 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-cyan transition-all"
             />
+            {loading && <Loader2 className="absolute right-4 top-3.5 text-accent-cyan animate-spin" size={20} />}
         </div>
         
         <GlassCard>
             <div className="flex items-center gap-6 pb-4 border-b border-white/5">
                 <div className="flex items-center gap-2"><Filter size={16} className="text-slate-400" /><span className="text-sm font-medium">Filters:</span></div>
-                <AppleSwitch checked={true} onChange={()=>{}} label="Fuzzy Search" size="sm" />
+                <AppleSwitch checked={fuzzy} onChange={setFuzzy} label="Fuzzy Search" size="sm" />
                 <div className="h-6 w-px bg-white/10"></div>
                 <div className="flex gap-2">
-                    <input type="date" className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-slate-300" />
+                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-slate-300" />
                     <span className="text-slate-500 text-sm">-</span>
-                    <input type="date" className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-slate-300" />
+                    <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-slate-300" />
                 </div>
             </div>
             
-            {/* Added selectable-text class to search result body */}
             <div className="mt-4 space-y-2 selectable-text">
-                <div className="text-xs text-slate-500 uppercase tracking-widest mb-3 select-none">2 Results found</div>
-                {[1, 2].map(i => (
-                    <div 
-                        key={i} 
-                        onClick={() => onNoteClick({ title: `Project Kickoff ${i}`, duration: '35m', tag: 'Diarized' })}
-                        className="p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors cursor-pointer group"
-                    >
-                        <div className="flex justify-between items-start mb-1 select-none">
-                            <div className="flex items-center gap-2">
-                                <FileText size={16} className="text-accent-cyan" />
-                                <span className="font-medium text-white">Project Kickoff {i}</span>
+                {error && <div className="text-xs text-red-400 mb-3">{error}</div>}
+                {!query.trim() ? (
+                    <div className="text-center text-sm text-slate-500 py-8">Enter a search term to find recordings</div>
+                ) : count === 0 && !loading ? (
+                    <div className="text-center text-sm text-slate-500 py-8">No results found for &ldquo;{query}&rdquo;</div>
+                ) : (
+                    <>
+                        <div className="text-xs text-slate-500 uppercase tracking-widest mb-3 select-none">{count} Result{count !== 1 ? 's' : ''} found</div>
+                        {results.map((r, i) => (
+                            <div 
+                                key={`${r.recording_id}-${r.id ?? i}`}
+                                onClick={() => onNoteClick({ 
+                                    title: r.title || r.filename, 
+                                    recordingId: r.recording_id,
+                                    duration: '',
+                                    tag: r.match_type,
+                                })}
+                                className="p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors cursor-pointer group"
+                            >
+                                <div className="flex justify-between items-start mb-1 select-none">
+                                    <div className="flex items-center gap-2">
+                                        <FileText size={16} className="text-accent-cyan" />
+                                        <span className="font-medium text-white">{r.title || r.filename}</span>
+                                        {r.speaker && <span className="text-xs text-slate-500">({r.speaker})</span>}
+                                    </div>
+                                    <span className="text-xs text-slate-500">{new Date(r.recorded_at).toLocaleDateString()}</span>
+                                </div>
+                                <p className="text-sm text-slate-400 pl-6 line-clamp-2">
+                                    {r.context ? (
+                                        <>...{r.context.split(r.word).map((part, pi, arr) => (
+                                            <React.Fragment key={pi}>
+                                                {part}
+                                                {pi < arr.length - 1 && <span className="text-accent-orange bg-accent-orange/10 rounded px-1">{r.word}</span>}
+                                            </React.Fragment>
+                                        ))}...</>
+                                    ) : r.word}
+                                </p>
                             </div>
-                            <span className="text-xs text-slate-500">Jan 1{i}, 2026</span>
-                        </div>
-                        <p className="text-sm text-slate-400 pl-6 line-clamp-2">
-                            ...we need to focus on the <span className="text-accent-orange bg-accent-orange/10 rounded px-1">interface</span> design before moving to the backend architecture...
-                        </p>
-                    </div>
-                ))}
+                        ))}
+                    </>
+                )}
             </div>
         </GlassCard>
     </div>
-);
+    );
+};
 
-const ImportTab = () => (
+const ImportTab = () => {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [diarization, setDiarization] = useState(true);
+    const [wordTimestamps, setWordTimestamps] = useState(false);
+    const [isDragOver, setIsDragOver] = useState(false);
+    const { status, result, error, upload, reset } = useUpload();
+
+    const handleFiles = useCallback((files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        const file = files[0];
+        upload(file, {
+            enable_diarization: diarization,
+            enable_word_timestamps: wordTimestamps,
+        });
+    }, [diarization, wordTimestamps, upload]);
+
+    const handleDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        handleFiles(e.dataTransfer.files);
+    }, [handleFiles]);
+
+    return (
     <div className="max-w-2xl mx-auto space-y-8 mt-10">
-        <div className="border-2 border-dashed border-white/20 rounded-3xl p-12 flex flex-col items-center justify-center text-center hover:border-accent-cyan/50 hover:bg-accent-cyan/5 transition-all cursor-pointer group">
-            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Upload size={32} className="text-slate-300 group-hover:text-accent-cyan" /></div>
-            <h3 className="text-xl font-semibold text-white mb-2">Drag & Drop Audio Files</h3>
-            <p className="text-slate-400 text-sm mb-6">Supports MP3, WAV, M4A, FLAC</p>
-            <Button variant="primary">Browse Files</Button>
-        </div>
+        <input
+            ref={fileInputRef}
+            type="file"
+            accept=".mp3,.wav,.m4a,.flac,.ogg,.webm,.opus"
+            className="hidden"
+            onChange={(e) => handleFiles(e.target.files)}
+        />
+
+        {status === 'success' && result ? (
+            <div className="border-2 border-green-500/30 rounded-3xl p-12 flex flex-col items-center justify-center text-center bg-green-500/5">
+                <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
+                    <Check size={32} className="text-green-400" />
+                </div>
+                <h3 className="text-xl font-semibold text-white mb-2">Upload Complete</h3>
+                <p className="text-slate-400 text-sm mb-2">{result.message}</p>
+                <p className="text-xs text-slate-500 mb-6">
+                    Recording ID: {result.recording_id}
+                    {result.diarization.performed && ' • Diarization applied'}
+                </p>
+                <Button variant="secondary" onClick={reset}>Upload Another</Button>
+            </div>
+        ) : status === 'error' ? (
+            <div className="border-2 border-red-500/30 rounded-3xl p-12 flex flex-col items-center justify-center text-center bg-red-500/5">
+                <h3 className="text-xl font-semibold text-white mb-2">Upload Failed</h3>
+                <p className="text-red-400 text-sm mb-6">{error}</p>
+                <Button variant="secondary" onClick={reset}>Try Again</Button>
+            </div>
+        ) : (
+            <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => status !== 'uploading' && fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-3xl p-12 flex flex-col items-center justify-center text-center transition-all cursor-pointer group ${
+                    isDragOver ? 'border-accent-cyan bg-accent-cyan/10 scale-[1.02]' :
+                    status === 'uploading' ? 'border-accent-cyan/50 bg-accent-cyan/5 pointer-events-none' :
+                    'border-white/20 hover:border-accent-cyan/50 hover:bg-accent-cyan/5'
+                }`}
+            >
+                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    {status === 'uploading'
+                        ? <Loader2 size={32} className="text-accent-cyan animate-spin" />
+                        : <Upload size={32} className="text-slate-300 group-hover:text-accent-cyan" />
+                    }
+                </div>
+                <h3 className="text-xl font-semibold text-white mb-2">
+                    {status === 'uploading' ? 'Uploading & Transcribing...' : 'Drag & Drop Audio Files'}
+                </h3>
+                <p className="text-slate-400 text-sm mb-6">Supports MP3, WAV, M4A, FLAC, OGG, WebM, Opus</p>
+                {status !== 'uploading' && <Button variant="primary">Browse Files</Button>}
+            </div>
+        )}
+
         <GlassCard title="Import Options">
             <div className="space-y-4">
-                 <AppleSwitch checked={true} onChange={()=>{}} label="Speaker Diarization" description="Identify distinct speakers in the audio" />
+                 <AppleSwitch checked={diarization} onChange={setDiarization} label="Speaker Diarization" description="Identify distinct speakers in the audio" />
                  <div className="h-px bg-white/5"></div>
-                 <AppleSwitch checked={false} onChange={()=>{}} label="Word-level Timestamps" description="Generate precise timestamps for every word" />
+                 <AppleSwitch checked={wordTimestamps} onChange={setWordTimestamps} label="Word-level Timestamps" description="Generate precise timestamps for every word" />
             </div>
         </GlassCard>
     </div>
-);
+    );
+};

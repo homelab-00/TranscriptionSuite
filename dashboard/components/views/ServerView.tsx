@@ -1,21 +1,27 @@
 import React, { useState } from 'react';
-import { Box, Cpu, HardDrive, Download, Terminal } from 'lucide-react';
+import { Box, Cpu, HardDrive, Download, Terminal, Loader2 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 
 export const ServerView: React.FC = () => {
+  const { status: adminStatus, loading: adminLoading } = useAdminStatus();
   const [imageTag, setImageTag] = useState('transcription-suite:latest');
-  const [transcriber, setTranscriber] = useState('large-v3');
+  const [transcriber, setTranscriber] = useState('');
   const [liveModel, setLiveModel] = useState('tiny (Low Latency)');
   
   // Dynamic State for Image
   const [imageStatus, setImageStatus] = useState<'active' | 'inactive'>('active');
   
-  // State to manage the running status of the instance
-  // Expanded to support 'stopped' (Orange) and 'removed' (Grey)
+  // Derive running status from admin status API
+  const isConnected = !!adminStatus;
   const [status, setStatus] = useState<'active' | 'stopped' | 'removed'>('active');
+
+  // Sync model name from admin status
+  const realModel = adminStatus?.config?.transcription?.model;
+  const activeTranscriber = transcriber || realModel || 'large-v3';
 
   return (
     <div className="w-full h-full overflow-y-auto custom-scrollbar">
@@ -128,9 +134,9 @@ export const ServerView: React.FC = () => {
                   <div className="space-y-2">
                       <label className="text-sm text-slate-300 font-medium">Main Transcriber</label>
                       <CustomSelect 
-                          value={transcriber}
+                          value={activeTranscriber}
                           onChange={setTranscriber}
-                          options={['large-v3', 'medium.en']}
+                          options={[realModel ?? 'large-v3', 'large-v3', 'medium.en'].filter((v, i, a) => a.indexOf(v) === i)}
                           accentColor="magenta"
                           className="w-full h-10 bg-white/5 border border-white/10 rounded-lg px-3 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none transition-shadow"
                       />

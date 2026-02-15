@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, Radio, Settings2, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Trash, Laptop, Power, ArrowRightLeft } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -9,6 +9,7 @@ import { AudioVisualizer } from '../AudioVisualizer';
 import { LogTerminal } from '../ui/LogTerminal';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
+import { useLanguages } from '../../src/hooks/useLanguages';
 
 export const SessionView: React.FC = () => {
   // Global State
@@ -17,10 +18,37 @@ export const SessionView: React.FC = () => {
   const [logsVisible, setLogsVisible] = useState(false);
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
 
+  // Real language list from server
+  const { languages } = useLanguages();
+  const languageOptions = languages.map(l => l.name);
+
+  // Audio device enumeration
+  const [micDevices, setMicDevices] = useState<string[]>([]);
+  const [sysDevices, setSysDevices] = useState<string[]>([]);
+
   // Audio Configuration State
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
-  const [micDevice, setMicDevice] = useState('MacBook Pro Microphone');
-  const [sysDevice, setSysDevice] = useState('Loopback Audio');
+  const [micDevice, setMicDevice] = useState('Default Microphone');
+  const [sysDevice, setSysDevice] = useState('Default Output');
+
+  const enumerateDevices = useCallback(async () => {
+    try {
+      // Request permission first (needed to get labels)
+      await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.label).map(d => d.label);
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput' && d.label).map(d => d.label);
+      setMicDevices(audioInputs.length > 0 ? audioInputs : ['Default Microphone']);
+      setSysDevices(audioOutputs.length > 0 ? audioOutputs : ['Default Output']);
+      if (audioInputs.length > 0 && !audioInputs.includes(micDevice)) setMicDevice(audioInputs[0]);
+      if (audioOutputs.length > 0 && !audioOutputs.includes(sysDevice)) setSysDevice(audioOutputs[0]);
+    } catch {
+      setMicDevices(['Default Microphone']);
+      setSysDevices(['Default Output']);
+    }
+  }, [micDevice, sysDevice]);
+
+  useEffect(() => { enumerateDevices(); }, [enumerateDevices]);
 
   // Main Transcription State
   const [mainLanguage, setMainLanguage] = useState('Auto Detect');
@@ -237,8 +265,8 @@ export const SessionView: React.FC = () => {
                                     {audioSource === 'mic' && <span className="text-[10px] bg-accent-cyan text-black px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">Live</span>}
                                 </div>
                                 <div className="flex gap-2">
-                                    <CustomSelect value={micDevice} onChange={setMicDevice} options={['MacBook Pro Microphone', 'External USB Mic', 'AirPods Pro']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
-                                    <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} />
+                                    <CustomSelect value={micDevice} onChange={setMicDevice} options={micDevices.length > 0 ? micDevices : ['Default Microphone']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
+                                    <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
                                 </div>
                             </div>
                             <div className={`p-3 rounded-xl border transition-all duration-300 ${audioSource === 'system' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}>
@@ -247,8 +275,8 @@ export const SessionView: React.FC = () => {
                                     {audioSource === 'system' && <span className="text-[10px] bg-accent-cyan text-black px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">Live</span>}
                                 </div>
                                 <div className="flex gap-2">
-                                    <CustomSelect value={sysDevice} onChange={setSysDevice} options={['Loopback Audio', 'BlackHole 2ch', 'ZoomAudioDevice']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
-                                    <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} />
+                                    <CustomSelect value={sysDevice} onChange={setSysDevice} options={sysDevices.length > 0 ? sysDevices : ['Default Output']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
+                                    <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
                                 </div>
                             </div>
                         </div>
@@ -262,7 +290,7 @@ export const SessionView: React.FC = () => {
                              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Source Language</label>
                              <div className="flex items-center gap-2">
                                 <div className="p-2.5 rounded-xl bg-accent-magenta/10 text-accent-magenta shadow-inner border border-accent-magenta/5"><Languages size={18} /></div>
-                                <CustomSelect value={mainLanguage} onChange={setMainLanguage} options={['Auto Detect', 'English', 'Greek', 'Japanese']} accentColor="magenta" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none hover:border-white/20 transition-all" />
+                                <CustomSelect value={mainLanguage} onChange={setMainLanguage} options={languageOptions} accentColor="magenta" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none hover:border-white/20 transition-all" />
                             </div>
                         </div>
                         <div className="h-12 w-px bg-white/10 self-end mb-1"></div>
@@ -337,7 +365,7 @@ export const SessionView: React.FC = () => {
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0">
                             <div className="h-full aspect-square flex items-center justify-center rounded-lg bg-accent-magenta/10 text-accent-magenta border border-accent-magenta/5"><Languages size={15} /></div>
-                            <CustomSelect value={liveLanguage} onChange={setLiveLanguage} options={['Auto Detect', 'English', 'Greek']} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-[130px]" />
+                            <CustomSelect value={liveLanguage} onChange={setLiveLanguage} options={languageOptions} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-[130px]" />
                         </div>
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0">

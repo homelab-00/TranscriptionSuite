@@ -10,6 +10,8 @@ interface AboutModalProps {
 export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<string>('');
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -19,6 +21,13 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
       setIsRendered(true);
       // Ensure initial state is applied before transition
       setIsVisible(false);
+
+      // Fetch app version from Electron
+      const api = (window as any).electronAPI;
+      if (api?.app) {
+        api.app.getVersion().then((v: string) => setAppVersion(v)).catch(() => {});
+        setPlatform(api.app.getPlatform?.() ?? '');
+      }
       
       // Double RAF to ensure DOM paint before transition
       rafId = requestAnimationFrame(() => {
@@ -84,7 +93,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
 
             {/* Name & Title */}
             <h2 className="text-xl font-bold text-white mb-0.5 tracking-tight">Transcription Suite</h2>
-            <p className="text-xs font-medium text-accent-cyan tracking-widest uppercase mb-4">v2.4.0 Beta</p>
+            <p className="text-xs font-medium text-accent-cyan tracking-widest uppercase mb-4">v{appVersion ?? '0.0.0'}{platform ? ` • ${platform}` : ''}</p>
             
             {/* Description */}
             <p className="text-slate-400 text-sm leading-relaxed text-center mb-6 px-2">
@@ -94,7 +103,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
             {/* Links */}
             <div className="w-full grid grid-cols-2 gap-3 mb-8">
                 <a 
-                    href="https://github.com/your-username/transcription-suite" 
+                    href="https://github.com/homelab-00/TranscriptionSuite" 
                     target="_blank" 
                     rel="noreferrer"
                     className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all group"
@@ -103,7 +112,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                     <span className="text-xs font-medium text-slate-400 group-hover:text-slate-200">Repository</span>
                 </a>
                 <a 
-                    href="https://github.com/your-username" 
+                    href="https://github.com/homelab-00" 
                     target="_blank" 
                     rel="noreferrer"
                     className="flex flex-col items-center justify-center gap-2 p-3 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all group"
@@ -121,7 +130,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
                  <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest">MIT License © 2024-2025</p>
                  <div className="flex items-center gap-1.5 text-xs text-slate-400">
                     <span>Designed by</span>
-                    <span className="text-white font-medium">Your Name</span>
+                    <a href="https://github.com/homelab-00" target="_blank" rel="noreferrer" className="text-white font-medium hover:text-accent-cyan transition-colors">homelab-00</a>
                  </div>
              </div>
         </div>

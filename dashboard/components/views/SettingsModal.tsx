@@ -1,8 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
-import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Database, Server, Laptop, AppWindow, Eye, EyeOff } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Database, Server, Laptop, AppWindow, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { useBackups } from '../../src/hooks/useBackups';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,6 +20,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // Animation State
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Backups hook for Notebook tab
+  const { backups, loading: backupsLoading, refresh: refreshBackups, createBackup, restoreBackup, operating, operationResult } = useBackups();
+  const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
   // Mock State for Settings
   const [appSettings, setAppSettings] = useState({
@@ -71,12 +77,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   ];
 
-  // Animation Lifecycle
+  // Animation Lifecycle + Load Settings from Config Store
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let rafId: number;
     if (isOpen) {
       setIsRendered(true);
+      setIsDirty(false);
+      // Load settings from config store
+      const api = (window as any).electronAPI;
+      if (api?.config) {
+        api.config.getAll().then((cfg: Record<string, unknown>) => {
+          if (cfg) {
+            setClientSettings(prev => ({
+              ...prev,
+              localHost: (cfg['connection.localHost'] as string) ?? prev.localHost,
+              remoteHost: (cfg['connection.remoteHost'] as string) ?? prev.remoteHost,
+              useRemote: (cfg['connection.useRemote'] as boolean) ?? prev.useRemote,
+              authToken: (cfg['connection.authToken'] as string) ?? prev.authToken,
+              port: (cfg['connection.port'] as number) ?? prev.port,
+              useHttps: (cfg['connection.useHttps'] as boolean) ?? prev.useHttps,
+              gracePeriod: (cfg['audio.gracePeriod'] as number) ?? prev.gracePeriod,
+              constrainSpeakers: (cfg['diarization.constrainSpeakers'] as boolean) ?? prev.constrainSpeakers,
+              numSpeakers: (cfg['diarization.numSpeakers'] as number) ?? prev.numSpeakers,
+              autoAddNotebook: (cfg['notebook.autoAdd'] as boolean) ?? prev.autoAddNotebook,
+            }));
+            setAppSettings(prev => ({
+              ...prev,
+              autoCopy: (cfg['app.autoCopy'] as boolean) ?? prev.autoCopy,
+              showNotifications: (cfg['app.showNotifications'] as boolean) ?? prev.showNotifications,
+              stopServerOnQuit: (cfg['app.stopServerOnQuit'] as boolean) ?? prev.stopServerOnQuit,
+            }));
+          }
+        }).catch(() => {});
+      }
       rafId = requestAnimationFrame(() => {
         rafId = requestAnimationFrame(() => {
           setIsVisible(true);
@@ -92,6 +126,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     };
   }, [isOpen]);
 
+  const handleSave = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (api?.config) {
+      const entries: [string, unknown][] = [
+        ['connection.localHost', clientSettings.localHost],
+        ['connection.remoteHost', clientSettings.remoteHost],
+        ['connection.useRemote', clientSettings.useRemote],
+        ['connection.authToken', clientSettings.authToken],
+        ['connection.port', clientSettings.port],
+        ['connection.useHttps', clientSettings.useHttps],
+        ['audio.gracePeriod', clientSettings.gracePeriod],
+        ['diarization.constrainSpeakers', clientSettings.constrainSpeakers],
+        ['diarization.numSpeakers', clientSettings.numSpeakers],
+        ['notebook.autoAdd', clientSettings.autoAddNotebook],
+        ['app.autoCopy', appSettings.autoCopy],
+        ['app.showNotifications', appSettings.showNotifications],
+        ['app.stopServerOnQuit', appSettings.stopServerOnQuit],
+      ];
+      await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
+    }
+    setIsDirty(false);
+    onClose();
+  }, [clientSettings, appSettings, onClose]);
+
   if (!isRendered) return null;
 
   const renderAppTab = () => (
@@ -99,21 +157,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       <Section title="Clipboard">
         <AppleSwitch 
           checked={appSettings.autoCopy} 
-          onChange={(v) => setAppSettings(prev => ({ ...prev, autoCopy: v }))} 
+          onChange={(v) => { setAppSettings(prev => ({ ...prev, autoCopy: v })); setIsDirty(true); }} 
           label="Automatically copy transcription to clipboard" 
         />
       </Section>
       <Section title="Notifications">
         <AppleSwitch 
           checked={appSettings.showNotifications} 
-          onChange={(v) => setAppSettings(prev => ({ ...prev, showNotifications: v }))} 
+          onChange={(v) => { setAppSettings(prev => ({ ...prev, showNotifications: v })); setIsDirty(true); }} 
           label="Show desktop notifications" 
         />
       </Section>
       <Section title="Docker Server">
         <AppleSwitch 
           checked={appSettings.stopServerOnQuit} 
-          onChange={(v) => setAppSettings(prev => ({ ...prev, stopServerOnQuit: v }))} 
+          onChange={(v) => { setAppSettings(prev => ({ ...prev, stopServerOnQuit: v })); setIsDirty(true); }} 
           label="Stop server when quitting dashboard" 
         />
       </Section>
@@ -307,26 +365,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         <Section title="Database Backup">
             <p className="text-xs text-slate-400 mb-4">Manage local SQLite database backups.</p>
             <div className="bg-black/30 border border-white/10 rounded-lg overflow-hidden mb-4">
-                 {[
-                     { name: 'backup_2026-01-14.db', date: 'Jan 14, 2026 18:00', size: '4.2 MB' },
-                     { name: 'backup_2026-01-13.db', date: 'Jan 13, 2026 09:30', size: '4.1 MB' },
-                     { name: 'backup_auto_weekly.db', date: 'Jan 10, 2026 00:00', size: '3.9 MB' },
-                 ].map((backup, i) => (
-                     <div key={i} className="flex items-center justify-between px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors cursor-pointer group">
+                 {backupsLoading ? (
+                     <div className="flex items-center justify-center py-6 text-slate-500">
+                         <Loader2 size={16} className="animate-spin mr-2" /> Loading backups…
+                     </div>
+                 ) : backups.length === 0 ? (
+                     <div className="text-center py-6 text-slate-500 text-sm">No backups found</div>
+                 ) : backups.map((backup, i) => (
+                     <div 
+                         key={backup.filename} 
+                         onClick={() => setSelectedBackup(backup.filename)}
+                         className={`flex items-center justify-between px-4 py-3 border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors cursor-pointer group ${
+                             selectedBackup === backup.filename ? 'bg-accent-cyan/5 border-l-2 border-l-accent-cyan' : ''
+                         }`}
+                     >
                         <div className="flex items-center gap-3">
                             <Database size={16} className="text-slate-500 group-hover:text-accent-cyan" />
                             <div>
-                                <div className="text-sm text-slate-300 font-medium">{backup.name}</div>
-                                <div className="text-xs text-slate-500">{backup.date}</div>
+                                <div className="text-sm text-slate-300 font-medium">{backup.filename}</div>
+                                <div className="text-xs text-slate-500">{new Date(backup.created_at).toLocaleString()}</div>
                             </div>
                         </div>
-                        <span className="text-xs font-mono text-slate-500">{backup.size}</span>
+                        <span className="text-xs font-mono text-slate-500">{(backup.size / 1024 / 1024).toFixed(1)} MB</span>
                      </div>
                  ))}
             </div>
+            {operationResult && (
+                <div className={`text-xs mb-3 p-2 rounded ${
+                    operationResult.includes('success') || operationResult.includes('Success') 
+                        ? 'text-green-400 bg-green-500/10' 
+                        : 'text-red-400 bg-red-500/10'
+                }`}>{operationResult}</div>
+            )}
             <div className="flex gap-3">
-                <Button variant="primary" size="sm" icon={<Save size={14}/>}>Create Backup</Button>
-                <Button variant="secondary" size="sm" icon={<RefreshCw size={14}/>}>Refresh</Button>
+                <Button variant="primary" size="sm" icon={<Save size={14}/>} onClick={createBackup} disabled={operating}>
+                    {operating ? 'Working…' : 'Create Backup'}
+                </Button>
+                <Button variant="secondary" size="sm" icon={<RefreshCw size={14}/>} onClick={refreshBackups}>Refresh</Button>
             </div>
         </Section>
 
@@ -338,7 +413,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     Restoring a backup will overwrite the current database. All changes made since the backup will be lost. The application will restart automatically.
                 </div>
             </div>
-            <Button variant="danger" className="w-full">Restore Selected Backup</Button>
+            <Button variant="danger" className="w-full" disabled={!selectedBackup || operating} onClick={() => selectedBackup && restoreBackup(selectedBackup)}>
+                {selectedBackup ? `Restore: ${selectedBackup}` : 'Select a backup above'}
+            </Button>
         </Section>
     </div>
   );
@@ -413,7 +490,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         {/* Footer */}
         <div className="px-6 py-4 border-t border-white/10 bg-white/5 flex justify-end gap-3 flex-none select-none">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button variant="primary">Save Changes</Button>
+            <Button variant="primary" onClick={handleSave}>Save Changes</Button>
         </div>
 
       </div>

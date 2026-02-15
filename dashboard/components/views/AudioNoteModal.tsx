@@ -1,9 +1,12 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Play, Pause, Rewind, FastForward, Sparkles, MessageSquare, Clock, FileText, Bot, User, Send, Settings2, MoreHorizontal, Trash2, Edit2, Share } from 'lucide-react';
+import { X, Play, Pause, Rewind, FastForward, Sparkles, MessageSquare, Clock, FileText, Bot, User, Send, Settings2, MoreHorizontal, Trash2, Edit2, Share, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
+import { useRecording } from '../../src/hooks/useRecording';
+import { apiClient } from '../../src/api/client';
+import type { Conversation, ChatMessage } from '../../src/api/types';
 
 interface AudioNoteModalProps {
   isOpen: boolean;
@@ -13,6 +16,7 @@ interface AudioNoteModalProps {
     date?: string;
     duration: string;
     tag?: string;
+    recordingId?: number;
   } | null;
 }
 
@@ -22,6 +26,25 @@ interface ChatSession {
     type: 'summary' | 'chat';
     timestamp: string;
     active: boolean;
+}
+
+/** Format seconds to MM:SS display */
+function formatRecSecs(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+/** Stable speaker colour from a consistent palette */
+const SPEAKER_COLORS = ['text-accent-cyan', 'text-accent-magenta', 'text-green-400', 'text-amber-400', 'text-indigo-400', 'text-rose-400'];
+const speakerColorMap = new Map<string, string>();
+function speakerColor(name: string): string {
+  let c = speakerColorMap.get(name);
+  if (!c) {
+    c = SPEAKER_COLORS[speakerColorMap.size % SPEAKER_COLORS.length];
+    speakerColorMap.set(name, c);
+  }
+  return c;
 }
 
 export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose, note }) => {
@@ -42,17 +65,24 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
 
   // LM Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [llmStatus, setLlmStatus] = useState<'active' | 'inactive'>('active');
+  const [llmStatus, setLlmStatus] = useState<'active' | 'inactive'>('inactive');
+  const [llmModel, setLlmModel] = useState<string | null>(null);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, id: string} | null>(null);
 
-  // Mock Data for Chat Sessions
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([
-    { id: '1', title: 'AI Generated Summary', type: 'summary', timestamp: '10:30 AM', active: false },
-    { id: '2', title: 'Performance Discussion', type: 'chat', timestamp: '10:32 AM', active: true },
-    { id: '3', title: 'Follow-up Questions', type: 'chat', timestamp: '10:45 AM', active: false },
-  ]);
+  // Chat Sessions — fetched from API when recording is available
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+
+  // Chat input state
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  // Real recording data
+  const { recording, transcription, loading: recordingLoading, audioUrl } = useRecording(note?.recordingId ?? null);
+  const segments = transcription?.segments ?? [];
 
   // Initialize Portal Target on Mount
   useEffect(() => {
@@ -70,7 +100,9 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
       setSummaryExpanded(false);
       setSummaryText('');
       setIsGenerating(false);
-      setLlmStatus(Math.random() > 0.5 ? 'active' : 'inactive');
+      apiClient.getLLMStatus()
+        .then(s => { setLlmStatus(s.available ? 'active' : 'inactive'); setLlmModel(s.model ?? null); })
+        .catch(() => setLlmStatus('inactive'));
 
       rafId = requestAnimationFrame(() => {
         rafId = requestAnimationFrame(() => {
@@ -89,22 +121,66 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     };
   }, [isOpen]);
 
-  // Mock Streaming Effect for Summary
+  // Fetch conversations when recording is available
   useEffect(() => {
-    if (isGenerating) {
-      const fullText = "The meeting focused on the Q1 interface redesign. Key takeaways included the decision to switch to a glassmorphism aesthetic, prioritizing dark mode as the default. The backend team raised concerns about websocket latency, which were addressed by proposing a local-first architecture. Next steps: Design team to finalize Figma mocks by Friday.";
+    if (!note?.recordingId) return;
+    apiClient.listConversations(note.recordingId).then(data => {
+      setChatSessions(data.conversations.map(c => ({
+        id: String(c.id),
+        title: c.title,
+        type: (c.title.toLowerCase().includes('summary') ? 'summary' : 'chat') as 'summary' | 'chat',
+        timestamp: new Date(c.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        active: false,
+      })));
+    }).catch(() => {});
+  }, [note?.recordingId]);
+
+  // Stream summary from API (or show existing summary)
+  useEffect(() => {
+    if (!isGenerating) return;
+
+    // If recording already has a summary, show it immediately
+    if (recording?.summary) {
+      let i = 0;
+      const text = recording.summary;
+      const interval = setInterval(() => {
+        setSummaryText(text.slice(0, i));
+        i++;
+        if (i > text.length) { setIsGenerating(false); clearInterval(interval); }
+      }, 15);
+      return () => clearInterval(interval);
+    }
+
+    // Otherwise, stream from the LLM API
+    if (note?.recordingId) {
+      let cancelled = false;
+      (async () => {
+        try {
+          const stream = apiClient.summarizeRecordingStream(note.recordingId!);
+          let text = '';
+          for await (const chunk of stream) {
+            if (cancelled) break;
+            text += chunk;
+            setSummaryText(text);
+          }
+        } catch {
+          if (!cancelled) setSummaryText('Failed to generate summary. Is the LLM server running?');
+        } finally {
+          if (!cancelled) setIsGenerating(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    } else {
+      // No recording ID — show fallback message
+      const msg = 'Open a synced recording to generate an AI summary.';
       let i = 0;
       const interval = setInterval(() => {
-        setSummaryText(fullText.slice(0, i));
-        i++;
-        if (i > fullText.length) {
-          setIsGenerating(false);
-          clearInterval(interval);
-        }
+        setSummaryText(msg.slice(0, i)); i++;
+        if (i > msg.length) { setIsGenerating(false); clearInterval(interval); }
       }, 20);
       return () => clearInterval(interval);
     }
-  }, [isGenerating]);
+  }, [isGenerating, note?.recordingId, recording?.summary]);
 
   // Close context menu on click anywhere
   useEffect(() => {
@@ -147,13 +223,13 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
             {/* Header */}
             <div className="flex-none h-20 px-8 border-b border-white/5 flex items-center justify-between select-none">
                 <div>
-                    <h2 className="text-2xl font-bold text-white tracking-tight">{note.title}</h2>
+                    <h2 className="text-2xl font-bold text-white tracking-tight">{recording?.title ?? note.title}</h2>
                     <div className="flex items-center gap-4 text-sm text-slate-400 mt-1">
-                        <span className="flex items-center gap-1.5"><Clock size={14}/> {note.duration}</span>
+                        <span className="flex items-center gap-1.5"><Clock size={14}/> {recording ? formatRecSecs(recording.duration_seconds) : note.duration}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        <span className="flex items-center gap-1.5"><FileText size={14}/> 1,420 words</span>
+                        <span className="flex items-center gap-1.5"><FileText size={14}/> {recording ? `${recording.word_count.toLocaleString()} words` : '— words'}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        <span className="text-slate-500">Jan 15, 2026 • 10:30 AM</span>
+                        <span className="text-slate-500">{recording ? new Date(recording.recorded_at).toLocaleString() : note.date ?? ''}</span>
                         {note.tag && <span className="ml-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-accent-cyan/10 text-accent-cyan border-accent-cyan/20">{note.tag}</span>}
                     </div>
                 </div>
@@ -213,22 +289,23 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                     <div className="sticky top-0 z-10 py-4 pointer-events-none select-none">
                         <span className="inline-flex items-center px-4 py-1.5 rounded-full bg-[#161f32]/90 backdrop-blur-xl border border-white/10 text-xs font-bold text-slate-400 uppercase tracking-widest shadow-lg pointer-events-auto">Transcript</span>
                     </div>
-                    {[1, 2, 3].map((i) => (
+                    {segments.length > 0 ? segments.map((seg, i) => (
                         <div key={i} className="flex gap-6 group">
                             <div className="w-16 flex-none text-right pt-1 select-none">
-                                <div className={`text-xs font-bold mb-1 ${i % 2 === 0 ? 'text-accent-cyan' : 'text-accent-magenta'}`}>{i % 2 === 0 ? 'Alex' : 'Sarah'}</div>
-                                <div className="text-[10px] text-slate-500 font-mono">04:2{i}</div>
+                                {seg.speaker && <div className={`text-xs font-bold mb-1 ${speakerColor(seg.speaker)}`}>{seg.speaker}</div>}
+                                <div className="text-[10px] text-slate-500 font-mono">{formatRecSecs(seg.start)}</div>
                             </div>
-                            {/* The content paragraph is selectable */}
                             <div className="flex-1 text-slate-300 leading-relaxed group-hover:text-white transition-colors selectable-text">
-                                <p>
-                                    {i % 2 === 0 
-                                     ? "I think the glassmorphism approach really modernizes the feel, but we need to be careful about performance on older devices." 
-                                     : "Agreed. If we use too many backdrop-blur filters, the frame rate might drop. Maybe we can disable it for low-power mode?"}
-                                </p>
+                                <p>{seg.text}</p>
                             </div>
                         </div>
-                    ))}
+                    )) : recordingLoading ? (
+                        <div className="flex items-center justify-center py-12 text-slate-500">
+                            <Loader2 size={20} className="animate-spin mr-2" /> Loading transcript…
+                        </div>
+                    ) : (
+                        <div className="text-center py-12 text-slate-500">No transcript available</div>
+                    )}
                 </div>
             </div>
         </div>
@@ -299,8 +376,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                         <button className="absolute right-2 top-2 p-1.5 bg-accent-cyan rounded-lg text-black hover:bg-cyan-300 transition-colors"><Send size={14} /></button>
                     </div>
                     <div className="mt-2 flex justify-between items-center px-1 select-none">
-                        <span className="text-[10px] text-slate-500">Model: Llama-3-8b-Instruct</span>
-                        <span className="text-[10px] text-slate-500">240 tokens context</span>
+                        <span className="text-[10px] text-slate-500">Model: {llmModel ?? 'unknown'}</span>
+                        <span className="text-[10px] text-slate-500">{segments.length} segments context</span>
                     </div>
                 </div>
              </div>
