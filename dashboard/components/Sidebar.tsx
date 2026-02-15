@@ -29,7 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onO
     <div 
       className={`
         bg-glass-surface backdrop-blur-2xl border-r border-glass-border h-full flex flex-col transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] relative
-        ${collapsed ? 'w-20' : 'w-[200px]'}
+        ${collapsed ? 'w-20' : 'w-50'}
       `}
     >
         {/* Toggle Button */}
@@ -42,8 +42,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onO
 
       {/* Logo Area */}
       <div className={`p-6 flex items-center ${collapsed ? 'justify-center' : 'gap-3'} transition-all duration-300`}>
-        <div className="relative flex-shrink-0">
-             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-magenta to-accent-orange flex items-center justify-center shadow-lg shadow-accent-magenta/20">
+        <div className="relative shrink-0">
+             <div className="w-10 h-10 rounded-xl bg-linear-to-br from-accent-magenta to-accent-orange flex items-center justify-center shadow-lg shadow-accent-magenta/20">
                 <Mic2 className="text-white" size={24} />
              </div>
              <div className="absolute -top-1 -right-1 w-3 h-3 bg-accent-cyan rounded-full border-2 border-slate-900"></div>
@@ -61,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onO
         {/* Animated Background Pill for Active State */}
         {activeIndex !== -1 && (
             <div 
-                className="absolute left-3 right-3 h-12 top-0 rounded-xl bg-gradient-to-r from-white/10 to-transparent border border-white/5 shadow-inner transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] z-0 pointer-events-none"
+                className="absolute left-3 right-3 h-12 top-0 rounded-xl bg-linear-to-r from-white/10 to-transparent border border-white/5 shadow-inner transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] z-0 pointer-events-none"
                 style={{
                     // 1.5rem (py-6) + index * (3rem height + 0.5rem gap)
                     transform: `translateY(calc(1.5rem + ${activeIndex} * 3.5rem))`

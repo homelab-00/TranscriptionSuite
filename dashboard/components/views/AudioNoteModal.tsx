@@ -338,7 +338,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
   if (!isRendered || !note || !portalContainer) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 lg:p-8">
+    <div className="fixed inset-0 z-9999 flex items-center justify-center p-4 lg:p-8">
       {/* Backdrop */}
       <div className={`absolute inset-0 bg-black/40 backdrop-blur-md transition-opacity duration-500 ease-in-out ${isVisible ? 'opacity-100' : 'opacity-0'}`} onClick={onClose} />
 
@@ -346,7 +346,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
       <div className={`relative w-full max-w-6xl h-[85vh] bg-glass-surface backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'}`}>
         
         {/* Left Section: Content & Player */}
-        <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-white/5 to-transparent">
+        <div className="flex-1 flex flex-col min-w-0 bg-linear-to-b from-white/5 to-transparent">
             {/* Header */}
             <div className="flex-none h-20 px-8 border-b border-white/5 flex items-center justify-between select-none">
                 <div>
@@ -413,7 +413,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                 </div>
 
                 {/* 2. AI Summary Section - Added selectable-text */}
-                <div className={`transition-all duration-500 ease-in-out border border-white/10 rounded-2xl overflow-hidden ${summaryExpanded ? 'bg-gradient-to-br from-accent-magenta/5 to-purple-900/10' : 'bg-glass-100 hover:bg-white/5'}`}>
+                <div className={`transition-all duration-500 ease-in-out border border-white/10 rounded-2xl overflow-hidden ${summaryExpanded ? 'bg-linear-to-br from-accent-magenta/5 to-purple-900/10' : 'bg-glass-100 hover:bg-white/5'}`}>
                     {!summaryExpanded ? (
                         <button onClick={handleGenerateSummary} className="w-full h-14 flex items-center justify-center gap-3 text-accent-magenta hover:text-white transition-colors group select-none">
                             <Sparkles size={18} className="group-hover:animate-spin-slow" />
@@ -460,8 +460,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
         </div>
 
         {/* Right Section: LLM Sidebar - Chat messages marked selectable */}
-        <div className={`transition-all duration-500 ease-[cubic-bezier(0.33,1,0.68,1)] border-l border-white/5 bg-[#0b1120] flex flex-col ${isSidebarOpen ? 'w-[400px] translate-x-0' : 'w-0 translate-x-10 opacity-0 overflow-hidden'}`}>
-             <div className="h-20 border-b border-white/5 flex items-center justify-between px-5 shrink-0 bg-white/[0.02] select-none">
+        <div className={`transition-all duration-500 ease-[cubic-bezier(0.33,1,0.68,1)] border-l border-white/5 bg-[#0b1120] flex flex-col ${isSidebarOpen ? 'w-100 translate-x-0' : 'w-0 translate-x-10 opacity-0 overflow-hidden'}`}>
+             <div className="h-20 border-b border-white/5 flex items-center justify-between px-5 shrink-0 bg-white/2 select-none">
                 <div className="flex items-center gap-3">
                     <div className="p-1.5 rounded-lg bg-green-500/10 text-green-400"><Bot size={18} /></div>
                     <div>
@@ -473,8 +473,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                     </div>
                 </div>
              </div>
-             <div className="flex-1 flex flex-col min-w-[400px] overflow-hidden">
-                <div className="flex-none p-2 border-b border-white/5 bg-white/[0.01] select-none">
+             <div className="flex-1 flex flex-col min-w-100 overflow-hidden">
+                <div className="flex-none p-2 border-b border-white/5 bg-white/1 select-none">
                     <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-3 py-2">Sessions</div>
                     <div className="space-y-1">
                         {chatSessions.map((session) => (
@@ -522,7 +522,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                 </div>
 
                 {/* Input Area */}
-                <div className="p-4 border-t border-white/5 bg-white/[0.02]">
+                <div className="p-4 border-t border-white/5 bg-white/2">
                     <div className="relative">
                         <input 
                           type="text" 
@@ -547,7 +547,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
 
       {/* Context Menu Portal */}
       {contextMenu && (
-        <div className="fixed z-[10000] w-48 bg-[#0f172a] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 py-1 select-none" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
+        <div className="fixed z-10000 w-48 bg-[#0f172a] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 py-1 select-none" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
             <button onClick={handleRename} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Edit2 size={14} /> Rename</button>
             <button onClick={() => handleExport('txt')} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Share size={14} /> Export TXT</button>
             <button onClick={() => handleExport('srt')} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Share size={14} /> Export SRT</button>

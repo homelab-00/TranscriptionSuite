@@ -338,7 +338,7 @@ export const SessionView: React.FC = () => {
              
              {/* Left Top Scroll Indicator */}
              <div className={`absolute top-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-gradient-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
+                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
              </div>
 
              {/* Left Top Corner Mask */}
@@ -348,7 +348,7 @@ export const SessionView: React.FC = () => {
              <div ref={leftScrollRef} className="flex-1 overflow-y-auto pr-3 pt-0 pb-0 custom-scrollbar space-y-6">
                 
                 {/* Unified Control Center */}
-                <GlassCard title="Control Center" className={`bg-gradient-to-b from-glass-200 to-glass-100 flex-none transition-all duration-500 ease-in-out relative ${isSystemHealthy ? '!border-accent-cyan/50 !shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),_0_8px_10px_-6px_rgba(0,0,0,0.3),_inset_0_0_30px_rgba(34,211,238,0.15)] z-10' : ''}`}>
+                <GlassCard title="Control Center" className={`bg-linear-to-b from-glass-200 to-glass-100 flex-none transition-all duration-500 ease-in-out relative ${isSystemHealthy ? 'border-accent-cyan/50! shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]! z-10' : ''}`}>
                     <div className="space-y-5">
                         {/* Server Control */}
                         <div className="flex flex-col p-4 bg-white/5 rounded-xl border border-white/5 space-y-4 shadow-sm">
@@ -444,9 +444,9 @@ export const SessionView: React.FC = () => {
                                 </div>
                             </div>
                             <div className="h-12 w-px bg-white/10 self-end mb-1"></div>
-                            <div className="flex flex-col items-center min-w-[100px]">
+                            <div className="flex flex-col items-center min-w-25">
                                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 mt-1 text-center whitespace-nowrap">Translate to English</label>
-                                <div className="h-[46px] flex items-center justify-center"><AppleSwitch checked={mainTranslate} onChange={setMainTranslate} size="sm" /></div>
+                                <div className="h-11.5 flex items-center justify-center"><AppleSwitch checked={mainTranslate} onChange={setMainTranslate} size="sm" /></div>
                             </div>
                         </div>
 
@@ -516,7 +516,7 @@ export const SessionView: React.FC = () => {
                 </GlassCard>
                 
                 <div className="pt-2">
-                    <div onClick={toggleLogs} className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200 cursor-pointer group select-none ${showLogs ? 'bg-accent-cyan/10 border-accent-cyan/30 text-accent-cyan shadow-[0_0_15px_rgba(34,211,238,0.15)]' : 'bg-gradient-to-br from-glass-200 to-glass-100 backdrop-blur-xl border-glass-border text-slate-400 hover:text-white hover:brightness-110'}`}>
+                    <div onClick={toggleLogs} className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all duration-200 cursor-pointer group select-none ${showLogs ? 'bg-accent-cyan/10 border-accent-cyan/30 text-accent-cyan shadow-[0_0_15px_rgba(34,211,238,0.15)]' : 'bg-linear-to-br from-glass-200 to-glass-100 backdrop-blur-xl border-glass-border text-slate-400 hover:text-white hover:brightness-110'}`}>
                         <div className="flex items-center gap-2"><Terminal size={18} /><span className="text-sm font-medium">System Logs</span></div>
                         <div className="flex items-center gap-3">
                              <div className={`transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] overflow-hidden ${showLogs ? 'w-24 opacity-100' : 'w-0 opacity-0'}`}>
@@ -530,7 +530,7 @@ export const SessionView: React.FC = () => {
 
             {/* Left Bottom Scroll Indicator */}
             <div className={`absolute bottom-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-gradient-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
+                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
             </div>
             <div className="absolute bottom-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)' }} />
         </div>
@@ -540,7 +540,7 @@ export const SessionView: React.FC = () => {
             
             {/* Right Top Scroll Indicator */}
              <div className={`absolute top-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-gradient-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
+                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
              </div>
              <div className="absolute top-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)' }} />
 
@@ -581,7 +581,7 @@ export const SessionView: React.FC = () => {
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0">
                             <div className="h-full aspect-square flex items-center justify-center rounded-lg bg-accent-magenta/10 text-accent-magenta border border-accent-magenta/5"><Languages size={15} /></div>
-                            <CustomSelect value={liveLanguage} onChange={setLiveLanguage} options={languageOptions} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-[130px]" />
+                            <CustomSelect value={liveLanguage} onChange={setLiveLanguage} options={languageOptions} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-32.5" />
                         </div>
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0">
@@ -635,7 +635,7 @@ export const SessionView: React.FC = () => {
 
             {/* Right Bottom Scroll Indicator */}
             <div className={`absolute bottom-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-gradient-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
+                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
             </div>
             <div className="absolute bottom-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)' }} />
         </div>

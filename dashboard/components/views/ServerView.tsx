@@ -64,7 +64,7 @@ export const ServerView: React.FC = () => {
          
          {/* 1. Image Card */}
          <div className="relative pl-8 border-l-2 border-white/10 pb-8 last:border-0 last:pb-0 shrink-0">
-           <div className={`absolute -left-[17px] top-0 w-8 h-8 rounded-full border-4 border-slate-900 flex items-center justify-center z-10 transition-colors duration-300 ${docker.images.length > 0 ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}>
+           <div className={`absolute -left-4.25 top-0 w-8 h-8 rounded-full border-4 border-slate-900 flex items-center justify-center z-10 transition-colors duration-300 ${docker.images.length > 0 ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}>
               <Download size={14} />
            </div>
            <GlassCard 
@@ -111,7 +111,7 @@ export const ServerView: React.FC = () => {
 
          {/* 2. Container Card (Config & Controls) */}
          <div className="relative pl-8 border-l-2 border-white/10 pb-8 last:border-0 last:pb-0 shrink-0">
-           <div className={`absolute -left-[17px] top-0 w-8 h-8 rounded-full border-4 border-slate-900 flex items-center justify-center z-10 transition-colors duration-300 ${isRunning ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}>
+           <div className={`absolute -left-4.25 top-0 w-8 h-8 rounded-full border-4 border-slate-900 flex items-center justify-center z-10 transition-colors duration-300 ${isRunning ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}>
               <Box size={16} />
            </div>
            <GlassCard 
@@ -159,7 +159,7 @@ export const ServerView: React.FC = () => {
 
          {/* 3. Models Card */}
          <div className="relative pl-8 border-l-2 border-white/10 pb-8 last:border-0 last:pb-0 shrink-0">
-           <div className="absolute -left-[17px] top-0 w-8 h-8 rounded-full bg-slate-800 border-4 border-slate-900 flex items-center justify-center z-10 text-slate-300">
+           <div className="absolute -left-4.25 top-0 w-8 h-8 rounded-full bg-slate-800 border-4 border-slate-900 flex items-center justify-center z-10 text-slate-300">
               <Cpu size={14} />
            </div>
            <GlassCard title="3. AI Models Configuration">
@@ -204,7 +204,7 @@ export const ServerView: React.FC = () => {
 
           {/* 4. Volumes Card */}
           <div className="relative pl-8 border-l-2 border-white/10 pb-2 last:border-0 last:pb-0 shrink-0">
-           <div className="absolute -left-[17px] top-0 w-8 h-8 rounded-full bg-slate-800 border-4 border-slate-900 flex items-center justify-center z-10 text-slate-300">
+           <div className="absolute -left-4.25 top-0 w-8 h-8 rounded-full bg-slate-800 border-4 border-slate-900 flex items-center justify-center z-10 text-slate-300">
               <HardDrive size={14} />
            </div>
            <GlassCard title="4. Persistent Volumes" action={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => docker.refreshVolumes()}>Refresh</Button>}>

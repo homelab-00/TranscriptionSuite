@@ -44,7 +44,7 @@ const App: React.FC = () => {
       <main className="flex-1 relative flex flex-col min-w-0">
         
         {/* Top Gradient Fade for aesthetic scrolling */}
-        <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-slate-900/10 to-transparent z-10 pointer-events-none"></div>
+        <div className="absolute top-0 left-0 right-0 h-8 bg-linear-to-b from-slate-900/10 to-transparent z-10 pointer-events-none"></div>
 
         {/* Scrollable View Content - Removed p-6 to allow full-width scrolling in Server View */}
         <div className="flex-1 overflow-hidden h-full relative">

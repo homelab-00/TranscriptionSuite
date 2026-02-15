@@ -185,7 +185,7 @@ const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, onRefre
     `;
 
     return createPortal(
-        <div className="fixed inset-0 z-[9999]" onClick={(e) => { e.stopPropagation(); onClose(); }} onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
+        <div className="fixed inset-0 z-9999" onClick={(e) => { e.stopPropagation(); onClose(); }} onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
             <style>{slideUpKeyframes}</style>
             <div 
                 ref={menuRef}
@@ -259,7 +259,7 @@ const HistoryPicker: React.FC<HistoryPickerProps> = ({ isOpen, onClose, selected
   const positionStyle: React.CSSProperties = triggerRect ? { position: 'fixed', top: `${triggerRect.top}px`, right: `${window.innerWidth - triggerRect.right}px`, transformOrigin: 'top right' } : {};
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999]">
+    <div className="fixed inset-0 z-9999">
       <div className="absolute inset-0" onClick={onClose} />
       <div style={positionStyle} className={`w-80 bg-black/10 backdrop-blur-xl border border-white/10 rounded-xl shadow-xl p-6 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-2'}`}>
         <div className="flex items-center justify-between mb-6">
@@ -310,7 +310,7 @@ const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient
                     {hours.map((hour) => {
                         const hourEvents = events.filter(e => Math.floor(e.startTime) === hour);
                         return (
-                            <div key={hour} className="flex group relative border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors duration-300" style={{ height: `${100 / visibleSlots}%` }}>
+                            <div key={hour} className="flex group relative border-b border-white/5 last:border-0 hover:bg-white/2 transition-colors duration-300" style={{ height: `${100 / visibleSlots}%` }}>
                                 <div className="w-16 shrink-0 text-right pr-4 pt-6 select-none sticky left-0 z-20">
                                     <span className="text-xs font-medium text-slate-500 font-mono">{hour.toString().padStart(2, '0')}:00</span>
                                 </div>
@@ -319,7 +319,7 @@ const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient
                                         const minutes = Math.round((evt.startTime % 1) * 60).toString().padStart(2, '0');
                                         const timeStr = `${Math.floor(evt.startTime).toString().padStart(2, '0')}:${minutes}`;
                                         return (
-                                            <div key={evt.id} onClick={() => onNoteClick(evt)} onContextMenu={(e) => handleContextMenu(e, evt)} className="snap-start flex-none w-[140px] p-3 rounded-xl bg-glass-200 border border-white/10 hover:bg-glass-300 transition-all duration-300 group/card cursor-pointer relative overflow-hidden shadow-sm hover:shadow-lg hover:border-white/20 hover:-translate-y-1 active:scale-[0.98] h-[85%]">
+                                            <div key={evt.id} onClick={() => onNoteClick(evt)} onContextMenu={(e) => handleContextMenu(e, evt)} className="snap-start flex-none w-35 p-3 rounded-xl bg-glass-200 border border-white/10 hover:bg-glass-300 transition-all duration-300 group/card cursor-pointer relative overflow-hidden shadow-sm hover:shadow-lg hover:border-white/20 hover:-translate-y-1 active:scale-[0.98] h-[85%]">
                                                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent-cyan opacity-80 group-hover/card:opacity-100 transition-opacity"></div>
                                                 <div className="flex flex-col h-full justify-between gap-2">
                                                     <div className="flex justify-between items-start">
@@ -340,7 +340,7 @@ const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient
                                             </div>
                                         );
                                     })}
-                                    <div className={`snap-start flex items-center ${hourEvents.length === 0 ? 'w-full h-full flex-none justify-start' : 'flex-1 min-w-[50px] h-[85%] justify-center'}`}>
+                                    <div className={`snap-start flex items-center ${hourEvents.length === 0 ? 'w-full h-full flex-none justify-start' : 'flex-1 min-w-12.5 h-[85%] justify-center'}`}>
                                         <button onClick={() => onAddNote(hour)} className={`rounded-xl border border-dashed border-white/10 flex flex-col items-center justify-center gap-2 hover:border-accent-cyan/50 hover:bg-accent-cyan/5 transition-all duration-300 group/add ${hourEvents.length === 0 ? 'w-full h-[90%]' : 'w-full h-full opacity-100'}`} >
                                             <div className={`rounded-full bg-white/5 flex items-center justify-center transition-all duration-300 group-hover/add:bg-accent-cyan group-hover/add:text-black group-hover/add:scale-110 shadow-lg ${hourEvents.length === 0 ? 'w-10 h-10' : 'w-7 h-7'}`}><Plus size={hourEvents.length === 0 ? 20 : 14} /></div>
                                             {hourEvents.length === 0 && <span className="text-xs font-medium text-slate-400 group-hover/add:text-white transition-colors">Add Note</span>}
@@ -463,7 +463,7 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
                                 <div key={i} className={`bg-glass-100/30 hover:bg-glass-100 transition-colors p-2 relative group cursor-pointer border-t border-r border-white/5 flex flex-col items-start min-h-0 overflow-hidden ${isSelected ? 'ring-1 ring-accent-cyan/50 bg-accent-cyan/5' : ''}`} onClick={() => handleDayClick(dayNum)} >
                                     <div className="flex justify-between items-center w-full mb-1">
                                         <span className={`text-xs w-6 h-6 flex items-center justify-center rounded-full transition-all shrink-0 ${isSelected ? 'bg-accent-cyan text-black font-bold' : hasEvents ? 'bg-[rgb(230,230,230)] text-black font-bold' : 'text-slate-400 group-hover:text-white'}`}>{dayNum}</span>
-                                        {hasEvents && <div className="flex items-center justify-center px-2 h-4 min-w-[24px] rounded-full bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)] mr-1"><span className="text-[9px] text-white font-bold leading-none">{count}</span></div>}
+                                        {hasEvents && <div className="flex items-center justify-center px-2 h-4 min-w-6 rounded-full bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.6)] mr-1"><span className="text-[9px] text-white font-bold leading-none">{count}</span></div>}
                                     </div>
                                     <div className="flex-1 w-full min-h-0 flex flex-col gap-1 overflow-hidden pt-1">
                                         {dayEvents.slice(0, 2).map((evt, idx) => ( <div key={idx} className="px-2 py-0.5 rounded-full bg-accent-cyan text-black text-[10px] font-medium truncate w-full shadow-sm">{evt.title}</div> ))}
@@ -476,8 +476,8 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
                 </GlassCard>
             </div>
             <div className="flex flex-col space-y-4 h-full min-h-0 overflow-hidden">
-                <TimeSection title="Morning" headerColor="text-accent-orange" headerGradient="bg-gradient-to-r from-accent-orange/10 via-red-900/10 to-transparent" startHour={0} endHour={12} events={morningEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} onRefresh={calendar.refresh} />
-                <TimeSection title="Afternoon" headerColor="text-indigo-400" headerGradient="bg-gradient-to-r from-indigo-500/10 via-blue-900/10 to-transparent" startHour={12} endHour={24} events={afternoonEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} onRefresh={calendar.refresh} />
+                <TimeSection title="Morning" headerColor="text-accent-orange" headerGradient="bg-linear-to-r from-accent-orange/10 via-red-900/10 to-transparent" startHour={0} endHour={12} events={morningEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} onRefresh={calendar.refresh} />
+                <TimeSection title="Afternoon" headerColor="text-indigo-400" headerGradient="bg-linear-to-r from-indigo-500/10 via-blue-900/10 to-transparent" startHour={12} endHour={24} events={afternoonEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} onRefresh={calendar.refresh} />
             </div>
             <HistoryPicker isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} selectedDate={currentDate} onSelect={setCurrentDate} triggerRect={triggerRect} />
         </div>

@@ -67,7 +67,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
       >
         
         {/* Banner with Close Button */}
-        <div className="h-32 bg-gradient-to-br from-accent-cyan/20 via-blue-600/10 to-accent-magenta/20 relative">
+        <div className="h-32 bg-linear-to-br from-accent-cyan/20 via-blue-600/10 to-accent-magenta/20 relative">
            <div className="absolute top-4 right-4 z-10">
                 <button 
                     onClick={onClose} 
@@ -82,7 +82,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
         <div className="px-6 pb-8 -mt-12 flex flex-col items-center relative z-0">
             {/* Avatar Profile Picture */}
             <div className="w-24 h-24 rounded-full p-1.5 bg-[#0b1120] border border-white/10 shadow-2xl mb-4 group">
-                 <div className="w-full h-full rounded-full overflow-hidden bg-gradient-to-br from-slate-700 to-slate-800 relative">
+                 <div className="w-full h-full rounded-full overflow-hidden bg-linear-to-br from-slate-700 to-slate-800 relative">
                     <img 
                         src="https://github.com/shadcn.png" 
                         alt="Profile" 

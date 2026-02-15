@@ -4,7 +4,7 @@ meta:
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/transcription-suite-ui-mockup
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/AudioVisualizer.tsx
@@ -25,8 +25,9 @@ meta:
       - components/views/SettingsModal.tsx
       - index.html
       - index.tsx
+      - src/index.css
       - types.ts
-    generated_at: 2026-02-14T17:44:50.608Z
+    generated_at: 2026-02-15T01:54:41.669Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   tailwind:
@@ -57,10 +58,14 @@ foundation:
         - "#d946ef"
         - "#fb923c"
         - "#fff"
+        - hsla(225, 39%, 30%, 1)
         - hsla(225,39%,30%,1)
+        - hsla(253, 16%, 7%, 1)
         - hsla(253,16%,7%,1)
+        - hsla(339, 49%, 30%, 1)
         - hsla(339,49%,30%,1)
         - rgb(230,230,230)
+        - rgba(${r}, ${g}, ${b}, ${alpha})
         - rgba(0, 0, 0, 0.3)
         - rgba(0, 0, 0, 0.4)
         - rgba(0, 0, 0, 0.5)
@@ -77,14 +82,13 @@ foundation:
         - rgba(255, 255, 255, 0.4)
         - rgba(255,255,255,0.3)
         - rgba(34, 211, 238, 0.6)
+        - rgba(34, 211, 238, 0.8)
         - rgba(34,211,238,0.05)
-        - rgba(34,211,238,0.1)
         - rgba(34,211,238,0.15)
         - rgba(34,211,238,0.2)
         - rgba(34,211,238,0.4)
         - rgba(34,211,238,0.5)
         - rgba(34,211,238,0.6)
-        - rgba(34,211,238,0)
       accent_scale: *a1
       glass_scale: *a2
       semantic_status_palette: &a3
@@ -120,7 +124,6 @@ foundation:
           shadow: shadow-blue-400/50
     blur_levels:
       backdrop:
-        - backdrop-blur
         - backdrop-blur-2xl
         - backdrop-blur-3xl
         - backdrop-blur-md
@@ -133,15 +136,9 @@ foundation:
       classes:
         - shadow
         - shadow-[0_0_10px_#22d3ee]
-        - shadow-[0_0_10px_rgba(34,211,238,0.05)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.15)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.4)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
-        - shadow-[0_0_5px_#4ade80]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -194,63 +191,40 @@ foundation:
         - rounded-md
         - rounded-r-full
         - rounded-t-2xl
-        - rounded-t-lg
         - rounded-tl-none
         - rounded-tr-none
         - rounded-xl
     z_index_levels:
       classes: &a4
-        - z-[10000]
-        - z-[60]
-        - z-[9999]
         - z-0
         - z-10
+        - z-10000
         - z-20
         - z-50
+        - z-60
+        - z-9999
     spacing_and_size_constraints:
       arbitrary_classes:
-        - -left-[17px]
-        - "!shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),_0_8px_10px_-6px_rgba(0,0,0,0.3),_inset_0_0_30px_rgba(34,211,238,0.15)]"
-        - drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]
         - grid-rows-[auto_repeat(5,1fr)]
-        - h-[46px]
         - h-[85%]
         - h-[85vh]
-        - h-[90%]
         - max-h-[300px]
         - max-h-[80vh]
         - min-h-[200px]
         - min-h-[calc(100vh-30rem)]
-        - min-w-[100px]
-        - min-w-[130px]
-        - min-w-[24px]
-        - min-w-[400px]
-        - min-w-[50px]
         - p-[3px]
-        - scale-[0.98]
         - shadow-[0_0_10px_#22d3ee]
-        - shadow-[0_0_10px_rgba(34,211,238,0.05)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.15)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.4)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
-        - shadow-[0_0_5px_#4ade80]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
-        - skew-x-[-12deg]
         - text-[10px]
         - text-[11px]
         - text-[8px]
         - text-[9px]
-        - translate-y-[100vh]
-        - w-[140px]
-        - w-[200px]
-        - w-[400px]
         - w-[calc(50%-4px)]
     status_states:
       allowed:
@@ -264,58 +238,56 @@ global_behaviors:
   css_blocks:
     body: |-
       body {
-              background-color: #0f172a;
-              /* Deep abstract background */
-              background-image: 
-                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-                radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
-                radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
-              color: white;
-              overflow: hidden;
-              /* Default non-selectable text */
-              user-select: none;
-              -webkit-user-select: none;
-            }
+        background-color: #0f172a;
+        background-image:
+          radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%),
+          radial-gradient(at 50% 0%, hsla(225, 39%, 30%, 1) 0, transparent 50%),
+          radial-gradient(at 100% 0%, hsla(339, 49%, 30%, 1) 0, transparent 50%);
+        color: white;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
     selection: |-
       ::selection {
-              background-color: #22d3ee;
-              color: #0f172a; /* Deep background color for high contrast readability */
-            }
+        background-color: #22d3ee;
+        color: #0f172a;
+      }
     moz_selection: |-
       ::-moz-selection {
-              background-color: #22d3ee;
-              color: #0f172a;
-            }
+        background-color: #22d3ee;
+        color: #0f172a;
+      }
     selectable_text: |-
       .selectable-text {
-              user-select: text !important;
-              -webkit-user-select: text !important;
-            }
+        user-select: text !important;
+        -webkit-user-select: text !important;
+      }
     custom_scrollbar_root: |-
       .custom-scrollbar::-webkit-scrollbar {
-              width: 8px;
-              height: 8px;
-            }
+        width: 8px;
+        height: 8px;
+      }
     custom_scrollbar_track: |-
       .custom-scrollbar::-webkit-scrollbar-track {
-              background: transparent;
-              border-radius: 9999px;
-            }
+        background: transparent;
+        border-radius: 9999px;
+      }
     custom_scrollbar_thumb: |-
       .custom-scrollbar::-webkit-scrollbar-thumb {
-              background-color: rgba(255, 255, 255, 0.2);
-              border-radius: 9999px; /* Fully rounded (semicircle ends) */
-              border: 2px solid transparent; /* Optional: creates padding inside track if background-clip is used, removing to ensure fullness if needed */
-              background-clip: padding-box;
-            }
+        background-color: rgba(255, 255, 255, 0.2);
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
     custom_scrollbar_thumb_hover: |-
       .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-              background-color: rgba(255, 255, 255, 0.4);
-            }
+        background-color: rgba(255, 255, 255, 0.4);
+      }
     custom_scrollbar_corner: |-
       .custom-scrollbar::-webkit-scrollbar-corner {
-              background: transparent;
-            }
+        background: transparent;
+      }
   selection:
     enforce_custom_selection: true
     selectors:
@@ -335,19 +307,18 @@ global_behaviors:
 utility_allowlist:
   exact_classes:
     - -bottom-1
+    - -left-4.25
     - -mt-1
     - -mt-12
     - -right-1
     - -right-3
+    - -skew-x-12
     - -top-1
     - -translate-y-1/2
-    - -translate-y-2
-    - "!border-accent-cyan/50"
     - absolute
     - active
     - animate-in
     - animate-pulse
-    - backdrop-blur
     - backdrop-blur-2xl
     - backdrop-blur-3xl
     - backdrop-blur-md
@@ -377,28 +348,29 @@ utility_allowlist:
     - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
-    - bg-gradient-to-b
-    - bg-gradient-to-br
-    - bg-gradient-to-r
-    - bg-gradient-to-t
-    - bg-green-400
     - bg-green-500
     - bg-green-500/10
+    - bg-green-500/5
+    - bg-linear-to-b
+    - bg-linear-to-br
+    - bg-linear-to-r
+    - bg-linear-to-t
     - bg-orange-500
     - bg-orange-500/10
     - bg-purple-500
     - bg-red-500
     - bg-red-500/10
-    - bg-red-500/20
+    - bg-red-500/5
     - bg-slate-500
-    - bg-slate-600
     - bg-slate-700
     - bg-slate-800
     - bg-slate-900/80
     - bg-teal-500
     - bg-transparent
     - bg-white
+    - bg-white/1
     - bg-white/10
+    - bg-white/2
     - bg-white/20
     - bg-white/5
     - block
@@ -406,10 +378,9 @@ utility_allowlist:
     - border
     - border-2
     - border-4
-    - border-accent-cyan
     - border-accent-cyan/10
     - border-accent-cyan/20
-    - border-accent-cyan/30
+    - border-accent-cyan/40
     - border-accent-magenta/20
     - border-accent-magenta/5
     - border-accent-orange/20
@@ -419,6 +390,7 @@ utility_allowlist:
     - border-dashed
     - border-glass-100
     - border-glass-border
+    - border-green-500/30
     - border-l
     - border-l-2
     - border-orange-500/20
@@ -427,7 +399,6 @@ utility_allowlist:
     - border-red-500/30
     - border-slate-900
     - border-t
-    - border-t-0
     - border-transparent
     - border-white/10
     - border-white/20
@@ -435,6 +406,7 @@ utility_allowlist:
     - bottom-0
     - bottom-1
     - bottom-6
+    - cursor-default
     - cursor-pointer
     - custom-scrollbar
     - delay-100
@@ -456,7 +428,6 @@ utility_allowlist:
     - flex-none
     - flex-nowrap
     - flex-row-reverse
-    - flex-shrink-0
     - flex-wrap
     - font-bold
     - font-light
@@ -464,10 +435,10 @@ utility_allowlist:
     - font-mono
     - font-sans
     - font-semibold
+    - font-src
     - from-accent-cyan
     - from-accent-cyan/20
     - from-accent-magenta
-    - from-accent-magenta/5
     - from-accent-orange/10
     - from-black/60
     - from-glass-200
@@ -492,10 +463,10 @@ utility_allowlist:
     - grid-cols-3
     - grid-cols-7
     - group
-    - h-0
     - h-1
     - h-1.5
     - h-10
+    - h-11.5
     - h-12
     - h-14
     - h-16
@@ -511,8 +482,6 @@ utility_allowlist:
     - h-48
     - h-5
     - h-6
-    - h-7
-    - h-72
     - h-8
     - h-9
     - h-full
@@ -521,6 +490,7 @@ utility_allowlist:
     - hidden
     - hover:-translate-y-1
     - hover:bg-accent-cyan
+    - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-black/40
     - hover:bg-cyan-300
@@ -529,19 +499,18 @@ utility_allowlist:
     - hover:bg-red-500/10
     - hover:bg-red-500/20
     - hover:bg-white/10
+    - hover:bg-white/2
     - hover:bg-white/5
     - hover:border-accent-cyan/50
     - hover:border-white/10
     - hover:border-white/20
-    - hover:brightness-110
     - hover:scale-105
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
+    - hover:text-accent-cyan
     - hover:text-black
     - hover:text-cyan-300
     - hover:text-red-300
-    - hover:text-slate-200
-    - hover:text-slate-300
     - hover:text-white
     - inline-block
     - inline-flex
@@ -553,7 +522,6 @@ utility_allowlist:
     - justify-between
     - justify-center
     - justify-end
-    - justify-start
     - leading-none
     - leading-relaxed
     - leading-snug
@@ -570,13 +538,10 @@ utility_allowlist:
     - lg:grid-cols-2
     - lg:grid-cols-3
     - lg:p-10
-    - lg:p-8
-    - line-clamp-1
     - line-clamp-2
     - mask-gradient-right
-    - max-h-0
+    - max-h-32
     - max-h-60
-    - max-h-96
     - max-w-2xl
     - max-w-3xl
     - max-w-4xl
@@ -584,6 +549,7 @@ utility_allowlist:
     - max-w-7xl
     - max-w-sm
     - max-w-xl
+    - max-w-xs
     - mb-0.5
     - mb-1
     - mb-1.5
@@ -596,8 +562,13 @@ utility_allowlist:
     - md:grid-cols-4
     - min-h-0
     - min-w-0
+    - min-w-100
+    - min-w-25
+    - min-w-32.5
+    - min-w-6
+    - ml-0.5
     - ml-1
-    - ml-2
+    - ml-3
     - ml-auto
     - mr-1
     - mr-2
@@ -612,7 +583,6 @@ utility_allowlist:
     - mt-8
     - mt-auto
     - mx-0.5
-    - mx-1
     - mx-2
     - mx-auto
     - my-1
@@ -620,7 +590,6 @@ utility_allowlist:
     - my-4
     - opacity-0
     - opacity-10
-    - opacity-100
     - opacity-20
     - opacity-30
     - opacity-50
@@ -654,10 +623,10 @@ utility_allowlist:
     - pl-0
     - pl-10
     - pl-12
+    - pl-2
     - pl-4
     - pl-6
     - pl-8
-    - pointer-events-auto
     - pointer-events-none
     - pr-10
     - pr-12
@@ -673,7 +642,6 @@ utility_allowlist:
     - pt-4
     - pt-6
     - pt-8
-    - px-0
     - px-1
     - px-1.5
     - px-2
@@ -682,15 +650,16 @@ utility_allowlist:
     - px-5
     - px-6
     - px-8
-    - py-0
     - py-0.5
     - py-1
     - py-1.5
+    - py-12
     - py-2
     - py-2.5
     - py-3
     - py-4
     - py-6
+    - py-8
     - relative
     - right-0
     - right-2
@@ -699,7 +668,6 @@ utility_allowlist:
     - ring-0
     - ring-1
     - ring-white/5
-    - rotate-180
     - rounded
     - rounded-2xl
     - rounded-3xl
@@ -710,14 +678,9 @@ utility_allowlist:
     - rounded-md
     - rounded-r-full
     - rounded-t-2xl
-    - rounded-t-lg
     - rounded-tl-none
     - rounded-tr-none
     - rounded-xl
-    - scale-100
-    - scale-105
-    - scale-110
-    - scale-95
     - select-all
     - select-none
     - selectable-text
@@ -780,9 +743,9 @@ utility_allowlist:
     - text-slate-500
     - text-slate-600
     - text-slate-700
-    - text-slate-900
     - text-sm
     - text-white
+    - text-white/60
     - text-white/90
     - text-xl
     - text-xs
@@ -791,7 +754,6 @@ utility_allowlist:
     - to-black/20
     - to-blue-500
     - to-glass-100
-    - to-purple-900/10
     - to-slate-800
     - to-transparent
     - top-0
@@ -812,26 +774,19 @@ utility_allowlist:
     - transition-opacity
     - transition-shadow
     - transition-transform
-    - translate-x-0
-    - translate-x-10
     - translate-x-4
     - translate-x-5
-    - translate-y-0
-    - translate-y-4
-    - translate-y-full
     - truncate
     - uppercase
     - via-blue-600/10
     - via-blue-900/10
     - via-red-900/10
     - via-transparent
-    - w-0
     - w-1
     - w-1.5
     - w-10
     - w-11
     - w-12
-    - w-14
     - w-16
     - w-2
     - w-2.5
@@ -840,83 +795,57 @@ utility_allowlist:
     - w-3
     - w-3.5
     - w-32
+    - w-35
     - w-4
     - w-4.5
     - w-44
     - w-48
     - w-6
-    - w-7
     - w-8
     - w-80
     - w-9
-    - w-auto
     - w-full
     - w-px
     - w-screen
     - whitespace-nowrap
+    - whitespace-pre-wrap
     - z-0
     - z-10
+    - z-10000
     - z-20
     - z-50
+    - z-60
+    - z-9999
   arbitrary_classes:
-    - -left-[17px]
-    - "!shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),_0_8px_10px_-6px_rgba(0,0,0,0.3),_inset_0_0_30px_rgba(34,211,238,0.15)]"
-    - active:scale-[0.98]
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[#161f32]/90
-    - bg-[rgb(230,230,230)]
-    - bg-white/[0.01]
-    - bg-white/[0.02]
     - border-[#0f172a]
-    - drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
     - ease-[cubic-bezier(0.33,1,0.68,1)]
     - grid-rows-[auto_repeat(5,1fr)]
-    - h-[46px]
     - h-[85%]
     - h-[85vh]
-    - h-[90%]
-    - hover:bg-white/[0.02]
     - max-h-[300px]
     - max-h-[80vh]
     - min-h-[200px]
     - min-h-[calc(100vh-30rem)]
-    - min-w-[100px]
-    - min-w-[130px]
-    - min-w-[24px]
-    - min-w-[400px]
-    - min-w-[50px]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
-    - shadow-[0_0_10px_rgba(34,211,238,0.05)]
-    - shadow-[0_0_15px_rgba(34,211,238,0.15)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
-    - shadow-[0_0_15px_rgba(34,211,238,0.4)]
-    - shadow-[0_0_15px_rgba(34,211,238,0.5)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
-    - shadow-[0_0_5px_#4ade80]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-    - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
     - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
-    - skew-x-[-12deg]
     - text-[10px]
     - text-[11px]
     - text-[8px]
     - text-[9px]
-    - translate-y-[100vh]
-    - w-[140px]
-    - w-[200px]
-    - w-[400px]
     - w-[calc(50%-4px)]
-    - z-[10000]
-    - z-[60]
-    - z-[9999]
 inline_style_allowlist:
   allowed_properties:
     - animation
@@ -925,41 +854,18 @@ inline_style_allowlist:
     - backgroundColor
     - backgroundImage
     - backgroundSize
-    - CALENDAR
     - height
-    - Helper
-    - hover
-    - icon
-    - id
-    - IMPORT
-    - label
     - left
     - maskImage
-    - NoteActionMenu
-    - NotebookView
-    - noteData
-    - onClose
     - opacity
-    - SEARCH
-    - time
     - top
     - transform
-    - trigger
-    - type
     - WebkitMaskImage
     - width
   allowed_literals:
-    - --enter-translate-y
-    - ../../types
-    - ../ui/AppleSwitch
-    - ../ui/Button
-    - ../ui/GlassCard
-    - ./AddNoteModal
-    - ./AudioNoteModal
     - "#0f172a"
     - ${100 / visibleSlots}%
     - ${20 + Math.random() * 60}%
-    - ${distFromBottom}px
     - "0"
     - "0.16"
     - "0.3"
@@ -969,10 +875,8 @@ inline_style_allowlist:
     - "1"
     - 1.5rem
     - "1.6"
-    - "10"
     - "100"
     - 100%
-    - "16"
     - 16%
     - 1px
     - 1rem
@@ -987,42 +891,22 @@ inline_style_allowlist:
     - 39%
     - 3rem
     - 49%
-    - "5"
     - 50%
     - "60"
     - 7%
     - "90"
-    - Calendar
     - fixed
-    - flex bg-glass-200 backdrop-blur-md p-1 rounded-lg border border-white/5
-    - flex flex-col h-full space-y-6 max-w-7xl mx-auto w-full p-6
-    - flex items-center justify-between flex-none
-    - |-
-      flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
-                              activeTab === tab.id 
-                              ? 'bg-white/10 text-white shadow-sm' 
-                              : 'text-slate-400 hover:text-white'
-                          }
-    - flex-1 min-h-0 relative animate-in fade-in slide-in-from-bottom-2 duration-300
-    - Import
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)
-    - lucide-react
     - none
-    - point
     - |-
       radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
           radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
           radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)
     - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
-    - react
-    - react-dom
-    - rect
-    - Search
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
-    - text-3xl font-bold text-white tracking-tight
     - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
   keyframes:
     - slideInLeft

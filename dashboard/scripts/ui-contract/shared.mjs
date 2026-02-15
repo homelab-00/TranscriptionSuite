@@ -123,6 +123,7 @@ export async function sourceFiles(root = PROJECT_ROOT) {
     path.join(root, 'App.tsx'),
     path.join(root, 'index.tsx'),
     path.join(root, 'types.ts'),
+    path.join(root, 'src', 'index.css'),
   ];
   const componentFiles = await walk(path.join(root, 'components'), (filePath) => filePath.endsWith('.tsx'));
   files.push(...componentFiles);
@@ -132,8 +133,14 @@ export async function sourceFiles(root = PROJECT_ROOT) {
 async function readFiles(filePaths) {
   const result = new Map();
   for (const filePath of filePaths) {
-    const content = await fs.readFile(filePath, 'utf8');
-    result.set(filePath, content);
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      result.set(filePath, content);
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
   }
   return result;
 }
@@ -210,6 +217,76 @@ function extractTailwindConfig(indexHtml) {
   const sandbox = { tailwind: {} };
   vm.runInNewContext(`tailwind.config = ${objectText};`, sandbox);
   return sandbox.tailwind.config;
+}
+
+function extractDarkModeFromHtml(indexHtml) {
+  return /\<html[^>]*\bclass=(['"])[^'"]*\bdark\b[^'"]*\1/i.test(indexHtml) ? 'class' : null;
+}
+
+function parseCssFontFamily(value) {
+  return value
+    .split(',')
+    .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean);
+}
+
+function extractTailwindConfigFromCss(cssText, indexHtml = '') {
+  const marker = '@theme';
+  const markerIdx = cssText.indexOf(marker);
+  if (markerIdx === -1) {
+    return null;
+  }
+
+  const braceStart = cssText.indexOf('{', markerIdx);
+  if (braceStart === -1) {
+    return null;
+  }
+
+  const themeBlock = findBalancedBlock(cssText, braceStart, '{', '}');
+  if (!themeBlock) {
+    return null;
+  }
+
+  const vars = {};
+  const varRe = /--([A-Za-z0-9-]+)\s*:\s*([^;]+);/g;
+  let match;
+  while ((match = varRe.exec(themeBlock)) !== null) {
+    vars[match[1]] = match[2].trim();
+  }
+
+  const accent = {};
+  const glass = {};
+  const backdropBlur = {};
+
+  for (const [key, value] of Object.entries(vars)) {
+    if (key.startsWith('color-accent-')) {
+      accent[key.slice('color-accent-'.length)] = value;
+      continue;
+    }
+    if (key.startsWith('color-glass-')) {
+      glass[key.slice('color-glass-'.length)] = value;
+      continue;
+    }
+    if (key.startsWith('backdrop-blur-')) {
+      backdropBlur[key.slice('backdrop-blur-'.length)] = value;
+    }
+  }
+
+  return {
+    darkMode: extractDarkModeFromHtml(indexHtml),
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: vars['font-sans'] ? parseCssFontFamily(vars['font-sans']) : [],
+        },
+        colors: {
+          accent,
+          glass,
+        },
+        backdropBlur,
+      },
+    },
+  };
 }
 
 function extractStyleTag(indexHtml) {
@@ -291,7 +368,13 @@ function looksLikeUtilityToken(rawToken) {
     return true;
   }
   if (token.includes('[') && token.includes(']')) {
-    return true;
+    if (/^[!-]?\[[a-z-]+:[^\]]+\]$/.test(token)) {
+      return true;
+    }
+    if (CLASS_PREFIX_RE.test(token)) {
+      return true;
+    }
+    return false;
   }
   if (token.includes('-') || token.includes(':') || token.includes('/')) {
     return CLASS_PREFIX_RE.test(token);
@@ -300,8 +383,9 @@ function looksLikeUtilityToken(rawToken) {
 }
 
 function extractUtilityTokensFromString(candidate) {
+  const withoutTemplateExpressions = candidate.replace(/\$\{[^}]*\}/g, ' ');
   const tokens = [];
-  const parts = candidate
+  const parts = withoutTemplateExpressions
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
@@ -361,7 +445,7 @@ function extractInlineStyleBlocks(content) {
     blocks.push(match[1]);
   }
 
-  const cssPropsCastRe = /\{([\s\S]*?)\}\s+as\s+React\.CSSProperties/g;
+  const cssPropsCastRe = /\{\s*([^{}]*?)\s*\}\s+as\s+React\.CSSProperties/g;
   while ((match = cssPropsCastRe.exec(content)) !== null) {
     blocks.push(match[1]);
   }
@@ -621,9 +705,10 @@ export async function extractFacts({ root = PROJECT_ROOT } = {}) {
 
   const indexHtmlPath = path.join(root, 'index.html');
   const indexHtml = fileContentMap.get(indexHtmlPath) ?? '';
-  const tailwindConfig = extractTailwindConfig(indexHtml);
-  const styleTag = extractStyleTag(indexHtml);
-  const globalCss = extractGlobalCssContracts(styleTag);
+  const cssPath = path.join(root, 'src', 'index.css');
+  const cssText = fileContentMap.get(cssPath) ?? extractStyleTag(indexHtml);
+  const tailwindConfig = extractTailwindConfig(indexHtml) ?? extractTailwindConfigFromCss(cssText, indexHtml);
+  const globalCss = extractGlobalCssContracts(cssText);
 
   const statusLightPath = path.join(root, 'components', 'ui', 'StatusLight.tsx');
   const statusStateMap = extractStatusStateMap(fileContentMap.get(statusLightPath) ?? '');

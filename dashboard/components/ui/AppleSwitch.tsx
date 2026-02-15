@@ -43,7 +43,7 @@ export const AppleSwitch: React.FC<AppleSwitchProps> = ({
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`
-          relative inline-flex flex-shrink-0 cursor-pointer rounded-full 
+          relative inline-flex shrink-0 cursor-pointer rounded-full 
           items-center p-[3px]
           transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent-cyan focus:ring-offset-2 focus:ring-offset-slate-900
           ${checked ? 'bg-accent-cyan' : 'bg-slate-700'}

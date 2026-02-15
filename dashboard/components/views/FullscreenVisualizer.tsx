@@ -40,7 +40,7 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOp
   if (!isRendered) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+    <div className="fixed inset-0 z-9999 flex items-center justify-center">
         
         {/* Deep Backdrop Blur */}
         <div 
@@ -72,9 +72,9 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOp
                     
                     {/* Decorative HUD Lines */}
                     <div className="hidden lg:flex items-center gap-1 opacity-30">
-                         <div className="w-2 h-8 bg-white/20 skew-x-[-12deg]"></div>
-                         <div className="w-2 h-8 bg-white/20 skew-x-[-12deg]"></div>
-                         <div className="w-2 h-8 bg-white/20 skew-x-[-12deg]"></div>
+                         <div className="w-2 h-8 bg-white/20 -skew-x-12"></div>
+                         <div className="w-2 h-8 bg-white/20 -skew-x-12"></div>
+                         <div className="w-2 h-8 bg-white/20 -skew-x-12"></div>
                     </div>
                 </div>
 
@@ -99,7 +99,7 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOp
                  <AudioVisualizer className="h-full w-full" analyserNode={analyserNode} />
                  
                  {/* Overlay Gradient for depth */}
-                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none"></div>
+                 <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-black/20 pointer-events-none"></div>
                  
                  {/* Floating Frequency Labels */}
                  <div className="absolute bottom-6 left-8 flex gap-8 text-xs font-mono text-slate-500 select-none">
