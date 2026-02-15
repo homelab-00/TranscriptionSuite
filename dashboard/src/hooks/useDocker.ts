@@ -56,6 +56,13 @@ export interface UseDockerReturn {
   refreshVolumes: () => Promise<void>;
   removeVolume: (name: string) => Promise<void>;
 
+  // Log streaming
+  logLines: string[];
+  logStreaming: boolean;
+  startLogStream: (tail?: number) => void;
+  stopLogStream: () => void;
+  clearLogs: () => void;
+
   // Operation feedback
   operating: boolean;
   operationError: string | null;
@@ -204,6 +211,56 @@ export function useDocker(): UseDockerReturn {
     });
   }, [withOperation, refreshVolumes]);
 
+  // ─── Log Streaming ─────────────────────────────────────────────────────────
+
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logStreaming, setLogStreaming] = useState(false);
+  const logCleanupRef = useRef<(() => void) | null>(null);
+
+  const startLogStream = useCallback((tail?: number) => {
+    const docker = api();
+    if (!docker) return;
+
+    // Stop any existing stream first
+    if (logCleanupRef.current) logCleanupRef.current();
+
+    setLogLines([]);
+    setLogStreaming(true);
+
+    docker.startLogStream(tail);
+    const cleanup = docker.onLogLine((line: string) => {
+      setLogLines(prev => {
+        const next = [...prev, line];
+        // Keep a rolling buffer of 1000 lines
+        return next.length > 1000 ? next.slice(-1000) : next;
+      });
+    });
+
+    logCleanupRef.current = () => {
+      cleanup();
+      docker.stopLogStream();
+      setLogStreaming(false);
+    };
+  }, []);
+
+  const stopLogStream = useCallback(() => {
+    if (logCleanupRef.current) {
+      logCleanupRef.current();
+      logCleanupRef.current = null;
+    }
+  }, []);
+
+  const clearLogs = useCallback(() => {
+    setLogLines([]);
+  }, []);
+
+  // Cleanup log stream on unmount
+  useEffect(() => {
+    return () => {
+      if (logCleanupRef.current) logCleanupRef.current();
+    };
+  }, []);
+
   return {
     available,
     loading,
@@ -218,6 +275,11 @@ export function useDocker(): UseDockerReturn {
     volumes,
     refreshVolumes,
     removeVolume,
+    logLines,
+    logStreaming,
+    startLogStream,
+    stopLogStream,
+    clearLogs,
     operating,
     operationError,
   };

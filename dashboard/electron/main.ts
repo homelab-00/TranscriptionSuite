@@ -1,8 +1,10 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
 import { dockerManager } from './dockerManager.js';
+import { TrayManager, type TrayState } from './trayManager.js';
+import { UpdateManager } from './updateManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,66 +28,69 @@ const store = new Store({
     'app.autoCopy': false,
     'app.showNotifications': true,
     'app.stopServerOnQuit': true,
+    'app.startMinimized': false,
+    'app.updateChecksEnabled': false,
+    'app.updateCheckIntervalMode': '24h',
+    'app.updateCheckCustomHours': 24,
+    'ui.sidebarCollapsed': false,
     'server.host': 'localhost',
     'server.port': 8000,
     'server.https': false,
+    'updates.lastStatus': null,
+    'updates.lastNotified': { appLatest: '', serverLatest: '' },
   },
 });
 
 let mainWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
 
-// --- Tray Icon Setup ---
-function createTray(): void {
-  // Use the tray icon from build assets (dev) or resources (packaged)
-  const iconPath = isDev
-    ? path.join(__dirname, '../../build/assets/tray-icon.png')
-    : path.join(process.resourcesPath, 'tray-icon.png');
+// ─── Tray Manager ───────────────────────────────────────────────────────────
 
-  const icon = nativeImage.createFromPath(iconPath);
-  tray = new Tray(icon);
-  tray.setToolTip('TranscriptionSuite');
+const trayManager = new TrayManager(isDev, () => mainWindow);
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show Window',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      },
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => {
-        app.quit();
-      },
-    },
-  ]);
+// ─── Update Manager ─────────────────────────────────────────────────────────
 
-  tray.setContextMenu(contextMenu);
+const updateManager = new UpdateManager(store);
 
-  // Left-click on tray shows window (Linux/Windows behavior)
-  tray.on('click', () => {
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
-      }
+// Wire tray context-menu actions → IPC messages to the renderer
+trayManager.setActions({
+  startServer: async () => {
+    try {
+      await dockerManager.startContainer('local');
+      trayManager.setMenuState({ serverRunning: true });
+    } catch (err) {
+      console.error('Tray: failed to start server', err);
     }
-  });
-}
+  },
+  stopServer: async () => {
+    try {
+      await dockerManager.stopContainer();
+      trayManager.setMenuState({ serverRunning: false, isRecording: false, isLive: false });
+    } catch (err) {
+      console.error('Tray: failed to stop server', err);
+    }
+  },
+  startRecording: () => {
+    mainWindow?.webContents.send('tray:action', 'start-recording');
+  },
+  stopRecording: () => {
+    mainWindow?.webContents.send('tray:action', 'stop-recording');
+  },
+  toggleMute: () => {
+    mainWindow?.webContents.send('tray:action', 'toggle-mute');
+  },
+});
+
+// ─── Window Creation ────────────────────────────────────────────────────────
 
 function createWindow(): void {
+  const startMinimized = store.get('app.startMinimized') as boolean;
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 960,
     minHeight: 600,
+    show: !startMinimized,
     frame: true,
     backgroundColor: '#0f172a',
     webPreferences: {
@@ -97,11 +102,9 @@ function createWindow(): void {
   });
 
   if (isDev) {
-    // In dev mode, load from Vite dev server
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
-    // In production, load the built index.html
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
@@ -110,7 +113,7 @@ function createWindow(): void {
   });
 }
 
-// --- IPC Handlers ---
+// ─── IPC Handlers ───────────────────────────────────────────────────────────
 
 // Config: get/set client settings via electron-store
 ipcMain.handle('config:get', async (_event, key: string) => {
@@ -119,10 +122,14 @@ ipcMain.handle('config:get', async (_event, key: string) => {
 
 ipcMain.handle('config:set', async (_event, key: string, value: unknown) => {
   store.set(key, value);
+  // Reconfigure update manager when update-related settings change
+  if (key.startsWith('app.updateCheck')) {
+    updateManager.reconfigure();
+  }
 });
 
 ipcMain.handle('config:getAll', async () => {
-  return store.store; // returns the full store object
+  return store.store;
 });
 
 // App metadata
@@ -130,7 +137,7 @@ ipcMain.handle('app:getVersion', () => {
   return app.getVersion();
 });
 
-// --- Docker Management IPC ---
+// ─── Docker Management IPC ──────────────────────────────────────────────────
 
 ipcMain.handle('docker:available', async () => {
   return dockerManager.dockerAvailable();
@@ -176,20 +183,49 @@ ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
   return dockerManager.getLogs(tail);
 });
 
-// --- Tray IPC Handlers ---
+// ─── Docker Log Streaming IPC ───────────────────────────────────────────────
 
-ipcMain.handle('tray:setTooltip', async (_event, tooltip: string) => {
-  if (tray) {
-    tray.setToolTip(tooltip);
-  }
+ipcMain.handle('docker:startLogStream', async (_event, tail?: number) => {
+  dockerManager.startLogStream((line: string) => {
+    mainWindow?.webContents.send('docker:logLine', line);
+  }, tail ?? 100);
 });
 
-// --- App Lifecycle ---
+ipcMain.handle('docker:stopLogStream', async () => {
+  dockerManager.stopLogStream();
+});
+
+// ─── Update Check IPC ───────────────────────────────────────────────────────
+
+ipcMain.handle('updates:getStatus', async () => {
+  return updateManager.getStatus();
+});
+
+ipcMain.handle('updates:checkNow', async () => {
+  return updateManager.check();
+});
+
+// ─── Tray IPC Handlers ─────────────────────────────────────────────────────
+
+ipcMain.handle('tray:setTooltip', async (_event, tooltip: string) => {
+  trayManager.setTooltip(tooltip);
+});
+
+ipcMain.handle('tray:setState', async (_event, state: TrayState) => {
+  trayManager.setState(state);
+});
+
+ipcMain.handle('tray:setMenuState', async (_event, menuState: { serverRunning?: boolean; isRecording?: boolean; isLive?: boolean; isMuted?: boolean }) => {
+  trayManager.setMenuState(menuState);
+});
+
+// ─── App Lifecycle ──────────────────────────────────────────────────────────
 
 let isQuitting = false;
 
 app.whenReady().then(() => {
-  createTray();
+  trayManager.create();
+  updateManager.start();
   createWindow();
 
   // Handle close-to-tray: hide window instead of quitting
@@ -203,18 +239,35 @@ app.whenReady().then(() => {
   }
 
   app.on('activate', () => {
-    // macOS: re-create window when dock icon is clicked and no windows are open
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async (event) => {
+  if (isQuitting) return; // Already in quit sequence
   isQuitting = true;
+
+  const shouldStopServer = store.get('app.stopServerOnQuit') as boolean;
+  if (shouldStopServer) {
+    event.preventDefault();
+    try {
+      console.log('Stopping server on quit…');
+      await dockerManager.stopContainer();
+    } catch (err) {
+      console.error('Failed to stop server on quit:', err);
+    } finally {
+      trayManager.destroy();
+      updateManager.destroy();
+      app.quit();
+    }
+  } else {
+    trayManager.destroy();
+    updateManager.destroy();
+  }
 });
 
 app.on('window-all-closed', () => {
   // On Linux/Windows, don't quit when window is closed (tray is active)
-  // App quits via tray menu or app.quit()
 });

@@ -13,6 +13,7 @@ import { useLanguages } from '../../src/hooks/useLanguages';
 import { useTranscription } from '../../src/hooks/useTranscription';
 import { useLiveMode } from '../../src/hooks/useLiveMode';
 import { useDocker } from '../../src/hooks/useDocker';
+import { useTraySync } from '../../src/hooks/useTraySync';
 import { apiClient } from '../../src/api/client';
 
 export const SessionView: React.FC = () => {
@@ -115,6 +116,21 @@ export const SessionView: React.FC = () => {
 
   // System Health Check for Visual Effects
   const isSystemHealthy = serverRunning && (clientConnected || transcription.status === 'idle');
+
+  // Sync tray icon state with application state
+  useTraySync({
+    serverStatus: serverRunning ? 'active' : 'inactive',
+    containerRunning: serverRunning,
+    transcriptionStatus: transcription.status,
+    liveStatus: live.status,
+    muted: live.muted,
+    onStartRecording: () => transcription.start(),
+    onStopRecording: () => {
+      if (isLive) live.stop();
+      else transcription.stop();
+    },
+    onToggleMute: () => live.toggleMute(),
+  });
 
   // Resolve language code from display name
   const resolveLanguage = useCallback((name: string): string | undefined => {

@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Database, Server, Laptop, AppWindow, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Database, Server, Laptop, AppWindow, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { CustomSelect } from '../ui/CustomSelect';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
@@ -75,7 +76,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     autoCopy: false,
     showNotifications: true,
     stopServerOnQuit: true,
+    startMinimized: false,
+    updateChecksEnabled: false,
+    updateCheckIntervalMode: '24h',
+    updateCheckCustomHours: 24,
   });
+
+  // Update check status (loaded from main process)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 
   const [clientSettings, setClientSettings] = useState({
     gracePeriod: 0.5,
@@ -120,8 +129,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               autoCopy: (cfg['app.autoCopy'] as boolean) ?? prev.autoCopy,
               showNotifications: (cfg['app.showNotifications'] as boolean) ?? prev.showNotifications,
               stopServerOnQuit: (cfg['app.stopServerOnQuit'] as boolean) ?? prev.stopServerOnQuit,
+              startMinimized: (cfg['app.startMinimized'] as boolean) ?? prev.startMinimized,
+              updateChecksEnabled: (cfg['app.updateChecksEnabled'] as boolean) ?? prev.updateChecksEnabled,
+              updateCheckIntervalMode: (cfg['app.updateCheckIntervalMode'] as string) ?? prev.updateCheckIntervalMode,
+              updateCheckCustomHours: (cfg['app.updateCheckCustomHours'] as number) ?? prev.updateCheckCustomHours,
             }));
           }
+        }).catch(() => {});
+        // Load persisted update status
+        api.updates?.getStatus?.().then((status: UpdateStatus | null) => {
+          if (status) setUpdateStatus(status);
         }).catch(() => {});
       }
       rafId = requestAnimationFrame(() => {
@@ -156,6 +173,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.autoCopy', appSettings.autoCopy],
         ['app.showNotifications', appSettings.showNotifications],
         ['app.stopServerOnQuit', appSettings.stopServerOnQuit],
+        ['app.startMinimized', appSettings.startMinimized],
+        ['app.updateChecksEnabled', appSettings.updateChecksEnabled],
+        ['app.updateCheckIntervalMode', appSettings.updateCheckIntervalMode],
+        ['app.updateCheckCustomHours', appSettings.updateCheckCustomHours],
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
     }
@@ -194,6 +215,98 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           onChange={(v) => { setAppSettings(prev => ({ ...prev, stopServerOnQuit: v })); setIsDirty(true); }} 
           label="Stop server when quitting dashboard" 
         />
+      </Section>
+      <Section title="Window">
+        <AppleSwitch 
+          checked={appSettings.startMinimized} 
+          onChange={(v) => { setAppSettings(prev => ({ ...prev, startMinimized: v })); setIsDirty(true); }} 
+          label="Start minimized to system tray" 
+        />
+      </Section>
+      <Section title="Update Checks">
+        <AppleSwitch
+          checked={appSettings.updateChecksEnabled}
+          onChange={(v) => { setAppSettings(prev => ({ ...prev, updateChecksEnabled: v })); setIsDirty(true); }}
+          label="Check for updates automatically"
+        />
+        {appSettings.updateChecksEnabled && (
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-xs text-slate-500 font-medium uppercase tracking-wider block mb-1.5">Check Interval</label>
+              <CustomSelect
+                value={appSettings.updateCheckIntervalMode}
+                onChange={(v) => { setAppSettings(prev => ({ ...prev, updateCheckIntervalMode: v })); setIsDirty(true); }}
+                options={['24h', '7d', '28d', 'custom']}
+              />
+            </div>
+            {appSettings.updateCheckIntervalMode === 'custom' && (
+              <div>
+                <label className="text-xs text-slate-500 font-medium uppercase tracking-wider block mb-1.5">Custom Interval (hours)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={appSettings.updateCheckCustomHours}
+                  onChange={(e) => { setAppSettings(prev => ({ ...prev, updateCheckCustomHours: Math.max(1, parseInt(e.target.value) || 1) })); setIsDirty(true); }}
+                  className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-cyan/50"
+                />
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={isCheckingUpdates ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+                disabled={isCheckingUpdates}
+                onClick={async () => {
+                  const api = window.electronAPI;
+                  if (!api?.updates) return;
+                  setIsCheckingUpdates(true);
+                  try {
+                    const status = await api.updates.checkNow();
+                    setUpdateStatus(status);
+                  } catch { /* ignore */ } finally {
+                    setIsCheckingUpdates(false);
+                  }
+                }}
+              >
+                {isCheckingUpdates ? 'Checking…' : 'Check Now'}
+              </Button>
+            </div>
+            {updateStatus && (
+              <div className="bg-black/30 border border-white/10 rounded-lg p-3 space-y-2 text-xs">
+                <div className="text-slate-500">
+                  Last checked: {new Date(updateStatus.lastChecked).toLocaleString()}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 w-16 shrink-0">Dashboard:</span>
+                  {updateStatus.app.error ? (
+                    <span className="text-red-400">Error: {updateStatus.app.error}</span>
+                  ) : updateStatus.app.updateAvailable ? (
+                    <span className="text-accent-cyan">
+                      {updateStatus.app.current} → {updateStatus.app.latest} <span className="text-green-400 ml-1">update available</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">{updateStatus.app.current} — up to date</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 w-16 shrink-0">Server:</span>
+                  {updateStatus.server.error ? (
+                    <span className="text-red-400">Error: {updateStatus.server.error}</span>
+                  ) : !updateStatus.server.current ? (
+                    <span className="text-slate-500">No local image found</span>
+                  ) : updateStatus.server.updateAvailable ? (
+                    <span className="text-accent-cyan">
+                      {updateStatus.server.current} → {updateStatus.server.latest} <span className="text-green-400 ml-1">update available</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">{updateStatus.server.current} — up to date</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </Section>
     </div>
   );

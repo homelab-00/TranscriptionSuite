@@ -137,7 +137,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ className = "h
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(animationId);
     };
-  }, []);
+  }, [analyserNode]);
 
   return (
     <div className={`w-full relative rounded-xl overflow-hidden bg-black/20 border border-white/5 shadow-inner ${className}`}>

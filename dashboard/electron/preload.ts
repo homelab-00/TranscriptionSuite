@@ -5,6 +5,18 @@ import { contextBridge, ipcRenderer, desktopCapturer } from 'electron';
  * The renderer accesses these via `window.electronAPI`.
  */
 
+export type TrayState =
+  | 'idle' | 'active' | 'connecting' | 'recording' | 'processing'
+  | 'live-listening' | 'live-processing' | 'muted' | 'complete'
+  | 'error' | 'disconnected';
+
+export interface TrayMenuState {
+  serverRunning?: boolean;
+  isRecording?: boolean;
+  isLive?: boolean;
+  isMuted?: boolean;
+}
+
 export interface ElectronAPI {
   config: {
     get: (key: string) => Promise<unknown>;
@@ -27,13 +39,36 @@ export interface ElectronAPI {
     getVolumes: () => Promise<Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>>;
     removeVolume: (name: string) => Promise<string>;
     getLogs: (tail?: number) => Promise<string[]>;
+    startLogStream: (tail?: number) => Promise<void>;
+    stopLogStream: () => Promise<void>;
+    onLogLine: (callback: (line: string) => void) => () => void;
   };
   tray: {
     setTooltip: (tooltip: string) => Promise<void>;
+    setState: (state: TrayState) => Promise<void>;
+    setMenuState: (menuState: TrayMenuState) => Promise<void>;
+    onAction: (callback: (action: string) => void) => () => void;
   };
   audio: {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
   };
+  updates: {
+    getStatus: () => Promise<UpdateStatus | null>;
+    checkNow: () => Promise<UpdateStatus>;
+  };
+}
+
+export interface ComponentUpdateStatus {
+  current: string | null;
+  latest: string | null;
+  updateAvailable: boolean;
+  error: string | null;
+}
+
+export interface UpdateStatus {
+  lastChecked: string;
+  app: ComponentUpdateStatus;
+  server: ComponentUpdateStatus;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -58,9 +93,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),
     removeVolume: (name: string) => ipcRenderer.invoke('docker:removeVolume', name),
     getLogs: (tail?: number) => ipcRenderer.invoke('docker:getLogs', tail),
+    startLogStream: (tail?: number) => ipcRenderer.invoke('docker:startLogStream', tail),
+    stopLogStream: () => ipcRenderer.invoke('docker:stopLogStream'),
+    onLogLine: (callback: (line: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
+      ipcRenderer.on('docker:logLine', handler);
+      return () => ipcRenderer.removeListener('docker:logLine', handler);
+    },
   },
   tray: {
     setTooltip: (tooltip: string) => ipcRenderer.invoke('tray:setTooltip', tooltip),
+    setState: (state: TrayState) => ipcRenderer.invoke('tray:setState', state),
+    setMenuState: (menuState: TrayMenuState) => ipcRenderer.invoke('tray:setMenuState', menuState),
+    onAction: (callback: (action: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, action: string) => callback(action);
+      ipcRenderer.on('tray:action', handler);
+      return () => ipcRenderer.removeListener('tray:action', handler);
+    },
   },
   audio: {
     getDesktopSources: async () => {
@@ -74,5 +123,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         thumbnail: source.thumbnail.toDataURL(),
       }));
     },
+  },
+  updates: {
+    getStatus: () => ipcRenderer.invoke('updates:getStatus'),
+    checkNow: () => ipcRenderer.invoke('updates:checkNow'),
   },
 } satisfies ElectronAPI);

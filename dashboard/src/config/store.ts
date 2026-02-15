@@ -40,6 +40,10 @@ export interface ClientConfig {
     autoCopy: boolean;
     showNotifications: boolean;
     stopServerOnQuit: boolean;
+    startMinimized: boolean;
+    updateChecksEnabled: boolean;
+    updateCheckIntervalMode: '24h' | '7d' | '28d' | 'custom';
+    updateCheckCustomHours: number;
   };
   /** UI preferences */
   ui: {
@@ -75,6 +79,10 @@ const DEFAULT_CONFIG: ClientConfig = {
     autoCopy: false,
     showNotifications: true,
     stopServerOnQuit: true,
+    startMinimized: false,
+    updateChecksEnabled: false,
+    updateCheckIntervalMode: '24h',
+    updateCheckCustomHours: 24,
   },
   ui: {
     sidebarCollapsed: false,

@@ -300,6 +300,17 @@ export class APIClient {
     });
   }
 
+  /** PUT /api/notebook/recordings/:id/summary — query-param variant */
+  async setRecordingSummary(
+    id: number,
+    summary: string,
+    summaryModel?: string,
+  ): Promise<{ status: string; id: number; summary: string; summary_model: string | null }> {
+    const params = new URLSearchParams({ summary });
+    if (summaryModel) params.set('summary_model', summaryModel);
+    return this.put(`/api/notebook/recordings/${id}/summary?${params.toString()}`);
+  }
+
   /** GET /api/notebook/recordings/:id/transcription */
   async getRecordingTranscription(id: number): Promise<RecordingTranscription> {
     return this.get(`/api/notebook/recordings/${id}/transcription`);
@@ -411,6 +422,68 @@ export class APIClient {
   /** POST /api/admin/models/load */
   async loadModels(): Promise<{ status: string }> {
     return this.post('/api/admin/models/load');
+  }
+
+  /**
+   * WS /api/admin/models/load/stream — load models with progress streaming.
+   *
+   * Returns a cleanup function. Callbacks fire as the server sends progress:
+   *   { type: 'progress', message: string }
+   *   { type: 'complete', status: 'loaded' }
+   *   { type: 'error', message: string }
+   */
+  loadModelsStream(callbacks: {
+    onProgress?: (message: string) => void;
+    onComplete?: () => void;
+    onError?: (message: string) => void;
+  }): () => void {
+    const wsProto = this.baseUrl.startsWith('https') ? 'wss' : 'ws';
+    const wsBase = this.baseUrl.replace(/^https?/, wsProto);
+    const url = `${wsBase}/api/admin/models/load/stream`;
+
+    const ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      // Auth via first message if we have a token
+      if (this.authToken) {
+        ws.send(JSON.stringify({ type: 'auth', token: this.authToken }));
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        switch (msg.type) {
+          case 'progress':
+            callbacks.onProgress?.(msg.message ?? '');
+            break;
+          case 'complete':
+            callbacks.onComplete?.();
+            ws.close();
+            break;
+          case 'error':
+            callbacks.onError?.(msg.message ?? 'Model loading failed');
+            ws.close();
+            break;
+        }
+      } catch {
+        // Ignore non-JSON messages
+      }
+    };
+
+    ws.onerror = () => {
+      callbacks.onError?.('WebSocket connection error');
+    };
+
+    ws.onclose = () => {
+      // No-op — cleanup handled by caller
+    };
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    };
   }
 
   /** POST /api/admin/models/unload */
