@@ -50,6 +50,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [9.4 UI Contract System](#94-ui-contract-system)
   - [9.5 Server Busy Handling](#95-server-busy-handling)
   - [9.6 Model Management](#96-model-management)
+  - [9.7 Package Management](#97-package-management)
 - [10. Configuration Reference](#10-configuration-reference)
   - [10.1 Server Configuration](#101-server-configuration)
   - [10.2 Dashboard Configuration](#102-dashboard-configuration)
@@ -816,7 +817,7 @@ npm run dev:electron
 
 ### 9.2 Tech Stack
 
-- **Renderer**: React 19 + TypeScript 5.8 + Tailwind CSS 4 (Vite-bundled)
+- **Renderer**: React 19 + TypeScript 5.9 + Tailwind CSS 4 (Vite-bundled)
 - **Main Process**: Electron (Node.js)
 - **Build**: Vite (renderer) + tsc (main process) + electron-builder (packaging)
 - **Icons**: Lucide React
@@ -988,6 +989,68 @@ The dashboard provides controls for managing GPU memory:
 - Live Mode uses the same model as main_transcriber by default (configurable in config.yaml)
 - When Live Mode stops, main model is reloaded for normal transcription
 - This ensures efficient VRAM usage on consumer GPUs (e.g., RTX 3060 12GB)
+
+### 9.7 Package Management
+
+**Check for outdated packages:**
+```bash
+cd dashboard
+npm outdated
+```
+
+This shows a table with:
+- `Package`: Package name
+- `Current`: Currently installed version
+- `Wanted`: Latest version satisfying semver range in package.json
+- `Latest`: Latest version available on npm registry
+
+**Understanding npm update vs npm install:**
+
+| Command | Behavior |
+|---------|----------|
+| `npm install <package>@latest` | Updates specific package to latest version, modifies package.json |
+| `npm install` | Installs exact versions from package-lock.json |
+| `npm update` | Updates packages to `Wanted` version (respects semver ranges like `^` or `~`) |
+| `npm update <package>` | Updates specific package within semver range |
+
+**Safe updates (respects semver):**
+```bash
+cd dashboard
+npm update           # Updates all packages within their semver ranges
+npm update electron  # Updates only electron within its range
+```
+
+**Major version updates (breaking changes allowed):**
+```bash
+# Update specific packages to latest
+npm install electron@latest --save-dev
+npm install react@latest react-dom@latest
+
+# Or update all to latest (more risky)
+# Edit package.json manually to change versions, then:
+npm install
+```
+
+**Clean reinstall (recommended after major updates):**
+```bash
+cd dashboard
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**Verify updates don't break the build:**
+```bash
+npm run typecheck    # TypeScript type checking
+npm run build        # Production build
+npm run dev:electron # Test in development mode
+```
+
+**Best practices:**
+- Run `npm outdated` periodically to check for updates
+- Read changelogs for major version bumps (especially Electron, React, Vite)
+- Test thoroughly after updates (typecheck → build → runtime)
+- Update `README_DEV.md` dependency version numbers after major updates
+- npm deprecation warnings from transitive dependencies (like `inflight`, `glob` in electron-builder) are usually harmless and cannot be eliminated until upstream packages update
 
 ---
 
@@ -1313,9 +1376,9 @@ These checks are useful for:
 ### 14.2 Dashboard
 
 - Node.js 24+
-- Electron 35+
-- React 19 + TypeScript 5.8
-- Vite 6 (bundler)
+- Electron 40+
+- React 19 + TypeScript 5.9
+- Vite 7 (bundler)
 - Tailwind CSS 4
 - electron-builder (packaging)
 - electron-store (client config persistence)
