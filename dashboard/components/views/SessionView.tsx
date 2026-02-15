@@ -1,6 +1,6 @@
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Mic, Radio, Settings2, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Trash, Laptop, Power, ArrowRightLeft } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Mic, Radio, Square, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Trash, Laptop, Loader2 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -10,6 +10,8 @@ import { LogTerminal } from '../ui/LogTerminal';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { useLanguages } from '../../src/hooks/useLanguages';
+import { useTranscription } from '../../src/hooks/useTranscription';
+import { useLiveMode } from '../../src/hooks/useLiveMode';
 
 export const SessionView: React.FC = () => {
   // Global State
@@ -20,11 +22,19 @@ export const SessionView: React.FC = () => {
 
   // Real language list from server
   const { languages } = useLanguages();
-  const languageOptions = languages.map(l => l.name);
+  const languageOptions = useMemo(() => ['Auto Detect', ...languages.map(l => l.name)], [languages]);
+
+  // Transcription hooks
+  const transcription = useTranscription();
+  const live = useLiveMode();
+
+  // Active analyser: live mode takes priority when active, then one-shot
+  const activeAnalyser = live.analyser ?? transcription.analyser;
 
   // Audio device enumeration
   const [micDevices, setMicDevices] = useState<string[]>([]);
   const [sysDevices, setSysDevices] = useState<string[]>([]);
+  const [micDeviceIds, setMicDeviceIds] = useState<Record<string, string>>({});
 
   // Audio Configuration State
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
@@ -36,11 +46,15 @@ export const SessionView: React.FC = () => {
       // Request permission first (needed to get labels)
       await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.label).map(d => d.label);
+      const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.label);
       const audioOutputs = devices.filter(d => d.kind === 'audiooutput' && d.label).map(d => d.label);
-      setMicDevices(audioInputs.length > 0 ? audioInputs : ['Default Microphone']);
+      const inputLabels = audioInputs.map(d => d.label);
+      const idMap: Record<string, string> = {};
+      audioInputs.forEach(d => { idMap[d.label] = d.deviceId; });
+      setMicDevices(inputLabels.length > 0 ? inputLabels : ['Default Microphone']);
+      setMicDeviceIds(idMap);
       setSysDevices(audioOutputs.length > 0 ? audioOutputs : ['Default Output']);
-      if (audioInputs.length > 0 && !audioInputs.includes(micDevice)) setMicDevice(audioInputs[0]);
+      if (inputLabels.length > 0 && !inputLabels.includes(micDevice)) setMicDevice(inputLabels[0]);
       if (audioOutputs.length > 0 && !audioOutputs.includes(sysDevice)) setSysDevice(audioOutputs[0]);
     } catch {
       setMicDevices(['Default Microphone']);
@@ -55,17 +69,95 @@ export const SessionView: React.FC = () => {
   const [mainTranslate, setMainTranslate] = useState(false);
 
   // Live Mode State
-  const [isLive, setIsLive] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const isLive = live.status !== 'idle' && live.status !== 'error';
   const [liveLanguage, setLiveLanguage] = useState('Auto Detect');
   const [liveTranslate, setLiveTranslate] = useState(false);
   
   // Control Center State
   const [serverRunning, setServerRunning] = useState(true);
-  const [clientConnected, setClientConnected] = useState(true);
+  // Derive client connection from hook states
+  const clientConnected = transcription.status === 'recording' || transcription.status === 'processing'
+    || live.status === 'listening' || live.status === 'processing' || live.status === 'starting';
 
   // System Health Check for Visual Effects
-  const isSystemHealthy = serverRunning && clientConnected;
+  const isSystemHealthy = serverRunning && (clientConnected || transcription.status === 'idle');
+
+  // Resolve language code from display name
+  const resolveLanguage = useCallback((name: string): string | undefined => {
+    if (name === 'Auto Detect') return undefined;
+    const match = languages.find(l => l.name === name);
+    return match?.code;
+  }, [languages]);
+
+  // Helpers for main transcription controls
+  const isRecording = transcription.status === 'recording';
+  const isProcessing = transcription.status === 'processing';
+  const isConnecting = transcription.status === 'connecting';
+  const canStartRecording = transcription.status === 'idle' || transcription.status === 'complete' || transcription.status === 'error';
+
+  const handleStartRecording = useCallback(() => {
+    if (!canStartRecording) return;
+    transcription.reset();
+    transcription.start({
+      language: resolveLanguage(mainLanguage),
+      deviceId: micDeviceIds[micDevice],
+      translate: mainTranslate,
+    });
+  }, [canStartRecording, transcription, mainLanguage, mainTranslate, micDevice, micDeviceIds, resolveLanguage]);
+
+  const handleStopRecording = useCallback(() => {
+    transcription.stop();
+  }, [transcription]);
+
+  // Helpers for live mode controls
+  const handleLiveToggle = useCallback((checked: boolean) => {
+    if (checked) {
+      live.start({
+        language: resolveLanguage(liveLanguage),
+        deviceId: micDeviceIds[micDevice],
+        translate: liveTranslate,
+      });
+    } else {
+      live.stop();
+    }
+  }, [live, liveLanguage, liveTranslate, micDevice, micDeviceIds, resolveLanguage]);
+
+  // Build log entries from hook states
+  const serverLogs = useMemo(() => {
+    const logs: Array<{ timestamp: string; source: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }> = [];
+    const now = () => new Date().toLocaleTimeString('en-US', { hour12: false });
+    if (serverRunning) {
+      logs.push({ timestamp: now(), source: 'Docker', message: 'Container running', type: 'success' });
+    }
+    if (live.statusMessage) {
+      logs.push({ timestamp: now(), source: 'Live', message: live.statusMessage, type: 'info' });
+    }
+    if (live.error) {
+      logs.push({ timestamp: now(), source: 'Live', message: live.error, type: 'error' });
+    }
+    if (transcription.error) {
+      logs.push({ timestamp: now(), source: 'Transcription', message: transcription.error, type: 'error' });
+    }
+    return logs;
+  }, [serverRunning, live.statusMessage, live.error, transcription.error]);
+
+  const clientLogs = useMemo(() => {
+    const logs: Array<{ timestamp: string; source: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }> = [];
+    const now = () => new Date().toLocaleTimeString('en-US', { hour12: false });
+    if (clientConnected) {
+      logs.push({ timestamp: now(), source: 'Socket', message: 'WebSocket connected', type: 'success' });
+    }
+    if (transcription.status === 'recording') {
+      logs.push({ timestamp: now(), source: 'Audio', message: 'Recording audio...', type: 'info' });
+    }
+    if (transcription.status === 'processing') {
+      logs.push({ timestamp: now(), source: 'Engine', message: 'Processing transcription...', type: 'info' });
+    }
+    if (transcription.result) {
+      logs.push({ timestamp: now(), source: 'Engine', message: `Transcription complete (${transcription.result.duration?.toFixed(1) ?? '?'}s audio)`, type: 'success' });
+    }
+    return logs;
+  }, [clientConnected, transcription.status, transcription.result]);
 
   // Scroll State
   const leftScrollRef = useRef<HTMLDivElement>(null);
@@ -73,18 +165,6 @@ export const SessionView: React.FC = () => {
   
   const [leftScrollState, setLeftScrollState] = useState({ top: false, bottom: false });
   const [rightScrollState, setRightScrollState] = useState({ top: false, bottom: false });
-
-  // Mock Logs
-  const serverLogs = [
-    { timestamp: '12:41:27', source: 'System', message: 'Initializing TranscriptionSuite v2.0...', type: 'info' as const },
-    { timestamp: '12:41:27', source: 'Docker', message: "Container 'whisper-backend' found.", type: 'success' as const },
-    { timestamp: '12:41:27', source: 'Docker', message: 'Status: Running (Port 9000)', type: 'success' as const },
-  ];
-
-  const clientLogs = [
-    { timestamp: '12:41:29', source: 'Client', message: 'Attempting handshake with localhost:9000...', type: 'info' as const },
-    { timestamp: '12:41:29', source: 'Socket', message: 'Connection established (ID: 8821)', type: 'success' as const },
-  ];
 
   // Handle Scroll Shadows
   useEffect(() => {
@@ -226,15 +306,11 @@ export const SessionView: React.FC = () => {
                                     <div className="text-sm font-semibold text-white tracking-wide">Client Link</div>
                                 </div>
                                 <div className="flex items-center gap-2.5">
-                                    <span className="text-xs font-medium text-slate-400">{clientConnected ? 'Connected to Socket' : 'Disconnected'}</span>
+                                    <span className="text-xs font-medium text-slate-400">
+                                      {clientConnected ? 'Connected to Socket' : transcription.status === 'connecting' || live.status === 'connecting' ? 'Connecting...' : 'Disconnected'}
+                                    </span>
                                     <StatusLight status={clientConnected ? 'active' : 'inactive'} className="w-2 h-2" animate={clientConnected} />
                                 </div>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                <Button variant="secondary" size="sm" onClick={() => setClientConnected(true)} className="text-xs px-3">Start Local</Button>
-                                <Button variant="secondary" size="sm" onClick={() => setClientConnected(true)} className="text-xs px-3">Start Remote</Button>
-                                <Button variant="danger" size="sm" onClick={() => setClientConnected(false)} className="text-xs px-3">Stop</Button>
-                                <Button variant="secondary" size="sm" className="text-xs px-3 ml-auto text-slate-400 hover:text-white" icon={<Trash size={12}/>}>Unload Models</Button>
                             </div>
                         </div>
                     </div>
@@ -285,19 +361,66 @@ export const SessionView: React.FC = () => {
 
                 {/* Main Transcription */}
                 <GlassCard title="Main Transcription" className="flex-none">
-                    <div className="flex items-center justify-between gap-6 p-1">
-                        <div className="flex flex-col flex-1 min-w-0">
-                             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Source Language</label>
-                             <div className="flex items-center gap-2">
-                                <div className="p-2.5 rounded-xl bg-accent-magenta/10 text-accent-magenta shadow-inner border border-accent-magenta/5"><Languages size={18} /></div>
-                                <CustomSelect value={mainLanguage} onChange={setMainLanguage} options={languageOptions} accentColor="magenta" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none hover:border-white/20 transition-all" />
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-6 p-1">
+                            <div className="flex flex-col flex-1 min-w-0">
+                                 <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Source Language</label>
+                                 <div className="flex items-center gap-2">
+                                    <div className="p-2.5 rounded-xl bg-accent-magenta/10 text-accent-magenta shadow-inner border border-accent-magenta/5"><Languages size={18} /></div>
+                                    <CustomSelect value={mainLanguage} onChange={setMainLanguage} options={languageOptions} accentColor="magenta" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none hover:border-white/20 transition-all" />
+                                </div>
+                            </div>
+                            <div className="h-12 w-px bg-white/10 self-end mb-1"></div>
+                            <div className="flex flex-col items-center min-w-[100px]">
+                                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 mt-1 text-center whitespace-nowrap">Translate to English</label>
+                                <div className="h-[46px] flex items-center justify-center"><AppleSwitch checked={mainTranslate} onChange={setMainTranslate} size="sm" /></div>
                             </div>
                         </div>
-                        <div className="h-12 w-px bg-white/10 self-end mb-1"></div>
-                        <div className="flex flex-col items-center min-w-[100px]">
-                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 mt-1 text-center whitespace-nowrap">Translate to English</label>
-                            <div className="h-[46px] flex items-center justify-center"><AppleSwitch checked={mainTranslate} onChange={setMainTranslate} size="sm" /></div>
+
+                        {/* Record / Stop Button */}
+                        <div className="flex items-center gap-3 pt-1">
+                            {canStartRecording ? (
+                                <Button
+                                    variant="primary"
+                                    className="flex-1 bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30"
+                                    icon={isConnecting ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
+                                    onClick={handleStartRecording}
+                                    disabled={isLive}
+                                >
+                                    {isConnecting ? 'Connecting...' : 'Start Recording'}
+                                </Button>
+                            ) : (
+                                <Button
+                                    variant="danger"
+                                    className="flex-1"
+                                    icon={isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
+                                    onClick={handleStopRecording}
+                                    disabled={isProcessing}
+                                >
+                                    {isProcessing ? 'Processing...' : 'Stop Recording'}
+                                </Button>
+                            )}
+                            {transcription.vadActive && (
+                                <span className="text-xs font-mono text-green-400 whitespace-nowrap animate-pulse">VAD Active</span>
+                            )}
                         </div>
+
+                        {/* Transcription Result */}
+                        {transcription.result && (
+                            <div className="bg-black/20 rounded-xl border border-white/5 p-4 text-sm leading-relaxed text-slate-300 font-mono selectable-text max-h-32 overflow-y-auto custom-scrollbar">
+                                {transcription.result.text}
+                                {transcription.result.language && (
+                                    <div className="mt-2 text-xs text-slate-500">
+                                        Detected: {transcription.result.language} &middot; {transcription.result.duration?.toFixed(1)}s
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Errors */}
+                        {transcription.error && (
+                            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{transcription.error}</div>
+                        )}
                     </div>
                 </GlassCard>
                 
@@ -345,7 +468,7 @@ export const SessionView: React.FC = () => {
                         </div>
                     </div>
                     <div className="relative group">
-                        <AudioVisualizer />
+                        <AudioVisualizer analyserNode={activeAnalyser} />
                         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <Button variant="secondary" size="icon" className="h-8 w-8 bg-black/50 backdrop-blur-sm" icon={<Maximize2 size={14}/>} onClick={() => setIsFullscreenVisualizerOpen(true)} />
                         </div>
@@ -353,15 +476,17 @@ export const SessionView: React.FC = () => {
                 </GlassCard>
 
                 {/* Live Mode (Text + Controls) */}
-                <GlassCard className="flex-1 min-h-[calc(100vh-30rem)] flex flex-col transition-all duration-300" title="Live Mode" action={<Button variant="ghost" size="sm" icon={<Copy size={14} />}>Copy</Button>}>
+                <GlassCard className="flex-1 min-h-[calc(100vh-30rem)] flex flex-col transition-all duration-300" title="Live Mode" action={<Button variant="ghost" size="sm" icon={<Copy size={14} />} onClick={() => navigator.clipboard.writeText(live.getText())}>Copy</Button>}>
                     
                     {/* Live Mode Controls Toolbar */}
                     <div className="flex items-center gap-2 p-1 pb-4 mb-4 border-b border-white/5 overflow-x-auto flex-nowrap custom-scrollbar no-scrollbar flex-none">
                         <div className="flex items-center gap-2 h-8 shrink-0">
-                                <span className={`text-xs font-bold uppercase tracking-wider ${isLive ? 'text-green-400' : 'text-slate-500'}`}>{isLive ? 'Active' : 'Offline'}</span>
-                                <AppleSwitch checked={isLive} onChange={setIsLive} size="sm" />
+                                <span className={`text-xs font-bold uppercase tracking-wider ${isLive ? 'text-green-400' : 'text-slate-500'}`}>
+                                    {live.status === 'starting' ? 'Loading...' : isLive ? 'Active' : 'Offline'}
+                                </span>
+                                <AppleSwitch checked={isLive} onChange={handleLiveToggle} size="sm" />
                         </div>
-                        <Button variant={isMuted ? 'danger' : 'secondary'} size="sm" icon={isMuted ? <VolumeX size={14}/> : <Volume2 size={14}/>} onClick={() => setIsMuted(!isMuted)} className={`h-8 shrink-0 whitespace-nowrap ${isMuted ? "bg-red-500/20 text-red-400 border-red-500/30" : "text-slate-300"}`}>{isMuted ? 'Muted' : 'Audio On'}</Button>
+                        <Button variant={live.muted ? 'danger' : 'secondary'} size="sm" icon={live.muted ? <VolumeX size={14}/> : <Volume2 size={14}/>} onClick={() => live.toggleMute()} disabled={!isLive} className={`h-8 shrink-0 whitespace-nowrap ${live.muted ? "bg-red-500/20 text-red-400 border-red-500/30" : "text-slate-300"}`}>{live.muted ? 'Muted' : 'Audio On'}</Button>
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0">
                             <div className="h-full aspect-square flex items-center justify-center rounded-lg bg-accent-magenta/10 text-accent-magenta border border-accent-magenta/5"><Languages size={15} /></div>
@@ -374,15 +499,38 @@ export const SessionView: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Transcript Area - Added selectable-text class */}
+                    {/* Transcript Area */}
                     <div className="flex-1 bg-black/20 rounded-xl border border-white/5 p-4 overflow-y-auto font-mono text-sm leading-relaxed text-slate-300 shadow-inner custom-scrollbar relative min-h-0 selectable-text">
                         {isLive ? (
                             <>
-                                <span className="text-slate-500 select-none mr-2">12:01:45</span>
-                                <span className="text-accent-cyan">Speaker 1:</span> Welcome to the Transcription Suite demo. 
-                                <br/><br/>
-                                <span className="text-slate-500 select-none mr-2">12:01:52</span>
-                                <span className="text-accent-magenta">System:</span> Start speaking to see live transcription appear here in real-time.
+                                {live.statusMessage && (
+                                    <div className="flex items-center gap-2 text-accent-cyan mb-3 animate-pulse">
+                                        <Loader2 size={14} className="animate-spin" />
+                                        <span className="text-xs">{live.statusMessage}</span>
+                                    </div>
+                                )}
+                                {live.sentences.map((s, i) => (
+                                    <div key={i} className="mb-2">
+                                        <span className="text-slate-500 select-none mr-2">{new Date(s.timestamp).toLocaleTimeString('en-US', { hour12: false })}</span>
+                                        <span>{s.text}</span>
+                                    </div>
+                                ))}
+                                {live.partial && (
+                                    <div className="mb-2 opacity-60">
+                                        <span className="text-slate-500 select-none mr-2">{new Date().toLocaleTimeString('en-US', { hour12: false })}</span>
+                                        <span className="italic">{live.partial}</span>
+                                        <span className="inline-block w-1.5 h-4 bg-accent-cyan ml-0.5 animate-pulse align-text-bottom"></span>
+                                    </div>
+                                )}
+                                {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-3 opacity-60 select-none">
+                                        <Activity size={32} strokeWidth={1} className="animate-pulse" />
+                                        <p>Listening... speak to see transcription.</p>
+                                    </div>
+                                )}
+                                {live.error && (
+                                    <div className="text-xs text-red-400 mt-2">{live.error}</div>
+                                )}
                             </>
                         ) : (
                             <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-3 opacity-60 select-none">
@@ -411,7 +559,7 @@ export const SessionView: React.FC = () => {
       )}
 
       {/* Fullscreen Visualizer Modal */}
-      <FullscreenVisualizer isOpen={isFullscreenVisualizerOpen} onClose={() => setIsFullscreenVisualizerOpen(false)} />
+      <FullscreenVisualizer isOpen={isFullscreenVisualizerOpen} onClose={() => setIsFullscreenVisualizerOpen(false)} analyserNode={activeAnalyser} />
 
     </div>
   );

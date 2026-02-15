@@ -68,6 +68,11 @@ export class APIClient {
     this.authToken = token;
   }
 
+  /** Get the current auth token (used by WebSocket service for handshake) */
+  getAuthToken(): string | null {
+    return this.authToken;
+  }
+
   /**
    * Sync base URL from config store.
    * Call this on app startup and whenever server config changes.

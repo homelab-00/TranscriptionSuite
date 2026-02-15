@@ -7,9 +7,10 @@ import { Button } from '../ui/Button';
 interface FullscreenVisualizerProps {
   isOpen: boolean;
   onClose: () => void;
+  analyserNode?: AnalyserNode | null;
 }
 
-export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOpen, onClose }) => {
+export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOpen, onClose, analyserNode }) => {
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -63,8 +64,8 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOp
                         <div>
                             <h2 className="text-2xl font-bold text-white tracking-tight">Spectral Analysis</h2>
                             <div className="flex items-center gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-400 shadow-[0_0_5px_#4ade80]"></span>
-                                <span className="text-xs font-mono text-green-400 tracking-widest uppercase">Live Input Active</span>
+                                <span className={`w-1.5 h-1.5 rounded-full ${analyserNode ? 'bg-green-400 shadow-[0_0_5px_#4ade80]' : 'bg-slate-500'}`}></span>
+                                <span className={`text-xs font-mono tracking-widest uppercase ${analyserNode ? 'text-green-400' : 'text-slate-500'}`}>{analyserNode ? 'Live Input Active' : 'No Input'}</span>
                             </div>
                         </div>
                     </div>
@@ -95,7 +96,7 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOp
                  {/* Top Left Corner Accent */}
                  <div className="absolute top-0 left-0 w-32 h-32 bg-accent-cyan/5 rounded-br-full blur-2xl pointer-events-none"></div>
                  
-                 <AudioVisualizer className="h-full w-full" />
+                 <AudioVisualizer className="h-full w-full" analyserNode={analyserNode} />
                  
                  {/* Overlay Gradient for depth */}
                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none"></div>
@@ -116,22 +117,22 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({ isOp
                 <HudCard 
                     icon={<Mic size={18} />}
                     label="Input Source"
-                    value="MacBook Pro Mic"
+                    value={analyserNode ? 'Live Input' : 'No Input'}
                     subValue="Channel 1 (Mono)"
                     color="cyan"
                 />
                 <HudCard 
                     icon={<Waves size={18} />}
                     label="Sample Rate"
-                    value="48,000 Hz"
+                    value={analyserNode ? `${(analyserNode.context.sampleRate / 1000).toFixed(1)} kHz` : '— kHz'}
                     subValue="32-bit Float"
                     color="magenta"
                 />
                 <HudCard 
                     icon={<Zap size={18} />}
-                    label="Latency"
-                    value="12ms"
-                    subValue="Round Trip"
+                    label="FFT Size"
+                    value={analyserNode ? `${analyserNode.fftSize}` : '—'}
+                    subValue={analyserNode ? `${analyserNode.frequencyBinCount} bins` : '—'}
                     color="orange"
                 />
                  <HudCard 
