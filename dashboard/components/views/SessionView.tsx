@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Mic, Radio, Square, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Trash, Laptop, Loader2, X, Download } from 'lucide-react';
+import { Mic, Radio, Square, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Laptop, Loader2, X, Download } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';

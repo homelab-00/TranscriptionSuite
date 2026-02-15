@@ -22,7 +22,9 @@ export type RuntimeProfile = 'gpu' | 'cpu';
 export interface StartContainerOptions {
   mode: 'local' | 'remote';
   runtimeProfile: RuntimeProfile;
+  imageTag?: string;
   tlsEnv?: Record<string, string>;
+  hfToken?: string;
 }
 
 export interface ElectronAPI {

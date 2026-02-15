@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Play, Pause, Rewind, FastForward, Sparkles, MessageSquare, Clock, FileText, Bot, User, Send, Settings2, MoreHorizontal, Trash2, Edit2, Share, Loader2, Pencil, Check, XCircle, StopCircle } from 'lucide-react';
+import { X, Play, Pause, Rewind, FastForward, Sparkles, MessageSquare, Clock, FileText, Bot, User, Send, Trash2, Edit2, Share, Loader2, Pencil, Check, XCircle, StopCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { useRecording } from '../../src/hooks/useRecording';
@@ -452,7 +452,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                               type="datetime-local"
                               value={dateEditValue}
                               onChange={(e) => setDateEditValue(e.target.value)}
-                              className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-sm text-white outline-none focus:ring-1 focus:ring-accent-cyan [color-scheme:dark]"
+                              className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-sm text-white outline-none focus:ring-1 focus:ring-accent-cyan scheme-dark"
                               autoFocus
                             />
                             <button onClick={handleDateSave} className="p-0.5 hover:text-accent-cyan transition-colors"><Check size={14} /></button>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { NotebookTab } from '../../types';
-import { Calendar, Search, Upload, Filter, FileText, Trash2, Download, Clock, MoreHorizontal, Play, ChevronLeft, ChevronRight, Check, Plus, Mic, Minus, CalendarDays, Edit2, Share, Loader2, RotateCcw, XCircle, AlertCircle } from 'lucide-react';
+import { Calendar, Search, Upload, Filter, FileText, Trash2, Download, Clock, MoreHorizontal, Play, ChevronLeft, ChevronRight, Check, Plus, Minus, Edit2, Loader2, RotateCcw, XCircle, AlertCircle } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
