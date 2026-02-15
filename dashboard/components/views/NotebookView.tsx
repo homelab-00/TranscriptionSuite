@@ -104,9 +104,47 @@ interface MenuTrigger {
 interface MenuProps {
     trigger: MenuTrigger;
     onClose: () => void;
+    noteId: string;
+    onRefresh: () => void;
+    onPlay: (id: string) => void;
 }
 
-const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose }) => {
+const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, onRefresh, onPlay }) => {
+    const recordingId = parseInt(noteId, 10);
+
+    const handlePlay = () => {
+        onPlay(noteId);
+        onClose();
+    };
+
+    const handleRename = async () => {
+        const newTitle = window.prompt('Enter new title:');
+        if (!newTitle) return;
+        try {
+            await apiClient.updateRecordingTitle(recordingId, newTitle);
+            onRefresh();
+        } catch {
+            alert('Failed to rename recording.');
+        }
+        onClose();
+    };
+
+    const handleExport = (format: 'txt' | 'srt' | 'ass') => {
+        const url = apiClient.getExportUrl(recordingId, format);
+        window.open(url, '_blank');
+        onClose();
+    };
+
+    const handleDelete = async () => {
+        if (!window.confirm('Delete this recording? This cannot be undone.')) return;
+        try {
+            await apiClient.deleteRecording(recordingId);
+            onRefresh();
+        } catch {
+            alert('Failed to delete recording.');
+        }
+        onClose();
+    };
     const menuRef = useRef<HTMLDivElement>(null);
     const [position, setPosition] = useState<{ top: number, left: number } | null>(null);
     const [animationStyle, setAnimationStyle] = useState<React.CSSProperties>({});
@@ -161,21 +199,29 @@ const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose }) => {
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
-                <button className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors group">
+                <button onClick={handlePlay} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors group">
                     <Play size={14} className="group-hover:text-accent-cyan" />
                     Play Recording
                 </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                <button className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors">
-                    <CalendarDays size={14} />
-                    Change Date
-                </button>
-                 <button className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors">
+                <button onClick={handleRename} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors">
                     <Edit2 size={14} />
                     Rename
                 </button>
+                <button onClick={() => handleExport('txt')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors">
+                    <Download size={14} />
+                    Export TXT
+                </button>
+                <button onClick={() => handleExport('srt')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors">
+                    <Download size={14} />
+                    Export SRT
+                </button>
+                <button onClick={() => handleExport('ass')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors">
+                    <Download size={14} />
+                    Export ASS
+                </button>
                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                <button className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2.5 transition-colors">
+                <button onClick={handleDelete} className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2.5 transition-colors">
                     <Trash2 size={14} />
                     Delete
                 </button>
@@ -245,7 +291,7 @@ const HistoryPicker: React.FC<HistoryPickerProps> = ({ isOpen, onClose, selected
 // --- Sub-components for Calendar View ---
 interface EventData { id: string; title: string; duration?: string; tag?: string; startTime: number; recordingId?: number; }
 
-const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient: string; startHour: number; endHour: number; events: EventData[]; visibleSlots: number; onZoomChange: (slots: number) => void; onNoteClick: (note: EventData) => void; onAddNote: (hour: number) => void; }> = ({ title, headerColor, headerGradient, startHour, endHour, events, visibleSlots, onZoomChange, onNoteClick, onAddNote }) => {
+const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient: string; startHour: number; endHour: number; events: EventData[]; visibleSlots: number; onZoomChange: (slots: number) => void; onNoteClick: (note: EventData) => void; onAddNote: (hour: number) => void; onRefresh: () => void; }> = ({ title, headerColor, headerGradient, startHour, endHour, events, visibleSlots, onZoomChange, onNoteClick, onAddNote, onRefresh }) => {
     const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
     const [activeMenu, setActiveMenu] = useState<{ id: string, trigger: MenuTrigger } | null>(null);
     const isCompact = visibleSlots >= 4;
@@ -306,7 +352,7 @@ const TimeSection: React.FC<{ title: string; headerColor: string; headerGradient
                     })}
                 </div>
             </div>
-            {activeMenu && <NoteActionMenu trigger={activeMenu.trigger} onClose={() => setActiveMenu(null)} />}
+            {activeMenu && <NoteActionMenu trigger={activeMenu.trigger} onClose={() => setActiveMenu(null)} noteId={activeMenu.id} onRefresh={onRefresh} onPlay={(id) => { const evt = events.find(e => e.id === id); if (evt) onNoteClick(evt); }} />}
         </div>
     );
 }
@@ -430,8 +476,8 @@ const CalendarTab: React.FC<{onNoteClick: (note: any) => void, onAddNote: (hour:
                 </GlassCard>
             </div>
             <div className="flex flex-col space-y-4 h-full min-h-0 overflow-hidden">
-                <TimeSection title="Morning" headerColor="text-accent-orange" headerGradient="bg-gradient-to-r from-accent-orange/10 via-red-900/10 to-transparent" startHour={0} endHour={12} events={morningEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} />
-                <TimeSection title="Afternoon" headerColor="text-indigo-400" headerGradient="bg-gradient-to-r from-indigo-500/10 via-blue-900/10 to-transparent" startHour={12} endHour={24} events={afternoonEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} />
+                <TimeSection title="Morning" headerColor="text-accent-orange" headerGradient="bg-gradient-to-r from-accent-orange/10 via-red-900/10 to-transparent" startHour={0} endHour={12} events={morningEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} onRefresh={calendar.refresh} />
+                <TimeSection title="Afternoon" headerColor="text-indigo-400" headerGradient="bg-gradient-to-r from-indigo-500/10 via-blue-900/10 to-transparent" startHour={12} endHour={24} events={afternoonEvents} visibleSlots={visibleSlots} onZoomChange={setVisibleSlots} onNoteClick={onNoteClick} onAddNote={onAddNote} onRefresh={calendar.refresh} />
             </div>
             <HistoryPicker isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} selectedDate={currentDate} onSelect={setCurrentDate} triggerRect={triggerRect} />
         </div>

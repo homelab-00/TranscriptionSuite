@@ -14,7 +14,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [2.2 Platform Architectures](#22-platform-architectures)
   - [2.3 Security Model](#23-security-model)
 - [3. Project Structure](#3-project-structure)
-  - [3.1 pyproject.toml Files](#31-pyprojecttoml-files)
+  - [3.1 Configuration Files](#31-configuration-files)
   - [3.2 Version Management](#32-version-management)
 - [4. Development Workflow](#4-development-workflow)
   - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
@@ -25,10 +25,9 @@ Technical documentation for developing and building TranscriptionSuite.
 - [5. Build Workflow](#5-build-workflow)
   - [5.1 Prerequisites](#51-prerequisites)
   - [5.2 Build Matrix](#52-build-matrix)
-  - [5.3 KDE AppImage (Linux)](#53-kde-appimage-linux)
-  - [5.4 GNOME AppImage (Linux)](#54-gnome-appimage-linux)
-  - [5.5 Windows Executable](#55-windows-executable)
-  - [5.6 Build Assets](#56-build-assets)
+  - [5.3 Linux AppImage](#53-linux-appimage)
+  - [5.4 Windows Installer](#54-windows-installer)
+  - [5.5 Build Assets](#55-build-assets)
 - [6. Docker Reference](#6-docker-reference)
   - [6.1 Local vs Remote Mode](#61-local-vs-remote-mode)
   - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
@@ -46,10 +45,9 @@ Technical documentation for developing and building TranscriptionSuite.
   - [8.4 Testing](#84-testing)
 - [9. Dashboard Development](#9-dashboard-development)
   - [9.1 Running from Source](#91-running-from-source)
-  - [9.2 Verbose Logging](#92-verbose-logging)
+  - [9.2 Tech Stack](#92-tech-stack)
   - [9.3 Key Modules](#93-key-modules)
-    - [9.3.1 Settings Exposure Rules](#931-settings-exposure-rules)
-  - [9.4 Dashboard Architecture & Refactoring](#94-dashboard-architecture--refactoring)
+  - [9.4 UI Contract System](#94-ui-contract-system)
   - [9.5 Server Busy Handling](#95-server-busy-handling)
   - [9.6 Model Management](#96-model-management)
 - [10. Configuration Reference](#10-configuration-reference)
@@ -148,9 +146,10 @@ cd dashboard && npm run package:windows
 | Build & publish image | `./build/docker-build-push.sh` |
 | Run dashboard (dev) | `cd dashboard && npm run dev` |
 | Run dashboard (Electron) | `cd dashboard && npm run dev:electron` |
-| Lint code | `./build/.venv/bin/ruff check .` |
-| Format code | `./build/.venv/bin/ruff format .` |
-| Type check | `./build/.venv/bin/pyright` |
+| Lint code (Python) | `./build/.venv/bin/ruff check .` |
+| Format code (Python) | `./build/.venv/bin/ruff format .` |
+| Type check (Python) | `./build/.venv/bin/pyright` |
+| Type check (TypeScript) | `cd dashboard && npx tsc --noEmit` |
 
 ---
 
@@ -230,13 +229,17 @@ TranscriptionSuite uses layered security for remote access:
 TranscriptionSuite/
 ├── dashboard/                    # Electron + React dashboard application
 │   ├── electron/                 # Electron main process
-│   │   ├── main.ts               # Window creation, IPC handlers
+│   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
 │   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
+│   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
 │   │   └── tsconfig.json         # TypeScript config for main process
-│   ├── src/                      # Shared source (API, config, hooks)
+│   ├── src/                      # Shared source (API, config, hooks, services)
 │   │   ├── api/client.ts         # REST API client for server communication
 │   │   ├── config/store.ts       # Client config (electron-store / localStorage)
-│   │   ├── hooks/                # React hooks (useServerStatus, etc.)
+│   │   ├── hooks/                # React hooks (see Key Modules section)
+│   │   ├── services/             # Core services
+│   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
+│   │   │   └── websocket.ts      # WebSocket client for real-time/live transcription
 │   │   ├── index.css             # Tailwind CSS + global styles
 │   │   └── types/electron.d.ts   # TypeScript declarations for Electron IPC
 │   ├── components/               # React UI components
@@ -244,6 +247,9 @@ TranscriptionSuite/
 │   │   ├── AudioVisualizer.tsx   # Canvas-based waveform visualizer
 │   │   ├── ui/                   # Primitives (Button, GlassCard, StatusLight, etc.)
 │   │   └── views/                # View components (SessionView, NotebookView, ServerView, modals)
+│   ├── public/                   # Static assets (served at /)
+│   │   ├── audio-worklet-processor.js  # AudioWorklet for mic capture
+│   │   └── logo.svg              # App logo for notifications/favicon
 │   ├── ui-contract/              # Machine-validated UI contract (design enforcement)
 │   ├── scripts/                  # Dev scripts + UI contract tooling
 │   ├── App.tsx                   # Root React component
@@ -256,8 +262,7 @@ TranscriptionSuite/
 │
 ├── build/                        # Build and development tools
 │   ├── build-electron-linux.sh   # Build Electron AppImage
-│   ├── build-appimage-kde.sh     # (legacy) PyInstaller KDE AppImage
-│   ├── build-appimage-gnome.sh   # (legacy) PyInstaller GNOME AppImage
+│   ├── generate-ico.sh           # Generate logo.png and logo.ico from logo.svg
 │   ├── docker-build-push.sh      # Build and push Docker image
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
@@ -457,16 +462,21 @@ npm run package:windows
 # Output: dashboard\release\TranscriptionSuite Setup *.exe
 ```
 
-### 5.6 Build Assets
+### 5.5 Build Assets
 
 **Source files (manually maintained in `build/assets/`):**
-- `logo.svg` (1024×1024) - Master vector logo
-- `logo.png` (1024×1024) - High-resolution raster export
-- `profile.png` - Author profile picture for About dialog
+- `logo.svg` — Master vector logo (source of truth)
+- `logo_wide.svg` — Wide variant for documentation/marketing
+- `profile.png` — Author profile picture for About dialog
 
-**Generated automatically during builds:**
-- `logo.ico` - Multi-resolution Windows icon
-- 256×256 PNG - Rescaled for AppImage
+**Generated files (created by `build/generate-ico.sh`):**
+- `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
+- `logo.ico` — Multi-resolution Windows icon (16, 32, 48, 256px)
+
+**Regenerate derived assets:**
+```bash
+cd build && ./generate-ico.sh
+```
 
 ---
 
@@ -820,6 +830,30 @@ npm run dev:electron
 |--------|---------|
 | `main.ts` | Window creation, IPC handlers, app lifecycle |
 | `preload.ts` | Context bridge (safe IPC between renderer and main) |
+| `dockerManager.ts` | Docker CLI wrapper for container/image management |
+
+**Services (`src/services/`):**
+
+| Module | Purpose |
+|--------|---------|
+| `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
+| `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
+
+**React Hooks (`src/hooks/`):**
+
+| Hook | Purpose |
+|------|---------|
+| `useServerStatus.ts` | Poll server health/status, connection state |
+| `useDocker.ts` | Docker container control via IPC (start/stop/status) |
+| `useTranscription.ts` | Real-time WebSocket transcription session |
+| `useLiveMode.ts` | Live Mode continuous transcription |
+| `useRecording.ts` | Fetch/manage individual recordings |
+| `useCalendar.ts` | Calendar view data fetching |
+| `useSearch.ts` | Full-text search across recordings |
+| `useUpload.ts` | Audio file upload with progress |
+| `useBackups.ts` | Database backup/restore operations |
+| `useLanguages.ts` | Available transcription languages |
+| `useAdminStatus.ts` | Admin authentication state |
 
 **Shared Source (`src/`):**
 
@@ -827,7 +861,6 @@ npm run dev:electron
 |--------|---------|
 | `api/client.ts` | REST API client for server communication |
 | `config/store.ts` | Client config persistence (electron-store / localStorage fallback) |
-| `hooks/useServerStatus.ts` | React hook for polling server health/status |
 | `index.css` | Tailwind CSS entry point + global styles |
 | `types/electron.d.ts` | TypeScript declarations for Electron IPC bridge |
 
@@ -848,13 +881,13 @@ npm run dev:electron
 
 | View | Purpose |
 |------|---------|
-| `SessionView.tsx` | Main transcription view: audio controls, live mode, control center, visualizer, logs |
-| `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs |
-| `ServerView.tsx` | Docker server management: image selection, instance controls |
+| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications |
+| `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
+| `ServerView.tsx` | Docker server management: image selection, container control |
 | `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
-| `AudioNoteModal.tsx` | Recording detail: transcript + player + LLM sidebar |
-| `AddNoteModal.tsx` | New recording from time slot |
+| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
+| `AddNoteModal.tsx` | Create new recording from calendar time slot |
 | `FullscreenVisualizer.tsx` | Fullscreen audio visualizer overlay |
 
 ### 9.4 UI Contract System
@@ -1141,6 +1174,12 @@ Run all checks across the entire codebase:
 
 # 2. Python tests
 ./build/.venv/bin/pytest server/backend/tests
+
+# 3. TypeScript checks (dashboard)
+cd dashboard && npx tsc --noEmit
+
+# 4. UI contract validation
+cd dashboard && npm run ui:contract:validate
 ```
 
 ### 12.3 GitHub CodeQL Layout
@@ -1196,11 +1235,11 @@ sudo systemctl restart tailscaled
 
 ```bash
 # Run from terminal to see errors
-./TranscriptionSuite-KDE-x86_64.AppImage
+./TranscriptionSuite-*-x86_64.AppImage
 
 # Check for missing libraries
-./TranscriptionSuite-KDE-x86_64.AppImage --appimage-extract
-ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
+./TranscriptionSuite-*-x86_64.AppImage --appimage-extract
+ldd squashfs-root/usr/bin/transcriptionsuite
 ```
 
 ### 13.5 Windows Docker Networking
@@ -1292,7 +1331,7 @@ These checks are useful for:
 
 **Current State**:
 - Setting is commented out in config.yaml with a TODO note
-- Dashboard UIs (KDE/GNOME) have a language selector, but it may not override the server's behavior
+- Dashboard has a language selector in Client settings, but it may not override the server's behavior
 - Language can be set through the dashboard, but effectiveness needs verification
 
 **Action Required**:

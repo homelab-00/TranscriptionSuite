@@ -6,7 +6,13 @@ import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
-import type { Conversation, ChatMessage } from '../../src/api/types';
+import type { Conversation } from '../../src/api/types';
+
+/** Local type for chat message display (simpler than API's ChatMessage) */
+interface DisplayMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 interface AudioNoteModalProps {
   isOpen: boolean;
@@ -55,8 +61,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   
+  // Audio player state
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(30);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   
   // Summary State
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -76,7 +86,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
 
   // Chat input state
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [isChatLoading, setIsChatLoading] = useState(false);
 
@@ -208,6 +218,123 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     setContextMenu({ x: e.clientX, y: e.clientY, id });
   };
 
+  // Audio playback handlers
+  const handlePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => {});
+    }
+  };
+
+  const handleSeek = (delta: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + delta));
+  };
+
+  const handleTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (audio) setCurrentTime(audio.currentTime);
+  };
+
+  const handleLoadedMetadata = () => {
+    const audio = audioRef.current;
+    if (audio) setDuration(audio.duration);
+  };
+
+  const handleAudioPlay = () => setIsPlaying(true);
+  const handleAudioPause = () => setIsPlaying(false);
+  const handleAudioEnded = () => { setIsPlaying(false); setCurrentTime(0); };
+
+  // LLM Chat handler — sends user message and streams assistant response
+  const handleSendMessage = useCallback(async () => {
+    const text = chatInput.trim();
+    if (!text || !note?.recordingId || isChatLoading) return;
+
+    // Add user message to display
+    const userMsg: DisplayMessage = { role: 'user', content: text };
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput('');
+    setIsChatLoading(true);
+
+    // Prepare assistant placeholder
+    const assistantMsg: DisplayMessage = { role: 'assistant', content: '' };
+    setChatMessages(prev => [...prev, assistantMsg]);
+
+    try {
+      // Ensure we have a conversation
+      let convId = activeConversationId;
+      if (!convId) {
+        const conv = await apiClient.createConversation(note.recordingId, 'Chat');
+        convId = conv.conversation_id;
+        setActiveConversationId(convId);
+      }
+
+      const stream = apiClient.chat({
+        conversation_id: convId,
+        user_message: text,
+        include_transcription: true,
+      });
+      let fullResponse = '';
+      for await (const chunk of stream) {
+        fullResponse += chunk;
+        setChatMessages(prev => {
+          const updated = [...prev];
+          const lastMsg: DisplayMessage = { role: 'assistant', content: fullResponse };
+          updated[updated.length - 1] = lastMsg;
+          return updated;
+        });
+      }
+    } catch (err) {
+      setChatMessages(prev => {
+        const updated = [...prev];
+        const errorMsg: DisplayMessage = { role: 'assistant', content: 'Error: Failed to get response from LLM.' };
+        updated[updated.length - 1] = errorMsg;
+        return updated;
+      });
+    } finally {
+      setIsChatLoading(false);
+    }
+  }, [chatInput, note?.recordingId, isChatLoading, activeConversationId]);
+
+  // Context menu handlers
+  const handleRename = useCallback(async () => {
+    if (!note?.recordingId) return;
+    const newTitle = window.prompt('Enter new title:', recording?.title ?? note.title);
+    if (!newTitle || newTitle === (recording?.title ?? note.title)) return;
+    try {
+      await apiClient.updateRecordingTitle(note.recordingId, newTitle);
+      // Close modal to refresh — parent should refetch
+      onClose();
+    } catch {
+      alert('Failed to rename recording.');
+    }
+    setContextMenu(null);
+  }, [note?.recordingId, recording?.title, note?.title, onClose]);
+
+  const handleExport = useCallback(async (format: 'txt' | 'srt' | 'ass' = 'txt') => {
+    if (!note?.recordingId) return;
+    const url = apiClient.getExportUrl(note.recordingId, format);
+    window.open(url, '_blank');
+    setContextMenu(null);
+  }, [note?.recordingId]);
+
+  const handleDelete = useCallback(async () => {
+    if (!note?.recordingId) return;
+    const confirmed = window.confirm(`Delete "${recording?.title ?? note.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await apiClient.deleteRecording(note.recordingId);
+      onClose();
+    } catch {
+      alert('Failed to delete recording.');
+    }
+    setContextMenu(null);
+  }, [note?.recordingId, recording?.title, note?.title, onClose]);
+
   if (!isRendered || !note || !portalContainer) return null;
 
   return createPortal(
@@ -248,18 +375,40 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
             <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-8">
                 {/* 1. Audio Player Card */}
                 <div className="bg-black/20 rounded-2xl border border-white/5 p-6 relative overflow-hidden group select-none">
+                     {/* Hidden audio element for playback */}
+                     {audioUrl && (
+                       <audio
+                         ref={audioRef}
+                         src={audioUrl}
+                         onTimeUpdate={handleTimeUpdate}
+                         onLoadedMetadata={handleLoadedMetadata}
+                         onPlay={handleAudioPlay}
+                         onPause={handleAudioPause}
+                         onEnded={handleAudioEnded}
+                         preload="metadata"
+                       />
+                     )}
                      <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none gap-1">
                         {Array.from({ length: 60 }).map((_, i) => (
                             <div key={i} className="w-1 bg-accent-cyan rounded-full transition-all duration-300" style={{ height: `${20 + Math.random() * 60}%`, opacity: i > progress / 1.6 ? 0.3 : 1 }}></div>
                         ))}
                      </div>
                      <div className="relative z-10 flex flex-col items-center gap-4">
-                        <div className="text-3xl font-mono text-white font-light tracking-widest">04:20 <span className="text-slate-500 text-lg">/ {note.duration}</span></div>
+                        <div className="text-3xl font-mono text-white font-light tracking-widest">{formatRecSecs(currentTime)} <span className="text-slate-500 text-lg">/ {duration > 0 ? formatRecSecs(duration) : note.duration}</span></div>
                         <div className="flex items-center gap-6">
-                            <button className="text-slate-400 hover:text-white transition-colors"><Rewind size={24} /></button>
-                            <button onClick={() => setIsPlaying(!isPlaying)} className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]">{isPlaying ? <Pause size={24} fill="black" /> : <Play size={24} fill="black" className="ml-1" />}</button>
-                            <button className="text-slate-400 hover:text-white transition-colors"><FastForward size={24} /></button>
+                            <button onClick={() => handleSeek(-10)} className="text-slate-400 hover:text-white transition-colors" title="Rewind 10s"><Rewind size={24} /></button>
+                            <button onClick={handlePlayPause} disabled={!audioUrl} className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed">{isPlaying ? <Pause size={24} fill="black" /> : <Play size={24} fill="black" className="ml-1" />}</button>
+                            <button onClick={() => handleSeek(10)} className="text-slate-400 hover:text-white transition-colors" title="Forward 10s"><FastForward size={24} /></button>
                         </div>
+                        {/* Seek bar */}
+                        <input
+                          type="range"
+                          min={0}
+                          max={duration || 100}
+                          value={currentTime}
+                          onChange={(e) => { if (audioRef.current) audioRef.current.currentTime = Number(e.target.value); }}
+                          className="w-full max-w-xs h-1 accent-accent-cyan bg-white/10 rounded cursor-pointer"
+                        />
                      </div>
                 </div>
 
@@ -344,7 +493,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
                     <div className="text-center text-xs text-slate-600 my-4 select-none">Current Session</div>
                     
-                    {/* Bot Message - Chat bubble content selectable */}
+                    {/* Welcome message */}
                     <div className="flex gap-3 pr-8">
                         <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 select-none"><Bot size={14} className="text-white" /></div>
                         <div className="bg-white/5 rounded-2xl rounded-tl-none p-3 border border-white/5 selectable-text">
@@ -352,28 +501,39 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                         </div>
                     </div>
 
-                    {/* User Message - Chat bubble content selectable */}
-                    <div className="flex gap-3 pl-8 flex-row-reverse">
-                        <div className="w-8 h-8 rounded-full bg-accent-cyan/20 flex items-center justify-center shrink-0 select-none"><User size={14} className="text-accent-cyan" /></div>
-                        <div className="bg-accent-cyan/10 rounded-2xl rounded-tr-none p-3 border border-accent-cyan/10 selectable-text">
-                            <p className="text-sm text-white">What did Alex say about performance?</p>
+                    {/* Dynamic chat messages */}
+                    {chatMessages.map((msg, idx) => (
+                      msg.role === 'user' ? (
+                        <div key={idx} className="flex gap-3 pl-8 flex-row-reverse">
+                            <div className="w-8 h-8 rounded-full bg-accent-cyan/20 flex items-center justify-center shrink-0 select-none"><User size={14} className="text-accent-cyan" /></div>
+                            <div className="bg-accent-cyan/10 rounded-2xl rounded-tr-none p-3 border border-accent-cyan/10 selectable-text">
+                                <p className="text-sm text-white">{msg.content}</p>
+                            </div>
                         </div>
-                    </div>
-                    
-                    {/* Bot Response - Chat bubble content selectable */}
-                    <div className="flex gap-3 pr-8">
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 select-none"><Bot size={14} className="text-white" /></div>
-                        <div className="bg-white/5 rounded-2xl rounded-tl-none p-3 border border-white/5 selectable-text">
-                            <p className="text-sm text-slate-300">Alex mentioned that using too many <span className="font-mono text-xs bg-black/30 px-1 rounded select-none">backdrop-blur</span> filters might affect frame rates on older devices.</p>
+                      ) : (
+                        <div key={idx} className="flex gap-3 pr-8">
+                            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 select-none"><Bot size={14} className="text-white" /></div>
+                            <div className="bg-white/5 rounded-2xl rounded-tl-none p-3 border border-white/5 selectable-text">
+                                <p className="text-sm text-slate-300 whitespace-pre-wrap">{msg.content || (isChatLoading ? <Loader2 size={14} className="animate-spin" /> : '')}</p>
+                            </div>
                         </div>
-                    </div>
+                      )
+                    ))}
                 </div>
 
                 {/* Input Area */}
                 <div className="p-4 border-t border-white/5 bg-white/[0.02]">
                     <div className="relative">
-                        <input type="text" placeholder="Ask about this note..." className="w-full bg-black/20 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-accent-cyan/50 focus:ring-1 focus:ring-accent-cyan/20 transition-all" />
-                        <button className="absolute right-2 top-2 p-1.5 bg-accent-cyan rounded-lg text-black hover:bg-cyan-300 transition-colors"><Send size={14} /></button>
+                        <input 
+                          type="text" 
+                          placeholder="Ask about this note..." 
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+                          disabled={isChatLoading || !note?.recordingId}
+                          className="w-full bg-black/20 border border-white/10 rounded-xl py-3 pl-4 pr-12 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-accent-cyan/50 focus:ring-1 focus:ring-accent-cyan/20 transition-all disabled:opacity-50" 
+                        />
+                        <button onClick={handleSendMessage} disabled={isChatLoading || !chatInput.trim()} className="absolute right-2 top-2 p-1.5 bg-accent-cyan rounded-lg text-black hover:bg-cyan-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"><Send size={14} /></button>
                     </div>
                     <div className="mt-2 flex justify-between items-center px-1 select-none">
                         <span className="text-[10px] text-slate-500">Model: {llmModel ?? 'unknown'}</span>
@@ -388,10 +548,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
       {/* Context Menu Portal */}
       {contextMenu && (
         <div className="fixed z-[10000] w-48 bg-[#0f172a] border border-white/10 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 py-1 select-none" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
-            <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Edit2 size={14} /> Rename</button>
-            <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Share size={14} /> Export</button>
+            <button onClick={handleRename} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Edit2 size={14} /> Rename</button>
+            <button onClick={() => handleExport('txt')} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Share size={14} /> Export TXT</button>
+            <button onClick={() => handleExport('srt')} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Share size={14} /> Export SRT</button>
+            <button onClick={() => handleExport('ass')} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"><Share size={14} /> Export ASS</button>
             <div className="h-px bg-white/10 my-1"></div>
-            <button className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2"><Trash2 size={14} /> Delete</button>
+            <button onClick={handleDelete} className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2"><Trash2 size={14} /> Delete</button>
         </div>
       )}
     </div>,

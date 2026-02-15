@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Mic, Radio, Square, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Trash, Laptop, Loader2 } from 'lucide-react';
+import { Mic, Radio, Square, RefreshCw, Languages, Copy, Volume2, VolumeX, Maximize2, Terminal, Activity, Server, Trash, Laptop, Loader2, X, Download } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -12,6 +12,8 @@ import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { useTranscription } from '../../src/hooks/useTranscription';
 import { useLiveMode } from '../../src/hooks/useLiveMode';
+import { useDocker } from '../../src/hooks/useDocker';
+import { apiClient } from '../../src/api/client';
 
 export const SessionView: React.FC = () => {
   // Global State
@@ -73,8 +75,9 @@ export const SessionView: React.FC = () => {
   const [liveLanguage, setLiveLanguage] = useState('Auto Detect');
   const [liveTranslate, setLiveTranslate] = useState(false);
   
-  // Control Center State
-  const [serverRunning, setServerRunning] = useState(true);
+  // Control Center State — real Docker container status
+  const docker = useDocker();
+  const serverRunning = docker.container.running;
   // Derive client connection from hook states
   const clientConnected = transcription.status === 'recording' || transcription.status === 'processing'
     || live.status === 'listening' || live.status === 'processing' || live.status === 'starting';
@@ -108,6 +111,33 @@ export const SessionView: React.FC = () => {
   const handleStopRecording = useCallback(() => {
     transcription.stop();
   }, [transcription]);
+
+  const handleCancelProcessing = useCallback(async () => {
+    try {
+      await apiClient.cancelTranscription();
+      transcription.reset();
+    } catch (err) {
+      console.error('Failed to cancel transcription:', err);
+    }
+  }, [transcription]);
+
+  // Copy transcription result to clipboard
+  const handleCopyTranscription = useCallback(() => {
+    if (!transcription.result?.text) return;
+    navigator.clipboard.writeText(transcription.result.text).catch(() => {});
+  }, [transcription.result?.text]);
+
+  // Download transcription as TXT file
+  const handleDownloadTranscription = useCallback(() => {
+    if (!transcription.result?.text) return;
+    const blob = new Blob([transcription.result.text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transcription-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [transcription.result?.text]);
 
   // Helpers for live mode controls
   const handleLiveToggle = useCallback((checked: boolean) => {
@@ -158,6 +188,47 @@ export const SessionView: React.FC = () => {
     }
     return logs;
   }, [clientConnected, transcription.status, transcription.result]);
+
+  // Copy all logs to clipboard
+  const handleCopyLogs = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const allLogs = [...serverLogs, ...clientLogs];
+    const logText = allLogs.map(l => `[${l.timestamp}] [${l.source}] ${l.message}`).join('\n');
+    navigator.clipboard.writeText(logText).catch(() => {});
+  }, [serverLogs, clientLogs]);
+
+  // Auto-copy transcription to clipboard on completion + desktop notification
+  const prevStatusRef = useRef(transcription.status);
+  useEffect(() => {
+    const wasProcessing = prevStatusRef.current === 'processing';
+    prevStatusRef.current = transcription.status;
+    if (wasProcessing && transcription.status === 'complete' && transcription.result?.text) {
+      // Auto-copy to clipboard
+      navigator.clipboard.writeText(transcription.result.text).catch(() => {});
+      // Desktop notification (if permission granted)
+      if (Notification.permission === 'granted') {
+        new Notification('Transcription Complete', {
+          body: transcription.result.text.slice(0, 100) + (transcription.result.text.length > 100 ? '...' : ''),
+          icon: '/logo.svg',
+        });
+      }
+    }
+    if (wasProcessing && transcription.status === 'error' && transcription.error) {
+      if (Notification.permission === 'granted') {
+        new Notification('Transcription Failed', {
+          body: transcription.error,
+          icon: '/logo.svg',
+        });
+      }
+    }
+  }, [transcription.status, transcription.result?.text, transcription.error]);
+
+  // Request notification permission on mount
+  useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Scroll State
   const leftScrollRef = useRef<HTMLDivElement>(null);
@@ -292,9 +363,11 @@ export const SessionView: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                                <Button variant="secondary" size="sm" onClick={() => setServerRunning(true)} className="text-xs px-3">Start Local</Button>
-                                <Button variant="secondary" size="sm" onClick={() => setServerRunning(true)} className="text-xs px-3">Start Remote</Button>
-                                <Button variant="danger" size="sm" onClick={() => setServerRunning(false)} className="text-xs px-3">Stop</Button>
+                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('local')} disabled={serverRunning || docker.operating} className="text-xs px-3">
+                                    {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('remote')} disabled={serverRunning || docker.operating} className="text-xs px-3">Start Remote</Button>
+                                <Button variant="danger" size="sm" onClick={() => docker.stopContainer()} disabled={!serverRunning || docker.operating} className="text-xs px-3">Stop</Button>
                             </div>
                         </div>
 
@@ -390,15 +463,27 @@ export const SessionView: React.FC = () => {
                                     {isConnecting ? 'Connecting...' : 'Start Recording'}
                                 </Button>
                             ) : (
-                                <Button
-                                    variant="danger"
-                                    className="flex-1"
-                                    icon={isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
-                                    onClick={handleStopRecording}
-                                    disabled={isProcessing}
-                                >
-                                    {isProcessing ? 'Processing...' : 'Stop Recording'}
-                                </Button>
+                                <>
+                                    <Button
+                                        variant="danger"
+                                        className="flex-1"
+                                        icon={isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Square size={16} />}
+                                        onClick={handleStopRecording}
+                                        disabled={isProcessing}
+                                    >
+                                        {isProcessing ? 'Processing...' : 'Stop Recording'}
+                                    </Button>
+                                    {isProcessing && (
+                                        <Button
+                                            variant="secondary"
+                                            className="shrink-0"
+                                            icon={<X size={16} />}
+                                            onClick={handleCancelProcessing}
+                                        >
+                                            Cancel
+                                        </Button>
+                                    )}
+                                </>
                             )}
                             {transcription.vadActive && (
                                 <span className="text-xs font-mono text-green-400 whitespace-nowrap animate-pulse">VAD Active</span>
@@ -407,13 +492,19 @@ export const SessionView: React.FC = () => {
 
                         {/* Transcription Result */}
                         {transcription.result && (
-                            <div className="bg-black/20 rounded-xl border border-white/5 p-4 text-sm leading-relaxed text-slate-300 font-mono selectable-text max-h-32 overflow-y-auto custom-scrollbar">
-                                {transcription.result.text}
-                                {transcription.result.language && (
-                                    <div className="mt-2 text-xs text-slate-500">
-                                        Detected: {transcription.result.language} &middot; {transcription.result.duration?.toFixed(1)}s
-                                    </div>
-                                )}
+                            <div className="space-y-2">
+                                <div className="bg-black/20 rounded-xl border border-white/5 p-4 text-sm leading-relaxed text-slate-300 font-mono selectable-text max-h-32 overflow-y-auto custom-scrollbar">
+                                    {transcription.result.text}
+                                    {transcription.result.language && (
+                                        <div className="mt-2 text-xs text-slate-500">
+                                            Detected: {transcription.result.language} &middot; {transcription.result.duration?.toFixed(1)}s
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Button variant="secondary" size="sm" icon={<Copy size={14} />} onClick={handleCopyTranscription}>Copy</Button>
+                                    <Button variant="secondary" size="sm" icon={<Download size={14} />} onClick={handleDownloadTranscription}>Download</Button>
+                                </div>
                             </div>
                         )}
 
@@ -429,7 +520,7 @@ export const SessionView: React.FC = () => {
                         <div className="flex items-center gap-2"><Terminal size={18} /><span className="text-sm font-medium">System Logs</span></div>
                         <div className="flex items-center gap-3">
                              <div className={`transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] overflow-hidden ${showLogs ? 'w-24 opacity-100' : 'w-0 opacity-0'}`}>
-                                  <Button variant="secondary" size="sm" className="h-8 w-full whitespace-nowrap text-xs text-slate-300" onClick={(e) => e.stopPropagation()} icon={<Copy size={14} />}>Copy All</Button>
+                                  <Button variant="secondary" size="sm" className="h-8 w-full whitespace-nowrap text-xs text-slate-300" onClick={handleCopyLogs} icon={<Copy size={14} />}>Copy All</Button>
                              </div>
                             <div className="text-xs uppercase tracking-wider font-bold">{showLogs ? 'Hide' : 'Show'}</div>
                         </div>

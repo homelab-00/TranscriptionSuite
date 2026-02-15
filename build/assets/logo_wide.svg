@@ -1,0 +1,40 @@
+<svg width="240" height="44" viewBox="0 0 240 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ts-logo-icon-gradient" x1="0" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D946EF" />
+      <stop offset="1" stop-color="#FB923C" />
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="4" width="40" height="40" rx="12" fill="url(#ts-logo-icon-gradient)" />
+
+  <g transform="translate(8 12)" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m11 7.601-5.994 8.19a1 1 0 0 0 .1 1.298l.817.818a1 1 0 0 0 1.314.087L15.09 12" />
+    <path d="M16.5 21.174C15.5 20.5 14.372 20 13 20c-2.058 0-3.928 2.356-6 2-2.072-.356-2.775-3.369-1.5-4.5" />
+    <circle cx="16" cy="7" r="5" />
+  </g>
+
+  <circle cx="38" cy="6" r="5" fill="#22D3EE" stroke="#0F172A" stroke-width="2" />
+
+  <text
+    x="56"
+    y="22"
+    fill="#FFFFFF"
+    font-family="Inter, sans-serif"
+    font-size="18"
+    font-weight="700"
+  >
+    Transcription
+  </text>
+  <text
+    x="56"
+    y="37"
+    fill="#22D3EE"
+    font-family="Inter, sans-serif"
+    font-size="12"
+    font-weight="700"
+    letter-spacing="1.2"
+  >
+    SUITE
+  </text>
+</svg>
