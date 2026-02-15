@@ -11,9 +11,9 @@ with cross-platform support offering
 advanced features like diarization, audio
 notebook mode and LM Studio integration.
 Longform & Live Transcription available.
-Written in Python, utilizing faster-whisper
-and NVIDIA GPU acceleration. Server/client
-architecture; server is Dockerized for
+Electron dashboard with Python backend,
+utilizing faster-whisper and NVIDIA GPU
+acceleration. Server is Dockerized for
 easy installation.
 </pre>
     </td>
@@ -22,7 +22,7 @@ easy installation.
 
 **OS Support:**
 
-![KDE Plasma](https://img.shields.io/badge/KDE_Plasma-%23FF7F00.svg?style=for-the-badge&logo=kde-plasma&logoColor=white) ![GNOME](https://img.shields.io/badge/GNOME-%238A2BE2.svg?style=for-the-badge&logo=gnome&logoColor=white) ![Windows 11](https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-%23FCC624.svg?style=for-the-badge&logo=linux&logoColor=black) ![Windows 11](https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white)
 
 **GPU Hardware Support:**
 
@@ -41,8 +41,7 @@ easy installation.
   - [4.1 Starting the Server & Client](#41-starting-the-server--client)
 - [5. Usage](#5-usage)
   - [5.1 Quick Start](#51-quick-start)
-  - [5.2 Dashboard GUI](#52-dashboard-gui)
-  - [5.3 Tray Icon Colors](#53-system-tray-icon-colors)
+  - [5.2 Dashboard Views](#52-dashboard-views)
 - [6. Remote Access](#6-remote-access)
   - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
   - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
@@ -62,7 +61,7 @@ easy installation.
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet
   beyond the initial setup
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
-- **Fully featured GUI**: Native app for KDE, GNOME, and Windows
+- **Fully featured GUI**: Electron desktop app for Linux and Windows
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
 - **Speaker Diarization**: PyAnnote-based speaker identification
@@ -146,32 +145,11 @@ Download the Dashboard for your platform from the [Releases](https://github.com/
 
 | Platform | Download | Notes |
 |----------|----------|-------|
-| **KDE** | `TranscriptionSuite-KDE.AppImage` | Standalone, no dependencies |
-| **GNOME** | `TranscriptionSuite-GNOME.AppImage` | Requires system packages (see below) |
-| **Windows** | `TranscriptionSuite.exe` | Standalone, no dependencies |
+| **Linux** | `TranscriptionSuite-x86_64.AppImage` | Standalone, no dependencies |
+| **Windows** | `TranscriptionSuite Setup.exe` | Standalone installer |
 
->* *These are all x64 packages*
->* *The Linux versions were developed on, and are targeting for, Wayland not X11*
-
-If using the GNOME version, you need to also install the following packages:
-
-**Ubuntu 24.04:**
-```bash
-sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio \
-                 python3-numpy python3-aiohttp python3-pyqt6 wl-clipboard
-```
-
-**Fedora:**
-```bash
-sudo dnf install python3 python3-gobject gtk3 libappindicator-gtk3 python3-pyaudio \
-                 python3-numpy python3-aiohttp python3-qt6 wl-clipboard
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-pyaudio \
-                        python-numpy python-aiohttp python-pyqt6 wl-clipboard
-```
+>* *These are x64 packages*
+>* *Linux builds support both X11 and Wayland*
 
 ---
 
@@ -179,29 +157,25 @@ sudo pacman -S --needed python python-gobject gtk3 libappindicator-gtk3 python-p
 
 **Before starting either Client or Server, you need to configure a few settings.**
 
-To access them, click on the hamburger menu and select Settings. A new
-window will open up with four tabs: `App`, `Client`, `Server`, and `Notebook`.
-Let's go through each one:
-* The settings in the `App` tab are self explanatory
-* The `Server` tab is just a button that opens the full `config.yaml` for the server.
-  You generally don't need to worry about it unless you want to change the model or
-  other server parameters. Refer to [README_DEV.md](README_DEV.md) for more information.
-* The `Notebook` tab provides database backup and restore functionality:
+To access settings, click the Settings button in the sidebar (gear icon). The Settings
+modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
+
+* **App tab**: General application settings (notifications, auto-copy, etc.)
+* **Server tab**: Opens  the full `config.yaml` for advanced server parameters.
+  Refer to [README_DEV.md](README_DEV.md) for more information.
+* **Notebook tab**: Database backup and restore functionality:
   - Create manual backups of your Audio Notebook database
   - View list of available backups with timestamps and sizes
   - Restore from any backup (creates safety backup first)
-* For the `Client` tab, the first thing you need to know is whether you want a local or
-  a remote connection. I'll list both cases:
-  * Local: In the Dashboard Client page, use the `Source` card to choose `Microphone` or `System Audio`, then optionally pick specific devices instead of system defaults.
-  * Remote: Go through [Section 6: Remote Access](#6-remote-access) first to set up Tailscale.
-    Then:
-    *(Remote access requires Tailscale MagicDNS + HTTPS certificates.)*
-    * In the 'Remote Host' field enter your Tailscale hostname (e.g., `my-machine.tail1234.ts.net`)
-    * Click on the 'Use remote server instead of local' checkbox
-    * Enter your auth token in the field (you'll get this token once you start the server
-      for the first time)
-    * Change the port to 8443
-    * Select the 'Use HTTPS' checkbox
+* **Client tab**: Configure connection mode:
+  * **Local**: Use default settings (localhost:8000)
+  * **Remote**: See [Section 6: Remote Access](#6-remote-access) to set up Tailscale first.
+    Then configure:
+    - Enter your Tailscale hostname in 'Remote Host' (e.g., `my-machine.tail1234.ts.net`)
+    - Enable 'Use remote server instead of local'
+    - Set port to 8443
+    - Enable 'Use HTTPS'
+    - Enter auth token (obtained after first server start)
 
 *Settings are saved to:*
 *- Linux: `~/.config/TranscriptionSuite/`*
@@ -209,15 +183,15 @@ Let's go through each one:
 
 ### 4.1 Starting the Server & Client
 
-You're now ready to start both Server & Client. Let's start with the Server:
-* Click on 'Fetch Fresh' and wait for the Docker server image to download
-* Then depending on whether you want to start the server in local or remote mode:
-  * Local: Just click on 'Start Local'
-  * Remote: Click on 'Start Remote', then copy the auth token that appears and
-    paste it over to the client settings (on the remote machine).
+You're now ready to start both Server & Client. Navigate to the **Server** view
+in the sidebar:
 
-Wait until the container has fully started. Then, head over to the Client tab and click
-the appropriate button. You should now be connected.
+1. Click 'Pull Image' to download the Docker server image (first time only)
+2. Wait for the download to complete
+3. Click 'Start Container' to launch the server
+4. Wait for the container health status to turn green
+
+Once the server is running, navigate to the **Session** view to start transcribing.
 
 ---
 
@@ -225,67 +199,49 @@ the appropriate button. You should now be connected.
 
 ### 5.1 Quick Start
 
-* Run the AppImage or executable
-* The tray icon appears in your system tray
-* **Longform Transcription**
-  * To start recording:
-    * On KDE & Windows left click on the system tray icon
-    * On GNOME left click on the system tray icon and the select 'Start Recording'
-  * To stop and transcribe:
-    * On KDE middle click on the system tray icon
-    * On Windows double click on the system tray icon
-    * On GNOME left click on the system tray icon and the select 'Stop Recording'
-* **Static transcription**
-  * Right click on the system tray and select 'Transcribe File...'
-* **Main Translation (English-only, optional)**
-  * In the `Main Transcription` card, enable `Translation` to translate output to English
-  * Scope: longform recordings, static file transcription, and Audio Notebook uploads
-  * `Translation` is disabled by default
-* **Live Mode** (Dashboard only)
-  * Open the Dashboard window and navigate to the Client View
-  * In the `Live Mode` card, enable the status toggle to activate continuous transcription
-  * Speak naturally with pauses - sentences appear in real-time as you speak
-  * Mute/unmute with the toggle button to control when audio is captured
-  * Use the `Source` card to choose whether Live Mode listens to microphone input or system audio
-  * Completed sentences are shown in the transcription display
-  * Optionally select a specific language for better accuracy (auto-detect may struggle with short utterances)
-  * Optionally enable `Translation` to output English translations in real time
+* Run the AppImage (Linux) or installer (Windows)
+* The Dashboard window opens with sidebar navigation
+* Navigate to **Session** view for transcription
 
-Result is automatically copied to clipboard
+**Longform Transcription:**
+* Click the Record button to start capturing audio
+* Click Stop to end recording and begin transcription
+* Result appears in the transcription display and is auto-copied to clipboard
 
-### 5.2 Dashboard GUI
+**Live Mode:**
+* In the Session view, enable the Live Mode toggle
+* Speak naturally with pauses — sentences appear in real-time
+* Use Mute/Unmute to control audio capture
+* Completed sentences accumulate in the display
 
-The app includes a full Docker & client management GUI. Click the tray icon and select
-"Show App" to open the Dashboard window, which features a **sidebar navigation** with:
+**Static File Transcription:**
+* Navigate to **Notebook** → **Import** tab
+* Drag and drop audio/video files or click to browse
+* Files are transcribed and added to the Audio Notebook
 
-- **Home**: Overview with status indicators for Server and Client
-- **Notebook**: Audio Notebook with Calendar, Search, and Import sub-tabs
-- **Docker Server**: Full Docker management including:
-  - Container and image status with health indicators
-  - Volume status with sizes and downloaded models list
-  - 3-column management section (Container | Image | Volumes)
-  - Server configuration with Settings button
-- **Client**: Start/stop client, configure settings
-- **Menu**: Settings, Help (User Guide / Developer Guide), and About
+**Translation (English-only, optional):**
+* Enable `Translation` toggle in the Session controls
+* Applies to: longform recordings, file transcription, Live Mode, and Notebook uploads
+* Translates source language to English
 
-**Status Lights**: The sidebar shows real-time status indicators next to Server and Client:
+### 5.2 Dashboard Views
+
+The Dashboard features **sidebar navigation** with these main views:
+
+- **Session**: Main transcription interface with:
+  - Recording controls and Live Mode toggle
+  - Audio visualizer
+  - Transcription output with copy/download buttons
+  - Processing logs
+- **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
+- **Server**: Docker server management (container, images, volumes)
+
+**Status Lights**: The sidebar shows real-time status indicators:
 - 🟢 Green: Running/Healthy
-- 🔴 Red: Unhealthy
+- 🔴 Red: Unhealthy/Error
 - 🔵 Blue: Starting
 - 🟠 Orange: Stopped
-- ⚪ Gray: Not set up
-
-### 5.3 System Tray Icon Colors
-
-- 🟢 Green: Ready
-- 🟡 Yellow: Recording
-- 🟠 Orange: Transcribing
-- 🟣 Magenta: Live Mode - Listening
-- 🟤 Dark Red: Live Mode - Muted
-- 🔵 Blue: Uploading
-- ⚫ Gray: Disconnected
-- 🟢 Dark Green: Models Unloaded
-- 🔴 Red: Error
+- ⚪ Gray: Not configured
 
 ---
 
