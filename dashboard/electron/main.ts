@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
@@ -33,6 +33,52 @@ const store = new Store({
 });
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+
+// --- Tray Icon Setup ---
+function createTray(): void {
+  // Use the tray icon from build assets (dev) or resources (packaged)
+  const iconPath = isDev
+    ? path.join(__dirname, '../../build/assets/tray-icon.png')
+    : path.join(process.resourcesPath, 'tray-icon.png');
+
+  const icon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(icon);
+  tray.setToolTip('TranscriptionSuite');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show Window',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  // Left-click on tray shows window (Linux/Windows behavior)
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }
+  });
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -130,10 +176,31 @@ ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
   return dockerManager.getLogs(tail);
 });
 
+// --- Tray IPC Handlers ---
+
+ipcMain.handle('tray:setTooltip', async (_event, tooltip: string) => {
+  if (tray) {
+    tray.setToolTip(tooltip);
+  }
+});
+
 // --- App Lifecycle ---
 
+let isQuitting = false;
+
 app.whenReady().then(() => {
+  createTray();
   createWindow();
+
+  // Handle close-to-tray: hide window instead of quitting
+  if (mainWindow) {
+    mainWindow.on('close', (event) => {
+      if (!isQuitting) {
+        event.preventDefault();
+        mainWindow?.hide();
+      }
+    });
+  }
 
   app.on('activate', () => {
     // macOS: re-create window when dock icon is clicked and no windows are open
@@ -143,6 +210,11 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
 app.on('window-all-closed', () => {
-  app.quit();
+  // On Linux/Windows, don't quit when window is closed (tray is active)
+  // App quits via tray menu or app.quit()
 });

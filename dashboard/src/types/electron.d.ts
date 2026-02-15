@@ -25,6 +25,12 @@ interface ElectronAPI {
     removeVolume: (name: string) => Promise<string>;
     getLogs: (tail?: number) => Promise<string[]>;
   };
+  tray: {
+    setTooltip: (tooltip: string) => Promise<void>;
+  };
+  audio: {
+    getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
+  };
 }
 
 interface Window {

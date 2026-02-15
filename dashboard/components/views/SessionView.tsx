@@ -38,10 +38,41 @@ export const SessionView: React.FC = () => {
   const [sysDevices, setSysDevices] = useState<string[]>([]);
   const [micDeviceIds, setMicDeviceIds] = useState<Record<string, string>>({});
 
+  // Desktop sources for system audio capture (Electron only)
+  const [desktopSources, setDesktopSources] = useState<Array<{ id: string; name: string; thumbnail: string }>>([]);
+  const [desktopSourceIds, setDesktopSourceIds] = useState<Record<string, string>>({});
+
   // Audio Configuration State
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
   const [micDevice, setMicDevice] = useState('Default Microphone');
   const [sysDevice, setSysDevice] = useState('Default Output');
+
+  // Fetch desktop sources when system audio is selected (Electron only)
+  const fetchDesktopSources = useCallback(async () => {
+    if (!window.electronAPI?.audio?.getDesktopSources) return;
+    try {
+      const sources = await window.electronAPI.audio.getDesktopSources();
+      setDesktopSources(sources);
+      const idMap: Record<string, string> = {};
+      sources.forEach(s => { idMap[s.name] = s.id; });
+      setDesktopSourceIds(idMap);
+      const sourceNames = sources.map(s => s.name);
+      setSysDevices(sourceNames.length > 0 ? sourceNames : ['No sources available']);
+      if (sourceNames.length > 0 && !sourceNames.includes(sysDevice)) {
+        setSysDevice(sourceNames[0]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch desktop sources:', err);
+      setSysDevices(['No sources available']);
+    }
+  }, [sysDevice]);
+
+  // Refresh desktop sources when switching to system audio
+  useEffect(() => {
+    if (audioSource === 'system') {
+      fetchDesktopSources();
+    }
+  }, [audioSource, fetchDesktopSources]);
 
   const enumerateDevices = useCallback(async () => {
     try {
@@ -101,12 +132,15 @@ export const SessionView: React.FC = () => {
   const handleStartRecording = useCallback(() => {
     if (!canStartRecording) return;
     transcription.reset();
+    const isSystemAudio = audioSource === 'system';
     transcription.start({
       language: resolveLanguage(mainLanguage),
-      deviceId: micDeviceIds[micDevice],
+      deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
       translate: mainTranslate,
+      systemAudio: isSystemAudio,
+      desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
     });
-  }, [canStartRecording, transcription, mainLanguage, mainTranslate, micDevice, micDeviceIds, resolveLanguage]);
+  }, [canStartRecording, transcription, mainLanguage, mainTranslate, audioSource, micDevice, micDeviceIds, sysDevice, desktopSourceIds, resolveLanguage]);
 
   const handleStopRecording = useCallback(() => {
     transcription.stop();
@@ -142,15 +176,18 @@ export const SessionView: React.FC = () => {
   // Helpers for live mode controls
   const handleLiveToggle = useCallback((checked: boolean) => {
     if (checked) {
+      const isSystemAudio = audioSource === 'system';
       live.start({
         language: resolveLanguage(liveLanguage),
-        deviceId: micDeviceIds[micDevice],
+        deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
         translate: liveTranslate,
+        systemAudio: isSystemAudio,
+        desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
       });
     } else {
       live.stop();
     }
-  }, [live, liveLanguage, liveTranslate, micDevice, micDeviceIds, resolveLanguage]);
+  }, [live, liveLanguage, liveTranslate, audioSource, micDevice, micDeviceIds, sysDevice, desktopSourceIds, resolveLanguage]);
 
   // Build log entries from hook states
   const serverLogs = useMemo(() => {

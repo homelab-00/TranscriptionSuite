@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, desktopCapturer } from 'electron';
 
 /**
  * Preload script — exposes a safe IPC bridge to the renderer process.
@@ -28,6 +28,12 @@ export interface ElectronAPI {
     removeVolume: (name: string) => Promise<string>;
     getLogs: (tail?: number) => Promise<string[]>;
   };
+  tray: {
+    setTooltip: (tooltip: string) => Promise<void>;
+  };
+  audio: {
+    getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
+  };
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -52,5 +58,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),
     removeVolume: (name: string) => ipcRenderer.invoke('docker:removeVolume', name),
     getLogs: (tail?: number) => ipcRenderer.invoke('docker:getLogs', tail),
+  },
+  tray: {
+    setTooltip: (tooltip: string) => ipcRenderer.invoke('tray:setTooltip', tooltip),
+  },
+  audio: {
+    getDesktopSources: async () => {
+      const sources = await desktopCapturer.getSources({
+        types: ['window', 'screen'],
+        thumbnailSize: { width: 150, height: 150 },
+      });
+      return sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        thumbnail: source.thumbnail.toDataURL(),
+      }));
+    },
   },
 } satisfies ElectronAPI);

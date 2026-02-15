@@ -52,6 +52,8 @@ export interface LiveStartOptions {
   deviceId?: string;
   translate?: boolean;
   model?: string;
+  systemAudio?: boolean;
+  desktopSourceId?: string;
 }
 
 export function useLiveMode(): LiveModeState {
@@ -108,7 +110,11 @@ export function useLiveMode(): LiveModeState {
             captureRef.current = new AudioCapture((chunk) => {
               socketRef.current?.sendAudio(chunk);
             });
-            captureRef.current.start({ deviceId: startOptsRef.current.deviceId }).then(() => {
+            captureRef.current.start({
+              deviceId: startOptsRef.current.deviceId,
+              systemAudio: startOptsRef.current.systemAudio,
+              desktopSourceId: startOptsRef.current.desktopSourceId,
+            }).then(() => {
               setAnalyser(captureRef.current?.analyser ?? null);
             }).catch((err) => {
               setError(err instanceof Error ? err.message : 'Audio capture failed');

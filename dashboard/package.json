@@ -51,6 +51,20 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../build/assets/tray-icon.png",
+        "to": "tray-icon.png"
+      },
+      {
+        "from": "../build/assets/tray-icon@1x.png",
+        "to": "tray-icon@1x.png"
+      },
+      {
+        "from": "../build/assets/tray-icon@2x.png",
+        "to": "tray-icon@2x.png"
+      }
+    ],
     "linux": {
       "target": "AppImage",
       "category": "Utility",

@@ -71,8 +71,6 @@ Technical documentation for developing and building TranscriptionSuite.
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
-- [15. Known Issues & Future Work](#15-known-issues--future-work)
-  - [15.1 Live Mode Language Setting](#151-live-mode-language-setting)
 
 ---
 
@@ -262,7 +260,7 @@ TranscriptionSuite/
 │
 ├── build/                        # Build and development tools
 │   ├── build-electron-linux.sh   # Build Electron AppImage
-│   ├── generate-ico.sh           # Generate logo.png and logo.ico from logo.svg
+│   ├── generate-ico.sh           # Generate PNG/ICO logo assets from SVG sources
 │   ├── docker-build-push.sh      # Build and push Docker image
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
@@ -472,6 +470,8 @@ npm run package:windows
 **Generated files (created by `build/generate-ico.sh`):**
 - `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
 - `logo.ico` — Multi-resolution Windows icon (16, 32, 48, 256px)
+- `logo_wide.png` (440px tall, aspect-preserved) — Sharp wide logo used in packaged app assets
+- `logo_wide_readme.png` (880px tall, aspect-preserved) — Extra-sharp wide logo for README rendering
 
 **Regenerate derived assets:**
 ```bash
@@ -1320,24 +1320,3 @@ These checks are useful for:
 - electron-builder (packaging)
 - electron-store (client config persistence)
 - Lucide React (icons)
-
----
-
-## 15. Known Issues & Future Work
-
-### 15.1 Live Mode Language Setting
-
-**Issue**: The `live_language` setting in `server/config.yaml` (line 117) is currently not being respected by the Live Mode transcription engine.
-
-**Current State**:
-- Setting is commented out in config.yaml with a TODO note
-- Dashboard has a language selector in Client settings, but it may not override the server's behavior
-- Language can be set through the dashboard, but effectiveness needs verification
-
-**Action Required**:
-- Investigate why the setting isn't being applied to the Live Mode engine
-- Verify the data flow from dashboard → API → live engine configuration
-- Ensure language preference is properly passed to the underlying transcription model
-- Test with various languages to confirm the setting takes effect
-
-**Workaround**: Use the language selector in the dashboard Client view, which attempts to set the language via the WebSocket configuration payload.

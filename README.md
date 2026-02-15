@@ -1,32 +1,38 @@
-# TranscriptionSuite
+<p align="left">
+  <img src="./build/assets/logo_wide_readme.png" alt="TranscriptionSuite logo" width="680">
+</p>
 
-<img align="left" width="374" height="205" src="./build/assets/logo_wide.png">
-
-<table>
+<table width="100%">
   <tr>
-    <td width="375px">
+    <td valign="top">
+      <table>
+        <tr>
+          <td width="375px">
 <pre>
-A fully local & private Speech-To-Text app
-with cross-platform support offering
-advanced features like diarization, audio
-notebook mode and LM Studio integration.
-Longform & Live Transcription available.
-Electron dashboard with Python backend,
-utilizing faster-whisper and NVIDIA GPU
-acceleration. Server is Dockerized for
-easy installation.
+A fully local and private Speech-To-Text
+app with cross-platform support, speaker
+diarization, Audio Notebook mode,
+LM Studio integration, and both longform
+and live transcription. Electron
+dashboard + Python backend powered by
+faster-whisper with NVIDIA GPU
+acceleration. The server is Dockerized
+for fast setup.
 </pre>
+          </td>
+        </tr>
+      </table>
+    </td>
+    <td align="left" valign="top" width="280px">
+      <br>
+      <strong>OS Support:</strong><br>
+      <img src="https://img.shields.io/badge/Linux-%23FCC624.svg?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
+      <img src="https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white" alt="Windows 11"><br><br>
+      <strong>GPU Hardware Support:</strong><br>
+      <img src="https://img.shields.io/badge/NVIDIA-Supported_only-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA Supported only">
     </td>
   </tr>
 </table>
-
-**OS Support:**
-
-![Linux](https://img.shields.io/badge/Linux-%23FCC624.svg?style=for-the-badge&logo=linux&logoColor=black) ![Windows 11](https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white)
-
-**GPU Hardware Support:**
-
-![NVIDIA Supported only](https://img.shields.io/badge/NVIDIA-Supported_only-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white)
 
 ---
 
@@ -62,7 +68,7 @@ easy installation.
   beyond the initial setup
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
 - **Fully featured GUI**: Electron desktop app for Linux and Windows
-- **Longform Transcription**: Record as long as you want and have it transcribed in seconds
+- **Longform Transcription**: Record as long as you want and have it transcribed in seconds![alt text](image.png)
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
 - **Speaker Diarization**: PyAnnote-based speaker identification
 - **Static File Transcription**: Transcribe an existing audio/video file
