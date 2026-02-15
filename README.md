@@ -16,7 +16,7 @@ LM Studio integration, and both longform
 and live transcription. Electron
 dashboard + Python backend powered by
 faster-whisper with NVIDIA GPU
-acceleration or CPU-only mode. The server
+acceleration or CPU mode. The server
 is Dockerized for fast setup.
 </pre>
           </td>
@@ -30,8 +30,8 @@ is Dockerized for fast setup.
       <img src="https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white" alt="Windows 11">
       <img src="https://img.shields.io/badge/macOS-000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"><br><br>
       <strong>Hardware Acceleration:</strong><br>
-      <img src="https://img.shields.io/badge/NVIDIA_GPU-Recommended-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA GPU Recommended">
-      <img src="https://img.shields.io/badge/CPU_Only-Supported-%23555555.svg?style=for-the-badge" alt="CPU Only Supported">
+      <img src="https://img.shields.io/badge/NVIDIA-Recommended-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA Recommended"><br>
+      <img src="https://img.shields.io/badge/CPU-Supported-%230EA5E9.svg?style=for-the-badge" alt="CPU Supported">
     </td>
   </tr>
 </table>
@@ -45,6 +45,7 @@ is Dockerized for fast setup.
   - [2.1 Docker](#21-docker)
   - [2.2 Git](#22-git)
 - [3. Installation](#3-installation)
+  - [3.1 Verify Download (Kleopatra)](#31-verify-download-kleopatra)
 - [4. First time setup](#4-first-time-setup)
   - [4.1 Starting the Server & Client](#41-starting-the-server--client)
 - [5. Usage](#5-usage)
@@ -155,20 +156,28 @@ https://github.com/user-attachments/assets/ea801ae2-d263-493b-a6c5-d431b59601ee
 
 ## 3. Installation
 
-Setup Guide/Tutorial:
-
-https://github.com/user-attachments/assets/2e5beea5-3417-4d08-afb9-815f47adf5d8
-
 Download the Dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page:
 
 | Platform | Download | Notes |
 |----------|----------|-------|
 | **Linux** | `TranscriptionSuite-x86_64.AppImage` | Standalone, no dependencies |
 | **Windows** | `TranscriptionSuite Setup.exe` | Standalone installer |
-| **macOS** | `TranscriptionSuite-arm64.dmg` | Signed & notarized, Apple Silicon |
+| **macOS** | `TranscriptionSuite-arm64.dmg` | Unsigned build for Apple Silicon |
 
 >* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
 >* *Linux builds support both X11 and Wayland*
+>* *Each release artifact includes an armored detached signature (`.asc`)*
+
+### 3.1 Verify Download (Kleopatra)
+
+1. Download both files from the same release:
+   - installer/app (`.AppImage`, `.exe`, `.dmg`, or `.zip`)
+   - matching signature file (`.asc`)
+2. Install Kleopatra: https://apps.kde.org/kleopatra/
+3. Import the public key in Kleopatra from this repository:
+   - [`build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](./build/assets/homelab-00_0xBFE4CC5D72020691_public.asc)
+4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
+5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
 
 ---
 

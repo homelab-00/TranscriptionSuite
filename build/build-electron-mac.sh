@@ -2,12 +2,10 @@
 # Build Electron DMG + ZIP for macOS (Apple Silicon arm64)
 # Requires: Node.js 24+, npm
 #
-# For signed/notarized builds, set these env vars:
-#   CSC_LINK          — Base64-encoded .p12 certificate (or path)
-#   CSC_KEY_PASSWORD  — Certificate password
-#   APPLE_ID          — Apple Developer account email
-#   APPLE_APP_PASSWORD— App-specific password
-#   APPLE_TEAM_ID     — 10-char Team ID
+# Optional release signing:
+#   GPG_KEY_ID         - key id / fingerprint used for detached .asc signatures
+#   GPG_PASSPHRASE     - passphrase for non-interactive signing
+#   GPG_TIMEOUT_MINUTES- signing timeout (default: 45)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,19 +25,6 @@ fi
 echo "→ Node.js $(node --version)"
 echo "→ npm $(npm --version)"
 
-# Check signing status
-if [[ -n "$CSC_LINK" ]]; then
-    echo "→ Code signing: ENABLED"
-else
-    echo "⚠ Code signing: DISABLED (CSC_LINK not set)"
-fi
-
-if [[ -n "$APPLE_ID" && -n "$APPLE_APP_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
-    echo "→ Notarization: ENABLED"
-else
-    echo "⚠ Notarization: DISABLED (Apple credentials not set)"
-fi
-
 # Install dependencies
 echo "→ Installing dependencies..."
 cd "$DASHBOARD_DIR"
@@ -52,6 +37,14 @@ npm run build:electron
 # Package as DMG + ZIP
 echo "→ Packaging for macOS..."
 npm run package:mac
+
+# Optional detached signature generation
+if [[ -n "${GPG_KEY_ID:-}" ]]; then
+    echo "→ Signing release artifacts with GPG armor..."
+    "$PROJECT_ROOT/build/sign-electron-artifacts.sh" "$DASHBOARD_DIR/release"
+else
+    echo "→ GPG signing skipped (set GPG_KEY_ID to enable)"
+fi
 
 echo ""
 echo "=================================================="

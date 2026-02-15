@@ -1,6 +1,11 @@
 #!/bin/bash
 # Build Electron AppImage for TranscriptionSuite
 # Requires: Node.js 24+, npm
+#
+# Optional release signing:
+#   GPG_KEY_ID         - key id / fingerprint used for detached .asc signatures
+#   GPG_PASSPHRASE     - passphrase for non-interactive signing
+#   GPG_TIMEOUT_MINUTES- signing timeout (default: 45)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +37,14 @@ npm run build:electron
 # Package as AppImage
 echo "→ Packaging as AppImage..."
 npm run package:linux
+
+# Optional detached signature generation
+if [[ -n "${GPG_KEY_ID:-}" ]]; then
+    echo "→ Signing release artifacts with GPG armor..."
+    "$PROJECT_ROOT/build/sign-electron-artifacts.sh" "$DASHBOARD_DIR/release"
+else
+    echo "→ GPG signing skipped (set GPG_KEY_ID to enable)"
+fi
 
 echo ""
 echo "=================================================="

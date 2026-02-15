@@ -27,8 +27,9 @@ Technical documentation for developing and building TranscriptionSuite.
   - [5.2 Build Matrix](#52-build-matrix)
   - [5.3 Linux AppImage](#53-linux-appimage)
   - [5.4 Windows Installer](#54-windows-installer)
-  - [5.5 macOS DMG (Signed + Notarized)](#55-macos-dmg-signed--notarized)
+  - [5.5 macOS DMG + ZIP (Unsigned)](#55-macos-dmg--zip-unsigned)
   - [5.6 Build Assets](#56-build-assets)
+  - [5.7 End-User Verification Docs](#57-end-user-verification-docs)
 - [6. Docker Reference](#6-docker-reference)
   - [6.1 Compose File Layering](#61-compose-file-layering)
   - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
@@ -186,7 +187,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  Renderer: React + TypeScript + Tailwind CSS      │  │
 │  │  Main Process: Electron (Node.js)                 │  │
 │  │  Targets: Linux (AppImage) + Windows (NSIS)       │  │
-│  │           + macOS (DMG, arm64, signed/notarized)  │  │
+│  │           + macOS (DMG + ZIP, arm64, unsigned)    │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -208,7 +209,7 @@ TranscriptionSuite uses a **client-server architecture**:
 |----------|--------------|----------|-----------------|-------|
 | **Linux** | Single-process | Electron + React | GPU (default) or CPU | Packaged as AppImage via electron-builder |
 | **Windows** | Single-process | Electron + React | GPU (default) or CPU | Packaged as NSIS installer via electron-builder |
-| **macOS** | Single-process | Electron + React | CPU only (v1) | Packaged as DMG + ZIP (arm64), signed & notarized |
+| **macOS** | Single-process | Electron + React | CPU only (v1) | Packaged as DMG + ZIP (arm64), unsigned |
 
 **Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
@@ -275,10 +276,9 @@ TranscriptionSuite/
 ├── build/                        # Build and development tools
 │   ├── build-electron-linux.sh   # Build Electron AppImage
 │   ├── build-electron-mac.sh     # Build Electron DMG + ZIP (macOS arm64)
+│   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
 │   ├── generate-ico.sh           # Generate PNG/ICO/ICNS logo assets from SVG sources
 │   ├── docker-build-push.sh      # Build and push Docker image
-│   ├── notarize.cjs              # Electron-builder afterSign hook for macOS notarization
-│   ├── entitlements.mac.plist    # macOS Hardened Runtime entitlements
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
 │
@@ -458,7 +458,7 @@ uv sync
 |----------|--------|--------|---------------------|
 | **Linux** | Electron + electron-builder | AppImage | None |
 | **Windows** | Electron + electron-builder | NSIS installer | None |
-| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Apple Developer cert + notarization credentials |
+| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | None |
 
 ### 5.3 Linux AppImage
 
@@ -481,7 +481,7 @@ npm run package:windows
 # Output: dashboard\release\TranscriptionSuite Setup *.exe
 ```
 
-### 5.5 macOS DMG (Signed + Notarized)
+### 5.5 macOS DMG + ZIP (Unsigned)
 
 ```bash
 ./build/build-electron-mac.sh
@@ -495,18 +495,24 @@ cd dashboard
 npm run package:mac
 ```
 
-**Signing & notarization** requires these environment variables:
+Optional armored signatures (`.asc`) for all desktop artifacts:
+
+```bash
+export GPG_KEY_ID="<your-key-id-or-fingerprint>"
+export GPG_TIMEOUT_MINUTES=60
+./build/sign-electron-artifacts.sh
+```
+
+The signing script prompts for your key passphrase by default (or uses `GPG_PASSPHRASE` in non-interactive environments).
+
+CI release workflow: `.github/workflows/release-desktop.yml`
+
+Required GitHub secrets for CI signing:
 | Variable | Description |
 |----------|-------------|
-| `CSC_LINK` | Base64-encoded `.p12` certificate (or file path) |
-| `CSC_KEY_PASSWORD` | Certificate password |
-| `APPLE_ID` | Apple Developer account email |
-| `APPLE_APP_PASSWORD` | App-specific password ([appleid.apple.com](https://appleid.apple.com)) |
-| `APPLE_TEAM_ID` | 10-character Team ID from Apple Developer portal |
-
-Without these variables, the build produces an unsigned DMG (for local development only).
-
-The CI pipeline (`.github/workflows/release-mac.yml`) injects these from repository secrets.
+| `GPG_PRIVATE_KEY` | Private key block (ASCII armored) or base64-encoded private key |
+| `GPG_KEY_ID` | Key id or fingerprint used to sign artifacts |
+| `GPG_PASSPHRASE` | Passphrase for `GPG_PRIVATE_KEY` |
 
 ### 5.6 Build Assets
 
@@ -514,6 +520,7 @@ The CI pipeline (`.github/workflows/release-mac.yml`) injects these from reposit
 - `logo.svg` — Master vector logo (source of truth)
 - `logo_wide.svg` — Wide variant for documentation/marketing
 - `profile.png` — Author profile picture for About dialog
+- `homelab-00_0xBFE4CC5D72020691_public.asc` — Public key used by users to verify release `.asc` signatures
 
 **Generated files (created by `build/generate-ico.sh`):**
 - `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
@@ -526,6 +533,12 @@ The CI pipeline (`.github/workflows/release-mac.yml`) injects these from reposit
 ```bash
 cd build && ./generate-ico.sh
 ```
+
+### 5.7 End-User Verification Docs
+
+- User-facing verification steps are documented in `README.md` section `3.1 Verify Download (Kleopatra)`.
+- Keep this key path stable for docs and releases: `build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
+- Kleopatra reference page used in docs: https://apps.kde.org/kleopatra/
 
 ---
 

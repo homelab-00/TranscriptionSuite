@@ -28,7 +28,6 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@electron/notarize": "^2.5.0",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
@@ -84,27 +83,34 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.utilities",
-      "icon": "../build/assets/logo.icns",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "../build/entitlements.mac.plist",
-      "entitlementsInherit": "../build/entitlements.mac.plist"
+      "icon": "../build/assets/logo.icns"
     },
     "dmg": {
       "sign": false,
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
-    },
-    "afterSign": "../build/notarize.cjs"
+    }
   }
 }
