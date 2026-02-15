@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
@@ -77,9 +77,11 @@ trayManager.setActions({
   startServer: async () => {
     try {
       const runtimeProfile = (store.get('server.runtimeProfile') as string) || 'gpu';
+      const hfToken = (store.get('server.hfToken') as string) || undefined;
       await dockerManager.startContainer({
         mode: 'local',
         runtimeProfile: runtimeProfile as 'gpu' | 'cpu',
+        hfToken,
       });
       trayManager.setMenuState({ serverRunning: true });
     } catch (err) {
@@ -102,6 +104,19 @@ trayManager.setActions({
   },
   toggleMute: () => {
     mainWindow?.webContents.send('tray:action', 'toggle-mute');
+  },
+  transcribeFile: async () => {
+    const win = mainWindow;
+    if (!win) return;
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select Audio File to Transcribe',
+      filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm', 'opus'] }],
+      properties: ['openFile'],
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+      win.webContents.send('tray:action', 'transcribe-file', result.filePaths[0]);
+      if (!win.isVisible()) { win.show(); win.focus(); }
+    }
   },
 });
 
@@ -189,10 +204,36 @@ ipcMain.handle('app:openExternal', async (_event, url: string) => {
   await shell.openExternal(url);
 });
 
+ipcMain.handle('app:openPath', async (_event, filePath: string) => {
+  return shell.openPath(filePath);
+});
+
+ipcMain.handle('app:getConfigDir', () => {
+  // TranscriptionSuite stores config in ~/.config/TranscriptionSuite
+  const homeDir = app.getPath('home');
+  const configDir = path.join(homeDir, '.config', 'TranscriptionSuite');
+  return configDir;
+});
+
+ipcMain.handle('app:readLocalFile', async (_event, filePath: string) => {
+  const buffer = fs.readFileSync(filePath);
+  const name = path.basename(filePath);
+  const ext = path.extname(filePath).toLowerCase().slice(1);
+  const mimeMap: Record<string, string> = {
+    mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+    flac: 'audio/flac', ogg: 'audio/ogg', webm: 'audio/webm', opus: 'audio/opus',
+  };
+  return { name, buffer: buffer.buffer, mimeType: mimeMap[ext] || 'audio/mpeg' };
+});
+
 // ─── Docker Management IPC ──────────────────────────────────────────────────
 
 ipcMain.handle('docker:available', async () => {
   return dockerManager.dockerAvailable();
+});
+
+ipcMain.handle('docker:checkGpu', async () => {
+  return dockerManager.checkGpu();
 });
 
 ipcMain.handle('docker:listImages', async () => {
@@ -201,6 +242,14 @@ ipcMain.handle('docker:listImages', async () => {
 
 ipcMain.handle('docker:pullImage', async (_event, tag: string) => {
   return dockerManager.pullImage(tag);
+});
+
+ipcMain.handle('docker:cancelPull', () => {
+  return dockerManager.cancelPull();
+});
+
+ipcMain.handle('docker:isPulling', () => {
+  return dockerManager.isPulling();
 });
 
 ipcMain.handle('docker:removeImage', async (_event, tag: string) => {

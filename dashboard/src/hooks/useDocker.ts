@@ -43,11 +43,13 @@ export interface UseDockerReturn {
   images: DockerImage[];
   refreshImages: () => Promise<void>;
   pullImage: (tag: string) => Promise<void>;
+  cancelPull: () => Promise<void>;
+  pulling: boolean;
   removeImage: (tag: string) => Promise<void>;
 
   // Container state
   container: ContainerStatus;
-  startContainer: (mode: 'local' | 'remote', runtimeProfile?: RuntimeProfile, tlsEnv?: Record<string, string>, imageTag?: string) => Promise<void>;
+  startContainer: (mode: 'local' | 'remote', runtimeProfile?: RuntimeProfile, tlsEnv?: Record<string, string>, imageTag?: string, hfToken?: string) => Promise<void>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
 
@@ -82,6 +84,7 @@ export function useDocker(): UseDockerReturn {
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
   const [operating, setOperating] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [pulling, setPulling] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
@@ -158,11 +161,24 @@ export function useDocker(): UseDockerReturn {
   const pullImage = useCallback(async (tag: string) => {
     const docker = api();
     if (!docker) return;
+    setPulling(true);
     await withOperation(async () => {
-      await docker.pullImage(tag);
-      await refreshImages();
+      try {
+        await docker.pullImage(tag);
+        await refreshImages();
+      } finally {
+        setPulling(false);
+      }
     });
   }, [withOperation, refreshImages]);
+
+  const cancelPull = useCallback(async () => {
+    const docker = api();
+    if (!docker) return;
+    await docker.cancelPull();
+    setPulling(false);
+    setOperating(false);
+  }, []);
 
   const removeImage = useCallback(async (tag: string) => {
     const docker = api();
@@ -173,11 +189,11 @@ export function useDocker(): UseDockerReturn {
     });
   }, [withOperation, refreshImages]);
 
-  const startContainer = useCallback(async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile = 'gpu', tlsEnv?: Record<string, string>, imageTag?: string) => {
+  const startContainer = useCallback(async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile = 'gpu', tlsEnv?: Record<string, string>, imageTag?: string, hfToken?: string) => {
     const docker = api();
     if (!docker) return;
     await withOperation(async () => {
-      await docker.startContainer({ mode, runtimeProfile, tlsEnv, imageTag });
+      await docker.startContainer({ mode, runtimeProfile, tlsEnv, imageTag, hfToken });
       // Wait a moment then refresh status
       await new Promise(r => setTimeout(r, 2000));
       setContainer(await docker.getContainerStatus());
@@ -269,6 +285,8 @@ export function useDocker(): UseDockerReturn {
     images,
     refreshImages,
     pullImage,
+    cancelPull,
+    pulling,
     removeImage,
     container,
     startContainer,

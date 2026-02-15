@@ -288,6 +288,11 @@ export class APIClient {
     return this.patch(`/api/notebook/recordings/${id}/title`, { title });
   }
 
+  /** PATCH /api/notebook/recordings/:id/date */
+  async updateRecordingDate(id: number, recordedAt: string): Promise<{ status: string; id: number; recorded_at: string }> {
+    return this.patch(`/api/notebook/recordings/${id}/date`, { recorded_at: recordedAt });
+  }
+
   /** PATCH /api/notebook/recordings/:id/summary */
   async updateRecordingSummary(
     id: number,

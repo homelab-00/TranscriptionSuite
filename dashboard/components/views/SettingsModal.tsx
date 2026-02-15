@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Database, Server, Laptop, AppWindow, Eye, EyeOff, Loader2, RotateCw } from 'lucide-react';
+import { X, Search, ChevronDown, FileText, RefreshCw, AlertTriangle, Save, Database, Server, Laptop, AppWindow, Eye, EyeOff, Loader2, RotateCw, Plus, Trash2, Shield, Copy, Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import type { AuthToken } from '../../src/api/types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [activeTab, setActiveTab] = useState('App');
   const [serverSearch, setServerSearch] = useState('');
   const [showAuthToken, setShowAuthToken] = useState(false);
+  const [showHfToken, setShowHfToken] = useState(false);
 
   // Animation State
   const [isRendered, setIsRendered] = useState(false);
@@ -31,6 +33,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   // Admin status for Server tab (read-only config display)
   const { status: adminStatus, loading: adminLoading } = useAdminStatus();
+
+  // Edited server config values (key → value; only populated when user edits)
+  const [serverConfigEdits, setServerConfigEdits] = useState<Record<string, string>>({});
+  const [configDir, setConfigDir] = useState<string>('~/.config/TranscriptionSuite');
+
+  // Token management state
+  const [tokens, setTokens] = useState<AuthToken[]>([]);
+  const [tokensLoading, setTokensLoading] = useState(false);
+  const [showTokenPanel, setShowTokenPanel] = useState(false);
+  const [newTokenName, setNewTokenName] = useState('');
+  const [newTokenAdmin, setNewTokenAdmin] = useState(false);
+  const [createdTokenPlaintext, setCreatedTokenPlaintext] = useState<string | null>(null);
+  const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
 
   // Derive server config sections from admin status
   const serverConfig = React.useMemo(() => {
@@ -98,6 +113,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     authToken: 'sk-1234567890abcdef',
     port: 9000,
     useHttps: false,
+    hfToken: '',
   });
 
   // Animation Lifecycle + Load Settings from Config Store
@@ -110,6 +126,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       // Load settings from config store
       const api = (window as any).electronAPI;
       if (api?.config) {
+        // Load config directory path
+        api.app?.getConfigDir?.().then((dir: string) => {
+          if (dir) setConfigDir(dir);
+        }).catch(() => {});
+        // Reset server config edits on open
+        setServerConfigEdits({});
         api.config.getAll().then((cfg: Record<string, unknown>) => {
           if (cfg) {
             setClientSettings(prev => ({
@@ -124,6 +146,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               constrainSpeakers: (cfg['diarization.constrainSpeakers'] as boolean) ?? prev.constrainSpeakers,
               numSpeakers: (cfg['diarization.numSpeakers'] as number) ?? prev.numSpeakers,
               autoAddNotebook: (cfg['notebook.autoAdd'] as boolean) ?? prev.autoAddNotebook,
+              hfToken: (cfg['server.hfToken'] as string) ?? prev.hfToken,
             }));
             setAppSettings(prev => ({
               ...prev,
@@ -172,6 +195,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['diarization.constrainSpeakers', clientSettings.constrainSpeakers],
         ['diarization.numSpeakers', clientSettings.numSpeakers],
         ['notebook.autoAdd', clientSettings.autoAddNotebook],
+        ['server.hfToken', clientSettings.hfToken],
         ['app.autoCopy', appSettings.autoCopy],
         ['app.showNotifications', appSettings.showNotifications],
         ['app.stopServerOnQuit', appSettings.stopServerOnQuit],
@@ -389,6 +413,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         </div>
       </Section>
 
+      <Section title="HuggingFace Token">
+        <p className="text-xs text-slate-400 mb-3">
+          Required for speaker diarization. Accept the{' '}
+          <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline">
+            PyAnnote model terms
+          </a>{' '}
+          on HuggingFace, then paste your token here.
+        </p>
+        <div className="relative">
+          <input
+            type={showHfToken ? 'text' : 'password'}
+            value={clientSettings.hfToken}
+            onChange={(e) => setClientSettings(prev => ({ ...prev, hfToken: e.target.value }))}
+            placeholder="hf_xxxxxxxxxxxxxxxxxxxx"
+            className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm text-white font-mono focus:outline-none focus:border-accent-cyan/50"
+          />
+          <button
+            type="button"
+            onClick={() => setShowHfToken(!showHfToken)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+          >
+            {showHfToken ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+        {clientSettings.hfToken && (
+          <p className="text-xs text-green-400/70 mt-1.5">Token will be passed to the container on next start.</p>
+        )}
+      </Section>
+
       <Section title="Audio Notebook">
         <AppleSwitch 
             checked={clientSettings.autoAddNotebook}
@@ -448,6 +501,125 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
             </div>
 
+            {/* Token Management Panel */}
+            <div className="mt-2">
+              <button
+                onClick={async () => {
+                  setShowTokenPanel(!showTokenPanel);
+                  if (!showTokenPanel && tokens.length === 0) {
+                    setTokensLoading(true);
+                    try {
+                      const res = await apiClient.listTokens();
+                      setTokens(res.tokens || []);
+                    } catch { /* server may not have TLS enabled */ }
+                    setTokensLoading(false);
+                  }
+                }}
+                className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                <Shield size={12} />
+                <span>Manage Tokens</span>
+                <ChevronDown size={12} className={`transition-transform ${showTokenPanel ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showTokenPanel && (
+                <div className="mt-3 space-y-3 border border-white/10 rounded-lg p-3 bg-white/5">
+                  {tokensLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 size={14} className="animate-spin" /> Loading tokens...</div>
+                  ) : (
+                    <>
+                      {/* Existing tokens list */}
+                      {tokens.length > 0 ? (
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                          {tokens.filter(t => !t.is_revoked).map(t => (
+                            <div key={t.token_id} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-black/20">
+                              <span className={`w-2 h-2 rounded-full ${t.is_admin ? 'bg-amber-400' : 'bg-accent-cyan'}`} />
+                              <span className="text-white flex-1 truncate">{t.client_name}</span>
+                              <span className="text-slate-500 font-mono">{t.token_id.slice(0, 8)}…</span>
+                              {t.is_admin && <span className="text-[9px] text-amber-400 font-bold uppercase">Admin</span>}
+                              {t.expires_at && (
+                                <span className="text-slate-500 text-[10px]">
+                                  {t.is_expired ? 'Expired' : `Expires ${new Date(t.expires_at).toLocaleDateString()}`}
+                                </span>
+                              )}
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`Revoke token for "${t.client_name}"?`)) return;
+                                  try {
+                                    await apiClient.revokeToken(t.token_id);
+                                    setTokens(prev => prev.filter(tk => tk.token_id !== t.token_id));
+                                  } catch { alert('Failed to revoke token.'); }
+                                }}
+                                className="p-0.5 text-slate-500 hover:text-red-400 transition-colors"
+                                title="Revoke"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">No active tokens. Enable TLS on the server to manage tokens.</p>
+                      )}
+
+                      {/* Created token display (shown once after creation) */}
+                      {createdTokenPlaintext && (
+                        <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                          <p className="text-xs text-green-400 font-semibold mb-1">New Token Created — Copy Now!</p>
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs text-white font-mono bg-black/30 rounded px-2 py-1 flex-1 select-all break-all">{createdTokenPlaintext}</code>
+                            <button
+                              onClick={() => { navigator.clipboard.writeText(createdTokenPlaintext); setCopiedTokenId('new'); setTimeout(() => setCopiedTokenId(null), 2000); }}
+                              className="p-1 text-green-400 hover:text-white transition-colors"
+                            >
+                              {copiedTokenId === 'new' ? <Check size={14} /> : <Copy size={14} />}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-1">This token will not be shown again.</p>
+                        </div>
+                      )}
+
+                      {/* Create new token */}
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Client name..."
+                          value={newTokenName}
+                          onChange={(e) => setNewTokenName(e.target.value)}
+                          className="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-accent-cyan/50"
+                        />
+                        <label className="flex items-center gap-1 text-[10px] text-slate-400 whitespace-nowrap">
+                          <input type="checkbox" checked={newTokenAdmin} onChange={(e) => setNewTokenAdmin(e.target.checked)} className="rounded" />
+                          Admin
+                        </label>
+                        <button
+                          onClick={async () => {
+                            if (!newTokenName.trim()) return;
+                            try {
+                              const res = await apiClient.createToken({ client_name: newTokenName.trim(), is_admin: newTokenAdmin });
+                              if (res.token) {
+                                setCreatedTokenPlaintext(res.token.token);
+                                setNewTokenName('');
+                                setNewTokenAdmin(false);
+                                // Refresh list
+                                const list = await apiClient.listTokens();
+                                setTokens(list.tokens || []);
+                              }
+                            } catch { alert('Failed to create token.'); }
+                          }}
+                          disabled={!newTokenName.trim()}
+                          className="p-1 text-accent-cyan hover:text-white disabled:text-slate-600 transition-colors"
+                          title="Create token"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4 items-end">
                 <div>
                     <label className="text-xs text-slate-500 font-medium uppercase tracking-wider block mb-1.5">Port</label>
@@ -471,12 +643,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     </div>
   );
 
-  const renderServerTab = () => (
+  const renderServerTab = () => {
+    const handleOpenConfigInEditor = async () => {
+      const api = (window as any).electronAPI;
+      if (api?.app?.openPath) {
+        const configPath = `${configDir}/config.yaml`;
+        const error = await api.app.openPath(configPath);
+        if (error) {
+          // Fallback: try opening the directory
+          await api.app.openPath(configDir).catch(() => {});
+        }
+      }
+    };
+
+    const handleServerConfigEdit = (sectionCategory: string, settingKey: string, newValue: string) => {
+      const fullKey = `${sectionCategory}.${settingKey}`;
+      setServerConfigEdits(prev => ({ ...prev, [fullKey]: newValue }));
+      setIsDirty(true);
+    };
+
+    const getServerConfigValue = (sectionCategory: string, settingKey: string, originalValue: string): string => {
+      const fullKey = `${sectionCategory}.${settingKey}`;
+      return fullKey in serverConfigEdits ? serverConfigEdits[fullKey] : originalValue;
+    };
+
+    return (
     <div className="space-y-6">
        <div className="bg-white/5 rounded-xl p-4 border border-white/10">
             <p className="text-sm text-slate-400 mb-4">
                 Server settings are stored in <span className="font-mono text-accent-cyan bg-accent-cyan/10 px-1 rounded">config.yaml</span>. 
-                Changes here will require a restart.
+                Changes here are for reference — edit the config file directly for persistent changes.
             </p>
             <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-slate-500" size={16} />
@@ -502,22 +698,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             ) : serverConfig.map((section) => (
                 <CollapsibleSection key={section.category} title={section.category} description={section.description}>
                     <div className="space-y-3 pt-2">
-                        {section.settings.filter(s => s.key.toLowerCase().includes(serverSearch.toLowerCase())).map((setting) => (
+                        {section.settings.filter(s => s.key.toLowerCase().includes(serverSearch.toLowerCase())).map((setting) => {
+                            const currentVal = getServerConfigValue(section.category, setting.key, setting.value);
+                            const isBoolean = setting.value === 'true' || setting.value === 'false';
+                            return (
                             <div key={setting.key} className="flex items-center justify-between group py-1">
                                 <div>
                                     <div className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">{setting.key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</div>
                                     <div className="text-xs text-slate-500">{setting.description}</div>
                                 </div>
                                 <div className="w-32">
-                                    <input 
-                                        type="text" 
-                                        readOnly
-                                        value={setting.value}
-                                        className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white/60 font-mono text-right cursor-default"
-                                    />
+                                    {isBoolean ? (
+                                        <AppleSwitch
+                                            checked={currentVal === 'true'}
+                                            onChange={(v) => handleServerConfigEdit(section.category, setting.key, String(v))}
+                                            label=""
+                                        />
+                                    ) : (
+                                        <input 
+                                            type="text" 
+                                            value={currentVal}
+                                            onChange={(e) => handleServerConfigEdit(section.category, setting.key, e.target.value)}
+                                            className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white/80 font-mono text-right hover:border-white/20 focus:outline-none focus:ring-1 focus:ring-accent-cyan/50 focus:border-accent-cyan/30 transition-all"
+                                        />
+                                    )}
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                         {section.settings.filter(s => s.key.toLowerCase().includes(serverSearch.toLowerCase())).length === 0 && (
                             <div className="text-center py-2 text-xs text-slate-600 italic">No matches in this section</div>
                         )}
@@ -531,14 +739,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <div>
                     <label className="text-xs text-slate-500 font-medium uppercase tracking-wider block mb-1">File Location</label>
                     <div className="font-mono text-xs text-slate-300 bg-black/30 px-2 py-1 rounded border border-white/5 select-all">
-                        /etc/transcription-suite/config.yaml
+                        {configDir}/config.yaml
                     </div>
                 </div>
-                <Button variant="secondary" size="sm" icon={<FileText size={14}/>}>Open in Editor</Button>
+                <Button variant="secondary" size="sm" icon={<FileText size={14}/>} onClick={handleOpenConfigInEditor}>Open in Editor</Button>
             </div>
        </Section>
     </div>
-  );
+    );
+  };
 
   const renderNotebookTab = () => (
     <div className="space-y-6">

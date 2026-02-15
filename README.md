@@ -165,7 +165,6 @@ Download the Dashboard for your platform from the [Releases](https://github.com/
 | **macOS** | `TranscriptionSuite-arm64.dmg` | Unsigned build for Apple Silicon |
 
 >* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
->* *Linux builds support both X11 and Wayland*
 >* *Each release artifact includes an armored detached signature (`.asc`)*
 
 ### 3.1 Verify Download (Kleopatra)

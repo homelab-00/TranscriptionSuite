@@ -15,8 +15,10 @@ import { useLiveMode } from '../../src/hooks/useLiveMode';
 import { useDocker } from '../../src/hooks/useDocker';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
 import { setConfig } from '../../src/config/store';
+import { supportsTranslation } from '../../src/services/modelCapabilities';
 
 export const SessionView: React.FC = () => {
   // Global State
@@ -111,6 +113,18 @@ export const SessionView: React.FC = () => {
 
   useEffect(() => { enumerateDevices(); }, [enumerateDevices]);
 
+  // Control Center State — real Docker container status
+  const docker = useDocker();
+  const serverRunning = docker.container.running;
+  // Client connection state — tracks explicit connect/disconnect
+  const [clientRunning, setClientRunning] = useState(false);
+  const serverConnection = useServerStatus();
+  const admin = useAdminStatus();
+
+  // Active model name (for capability checks & tray tooltip)
+  const activeModel = admin.status?.config?.transcription?.model ?? null;
+  const canTranslate = supportsTranslation(activeModel);
+
   // Main Transcription State
   const [mainLanguage, setMainLanguage] = useState('Auto Detect');
   const [mainTranslate, setMainTranslate] = useState(false);
@@ -119,13 +133,15 @@ export const SessionView: React.FC = () => {
   const isLive = live.status !== 'idle' && live.status !== 'error';
   const [liveLanguage, setLiveLanguage] = useState('Auto Detect');
   const [liveTranslate, setLiveTranslate] = useState(false);
-  
-  // Control Center State — real Docker container status
-  const docker = useDocker();
-  const serverRunning = docker.container.running;
-  // Client connection state — tracks explicit connect/disconnect
-  const [clientRunning, setClientRunning] = useState(false);
-  const serverConnection = useServerStatus();
+
+  // Reset translate toggles when model changes to one that doesn't support it
+  useEffect(() => {
+    if (!canTranslate) {
+      setMainTranslate(false);
+      setLiveTranslate(false);
+    }
+  }, [canTranslate]);
+
   // Derive active client connection from explicit state + hook activity
   const clientConnected = clientRunning && (
     serverConnection.reachable
@@ -174,12 +190,22 @@ export const SessionView: React.FC = () => {
     transcriptionStatus: transcription.status,
     liveStatus: live.status,
     muted: live.muted,
+    activeModel: activeModel ?? undefined,
     onStartRecording: () => transcription.start(),
     onStopRecording: () => {
       if (isLive) live.stop();
       else transcription.stop();
     },
     onToggleMute: () => live.toggleMute(),
+    onTranscribeFile: async (filePath: string) => {
+      try {
+        const { name, buffer, mimeType } = await window.electronAPI!.app.readLocalFile(filePath);
+        const file = new File([buffer], name, { type: mimeType });
+        await apiClient.uploadAndTranscribe(file, { enable_diarization: true });
+      } catch (err: any) {
+        console.error('Tray transcribe file failed:', err);
+      }
+    },
   });
 
   // Resolve language code from display name
@@ -552,9 +578,9 @@ export const SessionView: React.FC = () => {
                                 </div>
                             </div>
                             <div className="h-12 w-px bg-white/10 self-end mb-1"></div>
-                            <div className="flex flex-col items-center min-w-25">
-                                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2 mt-1 text-center whitespace-nowrap">Translate to English</label>
-                                <div className="h-11.5 flex items-center justify-center"><AppleSwitch checked={mainTranslate} onChange={setMainTranslate} size="sm" /></div>
+                            <div className="flex flex-col items-center min-w-25" title={canTranslate ? '' : 'Current model does not support translation'}>
+                                <label className={`text-[9px] font-bold uppercase tracking-widest mb-2 mt-1 text-center whitespace-nowrap ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}>Translate to English</label>
+                                <div className="h-11.5 flex items-center justify-center"><AppleSwitch checked={mainTranslate && canTranslate} onChange={setMainTranslate} size="sm" disabled={!canTranslate} /></div>
                             </div>
                         </div>
 
@@ -692,9 +718,9 @@ export const SessionView: React.FC = () => {
                             <CustomSelect value={liveLanguage} onChange={setLiveLanguage} options={languageOptions} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-32.5" />
                         </div>
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
-                        <div className="flex items-center gap-2 h-8 shrink-0">
-                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap">Translate to English</span>
-                            <AppleSwitch checked={liveTranslate} onChange={setLiveTranslate} size="sm" />
+                        <div className="flex items-center gap-2 h-8 shrink-0" title={canTranslate ? '' : 'Current model does not support translation'}>
+                            <span className={`text-[9px] font-bold uppercase tracking-widest whitespace-nowrap ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}>Translate to English</span>
+                            <AppleSwitch checked={liveTranslate && canTranslate} onChange={setLiveTranslate} size="sm" disabled={!canTranslate} />
                         </div>
                     </div>
 

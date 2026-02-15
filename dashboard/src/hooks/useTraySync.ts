@@ -26,10 +26,13 @@ interface TrySyncDeps {
   liveStatus: LiveStatus;
   /** Whether audio is muted (live mode or recording) */
   muted: boolean;
+  /** Active transcription model name (for tooltip) */
+  activeModel?: string;
   /** Callbacks to forward tray context-menu actions */
   onStartRecording?: () => void;
   onStopRecording?: () => void;
   onToggleMute?: () => void;
+  onTranscribeFile?: (filePath: string) => void;
 }
 
 /**
@@ -103,6 +106,7 @@ export function useTraySync(deps: TrySyncDeps): void {
     transcriptionStatus,
     liveStatus,
     muted,
+    activeModel,
   } = deps;
 
   // Push TrayState whenever inputs change
@@ -112,7 +116,11 @@ export function useTraySync(deps: TrySyncDeps): void {
       prevStateRef.current = newState;
       window.electronAPI!.tray.setState(newState);
     }
-  }, [serverStatus, containerRunning, transcriptionStatus, liveStatus, muted]);
+    // Also set custom tooltip with model info when server is active
+    if (activeModel && containerRunning) {
+      window.electronAPI!.tray.setTooltip(`TranscriptionSuite — Model: ${activeModel}`);
+    }
+  }, [serverStatus, containerRunning, transcriptionStatus, liveStatus, muted, activeModel]);
 
   // Push menu state so the context menu shows the right labels
   useEffect(() => {
@@ -128,7 +136,7 @@ export function useTraySync(deps: TrySyncDeps): void {
 
   // Listen for tray context-menu actions forwarded from the main process
   useEffect(() => {
-    const cleanup = window.electronAPI!.tray.onAction((action: string) => {
+    const cleanup = window.electronAPI!.tray.onAction((action: string, ...args: any[]) => {
       switch (action) {
         case 'start-recording':
           callbacksRef.current.onStartRecording?.();
@@ -138,6 +146,9 @@ export function useTraySync(deps: TrySyncDeps): void {
           break;
         case 'toggle-mute':
           callbacksRef.current.onToggleMute?.();
+          break;
+        case 'transcribe-file':
+          if (args[0]) callbacksRef.current.onTranscribeFile?.(args[0] as string);
           break;
       }
     });

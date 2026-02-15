@@ -69,6 +69,7 @@ export interface StartContainerOptions {
   runtimeProfile: RuntimeProfile;
   imageTag?: string;
   tlsEnv?: Record<string, string>;
+  hfToken?: string;
 }
 
 // ─── Compose File Selection ─────────────────────────────────────────────────
@@ -124,6 +125,9 @@ async function dockerAvailable(): Promise<boolean> {
 
 // ─── Image Operations ───────────────────────────────────────────────────────
 
+/** Active pull process — tracked so it can be cancelled */
+let pullProcess: ChildProcess | null = null;
+
 /**
  * List local Docker images matching our repo.
  */
@@ -148,9 +152,57 @@ async function listImages(): Promise<DockerImage[]> {
 
 /**
  * Pull an image tag from the registry.
+ * Uses spawn instead of exec so the process can be cancelled.
  */
-async function pullImage(tag: string = 'latest'): Promise<string> {
-  return exec('docker', ['pull', `${IMAGE_REPO}:${tag}`]);
+function pullImage(tag: string = 'latest'): Promise<string> {
+  return new Promise((resolve, reject) => {
+    cancelPull(); // kill any existing pull first
+
+    const proc = spawn('docker', ['pull', `${IMAGE_REPO}:${tag}`], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    pullProcess = proc;
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString(); });
+    proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      if (pullProcess === proc) pullProcess = null;
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(stderr.trim() || `Pull exited with code ${code}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      if (pullProcess === proc) pullProcess = null;
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Cancel an in-progress image pull.
+ * Returns true if a pull was actually cancelled.
+ */
+function cancelPull(): boolean {
+  if (pullProcess) {
+    pullProcess.kill('SIGTERM');
+    pullProcess = null;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a pull is currently in progress.
+ */
+function isPulling(): boolean {
+  return pullProcess !== null;
 }
 
 /**
@@ -193,7 +245,7 @@ async function getContainerStatus(): Promise<ContainerStatus> {
 async function startContainer(
   options: StartContainerOptions,
 ): Promise<string> {
-  const { mode, runtimeProfile, imageTag, tlsEnv } = options;
+  const { mode, runtimeProfile, imageTag, tlsEnv, hfToken } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
 
   // Pass the selected image tag to docker-compose (defaults to 'latest' in compose file)
@@ -208,6 +260,11 @@ async function startContainer(
   // For CPU mode, force CUDA invisible so the server deterministically uses CPU
   if (runtimeProfile === 'cpu') {
     composeEnv['CUDA_VISIBLE_DEVICES'] = '';
+  }
+
+  // Pass HuggingFace token to the container for diarization model access
+  if (hfToken) {
+    composeEnv['HUGGINGFACE_TOKEN'] = hfToken;
   }
 
   const fileArgs = composeFileArgs(runtimeProfile);
@@ -353,12 +410,37 @@ async function getLogs(tail: number = 200): Promise<string[]> {
   }
 }
 
+// ─── GPU Detection ──────────────────────────────────────────────────────────
+
+/**
+ * Check for NVIDIA GPU + container toolkit availability.
+ * Returns { gpu: boolean, toolkit: boolean }.
+ */
+async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
+  let gpu = false;
+  let toolkit = false;
+  try {
+    await exec('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
+    gpu = true;
+  } catch {}
+  if (gpu) {
+    try {
+      const info = await exec('docker', ['info', '--format', '{{json .Runtimes}}']);
+      toolkit = info.includes('nvidia');
+    } catch {}
+  }
+  return { gpu, toolkit };
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export const dockerManager = {
   dockerAvailable,
+  checkGpu,
   listImages,
   pullImage,
+  cancelPull,
+  isPulling,
   removeImage,
   getContainerStatus,
   startContainer,

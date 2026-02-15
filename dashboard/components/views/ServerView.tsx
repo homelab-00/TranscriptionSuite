@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Cpu, HardDrive, Download, Loader2, RefreshCw, Gpu } from 'lucide-react';
+import { Box, Cpu, HardDrive, Download, Loader2, RefreshCw, Gpu, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -7,6 +7,7 @@ import { CustomSelect } from '../ui/CustomSelect';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDocker } from '../../src/hooks/useDocker';
 import { apiClient } from '../../src/api/client';
+import { getConfig } from '../../src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
@@ -54,12 +55,81 @@ export const ServerView: React.FC = () => {
   const activeTranscriber = transcriber || realModel;
   const activeLiveModel = liveModel || realLiveModel;
 
-  // Image selection state
+  // Image selection state — "Most Recent (auto)" always picks the newest available tag
+  const MOST_RECENT = 'Most Recent (auto)';
   const imageOptions = docker.images.length > 0
-    ? docker.images.map(i => i.fullName)
+    ? [MOST_RECENT, ...docker.images.map(i => i.fullName)]
     : ['ghcr.io/homelab-00/transcriptionsuite-server:latest'];
   const [selectedImage, setSelectedImage] = useState(imageOptions[0]);
-  const selectedTag = selectedImage.split(':').pop() || 'latest';
+  const resolvedImage = selectedImage === MOST_RECENT && docker.images.length > 0
+    ? docker.images[0].fullName
+    : selectedImage;
+  const selectedTag = resolvedImage.split(':').pop() || 'latest';
+
+  // Start container with HF token from config
+  const handleStartContainer = useCallback(async (mode: 'local' | 'remote') => {
+    const hfToken = await getConfig<string>('server.hfToken') || undefined;
+    await docker.startContainer(mode, runtimeProfile, undefined, selectedTag, hfToken);
+  }, [docker, runtimeProfile, selectedTag]);
+
+  // ─── Setup Checklist ────────────────────────────────────────────────────────
+
+  const [setupDismissed, setSetupDismissed] = useState(true); // hide until loaded
+  const [setupExpanded, setSetupExpanded] = useState(true);
+  const [gpuInfo, setGpuInfo] = useState<{ gpu: boolean; toolkit: boolean } | null>(null);
+
+  // Load dismissed state and GPU info on mount
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (api?.config) {
+      api.config.get('app.setupDismissed').then((val: unknown) => {
+        setSetupDismissed(val === true);
+      }).catch(() => setSetupDismissed(false));
+    } else {
+      setSetupDismissed(false);
+    }
+    if (api?.docker?.checkGpu) {
+      api.docker.checkGpu().then((info: { gpu: boolean; toolkit: boolean }) => {
+        setGpuInfo(info);
+        // Auto-set runtime profile based on GPU detection (only if not already configured)
+        api.config?.get('server.runtimeProfile').then((val: unknown) => {
+          if (!val && info.gpu && info.toolkit) {
+            handleRuntimeProfileChange('gpu');
+          } else if (!val && !info.gpu) {
+            handleRuntimeProfileChange('cpu');
+          }
+        }).catch(() => {});
+      }).catch(() => setGpuInfo(null));
+    }
+  }, []);
+
+  // Setup checks
+  const setupChecks = [
+    {
+      label: 'Docker installed',
+      ok: docker.available,
+      hint: 'Install Docker Engine or Docker Desktop',
+    },
+    {
+      label: 'Docker image pulled',
+      ok: docker.images.length > 0,
+      hint: 'Pull an image below to get started',
+    },
+    {
+      label: 'NVIDIA GPU detected',
+      ok: gpuInfo?.gpu ?? false,
+      warn: gpuInfo !== null && !gpuInfo.gpu,
+      hint: gpuInfo?.gpu ? (gpuInfo.toolkit ? 'nvidia-container-toolkit ready' : 'Install nvidia-container-toolkit for GPU mode') : 'CPU mode will be used (slower)',
+    },
+  ];
+  const allPassed = setupChecks.every(c => c.ok);
+  const showChecklist = !setupDismissed || !allPassed;
+
+  const handleDismissSetup = useCallback(() => {
+    setSetupDismissed(true);
+    const api = (window as any).electronAPI;
+    api?.config?.set('app.setupDismissed', true);
+  }, []);
 
   // Model load/unload handlers
   const handleLoadModels = useCallback(async () => {
@@ -85,6 +155,56 @@ export const ServerView: React.FC = () => {
              <h1 className="text-3xl font-bold text-white tracking-tight mb-2">Server Configuration</h1>
              <p className="text-slate-400 -mt-1">Manage runtime resources and persistent storage.</p>
          </div>
+
+         {/* Setup checklist — shown on first run or when prerequisites are missing */}
+         {showChecklist && (
+           <div className={`rounded-xl border transition-all duration-300 overflow-hidden ${allPassed ? 'border-green-500/20 bg-green-500/5' : 'border-accent-orange/20 bg-accent-orange/5'}`}>
+             <button
+               onClick={() => setSetupExpanded(!setupExpanded)}
+               className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-white/5 transition-colors"
+             >
+               <div className="flex items-center gap-3">
+                 {allPassed
+                   ? <CheckCircle2 size={18} className="text-green-400" />
+                   : <AlertTriangle size={18} className="text-accent-orange" />
+                 }
+                 <span className="text-sm font-semibold text-white">
+                   {allPassed ? 'Setup Complete' : 'Setup Checklist'}
+                 </span>
+                 <span className="text-xs text-slate-500 font-mono">
+                   {setupChecks.filter(c => c.ok).length}/{setupChecks.length} checks passed
+                 </span>
+               </div>
+               <div className="flex items-center gap-2">
+                 {allPassed && (
+                   <button
+                     onClick={(e) => { e.stopPropagation(); handleDismissSetup(); }}
+                     className="text-xs text-slate-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-white/10"
+                   >
+                     Dismiss
+                   </button>
+                 )}
+                 {setupExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+               </div>
+             </button>
+             {setupExpanded && (
+               <div className="px-5 pb-4 space-y-2.5">
+                 {setupChecks.map((check, i) => (
+                   <div key={i} className="flex items-center gap-3">
+                     {check.ok
+                       ? <CheckCircle2 size={15} className="text-green-400 shrink-0" />
+                       : check.warn
+                       ? <AlertTriangle size={15} className="text-accent-orange shrink-0" />
+                       : <XCircle size={15} className="text-red-400 shrink-0" />
+                     }
+                     <span className={`text-sm ${check.ok ? 'text-slate-300' : 'text-white'}`}>{check.label}</span>
+                     <span className="text-xs text-slate-500 ml-auto">{check.hint}</span>
+                   </div>
+                 ))}
+               </div>
+             )}
+           </div>
+         )}
          
          {/* 1. Image Card */}
          <div className="relative pl-8 border-l-2 border-white/10 pb-8 last:border-0 last:pb-0 shrink-0">
@@ -122,8 +242,13 @@ export const ServerView: React.FC = () => {
                   </div>
                   <div className="flex flex-col justify-end space-y-2">
                        <Button variant="secondary" className="w-full h-10" onClick={() => docker.pullImage(selectedTag)} disabled={docker.operating}>
-                         {docker.operating ? <><Loader2 size={14} className="animate-spin mr-2" /> Pulling...</> : 'Fetch Fresh Image'}
+                         {docker.pulling ? <><Loader2 size={14} className="animate-spin mr-2" /> Pulling...</> : 'Fetch Fresh Image'}
                        </Button>
+                       {docker.pulling && (
+                         <Button variant="danger" className="w-full h-10" onClick={() => docker.cancelPull()}>
+                           Cancel Pull
+                         </Button>
+                       )}
                        <Button variant="danger" className="w-full h-10" onClick={() => docker.removeImage(selectedTag)} disabled={docker.operating || docker.images.length === 0}>Remove Image</Button>
                   </div>
               </div>
@@ -193,10 +318,10 @@ export const ServerView: React.FC = () => {
 
                         <div className="flex-1 flex flex-wrap items-center justify-between gap-4 min-w-0">
                             <div className="flex gap-2">
-                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('local', runtimeProfile, undefined, selectedTag)} disabled={docker.operating || isRunning}>
+                                <Button variant="secondary" className="h-9 px-4" onClick={() => handleStartContainer('local')} disabled={docker.operating || isRunning}>
                                   {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
                                 </Button>
-                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('remote', runtimeProfile, undefined, selectedTag)} disabled={docker.operating || isRunning}>Start Remote</Button>
+                                <Button variant="secondary" className="h-9 px-4" onClick={() => handleStartContainer('remote')} disabled={docker.operating || isRunning}>Start Remote</Button>
                                 <Button variant="danger" className="h-9 px-4" onClick={() => docker.stopContainer()} disabled={docker.operating || !isRunning}>Stop</Button>
                             </div>
                             <Button variant="danger" className="h-9 px-4" onClick={() => docker.removeContainer()} disabled={docker.operating || isRunning}>

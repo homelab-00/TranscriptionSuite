@@ -14,6 +14,7 @@ interface StartContainerOptions {
   runtimeProfile: RuntimeProfile;
   imageTag?: string;
   tlsEnv?: Record<string, string>;
+  hfToken?: string;
 }
 
 interface TrayMenuState {
@@ -33,11 +34,17 @@ interface ElectronAPI {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
     openExternal: (url: string) => Promise<void>;
+    openPath: (filePath: string) => Promise<string>;
+    getConfigDir: () => Promise<string>;
+    readLocalFile: (filePath: string) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
   };
   docker: {
     available: () => Promise<boolean>;
+    checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean }>;
     listImages: () => Promise<Array<{ tag: string; fullName: string; size: string; created: string; id: string }>>;
     pullImage: (tag: string) => Promise<string>;
+    cancelPull: () => Promise<boolean>;
+    isPulling: () => Promise<boolean>;
     removeImage: (tag: string) => Promise<string>;
     getContainerStatus: () => Promise<{ exists: boolean; running: boolean; status: string; health?: string; startedAt?: string }>;
     startContainer: (options: StartContainerOptions) => Promise<string>;
@@ -54,7 +61,7 @@ interface ElectronAPI {
     setTooltip: (tooltip: string) => Promise<void>;
     setState: (state: TrayState) => Promise<void>;
     setMenuState: (menuState: TrayMenuState) => Promise<void>;
-    onAction: (callback: (action: string) => void) => () => void;
+    onAction: (callback: (action: string, ...args: any[]) => void) => () => void;
   };
   audio: {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Play, Pause, Rewind, FastForward, Sparkles, MessageSquare, Clock, FileText, Bot, User, Send, Settings2, MoreHorizontal, Trash2, Edit2, Share, Loader2 } from 'lucide-react';
+import { X, Play, Pause, Rewind, FastForward, Sparkles, MessageSquare, Clock, FileText, Bot, User, Send, Settings2, MoreHorizontal, Trash2, Edit2, Share, Loader2, Pencil, Check, XCircle, StopCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { useRecording } from '../../src/hooks/useRecording';
@@ -72,6 +72,15 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSummaryEditing, setIsSummaryEditing] = useState(false);
+  const [summaryEditText, setSummaryEditText] = useState('');
+  const [isSummarySaving, setIsSummarySaving] = useState(false);
+  const summaryEditRef = useRef<HTMLTextAreaElement>(null);
+  const summarySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Date editing state
+  const [isDateEditing, setIsDateEditing] = useState(false);
+  const [dateEditValue, setDateEditValue] = useState('');
 
   // LM Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -204,6 +213,63 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     setIsGenerating(true);
   };
 
+  const handleStopGeneration = useCallback(() => {
+    setIsGenerating(false);
+  }, []);
+
+  const handleEnterSummaryEdit = useCallback(() => {
+    if (isGenerating) return;
+    setIsSummaryEditing(true);
+    setSummaryEditText(summaryText);
+    // Focus the textarea after render
+    setTimeout(() => summaryEditRef.current?.focus(), 50);
+  }, [isGenerating, summaryText]);
+
+  const handleSaveSummary = useCallback(async (text: string) => {
+    if (!note?.recordingId) return;
+    setIsSummarySaving(true);
+    try {
+      await apiClient.updateRecordingSummary(note.recordingId, text || undefined);
+      setSummaryText(text);
+    } catch {
+      // silently fail — user can retry
+    } finally {
+      setIsSummarySaving(false);
+    }
+  }, [note?.recordingId]);
+
+  const handleExitSummaryEdit = useCallback((save: boolean) => {
+    if (summarySaveTimerRef.current) {
+      clearTimeout(summarySaveTimerRef.current);
+      summarySaveTimerRef.current = null;
+    }
+    if (save && summaryEditText !== summaryText) {
+      handleSaveSummary(summaryEditText);
+    }
+    setIsSummaryEditing(false);
+  }, [summaryEditText, summaryText, handleSaveSummary]);
+
+  const handleSummaryEditChange = useCallback((text: string) => {
+    setSummaryEditText(text);
+    // Debounced auto-save (2s after user stops typing)
+    if (summarySaveTimerRef.current) clearTimeout(summarySaveTimerRef.current);
+    summarySaveTimerRef.current = setTimeout(() => {
+      if (note?.recordingId && text !== summaryText) {
+        handleSaveSummary(text);
+      }
+    }, 2000);
+  }, [note?.recordingId, summaryText, handleSaveSummary]);
+
+  const handleClearSummary = useCallback(async () => {
+    if (!note?.recordingId) return;
+    const confirmed = window.confirm('Clear the summary? This cannot be undone.');
+    if (!confirmed) return;
+    await handleSaveSummary('');
+    setSummaryText('');
+    setSummaryExpanded(false);
+    setIsSummaryEditing(false);
+  }, [note?.recordingId, handleSaveSummary]);
+
   const handleCloseAction = () => {
     if (isSidebarOpen) {
         setIsSidebarOpen(false);
@@ -315,6 +381,30 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     setContextMenu(null);
   }, [note?.recordingId, recording?.title, note?.title, onClose]);
 
+  /** Open inline date editor with current date pre-filled */
+  const handleDateEditOpen = useCallback(() => {
+    if (!recording?.recorded_at) return;
+    // Format as datetime-local input value: YYYY-MM-DDTHH:mm
+    const d = new Date(recording.recorded_at);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setDateEditValue(val);
+    setIsDateEditing(true);
+  }, [recording?.recorded_at]);
+
+  /** Save new date and close editor */
+  const handleDateSave = useCallback(async () => {
+    if (!note?.recordingId || !dateEditValue) return;
+    try {
+      const isoDate = new Date(dateEditValue).toISOString();
+      await apiClient.updateRecordingDate(note.recordingId, isoDate);
+      setIsDateEditing(false);
+      onClose(); // refresh
+    } catch {
+      alert('Failed to update date.');
+    }
+  }, [note?.recordingId, dateEditValue, onClose]);
+
   const handleExport = useCallback(async (format: 'txt' | 'srt' | 'ass' = 'txt') => {
     if (!note?.recordingId) return;
     const url = apiClient.getExportUrl(note.recordingId, format);
@@ -356,7 +446,27 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                         <span className="w-1 h-1 rounded-full bg-slate-600"></span>
                         <span className="flex items-center gap-1.5"><FileText size={14}/> {recording ? `${recording.word_count.toLocaleString()} words` : '— words'}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                        <span className="text-slate-500">{recording ? new Date(recording.recorded_at).toLocaleString() : note.date ?? ''}</span>
+                        {isDateEditing ? (
+                          <span className="flex items-center gap-1.5">
+                            <input
+                              type="datetime-local"
+                              value={dateEditValue}
+                              onChange={(e) => setDateEditValue(e.target.value)}
+                              className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-sm text-white outline-none focus:ring-1 focus:ring-accent-cyan [color-scheme:dark]"
+                              autoFocus
+                            />
+                            <button onClick={handleDateSave} className="p-0.5 hover:text-accent-cyan transition-colors"><Check size={14} /></button>
+                            <button onClick={() => setIsDateEditing(false)} className="p-0.5 hover:text-red-400 transition-colors"><XCircle size={14} /></button>
+                          </span>
+                        ) : (
+                          <span
+                            className="text-slate-500 hover:text-slate-300 cursor-pointer transition-colors"
+                            onClick={handleDateEditOpen}
+                            title="Click to change date"
+                          >
+                            {recording ? new Date(recording.recorded_at).toLocaleString() : note.date ?? ''}
+                          </span>
+                        )}
                         {note.tag && <span className="ml-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-accent-cyan/10 text-accent-cyan border-accent-cyan/20">{note.tag}</span>}
                     </div>
                 </div>
@@ -412,7 +522,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                      </div>
                 </div>
 
-                {/* 2. AI Summary Section - Added selectable-text */}
+                {/* 2. AI Summary Section - Editable */}
                 <div className={`transition-all duration-500 ease-in-out border border-white/10 rounded-2xl overflow-hidden ${summaryExpanded ? 'bg-linear-to-br from-accent-magenta/5 to-purple-900/10' : 'bg-glass-100 hover:bg-white/5'}`}>
                     {!summaryExpanded ? (
                         <button onClick={handleGenerateSummary} className="w-full h-14 flex items-center justify-center gap-3 text-accent-magenta hover:text-white transition-colors group select-none">
@@ -421,14 +531,59 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                         </button>
                     ) : (
                         <div className="p-6 selectable-text">
-                            <div className="flex items-center gap-2 mb-3 text-accent-magenta select-none">
-                                <Sparkles size={16} />
-                                <span className="text-xs font-bold uppercase tracking-widest">AI Generated Summary</span>
+                            <div className="flex items-center justify-between mb-3 select-none">
+                                <div className="flex items-center gap-2 text-accent-magenta">
+                                    <Sparkles size={16} />
+                                    <span className="text-xs font-bold uppercase tracking-widest">AI Generated Summary</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    {isGenerating && (
+                                        <button onClick={handleStopGeneration} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-red-400 transition-colors" title="Stop generation">
+                                            <StopCircle size={14} />
+                                        </button>
+                                    )}
+                                    {!isGenerating && summaryText && !isSummaryEditing && (
+                                        <button onClick={handleEnterSummaryEdit} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors" title="Edit summary">
+                                            <Pencil size={14} />
+                                        </button>
+                                    )}
+                                    {isSummaryEditing && (
+                                        <>
+                                            <button onClick={() => handleExitSummaryEdit(true)} className="p-1.5 rounded-lg hover:bg-white/10 text-green-400 hover:text-green-300 transition-colors" title="Save">
+                                                <Check size={14} />
+                                            </button>
+                                            <button onClick={() => handleExitSummaryEdit(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors" title="Cancel editing">
+                                                <XCircle size={14} />
+                                            </button>
+                                        </>
+                                    )}
+                                    {!isGenerating && summaryText && (
+                                        <button onClick={handleClearSummary} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-red-400 transition-colors" title="Clear summary">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    )}
+                                    {isSummarySaving && (
+                                        <Loader2 size={14} className="animate-spin text-accent-magenta ml-1" />
+                                    )}
+                                </div>
                             </div>
-                            <p className="text-slate-200 leading-relaxed text-lg">
-                                {summaryText}
-                                {isGenerating && <span className="inline-block w-2 h-4 bg-accent-magenta ml-1 animate-pulse select-none"/>}
-                            </p>
+                            {isSummaryEditing ? (
+                                <textarea
+                                    ref={summaryEditRef}
+                                    value={summaryEditText}
+                                    onChange={(e) => handleSummaryEditChange(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Escape') handleExitSummaryEdit(false);
+                                    }}
+                                    className="w-full min-h-32 bg-black/20 border border-white/10 rounded-lg p-3 text-slate-200 leading-relaxed text-lg resize-y focus:outline-none focus:ring-1 focus:ring-accent-magenta/50 transition-all"
+                                    placeholder="Edit summary..."
+                                />
+                            ) : (
+                                <p className="text-slate-200 leading-relaxed text-lg cursor-text" onClick={handleEnterSummaryEdit}>
+                                    {summaryText}
+                                    {isGenerating && <span className="inline-block w-2 h-4 bg-accent-magenta ml-1 animate-pulse select-none"/>}
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -445,7 +600,38 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                                 <div className="text-[10px] text-slate-500 font-mono">{formatRecSecs(seg.start)}</div>
                             </div>
                             <div className="flex-1 text-slate-300 leading-relaxed group-hover:text-white transition-colors selectable-text">
-                                <p>{seg.text}</p>
+                                {seg.words && seg.words.length > 0 ? (
+                                  <p>
+                                    {seg.words.map((w, wi) => (
+                                      <span
+                                        key={wi}
+                                        onClick={() => {
+                                          if (audioRef.current) {
+                                            audioRef.current.currentTime = w.start;
+                                            audioRef.current.play().catch(() => {});
+                                          }
+                                        }}
+                                        className={`cursor-pointer rounded px-px transition-colors duration-150 hover:bg-accent-cyan/20 hover:text-accent-cyan ${
+                                          audioRef.current && currentTime >= w.start && currentTime < w.end
+                                            ? 'bg-accent-cyan/30 text-accent-cyan font-medium'
+                                            : ''
+                                        }`}
+                                        title={`${formatRecSecs(w.start)} → ${formatRecSecs(w.end)}`}
+                                      >{w.word}</span>
+                                    ))}
+                                  </p>
+                                ) : (
+                                  <p
+                                    className="cursor-pointer hover:text-accent-cyan/80 transition-colors"
+                                    onClick={() => {
+                                      if (audioRef.current) {
+                                        audioRef.current.currentTime = seg.start;
+                                        audioRef.current.play().catch(() => {});
+                                      }
+                                    }}
+                                    title={`Seek to ${formatRecSecs(seg.start)}`}
+                                  >{seg.text}</p>
+                                )}
                             </div>
                         </div>
                     )) : recordingLoading ? (

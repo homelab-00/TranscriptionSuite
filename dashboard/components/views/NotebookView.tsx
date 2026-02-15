@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { NotebookTab } from '../../types';
-import { Calendar, Search, Upload, Filter, FileText, Trash2, Download, Clock, MoreHorizontal, Play, ChevronLeft, ChevronRight, Check, Plus, Mic, Minus, CalendarDays, Edit2, Share, Loader2 } from 'lucide-react';
+import { Calendar, Search, Upload, Filter, FileText, Trash2, Download, Clock, MoreHorizontal, Play, ChevronLeft, ChevronRight, Check, Plus, Mic, Minus, CalendarDays, Edit2, Share, Loader2, RotateCcw, XCircle, AlertCircle } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -11,6 +11,8 @@ import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
 import { useUpload } from '../../src/hooks/useUpload';
+import { useImportQueue } from '../../src/hooks/useImportQueue';
+import type { ImportJob } from '../../src/hooks/useImportQueue';
 import { apiClient } from '../../src/api/client';
 import type { Recording } from '../../src/api/types';
 
@@ -586,16 +588,15 @@ const ImportTab = () => {
     const [diarization, setDiarization] = useState(true);
     const [wordTimestamps, setWordTimestamps] = useState(false);
     const [isDragOver, setIsDragOver] = useState(false);
-    const { status, result, error, upload, reset } = useUpload();
+    const queue = useImportQueue();
 
     const handleFiles = useCallback((files: FileList | null) => {
         if (!files || files.length === 0) return;
-        const file = files[0];
-        upload(file, {
+        queue.addFiles(Array.from(files), {
             enable_diarization: diarization,
             enable_word_timestamps: wordTimestamps,
         });
-    }, [diarization, wordTimestamps, upload]);
+    }, [diarization, wordTimestamps, queue]);
 
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -603,59 +604,91 @@ const ImportTab = () => {
         handleFiles(e.dataTransfer.files);
     }, [handleFiles]);
 
+    const statusIcon = (job: ImportJob) => {
+        switch (job.status) {
+            case 'pending': return <Clock size={14} className="text-slate-400" />;
+            case 'processing': return <Loader2 size={14} className="text-accent-cyan animate-spin" />;
+            case 'success': return <Check size={14} className="text-green-400" />;
+            case 'error': return <AlertCircle size={14} className="text-red-400" />;
+        }
+    };
+
+    const statusLabel = (job: ImportJob) => {
+        switch (job.status) {
+            case 'pending': return 'Queued';
+            case 'processing': return 'Processing...';
+            case 'success': return `Done — ID ${job.result?.recording_id}`;
+            case 'error': return job.error ?? 'Failed';
+        }
+    };
+
     return (
     <div className="max-w-2xl mx-auto space-y-8 mt-10">
         <input
             ref={fileInputRef}
             type="file"
             accept=".mp3,.wav,.m4a,.flac,.ogg,.webm,.opus"
+            multiple
             className="hidden"
-            onChange={(e) => handleFiles(e.target.files)}
+            onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
         />
 
-        {status === 'success' && result ? (
-            <div className="border-2 border-green-500/30 rounded-3xl p-12 flex flex-col items-center justify-center text-center bg-green-500/5">
-                <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
-                    <Check size={32} className="text-green-400" />
+        {/* Drop Zone — always visible */}
+        <div
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-3xl p-12 flex flex-col items-center justify-center text-center transition-all cursor-pointer group ${
+                isDragOver ? 'border-accent-cyan bg-accent-cyan/10 scale-[1.02]' :
+                'border-white/20 hover:border-accent-cyan/50 hover:bg-accent-cyan/5'
+            }`}
+        >
+            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Upload size={32} className="text-slate-300 group-hover:text-accent-cyan" />
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">Drag & Drop Audio Files</h3>
+            <p className="text-slate-400 text-sm mb-6">Supports MP3, WAV, M4A, FLAC, OGG, WebM, Opus — multiple files OK</p>
+            <Button variant="primary">Browse Files</Button>
+        </div>
+
+        {/* Queue List */}
+        {queue.jobs.length > 0 && (
+          <GlassCard
+            title={`Import Queue${queue.isProcessing ? ' — Processing' : ''}`}
+            action={
+              <div className="flex items-center gap-3 text-xs text-slate-400">
+                {queue.completedCount > 0 && <span className="text-green-400">{queue.completedCount} done</span>}
+                {queue.pendingCount > 0 && <span>{queue.pendingCount} pending</span>}
+                {queue.errorCount > 0 && <span className="text-red-400">{queue.errorCount} failed</span>}
+                {(queue.completedCount > 0 || queue.errorCount > 0) && (
+                  <button onClick={queue.clearFinished} className="text-slate-500 hover:text-white transition-colors ml-1" title="Clear finished">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            }
+          >
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {queue.jobs.map(job => (
+                <div key={job.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/8 transition-colors">
+                  {statusIcon(job)}
+                  <span className="flex-1 text-sm text-white truncate">{job.file.name}</span>
+                  <span className="text-xs text-slate-400 whitespace-nowrap">{statusLabel(job)}</span>
+                  {job.status === 'error' && (
+                    <button onClick={() => queue.retryJob(job.id)} className="p-1 hover:text-accent-cyan text-slate-400 transition-colors" title="Retry">
+                      <RotateCcw size={12} />
+                    </button>
+                  )}
+                  {job.status !== 'processing' && (
+                    <button onClick={() => queue.removeJob(job.id)} className="p-1 hover:text-red-400 text-slate-500 transition-colors" title="Remove">
+                      <XCircle size={12} />
+                    </button>
+                  )}
                 </div>
-                <h3 className="text-xl font-semibold text-white mb-2">Upload Complete</h3>
-                <p className="text-slate-400 text-sm mb-2">{result.message}</p>
-                <p className="text-xs text-slate-500 mb-6">
-                    Recording ID: {result.recording_id}
-                    {result.diarization.performed && ' • Diarization applied'}
-                </p>
-                <Button variant="secondary" onClick={reset}>Upload Another</Button>
+              ))}
             </div>
-        ) : status === 'error' ? (
-            <div className="border-2 border-red-500/30 rounded-3xl p-12 flex flex-col items-center justify-center text-center bg-red-500/5">
-                <h3 className="text-xl font-semibold text-white mb-2">Upload Failed</h3>
-                <p className="text-red-400 text-sm mb-6">{error}</p>
-                <Button variant="secondary" onClick={reset}>Try Again</Button>
-            </div>
-        ) : (
-            <div
-                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                onDragLeave={() => setIsDragOver(false)}
-                onDrop={handleDrop}
-                onClick={() => status !== 'uploading' && fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-3xl p-12 flex flex-col items-center justify-center text-center transition-all cursor-pointer group ${
-                    isDragOver ? 'border-accent-cyan bg-accent-cyan/10 scale-[1.02]' :
-                    status === 'uploading' ? 'border-accent-cyan/50 bg-accent-cyan/5 pointer-events-none' :
-                    'border-white/20 hover:border-accent-cyan/50 hover:bg-accent-cyan/5'
-                }`}
-            >
-                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    {status === 'uploading'
-                        ? <Loader2 size={32} className="text-accent-cyan animate-spin" />
-                        : <Upload size={32} className="text-slate-300 group-hover:text-accent-cyan" />
-                    }
-                </div>
-                <h3 className="text-xl font-semibold text-white mb-2">
-                    {status === 'uploading' ? 'Uploading & Transcribing...' : 'Drag & Drop Audio Files'}
-                </h3>
-                <p className="text-slate-400 text-sm mb-6">Supports MP3, WAV, M4A, FLAC, OGG, WebM, Opus</p>
-                {status !== 'uploading' && <Button variant="primary">Browse Files</Button>}
-            </div>
+          </GlassCard>
         )}
 
         <GlassCard title="Import Options">

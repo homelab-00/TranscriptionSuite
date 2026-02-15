@@ -109,6 +109,7 @@ export class TrayManager {
     startRecording?: () => void;
     stopRecording?: () => void;
     toggleMute?: () => void;
+    transcribeFile?: () => void;
   } = {};
 
   constructor(isDev: boolean, getWindow: () => BrowserWindow | null) {
@@ -320,6 +321,11 @@ export class TrayManager {
               } as Electron.MenuItemConstructorOptions,
             ]
         ),
+        { type: 'separator' as const },
+        {
+          label: 'Transcribe File…',
+          click: () => { this.actions.transcribeFile?.(); },
+        } as Electron.MenuItemConstructorOptions,
       ] : []),
 
       { type: 'separator' },

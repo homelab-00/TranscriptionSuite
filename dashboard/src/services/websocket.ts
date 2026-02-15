@@ -21,12 +21,38 @@ export interface ServerMessage {
   data?: Record<string, unknown>;
 }
 
+/** Reconnection configuration */
+export interface ReconnectConfig {
+  /** Enable automatic reconnection (default: true) */
+  enabled: boolean;
+  /** Initial delay in ms before first reconnect attempt (default: 1000) */
+  initialDelayMs: number;
+  /** Maximum delay in ms between reconnect attempts (default: 30000) */
+  maxDelayMs: number;
+  /** Multiplier applied to delay after each failed attempt (default: 2) */
+  backoffMultiplier: number;
+  /** Maximum number of reconnect attempts before giving up (0 = unlimited, default: 0) */
+  maxAttempts: number;
+}
+
+const DEFAULT_RECONNECT: ReconnectConfig = {
+  enabled: true,
+  initialDelayMs: 1_000,
+  maxDelayMs: 30_000,
+  backoffMultiplier: 2,
+  maxAttempts: 0,
+};
+
 /** Callbacks consumers register */
 export interface SocketCallbacks {
   onStateChange?: (state: ConnectionState) => void;
   onMessage?: (msg: ServerMessage) => void;
   onError?: (error: string) => void;
   onClose?: (code: number, reason: string) => void;
+  /** Called when a reconnect attempt is scheduled */
+  onReconnect?: (attempt: number, delayMs: number) => void;
+  /** Called when reconnect gives up after maxAttempts */
+  onReconnectExhausted?: () => void;
 }
 
 // ─── Binary framing ──────────────────────────────────────────────────────────
@@ -63,10 +89,16 @@ export class TranscriptionSocket {
   private callbacks: SocketCallbacks;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private state: ConnectionState = 'disconnected';
+  private reconnectConfig: ReconnectConfig;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  /** When true, disconnect was initiated by the user — don't auto-reconnect */
+  private intentionalDisconnect = false;
 
-  constructor(endpoint: SocketEndpoint, callbacks: SocketCallbacks) {
+  constructor(endpoint: SocketEndpoint, callbacks: SocketCallbacks, reconnect?: Partial<ReconnectConfig>) {
     this.endpoint = endpoint;
     this.callbacks = callbacks;
+    this.reconnectConfig = { ...DEFAULT_RECONNECT, ...reconnect };
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -84,6 +116,9 @@ export class TranscriptionSocket {
   connect(): void {
     if (this.ws) this.disconnect();
 
+    this.intentionalDisconnect = false;
+    this.reconnectAttempt = 0;
+    this.cancelReconnect();
     this.setState('connecting');
 
     const url = this.getWsUrl();
@@ -118,11 +153,14 @@ export class TranscriptionSocket {
       this.cleanup();
       this.setState('disconnected');
       this.callbacks.onClose?.(ev.code, ev.reason);
+      this.scheduleReconnect();
     };
   }
 
   /** Close the WebSocket cleanly. */
   disconnect(): void {
+    this.intentionalDisconnect = true;
+    this.cancelReconnect();
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onmessage = null;
@@ -162,7 +200,93 @@ export class TranscriptionSocket {
       this.ws.send(frameAudioChunk(pcmInt16));
     }
   }
+  // ── Reconnection ────────────────────────────────────────────────────────
 
+  /** Schedule a reconnect attempt with exponential backoff. */
+  private scheduleReconnect(): void {
+    if (this.intentionalDisconnect) return;
+    if (!this.reconnectConfig.enabled) return;
+    if (this.reconnectConfig.maxAttempts > 0 && this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+      this.callbacks.onReconnectExhausted?.();
+      return;
+    }
+
+    const delay = Math.min(
+      this.reconnectConfig.initialDelayMs * Math.pow(this.reconnectConfig.backoffMultiplier, this.reconnectAttempt),
+      this.reconnectConfig.maxDelayMs,
+    );
+    this.reconnectAttempt++;
+
+    this.callbacks.onReconnect?.(this.reconnectAttempt, delay);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.doReconnect();
+    }, delay);
+  }
+
+  /** Perform the actual reconnect (bypasses intentional-disconnect guard). */
+  private doReconnect(): void {
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close(1000, 'Reconnecting');
+      }
+      this.ws = null;
+    }
+    this.cleanup();
+    // Re-enter the connect flow but keep the attempt counter
+    this.setState('connecting');
+    const url = this.getWsUrl();
+    this.ws = new WebSocket(url);
+    this.ws.binaryType = 'arraybuffer';
+
+    this.ws.onopen = () => {
+      this.setState('authenticating');
+      this.reconnectAttempt = 0; // reset on success
+      const token = apiClient.getAuthToken?.() ?? '';
+      this.sendJSON({ type: 'auth', data: { token } });
+    };
+
+    this.ws.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data === 'string') {
+        try {
+          const msg: ServerMessage = JSON.parse(ev.data);
+          this.handleMessage(msg);
+        } catch {
+          this.callbacks.onError?.('Invalid JSON from server');
+        }
+      }
+    };
+
+    this.ws.onerror = () => {
+      this.setState('error');
+      this.callbacks.onError?.('WebSocket connection error');
+    };
+
+    this.ws.onclose = (ev: CloseEvent) => {
+      this.cleanup();
+      this.setState('disconnected');
+      this.callbacks.onClose?.(ev.code, ev.reason);
+      this.scheduleReconnect();
+    };
+  }
+
+  /** Cancel any pending reconnect timer. */
+  private cancelReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  /** Update reconnect configuration at runtime. */
+  setReconnectConfig(config: Partial<ReconnectConfig>): void {
+    this.reconnectConfig = { ...this.reconnectConfig, ...config };
+  }
   // ── Internal ───────────────────────────────────────────────────────────────
 
   private handleMessage(msg: ServerMessage): void {
@@ -210,5 +334,6 @@ export class TranscriptionSocket {
 
   private cleanup(): void {
     this.stopPing();
+    // Note: don't cancel reconnect here — cleanup is called during reconnect flow
   }
 }

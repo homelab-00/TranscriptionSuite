@@ -47,6 +47,7 @@ from server.database.database import (
     save_longform_to_database,
     update_recording_title,
     update_recording_summary,
+    update_recording_date,
 )
 from server.database.backup import DatabaseBackupManager
 
@@ -89,6 +90,12 @@ class TitleUpdate(BaseModel):
     """Request body for updating a recording's title."""
 
     title: str
+
+
+class DateUpdate(BaseModel):
+    """Request body for updating a recording's recorded_at date."""
+
+    recorded_at: str
 
 
 @router.get("/recordings", response_model=List[RecordingResponse])
@@ -224,6 +231,25 @@ async def update_title_patch(
         return {"status": "updated", "id": recording_id, "title": title}
     else:
         raise HTTPException(status_code=500, detail="Failed to update title")
+
+
+@router.patch("/recordings/{recording_id}/date")
+async def update_date_patch(
+    recording_id: int,
+    body: DateUpdate,
+) -> Dict[str, Any]:
+    """Update the recorded_at date for a recording."""
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    recorded_at = body.recorded_at.strip()
+    if not recorded_at:
+        raise HTTPException(status_code=400, detail="Date cannot be empty")
+
+    if update_recording_date(recording_id, recorded_at):
+        return {"status": "updated", "id": recording_id, "recorded_at": recorded_at}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update date")
 
 
 @router.get("/recordings/{recording_id}/audio")

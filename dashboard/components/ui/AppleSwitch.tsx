@@ -6,6 +6,7 @@ interface AppleSwitchProps {
   label?: string;
   description?: string;
   size?: 'sm' | 'md';
+  disabled?: boolean;
 }
 
 export const AppleSwitch: React.FC<AppleSwitchProps> = ({ 
@@ -13,7 +14,8 @@ export const AppleSwitch: React.FC<AppleSwitchProps> = ({
   onChange, 
   label, 
   description,
-  size = 'sm' 
+  size = 'sm',
+  disabled = false,
 }) => {
   // sm: 36px width, 20px height
   // md: 44px width, 24px height
@@ -41,11 +43,13 @@ export const AppleSwitch: React.FC<AppleSwitchProps> = ({
         type="button"
         role="switch"
         aria-checked={checked}
-        onClick={() => onChange(!checked)}
+        disabled={disabled}
+        onClick={() => { if (!disabled) onChange(!checked); }}
         className={`
-          relative inline-flex shrink-0 cursor-pointer rounded-full 
+          relative inline-flex shrink-0 rounded-full 
           items-center p-[3px]
           transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent-cyan focus:ring-offset-2 focus:ring-offset-slate-900
+          ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
           ${checked ? 'bg-accent-cyan' : 'bg-slate-700'}
           ${dimensions}
         `}

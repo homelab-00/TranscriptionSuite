@@ -35,11 +35,17 @@ export interface ElectronAPI {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
     openExternal: (url: string) => Promise<void>;
+    openPath: (filePath: string) => Promise<string>;
+    getConfigDir: () => Promise<string>;
+    readLocalFile: (filePath: string) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
   };
   docker: {
     available: () => Promise<boolean>;
+    checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean }>;
     listImages: () => Promise<Array<{ tag: string; fullName: string; size: string; created: string; id: string }>>;
     pullImage: (tag: string) => Promise<string>;
+    cancelPull: () => Promise<boolean>;
+    isPulling: () => Promise<boolean>;
     removeImage: (tag: string) => Promise<string>;
     getContainerStatus: () => Promise<{ exists: boolean; running: boolean; status: string; health?: string; startedAt?: string }>;
     startContainer: (options: StartContainerOptions) => Promise<string>;
@@ -56,7 +62,7 @@ export interface ElectronAPI {
     setTooltip: (tooltip: string) => Promise<void>;
     setState: (state: TrayState) => Promise<void>;
     setMenuState: (menuState: TrayMenuState) => Promise<void>;
-    onAction: (callback: (action: string) => void) => () => void;
+    onAction: (callback: (action: string, ...args: any[]) => void) => () => void;
   };
   audio: {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
@@ -90,11 +96,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
+    openPath: (filePath: string) => ipcRenderer.invoke('app:openPath', filePath),
+    getConfigDir: () => ipcRenderer.invoke('app:getConfigDir'),
+    readLocalFile: (filePath: string) => ipcRenderer.invoke('app:readLocalFile', filePath) as Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>,
   },
   docker: {
     available: () => ipcRenderer.invoke('docker:available'),
+    checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
     listImages: () => ipcRenderer.invoke('docker:listImages'),
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
+    cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),
+    isPulling: () => ipcRenderer.invoke('docker:isPulling'),
     removeImage: (tag: string) => ipcRenderer.invoke('docker:removeImage', tag),
     getContainerStatus: () => ipcRenderer.invoke('docker:getContainerStatus'),
     startContainer: (options: StartContainerOptions) => ipcRenderer.invoke('docker:startContainer', options),
@@ -115,8 +127,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setTooltip: (tooltip: string) => ipcRenderer.invoke('tray:setTooltip', tooltip),
     setState: (state: TrayState) => ipcRenderer.invoke('tray:setState', state),
     setMenuState: (menuState: TrayMenuState) => ipcRenderer.invoke('tray:setMenuState', menuState),
-    onAction: (callback: (action: string) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, action: string) => callback(action);
+    onAction: (callback: (action: string, ...args: any[]) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, action: string, ...args: any[]) => callback(action, ...args);
       ipcRenderer.on('tray:action', handler);
       return () => ipcRenderer.removeListener('tray:action', handler);
     },
