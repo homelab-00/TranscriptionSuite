@@ -7,6 +7,14 @@ type TrayState =
   | 'live-listening' | 'live-processing' | 'muted' | 'complete'
   | 'error' | 'disconnected';
 
+type RuntimeProfile = 'gpu' | 'cpu';
+
+interface StartContainerOptions {
+  mode: 'local' | 'remote';
+  runtimeProfile: RuntimeProfile;
+  tlsEnv?: Record<string, string>;
+}
+
 interface TrayMenuState {
   serverRunning?: boolean;
   isRecording?: boolean;
@@ -30,7 +38,7 @@ interface ElectronAPI {
     pullImage: (tag: string) => Promise<string>;
     removeImage: (tag: string) => Promise<string>;
     getContainerStatus: () => Promise<{ exists: boolean; running: boolean; status: string; health?: string; startedAt?: string }>;
-    startContainer: (mode: 'local' | 'remote', env?: Record<string, string>) => Promise<string>;
+    startContainer: (options: StartContainerOptions) => Promise<string>;
     stopContainer: () => Promise<string>;
     removeContainer: () => Promise<string>;
     getVolumes: () => Promise<Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>>;

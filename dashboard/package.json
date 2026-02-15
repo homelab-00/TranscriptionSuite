@@ -1,7 +1,7 @@
 {
   "name": "transcriptionsuite",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "package:linux": "npm run build:electron && electron-builder --linux AppImage",
     "package:windows": "npm run build:electron && electron-builder --win nsis",
+    "package:mac": "npm run build:electron && electron-builder --mac dmg zip",
     "ui:contract:extract": "node scripts/ui-contract/extract-facts.mjs",
     "ui:contract:build": "node scripts/ui-contract/build-contract.mjs",
     "ui:contract:validate": "node scripts/ui-contract/validate-contract.mjs",
@@ -27,6 +28,7 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
@@ -77,6 +79,32 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64"]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "../build/assets/logo.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "../build/entitlements.mac.plist",
+      "entitlementsInherit": "../build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "sign": false,
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "afterSign": "../build/notarize.cjs"
   }
 }

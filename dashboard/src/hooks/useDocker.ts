@@ -47,7 +47,7 @@ export interface UseDockerReturn {
 
   // Container state
   container: ContainerStatus;
-  startContainer: (mode: 'local' | 'remote', env?: Record<string, string>) => Promise<void>;
+  startContainer: (mode: 'local' | 'remote', runtimeProfile?: RuntimeProfile, tlsEnv?: Record<string, string>) => Promise<void>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
 
@@ -67,6 +67,8 @@ export interface UseDockerReturn {
   operating: boolean;
   operationError: string | null;
 }
+
+type RuntimeProfile = 'gpu' | 'cpu';
 
 const api = () => (window as any).electronAPI?.docker as ElectronAPI['docker'] | undefined;
 
@@ -171,11 +173,11 @@ export function useDocker(): UseDockerReturn {
     });
   }, [withOperation, refreshImages]);
 
-  const startContainer = useCallback(async (mode: 'local' | 'remote', env?: Record<string, string>) => {
+  const startContainer = useCallback(async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile = 'gpu', tlsEnv?: Record<string, string>) => {
     const docker = api();
     if (!docker) return;
     await withOperation(async () => {
-      await docker.startContainer(mode, env);
+      await docker.startContainer({ mode, runtimeProfile, tlsEnv });
       // Wait a moment then refresh status
       await new Promise(r => setTimeout(r, 2000));
       setContainer(await docker.getContainerStatus());

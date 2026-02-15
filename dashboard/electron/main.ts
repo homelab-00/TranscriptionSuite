@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { dockerManager } from './dockerManager.js';
+import { dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 
@@ -38,6 +38,7 @@ const store = new Store({
     'server.https': false,
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
+    'server.runtimeProfile': 'gpu',
   },
 });
 
@@ -55,7 +56,11 @@ const updateManager = new UpdateManager(store);
 trayManager.setActions({
   startServer: async () => {
     try {
-      await dockerManager.startContainer('local');
+      const runtimeProfile = (store.get('server.runtimeProfile') as string) || 'gpu';
+      await dockerManager.startContainer({
+        mode: 'local',
+        runtimeProfile: runtimeProfile as 'gpu' | 'cpu',
+      });
       trayManager.setMenuState({ serverRunning: true });
     } catch (err) {
       console.error('Tray: failed to start server', err);
@@ -159,8 +164,8 @@ ipcMain.handle('docker:getContainerStatus', async () => {
   return dockerManager.getContainerStatus();
 });
 
-ipcMain.handle('docker:startContainer', async (_event, mode: 'local' | 'remote', env?: Record<string, string>) => {
-  return dockerManager.startContainer(mode, env);
+ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOptions) => {
+  return dockerManager.startContainer(options);
 });
 
 ipcMain.handle('docker:stopContainer', async () => {
@@ -270,4 +275,5 @@ app.on('before-quit', async (event) => {
 
 app.on('window-all-closed', () => {
   // On Linux/Windows, don't quit when window is closed (tray is active)
+  // On macOS, standard behavior is to keep the app running in the dock
 });

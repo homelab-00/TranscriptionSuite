@@ -513,8 +513,11 @@ fi
 
 cd "$SCRIPT_DIR"
 
+# Build compose file list: base + linux host-network + GPU overlay
+COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml)
+
 compose_output=""
-if ! compose_output="$(docker compose "${ENV_FILE_ARGS[@]}" up -d 2>&1)"; then
+if ! compose_output="$(docker compose "${COMPOSE_FILES[@]}" "${ENV_FILE_ARGS[@]}" up -d 2>&1)"; then
     echo "$compose_output"
     exit 1
 fi

@@ -16,8 +16,8 @@ LM Studio integration, and both longform
 and live transcription. Electron
 dashboard + Python backend powered by
 faster-whisper with NVIDIA GPU
-acceleration. The server is Dockerized
-for fast setup.
+acceleration or CPU-only mode. The server
+is Dockerized for fast setup.
 </pre>
           </td>
         </tr>
@@ -27,9 +27,11 @@ for fast setup.
       <br>
       <strong>OS Support:</strong><br>
       <img src="https://img.shields.io/badge/Linux-%23FCC624.svg?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
-      <img src="https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white" alt="Windows 11"><br><br>
-      <strong>GPU Hardware Support:</strong><br>
-      <img src="https://img.shields.io/badge/NVIDIA-Supported_only-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA Supported only">
+      <img src="https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white" alt="Windows 11">
+      <img src="https://img.shields.io/badge/macOS-000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"><br><br>
+      <strong>Hardware Acceleration:</strong><br>
+      <img src="https://img.shields.io/badge/NVIDIA_GPU-Recommended-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA GPU Recommended">
+      <img src="https://img.shields.io/badge/CPU_Only-Supported-%23555555.svg?style=for-the-badge" alt="CPU Only Supported">
     </td>
   </tr>
 </table>
@@ -67,7 +69,8 @@ for fast setup.
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet
   beyond the initial setup
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
-- **Fully featured GUI**: Electron desktop app for Linux and Windows
+- **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS (Apple Silicon)
+- **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds![alt text](image.png)
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
 - **Speaker Diarization**: PyAnnote-based speaker identification
@@ -120,13 +123,19 @@ https://github.com/user-attachments/assets/ea801ae2-d263-493b-a6c5-d431b59601ee
 1. Install Docker Engine
     * For Arch run `sudo pacman -S --needed docker`
     * For other distros refer to the [Docker documentation](https://docs.docker.com/engine/install/)
-2. Install NVIDIA Container Toolkit (for GPU support)
+2. Install NVIDIA Container Toolkit (for GPU mode)
     * Refer to the [NVIDIA documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+    * Not required if using CPU mode
 
 **Windows:**
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (during installation make sure the
   *'Use WSL 2 instead of Hyper-V'* checkbox is enabled)
 2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
+    * Not required if using CPU mode
+
+**macOS (Apple Silicon):**
+1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+2. GPU mode is not available on macOS — the server runs in CPU mode automatically
 
 ### 2.2 Git
 
@@ -138,6 +147,9 @@ https://github.com/user-attachments/assets/ea801ae2-d263-493b-a6c5-d431b59601ee
 
 **Windows:**
 * Download and install [Git for Windows](https://git-scm.com/download/win)
+
+**macOS:**
+* Git is included with Xcode Command Line Tools: `xcode-select --install`
 
 ---
 
@@ -153,8 +165,9 @@ Download the Dashboard for your platform from the [Releases](https://github.com/
 |----------|----------|-------|
 | **Linux** | `TranscriptionSuite-x86_64.AppImage` | Standalone, no dependencies |
 | **Windows** | `TranscriptionSuite Setup.exe` | Standalone installer |
+| **macOS** | `TranscriptionSuite-arm64.dmg` | Signed & notarized, Apple Silicon |
 
->* *These are x64 packages*
+>* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
 >* *Linux builds support both X11 and Wayland*
 
 ---
@@ -186,6 +199,7 @@ modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
 *Settings are saved to:*
 *- Linux: `~/.config/TranscriptionSuite/`*
 *- Windows: `%APPDATA%\TranscriptionSuite\`*
+*- macOS: `~/Library/Application Support/TranscriptionSuite/`*
 
 ### 4.1 Starting the Server & Client
 
@@ -408,6 +422,11 @@ Verify NVIDIA Container Toolkit is installed:
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 ```
+
+If you don't have an NVIDIA GPU or prefer not to use GPU acceleration, switch to
+**CPU mode** in Settings → App → Runtime Mode, or in the Server view before starting
+the container. CPU mode works on all platforms (Linux, Windows, macOS) but transcription
+will be significantly slower.
 
 ### 9.3 Connection Issues (Remote Mode)
 

@@ -17,6 +17,14 @@ export interface TrayMenuState {
   isMuted?: boolean;
 }
 
+export type RuntimeProfile = 'gpu' | 'cpu';
+
+export interface StartContainerOptions {
+  mode: 'local' | 'remote';
+  runtimeProfile: RuntimeProfile;
+  tlsEnv?: Record<string, string>;
+}
+
 export interface ElectronAPI {
   config: {
     get: (key: string) => Promise<unknown>;
@@ -33,7 +41,7 @@ export interface ElectronAPI {
     pullImage: (tag: string) => Promise<string>;
     removeImage: (tag: string) => Promise<string>;
     getContainerStatus: () => Promise<{ exists: boolean; running: boolean; status: string; health?: string; startedAt?: string }>;
-    startContainer: (mode: 'local' | 'remote', env?: Record<string, string>) => Promise<string>;
+    startContainer: (options: StartContainerOptions) => Promise<string>;
     stopContainer: () => Promise<string>;
     removeContainer: () => Promise<string>;
     getVolumes: () => Promise<Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>>;
@@ -87,7 +95,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
     removeImage: (tag: string) => ipcRenderer.invoke('docker:removeImage', tag),
     getContainerStatus: () => ipcRenderer.invoke('docker:getContainerStatus'),
-    startContainer: (mode: 'local' | 'remote', env?: Record<string, string>) => ipcRenderer.invoke('docker:startContainer', mode, env),
+    startContainer: (options: StartContainerOptions) => ipcRenderer.invoke('docker:startContainer', options),
     stopContainer: () => ipcRenderer.invoke('docker:stopContainer'),
     removeContainer: () => ipcRenderer.invoke('docker:removeContainer'),
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),

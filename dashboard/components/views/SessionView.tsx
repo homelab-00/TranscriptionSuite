@@ -23,6 +23,17 @@ export const SessionView: React.FC = () => {
   const [logsVisible, setLogsVisible] = useState(false);
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
 
+  // Runtime profile (read from persisted config)
+  const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu'>('gpu');
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (api?.config) {
+      api.config.get('server.runtimeProfile').then((val: unknown) => {
+        if (val === 'gpu' || val === 'cpu') setRuntimeProfile(val);
+      }).catch(() => {});
+    }
+  }, []);
+
   // Real language list from server
   const { languages } = useLanguages();
   const languageOptions = useMemo(() => ['Auto Detect', ...languages.map(l => l.name)], [languages]);
@@ -416,10 +427,10 @@ export const SessionView: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('local')} disabled={serverRunning || docker.operating} className="text-xs px-3">
+                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('local', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">
                                     {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
                                 </Button>
-                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('remote')} disabled={serverRunning || docker.operating} className="text-xs px-3">Start Remote</Button>
+                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('remote', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">Start Remote</Button>
                                 <Button variant="danger" size="sm" onClick={() => docker.stopContainer()} disabled={!serverRunning || docker.operating} className="text-xs px-3">Stop</Button>
                             </div>
                         </div>

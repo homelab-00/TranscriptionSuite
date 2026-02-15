@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { Box, Cpu, HardDrive, Download, Loader2, RefreshCw } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Box, Cpu, HardDrive, Download, Loader2, RefreshCw, Gpu } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -7,6 +7,8 @@ import { CustomSelect } from '../ui/CustomSelect';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDocker } from '../../src/hooks/useDocker';
 import { apiClient } from '../../src/api/client';
+
+type RuntimeProfile = 'gpu' | 'cpu';
 
 export const ServerView: React.FC = () => {
   const { status: adminStatus } = useAdminStatus();
@@ -16,6 +18,28 @@ export const ServerView: React.FC = () => {
   const [transcriber, setTranscriber] = useState('');
   const [liveModel, setLiveModel] = useState('');
   const [modelsLoading, setModelsLoading] = useState(false);
+
+  // Runtime profile (persisted in electron-store)
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
+
+  // Load persisted runtime profile on mount
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (api?.config) {
+      api.config.get('server.runtimeProfile').then((val: unknown) => {
+        if (val === 'gpu' || val === 'cpu') setRuntimeProfile(val);
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Persist runtime profile changes
+  const handleRuntimeProfileChange = useCallback((profile: RuntimeProfile) => {
+    setRuntimeProfile(profile);
+    const api = (window as any).electronAPI;
+    if (api?.config) {
+      api.config.set('server.runtimeProfile', profile);
+    }
+  }, []);
 
   // Derive status from Docker hook
   const containerStatus = docker.container;
@@ -119,6 +143,40 @@ export const ServerView: React.FC = () => {
              className={`transition-all duration-500 ease-in-out ${isRunning ? 'border-accent-cyan/30 shadow-[0_0_15px_rgba(34,211,238,0.15)]' : ''}`}
            >
                <div className="space-y-6">
+                   {/* Runtime Profile Selector */}
+                   <div className="flex items-center gap-4 pb-4 border-b border-white/5">
+                        <label className="text-xs text-slate-500 font-medium uppercase tracking-wider whitespace-nowrap">Runtime</label>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => handleRuntimeProfileChange('gpu')}
+                                disabled={isRunning}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                    runtimeProfile === 'gpu'
+                                        ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.15)]'
+                                        : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                                } ${isRunning ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                            >
+                                <Gpu size={14} />
+                                GPU (CUDA)
+                            </button>
+                            <button
+                                onClick={() => handleRuntimeProfileChange('cpu')}
+                                disabled={isRunning}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+                                    runtimeProfile === 'cpu'
+                                        ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange shadow-[0_0_10px_rgba(255,145,0,0.15)]'
+                                        : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                                } ${isRunning ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                            >
+                                <Cpu size={14} />
+                                CPU Only
+                            </button>
+                        </div>
+                        {runtimeProfile === 'cpu' && !isRunning && (
+                            <span className="text-xs text-slate-500 italic">Slower transcription, no NVIDIA GPU required</span>
+                        )}
+                   </div>
+
                    <div className="flex flex-wrap items-center gap-5">
                         <div className="flex items-center space-x-3 pr-5 border-r border-white/10 h-6 shrink-0">
                           <StatusLight 
@@ -135,10 +193,10 @@ export const ServerView: React.FC = () => {
 
                         <div className="flex-1 flex flex-wrap items-center justify-between gap-4 min-w-0">
                             <div className="flex gap-2">
-                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('local')} disabled={docker.operating || isRunning}>
+                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('local', runtimeProfile)} disabled={docker.operating || isRunning}>
                                   {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
                                 </Button>
-                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('remote')} disabled={docker.operating || isRunning}>Start Remote</Button>
+                                <Button variant="secondary" className="h-9 px-4" onClick={() => docker.startContainer('remote', runtimeProfile)} disabled={docker.operating || isRunning}>Start Remote</Button>
                                 <Button variant="danger" className="h-9 px-4" onClick={() => docker.stopContainer()} disabled={docker.operating || !isRunning}>Stop</Button>
                             </div>
                             <Button variant="danger" className="h-9 px-4" onClick={() => docker.removeContainer()} disabled={docker.operating || isRunning}>

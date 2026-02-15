@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate raster/logo assets from SVG sources.
-# Creates logo.png, logo.ico, logo_wide.png, and logo_wide_readme.png
+# Creates logo.png, logo.ico, logo.icns, logo_wide.png, and logo_wide_readme.png
 
 set -euo pipefail
 
@@ -91,6 +91,45 @@ $MAGICK_CMD "$ASSETS_DIR/logo.png" -background transparent \
     "$ASSETS_DIR/logo.ico"
 
 echo "✓ Created logo.ico with sizes: 16, 32, 48, 256"
+
+# Generate macOS .icns icon from the master PNG.
+# Uses an iconset directory with all required sizes, then converts with iconutil (macOS)
+# or png2icns / ImageMagick fallback (Linux/CI).
+generate_icns() {
+    local src_png="$1"
+    local out_icns="$2"
+
+    # Attempt native macOS iconutil first
+    if command -v iconutil &> /dev/null; then
+        local iconset_dir
+        iconset_dir=$(mktemp -d)/logo.iconset
+        mkdir -p "$iconset_dir"
+        for sz in 16 32 64 128 256 512; do
+            $MAGICK_CMD "$src_png" -resize "${sz}x${sz}" "$iconset_dir/icon_${sz}x${sz}.png"
+            local dbl=$((sz * 2))
+            $MAGICK_CMD "$src_png" -resize "${dbl}x${dbl}" "$iconset_dir/icon_${sz}x${sz}@2x.png"
+        done
+        iconutil -c icns -o "$out_icns" "$iconset_dir"
+        rm -rf "$(dirname "$iconset_dir")"
+    elif command -v png2icns &> /dev/null; then
+        # libicns tools (Linux: apt install icnsutils / pacman -S libicns)
+        local tmp_dir
+        tmp_dir=$(mktemp -d)
+        for sz in 16 32 128 256 512 1024; do
+            $MAGICK_CMD "$src_png" -resize "${sz}x${sz}" "$tmp_dir/icon_${sz}.png"
+        done
+        png2icns "$out_icns" "$tmp_dir"/icon_*.png
+        rm -rf "$tmp_dir"
+    else
+        echo "⚠ Skipping .icns generation: neither iconutil (macOS) nor png2icns (libicns) found."
+        echo "  Install with: sudo pacman -S libicns  OR  sudo apt install icnsutils"
+        return 1
+    fi
+}
+
+generate_icns "$ASSETS_DIR/logo.png" "$ASSETS_DIR/logo.icns" \
+    && echo "✓ Created logo.icns (macOS app icon)" \
+    || echo "⚠ logo.icns was not generated (see above)"
 
 # Generate sharp wide-logo PNGs directly from the SVG's intrinsic geometry.
 # Export by target height so width automatically follows the SVG's current trimmed bounds.

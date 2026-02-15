@@ -3,6 +3,12 @@
  *
  * Uses Docker CLI via child_process — no Dockerode dependency.
  * All methods are async and designed to be called from IPC handlers.
+ *
+ * Compose file layering:
+ *   base:         docker-compose.yml            (service, env, volumes)
+ *   linux host:   docker-compose.linux-host.yml  (host networking)
+ *   desktop VM:   docker-compose.desktop-vm.yml  (bridge + port mapping, macOS/Windows)
+ *   GPU:          docker-compose.gpu.yml         (NVIDIA reservation)
  */
 
 import { execFile, spawn, ChildProcess } from 'child_process';
@@ -20,6 +26,9 @@ const __dirname = path.dirname(__filename);
 const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 const CONTAINER_NAME = 'transcriptionsuite-container';
 const COMPOSE_DIR = path.resolve(__dirname, '../../server/docker');
+
+/** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
+export type RuntimeProfile = 'gpu' | 'cpu';
 
 const VOLUME_NAMES = {
   data: 'transcriptionsuite-data',
@@ -53,6 +62,37 @@ export interface VolumeInfo {
   driver: string;
   mountpoint: string;
   size?: string;
+}
+
+export interface StartContainerOptions {
+  mode: 'local' | 'remote';
+  runtimeProfile: RuntimeProfile;
+  tlsEnv?: Record<string, string>;
+}
+
+// ─── Compose File Selection ─────────────────────────────────────────────────
+
+/**
+ * Build the list of compose file args (-f ...) based on platform and runtime profile.
+ */
+function composeFileArgs(runtimeProfile: RuntimeProfile): string[] {
+  const files: string[] = ['docker-compose.yml'];
+
+  // Platform overlay
+  if (process.platform === 'linux') {
+    files.push('docker-compose.linux-host.yml');
+  } else {
+    // macOS (darwin) and Windows (win32) use Docker Desktop with VM networking
+    files.push('docker-compose.desktop-vm.yml');
+  }
+
+  // GPU overlay (only for GPU profile)
+  if (runtimeProfile === 'gpu') {
+    files.push('docker-compose.gpu.yml');
+  }
+
+  // Flatten into docker compose args
+  return files.flatMap(f => ['-f', f]);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -146,21 +186,27 @@ async function getContainerStatus(): Promise<ContainerStatus> {
 }
 
 /**
- * Start the container via docker compose.
- * @param mode - 'local' or 'remote'
- * @param env - Additional environment variables (TLS paths etc.)
+ * Start the container via docker compose with layered compose files.
+ * @param options - Container start options including mode, runtime profile, and optional TLS env.
  */
 async function startContainer(
-  mode: 'local' | 'remote',
-  env?: Record<string, string>,
+  options: StartContainerOptions,
 ): Promise<string> {
-  const composeEnv: Record<string, string> = { ...env };
+  const { mode, runtimeProfile, tlsEnv } = options;
+  const composeEnv: Record<string, string> = { ...tlsEnv };
 
   if (mode === 'remote') {
     composeEnv['TLS_ENABLED'] = 'true';
   }
 
-  return exec('docker', ['compose', 'up', '-d'], {
+  // For CPU mode, force CUDA invisible so the server deterministically uses CPU
+  if (runtimeProfile === 'cpu') {
+    composeEnv['CUDA_VISIBLE_DEVICES'] = '';
+  }
+
+  const fileArgs = composeFileArgs(runtimeProfile);
+
+  return exec('docker', ['compose', ...fileArgs, 'up', '-d'], {
     cwd: COMPOSE_DIR,
     env: composeEnv,
   });

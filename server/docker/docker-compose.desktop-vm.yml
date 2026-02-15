@@ -1,0 +1,14 @@
+# Desktop VM (macOS / Windows) network overlay
+# Uses bridge networking with explicit port mapping.
+# host.docker.internal resolves to the Docker host for LM Studio access.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+
+services:
+  transcriptionsuite:
+    # Bridge networking with explicit port mapping (host networking is unavailable on VM platforms)
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    environment:
+      # Override LM Studio URL to use Docker Desktop's host gateway
+      - LM_STUDIO_URL=${LM_STUDIO_URL:-http://host.docker.internal:1234}

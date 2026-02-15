@@ -1,0 +1,7 @@
+# Linux host-network overlay
+# Provides direct host networking (required for LM Studio localhost access).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml up -d
+
+services:
+  transcriptionsuite:
+    network_mode: "host"

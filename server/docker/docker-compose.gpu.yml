@@ -1,0 +1,13 @@
+# NVIDIA GPU overlay
+# Adds GPU device reservation for CUDA-accelerated transcription.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+
+services:
+  transcriptionsuite:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

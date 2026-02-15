@@ -80,6 +80,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateChecksEnabled: false,
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
+    runtimeProfile: 'gpu' as 'gpu' | 'cpu',
   });
 
   // Update check status (loaded from main process)
@@ -133,6 +134,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               updateChecksEnabled: (cfg['app.updateChecksEnabled'] as boolean) ?? prev.updateChecksEnabled,
               updateCheckIntervalMode: (cfg['app.updateCheckIntervalMode'] as string) ?? prev.updateCheckIntervalMode,
               updateCheckCustomHours: (cfg['app.updateCheckCustomHours'] as number) ?? prev.updateCheckCustomHours,
+              runtimeProfile: (cfg['server.runtimeProfile'] as 'gpu' | 'cpu') ?? prev.runtimeProfile,
             }));
           }
         }).catch(() => {});
@@ -177,6 +179,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.updateChecksEnabled', appSettings.updateChecksEnabled],
         ['app.updateCheckIntervalMode', appSettings.updateCheckIntervalMode],
         ['app.updateCheckCustomHours', appSettings.updateCheckCustomHours],
+        ['server.runtimeProfile', appSettings.runtimeProfile],
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
     }
@@ -215,6 +218,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           onChange={(v) => { setAppSettings(prev => ({ ...prev, stopServerOnQuit: v })); setIsDirty(true); }} 
           label="Stop server when quitting dashboard" 
         />
+      </Section>
+      <Section title="Runtime Mode">
+        <div className="space-y-3">
+            <p className="text-xs text-slate-400">
+                Choose the hardware acceleration profile for the transcription server.
+                GPU mode requires an NVIDIA GPU with CUDA support. CPU mode works on all platforms but is significantly slower.
+            </p>
+            <div className="flex gap-3">
+                <button
+                    onClick={() => { setAppSettings(prev => ({ ...prev, runtimeProfile: 'gpu' })); setIsDirty(true); }}
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all border ${
+                        appSettings.runtimeProfile === 'gpu'
+                            ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan'
+                            : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+                    }`}
+                >
+                    GPU (CUDA)
+                </button>
+                <button
+                    onClick={() => { setAppSettings(prev => ({ ...prev, runtimeProfile: 'cpu' })); setIsDirty(true); }}
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all border ${
+                        appSettings.runtimeProfile === 'cpu'
+                            ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange'
+                            : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+                    }`}
+                >
+                    CPU Only
+                </button>
+            </div>
+            <p className="text-xs text-slate-500 italic">
+                {appSettings.runtimeProfile === 'cpu' 
+                    ? 'CPU mode: No GPU required. Works on macOS, Linux, and Windows. Expect slower transcription speeds.'
+                    : 'GPU mode: Requires NVIDIA GPU with CUDA. Recommended for Linux and Windows with supported hardware.'}
+            </p>
+        </div>
       </Section>
       <Section title="Window">
         <AppleSwitch 

@@ -27,13 +27,16 @@ Technical documentation for developing and building TranscriptionSuite.
   - [5.2 Build Matrix](#52-build-matrix)
   - [5.3 Linux AppImage](#53-linux-appimage)
   - [5.4 Windows Installer](#54-windows-installer)
-  - [5.5 Build Assets](#55-build-assets)
+  - [5.5 macOS DMG (Signed + Notarized)](#55-macos-dmg-signed--notarized)
+  - [5.6 Build Assets](#56-build-assets)
 - [6. Docker Reference](#6-docker-reference)
-  - [6.1 Local vs Remote Mode](#61-local-vs-remote-mode)
-  - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
-  - [6.3 Docker Volume Structure](#63-docker-volume-structure)
-  - [6.4 Docker Image Selection](#64-docker-image-selection)
-  - [6.5 Server Update Lifecycle](#65-server-update-lifecycle)
+  - [6.1 Compose File Layering](#61-compose-file-layering)
+  - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
+  - [6.3 CPU Mode](#63-cpu-mode)
+  - [6.4 Tailscale HTTPS Setup](#64-tailscale-https-setup)
+  - [6.5 Docker Volume Structure](#65-docker-volume-structure)
+  - [6.6 Docker Image Selection](#66-docker-image-selection)
+  - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
 - [7. API Reference](#7-api-reference)
   - [7.1 API Endpoints](#71-api-endpoints)
   - [7.2 WebSocket Protocol](#72-websocket-protocol)
@@ -67,7 +70,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
-  - [13.5 Windows Docker Networking](#135-windows-docker-networking)
+  - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
   - [13.6 Checking Installed Packages](#136-checking-installed-packages)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
@@ -131,6 +134,13 @@ cd dashboard && npm run package:linux
 # Windows (on Windows machine)
 cd dashboard && npm run package:windows
 # Output: dashboard/release/TranscriptionSuite Setup *.exe
+
+# macOS (on macOS machine, Apple Silicon)
+./build/build-electron-mac.sh
+# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+
+# Or from within dashboard/
+cd dashboard && npm run package:mac
 ```
 
 ### 1.4 Common Tasks
@@ -176,6 +186,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  Renderer: React + TypeScript + Tailwind CSS      │  │
 │  │  Main Process: Electron (Node.js)                 │  │
 │  │  Targets: Linux (AppImage) + Windows (NSIS)       │  │
+│  │           + macOS (DMG, arm64, signed/notarized)  │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -193,10 +204,11 @@ TranscriptionSuite uses a **client-server architecture**:
 
 ### 2.2 Platform Architectures
 
-| Platform | Architecture | UI Stack | Notes |
-|----------|--------------|----------|-------|
-| **Linux** | Single-process | Electron + React | Packaged as AppImage via electron-builder |
-| **Windows** | Single-process | Electron + React | Packaged as NSIS installer via electron-builder |
+| Platform | Architecture | UI Stack | Runtime Profile | Notes |
+|----------|--------------|----------|-----------------|-------|
+| **Linux** | Single-process | Electron + React | GPU (default) or CPU | Packaged as AppImage via electron-builder |
+| **Windows** | Single-process | Electron + React | GPU (default) or CPU | Packaged as NSIS installer via electron-builder |
+| **macOS** | Single-process | Electron + React | CPU only (v1) | Packaged as DMG + ZIP (arm64), signed & notarized |
 
 **Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
@@ -204,6 +216,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - Main content area on the right with views: Session, Notebook, Server
 - Notebook tab contains Calendar, Search, and Import sub-tabs
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
+- App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
 - Glassmorphism design language with dark frosted glass aesthetic
 
 ### 2.3 Security Model
@@ -261,15 +274,21 @@ TranscriptionSuite/
 │
 ├── build/                        # Build and development tools
 │   ├── build-electron-linux.sh   # Build Electron AppImage
-│   ├── generate-ico.sh           # Generate PNG/ICO logo assets from SVG sources
+│   ├── build-electron-mac.sh     # Build Electron DMG + ZIP (macOS arm64)
+│   ├── generate-ico.sh           # Generate PNG/ICO/ICNS logo assets from SVG sources
 │   ├── docker-build-push.sh      # Build and push Docker image
+│   ├── notarize.cjs              # Electron-builder afterSign hook for macOS notarization
+│   ├── entitlements.mac.plist    # macOS Hardened Runtime entitlements
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
 │
 ├── server/                       # Server source code
 │   ├── docker/                   # Docker infrastructure
 │   │   ├── Dockerfile            # Runtime-bootstrap image (small base + first-run sync)
-│   │   ├── docker-compose.yml    # Container orchestration
+│   │   ├── docker-compose.yml    # Base container orchestration (service, env, volumes)
+│   │   ├── docker-compose.linux-host.yml   # Linux overlay: host networking
+│   │   ├── docker-compose.desktop-vm.yml   # macOS/Windows overlay: bridge + port mapping
+│   │   ├── docker-compose.gpu.yml          # NVIDIA GPU overlay
 │   │   └── entrypoint.py         # Container entrypoint
 │   ├── backend/                  # FastAPI backend
 │   │   ├── api/                  # FastAPI routes
@@ -439,6 +458,7 @@ uv sync
 |----------|--------|--------|---------------------|
 | **Linux** | Electron + electron-builder | AppImage | None |
 | **Windows** | Electron + electron-builder | NSIS installer | None |
+| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Apple Developer cert + notarization credentials |
 
 ### 5.3 Linux AppImage
 
@@ -461,7 +481,34 @@ npm run package:windows
 # Output: dashboard\release\TranscriptionSuite Setup *.exe
 ```
 
-### 5.5 Build Assets
+### 5.5 macOS DMG (Signed + Notarized)
+
+```bash
+./build/build-electron-mac.sh
+# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+#         dashboard/release/TranscriptionSuite-*-arm64-mac.zip
+```
+
+Or manually:
+```bash
+cd dashboard
+npm run package:mac
+```
+
+**Signing & notarization** requires these environment variables:
+| Variable | Description |
+|----------|-------------|
+| `CSC_LINK` | Base64-encoded `.p12` certificate (or file path) |
+| `CSC_KEY_PASSWORD` | Certificate password |
+| `APPLE_ID` | Apple Developer account email |
+| `APPLE_APP_PASSWORD` | App-specific password ([appleid.apple.com](https://appleid.apple.com)) |
+| `APPLE_TEAM_ID` | 10-character Team ID from Apple Developer portal |
+
+Without these variables, the build produces an unsigned DMG (for local development only).
+
+The CI pipeline (`.github/workflows/release-mac.yml`) injects these from repository secrets.
+
+### 5.6 Build Assets
 
 **Source files (manually maintained in `build/assets/`):**
 - `logo.svg` — Master vector logo (source of truth)
@@ -471,6 +518,7 @@ npm run package:windows
 **Generated files (created by `build/generate-ico.sh`):**
 - `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
 - `logo.ico` — Multi-resolution Windows icon (16, 32, 48, 256px)
+- `logo.icns` — macOS app icon (requires `iconutil` on macOS or `png2icns`/`libicns` on Linux)
 - `logo_wide.png` (440px tall, aspect-preserved) — Sharp wide logo used in packaged app assets
 - `logo_wide_readme.png` (880px tall, aspect-preserved) — Extra-sharp wide logo for README rendering
 
@@ -483,24 +531,77 @@ cd build && ./generate-ico.sh
 
 ## 6. Docker Reference
 
-### 6.1 Local vs Remote Mode
+### 6.1 Compose File Layering
+
+Docker Compose configuration is split into layered files for cross-platform and CPU/GPU support:
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Base: service definition, environment, volumes |
+| `docker-compose.linux-host.yml` | Linux: host networking (direct localhost access) |
+| `docker-compose.desktop-vm.yml` | macOS/Windows: bridge networking + port mapping + `host.docker.internal` |
+| `docker-compose.gpu.yml` | NVIDIA GPU device reservation |
+
+**Usage examples:**
 
 ```bash
-# Local mode (default)
-docker compose up -d
+# Linux + GPU (most common, equivalent to previous default)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 
-# Remote mode with HTTPS
+# Linux + CPU only
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml up -d
+
+# macOS or Windows + CPU (Docker Desktop)
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+
+# Windows + GPU (Docker Desktop with NVIDIA WSL support)
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
+```
+
+The Electron dashboard selects the correct compose file stack automatically based on the detected platform and the user's runtime profile setting.
+
+The `start-local.sh` / `start-remote.sh` convenience scripts default to Linux + GPU mode.
+
+### 6.2 Local vs Remote Mode
+
+```bash
+# Local mode (Linux + GPU, default)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+
+# Remote mode with HTTPS (Linux + GPU)
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 ```
 
 **Ports:**
 - `8000` — HTTP API (always available)
 - `8443` — HTTPS (only when `TLS_ENABLED=true`)
 
-### 6.2 Tailscale HTTPS Setup
+### 6.3 CPU Mode
+
+CPU mode runs the server without NVIDIA GPU reservation. The server automatically falls back
+to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
+
+**When to use CPU mode:**
+- macOS (no NVIDIA GPU support in Docker)
+- Systems without an NVIDIA GPU
+- Testing/development without GPU overhead
+- Running on VMs without GPU passthrough
+
+**How CPU mode works:**
+1. The GPU compose overlay (`docker-compose.gpu.yml`) is omitted from the compose stack
+2. `CUDA_VISIBLE_DEVICES` is set to empty string, ensuring deterministic CPU-only behavior
+3. The server's engine detects no CUDA availability and uses CPU for all inference
+
+**Performance expectations (CPU vs GPU):**
+- CPU mode is **5–20× slower** than GPU depending on model size and audio length
+- Recommended to use smaller models (`small`, `base`, `tiny`) in CPU mode
+- `large-v3` model in CPU mode: ~10–30× real-time (30 min audio ≈ 15–30 min transcription)
+- `small` model in CPU mode: ~2–5× real-time (much more practical)
+
+### 6.4 Tailscale HTTPS Setup
 
 1. **Install and authenticate Tailscale:**
    ```bash
@@ -528,7 +629,7 @@ docker compose up -d
    docker compose up -d
    ```
 
-### 6.3 Docker Volume Structure
+### 6.5 Docker Volume Structure
 
 **`transcriptionsuite-data`** (mounted to `/data`):
 
@@ -563,7 +664,7 @@ docker compose up -d
 
 When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 
-### 6.4 Docker Image Selection
+### 6.6 Docker Image Selection
 
 The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcriptionsuite-server`) with flexible tag selection:
 
@@ -597,7 +698,7 @@ TAG=my-custom docker compose up -d
 
 **Note:** The `TAG` environment variable is the only way to override which image version is used. If you have multiple local images with different tags, you must explicitly specify which one via `TAG=...` or it defaults to looking for the `latest` tag.
 
-### 6.5 Server Update Lifecycle
+### 6.7 Server Update Lifecycle
 
 This section describes exactly what updates when the Docker image changes versus when runtime dependency volumes change.
 
@@ -1113,6 +1214,7 @@ server:
   remote_host: ""              # Remote server hostname (no protocol/port)
   auto_reconnect: true         # Auto-reconnect on disconnect
   reconnect_interval: 10       # Seconds between attempts
+  runtimeProfile: gpu          # "gpu" (default) or "cpu" — controls Docker GPU reservation
 
 recording:
   sample_rate: 16000           # Audio sample rate (fixed for Whisper)
@@ -1125,6 +1227,13 @@ ui:
   notifications: true          # Show desktop notifications
   start_minimized: false       # Start with tray icon only
 ```
+
+> **`server.runtimeProfile`** — Controls whether the Docker container is
+> launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).
+> When set to `cpu`, the `docker-compose.gpu.yml` overlay is omitted and
+> `CUDA_VISIBLE_DEVICES` is set to an empty string, forcing faster-whisper
+> to use the CPU compute backend. Change this from the **Server View** or
+> **Settings → App tab** in the dashboard UI.
 
 ---
 
@@ -1305,24 +1414,20 @@ sudo systemctl restart tailscaled
 ldd squashfs-root/usr/bin/transcriptionsuite
 ```
 
-### 13.5 Windows Docker Networking
+### 13.5 Windows / macOS Docker Networking
 
-**Issue**: On Windows Docker Desktop, `network_mode: "host"` doesn't expose container ports to the Windows host because containers run inside a Linux VM (WSL2/Hyper-V). The server listens inside the VM but Windows can't reach `localhost:8000`.
+**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected — the server listens inside the VM but the host can't reach `localhost:8000`.
 
-**Solution**: The setup wizard automatically generates platform-specific `docker-compose.yml`:
-- **Linux**: Uses `network_mode: "host"` for direct access
-- **Windows**: Uses explicit port mappings (`8000:8000`, `8443:8443`) with bridge networking
-- **LM Studio URL**: Windows uses `host.docker.internal:1234` to reach host services (works with LM Studio 0.4.0+ v1 API)
+**Solution**: The layered compose system handles this automatically:
+- **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
+- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mappings `8000:8000`, `8443:8443`)
+- **LM Studio URL**: Windows/macOS uses `host.docker.internal:1234` to reach host services
 
-**For existing installations**, manually edit `docker-compose.yml`:
-```yaml
-# Replace:
-network_mode: "host"
+The Electron dashboard selects the correct overlay automatically based on `process.platform`.
 
-# With:
-ports:
-  - "8000:8000"
-  - "8443:8443"
+**Manual CLI usage** (Windows/macOS):
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
 ```
 
 Then restart: `docker compose down && docker compose up -d`
