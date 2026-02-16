@@ -68,6 +68,9 @@ export interface UseDockerReturn {
   // Operation feedback
   operating: boolean;
   operationError: string | null;
+
+  // Re-run Docker availability and image detection
+  retryDetection: () => Promise<void>;
 }
 
 type RuntimeProfile = 'gpu' | 'cpu';
@@ -144,6 +147,36 @@ export function useDocker(): UseDockerReturn {
     if (!docker) return;
     const vols = await docker.getVolumes();
     setVolumes(vols);
+  }, []);
+
+  /**
+   * Re-run Docker detection from scratch.
+   * Useful when Docker was started after the app launched, or detection failed due
+   * to a transient issue (e.g. daemon not ready yet).
+   */
+  const retryDetection = useCallback(async () => {
+    const docker = api();
+    if (!docker) return;
+    setLoading(true);
+    setOperationError(null);
+    try {
+      const ok = await docker.available();
+      setAvailable(ok);
+      if (ok) {
+        const [imgs, status, vols] = await Promise.all([
+          docker.listImages(),
+          docker.getContainerStatus(),
+          docker.getVolumes(),
+        ]);
+        setImages(imgs);
+        setContainer(status);
+        setVolumes(vols);
+      }
+    } catch {
+      setAvailable(false);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const withOperation = useCallback(async (fn: () => Promise<unknown>) => {
@@ -302,5 +335,6 @@ export function useDocker(): UseDockerReturn {
     clearLogs,
     operating,
     operationError,
+    retryDetection,
   };
 }

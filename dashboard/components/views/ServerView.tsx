@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Cpu, HardDrive, Download, Loader2, RefreshCw, Gpu, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Box, Cpu, HardDrive, Download, Loader2, RefreshCw, Gpu, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -64,13 +64,14 @@ export const ServerView: React.FC = () => {
   const resolvedImage = selectedImage === MOST_RECENT && docker.images.length > 0
     ? docker.images[0].fullName
     : selectedImage;
-  const selectedTag = resolvedImage.split(':').pop() || 'latest';
+  const selectedTagForActions = resolvedImage.split(':').pop() || 'latest';
+  const selectedTagForStart = docker.images.length > 0 ? selectedTagForActions : undefined;
 
   // Start container with HF token from config
   const handleStartContainer = useCallback(async (mode: 'local' | 'remote') => {
     const hfToken = await getConfig<string>('server.hfToken') || undefined;
-    await docker.startContainer(mode, runtimeProfile, undefined, selectedTag, hfToken);
-  }, [docker, runtimeProfile, selectedTag]);
+    await docker.startContainer(mode, runtimeProfile, undefined, selectedTagForStart, hfToken);
+  }, [docker, runtimeProfile, selectedTagForStart]);
 
   // ─── Setup Checklist ────────────────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ export const ServerView: React.FC = () => {
       label: 'NVIDIA GPU detected',
       ok: gpuInfo?.gpu ?? false,
       warn: gpuInfo !== null && !gpuInfo.gpu,
-      hint: gpuInfo?.gpu ? (gpuInfo.toolkit ? 'nvidia-container-toolkit ready' : 'Install nvidia-container-toolkit for GPU mode') : 'CPU mode will be used (slower)',
+      hint: gpuInfo?.gpu ? (gpuInfo.toolkit ? 'nvidia-container-toolkit ready' : 'Run: sudo nvidia-ctk runtime configure --runtime=docker') : 'CPU mode will be used (slower)',
     },
   ];
   const allPassed = setupChecks.every(c => c.ok);
@@ -176,13 +177,29 @@ export const ServerView: React.FC = () => {
                  </span>
                </div>
                <div className="flex items-center gap-2">
+                 {!allPassed && (
+                   <div
+                     role="button"
+                     tabIndex={0}
+                     onClick={(e) => { e.stopPropagation(); docker.retryDetection(); }}
+                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); docker.retryDetection(); } }}
+                     className="text-xs text-slate-400 hover:text-accent-cyan transition-colors px-2 py-1 rounded hover:bg-white/10 flex items-center gap-1 cursor-pointer"
+                     title="Re-check Docker, images, and GPU"
+                   >
+                     <RotateCcw size={12} />
+                     Retry
+                   </div>
+                 )}
                  {allPassed && (
-                   <button
+                   <div
+                     role="button"
+                     tabIndex={0}
                      onClick={(e) => { e.stopPropagation(); handleDismissSetup(); }}
-                     className="text-xs text-slate-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-white/10"
+                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleDismissSetup(); } }}
+                     className="text-xs text-slate-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-white/10 cursor-pointer"
                    >
                      Dismiss
-                   </button>
+                   </div>
                  )}
                  {setupExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
                </div>
@@ -241,7 +258,10 @@ export const ServerView: React.FC = () => {
                       </div>
                   </div>
                   <div className="flex flex-col justify-end space-y-2">
-                       <Button variant="secondary" className="w-full h-10" onClick={() => docker.pullImage(selectedTag)} disabled={docker.operating}>
+                       <Button variant="secondary" className="w-full h-10" onClick={() => docker.refreshImages()} disabled={docker.operating}>
+                         <RefreshCw size={14} className="mr-2" />Scan Local Images
+                       </Button>
+                       <Button variant="secondary" className="w-full h-10" onClick={() => docker.pullImage(selectedTagForActions)} disabled={docker.operating}>
                          {docker.pulling ? <><Loader2 size={14} className="animate-spin mr-2" /> Pulling...</> : 'Fetch Fresh Image'}
                        </Button>
                        {docker.pulling && (
@@ -249,7 +269,7 @@ export const ServerView: React.FC = () => {
                            Cancel Pull
                          </Button>
                        )}
-                       <Button variant="danger" className="w-full h-10" onClick={() => docker.removeImage(selectedTag)} disabled={docker.operating || docker.images.length === 0}>Remove Image</Button>
+                       <Button variant="danger" className="w-full h-10" onClick={() => docker.removeImage(selectedTagForActions)} disabled={docker.operating || docker.images.length === 0}>Remove Image</Button>
                   </div>
               </div>
               {docker.operationError && (

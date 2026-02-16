@@ -10,6 +10,9 @@ import { UpdateManager } from './updateManager.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
+app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
+
 const isDev = !app.isPackaged;
 
 function getResolvedAppVersion(): string {
@@ -294,6 +297,32 @@ ipcMain.handle('docker:startLogStream', async (_event, tail?: number) => {
 
 ipcMain.handle('docker:stopLogStream', async () => {
   dockerManager.stopLogStream();
+});
+
+// ─── Audio IPC ──────────────────────────────────────────────────────────────
+
+// desktopCapturer was removed in Electron 35+; use session-based display media handler instead.
+// For now, provide a stub that returns empty sources. System audio capture uses
+// navigator.mediaDevices.getDisplayMedia() in the renderer directly.
+ipcMain.handle('audio:getDesktopSources', async () => {
+  try {
+    // Try dynamic import in case a future Electron re-exports it
+    const { desktopCapturer } = await import('electron');
+    if (desktopCapturer) {
+      const sources = await desktopCapturer.getSources({
+        types: ['window', 'screen'],
+        thumbnailSize: { width: 150, height: 150 },
+      });
+      return sources.map((source: any) => ({
+        id: source.id,
+        name: source.name,
+        thumbnail: source.thumbnail.toDataURL(),
+      }));
+    }
+  } catch {
+    // desktopCapturer not available in this Electron version
+  }
+  return [];
 });
 
 // ─── Update Check IPC ───────────────────────────────────────────────────────

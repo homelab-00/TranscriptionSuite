@@ -15,6 +15,7 @@ import { execFile, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const execFileAsync = promisify(execFile);
 
@@ -97,13 +98,49 @@ function composeFileArgs(runtimeProfile: RuntimeProfile): string[] {
   return files.flatMap(f => ['-f', f]);
 }
 
+function buildProcessEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  const delimiter = path.delimiter;
+  const currentPath = process.env.PATH ?? '';
+  const defaultPathEntries = process.platform === 'win32'
+    ? ['C:\\Program Files\\Docker\\Docker\\resources\\bin']
+    : ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  const mergedPath = Array.from(new Set([...currentPath.split(delimiter).filter(Boolean), ...defaultPathEntries])).join(delimiter);
+
+  let rootlessDockerHost: string | undefined;
+  const explicitDockerHost = process.env.DOCKER_HOST || extraEnv?.DOCKER_HOST;
+  if (!explicitDockerHost && process.platform === 'linux' && typeof process.getuid === 'function') {
+    const systemDockerSocket = '/var/run/docker.sock';
+    const userDockerSocket = `/run/user/${process.getuid()}/docker.sock`;
+    if (fs.existsSync(userDockerSocket)) {
+      let systemSocketAccessible = false;
+      try {
+        fs.accessSync(systemDockerSocket, fs.constants.R_OK | fs.constants.W_OK);
+        systemSocketAccessible = true;
+      } catch {
+        systemSocketAccessible = false;
+      }
+
+      if (!systemSocketAccessible) {
+        rootlessDockerHost = `unix://${userDockerSocket}`;
+      }
+    }
+  }
+
+  return {
+    ...process.env,
+    PATH: mergedPath,
+    ...(rootlessDockerHost ? { DOCKER_HOST: rootlessDockerHost } : {}),
+    ...extraEnv,
+  };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function exec(cmd: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }): Promise<string> {
   try {
     const { stdout } = await execFileAsync(cmd, args, {
       cwd: opts?.cwd,
-      env: { ...process.env, ...opts?.env },
+      env: buildProcessEnv(opts?.env),
       maxBuffer: 10 * 1024 * 1024, // 10MB
       timeout: 120_000, // 2 minutes
     });
@@ -114,13 +151,46 @@ async function exec(cmd: string, args: string[], opts?: { cwd?: string; env?: Re
   }
 }
 
+/**
+ * Detect Docker availability using a three-stage fallback:
+ *   1. `docker version --format` — validates daemon connectivity (strongest)
+ *   2. `docker info`             — alternative daemon check
+ *   3. `docker --version`        — binary-only presence check (weakest)
+ *
+ * All stages log diagnostics to the main-process console for debugging.
+ */
 async function dockerAvailable(): Promise<boolean> {
+  const env = buildProcessEnv();
+
+  // Stage 1: validate full daemon connectivity (matches original working code)
   try {
-    await exec('docker', ['version', '--format', '{{.Server.Version}}']);
+    const ver = await exec('docker', ['version', '--format', '{{.Server.Version}}']);
+    console.log('[DockerManager] Docker daemon detected, server version:', ver);
     return true;
-  } catch {
-    return false;
+  } catch (err: any) {
+    console.warn('[DockerManager] docker version failed:', err.message);
   }
+
+  // Stage 2: try docker info as alternative daemon check
+  try {
+    await exec('docker', ['info', '--format', '{{.ServerVersion}}']);
+    console.log('[DockerManager] Docker detected via docker info');
+    return true;
+  } catch (err: any) {
+    console.warn('[DockerManager] docker info failed:', err.message);
+  }
+
+  // Stage 3: binary-only check (daemon might be down but binary exists)
+  try {
+    const clientVer = await exec('docker', ['--version']);
+    console.log('[DockerManager] Docker binary found (daemon may be down):', clientVer);
+    return true;
+  } catch (err: any) {
+    console.error('[DockerManager] Docker not found at all:', err.message);
+    console.error('[DockerManager] PATH used:', env.PATH);
+  }
+
+  return false;
 }
 
 // ─── Image Operations ───────────────────────────────────────────────────────
@@ -132,20 +202,95 @@ let pullProcess: ChildProcess | null = null;
  * List local Docker images matching our repo.
  */
 async function listImages(): Promise<DockerImage[]> {
+  const parseLegacyFormat = (output: string): DockerImage[] => {
+    return output
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [fullNameRaw = '', size = '', created = '', id = ''] = line.split('\t');
+        const fullName = fullNameRaw.trim();
+        const repoAndTag = fullName.split(':');
+        const tag = repoAndTag.length > 1 ? repoAndTag[repoAndTag.length - 1] : 'latest';
+        return { tag, fullName, size, created, id };
+      })
+      .filter((img) => img.fullName.startsWith(`${IMAGE_REPO}:`) && img.tag !== '<none>');
+  };
+
+  // Strategy 1: JSON format with filter (most reliable on modern Docker)
   try {
     const output = await exec('docker', [
+      'images', '--format', 'json',
+      '--filter', `reference=${IMAGE_REPO}`,
+    ]);
+    if (!output) {
+      console.log('[DockerManager] listImages: no matching images (json+filter)');
+      return [];
+    }
+
+    const parsed: DockerImage[] = [];
+    let parsedAnyJsonLine = false;
+
+    for (const line of output.split('\n').filter(Boolean)) {
+      try {
+        const row = JSON.parse(line) as {
+          Repository?: string;
+          Tag?: string;
+          Size?: string;
+          CreatedAt?: string;
+          ID?: string;
+        };
+        parsedAnyJsonLine = true;
+
+        const repo = row.Repository?.trim() ?? '';
+        const tag = row.Tag?.trim() || 'latest';
+        if (tag === '<none>') continue;
+
+        parsed.push({
+          tag,
+          fullName: `${repo}:${tag}`,
+          size: row.Size?.trim() ?? '',
+          created: row.CreatedAt?.trim() ?? '',
+          id: row.ID?.trim() ?? '',
+        });
+      } catch {
+        // Ignore malformed JSON line and continue.
+      }
+    }
+
+    if (parsedAnyJsonLine) {
+      console.log(`[DockerManager] listImages: found ${parsed.length} image(s) via json+filter`);
+      return parsed;
+    }
+    // Fall through to legacy format if no JSON was parsed.
+  } catch (err: any) {
+    console.warn('[DockerManager] listImages json+filter failed:', err.message);
+  }
+
+  // Strategy 2: Go template format with filter (original working approach)
+  try {
+    const legacyOutput = await exec('docker', [
       'images',
       '--format', '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
       '--filter', `reference=${IMAGE_REPO}`,
     ]);
-    if (!output) return [];
+    const results = parseLegacyFormat(legacyOutput);
+    console.log(`[DockerManager] listImages: found ${results.length} image(s) via template+filter`);
+    return results;
+  } catch (err: any) {
+    console.warn('[DockerManager] listImages template+filter failed:', err.message);
+  }
 
-    return output.split('\n').filter(Boolean).map(line => {
-      const [fullName, size, created, id] = line.split('\t');
-      const tag = fullName.split(':')[1] || 'latest';
-      return { tag, fullName, size, created, id };
-    });
-  } catch {
+  // Strategy 3: No filter, manual filtering (broadest compatibility)
+  try {
+    const rawOutput = await exec('docker', [
+      'images',
+      '--format', '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
+    ]);
+    const results = parseLegacyFormat(rawOutput);
+    console.log(`[DockerManager] listImages: found ${results.length} image(s) via unfiltered scan`);
+    return results;
+  } catch (err: any) {
+    console.error('[DockerManager] listImages: all strategies failed:', err.message);
     return [];
   }
 }
@@ -160,6 +305,7 @@ function pullImage(tag: string = 'latest'): Promise<string> {
 
     const proc = spawn('docker', ['pull', `${IMAGE_REPO}:${tag}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildProcessEnv(),
     });
     pullProcess = proc;
 
@@ -248,9 +394,18 @@ async function startContainer(
   const { mode, runtimeProfile, imageTag, tlsEnv, hfToken } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
 
-  // Pass the selected image tag to docker-compose (defaults to 'latest' in compose file)
-  if (imageTag) {
-    composeEnv['TAG'] = imageTag;
+  // Prefer a local image tag for dev workflows when no explicit tag is provided.
+  let resolvedTag = imageTag;
+  if (!resolvedTag) {
+    const localImages = await listImages();
+    if (localImages.length > 0) {
+      resolvedTag = localImages[0].tag;
+    }
+  }
+
+  // Pass the selected image tag to docker-compose (defaults to 'latest' only when none available locally)
+  if (resolvedTag) {
+    composeEnv['TAG'] = resolvedTag;
   }
 
   if (mode === 'remote') {
@@ -371,6 +526,7 @@ function startLogStream(onData: (line: string) => void, tail: number = 100): voi
 
   logProcess = spawn('docker', ['logs', '--follow', '--tail', String(tail), CONTAINER_NAME], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: buildProcessEnv(),
   });
 
   const handle = (data: Buffer) => {
@@ -420,14 +576,40 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
   let gpu = false;
   let toolkit = false;
   try {
-    await exec('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
+    const gpuName = await exec('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
     gpu = true;
-  } catch {}
+    console.log('[DockerManager] NVIDIA GPU detected:', gpuName);
+  } catch (err: any) {
+    console.warn('[DockerManager] nvidia-smi not found or failed:', err.message);
+  }
   if (gpu) {
+    // Check 1: Legacy nvidia runtime registered in Docker
     try {
       const info = await exec('docker', ['info', '--format', '{{json .Runtimes}}']);
-      toolkit = info.includes('nvidia');
-    } catch {}
+      if (info.includes('nvidia')) {
+        toolkit = true;
+        console.log('[DockerManager] NVIDIA container toolkit: legacy runtime detected');
+      }
+    } catch (err: any) {
+      console.warn('[DockerManager] docker info for toolkit check failed:', err.message);
+    }
+
+    // Check 2: Modern CDI (Container Device Interface) — nvidia-container-toolkit 1.14+
+    if (!toolkit) {
+      try {
+        const cdiOutput = await exec('nvidia-ctk', ['cdi', 'list']);
+        if (cdiOutput.includes('nvidia.com/gpu')) {
+          toolkit = true;
+          console.log('[DockerManager] NVIDIA container toolkit: CDI mode detected');
+        }
+      } catch {
+        // nvidia-ctk not available or CDI not configured
+      }
+    }
+
+    if (!toolkit) {
+      console.warn('[DockerManager] NVIDIA container toolkit: not found (install nvidia-container-toolkit and configure CDI)');
+    }
   }
   return { gpu, toolkit };
 }

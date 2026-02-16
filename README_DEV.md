@@ -218,6 +218,10 @@ TranscriptionSuite uses a **client-server architecture**:
 - Notebook tab contains Calendar, Search, and Import sub-tabs
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
 - App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
+- System tray integration with 11 state-aware icons, context menu controls, and quick-access file transcription
+- First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
+- Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
+- Model-aware translation toggle (auto-disables for turbo, .en, and distil model variants)
 - Glassmorphism design language with dark frosted glass aesthetic
 
 ### 2.3 Security Model
@@ -245,6 +249,8 @@ TranscriptionSuite/
 │   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
 │   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
 │   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
+│   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons
+│   │   ├── updateManager.ts      # Opt-in update checker (app via GitHub, image via GHCR)
 │   │   └── tsconfig.json         # TypeScript config for main process
 │   ├── src/                      # Shared source (API, config, hooks, services)
 │   │   ├── api/client.ts         # REST API client for server communication
@@ -252,7 +258,8 @@ TranscriptionSuite/
 │   │   ├── hooks/                # React hooks (see Key Modules section)
 │   │   ├── services/             # Core services
 │   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
-│   │   │   └── websocket.ts      # WebSocket client for real-time/live transcription
+│   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
+│   │   │   └── modelCapabilities.ts # Translation support detection per model variant
 │   │   ├── index.css             # Tailwind CSS + global styles
 │   │   └── types/electron.d.ts   # TypeScript declarations for Electron IPC
 │   ├── components/               # React UI components
@@ -811,6 +818,9 @@ Use runtime reset only for recovery/maintenance. Prefer keeping `transcriptionsu
 | `/api/notebook/recordings/{id}/export` | GET | Export recording (`txt` for pure notes, `srt`/`ass` for timestamp-capable notes) |
 | `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization (`translation_enabled`, `translation_target_language` supported) |
 | `/api/notebook/calendar` | GET | Get recordings by date range |
+| `/api/notebook/recordings/{id}/title` | PATCH | Rename a recording |
+| `/api/notebook/recordings/{id}/date` | PATCH | Change recording date |
+| `/api/notebook/recordings/{id}/summary` | PATCH | Update or clear recording summary |
 | `/backups` | GET | List available database backups |
 | `/backup` | POST | Create new database backup |
 | `/restore` | POST | Restore database from backup |
@@ -946,6 +956,8 @@ npm run dev:electron
 | `main.ts` | Window creation, IPC handlers, app lifecycle |
 | `preload.ts` | Context bridge (safe IPC between renderer and main) |
 | `dockerManager.ts` | Docker CLI wrapper for container/image management |
+| `trayManager.ts` | System tray with 11 state-aware icons, context menu, and runtime icon tinting |
+| `updateManager.ts` | Opt-in update checker for app releases (GitHub) and server image (GHCR) |
 
 **Services (`src/services/`):**
 
@@ -953,6 +965,7 @@ npm run dev:electron
 |--------|---------|
 | `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
+| `modelCapabilities.ts` | Translation support detection per Whisper model variant |
 
 **React Hooks (`src/hooks/`):**
 
@@ -969,6 +982,8 @@ npm run dev:electron
 | `useBackups.ts` | Database backup/restore operations |
 | `useLanguages.ts` | Available transcription languages |
 | `useAdminStatus.ts` | Admin authentication state |
+| `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
+| `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
 
 **Shared Source (`src/`):**
 
@@ -1215,31 +1230,31 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 
 ### 10.2 Dashboard Configuration
 
-Config file: `~/.config/TranscriptionSuite/dashboard.yaml`
+The Electron dashboard persists settings via **electron-store** (JSON) at the
+platform-specific config path (e.g. `~/.config/transcription-suite/config.json`
+on Linux). Settings are managed through the **Settings** modal in the UI.
 
-```yaml
-server:
-  host: localhost              # Local server hostname
-  port: 8000                   # Server port
-  use_https: false             # Enable HTTPS (required for remote/Tailscale)
-  token: ""                    # Authentication token
-  use_remote: false            # Use remote_host instead of host
-  remote_host: ""              # Remote server hostname (no protocol/port)
-  auto_reconnect: true         # Auto-reconnect on disconnect
-  reconnect_interval: 10       # Seconds between attempts
-  runtimeProfile: gpu          # "gpu" (default) or "cpu" — controls Docker GPU reservation
-
-recording:
-  sample_rate: 16000           # Audio sample rate (fixed for Whisper)
-  device_index: null           # Audio input device (null = default)
-
-clipboard:
-  auto_copy: true              # Copy transcription to clipboard
-
-ui:
-  notifications: true          # Show desktop notifications
-  start_minimized: false       # Start with tray icon only
-```
+| Key | Default | Description |
+|-----|---------|-------------|
+| `connection.localHost` | `localhost` | Local server hostname |
+| `connection.remoteHost` | `""` | Remote server hostname (no protocol/port) |
+| `connection.useRemote` | `false` | Use remote host instead of local |
+| `connection.authToken` | `""` | Authentication token |
+| `connection.port` | `8000` | Server port |
+| `connection.useHttps` | `false` | Enable HTTPS (required for remote/Tailscale) |
+| `audio.gracePeriod` | `0.5` | Seconds of silence before finalising a recording chunk |
+| `diarization.constrainSpeakers` | `false` | Constrain speaker count for diarization |
+| `diarization.numSpeakers` | `2` | Number of speakers when constrained |
+| `notebook.autoAdd` | `true` | Auto-add longform transcriptions to Notebook |
+| `server.hfToken` | `""` | HuggingFace token for PyAnnote diarization models |
+| `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` — controls Docker GPU reservation |
+| `app.autoCopy` | `true` | Copy transcription to clipboard on completion |
+| `app.showNotifications` | `true` | Show desktop notifications |
+| `app.stopServerOnQuit` | `false` | Stop Docker container when quitting the app |
+| `app.startMinimized` | `false` | Start minimised to system tray |
+| `app.updateChecksEnabled` | `false` | Enable opt-in update checking |
+| `app.updateCheckIntervalMode` | `daily` | Check interval: `hourly`, `daily`, `weekly`, or `custom` |
+| `app.updateCheckCustomHours` | `12` | Custom interval in hours (when mode is `custom`) |
 
 > **`server.runtimeProfile`** — Controls whether the Docker container is
 > launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).

@@ -72,14 +72,19 @@ is Dockerized for fast setup.
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
 - **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS (Apple Silicon)
 - **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
-- **Longform Transcription**: Record as long as you want and have it transcribed in seconds![alt text](image.png)
+- **Longform Transcription**: Record as long as you want and have it transcribed in seconds
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
 - **Speaker Diarization**: PyAnnote-based speaker identification
-- **Static File Transcription**: Transcribe an existing audio/video file
+- **Static File Transcription**: Transcribe existing audio/video files with multi-file import queue, retry, and progress tracking
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
   (utilizing Tailscale)
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
+- **System Tray**: Minimise to tray with state-aware icons, context menu controls, and quick-access file transcription
+- **Setup Checklist**: First-run setup wizard with automatic GPU detection, Docker verification, and HuggingFace token management
+- **Update Checker**: Opt-in update notifications for both the app and server Docker image
+- **Model-Aware Translation**: Translation toggle auto-disables for models that don't support it (turbo, .en, distil variants)
+- **Recording Management**: Edit recording dates, summaries, and titles directly from the Notebook
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
@@ -245,7 +250,8 @@ Once the server is running, navigate to the **Session** view to start transcribi
 **Static File Transcription:**
 * Navigate to **Notebook** → **Import** tab
 * Drag and drop audio/video files or click to browse
-* Files are transcribed and added to the Audio Notebook
+* Queue multiple files at once — each is transcribed with individual progress and retry on failure
+* Completed files are automatically added to the Audio Notebook
 
 **Translation (English-only, optional):**
 * Enable `Translation` toggle in the Session controls
@@ -263,6 +269,17 @@ The Dashboard features **sidebar navigation** with these main views:
   - Processing logs
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
 - **Server**: Docker server management (container, images, volumes)
+- **Settings**: Connection, audio, diarization, notebook, app behaviour, and HuggingFace token management
+
+**System Tray**: The app can minimise to the system tray. The tray icon reflects server and
+recording state (11 distinct states), and the context menu provides quick controls
+(start/stop server, open dashboard, transcribe file, quit).
+
+**Setup Checklist**: On first launch a setup checklist guides you through Docker verification,
+GPU detection, and HuggingFace token entry.
+
+**Update Checker**: Opt-in background checks for new app releases (GitHub) and server Docker
+image updates (GHCR). Configurable interval in Settings.
 
 **Status Lights**: The sidebar shows real-time status indicators:
 - 🟢 Green: Running/Healthy

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, desktopCapturer } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
 
 /**
  * Preload script — exposes a safe IPC bridge to the renderer process.
@@ -137,15 +137,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   audio: {
     getDesktopSources: async () => {
-      const sources = await desktopCapturer.getSources({
-        types: ['window', 'screen'],
-        thumbnailSize: { width: 150, height: 150 },
-      });
-      return sources.map((source) => ({
-        id: source.id,
-        name: source.name,
-        thumbnail: source.thumbnail.toDataURL(),
-      }));
+      return ipcRenderer.invoke('audio:getDesktopSources');
     },
   },
   updates: {
