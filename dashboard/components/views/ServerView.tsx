@@ -16,7 +16,7 @@ const LIVE_ALTERNATE_MODEL = 'Systran/faster-whisper-medium';
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
 const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
-const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/35 ring-1 ring-accent-cyan/25 !shadow-[0_0_0_1px_rgba(34,211,238,0.15),0_0_24px_rgba(34,211,238,0.24)]';
+const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40 shadow-[0_0_15px_rgba(34,211,238,0.2)]';
 
 function getString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -470,7 +470,7 @@ export const ServerView: React.FC = () => {
                           )}
                       </div>
                   </div>
-                  <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                  <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
                     <div className="text-xs text-slate-500 font-mono">Main: {activeTranscriber}</div>
                     <div className="text-xs text-slate-500 font-mono">Live: {activeLiveModel}</div>
                   </div>
