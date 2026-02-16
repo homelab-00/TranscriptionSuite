@@ -46,7 +46,9 @@ function resolveComposeDir(): string {
   }
 
   const bundledDir = path.join(process.resourcesPath, 'docker');
-  const writableDir = path.join(app.getPath('userData'), 'docker');
+  const userDataDir = path.join(app.getPath('appData'), 'TranscriptionSuite');
+  app.setPath('userData', userDataDir);
+  const writableDir = path.join(userDataDir, 'docker');
 
   // Ensure writable target exists
   fs.mkdirSync(writableDir, { recursive: true });
@@ -67,7 +69,16 @@ function resolveComposeDir(): string {
   return writableDir;
 }
 
-const COMPOSE_DIR = resolveComposeDir();
+let composeDir: string | null = null;
+
+function getComposeDir(): string {
+  if (composeDir) {
+    return composeDir;
+  }
+
+  composeDir = resolveComposeDir();
+  return composeDir;
+}
 
 /** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
 export type RuntimeProfile = 'gpu' | 'cpu';
@@ -471,7 +482,7 @@ async function startContainer(
   const fileArgs = composeFileArgs(runtimeProfile);
 
   return exec('docker', ['compose', ...fileArgs, 'up', '-d'], {
-    cwd: COMPOSE_DIR,
+    cwd: getComposeDir(),
     env: composeEnv,
   });
 }
@@ -480,14 +491,14 @@ async function startContainer(
  * Stop the container via docker compose.
  */
 async function stopContainer(): Promise<string> {
-  return exec('docker', ['compose', 'stop'], { cwd: COMPOSE_DIR });
+  return exec('docker', ['compose', 'stop'], { cwd: getComposeDir() });
 }
 
 /**
  * Remove the container (docker compose down).
  */
 async function removeContainer(): Promise<string> {
-  return exec('docker', ['compose', 'down'], { cwd: COMPOSE_DIR });
+  return exec('docker', ['compose', 'down'], { cwd: getComposeDir() });
 }
 
 // ─── Volume Operations ──────────────────────────────────────────────────────
