@@ -28,10 +28,46 @@ const __dirname = path.dirname(__filename);
 const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 const CONTAINER_NAME = 'transcriptionsuite-container';
 
-/** Resolve compose directory: extraResources/docker when packaged, repo path in dev */
-const COMPOSE_DIR = app.isPackaged
-  ? path.join(process.resourcesPath, 'docker')
-  : path.resolve(__dirname, '../../server/docker');
+/**
+ * Resolve compose directory.
+ *
+ * In dev mode the repo's server/docker directory is used directly.
+ *
+ * When packaged (AppImage / installed), the compose files live inside the
+ * read-only app bundle (extraResources).  Docker Compose resolves *relative*
+ * bind-mount paths (like `./.empty`) against the compose file's parent
+ * directory, so we must copy them to a writable location first.  We use
+ * `<userData>/docker/` for this and also create the `.empty` placeholder
+ * directory that the compose file defaults reference.
+ */
+function resolveComposeDir(): string {
+  if (!app.isPackaged) {
+    return path.resolve(__dirname, '../../server/docker');
+  }
+
+  const bundledDir = path.join(process.resourcesPath, 'docker');
+  const writableDir = path.join(app.getPath('userData'), 'docker');
+
+  // Ensure writable target exists
+  fs.mkdirSync(writableDir, { recursive: true });
+
+  // Copy / refresh compose files from the bundle into the writable dir
+  for (const file of fs.readdirSync(bundledDir)) {
+    const src = path.join(bundledDir, file);
+    const dst = path.join(writableDir, file);
+    // Only copy files (not directories)
+    if (fs.statSync(src).isFile()) {
+      fs.copyFileSync(src, dst);
+    }
+  }
+
+  // Create the .empty directory that compose defaults reference for optional bind mounts
+  fs.mkdirSync(path.join(writableDir, '.empty'), { recursive: true });
+
+  return writableDir;
+}
+
+const COMPOSE_DIR = resolveComposeDir();
 
 /** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
 export type RuntimeProfile = 'gpu' | 'cpu';
