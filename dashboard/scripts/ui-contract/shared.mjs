@@ -514,21 +514,28 @@ function extractKeyframes(content) {
 
 function extractComponentNames(content) {
   const names = new Set();
+  const isAllCapsConstant = (name) => /^[A-Z0-9_]+$/.test(name);
 
   const constArrowRe = /(?:export\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*\([^)]*\)\s*=>/g;
   let match;
   while ((match = constArrowRe.exec(content)) !== null) {
-    names.add(match[1]);
+    if (!isAllCapsConstant(match[1])) {
+      names.add(match[1]);
+    }
   }
 
   const broadArrowRe = /(?:export\s+)?const\s+([A-Z][A-Za-z0-9_]*)\b[\s\S]{0,220}?=>/g;
   while ((match = broadArrowRe.exec(content)) !== null) {
-    names.add(match[1]);
+    if (!isAllCapsConstant(match[1])) {
+      names.add(match[1]);
+    }
   }
 
   const functionRe = /(?:export\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*\(/g;
   while ((match = functionRe.exec(content)) !== null) {
-    names.add(match[1]);
+    if (!isAllCapsConstant(match[1])) {
+      names.add(match[1]);
+    }
   }
 
   return uniqueSorted(Array.from(names));

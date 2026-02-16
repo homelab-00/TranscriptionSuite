@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.0
+  spec_version: 1.0.2
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -27,7 +27,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-15T01:54:41.669Z
+    generated_at: 2026-02-16T03:30:37.910Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   tailwind:
@@ -80,6 +80,7 @@ foundation:
         - rgba(255, 255, 255, 0.1)
         - rgba(255, 255, 255, 0.2)
         - rgba(255, 255, 255, 0.4)
+        - rgba(255,145,0,0.15)
         - rgba(255,255,255,0.3)
         - rgba(34, 211, 238, 0.6)
         - rgba(34, 211, 238, 0.8)
@@ -101,9 +102,8 @@ foundation:
         inactive:
           classes:
             - bg-slate-500
-            - shadow-slate-500/50
           bg: bg-slate-500
-          shadow: shadow-slate-500/50
+          shadow: null
         warning:
           classes:
             - bg-accent-orange
@@ -142,7 +142,6 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - shadow-2xl
         - shadow-accent-cyan/20
         - shadow-accent-cyan/40
@@ -153,12 +152,12 @@ foundation:
         - shadow-inner
         - shadow-lg
         - shadow-red-500/50
-        - shadow-slate-500/50
         - shadow-sm
         - shadow-xl
     motion:
       duration_ms:
         - 100
+        - 150
         - 200
         - 300
         - 500
@@ -205,7 +204,6 @@ foundation:
         - z-9999
     spacing_and_size_constraints:
       arbitrary_classes:
-        - grid-rows-[auto_repeat(5,1fr)]
         - h-[85%]
         - h-[85vh]
         - max-h-[300px]
@@ -220,9 +218,7 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - text-[10px]
-        - text-[11px]
         - text-[8px]
         - text-[9px]
         - w-[calc(50%-4px)]
@@ -343,14 +339,12 @@ utility_allowlist:
     - bg-blue-500
     - bg-blue-500/10
     - bg-glass-100
-    - bg-glass-100/10
     - bg-glass-100/30
     - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
     - bg-green-500
     - bg-green-500/10
-    - bg-green-500/5
     - bg-linear-to-b
     - bg-linear-to-br
     - bg-linear-to-r
@@ -360,7 +354,6 @@ utility_allowlist:
     - bg-purple-500
     - bg-red-500
     - bg-red-500/10
-    - bg-red-500/5
     - bg-slate-500
     - bg-slate-700
     - bg-slate-800
@@ -382,7 +375,6 @@ utility_allowlist:
     - border-accent-cyan/20
     - border-accent-cyan/40
     - border-accent-magenta/20
-    - border-accent-magenta/5
     - border-accent-orange/20
     - border-b
     - border-b-2
@@ -396,7 +388,6 @@ utility_allowlist:
     - border-orange-500/20
     - border-r
     - border-red-500/20
-    - border-red-500/30
     - border-slate-900
     - border-t
     - border-transparent
@@ -406,13 +397,14 @@ utility_allowlist:
     - bottom-0
     - bottom-1
     - bottom-6
-    - cursor-default
     - cursor-pointer
+    - cursor-text
     - custom-scrollbar
     - delay-100
     - delay-150
     - delay-200
     - duration-100
+    - duration-150
     - duration-200
     - duration-300
     - duration-500
@@ -466,7 +458,6 @@ utility_allowlist:
     - h-1
     - h-1.5
     - h-10
-    - h-11.5
     - h-12
     - h-14
     - h-16
@@ -490,6 +481,7 @@ utility_allowlist:
     - hidden
     - hover:-translate-y-1
     - hover:bg-accent-cyan
+    - hover:bg-accent-cyan/20
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-black/40
@@ -501,6 +493,7 @@ utility_allowlist:
     - hover:bg-white/10
     - hover:bg-white/2
     - hover:bg-white/5
+    - hover:bg-white/8
     - hover:border-accent-cyan/50
     - hover:border-white/10
     - hover:border-white/20
@@ -508,10 +501,15 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
+    - hover:text-accent-cyan/80
     - hover:text-black
     - hover:text-cyan-300
+    - hover:text-green-300
     - hover:text-red-300
+    - hover:text-red-400
+    - hover:text-slate-300
     - hover:text-white
+    - hover:underline
     - inline-block
     - inline-flex
     - inset-0
@@ -531,8 +529,6 @@ utility_allowlist:
     - left-4
     - left-8
     - lg:col-span-2
-    - lg:col-span-5
-    - lg:col-span-7
     - lg:flex
     - lg:grid-cols-12
     - lg:grid-cols-2
@@ -541,6 +537,7 @@ utility_allowlist:
     - line-clamp-2
     - mask-gradient-right
     - max-h-32
+    - max-h-40
     - max-h-60
     - max-w-2xl
     - max-w-3xl
@@ -561,6 +558,7 @@ utility_allowlist:
     - md:grid-cols-2
     - md:grid-cols-4
     - min-h-0
+    - min-h-32
     - min-w-0
     - min-w-100
     - min-w-25
@@ -575,6 +573,7 @@ utility_allowlist:
     - mr-4
     - mt-0.5
     - mt-1
+    - mt-1.5
     - mt-10
     - mt-2
     - mt-3
@@ -608,7 +607,6 @@ utility_allowlist:
     - p-1.5
     - p-12
     - p-2
-    - p-2.5
     - p-3
     - p-4
     - p-5
@@ -650,6 +648,7 @@ utility_allowlist:
     - px-5
     - px-6
     - px-8
+    - px-px
     - py-0.5
     - py-1
     - py-1.5
@@ -657,6 +656,7 @@ utility_allowlist:
     - py-2
     - py-2.5
     - py-3
+    - py-3.5
     - py-4
     - py-6
     - py-8
@@ -694,7 +694,6 @@ utility_allowlist:
     - shadow-inner
     - shadow-lg
     - shadow-red-500/50
-    - shadow-slate-500/50
     - shadow-sm
     - shadow-xl
     - shrink-0
@@ -713,9 +712,9 @@ utility_allowlist:
     - space-y-1
     - space-y-1.5
     - space-y-2
+    - space-y-2.5
     - space-y-3
     - space-y-4
-    - space-y-5
     - space-y-6
     - space-y-8
     - sticky
@@ -724,11 +723,13 @@ utility_allowlist:
     - text-accent-cyan
     - text-accent-magenta
     - text-accent-orange
+    - text-amber-400
     - text-base
     - text-black
     - text-blue-400
     - text-center
     - text-green-400
+    - text-green-400/70
     - text-indigo-400
     - text-left
     - text-lg
@@ -745,7 +746,7 @@ utility_allowlist:
     - text-slate-700
     - text-sm
     - text-white
-    - text-white/60
+    - text-white/80
     - text-white/90
     - text-xl
     - text-xs
@@ -825,7 +826,6 @@ utility_allowlist:
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
     - ease-[cubic-bezier(0.33,1,0.68,1)]
-    - grid-rows-[auto_repeat(5,1fr)]
     - h-[85%]
     - h-[85vh]
     - max-h-[300px]
@@ -840,9 +840,7 @@ utility_allowlist:
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-    - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
     - text-[10px]
-    - text-[11px]
     - text-[8px]
     - text-[9px]
     - w-[calc(50%-4px)]
@@ -854,6 +852,7 @@ inline_style_allowlist:
     - backgroundColor
     - backgroundImage
     - backgroundSize
+    - gridTemplateRows
     - height
     - left
     - maskImage
@@ -895,6 +894,7 @@ inline_style_allowlist:
     - "60"
     - 7%
     - "90"
+    - auto repeat(${gridRows}, 1fr)
     - fixed
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)

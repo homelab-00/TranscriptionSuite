@@ -18,6 +18,17 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function bumpPatchVersion(version) {
+  const match = /^([0-9]+)\.([0-9]+)\.([0-9]+)$/.exec(String(version || '').trim());
+  if (!match) {
+    throw new Error(`Invalid semver version: ${version}`);
+  }
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]) + 1;
+  return `${major}.${minor}.${patch}`;
+}
+
 function hasIssue(report, code, pathIncludes = '') {
   return report.issues.some(
     (issue) => issue.code === code && (!pathIncludes || String(issue.path || '').includes(pathIncludes))
@@ -48,6 +59,9 @@ async function main() {
   };
 
   const baseFacts = await extractFacts();
+  const originalContract = await readYaml(CONTRACT_PATH);
+  const currentSpecVersion = originalContract.meta?.spec_version;
+  const bumpedSpecVersion = bumpPatchVersion(currentSpecVersion);
 
   // 1. Schema pass: canonical contract should validate.
   const schemaPass = await createValidationReport({ factsOverride: baseFacts });
@@ -110,7 +124,7 @@ async function main() {
     'semver-fail-baseline.json',
     JSON.stringify(
       {
-        spec_version: '1.0.0',
+        spec_version: currentSpecVersion,
         contract_sha256: '0000000000000000000000000000000000000000000000000000000000000000',
         updated_at: new Date().toISOString(),
       },
@@ -125,9 +139,8 @@ async function main() {
   expect(hasIssue(semverFail, 'semver_bump_required', 'meta.spec_version'), 'Versioning fail requires semver bump when contract hash changes');
 
   // 10. Versioning pass: bumped spec_version with changed hash should pass (warning allowed).
-  const originalContract = await readYaml(CONTRACT_PATH);
   const bumpedContract = clone(originalContract);
-  bumpedContract.meta.spec_version = '1.0.1';
+  bumpedContract.meta.spec_version = bumpedSpecVersion;
   const bumpedContractPath = await writeTempFile(
     'semver-pass-bumped-contract.yaml',
     YAML.stringify(bumpedContract, { indent: 2, lineWidth: 0, minContentWidth: 0 })
