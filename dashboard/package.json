@@ -64,6 +64,22 @@
       {
         "from": "../build/assets/tray-icon@2x.png",
         "to": "tray-icon@2x.png"
+      },
+      {
+        "from": "../server/docker/docker-compose.yml",
+        "to": "docker/docker-compose.yml"
+      },
+      {
+        "from": "../server/docker/docker-compose.linux-host.yml",
+        "to": "docker/docker-compose.linux-host.yml"
+      },
+      {
+        "from": "../server/docker/docker-compose.desktop-vm.yml",
+        "to": "docker/docker-compose.desktop-vm.yml"
+      },
+      {
+        "from": "../server/docker/docker-compose.gpu.yml",
+        "to": "docker/docker-compose.gpu.yml"
       }
     ],
     "linux": {

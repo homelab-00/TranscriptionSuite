@@ -16,6 +16,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { app } from 'electron';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,7 +27,11 @@ const __dirname = path.dirname(__filename);
 
 const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 const CONTAINER_NAME = 'transcriptionsuite-container';
-const COMPOSE_DIR = path.resolve(__dirname, '../../server/docker');
+
+/** Resolve compose directory: extraResources/docker when packaged, repo path in dev */
+const COMPOSE_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, 'docker')
+  : path.resolve(__dirname, '../../server/docker');
 
 /** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
 export type RuntimeProfile = 'gpu' | 'cpu';
