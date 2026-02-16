@@ -84,11 +84,13 @@ export class AudioCapture {
 
     // For system audio, we only need the audio track
     if (options.systemAudio) {
-      this.stream.getVideoTracks().forEach(t => t.stop());
+      this.stream.getVideoTracks().forEach((t) => t.stop());
     }
 
     // 2. Create AudioContext
-    this.ctx = new AudioContext({ sampleRate: this.stream.getAudioTracks()[0].getSettings().sampleRate || 48000 });
+    this.ctx = new AudioContext({
+      sampleRate: this.stream.getAudioTracks()[0].getSettings().sampleRate || 48000,
+    });
 
     // 3. Register the AudioWorklet processor
     await this.ctx.audioWorklet.addModule('./audio-worklet-processor.js');
@@ -133,7 +135,7 @@ export class AudioCapture {
       this.analyserNode = null;
     }
     if (this.stream) {
-      this.stream.getTracks().forEach(t => t.stop());
+      this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
     }
     if (this.ctx) {

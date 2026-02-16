@@ -28,7 +28,9 @@ function asObject(value) {
 }
 
 function trimMultiline(value) {
-  return String(value || '').replace(/\r\n/g, '\n').trim();
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .trim();
 }
 
 async function loadContract(contractPath) {
@@ -60,11 +62,21 @@ function normalizeContractForComparison(contract) {
       selection: trimMultiline(contract.global_behaviors?.css_blocks?.selection),
       moz_selection: trimMultiline(contract.global_behaviors?.css_blocks?.moz_selection),
       selectable_text: trimMultiline(contract.global_behaviors?.css_blocks?.selectable_text),
-      custom_scrollbar_root: trimMultiline(contract.global_behaviors?.css_blocks?.custom_scrollbar_root),
-      custom_scrollbar_track: trimMultiline(contract.global_behaviors?.css_blocks?.custom_scrollbar_track),
-      custom_scrollbar_thumb: trimMultiline(contract.global_behaviors?.css_blocks?.custom_scrollbar_thumb),
-      custom_scrollbar_thumb_hover: trimMultiline(contract.global_behaviors?.css_blocks?.custom_scrollbar_thumb_hover),
-      custom_scrollbar_corner: trimMultiline(contract.global_behaviors?.css_blocks?.custom_scrollbar_corner),
+      custom_scrollbar_root: trimMultiline(
+        contract.global_behaviors?.css_blocks?.custom_scrollbar_root,
+      ),
+      custom_scrollbar_track: trimMultiline(
+        contract.global_behaviors?.css_blocks?.custom_scrollbar_track,
+      ),
+      custom_scrollbar_thumb: trimMultiline(
+        contract.global_behaviors?.css_blocks?.custom_scrollbar_thumb,
+      ),
+      custom_scrollbar_thumb_hover: trimMultiline(
+        contract.global_behaviors?.css_blocks?.custom_scrollbar_thumb_hover,
+      ),
+      custom_scrollbar_corner: trimMultiline(
+        contract.global_behaviors?.css_blocks?.custom_scrollbar_corner,
+      ),
     },
     utility_allowlist: {
       exact_classes: asArray(contract.utility_allowlist?.exact_classes),
@@ -157,26 +169,77 @@ function buildSemanticDiff(contract, facts) {
   const factsView = normalizeFactsForComparison(facts);
 
   const setComparisons = {
-    utility_exact_classes: setDiff(contractView.utility_allowlist.exact_classes, factsView.utility_allowlist.exact_classes),
-    utility_arbitrary_classes: setDiff(contractView.utility_allowlist.arbitrary_classes, factsView.utility_allowlist.arbitrary_classes),
-    token_colors_literal_palette: setDiff(contractView.tokens.colors_literal_palette, factsView.tokens.colors_literal_palette),
+    utility_exact_classes: setDiff(
+      contractView.utility_allowlist.exact_classes,
+      factsView.utility_allowlist.exact_classes,
+    ),
+    utility_arbitrary_classes: setDiff(
+      contractView.utility_allowlist.arbitrary_classes,
+      factsView.utility_allowlist.arbitrary_classes,
+    ),
+    token_colors_literal_palette: setDiff(
+      contractView.tokens.colors_literal_palette,
+      factsView.tokens.colors_literal_palette,
+    ),
     token_blur_backdrop: setDiff(contractView.tokens.blur_backdrop, factsView.tokens.blur_backdrop),
     token_blur_filter: setDiff(contractView.tokens.blur_filter, factsView.tokens.blur_filter),
-    token_shadow_classes: setDiff(contractView.tokens.shadow_classes, factsView.tokens.shadow_classes),
-    token_motion_duration_ms: setDiff(contractView.tokens.motion_duration_ms.map(String), factsView.tokens.motion_duration_ms.map(String)),
-    token_motion_easings: setDiff(contractView.tokens.motion_easings, factsView.tokens.motion_easings),
-    token_motion_keyframes: setDiff(contractView.tokens.motion_keyframes, factsView.tokens.motion_keyframes),
-    token_motion_animation_classes: setDiff(contractView.tokens.motion_animation_classes, factsView.tokens.motion_animation_classes),
-    token_motion_animation_strings: setDiff(contractView.tokens.motion_animation_strings, factsView.tokens.motion_animation_strings),
+    token_shadow_classes: setDiff(
+      contractView.tokens.shadow_classes,
+      factsView.tokens.shadow_classes,
+    ),
+    token_motion_duration_ms: setDiff(
+      contractView.tokens.motion_duration_ms.map(String),
+      factsView.tokens.motion_duration_ms.map(String),
+    ),
+    token_motion_easings: setDiff(
+      contractView.tokens.motion_easings,
+      factsView.tokens.motion_easings,
+    ),
+    token_motion_keyframes: setDiff(
+      contractView.tokens.motion_keyframes,
+      factsView.tokens.motion_keyframes,
+    ),
+    token_motion_animation_classes: setDiff(
+      contractView.tokens.motion_animation_classes,
+      factsView.tokens.motion_animation_classes,
+    ),
+    token_motion_animation_strings: setDiff(
+      contractView.tokens.motion_animation_strings,
+      factsView.tokens.motion_animation_strings,
+    ),
     token_radii_classes: setDiff(contractView.tokens.radii_classes, factsView.tokens.radii_classes),
-    token_z_index_classes: setDiff(contractView.tokens.z_index_classes, factsView.tokens.z_index_classes),
-    token_spacing_arbitrary: setDiff(contractView.tokens.spacing_arbitrary, factsView.tokens.spacing_arbitrary),
-    token_status_allowed: setDiff(contractView.tokens.status_allowed, factsView.tokens.status_allowed),
-    inline_allowed_properties: setDiff(contractView.inline_style.allowed_properties, factsView.inline_style.allowed_properties),
-    inline_allowed_literals: setDiff(contractView.inline_style.allowed_literals, factsView.inline_style.allowed_literals),
-    inline_keyframes: setDiff(contractView.inline_style.keyframes, factsView.inline_style.keyframes),
-    inline_animation_strings: setDiff(contractView.inline_style.animation_strings, factsView.inline_style.animation_strings),
-    inline_cubic_beziers: setDiff(contractView.inline_style.cubic_beziers, factsView.inline_style.cubic_beziers),
+    token_z_index_classes: setDiff(
+      contractView.tokens.z_index_classes,
+      factsView.tokens.z_index_classes,
+    ),
+    token_spacing_arbitrary: setDiff(
+      contractView.tokens.spacing_arbitrary,
+      factsView.tokens.spacing_arbitrary,
+    ),
+    token_status_allowed: setDiff(
+      contractView.tokens.status_allowed,
+      factsView.tokens.status_allowed,
+    ),
+    inline_allowed_properties: setDiff(
+      contractView.inline_style.allowed_properties,
+      factsView.inline_style.allowed_properties,
+    ),
+    inline_allowed_literals: setDiff(
+      contractView.inline_style.allowed_literals,
+      factsView.inline_style.allowed_literals,
+    ),
+    inline_keyframes: setDiff(
+      contractView.inline_style.keyframes,
+      factsView.inline_style.keyframes,
+    ),
+    inline_animation_strings: setDiff(
+      contractView.inline_style.animation_strings,
+      factsView.inline_style.animation_strings,
+    ),
+    inline_cubic_beziers: setDiff(
+      contractView.inline_style.cubic_beziers,
+      factsView.inline_style.cubic_beziers,
+    ),
     component_coverage: setDiff(contractView.components.names, factsView.components.names),
   };
 
@@ -204,7 +267,10 @@ function buildSemanticDiff(contract, facts) {
     backdrop_blur_scale: {
       contract: contractView.tailwind.backdrop_blur_scale,
       extracted: factsView.tailwind.backdrop_blur_scale,
-      equal: deepEqual(contractView.tailwind.backdrop_blur_scale, factsView.tailwind.backdrop_blur_scale),
+      equal: deepEqual(
+        contractView.tailwind.backdrop_blur_scale,
+        factsView.tailwind.backdrop_blur_scale,
+      ),
     },
   };
 
@@ -232,27 +298,37 @@ function buildSemanticDiff(contract, facts) {
     custom_scrollbar_root: {
       contract: contractView.global_css.custom_scrollbar_root,
       extracted: factsView.global_css.custom_scrollbar_root,
-      equal: contractView.global_css.custom_scrollbar_root === factsView.global_css.custom_scrollbar_root,
+      equal:
+        contractView.global_css.custom_scrollbar_root ===
+        factsView.global_css.custom_scrollbar_root,
     },
     custom_scrollbar_track: {
       contract: contractView.global_css.custom_scrollbar_track,
       extracted: factsView.global_css.custom_scrollbar_track,
-      equal: contractView.global_css.custom_scrollbar_track === factsView.global_css.custom_scrollbar_track,
+      equal:
+        contractView.global_css.custom_scrollbar_track ===
+        factsView.global_css.custom_scrollbar_track,
     },
     custom_scrollbar_thumb: {
       contract: contractView.global_css.custom_scrollbar_thumb,
       extracted: factsView.global_css.custom_scrollbar_thumb,
-      equal: contractView.global_css.custom_scrollbar_thumb === factsView.global_css.custom_scrollbar_thumb,
+      equal:
+        contractView.global_css.custom_scrollbar_thumb ===
+        factsView.global_css.custom_scrollbar_thumb,
     },
     custom_scrollbar_thumb_hover: {
       contract: contractView.global_css.custom_scrollbar_thumb_hover,
       extracted: factsView.global_css.custom_scrollbar_thumb_hover,
-      equal: contractView.global_css.custom_scrollbar_thumb_hover === factsView.global_css.custom_scrollbar_thumb_hover,
+      equal:
+        contractView.global_css.custom_scrollbar_thumb_hover ===
+        factsView.global_css.custom_scrollbar_thumb_hover,
     },
     custom_scrollbar_corner: {
       contract: contractView.global_css.custom_scrollbar_corner,
       extracted: factsView.global_css.custom_scrollbar_corner,
-      equal: contractView.global_css.custom_scrollbar_corner === factsView.global_css.custom_scrollbar_corner,
+      equal:
+        contractView.global_css.custom_scrollbar_corner ===
+        factsView.global_css.custom_scrollbar_corner,
     },
   };
 
@@ -360,7 +436,8 @@ async function checkBaseline({ baselinePath, contractRaw, specVersion, updateBas
         code: 'missing_baseline',
         severity: 'error',
         path: path.relative(PROJECT_ROOT, baselinePath),
-        message: 'Baseline file is missing. Run validator with --update-baseline once to initialize.',
+        message:
+          'Baseline file is missing. Run validator with --update-baseline once to initialize.',
       });
       if (updateBaseline) {
         const initialized = {
@@ -399,7 +476,8 @@ async function checkBaseline({ baselinePath, contractRaw, specVersion, updateBas
         code: 'spec_version_changed',
         severity: 'warning',
         path: 'meta.spec_version',
-        message: 'Contract hash changed with a new spec_version. Update baseline to lock this revision.',
+        message:
+          'Contract hash changed with a new spec_version. Update baseline to lock this revision.',
         details: {
           baseline_spec_version: baseline.spec_version,
           current_spec_version: specVersion,

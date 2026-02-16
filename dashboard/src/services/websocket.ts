@@ -99,7 +99,9 @@ export function frameAudioChunk(pcmInt16: Int16Array): ArrayBuffer {
   // metadata JSON
   new Uint8Array(buf, 4, metaLen).set(metaBytes);
   // PCM data
-  new Uint8Array(buf, 4 + metaLen).set(new Uint8Array(pcmInt16.buffer, pcmInt16.byteOffset, pcmInt16.byteLength));
+  new Uint8Array(buf, 4 + metaLen).set(
+    new Uint8Array(pcmInt16.buffer, pcmInt16.byteOffset, pcmInt16.byteLength),
+  );
 
   return buf;
 }
@@ -118,7 +120,11 @@ export class TranscriptionSocket {
   /** When true, disconnect was initiated by the user — don't auto-reconnect */
   private intentionalDisconnect = false;
 
-  constructor(endpoint: SocketEndpoint, callbacks: SocketCallbacks, reconnect?: Partial<ReconnectConfig>) {
+  constructor(
+    endpoint: SocketEndpoint,
+    callbacks: SocketCallbacks,
+    reconnect?: Partial<ReconnectConfig>,
+  ) {
     this.endpoint = endpoint;
     this.callbacks = callbacks;
     this.reconnectConfig = { ...DEFAULT_RECONNECT, ...reconnect };
@@ -137,9 +143,7 @@ export class TranscriptionSocket {
   /** Derive ws:// or wss:// URL from the API client's base URL */
   private getWsUrl(): string {
     const httpUrl = apiClient.getBaseUrl(); // e.g. "http://localhost:8000"
-    const wsUrl = httpUrl
-      .replace(/^https:/, 'wss:')
-      .replace(/^http:/, 'ws:');
+    const wsUrl = httpUrl.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
     return `${wsUrl}${this.endpoint}`;
   }
 
@@ -248,14 +252,18 @@ export class TranscriptionSocket {
   private scheduleReconnect(): void {
     if (this.intentionalDisconnect) return;
     if (!this.reconnectConfig.enabled) return;
-    if (this.reconnectConfig.maxAttempts > 0 && this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+    if (
+      this.reconnectConfig.maxAttempts > 0 &&
+      this.reconnectAttempt >= this.reconnectConfig.maxAttempts
+    ) {
       this.log('Reconnect attempts exhausted', 'error');
       this.callbacks.onReconnectExhausted?.();
       return;
     }
 
     const delay = Math.min(
-      this.reconnectConfig.initialDelayMs * Math.pow(this.reconnectConfig.backoffMultiplier, this.reconnectAttempt),
+      this.reconnectConfig.initialDelayMs *
+        Math.pow(this.reconnectConfig.backoffMultiplier, this.reconnectAttempt),
       this.reconnectConfig.maxDelayMs,
     );
     this.reconnectAttempt++;

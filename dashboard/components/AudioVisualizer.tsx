@@ -6,7 +6,10 @@ interface AudioVisualizerProps {
   analyserNode?: AnalyserNode | null;
 }
 
-export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ className = "h-48", analyserNode }) => {
+export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
+  className = 'h-48',
+  analyserNode,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -28,7 +31,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ className = "h
         canvas.height = canvas.parentElement.offsetHeight;
       }
     };
-    
+
     resize();
     window.addEventListener('resize', resize);
 
@@ -38,31 +41,35 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ className = "h
       const height = canvas.height;
       const centerY = height / 2;
       const layers = 3;
-      
+
       for (let j = 0; j < layers; j++) {
         ctx.beginPath();
-        const color = j === 0 ? 'rgba(34, 211, 238, 0.6)' :
-                      j === 1 ? 'rgba(217, 70, 239, 0.5)' :
-                      'rgba(251, 146, 60, 0.3)';
+        const color =
+          j === 0
+            ? 'rgba(34, 211, 238, 0.6)'
+            : j === 1
+              ? 'rgba(217, 70, 239, 0.5)'
+              : 'rgba(251, 146, 60, 0.3)';
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
 
         for (let x = 0; x < width; x += 2) {
-            const amplitudeScale = height / 200; 
-            const y = centerY + 
-                Math.sin(x * 0.01 + t * (j + 1)) * (30 * amplitudeScale) * Math.sin(t * 0.5) +
-                Math.sin(x * 0.03 + t * 2) * (10 * amplitudeScale);
-            if (x === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+          const amplitudeScale = height / 200;
+          const y =
+            centerY +
+            Math.sin(x * 0.01 + t * (j + 1)) * (30 * amplitudeScale) * Math.sin(t * 0.5) +
+            Math.sin(x * 0.03 + t * 2) * (10 * amplitudeScale);
+          if (x === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
         }
         ctx.stroke();
-        
+
         if (j === 0) {
-            ctx.lineTo(width, height);
-            ctx.lineTo(0, height);
-            ctx.fillStyle = 'rgba(34,211,238,0.05)';
-            ctx.fill();
+          ctx.lineTo(width, height);
+          ctx.lineTo(0, height);
+          ctx.fillStyle = 'rgba(34,211,238,0.05)';
+          ctx.fill();
         }
       }
       t += 0.05;
@@ -89,18 +96,13 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ className = "h
 
         // Gradient color: cyan at low frequencies → magenta at high
         const ratio = i / barCount;
-        const r = Math.round(34 + ratio * 183);  // 34 → 217
-        const g = Math.round(211 - ratio * 141);  // 211 → 70
-        const b = Math.round(238 + ratio * 1);    // 238 → 239
+        const r = Math.round(34 + ratio * 183); // 34 → 217
+        const g = Math.round(211 - ratio * 141); // 211 → 70
+        const b = Math.round(238 + ratio * 1); // 238 → 239
         const alpha = 0.4 + normalized * 0.5;
 
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-        ctx.fillRect(
-          i * barWidth + 1,
-          height - barHeight,
-          barWidth - 2,
-          barHeight
-        );
+        ctx.fillRect(i * barWidth + 1, height - barHeight, barWidth - 2, barHeight);
       }
 
       // Draw a waveform overlay using time-domain data
@@ -140,10 +142,19 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ className = "h
   }, [analyserNode]);
 
   return (
-    <div className={`w-full relative rounded-xl overflow-hidden bg-black/20 border border-white/5 shadow-inner ${className}`}>
-        {/* Subtle grid overlay */}
-        <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-        <canvas ref={canvasRef} className="w-full h-full block" />
+    <div
+      className={`relative w-full overflow-hidden rounded-xl border border-white/5 bg-black/20 shadow-inner ${className}`}
+    >
+      {/* Subtle grid overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-10"
+        style={{
+          backgroundImage:
+            'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
+          backgroundSize: '20px 20px',
+        }}
+      ></div>
+      <canvas ref={canvasRef} className="block h-full w-full" />
     </div>
   );
 };

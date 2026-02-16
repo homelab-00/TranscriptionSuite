@@ -145,10 +145,18 @@ export async function setConfig(key: string, value: unknown): Promise<void> {
 export async function getServerBaseUrl(): Promise<string> {
   const useRemote = (await getConfig<boolean>('connection.useRemote')) ?? false;
   const host = useRemote
-    ? ((await getConfig<string>('connection.remoteHost')) || DEFAULT_CONFIG.connection.localHost)
-    : ((await getConfig<string>('connection.localHost')) ?? (await getConfig<string>('server.host')) ?? DEFAULT_CONFIG.server.host);
-  const port = (await getConfig<number>('connection.port')) ?? (await getConfig<number>('server.port')) ?? DEFAULT_CONFIG.server.port;
-  const https = (await getConfig<boolean>('connection.useHttps')) ?? (await getConfig<boolean>('server.https')) ?? DEFAULT_CONFIG.server.https;
+    ? (await getConfig<string>('connection.remoteHost')) || DEFAULT_CONFIG.connection.localHost
+    : ((await getConfig<string>('connection.localHost')) ??
+      (await getConfig<string>('server.host')) ??
+      DEFAULT_CONFIG.server.host);
+  const port =
+    (await getConfig<number>('connection.port')) ??
+    (await getConfig<number>('server.port')) ??
+    DEFAULT_CONFIG.server.port;
+  const https =
+    (await getConfig<boolean>('connection.useHttps')) ??
+    (await getConfig<boolean>('server.https')) ??
+    DEFAULT_CONFIG.server.https;
   const protocol = https ? 'https' : 'http';
   return `${protocol}://${host}:${port}`;
 }

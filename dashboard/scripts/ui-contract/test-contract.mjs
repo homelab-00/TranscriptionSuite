@@ -11,7 +11,7 @@ const SCHEMA_FAIL_FIXTURE = path.join(
   'scripts',
   'ui-contract',
   'fixtures',
-  'schema-fail-missing-component-contracts.yaml'
+  'schema-fail-missing-component-contracts.yaml',
 );
 
 function clone(value) {
@@ -31,7 +31,8 @@ function bumpPatchVersion(version) {
 
 function hasIssue(report, code, pathIncludes = '') {
   return report.issues.some(
-    (issue) => issue.code === code && (!pathIncludes || String(issue.path || '').includes(pathIncludes))
+    (issue) =>
+      issue.code === code && (!pathIncludes || String(issue.path || '').includes(pathIncludes)),
   );
 }
 
@@ -81,20 +82,32 @@ async function main() {
   factsColorDrift.utilities.exact_classes.push('text-fuchsia-300');
   factsColorDrift.utilities.exact_classes.sort((a, b) => a.localeCompare(b));
   const colorDrift = await createValidationReport({ factsOverride: factsColorDrift });
-  expect(hasIssue(colorDrift, 'set_mismatch', 'utility_exact_classes'), 'Drift fail for new color utility class');
+  expect(
+    hasIssue(colorDrift, 'set_mismatch', 'utility_exact_classes'),
+    'Drift fail for new color utility class',
+  );
 
   // 4. Drift fail: new arbitrary shadow token should fail.
   const factsShadowDrift = clone(baseFacts);
   factsShadowDrift.utilities.arbitrary_classes.push('shadow-[0_0_99px_rgba(0,0,0,1)]');
   factsShadowDrift.utilities.arbitrary_classes.sort((a, b) => a.localeCompare(b));
   const shadowDrift = await createValidationReport({ factsOverride: factsShadowDrift });
-  expect(hasIssue(shadowDrift, 'set_mismatch', 'utility_arbitrary_classes'), 'Drift fail for arbitrary shadow token');
+  expect(
+    hasIssue(shadowDrift, 'set_mismatch', 'utility_arbitrary_classes'),
+    'Drift fail for arbitrary shadow token',
+  );
 
   // 5. Drift fail: changed selection styling should fail global CSS check.
   const factsSelectionDrift = clone(baseFacts);
-  factsSelectionDrift.global_css.selection = factsSelectionDrift.global_css.selection.replace('#22d3ee', '#ff00aa');
+  factsSelectionDrift.global_css.selection = factsSelectionDrift.global_css.selection.replace(
+    '#22d3ee',
+    '#ff00aa',
+  );
   const selectionDrift = await createValidationReport({ factsOverride: factsSelectionDrift });
-  expect(hasIssue(selectionDrift, 'global_css_mismatch', 'selection'), 'Drift fail for global selection styling change');
+  expect(
+    hasIssue(selectionDrift, 'global_css_mismatch', 'selection'),
+    'Drift fail for global selection styling change',
+  );
 
   // 6. Drift fail: unregistered portal z-index should fail.
   const factsZDrift = clone(baseFacts);
@@ -103,7 +116,10 @@ async function main() {
   factsZDrift.utilities.arbitrary_classes.push('z-[12345]');
   factsZDrift.utilities.arbitrary_classes.sort((a, b) => a.localeCompare(b));
   const zDrift = await createValidationReport({ factsOverride: factsZDrift });
-  expect(hasIssue(zDrift, 'set_mismatch', 'token_z_index_classes'), 'Drift fail for unregistered portal z-index');
+  expect(
+    hasIssue(zDrift, 'set_mismatch', 'token_z_index_classes'),
+    'Drift fail for unregistered portal z-index',
+  );
 
   // 7. Drift fail: missing component contract coverage should fail.
   const factsComponentDrift = clone(baseFacts);
@@ -111,7 +127,10 @@ async function main() {
   factsComponentDrift.components.names.sort((a, b) => a.localeCompare(b));
   factsComponentDrift.components.files.GhostComponent = 'components/GhostComponent.tsx';
   const componentDrift = await createValidationReport({ factsOverride: factsComponentDrift });
-  expect(hasIssue(componentDrift, 'set_mismatch', 'component_coverage'), 'Drift fail for missing component contract coverage');
+  expect(
+    hasIssue(componentDrift, 'set_mismatch', 'component_coverage'),
+    'Drift fail for missing component contract coverage',
+  );
 
   // 8. Pass case: non-style facts should not fail style contract.
   const factsNonStyle = clone(baseFacts);
@@ -129,21 +148,24 @@ async function main() {
         updated_at: new Date().toISOString(),
       },
       null,
-      2
-    ) + '\n'
+      2,
+    ) + '\n',
   );
   const semverFail = await createValidationReport({
     factsOverride: baseFacts,
     baselinePath: semverFailBaselinePath,
   });
-  expect(hasIssue(semverFail, 'semver_bump_required', 'meta.spec_version'), 'Versioning fail requires semver bump when contract hash changes');
+  expect(
+    hasIssue(semverFail, 'semver_bump_required', 'meta.spec_version'),
+    'Versioning fail requires semver bump when contract hash changes',
+  );
 
   // 10. Versioning pass: bumped spec_version with changed hash should pass (warning allowed).
   const bumpedContract = clone(originalContract);
   bumpedContract.meta.spec_version = bumpedSpecVersion;
   const bumpedContractPath = await writeTempFile(
     'semver-pass-bumped-contract.yaml',
-    YAML.stringify(bumpedContract, { indent: 2, lineWidth: 0, minContentWidth: 0 })
+    YAML.stringify(bumpedContract, { indent: 2, lineWidth: 0, minContentWidth: 0 }),
   );
 
   const semverPass = await createValidationReport({
@@ -151,7 +173,10 @@ async function main() {
     factsOverride: baseFacts,
     baselinePath: BASELINE_PATH,
   });
-  expect(!hasIssue(semverPass, 'semver_bump_required', 'meta.spec_version'), 'Versioning pass when semver is bumped');
+  expect(
+    !hasIssue(semverPass, 'semver_bump_required', 'meta.spec_version'),
+    'Versioning pass when semver is bumped',
+  );
   expect(semverPass.ok === true, 'Bumped semver contract remains valid with baseline warning only');
 
   if (failures.length > 0) {

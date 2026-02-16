@@ -12,7 +12,7 @@ import { AudioCapture } from '../services/audioCapture';
 export type LiveStatus =
   | 'idle'
   | 'connecting'
-  | 'starting'   // model swap in progress
+  | 'starting' // model swap in progress
   | 'listening'
   | 'processing'
   | 'error';
@@ -110,17 +110,20 @@ export function useLiveMode(): LiveModeState {
             captureRef.current = new AudioCapture((chunk) => {
               socketRef.current?.sendAudio(chunk);
             });
-            captureRef.current.start({
-              deviceId: startOptsRef.current.deviceId,
-              systemAudio: startOptsRef.current.systemAudio,
-              desktopSourceId: startOptsRef.current.desktopSourceId,
-            }).then(() => {
-              setAnalyser(captureRef.current?.analyser ?? null);
-            }).catch((err) => {
-              setError(err instanceof Error ? err.message : 'Audio capture failed');
-              setStatus('error');
-              socketRef.current?.disconnect();
-            });
+            captureRef.current
+              .start({
+                deviceId: startOptsRef.current.deviceId,
+                systemAudio: startOptsRef.current.systemAudio,
+                desktopSourceId: startOptsRef.current.desktopSourceId,
+              })
+              .then(() => {
+                setAnalyser(captureRef.current?.analyser ?? null);
+              })
+              .catch((err) => {
+                setError(err instanceof Error ? err.message : 'Audio capture failed');
+                setStatus('error');
+                socketRef.current?.disconnect();
+              });
           }
         } else if (state === 'PROCESSING') {
           setStatus('processing');
@@ -131,10 +134,13 @@ export function useLiveMode(): LiveModeState {
       }
 
       case 'sentence':
-        setSentences(prev => [...prev, {
-          text: (msg.data?.text as string) ?? '',
-          timestamp: Date.now(),
-        }]);
+        setSentences((prev) => [
+          ...prev,
+          {
+            text: (msg.data?.text as string) ?? '',
+            timestamp: Date.now(),
+          },
+        ]);
         setPartial(''); // Clear partial when sentence completes
         break;
 
@@ -145,10 +151,12 @@ export function useLiveMode(): LiveModeState {
       case 'history':
         // Restore history from server
         if (Array.isArray(msg.data?.sentences)) {
-          setSentences((msg.data.sentences as string[]).map(text => ({
-            text,
-            timestamp: Date.now(),
-          })));
+          setSentences(
+            (msg.data.sentences as string[]).map((text) => ({
+              text,
+              timestamp: Date.now(),
+            })),
+          );
         }
         break;
 
@@ -165,33 +173,36 @@ export function useLiveMode(): LiveModeState {
     }
   }, []);
 
-  const start = useCallback((options?: LiveStartOptions) => {
-    setError(null);
-    setPartial('');
-    setSentences([]);
-    setStatusMessage(null);
-    setMuted(false);
-    startOptsRef.current = options ?? {};
+  const start = useCallback(
+    (options?: LiveStartOptions) => {
+      setError(null);
+      setPartial('');
+      setSentences([]);
+      setStatusMessage(null);
+      setMuted(false);
+      startOptsRef.current = options ?? {};
 
-    setStatus('connecting');
+      setStatus('connecting');
 
-    socketRef.current?.disconnect();
-    socketRef.current = new TranscriptionSocket('/ws/live', {
-      onMessage: handleMessage,
-      onError: (err) => {
-        setError(err);
-        setStatus('error');
-        captureRef.current?.stop();
-        setAnalyser(null);
-      },
-      onClose: () => {
-        captureRef.current?.stop();
-        setAnalyser(null);
-        setStatus('idle');
-      },
-    });
-    socketRef.current.connect();
-  }, [handleMessage]);
+      socketRef.current?.disconnect();
+      socketRef.current = new TranscriptionSocket('/ws/live', {
+        onMessage: handleMessage,
+        onError: (err) => {
+          setError(err);
+          setStatus('error');
+          captureRef.current?.stop();
+          setAnalyser(null);
+        },
+        onClose: () => {
+          captureRef.current?.stop();
+          setAnalyser(null);
+          setStatus('idle');
+        },
+      });
+      socketRef.current.connect();
+    },
+    [handleMessage],
+  );
 
   const stop = useCallback(() => {
     socketRef.current?.sendJSON({ type: 'stop' });
@@ -202,7 +213,7 @@ export function useLiveMode(): LiveModeState {
   }, []);
 
   const toggleMute = useCallback(() => {
-    setMuted(prev => {
+    setMuted((prev) => {
       const next = !prev;
       if (next) {
         captureRef.current?.mute();
@@ -220,7 +231,7 @@ export function useLiveMode(): LiveModeState {
   }, []);
 
   const getText = useCallback(() => {
-    return sentences.map(s => s.text).join(' ');
+    return sentences.map((s) => s.text).join(' ');
   }, [sentences]);
 
   return {

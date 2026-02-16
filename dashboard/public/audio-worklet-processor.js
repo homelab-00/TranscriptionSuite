@@ -91,7 +91,7 @@ class PCMProcessor extends AudioWorkletProcessor {
     const int16 = new Int16Array(float32.length);
     for (let i = 0; i < float32.length; i++) {
       const s = Math.max(-1, Math.min(1, float32[i]));
-      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
     return int16;
   }

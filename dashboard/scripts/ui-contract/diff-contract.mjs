@@ -80,8 +80,12 @@ async function main() {
     if (payload.diff_summary) {
       process.stdout.write(`Set mismatches: ${payload.diff_summary.set_mismatches}\n`);
       process.stdout.write(`Tailwind mismatches: ${payload.diff_summary.tailwind_mismatches}\n`);
-      process.stdout.write(`Global CSS mismatches: ${payload.diff_summary.global_css_mismatches}\n`);
-      process.stdout.write(`Component file mismatches: ${payload.diff_summary.component_file_mismatches}\n`);
+      process.stdout.write(
+        `Global CSS mismatches: ${payload.diff_summary.global_css_mismatches}\n`,
+      );
+      process.stdout.write(
+        `Component file mismatches: ${payload.diff_summary.component_file_mismatches}\n`,
+      );
     }
   }
 

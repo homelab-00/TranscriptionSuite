@@ -43,7 +43,11 @@ async function appendToClientLogFile(line: string): Promise<void> {
   }
 }
 
-export function logClientEvent(source: string, message: string, type: ClientLogType = 'info'): void {
+export function logClientEvent(
+  source: string,
+  message: string,
+  type: ClientLogType = 'info',
+): void {
   const normalizedMessage = String(message);
   const entry: ClientDebugLogEntry = {
     timestamp: nowTimestamp(),
@@ -94,7 +98,8 @@ export async function getClientDebugLogPath(): Promise<string | null> {
   }
 
   if (!logPathRequest) {
-    logPathRequest = appBridge.getClientLogPath()
+    logPathRequest = appBridge
+      .getClientLogPath()
       .then((resolvedPath) => {
         cachedLogPath = resolvedPath;
         return resolvedPath;

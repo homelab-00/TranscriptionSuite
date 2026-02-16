@@ -6,9 +6,17 @@ import { contextBridge, ipcRenderer } from 'electron';
  */
 
 export type TrayState =
-  | 'idle' | 'active' | 'connecting' | 'recording' | 'processing'
-  | 'live-listening' | 'live-processing' | 'muted' | 'complete'
-  | 'error' | 'disconnected';
+  | 'idle'
+  | 'active'
+  | 'connecting'
+  | 'recording'
+  | 'processing'
+  | 'live-listening'
+  | 'live-processing'
+  | 'muted'
+  | 'complete'
+  | 'error'
+  | 'disconnected';
 
 export interface TrayMenuState {
   serverRunning?: boolean;
@@ -41,21 +49,33 @@ export interface ElectronAPI {
     getConfigDir: () => Promise<string>;
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
-    readLocalFile: (filePath: string) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
+    readLocalFile: (
+      filePath: string,
+    ) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
   };
   docker: {
     available: () => Promise<boolean>;
     checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean }>;
-    listImages: () => Promise<Array<{ tag: string; fullName: string; size: string; created: string; id: string }>>;
+    listImages: () => Promise<
+      Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
+    >;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
     removeImage: (tag: string) => Promise<string>;
-    getContainerStatus: () => Promise<{ exists: boolean; running: boolean; status: string; health?: string; startedAt?: string }>;
+    getContainerStatus: () => Promise<{
+      exists: boolean;
+      running: boolean;
+      status: string;
+      health?: string;
+      startedAt?: string;
+    }>;
     startContainer: (options: StartContainerOptions) => Promise<string>;
     stopContainer: () => Promise<string>;
     removeContainer: () => Promise<string>;
-    getVolumes: () => Promise<Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>>;
+    getVolumes: () => Promise<
+      Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
+    >;
     removeVolume: (name: string) => Promise<string>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;
@@ -104,7 +124,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConfigDir: () => ipcRenderer.invoke('app:getConfigDir'),
     getClientLogPath: () => ipcRenderer.invoke('app:getClientLogPath'),
     appendClientLogLine: (line: string) => ipcRenderer.invoke('app:appendClientLogLine', line),
-    readLocalFile: (filePath: string) => ipcRenderer.invoke('app:readLocalFile', filePath) as Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>,
+    readLocalFile: (filePath: string) =>
+      ipcRenderer.invoke('app:readLocalFile', filePath) as Promise<{
+        name: string;
+        buffer: ArrayBuffer;
+        mimeType: string;
+      }>,
   },
   docker: {
     available: () => ipcRenderer.invoke('docker:available'),
@@ -115,7 +140,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     isPulling: () => ipcRenderer.invoke('docker:isPulling'),
     removeImage: (tag: string) => ipcRenderer.invoke('docker:removeImage', tag),
     getContainerStatus: () => ipcRenderer.invoke('docker:getContainerStatus'),
-    startContainer: (options: StartContainerOptions) => ipcRenderer.invoke('docker:startContainer', options),
+    startContainer: (options: StartContainerOptions) =>
+      ipcRenderer.invoke('docker:startContainer', options),
     stopContainer: () => ipcRenderer.invoke('docker:stopContainer'),
     removeContainer: () => ipcRenderer.invoke('docker:removeContainer'),
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),
@@ -134,7 +160,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setState: (state: TrayState) => ipcRenderer.invoke('tray:setState', state),
     setMenuState: (menuState: TrayMenuState) => ipcRenderer.invoke('tray:setMenuState', menuState),
     onAction: (callback: (action: string, ...args: any[]) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, action: string, ...args: any[]) => callback(action, ...args);
+      const handler = (_event: Electron.IpcRendererEvent, action: string, ...args: any[]) =>
+        callback(action, ...args);
       ipcRenderer.on('tray:action', handler);
       return () => ipcRenderer.removeListener('tray:action', handler);
     },

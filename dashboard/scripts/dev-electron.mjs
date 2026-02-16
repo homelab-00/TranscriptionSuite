@@ -57,21 +57,23 @@ tsc.on('close', (code) => {
 
   // 3. Wait for Vite then launch Electron
   const waitAndLaunch = () => {
-    fetch(`http://localhost:${VITE_PORT}/`).then(() => {
-      console.log('[electron] Vite ready, launching Electron...');
-      const electron = spawn('npx', ['electron', '.'], {
-        stdio: 'inherit',
-        shell: true,
-        env: { ...process.env, NODE_ENV: 'development' },
-      });
+    fetch(`http://localhost:${VITE_PORT}/`)
+      .then(() => {
+        console.log('[electron] Vite ready, launching Electron...');
+        const electron = spawn('npx', ['electron', '.'], {
+          stdio: 'inherit',
+          shell: true,
+          env: { ...process.env, NODE_ENV: 'development' },
+        });
 
-      electron.on('close', () => {
-        vite.kill();
-        process.exit(0);
+        electron.on('close', () => {
+          vite.kill();
+          process.exit(0);
+        });
+      })
+      .catch(() => {
+        setTimeout(waitAndLaunch, 500);
       });
-    }).catch(() => {
-      setTimeout(waitAndLaunch, 500);
-    });
   };
 
   waitAndLaunch();

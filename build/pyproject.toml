@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [tool.ruff]
-line-length = 90
+line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]

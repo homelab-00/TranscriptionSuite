@@ -39,8 +39,7 @@ const GITHUB_RELEASES_URL =
 const GHCR_TOKEN_URL =
   'https://ghcr.io/token?service=ghcr.io&scope=repository:homelab-00/transcriptionsuite-server:pull';
 
-const GHCR_TAGS_URL =
-  'https://ghcr.io/v2/homelab-00/transcriptionsuite-server/tags/list';
+const GHCR_TAGS_URL = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server/tags/list';
 
 const INTERVAL_MS: Record<string, number> = {
   '24h': 24 * 60 * 60 * 1000,
@@ -110,9 +109,7 @@ export class UpdateManager {
   start(): void {
     if (!this.isEnabled()) return;
     // Fire-and-forget initial check
-    this.check().catch((err) =>
-      console.error('UpdateManager: initial check failed', err),
-    );
+    this.check().catch((err) => console.error('UpdateManager: initial check failed', err));
     this.scheduleTimer();
   }
 
@@ -140,12 +137,22 @@ export class UpdateManager {
     const appStatus: ComponentUpdateStatus =
       appResult.status === 'fulfilled'
         ? appResult.value
-        : { current: app.getVersion(), latest: null, updateAvailable: false, error: String(appResult.reason) };
+        : {
+            current: app.getVersion(),
+            latest: null,
+            updateAvailable: false,
+            error: String(appResult.reason),
+          };
 
     const serverStatus: ComponentUpdateStatus =
       serverResult.status === 'fulfilled'
         ? serverResult.value
-        : { current: null, latest: null, updateAvailable: false, error: String(serverResult.reason) };
+        : {
+            current: null,
+            latest: null,
+            updateAvailable: false,
+            error: String(serverResult.reason),
+          };
 
     const status: UpdateStatus = {
       lastChecked: new Date().toISOString(),
@@ -187,9 +194,7 @@ export class UpdateManager {
     this.clearTimer();
     const ms = this.getIntervalMs();
     this.timer = setInterval(() => {
-      this.check().catch((err) =>
-        console.error('UpdateManager: scheduled check failed', err),
-      );
+      this.check().catch((err) => console.error('UpdateManager: scheduled check failed', err));
     }, ms);
   }
 
@@ -229,8 +234,7 @@ export class UpdateManager {
         };
       }
 
-      const updateAvailable =
-        currentSv !== null && compareSemVer(latestSv, currentSv) > 0;
+      const updateAvailable = currentSv !== null && compareSemVer(latestSv, currentSv) > 0;
 
       return {
         current: currentVersion,
@@ -312,19 +316,15 @@ export class UpdateManager {
   // ─── Notifications ─────────────────────────────────────────────────────
 
   private maybeNotify(status: UpdateStatus): void {
-    const showNotifications =
-      (this.store.get('app.showNotifications') as boolean) ?? true;
+    const showNotifications = (this.store.get('app.showNotifications') as boolean) ?? true;
     if (!showNotifications) return;
 
-    const lastNotifiedApp =
-      (this.store.get('updates.lastNotified.appLatest') as string) ?? '';
+    const lastNotifiedApp = (this.store.get('updates.lastNotified.appLatest') as string) ?? '';
     const lastNotifiedServer =
       (this.store.get('updates.lastNotified.serverLatest') as string) ?? '';
 
     const newApp =
-      status.app.updateAvailable &&
-      status.app.latest &&
-      status.app.latest !== lastNotifiedApp;
+      status.app.updateAvailable && status.app.latest && status.app.latest !== lastNotifiedApp;
 
     const newServer =
       status.server.updateAvailable &&

@@ -38,11 +38,21 @@ interface TrySyncDeps {
 /**
  * Resolve the highest-priority TrayState from all of the app's sub-states.
  */
-function resolveTrayState(deps: Pick<TrySyncDeps, 'serverStatus' | 'containerRunning' | 'transcriptionStatus' | 'liveStatus' | 'muted'>): TrayState {
+function resolveTrayState(
+  deps: Pick<
+    TrySyncDeps,
+    'serverStatus' | 'containerRunning' | 'transcriptionStatus' | 'liveStatus' | 'muted'
+  >,
+): TrayState {
   const { serverStatus, containerRunning, transcriptionStatus, liveStatus, muted } = deps;
 
   // Muted takes visual priority while recording/listening
-  if (muted && (transcriptionStatus === 'recording' || liveStatus === 'listening' || liveStatus === 'processing')) {
+  if (
+    muted &&
+    (transcriptionStatus === 'recording' ||
+      liveStatus === 'listening' ||
+      liveStatus === 'processing')
+  ) {
     return 'muted';
   }
 
@@ -100,18 +110,18 @@ export function useTraySync(deps: TrySyncDeps): void {
   const callbacksRef = useRef(deps);
   callbacksRef.current = deps;
 
-  const {
-    serverStatus,
-    containerRunning,
-    transcriptionStatus,
-    liveStatus,
-    muted,
-    activeModel,
-  } = deps;
+  const { serverStatus, containerRunning, transcriptionStatus, liveStatus, muted, activeModel } =
+    deps;
 
   // Push TrayState whenever inputs change
   useEffect(() => {
-    const newState = resolveTrayState({ serverStatus, containerRunning, transcriptionStatus, liveStatus, muted });
+    const newState = resolveTrayState({
+      serverStatus,
+      containerRunning,
+      transcriptionStatus,
+      liveStatus,
+      muted,
+    });
     if (newState !== prevStateRef.current) {
       prevStateRef.current = newState;
       window.electronAPI!.tray.setState(newState);
@@ -125,7 +135,8 @@ export function useTraySync(deps: TrySyncDeps): void {
   // Push menu state so the context menu shows the right labels
   useEffect(() => {
     const isRecording = transcriptionStatus === 'recording' || transcriptionStatus === 'processing';
-    const isLive = liveStatus === 'listening' || liveStatus === 'processing' || liveStatus === 'starting';
+    const isLive =
+      liveStatus === 'listening' || liveStatus === 'processing' || liveStatus === 'starting';
     window.electronAPI!.tray.setMenuState({
       serverRunning: containerRunning,
       isRecording,

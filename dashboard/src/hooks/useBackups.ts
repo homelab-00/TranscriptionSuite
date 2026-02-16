@@ -58,21 +58,27 @@ export function useBackups(): BackupsState {
     }
   }, [fetch]);
 
-  const restoreBackup = useCallback(
-    async (filename: string) => {
-      setOperating(true);
-      setOperationResult(null);
-      try {
-        const res = await apiClient.restoreBackup(filename);
-        setOperationResult(res.message);
-      } catch (err) {
-        setOperationResult(err instanceof Error ? err.message : 'Restore failed');
-      } finally {
-        setOperating(false);
-      }
-    },
-    [],
-  );
+  const restoreBackup = useCallback(async (filename: string) => {
+    setOperating(true);
+    setOperationResult(null);
+    try {
+      const res = await apiClient.restoreBackup(filename);
+      setOperationResult(res.message);
+    } catch (err) {
+      setOperationResult(err instanceof Error ? err.message : 'Restore failed');
+    } finally {
+      setOperating(false);
+    }
+  }, []);
 
-  return { backups, loading, error, refresh: fetch, createBackup, restoreBackup, operating, operationResult };
+  return {
+    backups,
+    loading,
+    error,
+    refresh: fetch,
+    createBackup,
+    restoreBackup,
+    operating,
+    operationResult,
+  };
 }

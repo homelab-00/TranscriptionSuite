@@ -67,11 +67,11 @@ export function useImportQueue(): UseImportQueueReturn {
     while (!abortRef.current) {
       // Find next pending job
       let nextJob: ImportJob | undefined;
-      setJobs(prev => {
-        nextJob = prev.find(j => j.status === 'pending');
+      setJobs((prev) => {
+        nextJob = prev.find((j) => j.status === 'pending');
         if (nextJob) {
-          return prev.map(j =>
-            j.id === nextJob!.id ? { ...j, status: 'processing' as const } : j
+          return prev.map((j) =>
+            j.id === nextJob!.id ? { ...j, status: 'processing' as const } : j,
           );
         }
         return prev;
@@ -83,45 +83,46 @@ export function useImportQueue(): UseImportQueueReturn {
 
       try {
         const result = await apiClient.uploadAndTranscribe(file, optionsRef.current);
-        setJobs(prev =>
-          prev.map(j =>
-            j.id === jobId ? { ...j, status: 'success' as const, result } : j
-          )
+        setJobs((prev) =>
+          prev.map((j) => (j.id === jobId ? { ...j, status: 'success' as const, result } : j)),
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Upload failed';
-        setJobs(prev =>
-          prev.map(j =>
-            j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j
-          )
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
+          ),
         );
       }
 
       // Small delay between jobs to let the server breathe
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     processingRef.current = false;
   }, []);
 
-  const addFiles = useCallback((files: File[], options?: TranscriptionUploadOptions) => {
-    optionsRef.current = options;
-    const newJobs: ImportJob[] = files.map(file => ({
-      id: nextJobId(),
-      file,
-      status: 'pending' as const,
-    }));
-    setJobs(prev => [...prev, ...newJobs]);
-    // Kick off processing (will no-op if already running)
-    setTimeout(() => processQueue(), 0);
-  }, [processQueue]);
+  const addFiles = useCallback(
+    (files: File[], options?: TranscriptionUploadOptions) => {
+      optionsRef.current = options;
+      const newJobs: ImportJob[] = files.map((file) => ({
+        id: nextJobId(),
+        file,
+        status: 'pending' as const,
+      }));
+      setJobs((prev) => [...prev, ...newJobs]);
+      // Kick off processing (will no-op if already running)
+      setTimeout(() => processQueue(), 0);
+    },
+    [processQueue],
+  );
 
   const removeJob = useCallback((id: string) => {
-    setJobs(prev => prev.filter(j => j.id !== id || j.status === 'processing'));
+    setJobs((prev) => prev.filter((j) => j.id !== id || j.status === 'processing'));
   }, []);
 
   const clearFinished = useCallback(() => {
-    setJobs(prev => prev.filter(j => j.status === 'pending' || j.status === 'processing'));
+    setJobs((prev) => prev.filter((j) => j.status === 'pending' || j.status === 'processing'));
   }, []);
 
   const clearAll = useCallback(() => {
@@ -129,21 +130,24 @@ export function useImportQueue(): UseImportQueueReturn {
     setJobs([]);
   }, []);
 
-  const retryJob = useCallback((id: string) => {
-    setJobs(prev =>
-      prev.map(j =>
-        j.id === id && j.status === 'error'
-          ? { ...j, status: 'pending' as const, error: undefined }
-          : j
-      )
-    );
-    setTimeout(() => processQueue(), 0);
-  }, [processQueue]);
+  const retryJob = useCallback(
+    (id: string) => {
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === id && j.status === 'error'
+            ? { ...j, status: 'pending' as const, error: undefined }
+            : j,
+        ),
+      );
+      setTimeout(() => processQueue(), 0);
+    },
+    [processQueue],
+  );
 
-  const pendingCount = jobs.filter(j => j.status === 'pending').length;
-  const completedCount = jobs.filter(j => j.status === 'success').length;
-  const errorCount = jobs.filter(j => j.status === 'error').length;
-  const isProcessing = jobs.some(j => j.status === 'processing');
+  const pendingCount = jobs.filter((j) => j.status === 'pending').length;
+  const completedCount = jobs.filter((j) => j.status === 'success').length;
+  const errorCount = jobs.filter((j) => j.status === 'error').length;
+  const isProcessing = jobs.some((j) => j.status === 'processing');
 
   return {
     jobs,

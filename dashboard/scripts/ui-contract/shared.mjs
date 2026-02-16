@@ -75,7 +75,8 @@ const KNOWN_SINGLE_CLASS_TOKENS = new Set([
   'z-50',
 ]);
 
-const CLASS_PREFIX_RE = /^(?:!?-?(?:aria-|backdrop-|bg-|blur-|border-|bottom-|col-|cursor-|delay-|drop-shadow-|duration-|ease-|fill-|flex-|font-|from-|gap-|grid-|h-|hover:|inset-|items-|justify-|leading-|left-|line-clamp-|lg:|m-|max-|mb-|md:|min-|ml-|mr-|mt-|mx-|my-|opacity-|outline-|overflow-|p-|pb-|peer-|pl-|pr-|pt-|px-|py-|ring-|right-|rotate-|rounded|scale-|shadow|shrink-|size-|skew-|slide-|sm:|snap-|space-|stroke-|text-|to-|top-|tracking-|translate-|via-|w-|whitespace-|xl:|z-))/;
+const CLASS_PREFIX_RE =
+  /^(?:!?-?(?:aria-|backdrop-|bg-|blur-|border-|bottom-|col-|cursor-|delay-|drop-shadow-|duration-|ease-|fill-|flex-|font-|from-|gap-|grid-|h-|hover:|inset-|items-|justify-|leading-|left-|line-clamp-|lg:|m-|max-|mb-|md:|min-|ml-|mr-|mt-|mx-|my-|opacity-|outline-|overflow-|p-|pb-|peer-|pl-|pr-|pt-|px-|py-|ring-|right-|rotate-|rounded|scale-|shadow|shrink-|size-|skew-|slide-|sm:|snap-|space-|stroke-|text-|to-|top-|tracking-|translate-|via-|w-|whitespace-|xl:|z-))/;
 
 const COLOR_LITERAL_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^\n\r)]+\)|hsla?\([^\n\r)]+\)/g;
 const CUBIC_BEZIER_RE = /cubic-bezier\([^\n\r)]+\)/g;
@@ -125,7 +126,9 @@ export async function sourceFiles(root = PROJECT_ROOT) {
     path.join(root, 'types.ts'),
     path.join(root, 'src', 'index.css'),
   ];
-  const componentFiles = await walk(path.join(root, 'components'), (filePath) => filePath.endsWith('.tsx'));
+  const componentFiles = await walk(path.join(root, 'components'), (filePath) =>
+    filePath.endsWith('.tsx'),
+  );
   files.push(...componentFiles);
   return files;
 }
@@ -516,7 +519,8 @@ function extractComponentNames(content) {
   const names = new Set();
   const isAllCapsConstant = (name) => /^[A-Z0-9_]+$/.test(name);
 
-  const constArrowRe = /(?:export\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*\([^)]*\)\s*=>/g;
+  const constArrowRe =
+    /(?:export\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*\([^)]*\)\s*=>/g;
   let match;
   while ((match = constArrowRe.exec(content)) !== null) {
     if (!isAllCapsConstant(match[1])) {
@@ -692,7 +696,12 @@ export async function extractFacts({ root = PROJECT_ROOT } = {}) {
       zIndexClasses.add(segment.startsWith('z-') ? segment : token);
     }
 
-    if (segment.includes('[') && /(w-|h-|min-|max-|translate-|scale-|skew-|grid-rows-|text-|p-|m-|left-|right-|top-|bottom-)/.test(segment)) {
+    if (
+      segment.includes('[') &&
+      /(w-|h-|min-|max-|translate-|scale-|skew-|grid-rows-|text-|p-|m-|left-|right-|top-|bottom-)/.test(
+        segment,
+      )
+    ) {
       spacingAndSizeArbitrary.add(segment);
     }
   }
@@ -714,7 +723,8 @@ export async function extractFacts({ root = PROJECT_ROOT } = {}) {
   const indexHtml = fileContentMap.get(indexHtmlPath) ?? '';
   const cssPath = path.join(root, 'src', 'index.css');
   const cssText = fileContentMap.get(cssPath) ?? extractStyleTag(indexHtml);
-  const tailwindConfig = extractTailwindConfig(indexHtml) ?? extractTailwindConfigFromCss(cssText, indexHtml);
+  const tailwindConfig =
+    extractTailwindConfig(indexHtml) ?? extractTailwindConfigFromCss(cssText, indexHtml);
   const globalCss = extractGlobalCssContracts(cssText);
 
   const statusLightPath = path.join(root, 'components', 'ui', 'StatusLight.tsx');

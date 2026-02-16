@@ -32,7 +32,13 @@ export interface TranscriptionState {
   /** AnalyserNode for visualizer (available while recording) */
   analyser: AnalyserNode | null;
   /** Begin a transcription session */
-  start: (options?: { language?: string; deviceId?: string; translate?: boolean; systemAudio?: boolean; desktopSourceId?: string }) => void;
+  start: (options?: {
+    language?: string;
+    deviceId?: string;
+    translate?: boolean;
+    systemAudio?: boolean;
+    desktopSourceId?: string;
+  }) => void;
   /** Stop recording and wait for the final result */
   stop: () => void;
   /** Reset state back to idle */
@@ -50,7 +56,13 @@ export function useTranscription(): TranscriptionState {
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
-  const startOptsRef = useRef<{ language?: string; deviceId?: string; translate?: boolean; systemAudio?: boolean; desktopSourceId?: string }>({});
+  const startOptsRef = useRef<{
+    language?: string;
+    deviceId?: string;
+    translate?: boolean;
+    systemAudio?: boolean;
+    desktopSourceId?: string;
+  }>({});
 
   // Cleanup on unmount
   useEffect(() => {
@@ -80,21 +92,26 @@ export function useTranscription(): TranscriptionState {
         captureRef.current = new AudioCapture((chunk) => {
           socketRef.current?.sendAudio(chunk);
         });
-        captureRef.current.start({
-          deviceId: startOptsRef.current.deviceId,
-          systemAudio: startOptsRef.current.systemAudio,
-          desktopSourceId: startOptsRef.current.desktopSourceId,
-        }).then(() => {
-          setAnalyser(captureRef.current?.analyser ?? null);
-        }).catch((err) => {
-          setError(err instanceof Error ? err.message : 'Failed to start audio capture');
-          setStatus('error');
-          socketRef.current?.disconnect();
-        });
+        captureRef.current
+          .start({
+            deviceId: startOptsRef.current.deviceId,
+            systemAudio: startOptsRef.current.systemAudio,
+            desktopSourceId: startOptsRef.current.desktopSourceId,
+          })
+          .then(() => {
+            setAnalyser(captureRef.current?.analyser ?? null);
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : 'Failed to start audio capture');
+            setStatus('error');
+            socketRef.current?.disconnect();
+          });
         break;
 
       case 'session_busy':
-        setError(`Server busy — ${(msg.data?.active_user as string) ?? 'another session'} is active`);
+        setError(
+          `Server busy — ${(msg.data?.active_user as string) ?? 'another session'} is active`,
+        );
         setStatus('error');
         socketRef.current?.disconnect();
         break;
@@ -134,31 +151,40 @@ export function useTranscription(): TranscriptionState {
     }
   }, []);
 
-  const start = useCallback((options?: { language?: string; deviceId?: string; translate?: boolean; systemAudio?: boolean; desktopSourceId?: string }) => {
-    // Reset previous state
-    setResult(null);
-    setError(null);
-    setVadActive(false);
-    startOptsRef.current = options ?? {};
+  const start = useCallback(
+    (options?: {
+      language?: string;
+      deviceId?: string;
+      translate?: boolean;
+      systemAudio?: boolean;
+      desktopSourceId?: string;
+    }) => {
+      // Reset previous state
+      setResult(null);
+      setError(null);
+      setVadActive(false);
+      startOptsRef.current = options ?? {};
 
-    setStatus('connecting');
+      setStatus('connecting');
 
-    socketRef.current?.disconnect();
-    socketRef.current = new TranscriptionSocket('/ws', {
-      onMessage: handleMessage,
-      onError: (err) => {
-        setError(err);
-        setStatus('error');
-        captureRef.current?.stop();
-        setAnalyser(null);
-      },
-      onClose: () => {
-        captureRef.current?.stop();
-        setAnalyser(null);
-      },
-    });
-    socketRef.current.connect();
-  }, [handleMessage]);
+      socketRef.current?.disconnect();
+      socketRef.current = new TranscriptionSocket('/ws', {
+        onMessage: handleMessage,
+        onError: (err) => {
+          setError(err);
+          setStatus('error');
+          captureRef.current?.stop();
+          setAnalyser(null);
+        },
+        onClose: () => {
+          captureRef.current?.stop();
+          setAnalyser(null);
+        },
+      });
+      socketRef.current.connect();
+    },
+    [handleMessage],
+  );
 
   const stop = useCallback(() => {
     if (status === 'recording') {

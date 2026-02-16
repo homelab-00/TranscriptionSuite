@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface GlassCardProps {
@@ -8,18 +7,27 @@ interface GlassCardProps {
   action?: React.ReactNode;
 }
 
-export const GlassCard: React.FC<GlassCardProps> = ({ children, className = '', title, action }) => {
+export const GlassCard: React.FC<GlassCardProps> = ({
+  children,
+  className = '',
+  title,
+  action,
+}) => {
   return (
-    <div className={`bg-linear-to-br from-glass-200 to-glass-100 backdrop-blur-xl border border-glass-border rounded-2xl shadow-xl overflow-hidden flex flex-col ${className}`}>
+    <div
+      className={`from-glass-200 to-glass-100 border-glass-border flex flex-col overflow-hidden rounded-2xl border bg-linear-to-br shadow-xl backdrop-blur-xl ${className}`}
+    >
       {(title || action) && (
-        <div className="h-14 px-5 border-b border-glass-border flex justify-between items-center bg-white/5 shrink-0">
-          {title && <div className="text-sm font-semibold text-white/90 tracking-wide flex items-center">{title}</div>}
+        <div className="border-glass-border flex h-14 shrink-0 items-center justify-between border-b bg-white/5 px-5">
+          {title && (
+            <div className="flex items-center text-sm font-semibold tracking-wide text-white/90">
+              {title}
+            </div>
+          )}
           {action && <div>{action}</div>}
         </div>
       )}
-      <div className="p-5 flex-1 flex flex-col min-h-0">
-        {children}
-      </div>
+      <div className="flex min-h-0 flex-1 flex-col p-5">{children}</div>
     </div>
   );
 };
