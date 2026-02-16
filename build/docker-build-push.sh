@@ -115,7 +115,6 @@ cleanup_old_images() {
 
 main() {
     local custom_tag="${1:-${TAG:-}}"
-    local is_release=false
     
     echo "=========================================="
     echo "  TranscriptionSuite Docker Push Only"
@@ -150,12 +149,6 @@ main() {
         log_success "Image found: $IMAGE_NAME:$custom_tag"
     fi
     
-    # Check if tag looks like a release version (v*.*.*)
-    if [[ "$custom_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        is_release=true
-        log_info "Detected release version: $custom_tag"
-    fi
-
     # Push the requested tag
     echo ""
     log_info "Pushing image to GHCR..."
