@@ -281,9 +281,7 @@ export function useDocker(): UseDockerReturn {
     docker.startLogStream(tail);
     const cleanup = docker.onLogLine((line: string) => {
       setLogLines(prev => {
-        const next = [...prev, line];
-        // Keep a rolling buffer of 1000 lines
-        return next.length > 1000 ? next.slice(-1000) : next;
+        return [...prev, line];
       });
     });
 

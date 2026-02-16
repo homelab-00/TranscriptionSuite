@@ -8,6 +8,7 @@
  */
 
 import { apiClient } from '../api/client';
+import { logClientEvent, type ClientLogType } from './clientDebugLog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,28 @@ const DEFAULT_RECONNECT: ReconnectConfig = {
   backoffMultiplier: 2,
   maxAttempts: 0,
 };
+
+const NOISY_SERVER_MESSAGE_TYPES = new Set([
+  'pong',
+  'partial',
+  'vad_start',
+  'vad_stop',
+  'vad_recording_start',
+  'vad_recording_stop',
+]);
+
+function classifyMessageType(type: string): ClientLogType {
+  if (type === 'error' || type === 'auth_fail') {
+    return 'error';
+  }
+  if (type === 'auth_ok' || type === 'session_started' || type === 'final') {
+    return 'success';
+  }
+  if (type === 'session_busy') {
+    return 'warning';
+  }
+  return 'info';
+}
 
 /** Callbacks consumers register */
 export interface SocketCallbacks {
@@ -101,6 +124,14 @@ export class TranscriptionSocket {
     this.reconnectConfig = { ...DEFAULT_RECONNECT, ...reconnect };
   }
 
+  private logSource(): string {
+    return this.endpoint === '/ws/live' ? 'SocketLive' : 'SocketMain';
+  }
+
+  private log(message: string, type: ClientLogType = 'info'): void {
+    logClientEvent(this.logSource(), message, type);
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   /** Derive ws:// or wss:// URL from the API client's base URL */
@@ -122,11 +153,13 @@ export class TranscriptionSocket {
     this.setState('connecting');
 
     const url = this.getWsUrl();
+    this.log(`Opening ${url}`);
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
       this.setState('authenticating');
+      this.log('Socket connected', 'success');
       // Send auth message — token may be empty for localhost bypass
       const token = apiClient.getAuthToken?.() ?? '';
       this.sendJSON({ type: 'auth', data: { token } });
@@ -146,12 +179,17 @@ export class TranscriptionSocket {
 
     this.ws.onerror = () => {
       this.setState('error');
+      this.log('WebSocket transport error', 'error');
       this.callbacks.onError?.('WebSocket connection error');
     };
 
     this.ws.onclose = (ev: CloseEvent) => {
       this.cleanup();
       this.setState('disconnected');
+      this.log(
+        `Socket closed (code=${ev.code}${ev.reason ? ` reason=${ev.reason}` : ''})`,
+        ev.code === 1000 ? 'info' : 'warning',
+      );
       this.callbacks.onClose?.(ev.code, ev.reason);
       this.scheduleReconnect();
     };
@@ -161,6 +199,7 @@ export class TranscriptionSocket {
   disconnect(): void {
     this.intentionalDisconnect = true;
     this.cancelReconnect();
+    this.log('Disconnect requested');
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onmessage = null;
@@ -190,6 +229,9 @@ export class TranscriptionSocket {
   /** Send a typed JSON message. */
   sendJSON(msg: { type: string; data?: unknown }): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
+      if (msg.type !== 'ping') {
+        this.log(`=> ${msg.type}`);
+      }
       this.ws.send(JSON.stringify(msg));
     }
   }
@@ -207,6 +249,7 @@ export class TranscriptionSocket {
     if (this.intentionalDisconnect) return;
     if (!this.reconnectConfig.enabled) return;
     if (this.reconnectConfig.maxAttempts > 0 && this.reconnectAttempt >= this.reconnectConfig.maxAttempts) {
+      this.log('Reconnect attempts exhausted', 'error');
       this.callbacks.onReconnectExhausted?.();
       return;
     }
@@ -217,6 +260,7 @@ export class TranscriptionSocket {
     );
     this.reconnectAttempt++;
 
+    this.log(`Reconnect attempt ${this.reconnectAttempt} scheduled in ${delay}ms`, 'warning');
     this.callbacks.onReconnect?.(this.reconnectAttempt, delay);
 
     this.reconnectTimer = setTimeout(() => {
@@ -227,6 +271,7 @@ export class TranscriptionSocket {
 
   /** Perform the actual reconnect (bypasses intentional-disconnect guard). */
   private doReconnect(): void {
+    this.log('Attempting reconnect');
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onmessage = null;
@@ -247,6 +292,7 @@ export class TranscriptionSocket {
     this.ws.onopen = () => {
       this.setState('authenticating');
       this.reconnectAttempt = 0; // reset on success
+      this.log('Socket reconnected', 'success');
       const token = apiClient.getAuthToken?.() ?? '';
       this.sendJSON({ type: 'auth', data: { token } });
     };
@@ -264,12 +310,17 @@ export class TranscriptionSocket {
 
     this.ws.onerror = () => {
       this.setState('error');
+      this.log('Reconnect attempt failed', 'error');
       this.callbacks.onError?.('WebSocket connection error');
     };
 
     this.ws.onclose = (ev: CloseEvent) => {
       this.cleanup();
       this.setState('disconnected');
+      this.log(
+        `Socket closed (code=${ev.code}${ev.reason ? ` reason=${ev.reason}` : ''})`,
+        ev.code === 1000 ? 'info' : 'warning',
+      );
       this.callbacks.onClose?.(ev.code, ev.reason);
       this.scheduleReconnect();
     };
@@ -290,6 +341,11 @@ export class TranscriptionSocket {
   // ── Internal ───────────────────────────────────────────────────────────────
 
   private handleMessage(msg: ServerMessage): void {
+    if (!NOISY_SERVER_MESSAGE_TYPES.has(msg.type)) {
+      const detail = typeof msg.data?.message === 'string' ? `: ${msg.data.message}` : '';
+      this.log(`<= ${msg.type}${detail}`, classifyMessageType(msg.type));
+    }
+
     switch (msg.type) {
       case 'auth_ok':
         this.setState('ready');
@@ -313,7 +369,9 @@ export class TranscriptionSocket {
 
   private setState(s: ConnectionState): void {
     if (this.state !== s) {
+      const previous = this.state;
       this.state = s;
+      this.log(`state ${previous} -> ${s}`, s === 'error' ? 'error' : 'info');
       this.callbacks.onStateChange?.(s);
     }
   }

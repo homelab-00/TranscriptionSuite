@@ -558,29 +558,57 @@ async function removeVolume(name: string): Promise<string> {
 
 let logProcess: ChildProcess | null = null;
 
+function resolveDockerTailArg(tail?: number): string {
+  if (typeof tail !== 'number' || !Number.isFinite(tail) || tail < 0) {
+    return 'all';
+  }
+  return String(Math.floor(tail));
+}
+
 /**
  * Start streaming container logs. Returns recent logs immediately.
  * The callback receives new log lines as they appear.
  */
-function startLogStream(onData: (line: string) => void, tail: number = 100): void {
+function startLogStream(onData: (line: string) => void, tail?: number): void {
   stopLogStream();
 
-  logProcess = spawn('docker', ['logs', '--follow', '--tail', String(tail), CONTAINER_NAME], {
+  const tailArg = resolveDockerTailArg(tail);
+  let stdoutRemainder = '';
+  let stderrRemainder = '';
+
+  logProcess = spawn('docker', ['logs', '--follow', '--timestamps', '--tail', tailArg, CONTAINER_NAME], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: buildProcessEnv(),
   });
 
-  const handle = (data: Buffer) => {
-    const lines = data.toString().split('\n').filter(Boolean);
+  const handle = (data: Buffer, stream: 'stdout' | 'stderr') => {
+    const previousRemainder = stream === 'stdout' ? stdoutRemainder : stderrRemainder;
+    const lines = `${previousRemainder}${data.toString()}`.split(/\r?\n/);
+    const remainder = lines.pop() ?? '';
+    if (stream === 'stdout') {
+      stdoutRemainder = remainder;
+    } else {
+      stderrRemainder = remainder;
+    }
     for (const line of lines) {
-      onData(line);
+      if (line.length > 0) {
+        onData(line);
+      }
     }
   };
 
-  logProcess.stdout?.on('data', handle);
-  logProcess.stderr?.on('data', handle);
+  logProcess.stdout?.on('data', (data: Buffer) => handle(data, 'stdout'));
+  logProcess.stderr?.on('data', (data: Buffer) => handle(data, 'stderr'));
 
   logProcess.on('close', () => {
+    if (stdoutRemainder.length > 0) {
+      onData(stdoutRemainder);
+      stdoutRemainder = '';
+    }
+    if (stderrRemainder.length > 0) {
+      onData(stderrRemainder);
+      stderrRemainder = '';
+    }
     logProcess = null;
   });
 }
@@ -598,10 +626,10 @@ function stopLogStream(): void {
 /**
  * Get recent container logs (non-streaming).
  */
-async function getLogs(tail: number = 200): Promise<string[]> {
+async function getLogs(tail?: number): Promise<string[]> {
   try {
-    const output = await exec('docker', ['logs', '--tail', String(tail), CONTAINER_NAME]);
-    return output.split('\n').filter(Boolean);
+    const output = await exec('docker', ['logs', '--timestamps', '--tail', resolveDockerTailArg(tail), CONTAINER_NAME]);
+    return output.split(/\r?\n/).filter(Boolean);
   } catch {
     return [];
   }

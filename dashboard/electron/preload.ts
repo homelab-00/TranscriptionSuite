@@ -39,6 +39,8 @@ export interface ElectronAPI {
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
     getConfigDir: () => Promise<string>;
+    getClientLogPath: () => Promise<string>;
+    appendClientLogLine: (line: string) => Promise<void>;
     readLocalFile: (filePath: string) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
   };
   docker: {
@@ -100,6 +102,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
     openPath: (filePath: string) => ipcRenderer.invoke('app:openPath', filePath),
     getConfigDir: () => ipcRenderer.invoke('app:getConfigDir'),
+    getClientLogPath: () => ipcRenderer.invoke('app:getClientLogPath'),
+    appendClientLogLine: (line: string) => ipcRenderer.invoke('app:appendClientLogLine', line),
     readLocalFile: (filePath: string) => ipcRenderer.invoke('app:readLocalFile', filePath) as Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>,
   },
   docker: {

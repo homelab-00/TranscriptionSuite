@@ -16,8 +16,10 @@ import { useDocker } from '../../src/hooks/useDocker';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { setConfig } from '../../src/config/store';
+import { logClientEvent } from '../../src/services/clientDebugLog';
 import { supportsTranslation } from '../../src/services/modelCapabilities';
 
 export const SessionView: React.FC = () => {
@@ -45,6 +47,7 @@ export const SessionView: React.FC = () => {
   // Transcription hooks
   const transcription = useTranscription();
   const live = useLiveMode();
+  const { logs: clientLogs, logPath: clientLogPath } = useClientDebugLogs();
 
   // Active analyser: live mode takes priority when active, then one-shot
   const activeAnalyser = live.analyser ?? transcription.analyser;
@@ -166,6 +169,7 @@ export const SessionView: React.FC = () => {
     await setConfig('connection.port', 8000);
     await apiClient.syncFromConfig();
     setClientRunning(true);
+    logClientEvent('Client', 'Configured local connection (localhost:8000)');
     serverConnection.refresh();
   }, [serverConnection]);
 
@@ -173,11 +177,13 @@ export const SessionView: React.FC = () => {
     await setConfig('connection.useRemote', true);
     await apiClient.syncFromConfig();
     setClientRunning(true);
+    logClientEvent('Client', 'Configured remote connection');
     serverConnection.refresh();
   }, [serverConnection]);
 
   const handleStopClient = useCallback(() => {
     setClientRunning(false);
+    logClientEvent('Client', 'Client link stopped', 'warning');
   }, []);
 
   // System Health Check for Visual Effects
@@ -281,42 +287,108 @@ export const SessionView: React.FC = () => {
     }
   }, [live, liveLanguage, liveTranslate, audioSource, micDevice, micDeviceIds, sysDevice, desktopSourceIds, resolveLanguage]);
 
-  // Build log entries from hook states
+  // Build server log entries from Docker stream + runtime errors.
   const serverLogs = useMemo(() => {
     const logs: Array<{ timestamp: string; source: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }> = [];
     const now = () => new Date().toLocaleTimeString('en-US', { hour12: false });
-    if (serverRunning) {
-      logs.push({ timestamp: now(), source: 'Docker', message: 'Container running', type: 'success' });
+
+    const classifyDockerLine = (line: string): 'info' | 'success' | 'error' | 'warning' => {
+      if (/(^|\b)(error|exception|traceback|fatal)(\b|$)/i.test(line)) return 'error';
+      if (/(^|\b)(warn|warning)(\b|$)/i.test(line)) return 'warning';
+      if (/(^|\b)(started|ready|listening|healthy)(\b|$)/i.test(line)) return 'success';
+      return 'info';
+    };
+
+    const parseDockerLine = (line: string) => {
+      const trimmed = line.trimEnd();
+      const match = trimmed.match(
+        /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\s+(.*)$/,
+      );
+      if (!match) {
+        return {
+          timestamp: now(),
+          source: 'Docker',
+          message: trimmed,
+          type: classifyDockerLine(trimmed),
+        };
+      }
+      const parsedDate = new Date(match[1]);
+      const time = Number.isNaN(parsedDate.getTime())
+        ? now()
+        : parsedDate.toLocaleTimeString('en-US', { hour12: false });
+      return {
+        timestamp: time,
+        source: 'Docker',
+        message: match[2],
+        type: classifyDockerLine(match[2]),
+      };
+    };
+
+    for (const line of docker.logLines) {
+      logs.push(parseDockerLine(line));
     }
-    if (live.statusMessage) {
-      logs.push({ timestamp: now(), source: 'Live', message: live.statusMessage, type: 'info' });
+
+    if (docker.container.running && logs.length === 0) {
+      logs.push({ timestamp: now(), source: 'Docker', message: 'Waiting for docker logs...', type: 'info' });
+    }
+
+    if (docker.operationError) {
+      logs.push({ timestamp: now(), source: 'Docker', message: docker.operationError, type: 'error' });
+    }
+
+    if (transcription.error) {
+      logs.push({ timestamp: now(), source: 'Transcription', message: transcription.error, type: 'error' });
     }
     if (live.error) {
       logs.push({ timestamp: now(), source: 'Live', message: live.error, type: 'error' });
     }
-    if (transcription.error) {
-      logs.push({ timestamp: now(), source: 'Transcription', message: transcription.error, type: 'error' });
-    }
     return logs;
-  }, [serverRunning, live.statusMessage, live.error, transcription.error]);
+  }, [
+    docker.logLines,
+    docker.container.running,
+    docker.operationError,
+    transcription.error,
+    live.error,
+  ]);
 
-  const clientLogs = useMemo(() => {
-    const logs: Array<{ timestamp: string; source: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }> = [];
-    const now = () => new Date().toLocaleTimeString('en-US', { hour12: false });
-    if (clientConnected) {
-      logs.push({ timestamp: now(), source: 'Socket', message: 'WebSocket connected', type: 'success' });
+  // Keep Docker logs streaming so the terminal updates in real time.
+  useEffect(() => {
+    if (!docker.container.exists) {
+      docker.stopLogStream();
+      return;
     }
-    if (transcription.status === 'recording') {
-      logs.push({ timestamp: now(), source: 'Audio', message: 'Recording audio...', type: 'info' });
+    docker.startLogStream();
+    return () => {
+      docker.stopLogStream();
+    };
+  }, [
+    docker.container.exists,
+    docker.container.running,
+    docker.startLogStream,
+    docker.stopLogStream,
+  ]);
+
+  const announcedClientLogPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!clientLogPath || announcedClientLogPathRef.current === clientLogPath) {
+      return;
     }
-    if (transcription.status === 'processing') {
-      logs.push({ timestamp: now(), source: 'Engine', message: 'Processing transcription...', type: 'info' });
+    announcedClientLogPathRef.current = clientLogPath;
+    logClientEvent('Client', `Debug log file: ${clientLogPath}`);
+  }, [clientLogPath]);
+
+  const prevClientConnectedRef = useRef(clientConnected);
+  useEffect(() => {
+    if (prevClientConnectedRef.current === clientConnected) {
+      return;
     }
-    if (transcription.result) {
-      logs.push({ timestamp: now(), source: 'Engine', message: `Transcription complete (${transcription.result.duration?.toFixed(1) ?? '?'}s audio)`, type: 'success' });
-    }
-    return logs;
-  }, [clientConnected, transcription.status, transcription.result]);
+    prevClientConnectedRef.current = clientConnected;
+    logClientEvent(
+      'Client',
+      clientConnected ? 'Client connection active' : 'Client connection inactive',
+      clientConnected ? 'success' : 'warning',
+    );
+  }, [clientConnected]);
 
   // Copy all logs to clipboard
   const handleCopyLogs = useCallback((e: React.MouseEvent) => {

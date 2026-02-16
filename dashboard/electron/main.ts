@@ -14,6 +14,18 @@ const __dirname = path.dirname(__filename);
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
 
 const isDev = !app.isPackaged;
+const CLIENT_LOG_DIR = 'logs';
+const CLIENT_LOG_FILE = 'client-debug.log';
+
+function ensureClientLogFilePath(): string {
+  const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
+  fs.mkdirSync(logDir, { recursive: true });
+  const logFilePath = path.join(logDir, CLIENT_LOG_FILE);
+  if (!fs.existsSync(logFilePath)) {
+    fs.writeFileSync(logFilePath, '', 'utf8');
+  }
+  return logFilePath;
+}
 
 function getResolvedAppVersion(): string {
   const version = app.getVersion();
@@ -218,6 +230,16 @@ ipcMain.handle('app:getConfigDir', () => {
   return configDir;
 });
 
+ipcMain.handle('app:getClientLogPath', () => {
+  return ensureClientLogFilePath();
+});
+
+ipcMain.handle('app:appendClientLogLine', async (_event, line: string) => {
+  const logFilePath = ensureClientLogFilePath();
+  const normalizedLine = String(line).replace(/\r?\n/g, ' ');
+  await fs.promises.appendFile(logFilePath, `${normalizedLine}\n`, 'utf8');
+});
+
 ipcMain.handle('app:readLocalFile', async (_event, filePath: string) => {
   const buffer = fs.readFileSync(filePath);
   const name = path.basename(filePath);
@@ -292,7 +314,7 @@ ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
 ipcMain.handle('docker:startLogStream', async (_event, tail?: number) => {
   dockerManager.startLogStream((line: string) => {
     mainWindow?.webContents.send('docker:logLine', line);
-  }, tail ?? 100);
+  }, tail);
 });
 
 ipcMain.handle('docker:stopLogStream', async () => {

@@ -36,6 +36,8 @@ interface ElectronAPI {
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
     getConfigDir: () => Promise<string>;
+    getClientLogPath: () => Promise<string>;
+    appendClientLogLine: (line: string) => Promise<void>;
     readLocalFile: (filePath: string) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
   };
   docker: {
