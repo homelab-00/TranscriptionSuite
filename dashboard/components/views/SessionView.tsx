@@ -567,67 +567,68 @@ export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) =>
     }
   }, []);
 
-  // Scroll State
-  const leftScrollRef = useRef<HTMLDivElement>(null);
-  const rightScrollRef = useRef<HTMLDivElement>(null);
-  
-  const [leftScrollState, setLeftScrollState] = useState({ top: false, bottom: false });
-  const [rightScrollState, setRightScrollState] = useState({ top: false, bottom: false });
+	  // Scroll State
+	  const leftScrollRef = useRef<HTMLDivElement>(null);
+	  const rightScrollRef = useRef<HTMLDivElement>(null);
+	  
+	  const [leftScrollState, setLeftScrollState] = useState({ top: false, bottom: false });
+	  const [rightScrollState, setRightScrollState] = useState({ top: false, bottom: false });
 
-  // Handle Scroll Shadows
-  useEffect(() => {
-    const handleScroll = (ref: React.RefObject<HTMLDivElement>, setState: React.Dispatch<React.SetStateAction<{top: boolean, bottom: boolean}>>) => {
-      if (ref.current) {
-        const { scrollTop, scrollHeight, clientHeight } = ref.current;
-        setState({
-            top: scrollTop > 0,
-            bottom: Math.ceil(scrollTop + clientHeight) < scrollHeight
-        });
-      }
-    };
+	  const calculateScrollState = useCallback((el: HTMLDivElement | null) => {
+	    if (!el) return { top: false, bottom: false };
+	    const { scrollTop, scrollHeight, clientHeight } = el;
+	    return {
+	      top: scrollTop > 0,
+	      bottom: Math.ceil(scrollTop + clientHeight) < scrollHeight,
+	    };
+	  }, []);
 
-    const checkAll = () => {
-        handleScroll(leftScrollRef, setLeftScrollState);
-        handleScroll(rightScrollRef, setRightScrollState);
-    };
+	  const updateLeftScrollState = useCallback(() => {
+	    setLeftScrollState(calculateScrollState(leftScrollRef.current));
+	  }, [calculateScrollState]);
 
-    const leftEl = leftScrollRef.current;
-    const rightEl = rightScrollRef.current;
+	  const updateRightScrollState = useCallback(() => {
+	    setRightScrollState(calculateScrollState(rightScrollRef.current));
+	  }, [calculateScrollState]);
 
-    if (leftEl) leftEl.addEventListener('scroll', () => handleScroll(leftScrollRef, setLeftScrollState));
-    if (rightEl) rightEl.addEventListener('scroll', () => handleScroll(rightScrollRef, setRightScrollState));
-    
-    // Initial check and resize listener
-    checkAll();
-    window.addEventListener('resize', checkAll);
+	  const recalcScrollIndicators = useCallback(() => {
+	    updateLeftScrollState();
+	    updateRightScrollState();
+	  }, [updateLeftScrollState, updateRightScrollState]);
 
-    return () => {
-      if (leftEl) leftEl.removeEventListener('scroll', () => handleScroll(leftScrollRef, setLeftScrollState));
-      if (rightEl) rightEl.removeEventListener('scroll', () => handleScroll(rightScrollRef, setRightScrollState));
-      window.removeEventListener('resize', checkAll);
-    };
-  }, []); // Run once on mount
+	  // Bind listeners once and reset both columns to top on startup.
+	  useEffect(() => {
+	    const leftEl = leftScrollRef.current;
+	    const rightEl = rightScrollRef.current;
 
-  // Scroll Pinning Logic
-  useEffect(() => {
-    const scrollContainer = leftScrollRef.current;
-    if (!scrollContainer) return;
+	    if (leftEl) leftEl.addEventListener('scroll', updateLeftScrollState, { passive: true });
+	    if (rightEl) rightEl.addEventListener('scroll', updateRightScrollState, { passive: true });
+	    window.addEventListener('resize', recalcScrollIndicators);
 
-    const duration = 600;
-    const startTime = performance.now();
-    let animationFrameId: number;
+	    const raf = requestAnimationFrame(() => {
+	      if (leftEl) leftEl.scrollTop = 0;
+	      if (rightEl) rightEl.scrollTop = 0;
+	      recalcScrollIndicators();
+	    });
 
-    const animateScroll = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      if (elapsed < duration) {
-        animationFrameId = requestAnimationFrame(animateScroll);
-      }
-    };
+	    return () => {
+	      cancelAnimationFrame(raf);
+	      if (leftEl) leftEl.removeEventListener('scroll', updateLeftScrollState);
+	      if (rightEl) rightEl.removeEventListener('scroll', updateRightScrollState);
+	      window.removeEventListener('resize', recalcScrollIndicators);
+	    };
+	  }, [updateLeftScrollState, updateRightScrollState, recalcScrollIndicators]);
 
-    animationFrameId = requestAnimationFrame(animateScroll);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [showLogs]);
+	  // Recalculate indicators whenever layout-affecting view state changes.
+	  useEffect(() => {
+	    recalcScrollIndicators();
+	    const raf = requestAnimationFrame(recalcScrollIndicators);
+	    const timer = setTimeout(recalcScrollIndicators, 575);
+	    return () => {
+	      cancelAnimationFrame(raf);
+	      clearTimeout(timer);
+	    };
+	  }, [showLogs, logsRendered, logsVisible, recalcScrollIndicators]);
 
   // Logs Animation Logic
   useEffect(() => {
@@ -671,18 +672,19 @@ export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) =>
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
         
         {/* Left Column: Controls (40%) */}
-        <div className="lg:col-span-5 flex flex-col min-h-0 relative rounded-2xl overflow-hidden">
+	        <div className="lg:col-span-5 min-w-0 flex flex-col min-h-0 relative rounded-2xl overflow-hidden">
              
              {/* Left Top Scroll Indicator */}
-             <div className={`absolute top-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}>
+	             <div className={`absolute top-0 left-0 right-0 h-6 pointer-events-none z-20 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}>
                  <div className="w-full h-full backdrop-blur-sm bg-linear-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
              </div>
 
              {/* Left Top Corner Mask */}
-            <div className="absolute top-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)' }} />
+	            <div className="absolute top-0 right-0 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)' }} />
 
              {/* Main Scrollable Area for Left Column */}
-             <div ref={leftScrollRef} className="flex-1 overflow-y-auto pr-3 pt-0 pb-0 custom-scrollbar space-y-6">
+	             <div ref={leftScrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
+		                <div className="pt-0 pb-0 pr-3 space-y-6">
                 
                 {/* Unified Control Center */}
                 <GlassCard title="Control Center" className={`bg-linear-to-b from-glass-200 to-glass-100 flex-none transition-all duration-500 ease-in-out relative ${isSystemHealthy ? 'border-accent-cyan/50! shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]! z-10' : ''}`}>
@@ -699,23 +701,27 @@ export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) =>
                                     <StatusLight status={serverRunning ? 'active' : 'inactive'} className="w-2 h-2" animate={serverRunning} />
                                 </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('local', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">
-                                    {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
-                                </Button>
-                                <Button variant="secondary" size="sm" onClick={() => docker.startContainer('remote', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">Start Remote</Button>
-                                <Button variant="danger" size="sm" onClick={() => docker.stopContainer()} disabled={!serverRunning || docker.operating} className="text-xs px-3">Stop</Button>
-                                <Button
-                                  variant="danger"
-                                  size="sm"
-                                  onClick={handleUnloadAllModels}
-                                  disabled={!serverConnection.reachable || modelsOperationPending}
-                                  className="text-xs px-3"
-                                >
-                                  {modelsOperationPending ? <><Loader2 size={14} className="animate-spin mr-1" />Unloading...</> : 'Unload Models'}
-                                </Button>
-                            </div>
-                        </div>
+	                            <div className="flex flex-wrap items-center gap-2">
+	                                <div className="flex flex-wrap gap-2">
+	                                    <Button variant="secondary" size="sm" onClick={() => docker.startContainer('local', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">
+	                                        {docker.operating ? <Loader2 size={14} className="animate-spin" /> : 'Start Local'}
+	                                    </Button>
+	                                    <Button variant="secondary" size="sm" onClick={() => docker.startContainer('remote', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">Start Remote</Button>
+	                                    <Button variant="danger" size="sm" onClick={() => docker.stopContainer()} disabled={!serverRunning || docker.operating} className="text-xs px-3">Stop</Button>
+	                                </div>
+	                                <div className="ml-auto shrink-0">
+	                                  <Button
+	                                    variant="danger"
+	                                    size="sm"
+	                                    onClick={handleUnloadAllModels}
+	                                    disabled={!serverConnection.reachable || modelsOperationPending}
+	                                    className="text-xs px-3"
+	                                  >
+	                                    {modelsOperationPending ? <><Loader2 size={14} className="animate-spin mr-1" />Unloading...</> : 'Unload Models'}
+	                                  </Button>
+		                </div>
+		            </div>
+		        </div>
 
                         {/* Client Control */}
                         <div className="flex flex-col p-4 bg-white/5 rounded-xl border border-white/5 space-y-4 shadow-sm">
@@ -764,21 +770,25 @@ export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) =>
                                     <div className="flex items-center gap-2"><Mic size={14} className={audioSource === 'mic' ? 'text-accent-cyan' : 'text-slate-500'} /><label className={`text-xs font-medium ${audioSource === 'mic' ? 'text-white' : 'text-slate-400'}`}>Microphone Device</label></div>
                                     {audioSource === 'mic' && <span className="text-[10px] bg-accent-cyan text-black px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">Live</span>}
                                 </div>
-                                <div className="flex gap-2">
-                                    <CustomSelect value={micDevice} onChange={handleMicDeviceChange} options={micDevices.length > 0 ? micDevices : ['Default Microphone']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
-                                    <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
-                                </div>
-                            </div>
+		                                <div className="flex items-center gap-2 min-w-0">
+		                                    <div className="min-w-0 flex-1">
+		                                      <CustomSelect value={micDevice} onChange={handleMicDeviceChange} options={micDevices.length > 0 ? micDevices : ['Default Microphone']} className="w-full min-w-0 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
+		                                    </div>
+		                                    <Button variant="secondary" size="icon" className="shrink-0" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
+		                                </div>
+	                            </div>
                             <div className={`p-3 rounded-xl border transition-all duration-300 ${audioSource === 'system' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'bg-transparent border-transparent hover:bg-white/5'}`}>
                                 <div className="flex items-center justify-between mb-2">
                                     <div className="flex items-center gap-2"><Laptop size={14} className={audioSource === 'system' ? 'text-accent-cyan' : 'text-slate-500'} /><label className={`text-xs font-medium ${audioSource === 'system' ? 'text-white' : 'text-slate-400'}`}>System Device</label></div>
                                     {audioSource === 'system' && <span className="text-[10px] bg-accent-cyan text-black px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">Live</span>}
                                 </div>
-                                <div className="flex gap-2">
-                                    <CustomSelect value={sysDevice} onChange={handleSystemDeviceChange} options={sysDevices.length > 0 ? sysDevices : ['Default Output']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
-                                    <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
-                                </div>
-                            </div>
+		                                <div className="flex items-center gap-2 min-w-0">
+		                                    <div className="min-w-0 flex-1">
+		                                      <CustomSelect value={sysDevice} onChange={handleSystemDeviceChange} options={sysDevices.length > 0 ? sysDevices : ['Default Output']} className="w-full min-w-0 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
+		                                    </div>
+		                                    <Button variant="secondary" size="icon" className="shrink-0" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
+		                                </div>
+	                            </div>
                         </div>
                     </div>
                 </GlassCard>
@@ -876,27 +886,29 @@ export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) =>
                             <div className="text-xs uppercase tracking-wider font-bold">{showLogs ? 'Hide' : 'Show'}</div>
                         </div>
                     </div>
-                </div>
-            </div>
+	                </div>
+	            </div>
+	             </div>
 
-            {/* Left Bottom Scroll Indicator */}
-            <div className={`absolute bottom-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
-            </div>
-            <div className="absolute bottom-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)' }} />
-        </div>
+	            {/* Left Bottom Scroll Indicator */}
+	            <div className={`absolute bottom-0 left-0 right-0 h-6 pointer-events-none z-20 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}>
+	                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
+	            </div>
+	            <div className="absolute bottom-0 right-0 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)' }} />
+	        </div>
 
-        {/* Right Column: Visualizer & Live Mode (60%) */}
-        <div className="lg:col-span-7 flex flex-col min-h-0 relative rounded-2xl overflow-hidden">
+	        {/* Right Column: Visualizer & Live Mode (60%) */}
+	        <div className="lg:col-span-7 min-w-0 flex flex-col min-h-0 relative rounded-2xl overflow-hidden">
             
             {/* Right Top Scroll Indicator */}
-             <div className={`absolute top-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
-             </div>
-             <div className="absolute top-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)' }} />
+	             <div className={`absolute top-0 left-0 right-0 h-6 pointer-events-none z-20 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}>
+	                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-b from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}></div>
+	             </div>
+	             <div className="absolute top-0 right-0 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)' }} />
 
-            {/* Right Column Scroll Container */}
-            <div ref={rightScrollRef} className="flex-1 flex flex-col overflow-y-auto pr-3 pt-0 pb-0 custom-scrollbar">
+	            {/* Right Column Scroll Container */}
+	            <div ref={rightScrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
+		                <div className="pt-0 pb-0 flex flex-col pr-3">
                 
                 {/* Visualizer Card */}
                 <GlassCard className="relative overflow-visible z-10 flex-none mb-6">
@@ -982,14 +994,15 @@ export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) =>
                         )}
                     </div>
                 </GlassCard>
-            </div>
+	                </div>
+	            </div>
 
-            {/* Right Bottom Scroll Indicator */}
-            <div className={`absolute bottom-0 left-0 right-3 h-6 pointer-events-none z-20 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}>
-                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
-            </div>
-            <div className="absolute bottom-0 right-3 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)' }} />
-        </div>
+	            {/* Right Bottom Scroll Indicator */}
+	            <div className={`absolute bottom-0 left-0 right-0 h-6 pointer-events-none z-20 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}>
+	                 <div className="w-full h-full backdrop-blur-sm bg-linear-to-t from-white/10 to-transparent" style={{ maskImage: 'linear-gradient(to top, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)' }}></div>
+	            </div>
+	            <div className="absolute bottom-0 right-0 w-4 h-4 z-20 pointer-events-none" style={{ ...maskStyle, maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)', WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)' }} />
+	        </div>
       </div>
       
       {/* 3. Bottom Drawer: Logs */}

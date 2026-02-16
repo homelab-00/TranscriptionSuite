@@ -86,7 +86,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   // The container needs to participate in the layout (flex, width) properly.
   // We extract width-related classes from className to apply to the container.
   // Note: We leave the original className on the button as well for bg, padding, border, etc.
-  const containerClasses = `relative ${isFlex ? 'flex-1' : ''} ${heightClass} ${widthClass} ${minWidthClass} ${maxWidthClass}`;
+  const containerClasses = `relative min-w-0 ${isFlex ? 'flex-1' : ''} ${heightClass} ${widthClass} ${minWidthClass} ${maxWidthClass}`;
 
   // Styles based on accentColor
   const activeItemClass = accentColor === 'magenta' 
@@ -102,7 +102,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       <button
         type="button"
         onClick={toggleOpen}
-        className={`flex items-center justify-between text-left w-full h-full ${className}`}
+        className={`flex min-w-0 items-center justify-between text-left w-full h-full ${className}`}
       >
         <span className="truncate mr-2">{value || placeholder}</span>
         <ChevronDown size={14} className={`shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''} opacity-50`} />

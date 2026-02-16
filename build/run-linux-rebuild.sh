@@ -70,11 +70,9 @@ require_directory() {
 print_step "Validate prerequisites"
 require_command uv
 require_command npm
-require_command docker
 require_directory "$BUILD_DIR"
 require_directory "$SERVER_BACKEND_DIR"
 require_directory "$DASHBOARD_DIR"
-require_directory "$SERVER_DOCKER_DIR"
 require_directory "$DASHBOARD_RELEASE_DIR"
 
 print_step "Set runtime options"
@@ -93,6 +91,8 @@ else
     echo "Non-interactive shell detected. Docker image rebuild defaults to no."
 fi
 if [[ "$SHOULD_REBUILD_DOCKER" == "true" ]]; then
+    require_command docker
+    require_directory "$SERVER_DOCKER_DIR"
     echo "Docker image rebuild: enabled"
 else
     echo "Docker image rebuild: skipped"
@@ -112,11 +112,13 @@ print_step "Refresh Python dependencies in server/backend/"
     uv sync
 )
 
-print_step "Update, install, and package dashboard AppImage"
+print_step "Update, install, validate, and package dashboard AppImage"
 (
     cd "$DASHBOARD_DIR"
     npm update
     npm ci
+    npm run typecheck
+    npm run ui:contract:check
     npm run package:linux
 )
 
@@ -128,41 +130,41 @@ else
     echo "Not found, skipping: $CONFIG_DIR"
 fi
 
-print_step "Remove Docker containers matching transcriptionsuite"
-mapfile -t container_ids < <(
-    docker ps -a --format '{{.ID}}\t{{.Names}}' \
-    | awk -F '\t' 'BEGIN { IGNORECASE=1 } $2 ~ /transcriptionsuite/ { print $1 }'
-)
-if [[ "${#container_ids[@]}" -gt 0 ]]; then
-    docker rm -f "${container_ids[@]}"
-else
-    echo "No matching containers found, skipping."
-fi
-
-print_step "Remove Docker images matching transcriptionsuite"
-mapfile -t image_ids < <(
-    docker images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}' \
-    | awk -F '\t' 'BEGIN { IGNORECASE=1 } $1 ~ /transcriptionsuite/ { print $2 }' \
-    | awk '!seen[$0]++'
-)
-if [[ "${#image_ids[@]}" -gt 0 ]]; then
-    docker rmi -f "${image_ids[@]}"
-else
-    echo "No matching images found, skipping."
-fi
-
-print_step "Remove Docker volumes matching transcriptionsuite"
-mapfile -t volume_names < <(
-    docker volume ls --format '{{.Name}}' \
-    | awk 'BEGIN { IGNORECASE=1 } /transcriptionsuite/ { print $0 }'
-)
-if [[ "${#volume_names[@]}" -gt 0 ]]; then
-    docker volume rm "${volume_names[@]}"
-else
-    echo "No matching volumes found, skipping."
-fi
-
 if [[ "$SHOULD_REBUILD_DOCKER" == "true" ]]; then
+    print_step "Remove Docker containers matching transcriptionsuite"
+    mapfile -t container_ids < <(
+        docker ps -a --format '{{.ID}}\t{{.Names}}' \
+        | awk -F '\t' 'BEGIN { IGNORECASE=1 } $2 ~ /transcriptionsuite/ { print $1 }'
+    )
+    if [[ "${#container_ids[@]}" -gt 0 ]]; then
+        docker rm -f "${container_ids[@]}"
+    else
+        echo "No matching containers found, skipping."
+    fi
+
+    print_step "Remove Docker images matching transcriptionsuite"
+    mapfile -t image_ids < <(
+        docker images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}' \
+        | awk -F '\t' 'BEGIN { IGNORECASE=1 } $1 ~ /transcriptionsuite/ { print $2 }' \
+        | awk '!seen[$0]++'
+    )
+    if [[ "${#image_ids[@]}" -gt 0 ]]; then
+        docker rmi -f "${image_ids[@]}"
+    else
+        echo "No matching images found, skipping."
+    fi
+
+    print_step "Remove Docker volumes matching transcriptionsuite"
+    mapfile -t volume_names < <(
+        docker volume ls --format '{{.Name}}' \
+        | awk 'BEGIN { IGNORECASE=1 } /transcriptionsuite/ { print $0 }'
+    )
+    if [[ "${#volume_names[@]}" -gt 0 ]]; then
+        docker volume rm "${volume_names[@]}"
+    else
+        echo "No matching volumes found, skipping."
+    fi
+
     print_step "Build Docker image with TAG=${SERVER_VERSION} (this may take several minutes)"
     (
         cd "$SERVER_DOCKER_DIR"
@@ -170,8 +172,8 @@ if [[ "$SHOULD_REBUILD_DOCKER" == "true" ]]; then
     )
     DOCKER_REBUILD_STATUS="completed"
 else
-    print_step "Skip Docker image rebuild"
-    echo "Skipping Docker image rebuild by user choice/default."
+    print_step "Skip all Docker operations"
+    echo "Skipping Docker container/image/volume cleanup and image rebuild by user choice/default."
 fi
 
 print_step "Mark AppImage executable"
