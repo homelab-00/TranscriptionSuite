@@ -98,38 +98,6 @@ else
     echo "Docker image rebuild: skipped"
 fi
 
-print_step "Refresh Python dependencies in build/"
-(
-    cd "$BUILD_DIR"
-    uv lock --upgrade
-    uv sync
-)
-
-print_step "Refresh Python dependencies in server/backend/"
-(
-    cd "$SERVER_BACKEND_DIR"
-    uv lock --upgrade
-    uv sync
-)
-
-print_step "Update, install, validate, and package dashboard AppImage"
-(
-    cd "$DASHBOARD_DIR"
-    npm update
-    npm ci
-    npm run typecheck
-    npm run ui:contract:check
-    npm run package:linux
-)
-
-print_step "Remove user config directory"
-if [[ -d "$CONFIG_DIR" ]]; then
-    rm -rf "$CONFIG_DIR"
-    echo "Removed: $CONFIG_DIR"
-else
-    echo "Not found, skipping: $CONFIG_DIR"
-fi
-
 if [[ "$SHOULD_REBUILD_DOCKER" == "true" ]]; then
     print_step "Remove Docker containers matching transcriptionsuite"
     mapfile -t container_ids < <(
@@ -174,6 +142,38 @@ if [[ "$SHOULD_REBUILD_DOCKER" == "true" ]]; then
 else
     print_step "Skip all Docker operations"
     echo "Skipping Docker container/image/volume cleanup and image rebuild by user choice/default."
+fi
+
+print_step "Refresh Python dependencies in build/"
+(
+    cd "$BUILD_DIR"
+    uv lock --upgrade
+    uv sync
+)
+
+print_step "Refresh Python dependencies in server/backend/"
+(
+    cd "$SERVER_BACKEND_DIR"
+    uv lock --upgrade
+    uv sync
+)
+
+print_step "Update, install, validate, and package dashboard AppImage"
+(
+    cd "$DASHBOARD_DIR"
+    npm update
+    npm ci
+    npm run typecheck
+    npm run ui:contract:check
+    npm run package:linux
+)
+
+print_step "Remove user config directory"
+if [[ -d "$CONFIG_DIR" ]]; then
+    rm -rf "$CONFIG_DIR"
+    echo "Removed: $CONFIG_DIR"
+else
+    echo "Not found, skipping: $CONFIG_DIR"
 fi
 
 print_step "Mark AppImage executable"
