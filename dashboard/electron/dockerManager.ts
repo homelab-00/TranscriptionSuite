@@ -106,6 +106,11 @@ export interface VolumeInfo {
   size?: string;
 }
 
+interface DockerDfVolumeRow {
+  Name?: string;
+  Size?: string;
+}
+
 export interface StartContainerOptions {
   mode: 'local' | 'remote';
   runtimeProfile: RuntimeProfile;
@@ -500,6 +505,7 @@ const VOLUME_LABELS: Record<string, string> = {
 async function getVolumes(): Promise<VolumeInfo[]> {
   const names = Object.values(VOLUME_NAMES);
   const results: VolumeInfo[] = [];
+  const volumeSizeByName = await getDockerReportedVolumeSizes();
 
   for (const name of names) {
     try {
@@ -510,27 +516,12 @@ async function getVolumes(): Promise<VolumeInfo[]> {
       ]);
       const [volName, driver, mountpoint] = output.split('\t');
 
-      // Try to get the actual size via du (may need sudo in some configs)
-      let size: string | undefined;
-      try {
-        const duOut = await exec('sudo', ['du', '-sh', mountpoint]);
-        size = duOut.split('\t')[0];
-      } catch {
-        // Fallback: try without sudo (works if Docker uses overlay in user namespace)
-        try {
-          const duOut = await exec('du', ['-sh', mountpoint]);
-          size = duOut.split('\t')[0];
-        } catch {
-          size = undefined;
-        }
-      }
-
       results.push({
         name: volName,
         label: VOLUME_LABELS[volName] || volName,
         driver,
         mountpoint,
-        size,
+        size: volumeSizeByName[volName] ?? volumeSizeByName[name],
       });
     } catch {
       // Volume doesn't exist — still include it as not found
@@ -545,6 +536,95 @@ async function getVolumes(): Promise<VolumeInfo[]> {
   }
 
   return results;
+}
+
+/**
+ * Ask Docker daemon for per-volume disk usage.
+ *
+ * This avoids host-level mountpoint access (and sudo) and works on Linux,
+ * macOS, and Windows Docker backends.
+ */
+async function getDockerReportedVolumeSizes(): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+
+  const addRows = (rows: DockerDfVolumeRow[]): void => {
+    for (const row of rows) {
+      const volumeName = row.Name?.trim();
+      const volumeSize = row.Size?.trim();
+      if (volumeName && volumeSize) {
+        map[volumeName] = volumeSize;
+      }
+    }
+  };
+
+  try {
+    const rowsOutput = await exec('docker', ['system', 'df', '-v', '--format', '{{range .Volumes}}{{json .}}{{println}}{{end}}']);
+    if (rowsOutput) {
+      const rows: DockerDfVolumeRow[] = [];
+      for (const line of rowsOutput.split(/\r?\n/).filter(Boolean)) {
+        try {
+          rows.push(JSON.parse(line) as DockerDfVolumeRow);
+        } catch {
+          // Skip malformed lines.
+        }
+      }
+      addRows(rows);
+    }
+  } catch {
+    // Fall through to alternate strategies.
+  }
+
+  if (Object.keys(map).length > 0) {
+    return map;
+  }
+
+  try {
+    const raw = await exec('docker', ['system', 'df', '-v', '--format', '{{json .Volumes}}']);
+    const rows = JSON.parse(raw) as DockerDfVolumeRow[];
+    addRows(rows);
+  } catch {
+    // Fall through to plain-text parsing.
+  }
+
+  if (Object.keys(map).length > 0) {
+    return map;
+  }
+
+  try {
+    const raw = await exec('docker', ['system', 'df', '-v']);
+    const lines = raw.split(/\r?\n/);
+    const sectionStart = lines.findIndex((line) => /local volumes space usage/i.test(line));
+    if (sectionStart === -1) {
+      return map;
+    }
+
+    let headerFound = false;
+    for (let i = sectionStart + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) {
+        if (headerFound) break;
+        continue;
+      }
+      if (!headerFound) {
+        if (/volume name/i.test(line) && /size/i.test(line)) {
+          headerFound = true;
+        }
+        continue;
+      }
+      const cols = line.split(/\s{2,}/).filter(Boolean);
+      if (cols.length >= 3) {
+        const volumeName = cols[0];
+        const volumeSize = cols[cols.length - 1];
+        if (volumeName && volumeSize) {
+          map[volumeName] = volumeSize;
+        }
+      }
+    }
+  } catch {
+    // Keep map empty if all non-interactive strategies fail.
+  }
+
+  return map;
 }
 
 /**
