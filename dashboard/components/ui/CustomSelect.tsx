@@ -126,11 +126,11 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                   onChange(option);
                   setIsOpen(false);
                 }}
-                className={`px-4 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between
+                className={`px-4 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between min-w-0
                   ${option === value ? activeItemClass : 'text-slate-300 hover:bg-white/5 hover:text-white'}
                 `}
               >
-                {option}
+                <span className="truncate mr-2">{option}</span>
                 {option === value && (
                    <div className={`w-1.5 h-1.5 rounded-full ${dotClass}`}></div>
                 )}

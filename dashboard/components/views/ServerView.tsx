@@ -344,7 +344,7 @@ export const ServerView: React.FC = () => {
                                 <Button variant="secondary" className="h-9 px-4" onClick={() => handleStartContainer('remote')} disabled={docker.operating || isRunning}>Start Remote</Button>
                                 <Button variant="danger" className="h-9 px-4" onClick={() => docker.stopContainer()} disabled={docker.operating || !isRunning}>Stop</Button>
                             </div>
-                            <Button variant="danger" className="h-9 px-4" onClick={() => docker.removeContainer()} disabled={docker.operating || isRunning}>
+                            <Button variant="danger" className="h-9 px-4" onClick={() => docker.removeContainer()} disabled={docker.operating || isRunning || !containerStatus.exists}>
                                 Remove Container
                             </Button>
                         </div>
