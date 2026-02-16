@@ -49,7 +49,13 @@ export interface UseDockerReturn {
 
   // Container state
   container: ContainerStatus;
-  startContainer: (mode: 'local' | 'remote', runtimeProfile?: RuntimeProfile, tlsEnv?: Record<string, string>, imageTag?: string, hfToken?: string) => Promise<void>;
+  startContainer: (
+    mode: 'local' | 'remote',
+    runtimeProfile?: RuntimeProfile,
+    tlsEnv?: Record<string, string>,
+    imageTag?: string,
+    hfToken?: string,
+  ) => Promise<void>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
 
@@ -120,14 +126,17 @@ export function useDocker(): UseDockerReturn {
       }
     })();
 
-    // Poll container status every 10s
+    // Poll container status and images every 10s
     pollRef.current = setInterval(async () => {
       const d = api();
       if (!d) return;
       try {
-        const status = await d.getContainerStatus();
+        const [status, imgs] = await Promise.all([d.getContainerStatus(), d.listImages()]);
         setContainer(status);
-      } catch { /* ignore */ }
+        setImages(imgs);
+      } catch {
+        /* ignore */
+      }
     }, 10_000);
 
     return () => {
@@ -191,19 +200,22 @@ export function useDocker(): UseDockerReturn {
     }
   }, []);
 
-  const pullImage = useCallback(async (tag: string) => {
-    const docker = api();
-    if (!docker) return;
-    setPulling(true);
-    await withOperation(async () => {
-      try {
-        await docker.pullImage(tag);
-        await refreshImages();
-      } finally {
-        setPulling(false);
-      }
-    });
-  }, [withOperation, refreshImages]);
+  const pullImage = useCallback(
+    async (tag: string) => {
+      const docker = api();
+      if (!docker) return;
+      setPulling(true);
+      await withOperation(async () => {
+        try {
+          await docker.pullImage(tag);
+          await refreshImages();
+        } finally {
+          setPulling(false);
+        }
+      });
+    },
+    [withOperation, refreshImages],
+  );
 
   const cancelPull = useCallback(async () => {
     const docker = api();
@@ -213,32 +225,44 @@ export function useDocker(): UseDockerReturn {
     setOperating(false);
   }, []);
 
-  const removeImage = useCallback(async (tag: string) => {
-    const docker = api();
-    if (!docker) return;
-    await withOperation(async () => {
-      await docker.removeImage(tag);
-      await refreshImages();
-    });
-  }, [withOperation, refreshImages]);
+  const removeImage = useCallback(
+    async (tag: string) => {
+      const docker = api();
+      if (!docker) return;
+      await withOperation(async () => {
+        await docker.removeImage(tag);
+        await refreshImages();
+      });
+    },
+    [withOperation, refreshImages],
+  );
 
-  const startContainer = useCallback(async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile = 'gpu', tlsEnv?: Record<string, string>, imageTag?: string, hfToken?: string) => {
-    const docker = api();
-    if (!docker) return;
-    await withOperation(async () => {
-      await docker.startContainer({ mode, runtimeProfile, tlsEnv, imageTag, hfToken });
-      // Wait a moment then refresh status
-      await new Promise(r => setTimeout(r, 2000));
-      setContainer(await docker.getContainerStatus());
-    });
-  }, [withOperation]);
+  const startContainer = useCallback(
+    async (
+      mode: 'local' | 'remote',
+      runtimeProfile: RuntimeProfile = 'gpu',
+      tlsEnv?: Record<string, string>,
+      imageTag?: string,
+      hfToken?: string,
+    ) => {
+      const docker = api();
+      if (!docker) return;
+      await withOperation(async () => {
+        await docker.startContainer({ mode, runtimeProfile, tlsEnv, imageTag, hfToken });
+        // Wait a moment then refresh status
+        await new Promise((r) => setTimeout(r, 2000));
+        setContainer(await docker.getContainerStatus());
+      });
+    },
+    [withOperation],
+  );
 
   const stopContainer = useCallback(async () => {
     const docker = api();
     if (!docker) return;
     await withOperation(async () => {
       await docker.stopContainer();
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000));
       setContainer(await docker.getContainerStatus());
     });
   }, [withOperation]);
@@ -248,19 +272,22 @@ export function useDocker(): UseDockerReturn {
     if (!docker) return;
     await withOperation(async () => {
       await docker.removeContainer();
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000));
       setContainer(await docker.getContainerStatus());
     });
   }, [withOperation]);
 
-  const removeVolume = useCallback(async (name: string) => {
-    const docker = api();
-    if (!docker) return;
-    await withOperation(async () => {
-      await docker.removeVolume(name);
-      await refreshVolumes();
-    });
-  }, [withOperation, refreshVolumes]);
+  const removeVolume = useCallback(
+    async (name: string) => {
+      const docker = api();
+      if (!docker) return;
+      await withOperation(async () => {
+        await docker.removeVolume(name);
+        await refreshVolumes();
+      });
+    },
+    [withOperation, refreshVolumes],
+  );
 
   // ─── Log Streaming ─────────────────────────────────────────────────────────
 
@@ -280,7 +307,7 @@ export function useDocker(): UseDockerReturn {
 
     docker.startLogStream(tail);
     const cleanup = docker.onLogLine((line: string) => {
-      setLogLines(prev => {
+      setLogLines((prev) => {
         return [...prev, line];
       });
     });

@@ -159,7 +159,9 @@ cd dashboard && npm run package:mac
 | Lint code (Python) | `./build/.venv/bin/ruff check .` |
 | Format code (Python) | `./build/.venv/bin/ruff format .` |
 | Type check (Python) | `./build/.venv/bin/pyright` |
-| Type check (TypeScript) | `cd dashboard && npx tsc --noEmit` |
+| Format code (TypeScript) | `cd dashboard && npm run format` |
+| Format check (TypeScript) | `cd dashboard && npm run format:check` |
+| Type check (TypeScript) | `cd dashboard && npm run typecheck` |
 
 ---
 
@@ -1346,8 +1348,15 @@ All Python code quality tools are installed in the build environment. Run these 
 **Check specific directories:**
 ```bash
 ./build/.venv/bin/ruff check server/backend/
-./build/.venv/bin/ruff format dashboard/
-./build/.venv/bin/pyright dashboard/
+./build/.venv/bin/ruff format server/backend/
+```
+
+**Dashboard (TypeScript) quality commands:**
+```bash
+cd dashboard && npm run format
+cd dashboard && npm run format:check
+cd dashboard && npm run typecheck
+cd dashboard && npm run ui:contract:check
 ```
 
 **Preview changes without modifying files:**
@@ -1376,7 +1385,8 @@ Run all checks across the entire codebase:
 ./build/.venv/bin/pytest server/backend/tests
 
 # 3. TypeScript checks (dashboard)
-cd dashboard && npx tsc --noEmit
+cd dashboard && npm run format:check
+cd dashboard && npm run typecheck
 
 # 4. UI contract validation
 cd dashboard && npm run ui:contract:validate

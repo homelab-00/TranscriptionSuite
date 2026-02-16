@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-ssr/
+dist-electron/
+release/
+
+ui-contract/.generated/
+scripts/ui-contract/fixtures/.tmp/
+ui-contract/transcription-suite-ui.contract.yaml
+
+package-lock.json
+electron-debug.log

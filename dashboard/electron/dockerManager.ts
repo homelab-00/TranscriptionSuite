@@ -152,16 +152,19 @@ function composeFileArgs(runtimeProfile: RuntimeProfile): string[] {
   }
 
   // Flatten into docker compose args
-  return files.flatMap(f => ['-f', f]);
+  return files.flatMap((f) => ['-f', f]);
 }
 
 function buildProcessEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
   const delimiter = path.delimiter;
   const currentPath = process.env.PATH ?? '';
-  const defaultPathEntries = process.platform === 'win32'
-    ? ['C:\\Program Files\\Docker\\Docker\\resources\\bin']
-    : ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
-  const mergedPath = Array.from(new Set([...currentPath.split(delimiter).filter(Boolean), ...defaultPathEntries])).join(delimiter);
+  const defaultPathEntries =
+    process.platform === 'win32'
+      ? ['C:\\Program Files\\Docker\\Docker\\resources\\bin']
+      : ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  const mergedPath = Array.from(
+    new Set([...currentPath.split(delimiter).filter(Boolean), ...defaultPathEntries]),
+  ).join(delimiter);
 
   let rootlessDockerHost: string | undefined;
   const explicitDockerHost = process.env.DOCKER_HOST || extraEnv?.DOCKER_HOST;
@@ -193,7 +196,11 @@ function buildProcessEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-async function exec(cmd: string, args: string[], opts?: { cwd?: string; env?: Record<string, string> }): Promise<string> {
+async function exec(
+  cmd: string,
+  args: string[],
+  opts?: { cwd?: string; env?: Record<string, string> },
+): Promise<string> {
   try {
     const { stdout } = await execFileAsync(cmd, args, {
       cwd: opts?.cwd,
@@ -267,7 +274,7 @@ async function listImages(): Promise<DockerImage[]> {
         const [fullNameRaw = '', size = '', created = '', id = ''] = line.split('\t');
         const fullName = fullNameRaw.trim();
         const repoAndTag = fullName.split(':');
-        const tag = repoAndTag.length > 1 ? repoAndTag[repoAndTag.length - 1] : 'latest';
+        const tag = repoAndTag.length > 1 ? repoAndTag[repoAndTag.length - 1] : 'unknown';
         return { tag, fullName, size, created, id };
       })
       .filter((img) => img.fullName.startsWith(`${IMAGE_REPO}:`) && img.tag !== '<none>');
@@ -276,8 +283,11 @@ async function listImages(): Promise<DockerImage[]> {
   // Strategy 1: JSON format with filter (most reliable on modern Docker)
   try {
     const output = await exec('docker', [
-      'images', '--format', 'json',
-      '--filter', `reference=${IMAGE_REPO}`,
+      'images',
+      '--format',
+      'json',
+      '--filter',
+      `reference=${IMAGE_REPO}`,
     ]);
     if (!output) {
       console.log('[DockerManager] listImages: no matching images (json+filter)');
@@ -299,7 +309,7 @@ async function listImages(): Promise<DockerImage[]> {
         parsedAnyJsonLine = true;
 
         const repo = row.Repository?.trim() ?? '';
-        const tag = row.Tag?.trim() || 'latest';
+        const tag = row.Tag?.trim() || 'unknown';
         if (tag === '<none>') continue;
 
         parsed.push({
@@ -327,8 +337,10 @@ async function listImages(): Promise<DockerImage[]> {
   try {
     const legacyOutput = await exec('docker', [
       'images',
-      '--format', '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
-      '--filter', `reference=${IMAGE_REPO}`,
+      '--format',
+      '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
+      '--filter',
+      `reference=${IMAGE_REPO}`,
     ]);
     const results = parseLegacyFormat(legacyOutput);
     console.log(`[DockerManager] listImages: found ${results.length} image(s) via template+filter`);
@@ -341,7 +353,8 @@ async function listImages(): Promise<DockerImage[]> {
   try {
     const rawOutput = await exec('docker', [
       'images',
-      '--format', '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
+      '--format',
+      '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
     ]);
     const results = parseLegacyFormat(rawOutput);
     console.log(`[DockerManager] listImages: found ${results.length} image(s) via unfiltered scan`);
@@ -356,7 +369,7 @@ async function listImages(): Promise<DockerImage[]> {
  * Pull an image tag from the registry.
  * Uses spawn instead of exec so the process can be cancelled.
  */
-function pullImage(tag: string = 'latest'): Promise<string> {
+function pullImage(tag: string): Promise<string> {
   return new Promise((resolve, reject) => {
     cancelPull(); // kill any existing pull first
 
@@ -369,8 +382,12 @@ function pullImage(tag: string = 'latest'): Promise<string> {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString(); });
-    proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
+    proc.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       if (pullProcess === proc) pullProcess = null;
@@ -445,9 +462,7 @@ async function getContainerStatus(): Promise<ContainerStatus> {
  * Start the container via docker compose with layered compose files.
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
  */
-async function startContainer(
-  options: StartContainerOptions,
-): Promise<string> {
+async function startContainer(options: StartContainerOptions): Promise<string> {
   const { mode, runtimeProfile, imageTag, tlsEnv, hfToken } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
 
@@ -460,9 +475,11 @@ async function startContainer(
     }
   }
 
-  // Pass the selected image tag to docker-compose (defaults to 'latest' only when none available locally)
+  // Pass the selected image tag to docker-compose (requires a local image to be available)
   if (resolvedTag) {
     composeEnv['TAG'] = resolvedTag;
+  } else {
+    throw new Error('No image tag specified and no local images found. Pull an image first.');
   }
 
   if (mode === 'remote') {
@@ -521,8 +538,10 @@ async function getVolumes(): Promise<VolumeInfo[]> {
   for (const name of names) {
     try {
       const output = await exec('docker', [
-        'volume', 'inspect',
-        '--format', '{{.Name}}\t{{.Driver}}\t{{.Mountpoint}}',
+        'volume',
+        'inspect',
+        '--format',
+        '{{.Name}}\t{{.Driver}}\t{{.Mountpoint}}',
         name,
       ]);
       const [volName, driver, mountpoint] = output.split('\t');
@@ -569,7 +588,13 @@ async function getDockerReportedVolumeSizes(): Promise<Record<string, string>> {
   };
 
   try {
-    const rowsOutput = await exec('docker', ['system', 'df', '-v', '--format', '{{range .Volumes}}{{json .}}{{println}}{{end}}']);
+    const rowsOutput = await exec('docker', [
+      'system',
+      'df',
+      '-v',
+      '--format',
+      '{{range .Volumes}}{{json .}}{{println}}{{end}}',
+    ]);
     if (rowsOutput) {
       const rows: DockerDfVolumeRow[] = [];
       for (const line of rowsOutput.split(/\r?\n/).filter(Boolean)) {
@@ -667,10 +692,14 @@ function startLogStream(onData: (line: string) => void, tail?: number): void {
   let stdoutRemainder = '';
   let stderrRemainder = '';
 
-  logProcess = spawn('docker', ['logs', '--follow', '--timestamps', '--tail', tailArg, CONTAINER_NAME], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: buildProcessEnv(),
-  });
+  logProcess = spawn(
+    'docker',
+    ['logs', '--follow', '--timestamps', '--tail', tailArg, CONTAINER_NAME],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildProcessEnv(),
+    },
+  );
 
   const handle = (data: Buffer, stream: 'stdout' | 'stderr') => {
     const previousRemainder = stream === 'stdout' ? stdoutRemainder : stderrRemainder;
@@ -719,7 +748,13 @@ function stopLogStream(): void {
  */
 async function getLogs(tail?: number): Promise<string[]> {
   try {
-    const output = await exec('docker', ['logs', '--timestamps', '--tail', resolveDockerTailArg(tail), CONTAINER_NAME]);
+    const output = await exec('docker', [
+      'logs',
+      '--timestamps',
+      '--tail',
+      resolveDockerTailArg(tail),
+      CONTAINER_NAME,
+    ]);
     return output.split(/\r?\n/).filter(Boolean);
   } catch {
     return [];
@@ -768,7 +803,9 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
     }
 
     if (!toolkit) {
-      console.warn('[DockerManager] NVIDIA container toolkit: not found (install nvidia-container-toolkit and configure CDI)');
+      console.warn(
+        '[DockerManager] NVIDIA container toolkit: not found (install nvidia-container-toolkit and configure CDI)',
+      );
     }
   }
   return { gpu, toolkit };

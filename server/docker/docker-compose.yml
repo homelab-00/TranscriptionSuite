@@ -54,7 +54,7 @@ services:
     build:
       context: ../..
       dockerfile: server/docker/Dockerfile
-    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
+    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG}
     container_name: transcriptionsuite-container
     
     # Environment variables

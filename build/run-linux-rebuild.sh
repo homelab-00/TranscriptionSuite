@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # Version defaults (easy to edit here)
-DEFAULT_SERVER_VERSION="1.0.1"
-DEFAULT_DASHBOARD_VERSION="1.0.1"
+DEFAULT_SERVER_VERSION="1.0.2"
+DEFAULT_DASHBOARD_VERSION="1.0.2"
 
 # Optional CLI overrides:
 #   ./build/run-linux-rebuild.sh [server_version] [dashboard_version]

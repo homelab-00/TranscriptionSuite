@@ -15,7 +15,7 @@ shift || true
 # Constants
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server:latest"
+DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server:${TAG:?TAG must be set}"
 CONTAINER_NAME="transcriptionsuite-container"
 HF_DIARIZATION_TERMS_URL="https://huggingface.co/pyannote/speaker-diarization-community-1"
 PROMPT_TIME_OFFSET_SECONDS=0

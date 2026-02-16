@@ -35,7 +35,9 @@ function getResolvedAppVersion(): string {
 
   try {
     const packageJsonPath = path.resolve(__dirname, '../package.json');
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version?: string };
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
+      version?: string;
+    };
     if (packageJson.version) {
       return packageJson.version;
     }
@@ -130,12 +132,17 @@ trayManager.setActions({
     if (!win) return;
     const result = await dialog.showOpenDialog(win, {
       title: 'Select Audio File to Transcribe',
-      filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm', 'opus'] }],
+      filters: [
+        { name: 'Audio Files', extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm', 'opus'] },
+      ],
       properties: ['openFile'],
     });
     if (!result.canceled && result.filePaths.length > 0) {
       win.webContents.send('tray:action', 'transcribe-file', result.filePaths[0]);
-      if (!win.isVisible()) { win.show(); win.focus(); }
+      if (!win.isVisible()) {
+        win.show();
+        win.focus();
+      }
     }
   },
 });
@@ -250,8 +257,13 @@ ipcMain.handle('app:readLocalFile', async (_event, filePath: string) => {
   const name = path.basename(filePath);
   const ext = path.extname(filePath).toLowerCase().slice(1);
   const mimeMap: Record<string, string> = {
-    mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
-    flac: 'audio/flac', ogg: 'audio/ogg', webm: 'audio/webm', opus: 'audio/opus',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    ogg: 'audio/ogg',
+    webm: 'audio/webm',
+    opus: 'audio/opus',
   };
   return { name, buffer: buffer.buffer, mimeType: mimeMap[ext] || 'audio/mpeg' };
 });
@@ -372,9 +384,20 @@ ipcMain.handle('tray:setState', async (_event, state: TrayState) => {
   trayManager.setState(state);
 });
 
-ipcMain.handle('tray:setMenuState', async (_event, menuState: { serverRunning?: boolean; isRecording?: boolean; isLive?: boolean; isMuted?: boolean }) => {
-  trayManager.setMenuState(menuState);
-});
+ipcMain.handle(
+  'tray:setMenuState',
+  async (
+    _event,
+    menuState: {
+      serverRunning?: boolean;
+      isRecording?: boolean;
+      isLive?: boolean;
+      isMuted?: boolean;
+    },
+  ) => {
+    trayManager.setMenuState(menuState);
+  },
+);
 
 // ─── App Lifecycle ──────────────────────────────────────────────────────────
 
@@ -411,13 +434,18 @@ app.on('before-quit', async (event) => {
     event.preventDefault();
     try {
       console.log('Stopping server on quit…');
-      await dockerManager.stopContainer();
+      // Race the stop against a 10s safety timeout
+      await Promise.race([
+        dockerManager.stopContainer(),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
     } catch (err) {
       console.error('Failed to stop server on quit:', err);
     } finally {
       trayManager.destroy();
       updateManager.destroy();
-      app.quit();
+      // Use app.exit() to avoid re-triggering before-quit
+      app.exit(0);
     }
   } else {
     trayManager.destroy();

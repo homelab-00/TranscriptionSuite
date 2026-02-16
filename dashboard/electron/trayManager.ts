@@ -21,17 +21,17 @@ const __dirname = path.dirname(__filename);
 // ─── Tray State Enum ────────────────────────────────────────────────────────
 
 export type TrayState =
-  | 'idle'            // Server stopped, no recording
-  | 'active'          // Server running, no session (original logo)
-  | 'connecting'      // WebSocket connecting
-  | 'recording'       // One-shot recording active
-  | 'processing'      // Transcription processing
-  | 'live-listening'  // Live mode listening
+  | 'idle' // Server stopped, no recording
+  | 'active' // Server running, no session (original logo)
+  | 'connecting' // WebSocket connecting
+  | 'recording' // One-shot recording active
+  | 'processing' // Transcription processing
+  | 'live-listening' // Live mode listening
   | 'live-processing' // Live mode processing
-  | 'muted'           // Recording/live but muted
-  | 'complete'        // Transcription complete (reverts after 3s)
-  | 'error'           // Error state
-  | 'disconnected';   // Server unreachable
+  | 'muted' // Recording/live but muted
+  | 'complete' // Transcription complete (reverts after 3s)
+  | 'error' // Error state
+  | 'disconnected'; // Server unreachable
 
 export interface TrayMenuState {
   serverRunning: boolean;
@@ -42,21 +42,25 @@ export interface TrayMenuState {
 
 // ─── Runtime Icon Generation ────────────────────────────────────────────────
 
-interface RGB { r: number; g: number; b: number }
+interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
 
 /** Vivid, maximally-distinct colors for each state's background area. */
 const STATE_COLORS: Record<TrayState, RGB | null> = {
-  'idle':            null,                           // grayscale only
-  'active':          null,                           // original logo
-  'connecting':      { r: 0xFF, g: 0xD6, b: 0x00 }, // vivid yellow
-  'recording':       { r: 0xF4, g: 0x43, b: 0x36 }, // red
-  'processing':      { r: 0xFF, g: 0x91, b: 0x00 }, // bright orange
-  'live-listening':  { r: 0x00, g: 0xE6, b: 0x76 }, // neon green
-  'live-processing': { r: 0x00, g: 0xE5, b: 0xFF }, // electric cyan
-  'muted':           { r: 0x7C, g: 0x4D, b: 0xFF }, // deep violet
-  'complete':        { r: 0x29, g: 0x79, b: 0xFF }, // bright blue
-  'error':           { r: 0xFF, g: 0x00, b: 0xFF }, // magenta
-  'disconnected':    null,                           // dimmed grayscale
+  idle: null, // grayscale only
+  active: null, // original logo
+  connecting: { r: 0xff, g: 0xd6, b: 0x00 }, // vivid yellow
+  recording: { r: 0xf4, g: 0x43, b: 0x36 }, // red
+  processing: { r: 0xff, g: 0x91, b: 0x00 }, // bright orange
+  'live-listening': { r: 0x00, g: 0xe6, b: 0x76 }, // neon green
+  'live-processing': { r: 0x00, g: 0xe5, b: 0xff }, // electric cyan
+  muted: { r: 0x7c, g: 0x4d, b: 0xff }, // deep violet
+  complete: { r: 0x29, g: 0x79, b: 0xff }, // bright blue
+  error: { r: 0xff, g: 0x00, b: 0xff }, // magenta
+  disconnected: null, // dimmed grayscale
 };
 
 /**
@@ -71,17 +75,17 @@ const STATE_COLORS: Record<TrayState, RGB | null> = {
 const MIC_LUMINANCE_THRESHOLD = 190;
 
 const STATE_TOOLTIP_MAP: Record<TrayState, string> = {
-  'idle':            'TranscriptionSuite — Server stopped',
-  'active':          'TranscriptionSuite — Ready',
-  'connecting':      'TranscriptionSuite — Connecting…',
-  'recording':       'TranscriptionSuite — Recording',
-  'processing':      'TranscriptionSuite — Processing…',
-  'live-listening':  'TranscriptionSuite — Live Mode',
+  idle: 'TranscriptionSuite — Server stopped',
+  active: 'TranscriptionSuite — Ready',
+  connecting: 'TranscriptionSuite — Connecting…',
+  recording: 'TranscriptionSuite — Recording',
+  processing: 'TranscriptionSuite — Processing…',
+  'live-listening': 'TranscriptionSuite — Live Mode',
   'live-processing': 'TranscriptionSuite — Live Processing…',
-  'muted':           'TranscriptionSuite — Muted',
-  'complete':        'TranscriptionSuite — Complete',
-  'error':           'TranscriptionSuite — Error',
-  'disconnected':    'TranscriptionSuite — Disconnected',
+  muted: 'TranscriptionSuite — Muted',
+  complete: 'TranscriptionSuite — Complete',
+  error: 'TranscriptionSuite — Error',
+  disconnected: 'TranscriptionSuite — Disconnected',
 };
 
 // ─── TrayManager Class ──────────────────────────────────────────────────────
@@ -163,13 +167,17 @@ export class TrayManager {
     }
 
     if (newState === 'complete') {
-      this.previousState = this.state;
+      // Don't save previousState — we'll let the renderer push the correct
+      // post-completion state. The 3s timer just clears the 'complete' display
+      // and falls back to 'active' (server should still be running after transcription).
       this.state = 'complete';
       this.applyState();
 
       this.completeTimer = setTimeout(() => {
         this.completeTimer = null;
-        this.state = this.previousState;
+        // Revert to 'active' (server is running) rather than the transient
+        // 'processing' state that was active before completion.
+        this.state = 'active';
         this.applyState();
       }, 3000);
     } else {
@@ -251,20 +259,20 @@ export class TrayManager {
       if (lum > MIC_LUMINANCE_THRESHOLD) {
         // Bright pixel → mic symbol → grayscale
         const gray = Math.round(Math.min(lum * dimFactor, 255));
-        bitmap[i]     = gray;
+        bitmap[i] = gray;
         bitmap[i + 1] = gray;
         bitmap[i + 2] = gray;
       } else if (color) {
         // Background pixel → tint with state color
         // Preserve depth by scaling color with relative brightness
         const factor = 0.6 + 0.4 * Math.min(lum / MIC_LUMINANCE_THRESHOLD, 1);
-        bitmap[i]     = Math.round(Math.min(color.b * factor, 255));
+        bitmap[i] = Math.round(Math.min(color.b * factor, 255));
         bitmap[i + 1] = Math.round(Math.min(color.g * factor, 255));
         bitmap[i + 2] = Math.round(Math.min(color.r * factor, 255));
       } else {
         // null color (idle / disconnected) → plain grayscale
         const gray = Math.round(Math.min(lum * dimFactor, 255));
-        bitmap[i]     = gray;
+        bitmap[i] = gray;
         bitmap[i + 1] = gray;
         bitmap[i + 2] = gray;
       }
@@ -294,46 +302,77 @@ export class TrayManager {
         click: () => {
           const w = this.getWindow();
           if (!w) return;
-          if (w.isVisible()) { w.hide(); }
-          else { w.show(); w.focus(); }
+          if (w.isVisible()) {
+            w.hide();
+          } else {
+            w.show();
+            w.focus();
+          }
         },
       },
       { type: 'separator' },
 
       ...(this.menuState.serverRunning
-        ? [{ label: 'Stop Server', click: () => { this.actions.stopServer?.(); } } as Electron.MenuItemConstructorOptions]
-        : [{ label: 'Start Server', click: () => { this.actions.startServer?.(); } } as Electron.MenuItemConstructorOptions]
-      ),
+        ? [
+            {
+              label: 'Stop Server',
+              click: () => {
+                this.actions.stopServer?.();
+              },
+            } as Electron.MenuItemConstructorOptions,
+          ]
+        : [
+            {
+              label: 'Start Server',
+              click: () => {
+                this.actions.startServer?.();
+              },
+            } as Electron.MenuItemConstructorOptions,
+          ]),
 
-      ...(this.menuState.serverRunning ? [
-        { type: 'separator' as const },
-        ...(this.menuState.isRecording || this.menuState.isLive
-          ? [
-              {
-                label: this.menuState.isLive ? 'Stop Live Mode' : 'Stop Recording',
-                click: () => { this.actions.stopRecording?.(); },
-              } as Electron.MenuItemConstructorOptions,
-              {
-                label: this.menuState.isMuted ? 'Unmute' : 'Mute',
-                click: () => { this.actions.toggleMute?.(); },
-              } as Electron.MenuItemConstructorOptions,
-            ]
-          : [
-              {
-                label: 'Start Recording',
-                click: () => { this.actions.startRecording?.(); },
-              } as Electron.MenuItemConstructorOptions,
-            ]
-        ),
-        { type: 'separator' as const },
-        {
-          label: 'Transcribe File…',
-          click: () => { this.actions.transcribeFile?.(); },
-        } as Electron.MenuItemConstructorOptions,
-      ] : []),
+      ...(this.menuState.serverRunning
+        ? [
+            { type: 'separator' as const },
+            ...(this.menuState.isRecording || this.menuState.isLive
+              ? [
+                  {
+                    label: this.menuState.isLive ? 'Stop Live Mode' : 'Stop Recording',
+                    click: () => {
+                      this.actions.stopRecording?.();
+                    },
+                  } as Electron.MenuItemConstructorOptions,
+                  {
+                    label: this.menuState.isMuted ? 'Unmute' : 'Mute',
+                    click: () => {
+                      this.actions.toggleMute?.();
+                    },
+                  } as Electron.MenuItemConstructorOptions,
+                ]
+              : [
+                  {
+                    label: 'Start Recording',
+                    click: () => {
+                      this.actions.startRecording?.();
+                    },
+                  } as Electron.MenuItemConstructorOptions,
+                ]),
+            { type: 'separator' as const },
+            {
+              label: 'Transcribe File…',
+              click: () => {
+                this.actions.transcribeFile?.();
+              },
+            } as Electron.MenuItemConstructorOptions,
+          ]
+        : []),
 
       { type: 'separator' },
-      { label: 'Quit', click: () => { app.quit(); } },
+      {
+        label: 'Quit',
+        click: () => {
+          app.quit();
+        },
+      },
     ];
 
     this.tray.setContextMenu(Menu.buildFromTemplate(template));

@@ -144,13 +144,26 @@ export class APIClient {
   }
 
   private async postFormData<T>(path: string, formData: FormData): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: this.authHeaders(), // No Content-Type — browser sets multipart boundary
-      body: formData,
-    });
-    if (!res.ok) throw new APIError(res.status, await res.text(), path);
-    return res.json();
+    const controller = new AbortController();
+    // 10-minute timeout for large audio uploads
+    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: this.authHeaders(), // No Content-Type — browser sets multipart boundary
+        body: formData,
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new APIError(res.status, await res.text(), path);
+      return res.json();
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        throw new APIError(408, 'Upload timed out after 10 minutes', path);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   // ─── Health / Status ──────────────────────────────────────────────────────
@@ -186,10 +199,7 @@ export class APIClient {
       return { reachable: false, ready: false, status: null, error: 'Server unreachable' };
     }
     try {
-      const [readiness, status] = await Promise.all([
-        this.getReadiness(),
-        this.getStatus(),
-      ]);
+      const [readiness, status] = await Promise.all([this.getReadiness(), this.getStatus()]);
       return {
         reachable: true,
         ready: readiness.status === 'ready',
@@ -220,7 +230,9 @@ export class APIClient {
   }
 
   /** POST /api/auth/tokens — admin only */
-  async createToken(req: CreateTokenRequest): Promise<{ success: boolean; message: string; token: AuthToken }> {
+  async createToken(
+    req: CreateTokenRequest,
+  ): Promise<{ success: boolean; message: string; token: AuthToken }> {
     return this.post('/api/auth/tokens', req);
   }
 
@@ -232,15 +244,21 @@ export class APIClient {
   // ─── Transcription ────────────────────────────────────────────────────────
 
   /** POST /api/transcribe/audio — transcribe an uploaded file */
-  async transcribeAudio(file: File, options?: TranscriptionUploadOptions): Promise<TranscriptionResponse> {
+  async transcribeAudio(
+    file: File,
+    options?: TranscriptionUploadOptions,
+  ): Promise<TranscriptionResponse> {
     const fd = new FormData();
     fd.append('file', file);
     if (options?.language) fd.append('language', options.language);
     if (options?.translation_enabled) fd.append('translation_enabled', 'true');
-    if (options?.translation_target_language) fd.append('translation_target_language', options.translation_target_language);
-    if (options?.enable_word_timestamps !== undefined) fd.append('word_timestamps', String(options.enable_word_timestamps));
+    if (options?.translation_target_language)
+      fd.append('translation_target_language', options.translation_target_language);
+    if (options?.enable_word_timestamps !== undefined)
+      fd.append('word_timestamps', String(options.enable_word_timestamps));
     if (options?.enable_diarization) fd.append('diarization', 'true');
-    if (options?.expected_speakers) fd.append('expected_speakers', String(options.expected_speakers));
+    if (options?.expected_speakers)
+      fd.append('expected_speakers', String(options.expected_speakers));
     return this.postFormData('/api/transcribe/audio', fd);
   }
 
@@ -284,12 +302,18 @@ export class APIClient {
   }
 
   /** PATCH /api/notebook/recordings/:id/title */
-  async updateRecordingTitle(id: number, title: string): Promise<{ status: string; id: number; title: string }> {
+  async updateRecordingTitle(
+    id: number,
+    title: string,
+  ): Promise<{ status: string; id: number; title: string }> {
     return this.patch(`/api/notebook/recordings/${id}/title`, { title });
   }
 
   /** PATCH /api/notebook/recordings/:id/date */
-  async updateRecordingDate(id: number, recordedAt: string): Promise<{ status: string; id: number; recorded_at: string }> {
+  async updateRecordingDate(
+    id: number,
+    recordedAt: string,
+  ): Promise<{ status: string; id: number; recorded_at: string }> {
     return this.patch(`/api/notebook/recordings/${id}/date`, { recorded_at: recordedAt });
   }
 
@@ -346,15 +370,21 @@ export class APIClient {
    * POST /api/notebook/transcribe/upload
    * Upload audio, transcribe, and save to notebook in one step.
    */
-  async uploadAndTranscribe(file: File, options?: TranscriptionUploadOptions): Promise<UploadResponse> {
+  async uploadAndTranscribe(
+    file: File,
+    options?: TranscriptionUploadOptions,
+  ): Promise<UploadResponse> {
     const fd = new FormData();
     fd.append('file', file);
     if (options?.language) fd.append('language', options.language);
     if (options?.translation_enabled) fd.append('translation_enabled', 'true');
-    if (options?.translation_target_language) fd.append('translation_target_language', options.translation_target_language);
+    if (options?.translation_target_language)
+      fd.append('translation_target_language', options.translation_target_language);
     if (options?.enable_diarization) fd.append('enable_diarization', 'true');
-    if (options?.enable_word_timestamps !== undefined) fd.append('enable_word_timestamps', String(options.enable_word_timestamps));
-    if (options?.expected_speakers) fd.append('expected_speakers', String(options.expected_speakers));
+    if (options?.enable_word_timestamps !== undefined)
+      fd.append('enable_word_timestamps', String(options.enable_word_timestamps));
+    if (options?.expected_speakers)
+      fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
     return this.postFormData('/api/notebook/transcribe/upload', fd);
   }
@@ -541,13 +571,17 @@ export class APIClient {
    * POST /api/llm/summarize/:recordingId/stream — SSE streaming.
    * Returns an async generator yielding content chunks.
    */
-  async *summarizeRecordingStream(recordingId: number, customPrompt?: string): AsyncGenerator<string, void, unknown> {
+  async *summarizeRecordingStream(
+    recordingId: number,
+    customPrompt?: string,
+  ): AsyncGenerator<string, void, unknown> {
     const params = customPrompt ? `?custom_prompt=${encodeURIComponent(customPrompt)}` : '';
     const res = await fetch(`${this.baseUrl}/api/llm/summarize/${recordingId}/stream${params}`, {
       method: 'POST',
       headers: this.headers(),
     });
-    if (!res.ok) throw new APIError(res.status, await res.text(), `/api/llm/summarize/${recordingId}/stream`);
+    if (!res.ok)
+      throw new APIError(res.status, await res.text(), `/api/llm/summarize/${recordingId}/stream`);
     yield* this.readSSE(res);
   }
 
@@ -572,7 +606,11 @@ export class APIClient {
   }
 
   /** POST /api/llm/model/load */
-  async loadLLMModel(modelId?: string, gpuOffload?: number, contextLength?: number): Promise<ServerControlResponse> {
+  async loadLLMModel(
+    modelId?: string,
+    gpuOffload?: number,
+    contextLength?: number,
+  ): Promise<ServerControlResponse> {
     return this.post('/api/llm/model/load', {
       model_id: modelId,
       gpu_offload: gpuOffload,
@@ -594,7 +632,10 @@ export class APIClient {
   }
 
   /** POST /api/llm/conversations */
-  async createConversation(recordingId: number, title?: string): Promise<{ conversation_id: number; title: string }> {
+  async createConversation(
+    recordingId: number,
+    title?: string,
+  ): Promise<{ conversation_id: number; title: string }> {
     return this.post('/api/llm/conversations', { recording_id: recordingId, title });
   }
 
@@ -604,7 +645,10 @@ export class APIClient {
   }
 
   /** PATCH /api/llm/conversation/:id */
-  async updateConversation(conversationId: number, title: string): Promise<{ success: boolean; title: string }> {
+  async updateConversation(
+    conversationId: number,
+    title: string,
+  ): Promise<{ success: boolean; title: string }> {
     return this.patch(`/api/llm/conversation/${conversationId}`, { title });
   }
 

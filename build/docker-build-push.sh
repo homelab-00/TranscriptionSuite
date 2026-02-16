@@ -66,9 +66,9 @@ check_prerequisites() {
 check_docker_login() {
     log_info "Checking Docker registry authentication..."
     
-    # Try to list repositories to verify authentication
-    if ! docker manifest inspect "$IMAGE_NAME:latest" &> /dev/null && \
-       ! docker pull "$IMAGE_NAME:latest" &> /dev/null 2>&1; then
+    # Try docker login status to verify authentication
+    if ! docker manifest inspect "$IMAGE_NAME:$custom_tag" &> /dev/null 2>&1 && \
+       ! docker login ghcr.io --get-login &> /dev/null 2>&1; then
         log_warning "Not authenticated with GHCR or image doesn't exist yet"
         log_info "To authenticate, run: docker login ghcr.io -u <username>"
         log_info "Continuing anyway (you'll need auth to push)..."
@@ -163,17 +163,8 @@ main() {
         exit 1
     fi
     
-    # For release versions, also tag as 'latest' and push
-    if [[ "$is_release" == true ]]; then
-        echo ""
-        log_info "Tagging and pushing 'latest' alias..."
-        if ! tag_image "$custom_tag" "latest"; then
-            exit 1
-        fi
-        if ! push_image "latest"; then
-            exit 1
-        fi
-    fi
+    # Release versions are no longer auto-tagged as 'latest'
+    # All images use explicit version tags only
     
     # Success summary
     echo ""
@@ -184,9 +175,7 @@ main() {
     echo "📦 Registry: GitHub Container Registry (GHCR)"
     echo "🏷️  Tags pushed:"
     echo "   • $IMAGE_NAME:$custom_tag"
-    if [[ "$is_release" == true ]]; then
-        echo "   • $IMAGE_NAME:latest"
-    fi
+
     echo ""
     echo "📥 Pull command:"
     echo "   docker pull $IMAGE_NAME:$custom_tag"
