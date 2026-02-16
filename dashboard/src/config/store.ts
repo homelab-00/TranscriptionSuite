@@ -26,6 +26,14 @@ export interface ClientConfig {
   audio: {
     gracePeriod: number;
   };
+  /** Session view UI selections */
+  session: {
+    audioSource: 'mic' | 'system';
+    micDevice: string;
+    systemDevice: string;
+    mainLanguage: string;
+    liveLanguage: string;
+  };
   /** Diarization settings */
   diarization: {
     constrainSpeakers: boolean;
@@ -67,6 +75,13 @@ const DEFAULT_CONFIG: ClientConfig = {
   },
   audio: {
     gracePeriod: 0.5,
+  },
+  session: {
+    audioSource: 'mic',
+    micDevice: 'Default Microphone',
+    systemDevice: 'Default Output',
+    mainLanguage: 'Auto Detect',
+    liveLanguage: 'Auto Detect',
   },
   diarization: {
     constrainSpeakers: false,

@@ -14,15 +14,19 @@ import { useTranscription } from '../../src/hooks/useTranscription';
 import { useLiveMode } from '../../src/hooks/useLiveMode';
 import { useDocker } from '../../src/hooks/useDocker';
 import { useTraySync } from '../../src/hooks/useTraySync';
-import { useServerStatus } from '../../src/hooks/useServerStatus';
+import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
-import { setConfig } from '../../src/config/store';
+import { getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
 import { supportsTranslation } from '../../src/services/modelCapabilities';
 
-export const SessionView: React.FC = () => {
+interface SessionViewProps {
+  serverConnection: ServerConnectionInfo;
+}
+
+export const SessionView: React.FC<SessionViewProps> = ({ serverConnection }) => {
   // Global State
   const [showLogs, setShowLogs] = useState(false);
   const [logsRendered, setLogsRendered] = useState(false);
@@ -41,7 +45,7 @@ export const SessionView: React.FC = () => {
   }, []);
 
   // Real language list from server
-  const { languages } = useLanguages();
+  const { languages, loading: languagesLoading } = useLanguages();
   const languageOptions = useMemo(() => ['Auto Detect', ...languages.map(l => l.name)], [languages]);
 
   // Transcription hooks
@@ -65,6 +69,22 @@ export const SessionView: React.FC = () => {
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
   const [micDevice, setMicDevice] = useState('Default Microphone');
   const [sysDevice, setSysDevice] = useState('Default Output');
+  const persistedSelectionsRef = useRef<{
+    audioSource?: 'mic' | 'system';
+    micDevice?: string;
+    sysDevice?: string;
+    mainLanguage?: string;
+    liveLanguage?: string;
+  }>({});
+
+  const pickPreferredOption = useCallback(
+    (options: string[], currentValue: string, rememberedValue?: string) => {
+      if (options.includes(currentValue)) return currentValue;
+      if (rememberedValue && options.includes(rememberedValue)) return rememberedValue;
+      return options[0];
+    },
+    [],
+  );
 
   // Fetch desktop sources when system audio is selected (Electron only)
   const fetchDesktopSources = useCallback(async () => {
@@ -76,15 +96,19 @@ export const SessionView: React.FC = () => {
       sources.forEach(s => { idMap[s.name] = s.id; });
       setDesktopSourceIds(idMap);
       const sourceNames = sources.map(s => s.name);
-      setSysDevices(sourceNames.length > 0 ? sourceNames : ['No sources available']);
-      if (sourceNames.length > 0 && !sourceNames.includes(sysDevice)) {
-        setSysDevice(sourceNames[0]);
-      }
+      const options = sourceNames.length > 0 ? sourceNames : ['No sources available'];
+      setSysDevices(options);
+      const nextSystemDevice = pickPreferredOption(
+        options,
+        sysDevice,
+        persistedSelectionsRef.current.sysDevice,
+      );
+      if (nextSystemDevice !== sysDevice) setSysDevice(nextSystemDevice);
     } catch (err) {
       console.error('Failed to fetch desktop sources:', err);
       setSysDevices(['No sources available']);
     }
-  }, [sysDevice]);
+  }, [sysDevice, pickPreferredOption]);
 
   // Refresh desktop sources when switching to system audio
   useEffect(() => {
@@ -103,16 +127,28 @@ export const SessionView: React.FC = () => {
       const inputLabels = audioInputs.map(d => d.label);
       const idMap: Record<string, string> = {};
       audioInputs.forEach(d => { idMap[d.label] = d.deviceId; });
-      setMicDevices(inputLabels.length > 0 ? inputLabels : ['Default Microphone']);
+      const micOptions = inputLabels.length > 0 ? inputLabels : ['Default Microphone'];
+      const outputOptions = audioOutputs.length > 0 ? audioOutputs : ['Default Output'];
+      setMicDevices(micOptions);
       setMicDeviceIds(idMap);
-      setSysDevices(audioOutputs.length > 0 ? audioOutputs : ['Default Output']);
-      if (inputLabels.length > 0 && !inputLabels.includes(micDevice)) setMicDevice(inputLabels[0]);
-      if (audioOutputs.length > 0 && !audioOutputs.includes(sysDevice)) setSysDevice(audioOutputs[0]);
+      setSysDevices(outputOptions);
+      const nextMicDevice = pickPreferredOption(
+        micOptions,
+        micDevice,
+        persistedSelectionsRef.current.micDevice,
+      );
+      const nextSystemDevice = pickPreferredOption(
+        outputOptions,
+        sysDevice,
+        persistedSelectionsRef.current.sysDevice,
+      );
+      if (nextMicDevice !== micDevice) setMicDevice(nextMicDevice);
+      if (nextSystemDevice !== sysDevice) setSysDevice(nextSystemDevice);
     } catch {
       setMicDevices(['Default Microphone']);
       setSysDevices(['Default Output']);
     }
-  }, [micDevice, sysDevice]);
+  }, [micDevice, sysDevice, pickPreferredOption]);
 
   useEffect(() => { enumerateDevices(); }, [enumerateDevices]);
 
@@ -121,8 +157,8 @@ export const SessionView: React.FC = () => {
   const serverRunning = docker.container.running;
   // Client connection state — tracks explicit connect/disconnect
   const [clientRunning, setClientRunning] = useState(false);
-  const serverConnection = useServerStatus();
   const admin = useAdminStatus();
+  const [modelsOperationPending, setModelsOperationPending] = useState(false);
 
   // Active model name (for capability checks & tray tooltip)
   const activeModel = admin.status?.config?.transcription?.model ?? null;
@@ -137,6 +173,81 @@ export const SessionView: React.FC = () => {
   const [liveLanguage, setLiveLanguage] = useState('Auto Detect');
   const [liveTranslate, setLiveTranslate] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const [
+        savedAudioSource,
+        savedMicDevice,
+        savedSystemDevice,
+        savedMainLanguage,
+        savedLiveLanguage,
+      ] = await Promise.all([
+        getConfig<'mic' | 'system'>('session.audioSource'),
+        getConfig<string>('session.micDevice'),
+        getConfig<string>('session.systemDevice'),
+        getConfig<string>('session.mainLanguage'),
+        getConfig<string>('session.liveLanguage'),
+      ]);
+      if (!active) return;
+
+      if (savedAudioSource === 'mic' || savedAudioSource === 'system') {
+        persistedSelectionsRef.current.audioSource = savedAudioSource;
+        setAudioSource(savedAudioSource);
+      }
+      if (savedMicDevice) {
+        persistedSelectionsRef.current.micDevice = savedMicDevice;
+        setMicDevice(savedMicDevice);
+      }
+      if (savedSystemDevice) {
+        persistedSelectionsRef.current.sysDevice = savedSystemDevice;
+        setSysDevice(savedSystemDevice);
+      }
+      if (savedMainLanguage) {
+        persistedSelectionsRef.current.mainLanguage = savedMainLanguage;
+        setMainLanguage(savedMainLanguage);
+      }
+      if (savedLiveLanguage) {
+        persistedSelectionsRef.current.liveLanguage = savedLiveLanguage;
+        setLiveLanguage(savedLiveLanguage);
+      }
+    })().catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleAudioSourceChange = useCallback((source: 'mic' | 'system') => {
+    setAudioSource(source);
+    persistedSelectionsRef.current.audioSource = source;
+    void setConfig('session.audioSource', source).catch(() => {});
+  }, []);
+
+  const handleMicDeviceChange = useCallback((device: string) => {
+    setMicDevice(device);
+    persistedSelectionsRef.current.micDevice = device;
+    void setConfig('session.micDevice', device).catch(() => {});
+  }, []);
+
+  const handleSystemDeviceChange = useCallback((device: string) => {
+    setSysDevice(device);
+    persistedSelectionsRef.current.sysDevice = device;
+    void setConfig('session.systemDevice', device).catch(() => {});
+  }, []);
+
+  const handleMainLanguageChange = useCallback((language: string) => {
+    setMainLanguage(language);
+    persistedSelectionsRef.current.mainLanguage = language;
+    void setConfig('session.mainLanguage', language).catch(() => {});
+  }, []);
+
+  const handleLiveLanguageChange = useCallback((language: string) => {
+    setLiveLanguage(language);
+    persistedSelectionsRef.current.liveLanguage = language;
+    void setConfig('session.liveLanguage', language).catch(() => {});
+  }, []);
+
   // Reset translate toggles when model changes to one that doesn't support it
   useEffect(() => {
     if (!canTranslate) {
@@ -144,6 +255,16 @@ export const SessionView: React.FC = () => {
       setLiveTranslate(false);
     }
   }, [canTranslate]);
+
+  useEffect(() => {
+    if (languagesLoading) return;
+    if (!languageOptions.includes(mainLanguage)) {
+      setMainLanguage('Auto Detect');
+    }
+    if (!languageOptions.includes(liveLanguage)) {
+      setLiveLanguage('Auto Detect');
+    }
+  }, [languagesLoading, languageOptions, mainLanguage, liveLanguage]);
 
   // Derive active client connection from explicit state + hook activity
   const clientConnected = clientRunning && (
@@ -186,8 +307,23 @@ export const SessionView: React.FC = () => {
     logClientEvent('Client', 'Client link stopped', 'warning');
   }, []);
 
+  const handleUnloadAllModels = useCallback(async () => {
+    setModelsOperationPending(true);
+    try {
+      await Promise.allSettled([
+        apiClient.unloadModels(),
+        apiClient.unloadLLMModel(),
+      ]);
+      logClientEvent('Client', 'Requested unload for all models', 'warning');
+      admin.refresh();
+      serverConnection.refresh();
+    } finally {
+      setModelsOperationPending(false);
+    }
+  }, [admin, serverConnection]);
+
   // System Health Check for Visual Effects
-  const isSystemHealthy = serverRunning && (clientConnected || transcription.status === 'idle');
+  const isSystemHealthy = serverRunning && clientConnected;
 
   // Sync tray icon state with application state
   useTraySync({
@@ -569,6 +705,15 @@ export const SessionView: React.FC = () => {
                                 </Button>
                                 <Button variant="secondary" size="sm" onClick={() => docker.startContainer('remote', runtimeProfile)} disabled={serverRunning || docker.operating} className="text-xs px-3">Start Remote</Button>
                                 <Button variant="danger" size="sm" onClick={() => docker.stopContainer()} disabled={!serverRunning || docker.operating} className="text-xs px-3">Stop</Button>
+                                <Button
+                                  variant="danger"
+                                  size="sm"
+                                  onClick={handleUnloadAllModels}
+                                  disabled={!serverConnection.reachable || modelsOperationPending}
+                                  className="text-xs px-3"
+                                >
+                                  {modelsOperationPending ? <><Loader2 size={14} className="animate-spin mr-1" />Unloading...</> : 'Unload Models'}
+                                </Button>
                             </div>
                         </div>
 
@@ -602,11 +747,11 @@ export const SessionView: React.FC = () => {
                              <label className="text-xs text-slate-400 ml-1 font-medium uppercase tracking-wider mb-2 block">Active Input Source</label>
                              <div className="bg-black/60 p-1 rounded-xl border border-white/5 relative flex shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]">
                                 <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] z-0 bg-slate-700 border-t border-white/10 ${audioSource === 'system' ? 'translate-x-[calc(100%+4px)]' : 'translate-x-0'}`} />
-                                <button onClick={() => setAudioSource('mic')} className={`flex-1 relative z-10 flex items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'mic' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}>
+                                <button onClick={() => handleAudioSourceChange('mic')} className={`flex-1 relative z-10 flex items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'mic' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}>
                                     <Mic size={18} className={`transition-all duration-300 ${audioSource === 'mic' ? 'text-accent-cyan drop-shadow-[0_0_8px_rgba(34,211,238,0.6)] scale-110' : ''}`} />
                                     <span>Microphone</span>
                                 </button>
-                                <button onClick={() => setAudioSource('system')} className={`flex-1 relative z-10 flex items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'system' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}>
+                                <button onClick={() => handleAudioSourceChange('system')} className={`flex-1 relative z-10 flex items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'system' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}>
                                     <Laptop size={18} className={`transition-all duration-300 ${audioSource === 'system' ? 'text-accent-cyan drop-shadow-[0_0_8px_rgba(34,211,238,0.6)] scale-110' : ''}`} />
                                     <span>System Audio</span>
                                 </button>
@@ -620,7 +765,7 @@ export const SessionView: React.FC = () => {
                                     {audioSource === 'mic' && <span className="text-[10px] bg-accent-cyan text-black px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">Live</span>}
                                 </div>
                                 <div className="flex gap-2">
-                                    <CustomSelect value={micDevice} onChange={setMicDevice} options={micDevices.length > 0 ? micDevices : ['Default Microphone']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
+                                    <CustomSelect value={micDevice} onChange={handleMicDeviceChange} options={micDevices.length > 0 ? micDevices : ['Default Microphone']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
                                     <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
                                 </div>
                             </div>
@@ -630,7 +775,7 @@ export const SessionView: React.FC = () => {
                                     {audioSource === 'system' && <span className="text-[10px] bg-accent-cyan text-black px-1.5 py-0.5 rounded font-bold uppercase tracking-wide">Live</span>}
                                 </div>
                                 <div className="flex gap-2">
-                                    <CustomSelect value={sysDevice} onChange={setSysDevice} options={sysDevices.length > 0 ? sysDevices : ['Default Output']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
+                                    <CustomSelect value={sysDevice} onChange={handleSystemDeviceChange} options={sysDevices.length > 0 ? sysDevices : ['Default Output']} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none hover:border-white/20 transition-shadow" />
                                     <Button variant="secondary" size="icon" icon={<RefreshCw size={14} />} onClick={enumerateDevices} />
                                 </div>
                             </div>
@@ -646,7 +791,7 @@ export const SessionView: React.FC = () => {
                                  <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Source Language</label>
                                  <div className="flex items-center gap-2">
                                     <div className="p-2.5 rounded-xl bg-accent-magenta/10 text-accent-magenta shadow-inner border border-accent-magenta/5"><Languages size={18} /></div>
-                                    <CustomSelect value={mainLanguage} onChange={setMainLanguage} options={languageOptions} accentColor="magenta" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none hover:border-white/20 transition-all" />
+                                    <CustomSelect value={mainLanguage} onChange={handleMainLanguageChange} options={languageOptions} accentColor="magenta" className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none hover:border-white/20 transition-all" />
                                 </div>
                             </div>
                             <div className="h-12 w-px bg-white/10 self-end mb-1"></div>
@@ -787,7 +932,7 @@ export const SessionView: React.FC = () => {
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0">
                             <div className="h-full aspect-square flex items-center justify-center rounded-lg bg-accent-magenta/10 text-accent-magenta border border-accent-magenta/5"><Languages size={15} /></div>
-                            <CustomSelect value={liveLanguage} onChange={setLiveLanguage} options={languageOptions} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-32.5" />
+                            <CustomSelect value={liveLanguage} onChange={handleLiveLanguageChange} options={languageOptions} accentColor="magenta" className="bg-white/5 border border-white/10 rounded-lg px-3 py-1 text-sm text-slate-300 focus:ring-1 focus:ring-accent-magenta outline-none h-full min-w-32.5" />
                         </div>
                         <div className="h-5 w-px bg-white/10 mx-0.5 shrink-0"></div>
                         <div className="flex items-center gap-2 h-8 shrink-0" title={canTranslate ? '' : 'Current model does not support translation'}>

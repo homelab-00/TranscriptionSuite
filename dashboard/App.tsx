@@ -17,13 +17,13 @@ const App: React.FC = () => {
   const renderView = () => {
     switch (currentView) {
       case View.SESSION:
-        return <SessionView />;
+        return <SessionView serverConnection={serverConnection} />;
       case View.NOTEBOOK:
         return <NotebookView />;
       case View.SERVER:
         return <ServerView />;
       default:
-        return <SessionView />;
+        return <SessionView serverConnection={serverConnection} />;
     }
   };
 

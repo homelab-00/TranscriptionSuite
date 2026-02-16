@@ -32,7 +32,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
   // Admin status for Server tab (read-only config display)
-  const { status: adminStatus, loading: adminLoading } = useAdminStatus();
+  const { status: adminStatus, loading: adminLoading } = useAdminStatus(10000, isOpen && activeTab === 'Server');
 
   // Edited server config values (key → value; only populated when user edits)
   const [serverConfigEdits, setServerConfigEdits] = useState<Record<string, string>>({});

@@ -2,6 +2,8 @@
   "name": "transcriptionsuite",
   "private": true,
   "version": "1.0.1",
+  "description": "Desktop dashboard for managing TranscriptionSuite server and transcription workflows.",
+  "author": "TranscriptionSuite Team",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {

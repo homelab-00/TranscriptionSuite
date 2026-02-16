@@ -14,9 +14,9 @@ export interface AdminStatusState {
   refresh: () => void;
 }
 
-export function useAdminStatus(pollInterval = 10000): AdminStatusState {
+export function useAdminStatus(pollInterval = 10000, enabled = true): AdminStatusState {
   const [status, setStatus] = useState<AdminStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -38,13 +38,19 @@ export function useAdminStatus(pollInterval = 10000): AdminStatusState {
 
   useEffect(() => {
     mountedRef.current = true;
+    if (!enabled) {
+      setLoading(false);
+      return () => {
+        mountedRef.current = false;
+      };
+    }
     fetch();
     const interval = setInterval(fetch, pollInterval);
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
     };
-  }, [fetch, pollInterval]);
+  }, [fetch, pollInterval, enabled]);
 
   return { status, loading, error, refresh: fetch };
 }
