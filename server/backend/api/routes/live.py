@@ -23,6 +23,7 @@ from server.core.live_engine import (
     LiveModeState,
 )
 from server.core.model_manager import get_model_manager
+from server.config import get_config, resolve_live_transcriber_model
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
 
@@ -114,10 +115,14 @@ class LiveModeSession:
 
         try:
             # Build config from client data
+            server_cfg = get_config()
             config = LiveModeConfig()
+            config.model = resolve_live_transcriber_model(server_cfg)
             if config_data:
                 if "model" in config_data:
-                    config.model = config_data["model"]
+                    candidate_model = str(config_data["model"] or "").strip()
+                    if candidate_model:
+                        config.model = candidate_model
                 if "language" in config_data:
                     config.language = config_data["language"]
                 if "translation_enabled" in config_data:

@@ -14,7 +14,7 @@ import queue
 import threading
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 
@@ -39,7 +39,8 @@ class LiveModeConfig:
     """Configuration for Live Mode."""
 
     # Whisper model settings
-    model: str = "Systran/faster-whisper-large-v3"
+    # Empty string defers to server config default resolution.
+    model: str = ""
     language: str = ""
     translation_enabled: bool = False
     translation_target_language: str = "en"

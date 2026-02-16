@@ -11,13 +11,33 @@ import { getConfig } from '../../src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
+const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
+const LIVE_ALTERNATE_MODEL = 'Systran/faster-whisper-medium';
+const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
+const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/35 ring-1 ring-accent-cyan/25 !shadow-[0_0_0_1px_rgba(34,211,238,0.15),0_0_24px_rgba(34,211,238,0.24)]';
+
+function getString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeModelName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 export const ServerView: React.FC = () => {
   const { status: adminStatus } = useAdminStatus();
   const docker = useDocker();
 
   // Model selection state
-  const [transcriber, setTranscriber] = useState('');
-  const [liveModel, setLiveModel] = useState('');
+  const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
+  const [mainCustomModel, setMainCustomModel] = useState('');
+  const [liveModelSelection, setLiveModelSelection] = useState(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+  const [liveCustomModel, setLiveCustomModel] = useState('');
+  const [modelsHydrated, setModelsHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
   // Runtime profile (persisted in electron-store)
@@ -45,15 +65,56 @@ export const ServerView: React.FC = () => {
   // Derive status from Docker hook
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
+  const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
     : 'Not Found';
 
-  // Derive model names from admin status
-  const realModel = adminStatus?.config?.transcription?.model ?? 'large-v3';
-  const realLiveModel = adminStatus?.config?.live_transcription?.model ?? 'tiny';
-  const activeTranscriber = transcriber || realModel;
-  const activeLiveModel = liveModel || realLiveModel;
+  // Resolve configured model names from admin status payload (new + legacy shapes)
+  const adminConfig = (adminStatus?.config ?? {}) as Record<string, unknown>;
+  const adminMainCfg = (adminConfig.main_transcriber ?? {}) as Record<string, unknown>;
+  const adminLiveCfg = ((adminConfig.live_transcriber ?? adminConfig.live_transcription) ?? {}) as Record<string, unknown>;
+  const adminLegacyTranscriptionCfg = (adminConfig.transcription ?? {}) as Record<string, unknown>;
+  const adminModels = (adminStatus?.models ?? {}) as Record<string, unknown>;
+  const adminModelTranscription = (adminModels.transcription ?? {}) as Record<string, unknown>;
+  const adminModelTranscriptionCfg = (adminModelTranscription.config ?? {}) as Record<string, unknown>;
+
+  const configuredMainModel = getString(adminMainCfg.model)
+    ?? getString(adminLegacyTranscriptionCfg.model)
+    ?? getString(adminModelTranscriptionCfg.model)
+    ?? '';
+  const configuredLiveModel = getString(adminLiveCfg.model) ?? configuredMainModel;
+
+  useEffect(() => {
+    if (modelsHydrated || !adminStatus || !configuredMainModel) return;
+
+    const normalizedMain = normalizeModelName(configuredMainModel);
+    setMainModelSelection(configuredMainModel);
+    setMainCustomModel('');
+
+    const normalizedLive = normalizeModelName(configuredLiveModel);
+    if (normalizedLive === normalizedMain) {
+      setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(LIVE_ALTERNATE_MODEL)) {
+      setLiveModelSelection(LIVE_ALTERNATE_MODEL);
+      setLiveCustomModel('');
+    } else {
+      setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
+      setLiveCustomModel(configuredLiveModel);
+    }
+
+    setModelsHydrated(true);
+  }, [adminStatus, configuredMainModel, configuredLiveModel, modelsHydrated]);
+
+  const activeTranscriber = mainModelSelection === MAIN_MODEL_CUSTOM_OPTION
+    ? (mainCustomModel.trim() || configuredMainModel)
+    : (configuredMainModel || mainModelSelection);
+  const activeLiveModel = liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
+    ? activeTranscriber
+    : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
+      ? (liveCustomModel.trim() || configuredLiveModel || activeTranscriber)
+      : LIVE_ALTERNATE_MODEL;
 
   // Image selection state — "Most Recent (auto)" always picks the newest available tag
   const MOST_RECENT = 'Most Recent (auto)';
@@ -225,22 +286,22 @@ export const ServerView: React.FC = () => {
          
          {/* 1. Image Card */}
          <div className="relative pl-8 border-l-2 border-white/10 pb-8 last:border-0 last:pb-0 shrink-0">
-           <div className={`absolute -left-4.25 top-0 w-8 h-8 rounded-full border-4 border-slate-900 flex items-center justify-center z-10 transition-colors duration-300 ${docker.images.length > 0 ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}>
+           <div className={`absolute -left-4.25 top-0 w-8 h-8 rounded-full border-4 border-slate-900 flex items-center justify-center z-10 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}>
               <Download size={14} />
            </div>
            <GlassCard 
               title="1. Docker Image" 
-              className={`transition-all duration-500 ease-in-out ${docker.images.length > 0 ? 'border-accent-cyan/30 shadow-[0_0_15px_rgba(34,211,238,0.15)]' : ''}`}
+              className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
            >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                       <div className="flex items-center space-x-3">
-                          <StatusLight status={docker.images.length > 0 ? 'active' : 'inactive'} />
-                          <span className={`font-mono text-sm transition-colors ${docker.images.length > 0 ? 'text-slate-300' : 'text-slate-500'}`}>
-                              {docker.images.length > 0 ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available` : 'No images'}
+                          <StatusLight status={hasImages ? 'active' : 'inactive'} />
+                          <span className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}>
+                              {hasImages ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available` : 'No images'}
                           </span>
                           
-                          {docker.images.length > 0 && docker.images[0] && (
+                          {hasImages && docker.images[0] && (
                             <div className="flex gap-2 transition-opacity duration-300">
                               <span className="text-xs bg-white/10 px-2 py-0.5 rounded text-slate-400">{docker.images[0].created.split(' ')[0]}</span>
                               <span className="text-xs bg-white/10 px-2 py-0.5 rounded text-slate-400">{docker.images[0].size}</span>
@@ -285,7 +346,7 @@ export const ServerView: React.FC = () => {
            </div>
            <GlassCard 
              title="2. Instance Settings"
-             className={`transition-all duration-500 ease-in-out ${isRunning ? 'border-accent-cyan/30 shadow-[0_0_15px_rgba(34,211,238,0.15)]' : ''}`}
+             className={`transition-all duration-500 ease-in-out ${isRunning ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
            >
                <div className="space-y-6">
                    {/* Runtime Profile Selector */}
@@ -371,22 +432,47 @@ export const ServerView: React.FC = () => {
                       <div className="space-y-2">
                           <label className="text-sm text-slate-300 font-medium">Main Transcriber</label>
                           <CustomSelect 
-                              value={activeTranscriber}
-                              onChange={setTranscriber}
-                              options={[realModel, 'large-v3', 'large-v2', 'medium', 'medium.en', 'small', 'base', 'tiny'].filter((v, i, a) => a.indexOf(v) === i)}
+                              value={mainModelSelection}
+                              onChange={setMainModelSelection}
+                              options={[configuredMainModel || MODEL_DEFAULT_LOADING_PLACEHOLDER, MAIN_MODEL_CUSTOM_OPTION]}
                               accentColor="magenta"
                               className="w-full h-10 bg-white/5 border border-white/10 rounded-lg px-3 text-sm text-white focus:ring-1 focus:ring-accent-magenta outline-none transition-shadow"
                           />
+                          {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
+                            <input
+                              type="text"
+                              value={mainCustomModel}
+                              onChange={(e) => setMainCustomModel(e.target.value)}
+                              placeholder="owner/model-name"
+                              className="w-full h-10 bg-white/5 border border-white/10 rounded-lg px-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-1 focus:ring-accent-magenta transition-shadow"
+                            />
+                          )}
                       </div>
                       <div className="space-y-2">
                           <label className="text-sm text-slate-300 font-medium">Live Mode Model</label>
                           <CustomSelect 
-                              value={activeLiveModel}
-                              onChange={setLiveModel}
-                              options={[realLiveModel, 'tiny', 'base', 'small', 'medium'].filter((v, i, a) => a.indexOf(v) === i)}
+                              value={liveModelSelection}
+                              onChange={setLiveModelSelection}
+                              options={[LIVE_MODEL_SAME_AS_MAIN_OPTION, LIVE_ALTERNATE_MODEL, LIVE_MODEL_CUSTOM_OPTION]}
                               className="w-full h-10 bg-white/5 border border-white/10 rounded-lg px-3 text-sm text-white focus:ring-1 focus:ring-accent-cyan outline-none transition-shadow"
                           />
+                          {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
+                            <input
+                              type="text"
+                              value={liveCustomModel}
+                              onChange={(e) => setLiveCustomModel(e.target.value)}
+                              placeholder="owner/model-name"
+                              className="w-full h-10 bg-white/5 border border-white/10 rounded-lg px-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-1 focus:ring-accent-cyan transition-shadow"
+                            />
+                          )}
+                          {liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION && (
+                            <p className="text-xs text-slate-500 font-mono">Using: {activeTranscriber}</p>
+                          )}
                       </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                    <div className="text-xs text-slate-500 font-mono">Main: {activeTranscriber}</div>
+                    <div className="text-xs text-slate-500 font-mono">Live: {activeLiveModel}</div>
                   </div>
                   <div className="flex gap-2 pt-2 border-t border-white/5">
                       <Button variant="secondary" className="h-9 px-4" onClick={handleLoadModels} disabled={modelsLoading || !isRunning}>

@@ -225,12 +225,21 @@ export interface AdminStatus {
   models_loaded?: boolean;
   config: {
     server: Record<string, unknown>;
-    transcription: {
+    transcription?: {
       model: string;
-      device: string;
+      device?: string;
+    };
+    main_transcriber?: {
+      model: string;
+      device?: string;
+    };
+    live_transcriber?: {
+      model: string;
+      device?: string;
     };
     live_transcription?: {
       model: string;
+      device?: string;
       [key: string]: unknown;
     };
     [key: string]: unknown;
