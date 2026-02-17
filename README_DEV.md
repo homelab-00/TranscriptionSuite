@@ -154,6 +154,7 @@ cd dashboard && npm run package:mac
 | Build Docker image | `cd server/docker && docker compose build` |
 | View server logs | `docker compose logs -f` |
 | Build & publish image | `./build/docker-build-push.sh` |
+| Bump project versions + refresh deps | `./build/update-project-versions.sh` |
 | Run dashboard (dev) | `cd dashboard && npm run dev` |
 | Run dashboard (Electron) | `cd dashboard && npm run dev:electron` |
 | Lint code (Python) | `./build/.venv/bin/ruff check .` |
@@ -288,6 +289,7 @@ TranscriptionSuite/
 │   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
 │   ├── generate-ico.sh           # Generate PNG/ICO/ICNS logo assets from SVG sources
 │   ├── docker-build-push.sh      # Build and push Docker image
+│   ├── update-project-versions.sh # Bump project versions + refresh dependency locks
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
 │
@@ -317,9 +319,30 @@ TranscriptionSuite/
 
 ### 3.2 Version Management
 
-Each `pyproject.toml` defines its component's version. All version strings are dynamically sourced from these files - update the version in one place.
+Keep these version fields aligned for a release:
 
-*Note: The tags and releases version numbers refer to the Dashboard's `package.json` version.*
+- `build/pyproject.toml`
+- `server/backend/pyproject.toml`
+- `dashboard/package.json`
+
+Use the helper script to bump all three and refresh dependencies:
+
+```bash
+# Interactive prompt (asks for target version)
+./build/update-project-versions.sh
+
+# Non-interactive usage
+./build/update-project-versions.sh 1.0.3
+```
+
+What the script does:
+- Prompts for the new version (or uses arg 1)
+- Updates the version value in the three files above
+- Runs `uv lock --upgrade && uv sync` in `build/`
+- Runs `uv lock --upgrade && uv sync` in `server/backend/`
+- Runs `npm update` in `dashboard/`
+
+*Note: Release tags should continue to match the Dashboard `package.json` version.*
 
 ---
 
