@@ -574,6 +574,58 @@ function extractStatusStateMap(statusLightContent) {
   return stateMap;
 }
 
+function normalizeStatusBinding(rawValue) {
+  const compact = String(rawValue || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const noCast = compact.replace(/\s+as\s+.+$/, '').trim();
+  return noCast;
+}
+
+function extractSidebarStatusLightBindings(sidebarContent) {
+  const marker = 'const navItems = [';
+  const markerIdx = sidebarContent.indexOf(marker);
+  if (markerIdx === -1) {
+    return [];
+  }
+
+  const arrayStart = sidebarContent.indexOf('[', markerIdx);
+  if (arrayStart === -1) {
+    return [];
+  }
+  const arrayBlock = findBalancedBlock(sidebarContent, arrayStart, '[', ']');
+  if (!arrayBlock) {
+    return [];
+  }
+
+  const bindings = [];
+  let cursor = 0;
+
+  while (cursor < arrayBlock.length) {
+    const objStart = arrayBlock.indexOf('{', cursor);
+    if (objStart === -1) {
+      break;
+    }
+
+    const objectBlock = findBalancedBlock(arrayBlock, objStart, '{', '}');
+    if (!objectBlock) {
+      break;
+    }
+
+    const idMatch = objectBlock.match(/\bid\s*:\s*View\.([A-Z_]+)/);
+    const statusMatch = objectBlock.match(
+      /\bstatus\s*:\s*([\s\S]*?)(?=,\s*[A-Za-z_$][A-Za-z0-9_$]*\s*:|,\s*}|})/,
+    );
+    if (idMatch && statusMatch) {
+      bindings.push(`${idMatch[1]}=${normalizeStatusBinding(statusMatch[1])}`);
+    }
+
+    cursor = objStart + objectBlock.length;
+  }
+
+  return uniqueSorted(bindings);
+}
+
 function parseDurationMs(animationString) {
   const msMatch = animationString.match(/\b(\d+(?:\.\d+)?)ms\b/);
   if (msMatch) {
@@ -729,6 +781,10 @@ export async function extractFacts({ root = PROJECT_ROOT } = {}) {
 
   const statusLightPath = path.join(root, 'components', 'ui', 'StatusLight.tsx');
   const statusStateMap = extractStatusStateMap(fileContentMap.get(statusLightPath) ?? '');
+  const sidebarPath = path.join(root, 'components', 'Sidebar.tsx');
+  const sidebarStatusLightBindings = extractSidebarStatusLightBindings(
+    fileContentMap.get(sidebarPath) ?? '',
+  );
 
   return {
     generated_at: new Date().toISOString(),
@@ -788,6 +844,9 @@ export async function extractFacts({ root = PROJECT_ROOT } = {}) {
     components: {
       names: uniqueSorted(Array.from(componentNames)),
       files: componentToFile,
+    },
+    sidebar: {
+      status_light_bindings: sidebarStatusLightBindings,
     },
   };
 }

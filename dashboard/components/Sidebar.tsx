@@ -54,7 +54,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <Mic2 size={20} />,
       status: sessionStatus as 'active' | 'warning' | 'inactive',
     },
-    { id: View.NOTEBOOK, label: 'Notebook', icon: <Book size={20} /> },
+    {
+      id: View.NOTEBOOK,
+      label: 'Notebook',
+      icon: <Book size={20} />,
+      status: serverSidebarStatus as 'active' | 'warning' | 'inactive',
+    },
     {
       id: View.SERVER,
       label: 'Server',

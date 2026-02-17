@@ -132,13 +132,30 @@ async function main() {
     'Drift fail for missing component contract coverage',
   );
 
-  // 8. Pass case: non-style facts should not fail style contract.
+  // 8. Drift fail: Sidebar notebook status light must stay bound to server status source.
+  const factsSidebarBindingDrift = clone(baseFacts);
+  factsSidebarBindingDrift.sidebar = factsSidebarBindingDrift.sidebar || {};
+  const currentBindings = Array.isArray(factsSidebarBindingDrift.sidebar.status_light_bindings)
+    ? factsSidebarBindingDrift.sidebar.status_light_bindings
+    : [];
+  factsSidebarBindingDrift.sidebar.status_light_bindings = currentBindings.map((binding) =>
+    String(binding).startsWith('NOTEBOOK=') ? 'NOTEBOOK=sessionStatus' : String(binding),
+  );
+  const sidebarBindingDrift = await createValidationReport({
+    factsOverride: factsSidebarBindingDrift,
+  });
+  expect(
+    hasIssue(sidebarBindingDrift, 'set_mismatch', 'sidebar_status_light_bindings'),
+    'Drift fail for sidebar notebook/server status binding',
+  );
+
+  // 9. Pass case: non-style facts should not fail style contract.
   const factsNonStyle = clone(baseFacts);
   factsNonStyle.non_style_metadata = { build_id: 'abc123' };
   const nonStylePass = await createValidationReport({ factsOverride: factsNonStyle });
   expect(nonStylePass.ok === true, 'Non-style changes do not fail style contract checks');
 
-  // 9. Versioning fail: contract hash changes with same version should fail.
+  // 10. Versioning fail: contract hash changes with same version should fail.
   const semverFailBaselinePath = await writeTempFile(
     'semver-fail-baseline.json',
     JSON.stringify(
@@ -160,7 +177,7 @@ async function main() {
     'Versioning fail requires semver bump when contract hash changes',
   );
 
-  // 10. Versioning pass: bumped spec_version with changed hash should pass (warning allowed).
+  // 11. Versioning pass: bumped spec_version with changed hash should pass (warning allowed).
   const bumpedContract = clone(originalContract);
   bumpedContract.meta.spec_version = bumpedSpecVersion;
   const bumpedContractPath = await writeTempFile(

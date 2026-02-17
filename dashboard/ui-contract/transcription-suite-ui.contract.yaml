@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.10
+  spec_version: 1.0.11
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -877,7 +877,6 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
-    - border-slate-900
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -1593,6 +1592,10 @@ component_contracts:
         - SESSION
         - NOTEBOOK
         - SERVER
+      status_light_bindings:
+        - SESSION=sessionStatus
+        - NOTEBOOK=serverSidebarStatus
+        - SERVER=serverSidebarStatus
     structural_invariants:
       - id: sidebar-width-modes
         rule: Sidebar must keep collapsed/expanded width modes and preserve active navigation pill with cyan indicator.
@@ -1601,7 +1604,7 @@ component_contracts:
         rule: Collapse/expand and active pill transitions must remain within approved duration/easing tokens.
     state_rules:
       - id: status-dots
-        rule: Client and server nav items retain StatusLight indicators and active/inactive styling behavior.
+        rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
   StatusLight:
     file: components/ui/StatusLight.tsx
     required_tokens:

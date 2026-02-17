@@ -48,6 +48,9 @@ function normalizeContractForComparison(contract) {
   const foundation = asObject(contract.foundation);
   const tokens = asObject(foundation.tokens);
   const motion = asObject(tokens.motion);
+  const componentContracts = asObject(contract.component_contracts);
+  const sidebarContract = asObject(componentContracts.Sidebar);
+  const sidebarAllowedVariants = asObject(sidebarContract.allowed_variants);
 
   return {
     tailwind: {
@@ -105,13 +108,16 @@ function normalizeContractForComparison(contract) {
       cubic_beziers: asArray(contract.inline_style_allowlist?.cubic_beziers),
     },
     components: {
-      names: Object.keys(asObject(contract.component_contracts)).sort((a, b) => a.localeCompare(b)),
-      contracts: asObject(contract.component_contracts),
+      names: Object.keys(componentContracts).sort((a, b) => a.localeCompare(b)),
+      contracts: componentContracts,
+      sidebar_status_light_bindings: asArray(sidebarAllowedVariants.status_light_bindings),
     },
   };
 }
 
 function normalizeFactsForComparison(facts) {
+  const sidebarFacts = asObject(facts.sidebar);
+
   return {
     tailwind: {
       dark_mode: facts.tailwind?.dark_mode ?? null,
@@ -160,6 +166,7 @@ function normalizeFactsForComparison(facts) {
     components: {
       names: asArray(facts.components?.names),
       files: asObject(facts.components?.files),
+      sidebar_status_light_bindings: asArray(sidebarFacts.status_light_bindings),
     },
   };
 }
@@ -241,6 +248,10 @@ function buildSemanticDiff(contract, facts) {
       factsView.inline_style.cubic_beziers,
     ),
     component_coverage: setDiff(contractView.components.names, factsView.components.names),
+    sidebar_status_light_bindings: setDiff(
+      contractView.components.sidebar_status_light_bindings,
+      factsView.components.sidebar_status_light_bindings,
+    ),
   };
 
   const tailwindComparisons = {

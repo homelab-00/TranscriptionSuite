@@ -37,6 +37,11 @@ const componentSpecs = {
     allowed_variants: {
       collapsed: ['true', 'false'],
       active_view: ['SESSION', 'NOTEBOOK', 'SERVER'],
+      status_light_bindings: [
+        'SESSION=sessionStatus',
+        'NOTEBOOK=serverSidebarStatus',
+        'SERVER=serverSidebarStatus',
+      ],
     },
     structural_invariants: [
       {
@@ -53,7 +58,7 @@ const componentSpecs = {
     state_rules: [
       {
         id: 'status-dots',
-        rule: 'Client and server nav items retain StatusLight indicators and active/inactive styling behavior.',
+        rule: 'Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.',
       },
     ],
   },
