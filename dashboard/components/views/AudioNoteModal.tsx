@@ -37,6 +37,7 @@ interface DisplayMessage {
 interface AudioNoteModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onRecordingMutated?: () => void;
   note: {
     title: string;
     date?: string;
@@ -80,7 +81,12 @@ function speakerColor(name: string): string {
   return c;
 }
 
-export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose, note }) => {
+export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
+  isOpen,
+  onClose,
+  onRecordingMutated,
+  note,
+}) => {
   // Portal Container State
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
@@ -93,6 +99,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   // Summary State
@@ -175,6 +182,14 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
       clearTimeout(timer);
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setAudioError(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+  }, [isOpen, note?.recordingId]);
 
   // Fetch conversations when recording is available
   useEffect(() => {
@@ -355,7 +370,9 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     if (isPlaying) {
       audio.pause();
     } else {
-      audio.play().catch(() => {});
+      audio.play().catch(() => {
+        setAudioError('Unable to start playback. Check auth token/server access for this note.');
+      });
     }
   };
 
@@ -372,14 +389,24 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
 
   const handleLoadedMetadata = () => {
     const audio = audioRef.current;
-    if (audio) setDuration(audio.duration);
+    if (audio) {
+      setDuration(audio.duration);
+      setAudioError(null);
+    }
   };
 
-  const handleAudioPlay = () => setIsPlaying(true);
+  const handleAudioPlay = () => {
+    setIsPlaying(true);
+    setAudioError(null);
+  };
   const handleAudioPause = () => setIsPlaying(false);
   const handleAudioEnded = () => {
     setIsPlaying(false);
     setCurrentTime(0);
+  };
+  const handleAudioError = () => {
+    setIsPlaying(false);
+    setAudioError('Audio playback failed. Verify server authentication and audio availability.');
   };
 
   // LLM Chat handler — sends user message and streams assistant response
@@ -444,12 +471,13 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     try {
       await apiClient.updateRecordingTitle(note.recordingId, newTitle);
       // Close modal to refresh — parent should refetch
+      onRecordingMutated?.();
       onClose();
     } catch {
       alert('Failed to rename recording.');
     }
     setContextMenu(null);
-  }, [note?.recordingId, recording?.title, note?.title, onClose]);
+  }, [note?.recordingId, recording?.title, note?.title, onRecordingMutated, onClose]);
 
   /** Open inline date editor with current date pre-filled */
   const handleDateEditOpen = useCallback(() => {
@@ -469,11 +497,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
       const isoDate = new Date(dateEditValue).toISOString();
       await apiClient.updateRecordingDate(note.recordingId, isoDate);
       setIsDateEditing(false);
+      onRecordingMutated?.();
       onClose(); // refresh
     } catch {
       alert('Failed to update date.');
     }
-  }, [note?.recordingId, dateEditValue, onClose]);
+  }, [note?.recordingId, dateEditValue, onRecordingMutated, onClose]);
 
   const handleExport = useCallback(
     async (format: 'txt' | 'srt' | 'ass' = 'txt') => {
@@ -493,12 +522,13 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
     if (!confirmed) return;
     try {
       await apiClient.deleteRecording(note.recordingId);
+      onRecordingMutated?.();
       onClose();
     } catch {
       alert('Failed to delete recording.');
     }
     setContextMenu(null);
-  }, [note?.recordingId, recording?.title, note?.title, onClose]);
+  }, [note?.recordingId, recording?.title, note?.title, onRecordingMutated, onClose]);
 
   if (!isRendered || !note || !portalContainer) return null;
 
@@ -610,6 +640,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                   onPlay={handleAudioPlay}
                   onPause={handleAudioPause}
                   onEnded={handleAudioEnded}
+                  onError={handleAudioError}
                   preload="metadata"
                 />
               )}
@@ -670,6 +701,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
                   }}
                   className="accent-accent-cyan h-1 w-full max-w-xs cursor-pointer rounded bg-white/10"
                 />
+                {audioError && <div className="text-xs text-red-400">{audioError}</div>}
               </div>
             </div>
 

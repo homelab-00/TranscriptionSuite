@@ -10,9 +10,15 @@ interface AddNoteModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTime?: number; // e.g. 10 for 10:00
+  onCreated?: () => void;
 }
 
-export const AddNoteModal: React.FC<AddNoteModalProps> = ({ isOpen, onClose, initialTime }) => {
+export const AddNoteModal: React.FC<AddNoteModalProps> = ({
+  isOpen,
+  onClose,
+  initialTime,
+  onCreated,
+}) => {
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,13 +89,14 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({ isOpen, onClose, ini
       }
       // Success — reset and close
       setSelectedFiles([]);
+      onCreated?.();
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Upload failed. Is the server running?');
     } finally {
       setIsSubmitting(false);
     }
-  }, [selectedFiles, isDiarizationEnabled, isTimestampsEnabled, initialTime, onClose]);
+  }, [selectedFiles, isDiarizationEnabled, isTimestampsEnabled, initialTime, onCreated, onClose]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;

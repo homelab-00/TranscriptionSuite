@@ -3,7 +3,7 @@
  * Covers all REST endpoints; WebSocket connections are handled separately.
  */
 
-import { getServerBaseUrl } from '../config/store';
+import { getAuthToken, getServerBaseUrl } from '../config/store';
 import type {
   HealthResponse,
   ReadyResponse,
@@ -756,4 +756,5 @@ export const apiClient = new APIClient();
  */
 export async function initApiClient(): Promise<void> {
   await apiClient.syncFromConfig();
+  apiClient.setAuthToken(await getAuthToken());
 }

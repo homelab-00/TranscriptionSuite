@@ -38,6 +38,7 @@ import type { Recording } from '../../src/api/types';
 
 export const NotebookView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
+  const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
 
   // Audio Modal State (Existing Note)
   const [selectedNote, setSelectedNote] = useState<any>(null);
@@ -57,10 +58,20 @@ export const NotebookView: React.FC = () => {
     setIsAddModalOpen(true);
   };
 
+  const bumpCalendarRefresh = useCallback(() => {
+    setCalendarRefreshNonce((prev) => prev + 1);
+  }, []);
+
   const renderContent = () => {
     switch (activeTab) {
       case NotebookTab.CALENDAR:
-        return <CalendarTab onNoteClick={handleNoteClick} onAddNote={handleAddNote} />;
+        return (
+          <CalendarTab
+            onNoteClick={handleNoteClick}
+            onAddNote={handleAddNote}
+            refreshNonce={calendarRefreshNonce}
+          />
+        );
       case NotebookTab.SEARCH:
         return <SearchTab onNoteClick={handleNoteClick} />;
       case NotebookTab.IMPORT:
@@ -103,6 +114,7 @@ export const NotebookView: React.FC = () => {
         isOpen={isNoteModalOpen}
         onClose={() => setIsNoteModalOpen(false)}
         note={selectedNote}
+        onRecordingMutated={bumpCalendarRefresh}
       />
 
       {/* Add New Note Overlay */}
@@ -110,6 +122,7 @@ export const NotebookView: React.FC = () => {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         initialTime={selectedTimeSlot}
+        onCreated={bumpCalendarRefresh}
       />
     </div>
   );
@@ -626,7 +639,8 @@ const recordingToEvent = (rec: Recording): EventData => {
 const CalendarTab: React.FC<{
   onNoteClick: (note: any) => void;
   onAddNote: (hour: number) => void;
-}> = ({ onNoteClick, onAddNote }) => {
+  refreshNonce: number;
+}> = ({ onNoteClick, onAddNote, refreshNonce }) => {
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -717,6 +731,11 @@ const CalendarTab: React.FC<{
     [selectedDayRecordings],
   );
 
+  useEffect(() => {
+    if (refreshNonce === 0) return;
+    calendar.refresh();
+  }, [refreshNonce, calendar.refresh]);
+
   // Auto-select today if it has events and nothing else is selected
   useEffect(() => {
     if (selectedDay) return;
@@ -728,6 +747,8 @@ const CalendarTab: React.FC<{
     const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
     setSelectedDay(key);
   };
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-6 lg:grid-cols-3">
@@ -790,6 +811,7 @@ const CalendarTab: React.FC<{
               const count = dayEvents.length;
               const dayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
               const isSelected = selectedDay === dayKey;
+              const isToday = dayKey === todayKey;
               return (
                 <div
                   key={i}
@@ -798,7 +820,7 @@ const CalendarTab: React.FC<{
                 >
                   <div className="mb-1 flex w-full items-center justify-between">
                     <span
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs transition-all ${isSelected ? 'bg-accent-cyan font-bold text-black' : hasEvents ? 'bg-[rgb(230,230,230)] font-bold text-black' : 'text-slate-400 group-hover:text-white'}`}
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs transition-all ${isSelected ? 'bg-accent-cyan font-bold text-black' : isToday ? 'bg-[rgb(230,230,230)] font-bold text-black' : 'text-slate-400 group-hover:text-white'}`}
                     >
                       {dayNum}
                     </span>

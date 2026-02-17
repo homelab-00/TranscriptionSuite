@@ -9,6 +9,7 @@ import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { Button } from './components/ui/Button';
 import { useServerStatus } from './src/hooks/useServerStatus';
+import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 
@@ -62,6 +63,10 @@ const AppInner: React.FC = () => {
   const uvResolverRef = useRef<((result: 'cancel' | 'enabled' | 'skipped') => void) | null>(null);
 
   const containerLastSeenRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    void initApiClient();
+  }, []);
 
   const resolveHfPrompt = useCallback(
     (result: { action: 'cancel' | 'skip' | 'provided'; token: string }) => {

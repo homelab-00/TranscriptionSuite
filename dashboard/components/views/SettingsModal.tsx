@@ -264,9 +264,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
     // Sync API client with new config so connection target updates immediately
     await apiClient.syncFromConfig();
-    if (clientSettings.authToken) {
-      apiClient.setAuthToken(clientSettings.authToken);
-    }
+    apiClient.setAuthToken(clientSettings.authToken || null);
 
     setIsDirty(false);
     onClose();
