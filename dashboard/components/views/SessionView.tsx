@@ -726,7 +726,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
     updateLeftScrollState();
     updateRightScrollState();
     updateIndicatorWidths();
-  }, [captureColumnBaselines, updateLeftScrollState, updateRightScrollState, updateIndicatorWidths]);
+  }, [
+    captureColumnBaselines,
+    updateLeftScrollState,
+    updateRightScrollState,
+    updateIndicatorWidths,
+  ]);
 
   // Bind listeners once and reset both columns to top on startup.
   useEffect(() => {
@@ -855,7 +860,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
               ref={leftContentRef}
               className="space-y-6 pt-0 pr-3 pb-0"
               style={
-                leftColumnBaselineHeight ? { minHeight: `${leftColumnBaselineHeight}px` } : undefined
+                leftColumnBaselineHeight
+                  ? { minHeight: `${leftColumnBaselineHeight}px` }
+                  : undefined
               }
             >
               {/* Unified Control Center */}
@@ -1332,7 +1339,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
               ref={rightContentRef}
               className="flex min-h-full flex-col pt-0 pr-3 pb-0"
               style={
-                rightColumnBaselineHeight ? { minHeight: `${rightColumnBaselineHeight}px` } : undefined
+                rightColumnBaselineHeight
+                  ? { minHeight: `${rightColumnBaselineHeight}px` }
+                  : undefined
               }
             >
               {/* Visualizer Card */}
