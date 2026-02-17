@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.3
+  spec_version: 1.0.4
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -59,11 +59,8 @@ foundation:
         - "#fb923c"
         - "#fff"
         - hsla(225, 39%, 30%, 1)
-        - hsla(225,39%,30%,1)
         - hsla(253, 16%, 7%, 1)
-        - hsla(253,16%,7%,1)
         - hsla(339, 49%, 30%, 1)
-        - hsla(339,49%,30%,1)
         - rgb(230,230,230)
         - rgba(${r}, ${g}, ${b}, ${alpha})
         - rgba(0, 0, 0, 0.3)
@@ -803,7 +800,6 @@ utility_allowlist:
     - w-3.5
     - w-32
     - w-35
-    - w-4
     - w-4.5
     - w-44
     - w-48
@@ -855,8 +851,6 @@ inline_style_allowlist:
   allowed_properties:
     - animation
     - animationDelay
-    - backgroundAttachment
-    - backgroundColor
     - backgroundImage
     - backgroundSize
     - gridTemplateRows
@@ -869,7 +863,6 @@ inline_style_allowlist:
     - WebkitMaskImage
     - width
   allowed_literals:
-    - "#0f172a"
     - ${100 / visibleSlots}%
     - ${20 + Math.random() * 60}%
     - "0"
@@ -877,42 +870,25 @@ inline_style_allowlist:
     - "0.3"
     - 0.4s
     - 0.5rem
-    - 0%
     - "1"
     - 1.5rem
     - "1.6"
     - "100"
     - 100%
-    - 16%
     - 1px
-    - 1rem
     - "20"
     - 20px
     - 20px 20px
-    - "225"
-    - "253"
     - 3.5rem
-    - 30%
-    - "339"
-    - 39%
     - 3rem
-    - 49%
     - 50%
     - "60"
-    - 7%
     - "90"
     - auto repeat(${gridRows}, 1fr)
-    - fixed
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)
     - none
-    - |-
-      radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-          radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
-          radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)
-    - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
-    - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
   keyframes:

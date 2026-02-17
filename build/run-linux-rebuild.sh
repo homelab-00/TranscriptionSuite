@@ -134,10 +134,9 @@ if [[ "$SHOULD_REBUILD_DOCKER" == "true" ]]; then
     fi
 
     print_step "Build Docker image with TAG=${SERVER_VERSION} (this may take several minutes)"
-    (
-        cd "$SERVER_DOCKER_DIR"
-        TAG="$SERVER_VERSION" docker compose build --no-cache
-    )
+    pushd "$SERVER_DOCKER_DIR" > /dev/null
+    TAG="$SERVER_VERSION" docker compose build --no-cache
+    popd > /dev/null
     DOCKER_REBUILD_STATUS="completed"
 else
     print_step "Skip all Docker operations"
@@ -145,29 +144,26 @@ else
 fi
 
 print_step "Refresh Python dependencies in build/"
-(
-    cd "$BUILD_DIR"
-    uv lock --upgrade
-    uv sync
-)
+pushd "$BUILD_DIR" > /dev/null
+uv lock --upgrade
+uv sync
+popd > /dev/null
 
 print_step "Refresh Python dependencies in server/backend/"
-(
-    cd "$SERVER_BACKEND_DIR"
-    uv lock --upgrade
-    uv sync
-)
+pushd "$SERVER_BACKEND_DIR" > /dev/null
+uv lock --upgrade
+uv sync
+popd > /dev/null
 
-print_step "Update, install, validate, and package dashboard AppImage"
-(
-    cd "$DASHBOARD_DIR"
-    npm update
-    npm ci
-    npm run typecheck
-    npm run ui:contract:check
-    npm run format
-    npm run package:linux
-)
+print_step "Install, validate, and package dashboard AppImage"
+pushd "$DASHBOARD_DIR" > /dev/null
+npm update --package-lock-only
+npm ci
+npm run format
+npm run typecheck
+npm run ui:contract:check
+npm run package:linux
+popd > /dev/null
 
 print_step "Remove user config directory"
 if [[ -d "$CONFIG_DIR" ]]; then
@@ -181,19 +177,13 @@ print_step "Mark AppImage executable"
 if [[ ! -f "$DASHBOARD_RELEASE_DIR/$APPIMAGE" ]]; then
     fail "Expected AppImage not found: $DASHBOARD_RELEASE_DIR/$APPIMAGE"
 fi
-(
-    cd "$DASHBOARD_RELEASE_DIR"
-    chmod +x "./$APPIMAGE"
-)
-
-print_step "Launch AppImage in foreground"
-(
-    cd "$DASHBOARD_RELEASE_DIR"
-    "./$APPIMAGE"
-)
+chmod +x "$DASHBOARD_RELEASE_DIR/$APPIMAGE"
 
 echo
 echo "SUCCESS: Rebuild flow completed."
 echo "Server version:    ${SERVER_VERSION}"
 echo "Dashboard version: ${DASHBOARD_VERSION}"
 echo "Docker rebuild:    ${DOCKER_REBUILD_STATUS}"
+
+print_step "Launch AppImage in foreground"
+"$DASHBOARD_RELEASE_DIR/$APPIMAGE"
