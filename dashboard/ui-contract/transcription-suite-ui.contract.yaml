@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.8
+  spec_version: 1.0.9
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -665,6 +665,7 @@ utility_allowlist:
     - p-5
     - p-6
     - p-8
+    - pb-0
     - pb-1
     - pb-10
     - pb-2
