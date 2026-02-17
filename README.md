@@ -282,11 +282,11 @@ GPU detection, and HuggingFace token entry.
 image updates (GHCR). Configurable interval in Settings.
 
 **Status Lights**: The sidebar shows real-time status indicators:
-- 🟢 Green: Running/Healthy
-- 🔴 Red: Unhealthy/Error
-- 🔵 Blue: Starting
-- 🟠 Orange: Stopped
-- ⚪ Gray: Not configured
+- 🟢 Green (pulsing): Running AND healthy
+- 🟠 Orange (glowing): Container exists but not running/healthy
+- ⚪ Gray: Container missing
+- 🔴 Red: Unhealthy/Error state
+- 🔵 Blue: Starting/Loading
 
 ---
 
@@ -464,13 +464,14 @@ will be significantly slower.
 
 If you see errors like `Name or service not known` for `.ts.net` hostnames:
 
-- **Automatic fallback:** The client automatically tries to use Tailscale IP addresses
-  when DNS fails. Check the logs for "Tailscale IP fallback" messages.
+- **Automatic fallback:** The client automatically detects DNS failures and falls back
+  to Tailscale IP addresses with intelligent retry logic. It attempts multiple IPs
+  (both IPv4 and IPv6) when available. Check the logs for "Tailscale IP fallback" messages.
 - **Check for DNS fight:** Run `tailscale status` and look for DNS warnings. If you see
   `/etc/resolv.conf overwritten`, your system's DNS isn't forwarding to
   Tailscale's MagicDNS.
 
-See [README_DEV.md](README_DEV.md#tailscale-dns-resolution-issues) for detailed troubleshooting.
+See [README_DEV.md](README_DEV.md#133-tailscale-dns-resolution) for detailed troubleshooting.
 
 ---
 

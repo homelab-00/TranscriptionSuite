@@ -215,7 +215,7 @@ TranscriptionSuite uses a **client-server architecture**:
 
 **Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
-- Status lights show Server and Client states with color indicators (green=running, red=unhealthy, blue=starting, orange=stopped, gray=not set up)
+- Status lights show Server and Client states with color indicators (green=running AND healthy, orange=container exists but not healthy, gray=missing, red=unhealthy/error, blue=starting)
 - Main content area on the right with views: Session, Notebook, Server
 - Notebook tab contains Calendar, Search, and Import sub-tabs
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
@@ -1428,7 +1428,13 @@ docker compose exec transcriptionsuite-container curl -f http://localhost:8000/h
 
 ### 13.3 Tailscale DNS Resolution
 
-If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses.
+If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses with intelligent retry logic:
+
+1. First attempts DNS resolution of the configured hostname
+2. If DNS fails, queries `tailscale status --json` to discover available IPs
+3. Attempts connection to each IP (both IPv4 and IPv6) with per-IP timeout
+4. Returns success on first working IP, continues to next on failure
+5. Shows clear error messages distinguishing DNS vs connection failures
 
 **To diagnose:**
 ```bash
