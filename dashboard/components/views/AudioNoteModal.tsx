@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   X,
   Play,
@@ -56,6 +58,12 @@ interface ChatSession {
   updatedAt: string;
 }
 
+interface ParsedLlmSegment {
+  type: 'answer' | 'think';
+  content: string;
+  streaming?: boolean;
+}
+
 /** Format seconds to MM:SS display */
 function formatRecSecs(s: number): string {
   const m = Math.floor(s / 60);
@@ -99,6 +107,261 @@ function toDisplayMessages(messages: ChatMessage[] | undefined): DisplayMessage[
         m.role === 'user' || m.role === 'assistant',
     )
     .map((m) => ({ role: m.role, content: m.content }));
+}
+
+function parseLlmResponseSegments(rawText: string): ParsedLlmSegment[] {
+  if (!rawText) return [];
+
+  const segments: ParsedLlmSegment[] = [];
+  const lower = rawText.toLowerCase();
+  const openTag = '<think>';
+  const closeTag = '</think>';
+  let cursor = 0;
+
+  while (cursor < rawText.length) {
+    const openIndex = lower.indexOf(openTag, cursor);
+    if (openIndex === -1) {
+      const answerTail = rawText.slice(cursor);
+      if (answerTail) segments.push({ type: 'answer', content: answerTail });
+      break;
+    }
+
+    if (openIndex > cursor) {
+      const answerChunk = rawText.slice(cursor, openIndex);
+      if (answerChunk) segments.push({ type: 'answer', content: answerChunk });
+    }
+
+    const thinkStart = openIndex + openTag.length;
+    const closeIndex = lower.indexOf(closeTag, thinkStart);
+    if (closeIndex === -1) {
+      segments.push({
+        type: 'think',
+        content: rawText.slice(thinkStart),
+        streaming: true,
+      });
+      break;
+    }
+
+    segments.push({
+      type: 'think',
+      content: rawText.slice(thinkStart, closeIndex),
+    });
+    cursor = closeIndex + closeTag.length;
+  }
+
+  return segments.reduce<ParsedLlmSegment[]>((acc, segment) => {
+    if (!segment.content && segment.type === 'answer') return acc;
+    const previous = acc[acc.length - 1];
+    if (previous && previous.type === segment.type && !previous.streaming && !segment.streaming) {
+      previous.content += segment.content;
+      return acc;
+    }
+    acc.push(segment);
+    return acc;
+  }, []);
+}
+
+const SUMMARY_MARKDOWN_COMPONENTS = {
+  h1: ({ children }: any) => (
+    <h1 className="mt-3 mb-2 text-xl font-semibold tracking-tight text-white">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="mt-3 mb-2 text-xl font-semibold tracking-tight text-white">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="mt-3 mb-2 text-xl font-semibold tracking-tight text-white">{children}</h3>
+  ),
+  p: ({ children }: any) => (
+    <p className="text-lg leading-relaxed whitespace-pre-wrap text-slate-200">{children}</p>
+  ),
+  strong: ({ children }: any) => <strong className="font-bold text-white">{children}</strong>,
+  em: ({ children }: any) => <em className="text-slate-200 italic">{children}</em>,
+  code: ({ inline, children }: any) =>
+    inline ? (
+      <code className="text-accent-cyan rounded bg-black/30 px-1 py-0.5 font-mono text-xs">
+        {children}
+      </code>
+    ) : (
+      <code className="selectable-text rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-sm text-slate-200">
+        {children}
+      </code>
+    ),
+  pre: ({ children }: any) => <pre className="my-2 overflow-x-auto">{children}</pre>,
+  ul: ({ children }: any) => <div className="space-y-1 pl-4">{children}</div>,
+  ol: ({ children }: any) => <div className="space-y-1 pl-4">{children}</div>,
+  li: ({ children }: any) => (
+    <div className="text-lg leading-relaxed text-slate-200">• {children}</div>
+  ),
+  blockquote: ({ children }: any) => (
+    <blockquote className="my-2 rounded border border-white/10 bg-black/20 px-3 py-2 text-slate-400">
+      {children}
+    </blockquote>
+  ),
+  a: ({ children, href }: any) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-accent-cyan hover:text-cyan-300 hover:underline"
+    >
+      {children}
+    </a>
+  ),
+};
+
+const CHAT_MARKDOWN_COMPONENTS = {
+  h1: ({ children }: any) => (
+    <h1 className="mt-3 mb-2 text-base font-semibold text-white">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="mt-3 mb-2 text-base font-semibold text-white">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="mt-3 mb-2 text-base font-semibold text-white">{children}</h3>
+  ),
+  p: ({ children }: any) => (
+    <p className="text-sm leading-relaxed whitespace-pre-wrap text-slate-300">{children}</p>
+  ),
+  strong: ({ children }: any) => <strong className="font-bold text-white">{children}</strong>,
+  em: ({ children }: any) => <em className="text-slate-200 italic">{children}</em>,
+  code: ({ inline, children }: any) =>
+    inline ? (
+      <code className="text-accent-cyan rounded bg-black/30 px-1 py-0.5 font-mono text-xs">
+        {children}
+      </code>
+    ) : (
+      <code className="selectable-text rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">
+        {children}
+      </code>
+    ),
+  pre: ({ children }: any) => <pre className="my-2 overflow-x-auto">{children}</pre>,
+  ul: ({ children }: any) => <div className="space-y-1 pl-4">{children}</div>,
+  ol: ({ children }: any) => <div className="space-y-1 pl-4">{children}</div>,
+  li: ({ children }: any) => (
+    <div className="text-sm leading-relaxed text-slate-300">• {children}</div>
+  ),
+  blockquote: ({ children }: any) => (
+    <blockquote className="my-2 rounded border border-white/10 bg-black/20 px-3 py-2 text-slate-400">
+      {children}
+    </blockquote>
+  ),
+  a: ({ children, href }: any) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-accent-cyan hover:text-cyan-300 hover:underline"
+    >
+      {children}
+    </a>
+  ),
+};
+
+const THINK_MARKDOWN_COMPONENTS = {
+  h1: ({ children }: any) => (
+    <h1 className="mt-3 mb-2 text-sm font-semibold text-white">{children}</h1>
+  ),
+  h2: ({ children }: any) => (
+    <h2 className="mt-3 mb-2 text-sm font-semibold text-white">{children}</h2>
+  ),
+  h3: ({ children }: any) => (
+    <h3 className="mt-3 mb-2 text-sm font-semibold text-white">{children}</h3>
+  ),
+  p: ({ children }: any) => (
+    <p className="text-sm leading-relaxed whitespace-pre-wrap text-slate-300">{children}</p>
+  ),
+  strong: ({ children }: any) => <strong className="font-bold text-white">{children}</strong>,
+  em: ({ children }: any) => <em className="text-slate-200 italic">{children}</em>,
+  code: ({ inline, children }: any) =>
+    inline ? (
+      <code className="text-accent-cyan rounded bg-black/30 px-1 py-0.5 font-mono text-xs">
+        {children}
+      </code>
+    ) : (
+      <code className="selectable-text rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">
+        {children}
+      </code>
+    ),
+  pre: ({ children }: any) => <pre className="my-2 overflow-x-auto">{children}</pre>,
+  ul: ({ children }: any) => <div className="space-y-1 pl-4">{children}</div>,
+  ol: ({ children }: any) => <div className="space-y-1 pl-4">{children}</div>,
+  li: ({ children }: any) => (
+    <div className="text-sm leading-relaxed text-slate-300">• {children}</div>
+  ),
+  blockquote: ({ children }: any) => (
+    <blockquote className="my-2 rounded border border-white/10 bg-black/20 px-3 py-2 text-slate-400">
+      {children}
+    </blockquote>
+  ),
+  a: ({ children, href }: any) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-accent-cyan hover:text-cyan-300 hover:underline"
+    >
+      {children}
+    </a>
+  ),
+};
+
+function renderMarkdownBlock(content: string, tone: 'summary' | 'chat' | 'think'): React.ReactNode {
+  const markdownComponents =
+    tone === 'summary'
+      ? SUMMARY_MARKDOWN_COMPONENTS
+      : tone === 'chat'
+        ? CHAT_MARKDOWN_COMPONENTS
+        : THINK_MARKDOWN_COMPONENTS;
+
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+function renderLlmResponseContent({
+  content,
+  tone,
+  showStreamingCursor = false,
+  onAnswerClick,
+}: {
+  content: string;
+  tone: 'summary' | 'chat';
+  showStreamingCursor?: boolean;
+  onAnswerClick?: () => void;
+}): React.ReactNode {
+  const segments = parseLlmResponseSegments(content);
+  if (!content && !showStreamingCursor) return null;
+
+  return (
+    <div className="space-y-3">
+      {segments.map((segment, index) =>
+        segment.type === 'answer' ? (
+          <div
+            key={`answer-${index}`}
+            className={onAnswerClick ? 'cursor-text' : undefined}
+            onClick={onAnswerClick}
+          >
+            {renderMarkdownBlock(segment.content, tone)}
+          </div>
+        ) : (
+          <details
+            key={`think-${index}`}
+            className="rounded-lg border border-white/10 bg-black/20 px-3 py-2"
+          >
+            <summary className="cursor-pointer text-xs font-semibold tracking-wide text-slate-400 select-none">
+              {segment.streaming ? 'Reasoning (streaming)' : 'Reasoning'}
+            </summary>
+            <div className="mt-2">{renderMarkdownBlock(segment.content, 'think')}</div>
+          </details>
+        ),
+      )}
+      {showStreamingCursor && (
+        <span className="bg-accent-magenta ml-1 inline-block h-4 w-2 animate-pulse select-none" />
+      )}
+    </div>
+  );
 }
 
 function sanitizeFilename(input: string): string {
@@ -509,7 +772,9 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       audio.pause();
     } else {
       audio.play().catch(() => {
-        setAudioError('Unable to start playback. Check auth token/server access for this note.');
+        setAudioError(
+          'Unable to start playback. Check that the audio file is available and the server is reachable.',
+        );
       });
     }
   };
@@ -544,7 +809,9 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   };
   const handleAudioError = () => {
     setIsPlaying(false);
-    setAudioError('Audio playback failed. Verify server authentication and audio availability.');
+    setAudioError(
+      'Audio playback failed. The source may be unavailable or in an unsupported format.',
+    );
   };
 
   // LLM Chat handler — sends user message and streams assistant response
@@ -1044,15 +1311,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                       placeholder="Edit summary..."
                     />
                   ) : (
-                    <p
-                      className="cursor-text text-lg leading-relaxed text-slate-200"
-                      onClick={handleEnterSummaryEdit}
-                    >
-                      {summaryText}
-                      {isGenerating && (
-                        <span className="bg-accent-magenta ml-1 inline-block h-4 w-2 animate-pulse select-none" />
-                      )}
-                    </p>
+                    renderLlmResponseContent({
+                      content: summaryText,
+                      tone: 'summary',
+                      showStreamingCursor: isGenerating,
+                      onAnswerClick: handleEnterSummaryEdit,
+                    })
                   )}
                 </div>
               )}
@@ -1247,10 +1511,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                       <Bot size={14} className="text-white" />
                     </div>
                     <div className="selectable-text rounded-2xl rounded-tl-none border border-white/5 bg-white/5 p-3">
-                      <p className="text-sm whitespace-pre-wrap text-slate-300">
-                        {msg.content ||
-                          (isChatLoading ? <Loader2 size={14} className="animate-spin" /> : '')}
-                      </p>
+                      {msg.content ? (
+                        renderLlmResponseContent({ content: msg.content, tone: 'chat' })
+                      ) : isChatLoading ? (
+                        <Loader2 size={14} className="animate-spin text-slate-300" />
+                      ) : null}
                     </div>
                   </div>
                 ),
@@ -1296,7 +1561,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       {/* Context Menu Portal */}
       {contextMenu && (
         <div
-          className="animate-in fade-in zoom-in-95 fixed z-10000 w-48 overflow-hidden rounded-xl border border-white/10 bg-slate-900 py-1 shadow-2xl duration-100 select-none"
+          className="animate-in fade-in zoom-in-95 fixed z-10000 w-48 overflow-hidden rounded-xl border border-[#0f172a] bg-[#0f172a] py-1 shadow-2xl duration-100 select-none"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >

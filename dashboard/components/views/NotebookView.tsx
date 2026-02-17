@@ -47,14 +47,16 @@ export const NotebookView: React.FC = () => {
   // Add Note Modal State (New Note)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<number | undefined>(undefined);
+  const [selectedDateSlot, setSelectedDateSlot] = useState<string | undefined>(undefined);
 
   const handleNoteClick = (noteData: any) => {
     setSelectedNote(noteData);
     setIsNoteModalOpen(true);
   };
 
-  const handleAddNote = (time: number) => {
+  const handleAddNote = (time: number, dateKey: string) => {
     setSelectedTimeSlot(time);
+    setSelectedDateSlot(dateKey);
     setIsAddModalOpen(true);
   };
 
@@ -122,6 +124,7 @@ export const NotebookView: React.FC = () => {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         initialTime={selectedTimeSlot}
+        initialDate={selectedDateSlot}
         onCreated={bumpCalendarRefresh}
       />
     </div>
@@ -622,6 +625,9 @@ const formatDuration = (seconds: number): string => {
   return `${m}m ${s.toString().padStart(2, '0')}s`;
 };
 
+const formatDateKey = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
 /** Convert a Recording to an EventData for the TimeSection cards */
 const recordingToEvent = (rec: Recording): EventData => {
   const d = new Date(rec.recorded_at);
@@ -638,7 +644,7 @@ const recordingToEvent = (rec: Recording): EventData => {
 
 const CalendarTab: React.FC<{
   onNoteClick: (note: any) => void;
-  onAddNote: (hour: number) => void;
+  onAddNote: (hour: number, dateKey: string) => void;
   refreshNonce: number;
 }> = ({ onNoteClick, onAddNote, refreshNonce }) => {
   const [currentDate, setCurrentDate] = useState(() => new Date());
@@ -704,11 +710,21 @@ const CalendarTab: React.FC<{
   const eventsByDay: Record<number, { title: string; id: number }[]> = useMemo(() => {
     const result: Record<number, { title: string; id: number }[]> = {};
     for (const [dateKey, recordings] of Object.entries(calendar.days)) {
-      const day = new Date(dateKey).getDate();
+      const [keyYear, keyMonth, keyDay] = dateKey.split('-').map((part) => Number(part));
+      if (
+        !Number.isFinite(keyYear) ||
+        !Number.isFinite(keyMonth) ||
+        !Number.isFinite(keyDay) ||
+        keyYear !== year ||
+        keyMonth !== month + 1
+      ) {
+        continue;
+      }
+      const day = keyDay;
       result[day] = recordings.map((r) => ({ title: r.title || r.filename, id: r.id }));
     }
     return result;
-  }, [calendar.days]);
+  }, [calendar.days, year, month]);
 
   // Recordings for the currently selected day, split into morning/afternoon
   const selectedDayRecordings = useMemo<Recording[]>(() => {
@@ -739,7 +755,8 @@ const CalendarTab: React.FC<{
   // Auto-select today if it has events and nothing else is selected
   useEffect(() => {
     if (selectedDay) return;
-    const todayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+    const today = new Date();
+    const todayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     if (calendar.days[todayKey]?.length) setSelectedDay(todayKey);
   }, [calendar.days, selectedDay, year, month]);
 
@@ -747,8 +764,10 @@ const CalendarTab: React.FC<{
     const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
     setSelectedDay(key);
   };
+
+  const addNoteDateKey = selectedDay ?? formatDateKey(new Date());
   const today = new Date();
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const todayKey = formatDateKey(today);
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-6 lg:grid-cols-3">
@@ -869,7 +888,7 @@ const CalendarTab: React.FC<{
           visibleSlots={visibleSlots}
           onZoomChange={setVisibleSlots}
           onNoteClick={onNoteClick}
-          onAddNote={onAddNote}
+          onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
           onRefresh={calendar.refresh}
         />
         <TimeSection
@@ -882,7 +901,7 @@ const CalendarTab: React.FC<{
           visibleSlots={visibleSlots}
           onZoomChange={setVisibleSlots}
           onNoteClick={onNoteClick}
-          onAddNote={onAddNote}
+          onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
           onRefresh={calendar.refresh}
         />
       </div>

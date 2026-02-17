@@ -10,13 +10,23 @@ interface AddNoteModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTime?: number; // e.g. 10 for 10:00
+  initialDate?: string; // e.g. 2026-02-17
   onCreated?: () => void;
 }
+
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const formatDateKey = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+const buildLocalSlotTimestamp = (dateKey: string, hour: number): string =>
+  `${dateKey}T${String(hour).padStart(2, '0')}:00:00`;
 
 export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   isOpen,
   onClose,
   initialTime,
+  initialDate,
   onCreated,
 }) => {
   const [isRendered, setIsRendered] = useState(false);
@@ -31,6 +41,13 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedDateKey =
+    initialDate && DATE_KEY_RE.test(initialDate) ? initialDate : formatDateKey(new Date());
+  const selectedDateLabel = new Date(`${selectedDateKey}T00:00:00`).toLocaleDateString([], {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {
@@ -75,9 +92,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       // Build a created-at timestamp from the time slot
       let fileCreatedAt: string | undefined;
       if (initialTime !== undefined) {
-        const now = new Date();
-        now.setHours(initialTime, 0, 0, 0);
-        fileCreatedAt = now.toISOString();
+        fileCreatedAt = buildLocalSlotTimestamp(selectedDateKey, initialTime);
       }
 
       for (const file of selectedFiles) {
@@ -96,7 +111,15 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  }, [selectedFiles, isDiarizationEnabled, isTimestampsEnabled, initialTime, onCreated, onClose]);
+  }, [
+    selectedFiles,
+    isDiarizationEnabled,
+    isTimestampsEnabled,
+    initialTime,
+    onCreated,
+    onClose,
+    selectedDateKey,
+  ]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -161,7 +184,9 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
             <div className="text-accent-cyan flex items-center gap-2 text-xs font-medium tracking-wider uppercase">
               <Calendar size={12} />
               <span>
-                Today, {initialTime}:00 - {initialTime ? initialTime + 1 : 1}:00
+                {initialTime !== undefined
+                  ? `${selectedDateLabel}, ${String(initialTime).padStart(2, '0')}:00 - ${String((initialTime + 1) % 24).padStart(2, '0')}:00`
+                  : selectedDateLabel}
               </span>
             </div>
             <div>

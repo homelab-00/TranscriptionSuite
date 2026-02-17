@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.11
+  spec_version: 1.0.12
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -407,7 +407,6 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-700
     - bg-slate-800
-    - bg-slate-900
     - bg-slate-900/80
     - bg-teal-500
     - bg-transparent
@@ -877,6 +876,7 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
+    - border-[#0f172a]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
