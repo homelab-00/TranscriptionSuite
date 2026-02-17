@@ -1279,7 +1279,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Column Scroll Container */}
           <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-            <div className="flex flex-col pt-0 pr-3 pb-0">
+            <div className="flex h-full flex-col pt-0 pr-3 pb-0">
               {/* Visualizer Card */}
               <GlassCard className="relative z-10 mb-6 flex-none overflow-visible">
                 <div className="mb-4 flex shrink-0 items-center justify-between">
@@ -1309,7 +1309,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
               {/* Live Mode (Text + Controls) */}
               <GlassCard
-                className="flex flex-1 flex-col transition-all duration-300"
+                className="min-h-0 flex flex-1 flex-col transition-all duration-300"
                 title="Live Mode"
                 action={
                   <Button
