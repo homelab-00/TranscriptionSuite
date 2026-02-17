@@ -42,7 +42,9 @@ function stripOklabSupports(): import('postcss').Plugin {
     return { r, g, b, a };
   };
 
-  const parseRgbColor = (colorFn: string): { r: number; g: number; b: number; a: number } | null => {
+  const parseRgbColor = (
+    colorFn: string,
+  ): { r: number; g: number; b: number; a: number } | null => {
     const match = colorFn.trim().match(/^rgba?\((.*)\)$/i);
     if (!match) return null;
 
@@ -54,7 +56,10 @@ function stripOklabSupports(): import('postcss').Plugin {
     if (args.includes(',')) {
       parts = args.split(',').map((part) => part.trim());
     } else {
-      parts = args.replace(/\s*\/\s*/, ' / ').split(/\s+/).filter(Boolean);
+      parts = args
+        .replace(/\s*\/\s*/, ' / ')
+        .split(/\s+/)
+        .filter(Boolean);
     }
 
     if (parts.length < 3) return null;

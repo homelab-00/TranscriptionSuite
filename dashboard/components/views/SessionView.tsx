@@ -851,7 +851,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
           />
 
           {/* Main Scrollable Area for Left Column */}
-          <div ref={leftScrollRef} className="custom-scrollbar flex-1 overflow-y-auto pr-3 pt-0 pb-0">
+          <div
+            ref={leftScrollRef}
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+          >
             <div
               ref={leftContentRef}
               className="space-y-6"
@@ -1347,7 +1350,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
           />
 
           {/* Right Column Scroll Container */}
-          <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto pr-3 pt-0 pb-0">
+          <div
+            ref={rightScrollRef}
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+          >
             <div
               ref={rightContentRef}
               className="flex min-h-full flex-col"

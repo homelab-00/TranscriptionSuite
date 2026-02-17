@@ -49,7 +49,9 @@ export const StatusLight: React.FC<StatusLightProps> = ({
           style={{ animationDelay: syncDelay }}
         ></span>
       )}
-      <span className={`relative inline-flex h-3 w-3 rounded-full shadow-lg ${colors[status]}`}></span>
+      <span
+        className={`relative inline-flex h-3 w-3 rounded-full shadow-lg ${colors[status]}`}
+      ></span>
     </span>
   );
 };
