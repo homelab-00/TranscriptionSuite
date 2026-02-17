@@ -707,11 +707,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     captureColumnBaselines();
     updateLeftScrollState();
     updateRightScrollState();
-  }, [
-    captureColumnBaselines,
-    updateLeftScrollState,
-    updateRightScrollState,
-  ]);
+  }, [captureColumnBaselines, updateLeftScrollState, updateRightScrollState]);
 
   // Bind listeners once and reset both columns to top on startup.
   useEffect(() => {
@@ -826,7 +822,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-5">
           {/* Left Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 left-0 right-3 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
@@ -841,10 +837,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
             className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
-              backgroundImage: 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
+              backgroundImage:
+                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
               backgroundAttachment: 'fixed',
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+              WebkitMaskImage:
+                'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
             }}
           />
 
@@ -1298,7 +1296,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Left Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute bottom-0 left-0 right-3 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
@@ -1310,10 +1308,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute bottom-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
-              backgroundImage: 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
+              backgroundImage:
+                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
               backgroundAttachment: 'fixed',
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
               WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
@@ -1325,7 +1324,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-7">
           {/* Right Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 left-0 right-3 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
@@ -1340,10 +1339,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
             className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
-              backgroundImage: 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
+              backgroundImage:
+                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
               backgroundAttachment: 'fixed',
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              WebkitMaskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+              WebkitMaskImage:
+                'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
             }}
           />
 
@@ -1500,7 +1501,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute bottom-0 left-0 right-3 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
@@ -1512,10 +1513,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute bottom-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
-              backgroundImage: 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
+              backgroundImage:
+                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
               backgroundAttachment: 'fixed',
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
               WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
