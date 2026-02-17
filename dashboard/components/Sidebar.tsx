@@ -25,18 +25,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   clientRunning,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const hasElectronApi = typeof window !== 'undefined' && Boolean((window as any).electronAPI);
+  const useMockupStatusFallback = !hasElectronApi;
 
   // Derive status for each sidebar item from Docker + client state
   // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
-  const sessionStatus: 'active' | 'warning' | 'inactive' =
-    containerRunning && clientRunning && containerHealth === 'healthy'
+  const sessionStatus: 'active' | 'warning' | 'inactive' = useMockupStatusFallback
+    ? 'active'
+    : containerRunning && clientRunning && containerHealth === 'healthy'
       ? 'active'
       : containerExists
         ? 'warning'
         : 'inactive';
   // Issue 18 — Server: pulsing green when server running AND healthy, orange when container exists, gray otherwise
-  const serverSidebarStatus: 'active' | 'warning' | 'inactive' =
-    containerRunning && containerHealth === 'healthy'
+  const serverSidebarStatus: 'active' | 'warning' | 'inactive' = useMockupStatusFallback
+    ? 'active'
+    : containerRunning && containerHealth === 'healthy'
       ? 'active'
       : containerExists
         ? 'warning'
@@ -63,7 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
-      className={`bg-glass-surface border-glass-border relative flex h-full flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-56'} `}
+      className={`bg-glass-surface border-glass-border relative flex h-full flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-[200px]'} `}
     >
       {/* Toggle Button */}
       <button

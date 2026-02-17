@@ -13,15 +13,15 @@ export const StatusLight: React.FC<StatusLightProps> = ({
 }) => {
   const colors = {
     active: 'bg-green-500 shadow-green-500/50',
-    inactive: 'bg-slate-500',
+    inactive: 'bg-slate-500 shadow-slate-500/50',
     warning: 'bg-accent-orange shadow-accent-orange/50',
     error: 'bg-red-500 shadow-red-500/50',
     loading: 'bg-blue-400 shadow-blue-400/50',
   };
 
-  // Only 'active' (green) should pulse. 'warning' (orange) glows but does not pulse.
-  const shouldPulse = animate && status === 'active';
-  const shouldGlow = status !== 'inactive';
+  // Keep pulse behavior aligned with the original mockup:
+  // any non-inactive status can pulse when animation is enabled.
+  const shouldPulse = animate && status !== 'inactive';
 
   const [syncDelay, setSyncDelay] = useState('0ms');
 
@@ -49,9 +49,7 @@ export const StatusLight: React.FC<StatusLightProps> = ({
           style={{ animationDelay: syncDelay }}
         ></span>
       )}
-      <span
-        className={`relative inline-flex h-3 w-3 rounded-full ${shouldGlow ? 'shadow-lg' : ''} ${colors[status]}`}
-      ></span>
+      <span className={`relative inline-flex h-3 w-3 rounded-full shadow-lg ${colors[status]}`}></span>
     </span>
   );
 };
