@@ -774,7 +774,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({ isOpen, onClose,
             {/* 3. Transcript - Added selectable-text to paragraphs */}
             <div className="space-y-6">
               <div className="pointer-events-none sticky top-0 z-10 py-4 select-none">
-                <span className="pointer-events-auto inline-flex items-center rounded-full border border-white/10 bg-[#161f32]/90 px-4 py-1.5 text-xs font-bold tracking-widest text-slate-400 uppercase shadow-lg backdrop-blur-xl">
+                <span className="pointer-events-auto inline-flex items-center rounded-full border border-white/10 bg-[rgba(22,31,50,0.9)] px-4 py-1.5 text-xs font-bold tracking-widest text-slate-400 uppercase shadow-lg backdrop-blur-xl">
                   Transcript
                 </span>
               </div>

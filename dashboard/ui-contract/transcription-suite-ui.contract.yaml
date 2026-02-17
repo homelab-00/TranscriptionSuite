@@ -836,7 +836,7 @@ utility_allowlist:
   arbitrary_classes:
     - bg-[#0b1120]
     - bg-[#0f172a]
-    - bg-[#161f32]/90
+    - bg-[rgba(22,31,50,0.9)]
     - border-[#0f172a]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
