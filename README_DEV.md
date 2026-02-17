@@ -111,7 +111,7 @@ uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 # 2. Run dashboard (in a separate terminal)
 cd dashboard
 npm install
-npm run dev          # Vite dev server at http://localhost:3000
+npm run dev           # Vite dev server at http://localhost:3000
 # or
 npm run dev:electron  # Full Electron window with Vite hot-reload
 ```

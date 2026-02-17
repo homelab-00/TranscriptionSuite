@@ -877,7 +877,7 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
-    - border-[#0f172a]
+    - border-slate-900
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]

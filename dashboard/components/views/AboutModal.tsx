@@ -74,20 +74,24 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-500 ease-in-out ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-500 ease-in-out ${isVisible ? 'opacity-100' : 'opacity-0'}`}
         onClick={onClose}
       />
 
       {/* Modal Content */}
       <div
-        className={`relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'} `}
+        className={`relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/20 bg-linear-to-b from-white/5 to-black/20 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'} `}
       >
+        <div className="bg-accent-cyan/20 pointer-events-none absolute top-0 left-0 h-32 w-32 rounded-full blur-2xl" />
+        <div className="bg-accent-magenta/10 pointer-events-none absolute right-0 bottom-0 h-32 w-32 rounded-full blur-2xl" />
+        <div className="pointer-events-none absolute inset-0 bg-white/1" />
+
         {/* Banner with Close Button */}
         <div className="from-accent-cyan/20 to-accent-magenta/20 relative h-32 bg-linear-to-br via-blue-600/10">
           <div className="absolute top-4 right-4 z-10">
             <button
               onClick={onClose}
-              className="rounded-full border border-white/5 bg-black/20 p-2 text-white backdrop-blur-md transition-colors hover:bg-black/40"
+              className="rounded-full border border-white/10 bg-black/10 p-2 text-white backdrop-blur-md transition-colors hover:bg-black/40"
             >
               <X size={16} />
             </button>
@@ -117,7 +121,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
           </p>
 
           {/* Description */}
-          <p className="mb-6 px-2 text-center text-sm leading-relaxed text-slate-400">
+          <p className="mb-6 px-2 text-center text-sm leading-relaxed text-slate-300">
             A fully local and private Speech-To-Text app with cross-platform support, speaker
             diarization, Audio Notebook mode, LM Studio integration, and both longform and live
             transcription.
@@ -128,40 +132,40 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
             <button
               type="button"
               onClick={() => void openExternal('https://github.com/homelab-00/TranscriptionSuite')}
-              className="group flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/5 bg-white/5 p-3 transition-all hover:border-white/10 hover:bg-white/10"
+              className="group border-accent-cyan/20 bg-accent-cyan/20 flex flex-col items-center justify-center gap-2 rounded-2xl border p-3 transition-all hover:border-white/10 hover:bg-white/10"
             >
               <Github
                 size={20}
-                className="text-slate-300 transition-colors group-hover:text-white"
+                className="text-accent-cyan transition-colors group-hover:text-white"
               />
-              <span className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
+              <span className="text-accent-cyan text-xs font-medium group-hover:text-white">
                 Repository
               </span>
             </button>
             <button
               type="button"
               onClick={() => void openExternal('https://github.com/homelab-00')}
-              className="group flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/5 bg-white/5 p-3 transition-all hover:border-white/10 hover:bg-white/10"
+              className="group border-accent-magenta/20 bg-accent-magenta/10 flex flex-col items-center justify-center gap-2 rounded-2xl border p-3 transition-all hover:border-white/10 hover:bg-white/10"
             >
               <div className="relative">
                 <Github
                   size={20}
-                  className="text-slate-300 transition-colors group-hover:text-white"
+                  className="text-accent-magenta transition-colors group-hover:text-white"
                 />
-                <div className="bg-accent-cyan absolute -right-1 -bottom-1 h-2.5 w-2.5 rounded-full border-2 border-[#0f172a]"></div>
+                <div className="bg-accent-cyan absolute -right-1 -bottom-1 h-2.5 w-2.5 rounded-full border-2 border-slate-900"></div>
               </div>
-              <span className="text-xs font-medium text-slate-400 group-hover:text-slate-200">
+              <span className="text-accent-magenta text-xs font-medium group-hover:text-white">
                 Profile
               </span>
             </button>
           </div>
 
           {/* Footer / License */}
-          <div className="flex w-full flex-col items-center gap-1.5 border-t border-white/5 pt-6">
-            <p className="text-[10px] font-medium tracking-widest text-slate-500 uppercase">
+          <div className="flex w-full flex-col items-center gap-1.5 border-t border-white/10 pt-6">
+            <p className="text-[10px] font-medium tracking-widest text-slate-400 uppercase">
               GNU GPLv3+ © {copyrightYears}
             </p>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <div className="flex items-center gap-1.5 text-xs text-slate-300">
               <span>Designed by</span>
               <button
                 type="button"
