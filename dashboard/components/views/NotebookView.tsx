@@ -707,8 +707,8 @@ const CalendarTab: React.FC<{
   const calendar = useCalendar(year, month);
 
   // Build calendar grid: day-of-month (1-indexed) → array of recording summaries
-  const eventsByDay: Record<number, { title: string; id: number }[]> = useMemo(() => {
-    const result: Record<number, { title: string; id: number }[]> = {};
+  const eventsByDay: Record<number, EventData[]> = useMemo(() => {
+    const result: Record<number, EventData[]> = {};
     for (const [dateKey, recordings] of Object.entries(calendar.days)) {
       const [keyYear, keyMonth, keyDay] = dateKey.split('-').map((part) => Number(part));
       if (
@@ -721,7 +721,7 @@ const CalendarTab: React.FC<{
         continue;
       }
       const day = keyDay;
-      result[day] = recordings.map((r) => ({ title: r.title || r.filename, id: r.id }));
+      result[day] = recordings.map(recordingToEvent);
     }
     return result;
   }, [calendar.days, year, month]);
@@ -852,13 +852,18 @@ const CalendarTab: React.FC<{
                     )}
                   </div>
                   <div className="flex min-h-0 w-full flex-1 flex-col gap-1 overflow-hidden pt-1">
-                    {dayEvents.slice(0, 2).map((evt, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-accent-cyan w-full truncate rounded-full px-2 py-0.5 text-[10px] font-medium text-black shadow-sm"
+                    {dayEvents.slice(0, 2).map((evt) => (
+                      <button
+                        key={evt.id}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNoteClick(evt);
+                        }}
+                        className="bg-accent-cyan w-full cursor-pointer truncate rounded-full px-2 py-0.5 text-left text-[10px] font-medium text-black shadow-sm transition-opacity hover:opacity-85"
                       >
                         {evt.title}
-                      </div>
+                      </button>
                     ))}
                     {dayEvents.length > 2 && (
                       <div className="pl-2 text-[9px] text-slate-500">
