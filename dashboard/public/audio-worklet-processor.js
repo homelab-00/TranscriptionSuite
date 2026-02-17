@@ -26,10 +26,11 @@ class PCMProcessor extends AudioWorkletProcessor {
 
   /**
    * @param {Float32Array[][]} inputs
-   * @param {Float32Array[][]} outputs
+   * @param {Float32Array[][]} _outputs
+   * @param {Record<string, Float32Array>} _parameters
    * @returns {boolean}
    */
-  process(inputs) {
+  process(inputs, _outputs, _parameters) {
     const input = inputs[0];
     if (!input || !input[0] || input[0].length === 0) return true;
 

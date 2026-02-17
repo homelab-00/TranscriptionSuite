@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: TypeScript checks
+      - name: TypeScript + JavaScript checks
         run: npm run typecheck
 
       - name: UI contract checks

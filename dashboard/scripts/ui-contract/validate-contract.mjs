@@ -35,7 +35,7 @@ function trimMultiline(value) {
 
 async function loadContract(contractPath) {
   const raw = await fs.readFile(contractPath, 'utf8');
-  const parsed = YAML.parse(raw);
+  const parsed = /** @type {Record<string, any>} */ (YAML.parse(raw) ?? {});
   return { raw, parsed };
 }
 

@@ -11,11 +11,13 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
+    "checkJs": true,
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./*"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": ["dist", "dist-electron", "release", "node_modules"]
 }

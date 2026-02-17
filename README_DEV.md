@@ -159,9 +159,9 @@ cd dashboard && npm run package:mac
 | Lint code (Python) | `./build/.venv/bin/ruff check .` |
 | Format code (Python) | `./build/.venv/bin/ruff format .` |
 | Type check (Python) | `./build/.venv/bin/pyright` |
-| Format code (TypeScript) | `cd dashboard && npm run format` |
-| Format check (TypeScript) | `cd dashboard && npm run format:check` |
-| Type check (TypeScript) | `cd dashboard && npm run typecheck` |
+| Format code (TypeScript + JavaScript) | `cd dashboard && npm run format` |
+| Format check (TypeScript + JavaScript) | `cd dashboard && npm run format:check` |
+| Type check (TypeScript + JavaScript) | `cd dashboard && npm run typecheck` |
 
 ---
 
@@ -1171,7 +1171,7 @@ npm install
 
 **Verify updates don't break the build:**
 ```bash
-npm run typecheck    # TypeScript type checking
+npm run typecheck    # TypeScript + JavaScript static type checking
 npm run build        # Production build
 npm run dev:electron # Test in development mode
 ```
@@ -1351,7 +1351,7 @@ All Python code quality tools are installed in the build environment. Run these 
 ./build/.venv/bin/ruff format server/backend/
 ```
 
-**Dashboard (TypeScript) quality commands:**
+**Dashboard (TypeScript + JavaScript) quality commands:**
 ```bash
 cd dashboard && npm run format
 cd dashboard && npm run format:check
@@ -1384,7 +1384,7 @@ Run all checks across the entire codebase:
 # 2. Python tests
 ./build/.venv/bin/pytest server/backend/tests
 
-# 3. TypeScript checks (dashboard)
+# 3. TypeScript + JavaScript checks (dashboard)
 cd dashboard && npm run format:check
 cd dashboard && npm run typecheck
 
@@ -1398,6 +1398,7 @@ The repository uses two different `.github` locations for different purposes:
 
 - `.github/workflows/`: GitHub Actions workflow definitions (when jobs run, trigger rules, runner setup).
 - `.github/codeql/`: CodeQL configuration consumed by workflows (for example, `codeql-config.yml` path filters and query configuration).
+- Active CodeQL language matrix in `.github/workflows/codeql-analysis.yml`: `python`, `javascript-typescript`.
 
 Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs and conflicting results.
 
