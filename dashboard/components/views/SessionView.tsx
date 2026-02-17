@@ -672,6 +672,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [rightScrollState, setRightScrollState] = useState({ top: false, bottom: false });
   const [leftIndicatorWidth, setLeftIndicatorWidth] = useState<number | null>(null);
   const [rightIndicatorWidth, setRightIndicatorWidth] = useState<number | null>(null);
+  const [leftColumnBaselineHeight, setLeftColumnBaselineHeight] = useState<number | null>(null);
+  const [rightColumnBaselineHeight, setRightColumnBaselineHeight] = useState<number | null>(null);
 
   const calculateScrollState = useCallback((el: HTMLDivElement | null) => {
     if (!el) return { top: false, bottom: false };
@@ -707,11 +709,24 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setRightIndicatorWidth((prev) => (prev === nextRightWidth ? prev : nextRightWidth));
   }, [calculateIndicatorWidth]);
 
+  const captureColumnBaselines = useCallback(() => {
+    if (showLogs) return;
+    const nextLeftHeight = leftScrollRef.current?.clientHeight ?? null;
+    const nextRightHeight = rightScrollRef.current?.clientHeight ?? null;
+    if (nextLeftHeight) {
+      setLeftColumnBaselineHeight((prev) => (prev === nextLeftHeight ? prev : nextLeftHeight));
+    }
+    if (nextRightHeight) {
+      setRightColumnBaselineHeight((prev) => (prev === nextRightHeight ? prev : nextRightHeight));
+    }
+  }, [showLogs]);
+
   const recalcScrollIndicators = useCallback(() => {
+    captureColumnBaselines();
     updateLeftScrollState();
     updateRightScrollState();
     updateIndicatorWidths();
-  }, [updateLeftScrollState, updateRightScrollState, updateIndicatorWidths]);
+  }, [captureColumnBaselines, updateLeftScrollState, updateRightScrollState, updateIndicatorWidths]);
 
   // Bind listeners once and reset both columns to top on startup.
   useEffect(() => {
@@ -836,7 +851,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Main Scrollable Area for Left Column */}
           <div ref={leftScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-            <div ref={leftContentRef} className="space-y-6 pt-0 pr-3 pb-0">
+            <div
+              ref={leftContentRef}
+              className="space-y-6 pt-0 pr-3 pb-0"
+              style={
+                leftColumnBaselineHeight ? { minHeight: `${leftColumnBaselineHeight}px` } : undefined
+              }
+            >
               {/* Unified Control Center */}
               <GlassCard
                 title="Control Center"
@@ -1307,7 +1328,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Column Scroll Container */}
           <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-            <div ref={rightContentRef} className="flex min-h-full flex-col pt-0 pr-3 pb-0">
+            <div
+              ref={rightContentRef}
+              className="flex min-h-full flex-col pt-0 pr-3 pb-0"
+              style={
+                rightColumnBaselineHeight ? { minHeight: `${rightColumnBaselineHeight}px` } : undefined
+              }
+            >
               {/* Visualizer Card */}
               <GlassCard className="relative z-10 mb-6 flex-none overflow-visible">
                 <div className="mb-4 flex shrink-0 items-center justify-between">
