@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.6
+  spec_version: 1.0.7
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -30,6 +30,22 @@ meta:
     generated_at: 2026-02-16T23:17:25.509Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
+  color_space:
+    policy: srgb_only
+    enforcement: postcss_plugin
+    plugin_name: strip-oklab-supports
+    rule: >-
+      All Tailwind v4 @supports blocks that upgrade color rendering from sRGB
+      fallbacks to oklab color-mix or oklab gradient interpolation must be
+      stripped at build time. The original UI mockup (Tailwind v3 CDN) uses
+      sRGB exclusively. Default palette shades are pinned to their Tailwind v3
+      hex values in @theme to prevent oklch gamut-mapping drift.
+    prohibited_css_functions:
+      - color-mix(in oklab, ...)
+      - color-mix(in lab, ...)
+    prohibited_color_spaces:
+      - oklch
+      - oklab
   tailwind:
     dark_mode: class
     font_family_sans:
@@ -829,6 +845,7 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
+    - min-h-[calc(100vh-30rem)]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
@@ -1458,6 +1475,15 @@ component_contracts:
     structural_invariants:
       - id: two-column-session-layout
         rule: Session view preserves left controls/right monitoring split with scroll indicators and masked corners.
+      - id: scroll-indicator-offset
+        rule: >-
+          Scroll fade indicators and corner masks must use right-3 (0.75rem)
+          offset to align with the scrollbar track width plus padding, matching
+          the original mockup layout.
+      - id: live-mode-min-height
+        rule: >-
+          Live Mode GlassCard must use min-h-[calc(100vh-30rem)] to ensure the
+          offline placeholder text centers properly within the transcript area.
     behavior_rules:
       - id: logs-drawer-animation
         rule: Bottom logs drawer open/close behavior remains tied to approved durations and easing curves.

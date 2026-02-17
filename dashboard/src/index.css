@@ -18,6 +18,73 @@
 
   /* Backdrop blur */
   --backdrop-blur-xs: 2px;
+
+  /*
+   * Tailwind v3 sRGB palette overrides.
+   * Tailwind v4 redefines the default palette in oklch, which shifts
+   * perceived hue/saturation after gamut-mapping to sRGB for display.
+   * Pin every referenced shade back to the exact v3 hex value so the
+   * rendered output matches the original mockup (which used v3 CDN).
+   */
+
+  /* slate */
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+
+  /* green */
+  --color-green-300: #86efac;
+  --color-green-400: #4ade80;
+  --color-green-500: #22c55e;
+
+  /* red */
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-900: #7f1d1d;
+
+  /* blue */
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-900: #1e3a5f;
+
+  /* cyan */
+  --color-cyan-300: #67e8f9;
+
+  /* orange */
+  --color-orange-200: #fed7aa;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+
+  /* amber */
+  --color-amber-400: #fbbf24;
+
+  /* indigo */
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+
+  /* purple */
+  --color-purple-500: #a855f7;
+  --color-purple-900: #581c87;
+
+  /* teal */
+  --color-teal-500: #14b8a6;
+
+  /* rose */
+  --color-rose-400: #fb7185;
+
+  /* fuchsia */
+  --color-fuchsia-300: #f0abfc;
+
+  /* black / white (confirm sRGB identity values) */
+  --color-black: #000000;
+  --color-white: #ffffff;
 }
 
 /* --- Global Styles --- */
