@@ -56,14 +56,11 @@ export const LogTerminal: React.FC<LogTerminalProps> = ({
       {/* Terminal Body - Added selectable-text class */}
       <div
         ref={scrollRef}
-        className="custom-scrollbar selectable-text max-h-[300px] min-h-[200px] flex-1 space-y-1.5 overflow-y-auto p-4 font-mono text-xs"
+        className="custom-scrollbar selectable-text max-h-75 min-h-50 flex-1 space-y-1.5 overflow-y-auto p-4 font-mono text-xs"
       >
         {logs.map((log, index) => (
           <div key={index} className="flex gap-3 rounded p-0.5 transition-colors hover:bg-white/5">
             <span className="shrink-0 text-slate-600 select-none">{log.timestamp}</span>
-            <span className={`w-20 shrink-0 text-right font-bold ${accentColor.split(' ')[0]}`}>
-              [{log.source}]
-            </span>
             <span
               className={`break-all ${
                 log.type === 'error'

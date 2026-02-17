@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.4
+  spec_version: 1.0.5
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -183,13 +183,11 @@ foundation:
         - rounded
         - rounded-2xl
         - rounded-3xl
-        - rounded-b-2xl
         - rounded-br-full
         - rounded-full
         - rounded-lg
         - rounded-md
         - rounded-r-full
-        - rounded-t-2xl
         - rounded-tl-none
         - rounded-tr-none
         - rounded-xl
@@ -206,9 +204,7 @@ foundation:
       arbitrary_classes:
         - h-[85%]
         - h-[85vh]
-        - max-h-[300px]
         - max-h-[80vh]
-        - min-h-[200px]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
@@ -543,6 +539,7 @@ utility_allowlist:
     - max-h-32
     - max-h-40
     - max-h-60
+    - max-h-75
     - max-w-2xl
     - max-w-3xl
     - max-w-4xl
@@ -563,6 +560,9 @@ utility_allowlist:
     - md:grid-cols-4
     - min-h-0
     - min-h-32
+    - min-h-40
+    - min-h-50
+    - min-h-full
     - min-w-0
     - min-w-100
     - min-w-25
@@ -673,13 +673,11 @@ utility_allowlist:
     - rounded
     - rounded-2xl
     - rounded-3xl
-    - rounded-b-2xl
     - rounded-br-full
     - rounded-full
     - rounded-lg
     - rounded-md
     - rounded-r-full
-    - rounded-t-2xl
     - rounded-tl-none
     - rounded-tr-none
     - rounded-xl
@@ -794,7 +792,6 @@ utility_allowlist:
     - w-16
     - w-2
     - w-2.5
-    - w-20
     - w-24
     - w-3
     - w-3.5
@@ -830,9 +827,7 @@ utility_allowlist:
     - ease-[cubic-bezier(0.33,1,0.68,1)]
     - h-[85%]
     - h-[85vh]
-    - max-h-[300px]
     - max-h-[80vh]
-    - min-h-[200px]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]

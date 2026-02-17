@@ -787,6 +787,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setShowLogs(!showLogs);
   };
 
+  // Scroll both columns to the bottom whenever logs are toggled
+  useEffect(() => {
+    const leftEl = leftScrollRef.current;
+    const rightEl = rightScrollRef.current;
+    if (!leftEl && !rightEl) return;
+
+    const duration = 600;
+    const startTime = performance.now();
+    let animationFrameId: number;
+
+    const animateScroll = (currentTime: number) => {
+      if (leftEl) leftEl.scrollTop = leftEl.scrollHeight;
+      if (rightEl) rightEl.scrollTop = rightEl.scrollHeight;
+      if (currentTime - startTime < duration) {
+        animationFrameId = requestAnimationFrame(animateScroll);
+      }
+    };
+
+    animationFrameId = requestAnimationFrame(animateScroll);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [showLogs]);
+
   return (
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col p-6">
       {/* 1. Header (Fixed) */}
@@ -800,7 +822,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-5">
           {/* Left Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 left-0 z-20 h-6 overflow-hidden transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
             style={{ width: leftIndicatorWidth ?? '100%' }}
           >
             <div
@@ -1254,7 +1276,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Left Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute bottom-0 left-0 z-20 h-6 overflow-hidden transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
             style={{ width: leftIndicatorWidth ?? '100%' }}
           >
             <div
@@ -1271,7 +1293,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-7">
           {/* Right Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 left-0 z-20 h-6 overflow-hidden transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
             style={{ width: rightIndicatorWidth ?? '100%' }}
           >
             <div
@@ -1285,7 +1307,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Column Scroll Container */}
           <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-            <div ref={rightContentRef} className="flex h-full flex-col pt-0 pr-3 pb-0">
+            <div ref={rightContentRef} className="flex min-h-full flex-col pt-0 pr-3 pb-0">
               {/* Visualizer Card */}
               <GlassCard className="relative z-10 mb-6 flex-none overflow-visible">
                 <div className="mb-4 flex shrink-0 items-center justify-between">
@@ -1315,7 +1337,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
               {/* Live Mode (Text + Controls) */}
               <GlassCard
-                className="flex min-h-0 flex-1 flex-col transition-all duration-300"
+                className="flex flex-1 flex-col transition-all duration-300"
                 title="Live Mode"
                 action={
                   <Button
@@ -1381,7 +1403,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 </div>
 
                 {/* Transcript Area */}
-                <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
+                <div className="custom-scrollbar selectable-text relative min-h-40 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
                   {isLive ? (
                     <>
                       {live.statusMessage && (
@@ -1428,7 +1450,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute bottom-0 left-0 z-20 h-6 overflow-hidden transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
             style={{ width: rightIndicatorWidth ?? '100%' }}
           >
             <div
