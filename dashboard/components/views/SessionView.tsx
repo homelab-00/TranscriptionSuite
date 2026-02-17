@@ -832,7 +832,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
-              className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
+              className="h-full w-full bg-gradient-to-b from-white/10 to-transparent backdrop-blur-sm"
               style={{
                 maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
                 WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
@@ -1303,7 +1303,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
             className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
-              className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
+              className="h-full w-full bg-gradient-to-t from-white/10 to-transparent backdrop-blur-sm"
               style={{
                 maskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
                 WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
@@ -1328,7 +1328,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
-              className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
+              className="h-full w-full bg-gradient-to-b from-white/10 to-transparent backdrop-blur-sm"
               style={{
                 maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
                 WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
@@ -1504,7 +1504,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
             className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
-              className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
+              className="h-full w-full bg-gradient-to-t from-white/10 to-transparent backdrop-blur-sm"
               style={{
                 maskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
                 WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',

@@ -87,6 +87,17 @@
   --color-white: #ffffff;
 }
 
+/* Tailwind v4 maps bg-gradient-* to oklab interpolation; force mockup-like sRGB behavior. */
+.bg-gradient-to-b {
+  --tw-gradient-position: to bottom;
+  background-image: linear-gradient(var(--tw-gradient-stops));
+}
+
+.bg-gradient-to-t {
+  --tw-gradient-position: to top;
+  background-image: linear-gradient(var(--tw-gradient-stops));
+}
+
 /* --- Global Styles --- */
 body {
   background-color: #0f172a;

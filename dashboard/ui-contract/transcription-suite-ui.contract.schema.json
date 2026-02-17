@@ -75,6 +75,38 @@
       "additionalProperties": false,
       "required": ["tailwind", "tokens"],
       "properties": {
+        "color_space": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy",
+            "enforcement",
+            "plugin_name",
+            "rule",
+            "prohibited_css_functions",
+            "prohibited_color_spaces"
+          ],
+          "properties": {
+            "policy": {
+              "type": "string"
+            },
+            "enforcement": {
+              "type": "string"
+            },
+            "plugin_name": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "string"
+            },
+            "prohibited_css_functions": {
+              "$ref": "#/$defs/stringSet"
+            },
+            "prohibited_color_spaces": {
+              "$ref": "#/$defs/stringSet"
+            }
+          }
+        },
         "tailwind": {
           "type": "object",
           "additionalProperties": false,

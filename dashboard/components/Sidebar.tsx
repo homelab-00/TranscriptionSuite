@@ -67,7 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
-      className={`bg-glass-surface border-glass-border relative flex h-full flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-[200px]'} `}
+      className={`bg-glass-surface border-glass-border relative flex h-full flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-50'} `}
     >
       {/* Toggle Button */}
       <button

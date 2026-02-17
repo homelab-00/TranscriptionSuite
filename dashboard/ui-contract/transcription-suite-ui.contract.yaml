@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.7
+  spec_version: 1.0.8
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -27,19 +27,14 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-16T23:17:25.509Z
+    generated_at: 2026-02-17T17:17:39.523Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
     policy: srgb_only
     enforcement: postcss_plugin
     plugin_name: strip-oklab-supports
-    rule: >-
-      All Tailwind v4 @supports blocks that upgrade color rendering from sRGB
-      fallbacks to oklab color-mix or oklab gradient interpolation must be
-      stripped at build time. The original UI mockup (Tailwind v3 CDN) uses
-      sRGB exclusively. Default palette shades are pinned to their Tailwind v3
-      hex values in @theme to prevent oklch gamut-mapping drift.
+    rule: All Tailwind v4 @supports blocks that upgrade color rendering from sRGB fallbacks to oklab color-mix or oklab gradient interpolation must be stripped at build time. The original UI mockup (Tailwind v3 CDN) uses sRGB exclusively. Default palette shades are pinned to their Tailwind v3 hex values in @theme to prevent oklch gamut-mapping drift.
     prohibited_css_functions:
       - color-mix(in oklab, ...)
       - color-mix(in lab, ...)
@@ -66,17 +61,49 @@ foundation:
   tokens:
     colors:
       literal_palette:
+        - "#000000"
         - "#0b1120"
         - "#0f172a"
-        - "#161f32"
+        - "#14b8a6"
+        - "#1e293b"
+        - "#1e3a5f"
+        - "#22c55e"
         - "#22d3ee"
+        - "#2563eb"
+        - "#334155"
+        - "#3b82f6"
+        - "#475569"
         - "#4ade80"
+        - "#581c87"
+        - "#60a5fa"
+        - "#6366f1"
+        - "#64748b"
+        - "#67e8f9"
+        - "#7f1d1d"
+        - "#818cf8"
+        - "#86efac"
+        - "#94a3b8"
+        - "#a855f7"
+        - "#cbd5e1"
         - "#d946ef"
+        - "#e2e8f0"
+        - "#ef4444"
+        - "#f0abfc"
+        - "#f87171"
+        - "#f97316"
+        - "#fb7185"
         - "#fb923c"
+        - "#fbbf24"
+        - "#fca5a5"
+        - "#fed7aa"
         - "#fff"
+        - "#ffffff"
         - hsla(225, 39%, 30%, 1)
+        - hsla(225,39%,30%,1)
         - hsla(253, 16%, 7%, 1)
+        - hsla(253,16%,7%,1)
         - hsla(339, 49%, 30%, 1)
+        - hsla(339,49%,30%,1)
         - rgb(230,230,230)
         - rgba(${r}, ${g}, ${b}, ${alpha})
         - rgba(0, 0, 0, 0.3)
@@ -87,6 +114,7 @@ foundation:
         - rgba(0,0,0,0.4)
         - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
+        - rgba(22,31,50,0.9)
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.6)
         - rgba(251, 146, 60, 0.3)
@@ -116,8 +144,9 @@ foundation:
         inactive:
           classes:
             - bg-slate-500
+            - shadow-slate-500/50
           bg: bg-slate-500
-          shadow: null
+          shadow: shadow-slate-500/50
         warning:
           classes:
             - bg-accent-orange
@@ -167,6 +196,7 @@ foundation:
         - shadow-inner
         - shadow-lg
         - shadow-red-500/50
+        - shadow-slate-500/50
         - shadow-sm
         - shadow-xl
     motion:
@@ -199,11 +229,13 @@ foundation:
         - rounded
         - rounded-2xl
         - rounded-3xl
+        - rounded-b-2xl
         - rounded-br-full
         - rounded-full
         - rounded-lg
         - rounded-md
         - rounded-r-full
+        - rounded-t-2xl
         - rounded-tl-none
         - rounded-tr-none
         - rounded-xl
@@ -221,6 +253,7 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
+        - min-h-[calc(100vh-30rem)]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
@@ -357,6 +390,8 @@ utility_allowlist:
     - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
+    - bg-gradient-to-b
+    - bg-gradient-to-t
     - bg-green-500
     - bg-green-500/10
     - bg-linear-to-b
@@ -529,6 +564,7 @@ utility_allowlist:
     - inline-block
     - inline-flex
     - inset-0
+    - inset-4
     - italic
     - items-center
     - items-end
@@ -576,7 +612,6 @@ utility_allowlist:
     - md:grid-cols-4
     - min-h-0
     - min-h-32
-    - min-h-40
     - min-h-50
     - min-h-full
     - min-w-0
@@ -630,7 +665,6 @@ utility_allowlist:
     - p-5
     - p-6
     - p-8
-    - pb-0
     - pb-1
     - pb-10
     - pb-2
@@ -690,11 +724,13 @@ utility_allowlist:
     - rounded
     - rounded-2xl
     - rounded-3xl
+    - rounded-b-2xl
     - rounded-br-full
     - rounded-full
     - rounded-lg
     - rounded-md
     - rounded-r-full
+    - rounded-t-2xl
     - rounded-tl-none
     - rounded-tr-none
     - rounded-xl
@@ -711,6 +747,7 @@ utility_allowlist:
     - shadow-inner
     - shadow-lg
     - shadow-red-500/50
+    - shadow-slate-500/50
     - shadow-sm
     - shadow-xl
     - shrink-0
@@ -814,6 +851,7 @@ utility_allowlist:
     - w-3.5
     - w-32
     - w-35
+    - w-4
     - w-4.5
     - w-44
     - w-48
@@ -864,6 +902,8 @@ inline_style_allowlist:
   allowed_properties:
     - animation
     - animationDelay
+    - backgroundAttachment
+    - backgroundColor
     - backgroundImage
     - backgroundSize
     - gridTemplateRows
@@ -876,6 +916,7 @@ inline_style_allowlist:
     - WebkitMaskImage
     - width
   allowed_literals:
+    - "#0f172a"
     - ${100 / visibleSlots}%
     - ${20 + Math.random() * 60}%
     - "0"
@@ -883,25 +924,39 @@ inline_style_allowlist:
     - "0.3"
     - 0.4s
     - 0.5rem
+    - 0%
     - "1"
     - 1.5rem
     - "1.6"
     - "100"
     - 100%
+    - 16%
     - 1px
+    - 1rem
     - "20"
     - 20px
     - 20px 20px
+    - "225"
+    - "253"
     - 3.5rem
+    - 30%
+    - "339"
+    - 39%
     - 3rem
+    - 49%
     - 50%
     - "60"
+    - 7%
     - "90"
     - auto repeat(${gridRows}, 1fr)
+    - fixed
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)
     - none
+    - radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)
+    - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
+    - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
   keyframes:
@@ -1476,14 +1531,9 @@ component_contracts:
       - id: two-column-session-layout
         rule: Session view preserves left controls/right monitoring split with scroll indicators and masked corners.
       - id: scroll-indicator-offset
-        rule: >-
-          Scroll fade indicators and corner masks must use right-3 (0.75rem)
-          offset to align with the scrollbar track width plus padding, matching
-          the original mockup layout.
+        rule: Scroll fade indicators and corner masks must use right-3 (0.75rem) offset to align with the scrollbar track width plus padding, matching the original mockup layout.
       - id: live-mode-min-height
-        rule: >-
-          Live Mode GlassCard must use min-h-[calc(100vh-30rem)] to ensure the
-          offline placeholder text centers properly within the transcript area.
+        rule: Live Mode GlassCard must use min-h-[calc(100vh-30rem)] to ensure the offline placeholder text centers properly within the transcript area.
     behavior_rules:
       - id: logs-drawer-animation
         rule: Bottom logs drawer open/close behavior remains tied to approved durations and easing curves.

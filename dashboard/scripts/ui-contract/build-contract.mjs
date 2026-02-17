@@ -242,6 +242,16 @@ const componentSpecs = {
         id: 'two-column-session-layout',
         rule: 'Session view preserves left controls/right monitoring split with scroll indicators and masked corners.',
       },
+      {
+        id: 'scroll-indicator-offset',
+        rule:
+          'Scroll fade indicators and corner masks must use right-3 (0.75rem) offset to align with the scrollbar track width plus padding, matching the original mockup layout.',
+      },
+      {
+        id: 'live-mode-min-height',
+        rule:
+          'Live Mode GlassCard must use min-h-[calc(100vh-30rem)] to ensure the offline placeholder text centers properly within the transcript area.',
+      },
     ],
     behavior_rules: [
       {
@@ -733,6 +743,15 @@ const contract = {
     },
   },
   foundation: {
+    color_space: {
+      policy: 'srgb_only',
+      enforcement: 'postcss_plugin',
+      plugin_name: 'strip-oklab-supports',
+      rule:
+        'All Tailwind v4 @supports blocks that upgrade color rendering from sRGB fallbacks to oklab color-mix or oklab gradient interpolation must be stripped at build time. The original UI mockup (Tailwind v3 CDN) uses sRGB exclusively. Default palette shades are pinned to their Tailwind v3 hex values in @theme to prevent oklch gamut-mapping drift.',
+      prohibited_css_functions: ['color-mix(in oklab, ...)', 'color-mix(in lab, ...)'],
+      prohibited_color_spaces: ['oklch', 'oklab'],
+    },
     tailwind: {
       dark_mode: facts.tailwind.dark_mode,
       font_family_sans: facts.tailwind.extend.fontFamily?.sans || [],
