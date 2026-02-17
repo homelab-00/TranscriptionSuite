@@ -783,6 +783,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setShowLogs(!showLogs);
   };
 
+  const maskStyle: React.CSSProperties = {
+    backgroundColor: '#0f172a',
+    backgroundImage:
+      'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
+    backgroundAttachment: 'fixed',
+  };
+
   // Scroll both columns to the bottom whenever logs are toggled (skip initial mount)
   useEffect(() => {
     if (initialMountRef.current) {
@@ -836,10 +843,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           <div
             className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
             style={{
-              backgroundColor: '#0f172a',
-              backgroundImage:
-                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
-              backgroundAttachment: 'fixed',
+              ...maskStyle,
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
               WebkitMaskImage:
                 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
@@ -847,10 +851,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
           />
 
           {/* Main Scrollable Area for Left Column */}
-          <div ref={leftScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
+          <div ref={leftScrollRef} className="custom-scrollbar flex-1 overflow-y-auto pr-3 pt-0 pb-0">
             <div
               ref={leftContentRef}
-              className="space-y-6 pt-0 pr-3 pb-0"
+              className="space-y-6"
               style={
                 leftColumnBaselineHeight
                   ? { minHeight: `${leftColumnBaselineHeight}px` }
@@ -1310,10 +1314,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           <div
             className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
             style={{
-              backgroundColor: '#0f172a',
-              backgroundImage:
-                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
-              backgroundAttachment: 'fixed',
+              ...maskStyle,
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
               WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
             }}
@@ -1338,10 +1339,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           <div
             className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
             style={{
-              backgroundColor: '#0f172a',
-              backgroundImage:
-                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
-              backgroundAttachment: 'fixed',
+              ...maskStyle,
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
               WebkitMaskImage:
                 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
@@ -1349,10 +1347,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
           />
 
           {/* Right Column Scroll Container */}
-          <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
+          <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto pr-3 pt-0 pb-0">
             <div
               ref={rightContentRef}
-              className="flex min-h-full flex-col pt-0 pr-3 pb-0"
+              className="flex min-h-full flex-col"
               style={
                 rightColumnBaselineHeight
                   ? { minHeight: `${rightColumnBaselineHeight}px` }
@@ -1515,10 +1513,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           <div
             className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
             style={{
-              backgroundColor: '#0f172a',
-              backgroundImage:
-                'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
-              backgroundAttachment: 'fixed',
+              ...maskStyle,
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
               WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
             }}
