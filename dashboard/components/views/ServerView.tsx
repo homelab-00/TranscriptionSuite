@@ -119,6 +119,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const adminLiveCfg = (adminConfig.live_transcriber ??
     adminConfig.live_transcription ??
     {}) as Record<string, unknown>;
+  const adminDiarizationCfg = (adminConfig.diarization ?? {}) as Record<string, unknown>;
   const adminLegacyTranscriptionCfg = (adminConfig.transcription ?? {}) as Record<string, unknown>;
   const adminModels = (adminStatus?.models ?? {}) as Record<string, unknown>;
   const adminModelTranscription = (adminModels.transcription ?? {}) as Record<string, unknown>;
@@ -126,6 +127,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     string,
     unknown
   >;
+  const adminModelDiarization = (adminModels.diarization ?? {}) as Record<string, unknown>;
+  const adminModelDiarizationCfg = (adminModelDiarization.config ?? {}) as Record<string, unknown>;
 
   const configuredMainModel =
     getString(adminMainCfg.model) ??
@@ -133,6 +136,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     getString(adminModelTranscriptionCfg.model) ??
     '';
   const configuredLiveModel = getString(adminLiveCfg.model) ?? configuredMainModel;
+  const configuredDiarizationModel =
+    getString(adminDiarizationCfg.model) ??
+    getString(adminModelDiarizationCfg.model) ??
+    getString(adminModelDiarization.model) ??
+    '';
 
   useEffect(() => {
     if (modelsHydrated || !adminStatus || !configuredMainModel) return;
@@ -166,6 +174,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
         : LIVE_ALTERNATE_MODEL;
+  const activeDiarizationModel = configuredDiarizationModel || '(empty)';
 
   // Image selection state — "Most Recent (auto)" always picks the newest available tag
   const MOST_RECENT = 'Most Recent (auto)';
@@ -719,6 +728,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
                 <div className="font-mono text-xs text-slate-500">Main: {activeTranscriber}</div>
                 <div className="font-mono text-xs text-slate-500">Live: {activeLiveModel}</div>
+                <div className="font-mono text-xs text-slate-500">
+                  Diarization: {activeDiarizationModel}
+                </div>
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
