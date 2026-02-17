@@ -787,14 +787,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setShowLogs(!showLogs);
   };
 
-  const maskStyle: React.CSSProperties = {
-    backgroundColor: '#0f172a',
-    backgroundImage: `radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-    radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
-    radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)`,
-    backgroundAttachment: 'fixed',
-  };
-
   return (
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col p-6">
       {/* 1. Header (Fixed) */}
@@ -818,15 +810,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
               }}
             ></div>
-            <div
-              className="absolute top-0 right-0 h-4 w-4"
-              style={{
-                ...maskStyle,
-                maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-                WebkitMaskImage:
-                  'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              }}
-            />
           </div>
 
           {/* Main Scrollable Area for Left Column */}
@@ -1281,15 +1264,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
               }}
             ></div>
-            <div
-              className="absolute right-0 bottom-0 h-4 w-4"
-              style={{
-                ...maskStyle,
-                maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-                WebkitMaskImage:
-                  'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-              }}
-            />
           </div>
         </div>
 
@@ -1307,15 +1281,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
               }}
             ></div>
-            <div
-              className="absolute top-0 right-0 h-4 w-4"
-              style={{
-                ...maskStyle,
-                maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-                WebkitMaskImage:
-                  'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              }}
-            />
           </div>
 
           {/* Right Column Scroll Container */}
@@ -1473,15 +1438,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
               }}
             ></div>
-            <div
-              className="absolute right-0 bottom-0 h-4 w-4"
-              style={{
-                ...maskStyle,
-                maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-                WebkitMaskImage:
-                  'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-              }}
-            />
           </div>
         </div>
       </div>
