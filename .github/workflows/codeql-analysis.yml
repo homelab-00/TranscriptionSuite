@@ -100,13 +100,13 @@ jobs:
         exit 1
 
     - name: Perform CodeQL Analysis
-      if: ${{ env.ACT != 'true' }}
+      if: ${{ github.actor != 'nektos/act' }}
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
 
     - name: Perform CodeQL Analysis (local act)
-      if: ${{ env.ACT == 'true' }}
+      if: ${{ github.actor == 'nektos/act' }}
       uses: github/codeql-action/analyze@v4
       env:
         CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/codeql-analysis.yml:analyze
