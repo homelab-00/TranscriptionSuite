@@ -16,6 +16,7 @@ app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'))
 const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
 const CLIENT_LOG_FILE = 'client-debug.log';
+const STOP_SERVER_ON_QUIT_TIMEOUT_MS = 30_000;
 
 function ensureClientLogFilePath(): string {
   const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
@@ -434,13 +435,23 @@ app.on('before-quit', async (event) => {
     event.preventDefault();
     try {
       console.log('Stopping server on quit…');
-      // Race the stop against a 10s safety timeout
+      // Give compose stop a bounded grace period before forcing a direct stop.
       await Promise.race([
         dockerManager.stopContainer(),
-        new Promise((resolve) => setTimeout(resolve, 10_000)),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Timed out after ${STOP_SERVER_ON_QUIT_TIMEOUT_MS}ms`)),
+            STOP_SERVER_ON_QUIT_TIMEOUT_MS,
+          ),
+        ),
       ]);
     } catch (err) {
-      console.error('Failed to stop server on quit:', err);
+      console.error('Graceful stop on quit failed; forcing container stop:', err);
+      try {
+        await dockerManager.forceStopContainer(3);
+      } catch (forceErr) {
+        console.error('Forced stop on quit failed:', forceErr);
+      }
     } finally {
       trayManager.destroy();
       updateManager.destroy();

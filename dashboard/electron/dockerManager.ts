@@ -508,7 +508,39 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
  * Stop the container via docker compose.
  */
 async function stopContainer(): Promise<string> {
-  return exec('docker', ['compose', 'stop'], { cwd: getComposeDir() });
+  try {
+    return await exec('docker', ['compose', 'stop'], { cwd: getComposeDir() });
+  } catch (composeErr: any) {
+    console.warn(
+      '[DockerManager] docker compose stop failed; falling back to docker stop:',
+      composeErr?.message ?? composeErr,
+    );
+    try {
+      return await forceStopContainer(10);
+    } catch (forceErr: any) {
+      const composeMsg = composeErr?.message ?? String(composeErr);
+      const forceMsg = forceErr?.message ?? String(forceErr);
+      throw new Error(`${composeMsg}; fallback docker stop failed: ${forceMsg}`);
+    }
+  }
+}
+
+/**
+ * Force-stop the managed container by explicit container name.
+ * This bypasses compose parsing (for example when env interpolation fails).
+ */
+async function forceStopContainer(timeoutSeconds = 3): Promise<string> {
+  const seconds = Math.max(0, Math.floor(timeoutSeconds));
+  try {
+    return await exec('docker', ['stop', '--time', String(seconds), CONTAINER_NAME]);
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    // Treat "already stopped / missing" as success from a shutdown perspective.
+    if (/No such container|is not running/i.test(msg)) {
+      return msg;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -824,6 +856,7 @@ export const dockerManager = {
   getContainerStatus,
   startContainer,
   stopContainer,
+  forceStopContainer,
   removeContainer,
   getVolumes,
   removeVolume,

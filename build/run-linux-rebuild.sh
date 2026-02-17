@@ -165,6 +165,7 @@ print_step "Update, install, validate, and package dashboard AppImage"
     npm ci
     npm run typecheck
     npm run ui:contract:check
+    npm run format
     npm run package:linux
 )
 

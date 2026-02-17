@@ -665,9 +665,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Scroll State
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
+  const leftContentRef = useRef<HTMLDivElement>(null);
+  const rightContentRef = useRef<HTMLDivElement>(null);
 
   const [leftScrollState, setLeftScrollState] = useState({ top: false, bottom: false });
   const [rightScrollState, setRightScrollState] = useState({ top: false, bottom: false });
+  const [leftIndicatorWidth, setLeftIndicatorWidth] = useState<number | null>(null);
+  const [rightIndicatorWidth, setRightIndicatorWidth] = useState<number | null>(null);
 
   const calculateScrollState = useCallback((el: HTMLDivElement | null) => {
     if (!el) return { top: false, bottom: false };
@@ -678,6 +682,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
     };
   }, []);
 
+  const calculateIndicatorWidth = useCallback(
+    (scrollEl: HTMLDivElement | null, contentEl: HTMLDivElement | null) => {
+      if (!scrollEl || !contentEl) return null;
+      const contentStyles = window.getComputedStyle(contentEl);
+      const rightPadding = Number.parseFloat(contentStyles.paddingRight) || 0;
+      return Math.max(0, scrollEl.clientWidth - rightPadding);
+    },
+    [],
+  );
+
   const updateLeftScrollState = useCallback(() => {
     setLeftScrollState(calculateScrollState(leftScrollRef.current));
   }, [calculateScrollState]);
@@ -686,10 +700,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setRightScrollState(calculateScrollState(rightScrollRef.current));
   }, [calculateScrollState]);
 
+  const updateIndicatorWidths = useCallback(() => {
+    const nextLeftWidth = calculateIndicatorWidth(leftScrollRef.current, leftContentRef.current);
+    const nextRightWidth = calculateIndicatorWidth(rightScrollRef.current, rightContentRef.current);
+    setLeftIndicatorWidth((prev) => (prev === nextLeftWidth ? prev : nextLeftWidth));
+    setRightIndicatorWidth((prev) => (prev === nextRightWidth ? prev : nextRightWidth));
+  }, [calculateIndicatorWidth]);
+
   const recalcScrollIndicators = useCallback(() => {
     updateLeftScrollState();
     updateRightScrollState();
-  }, [updateLeftScrollState, updateRightScrollState]);
+    updateIndicatorWidths();
+  }, [updateLeftScrollState, updateRightScrollState, updateIndicatorWidths]);
 
   // Bind listeners once and reset both columns to top on startup.
   useEffect(() => {
@@ -713,6 +735,23 @@ export const SessionView: React.FC<SessionViewProps> = ({
       window.removeEventListener('resize', recalcScrollIndicators);
     };
   }, [updateLeftScrollState, updateRightScrollState, recalcScrollIndicators]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const resizeObserver = new ResizeObserver(() => {
+      recalcScrollIndicators();
+    });
+    const targets = [
+      leftScrollRef.current,
+      rightScrollRef.current,
+      leftContentRef.current,
+      rightContentRef.current,
+    ].filter((el): el is HTMLDivElement => el !== null);
+    targets.forEach((el) => resizeObserver.observe(el));
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [recalcScrollIndicators]);
 
   // Recalculate indicators whenever layout-affecting view state changes.
   useEffect(() => {
@@ -769,7 +808,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-5">
           {/* Left Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 right-0 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            style={{ width: leftIndicatorWidth ?? '100%' }}
           >
             <div
               className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
@@ -778,22 +818,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
               }}
             ></div>
+            <div
+              className="absolute top-0 right-0 h-4 w-4"
+              style={{
+                ...maskStyle,
+                maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+                WebkitMaskImage:
+                  'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+              }}
+            />
           </div>
-
-          {/* Left Top Corner Mask */}
-          <div
-            className="pointer-events-none absolute top-0 right-0 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              WebkitMaskImage:
-                'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-            }}
-          />
 
           {/* Main Scrollable Area for Left Column */}
           <div ref={leftScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-            <div className="space-y-6 pt-0 pr-3 pb-0">
+            <div ref={leftContentRef} className="space-y-6 pt-0 pr-3 pb-0">
               {/* Unified Control Center */}
               <GlassCard
                 title="Control Center"
@@ -1233,7 +1271,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Left Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute right-0 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            style={{ width: leftIndicatorWidth ?? '100%' }}
           >
             <div
               className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
@@ -1242,22 +1281,24 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
               }}
             ></div>
+            <div
+              className="absolute right-0 bottom-0 h-4 w-4"
+              style={{
+                ...maskStyle,
+                maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+                WebkitMaskImage:
+                  'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+              }}
+            />
           </div>
-          <div
-            className="pointer-events-none absolute right-0 bottom-0 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-              WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-            }}
-          />
         </div>
 
         {/* Right Column: Visualizer & Live Mode (60%) */}
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-7">
           {/* Right Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 right-0 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            style={{ width: rightIndicatorWidth ?? '100%' }}
           >
             <div
               className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
@@ -1266,20 +1307,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
               }}
             ></div>
+            <div
+              className="absolute top-0 right-0 h-4 w-4"
+              style={{
+                ...maskStyle,
+                maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+                WebkitMaskImage:
+                  'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+              }}
+            />
           </div>
-          <div
-            className="pointer-events-none absolute top-0 right-0 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              WebkitMaskImage:
-                'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-            }}
-          />
 
           {/* Right Column Scroll Container */}
           <div ref={rightScrollRef} className="custom-scrollbar flex-1 overflow-y-auto">
-            <div className="flex h-full flex-col pt-0 pr-3 pb-0">
+            <div ref={rightContentRef} className="flex h-full flex-col pt-0 pr-3 pb-0">
               {/* Visualizer Card */}
               <GlassCard className="relative z-10 mb-6 flex-none overflow-visible">
                 <div className="mb-4 flex shrink-0 items-center justify-between">
@@ -1309,7 +1350,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
               {/* Live Mode (Text + Controls) */}
               <GlassCard
-                className="min-h-0 flex flex-1 flex-col transition-all duration-300"
+                className="flex min-h-0 flex-1 flex-col transition-all duration-300"
                 title="Live Mode"
                 action={
                   <Button
@@ -1422,7 +1463,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute right-0 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            style={{ width: rightIndicatorWidth ?? '100%' }}
           >
             <div
               className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
@@ -1431,15 +1473,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
               }}
             ></div>
+            <div
+              className="absolute right-0 bottom-0 h-4 w-4"
+              style={{
+                ...maskStyle,
+                maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+                WebkitMaskImage:
+                  'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+              }}
+            />
           </div>
-          <div
-            className="pointer-events-none absolute right-0 bottom-0 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-              WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-            }}
-          />
         </div>
       </div>
 

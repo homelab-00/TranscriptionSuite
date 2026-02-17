@@ -9,8 +9,7 @@
     "rootDir": ".",
     "strict": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "types": ["node"]
+    "isolatedModules": true
   },
   "include": ["*.ts"]
 }
