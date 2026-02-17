@@ -21,12 +21,13 @@ import {
   Check,
   XCircle,
   StopCircle,
+  Plus,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
-import type { Conversation } from '../../src/api/types';
+import type { ChatMessage, Conversation } from '../../src/api/types';
 
 /** Local type for chat message display (simpler than API's ChatMessage) */
 interface DisplayMessage {
@@ -48,11 +49,11 @@ interface AudioNoteModalProps {
 }
 
 interface ChatSession {
-  id: string;
+  id: number;
   title: string;
   type: 'summary' | 'chat';
   timestamp: string;
-  active: boolean;
+  updatedAt: string;
 }
 
 /** Format seconds to MM:SS display */
@@ -60,6 +61,57 @@ function formatRecSecs(s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.round(s % 60);
   return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+/** Format a conversation timestamp for compact sidebar display */
+function formatSessionTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function inferSessionType(title: string): 'summary' | 'chat' {
+  return title.toLowerCase().includes('summary') ? 'summary' : 'chat';
+}
+
+function toChatSession(conversation: Conversation): ChatSession {
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    type: inferSessionType(conversation.title),
+    timestamp: formatSessionTime(conversation.updated_at),
+    updatedAt: conversation.updated_at,
+  };
+}
+
+function sortChatSessions(sessions: ChatSession[]): ChatSession[] {
+  return [...sessions].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+}
+
+function toDisplayMessages(messages: ChatMessage[] | undefined): DisplayMessage[] {
+  if (!messages) return [];
+  return messages
+    .filter(
+      (m): m is ChatMessage & { role: DisplayMessage['role'] } =>
+        m.role === 'user' || m.role === 'assistant',
+    )
+    .map((m) => ({ role: m.role, content: m.content }));
+}
+
+function sanitizeFilename(input: string): string {
+  const cleaned = input
+    .trim()
+    .replace(/[^\w.-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return cleaned || 'session';
+}
+
+function formatExportStamp(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 /** Stable speaker colour from a consistent palette */
@@ -122,10 +174,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [llmModel, setLlmModel] = useState<string | null>(null);
 
   // Context Menu State
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    conversationId: number;
+  } | null>(null);
 
   // Chat Sessions — fetched from API when recording is available
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
 
   // Chat input state
   const [chatInput, setChatInput] = useState('');
@@ -191,29 +249,62 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     setDuration(0);
   }, [isOpen, note?.recordingId]);
 
-  // Fetch conversations when recording is available
+  // Fetch conversations for this recording whenever modal opens or note changes
   useEffect(() => {
+    if (!isOpen) return;
+
+    setChatSessions([]);
+    setChatMessages([]);
+    setActiveConversationId(null);
+    setChatInput('');
+    setContextMenu(null);
+    setSessionsError(null);
+
     if (!note?.recordingId) return;
-    apiClient
-      .listConversations(note.recordingId)
-      .then((data) => {
-        setChatSessions(
-          data.conversations.map((c) => ({
-            id: String(c.id),
-            title: c.title,
-            type: (c.title.toLowerCase().includes('summary') ? 'summary' : 'chat') as
-              | 'summary'
-              | 'chat',
-            timestamp: new Date(c.updated_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            active: false,
-          })),
-        );
-      })
-      .catch(() => {});
-  }, [note?.recordingId]);
+
+    let cancelled = false;
+    const loadSessions = async () => {
+      setSessionsLoading(true);
+      try {
+        const data = await apiClient.listConversations(note.recordingId);
+        if (cancelled) return;
+
+        const mapped = sortChatSessions(data.conversations.map(toChatSession));
+        setChatSessions(mapped);
+
+        if (mapped.length > 0) {
+          const firstConversationId = mapped[0].id;
+          setActiveConversationId(firstConversationId);
+          try {
+            const conversation = await apiClient.getConversation(firstConversationId);
+            if (cancelled) return;
+            setChatMessages(toDisplayMessages(conversation.messages));
+            setChatSessions((prev) =>
+              sortChatSessions(
+                prev.map((session) =>
+                  session.id === conversation.id ? toChatSession(conversation) : session,
+                ),
+              ),
+            );
+          } catch {
+            if (!cancelled) {
+              setChatMessages([]);
+              setSessionsError('Failed to load selected session.');
+            }
+          }
+        }
+      } catch {
+        if (!cancelled) setSessionsError('Failed to load sessions.');
+      } finally {
+        if (!cancelled) setSessionsLoading(false);
+      }
+    };
+
+    void loadSessions();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, note?.recordingId]);
 
   // Stream summary from API (or show existing summary)
   useEffect(() => {
@@ -357,11 +448,58 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     }
   };
 
-  const handleContextMenu = (e: React.MouseEvent, id: string) => {
+  const handleContextMenu = (e: React.MouseEvent, conversationId: number) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY, id });
+    setContextMenu({ x: e.clientX, y: e.clientY, conversationId });
   };
+
+  const handleSelectSession = useCallback(async (conversationId: number) => {
+    setContextMenu(null);
+    setActiveConversationId(conversationId);
+    setSessionsError(null);
+    try {
+      const conversation = await apiClient.getConversation(conversationId);
+      setChatMessages(toDisplayMessages(conversation.messages));
+      setChatSessions((prev) =>
+        sortChatSessions(
+          prev.map((session) =>
+            session.id === conversation.id ? toChatSession(conversation) : session,
+          ),
+        ),
+      );
+    } catch {
+      setChatMessages([]);
+      setSessionsError('Failed to load selected session.');
+    }
+  }, []);
+
+  const handleCreateSession = useCallback(async () => {
+    if (!note?.recordingId) return;
+    try {
+      const conv = await apiClient.createConversation(note.recordingId, 'New Chat');
+      const updatedAt = new Date().toISOString();
+      const createdSession: ChatSession = {
+        id: conv.conversation_id,
+        title: conv.title || 'New Chat',
+        type: inferSessionType(conv.title || 'New Chat'),
+        timestamp: formatSessionTime(updatedAt),
+        updatedAt,
+      };
+      setChatSessions((prev) =>
+        sortChatSessions([
+          createdSession,
+          ...prev.filter((session) => session.id !== createdSession.id),
+        ]),
+      );
+      setActiveConversationId(createdSession.id);
+      setChatMessages([]);
+      setSessionsError(null);
+      setContextMenu(null);
+    } catch {
+      setSessionsError('Failed to create a new session.');
+    }
+  }, [note?.recordingId]);
 
   // Audio playback handlers
   const handlePlayPause = () => {
@@ -414,27 +552,43 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     const text = chatInput.trim();
     if (!text || !note?.recordingId || isChatLoading) return;
 
-    // Add user message to display
-    const userMsg: DisplayMessage = { role: 'user', content: text };
-    setChatMessages((prev) => [...prev, userMsg]);
+    let conversationId = activeConversationId;
+    if (!conversationId) {
+      try {
+        const conv = await apiClient.createConversation(note.recordingId, 'New Chat');
+        conversationId = conv.conversation_id;
+        const updatedAt = new Date().toISOString();
+        const createdSession: ChatSession = {
+          id: conversationId,
+          title: conv.title || 'New Chat',
+          type: inferSessionType(conv.title || 'New Chat'),
+          timestamp: formatSessionTime(updatedAt),
+          updatedAt,
+        };
+        setChatSessions((prev) =>
+          sortChatSessions([
+            createdSession,
+            ...prev.filter((session) => session.id !== createdSession.id),
+          ]),
+        );
+        setActiveConversationId(conversationId);
+      } catch {
+        setSessionsError('Failed to create a new session.');
+        return;
+      }
+    }
+
+    setSessionsError(null);
+    setChatMessages((prev) => [
+      ...prev,
+      { role: 'user', content: text },
+      { role: 'assistant', content: '' },
+    ]);
     setChatInput('');
     setIsChatLoading(true);
-
-    // Prepare assistant placeholder
-    const assistantMsg: DisplayMessage = { role: 'assistant', content: '' };
-    setChatMessages((prev) => [...prev, assistantMsg]);
-
     try {
-      // Ensure we have a conversation
-      let convId = activeConversationId;
-      if (!convId) {
-        const conv = await apiClient.createConversation(note.recordingId, 'Chat');
-        convId = conv.conversation_id;
-        setActiveConversationId(convId);
-      }
-
       const stream = apiClient.chat({
-        conversation_id: convId,
+        conversation_id: conversationId,
         user_message: text,
         include_transcription: true,
       });
@@ -448,7 +602,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
           return updated;
         });
       }
-    } catch (err) {
+    } catch {
       setChatMessages((prev) => {
         const updated = [...prev];
         const errorMsg: DisplayMessage = {
@@ -459,25 +613,152 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
         return updated;
       });
     } finally {
+      const updatedAt = new Date().toISOString();
+      setChatSessions((prev) => {
+        const current = prev.find((session) => session.id === conversationId);
+        if (!current) return prev;
+        const refreshed = {
+          ...current,
+          updatedAt,
+          timestamp: formatSessionTime(updatedAt),
+        };
+        return sortChatSessions([
+          refreshed,
+          ...prev.filter((session) => session.id !== conversationId),
+        ]);
+      });
       setIsChatLoading(false);
     }
   }, [chatInput, note?.recordingId, isChatLoading, activeConversationId]);
 
-  // Context menu handlers
-  const handleRename = useCallback(async () => {
-    if (!note?.recordingId) return;
-    const newTitle = window.prompt('Enter new title:', recording?.title ?? note.title);
-    if (!newTitle || newTitle === (recording?.title ?? note.title)) return;
+  // Session context-menu handlers
+  const handleRenameSession = useCallback(async () => {
+    if (!contextMenu) return;
+    const target = chatSessions.find((session) => session.id === contextMenu.conversationId);
+    if (!target) {
+      setContextMenu(null);
+      return;
+    }
+    const newTitle = window.prompt('Enter new session title:', target.title)?.trim();
+    if (!newTitle || newTitle === target.title) {
+      setContextMenu(null);
+      return;
+    }
     try {
-      await apiClient.updateRecordingTitle(note.recordingId, newTitle);
-      // Close modal to refresh — parent should refetch
-      onRecordingMutated?.();
-      onClose();
+      await apiClient.updateConversation(target.id, newTitle);
+      const updatedAt = new Date().toISOString();
+      setChatSessions((prev) =>
+        sortChatSessions(
+          prev.map((session) =>
+            session.id === target.id
+              ? {
+                  ...session,
+                  title: newTitle,
+                  type: inferSessionType(newTitle),
+                  updatedAt,
+                  timestamp: formatSessionTime(updatedAt),
+                }
+              : session,
+          ),
+        ),
+      );
     } catch {
-      alert('Failed to rename recording.');
+      alert('Failed to rename session.');
     }
     setContextMenu(null);
-  }, [note?.recordingId, recording?.title, note?.title, onRecordingMutated, onClose]);
+  }, [contextMenu, chatSessions]);
+
+  const handleExportSession = useCallback(async () => {
+    if (!contextMenu) return;
+    const conversationId = contextMenu.conversationId;
+    try {
+      const conversation = await apiClient.getConversation(conversationId);
+      const now = new Date();
+      const lines: string[] = [
+        'TranscriptionSuite Session Export',
+        `Session: ${conversation.title}`,
+        `Recording: ${recording?.title ?? note?.title ?? 'Unknown recording'}`,
+        `Recording ID: ${conversation.recording_id}`,
+        `Exported: ${now.toISOString()}`,
+        '',
+        'Messages',
+        '--------',
+      ];
+
+      const messageLines = (conversation.messages ?? [])
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map(
+          (m) =>
+            `[${new Date(m.created_at).toLocaleString()}] ${m.role.toUpperCase()}: ${m.content}`,
+        );
+
+      if (messageLines.length === 0) {
+        lines.push('(No chat messages yet)');
+      } else {
+        lines.push(...messageLines);
+      }
+
+      const filename = `${sanitizeFilename(conversation.title)}_${formatExportStamp(now)}.txt`;
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Failed to export session.');
+    }
+    setContextMenu(null);
+  }, [contextMenu, recording?.title, note?.title]);
+
+  const handleDeleteSession = useCallback(async () => {
+    if (!contextMenu) return;
+    const conversationId = contextMenu.conversationId;
+    const target = chatSessions.find((session) => session.id === conversationId);
+    const confirmed = window.confirm(
+      `Delete session "${target?.title ?? 'this session'}"? This cannot be undone.`,
+    );
+    if (!confirmed) {
+      setContextMenu(null);
+      return;
+    }
+
+    try {
+      await apiClient.deleteConversation(conversationId);
+      const remaining = sortChatSessions(
+        chatSessions.filter((session) => session.id !== conversationId),
+      );
+      setChatSessions(remaining);
+      setContextMenu(null);
+
+      if (activeConversationId === conversationId) {
+        if (remaining.length === 0) {
+          setActiveConversationId(null);
+          setChatMessages([]);
+          setSessionsError(null);
+          return;
+        }
+        const fallbackId = remaining[0].id;
+        setActiveConversationId(fallbackId);
+        try {
+          const fallbackConversation = await apiClient.getConversation(fallbackId);
+          setChatMessages(toDisplayMessages(fallbackConversation.messages));
+          setSessionsError(null);
+        } catch {
+          setChatMessages([]);
+          setSessionsError('Failed to load selected session.');
+        }
+      }
+    } catch {
+      alert('Failed to delete session.');
+      setContextMenu(null);
+    }
+  }, [contextMenu, chatSessions, activeConversationId]);
+
+  const activeSession = chatSessions.find((session) => session.id === activeConversationId) ?? null;
 
   /** Open inline date editor with current date pre-filled */
   const handleDateEditOpen = useCallback(() => {
@@ -503,32 +784,6 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       alert('Failed to update date.');
     }
   }, [note?.recordingId, dateEditValue, onRecordingMutated, onClose]);
-
-  const handleExport = useCallback(
-    async (format: 'txt' | 'srt' | 'ass' = 'txt') => {
-      if (!note?.recordingId) return;
-      const url = apiClient.getExportUrl(note.recordingId, format);
-      window.open(url, '_blank');
-      setContextMenu(null);
-    },
-    [note?.recordingId],
-  );
-
-  const handleDelete = useCallback(async () => {
-    if (!note?.recordingId) return;
-    const confirmed = window.confirm(
-      `Delete "${recording?.title ?? note.title}"? This cannot be undone.`,
-    );
-    if (!confirmed) return;
-    try {
-      await apiClient.deleteRecording(note.recordingId);
-      onRecordingMutated?.();
-      onClose();
-    } catch {
-      alert('Failed to delete recording.');
-    }
-    setContextMenu(null);
-  }, [note?.recordingId, recording?.title, note?.title, onRecordingMutated, onClose]);
 
   if (!isRendered || !note || !portalContainer) return null;
 
@@ -900,40 +1155,65 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
           </div>
           <div className="flex min-w-100 flex-1 flex-col overflow-hidden">
             <div className="flex-none border-b border-white/5 bg-white/1 p-2 select-none">
-              <div className="px-3 py-2 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                Sessions
+              <div className="flex items-center justify-between px-3 py-2">
+                <div className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                  Sessions
+                </div>
+                <button
+                  onClick={handleCreateSession}
+                  title="New session"
+                  className="rounded-md p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  disabled={!note?.recordingId || sessionsLoading}
+                >
+                  <Plus size={12} />
+                </button>
               </div>
-              <div className="space-y-1">
-                {chatSessions.map((session) => (
-                  <div
-                    key={session.id}
-                    onContextMenu={(e) => handleContextMenu(e, session.id)}
-                    className={`group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors ${session.active ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
-                  >
-                    <div
-                      className={`shrink-0 ${session.type === 'summary' ? 'text-accent-magenta' : 'text-accent-cyan'}`}
-                    >
-                      {session.type === 'summary' ? (
-                        <Sparkles size={14} />
-                      ) : (
-                        <MessageSquare size={14} />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-medium">{session.title}</div>
-                      <div className="text-[10px] text-slate-500">{session.timestamp}</div>
-                    </div>
-                    {session.active && (
-                      <div className="bg-accent-cyan h-1.5 w-1.5 rounded-full shadow-[0_0_5px_rgba(239,22,238,0.5)]"></div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              {sessionsLoading ? (
+                <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate-500">
+                  <Loader2 size={12} className="animate-spin" /> Loading sessions...
+                </div>
+              ) : chatSessions.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-500">No sessions yet</div>
+              ) : (
+                <div className="space-y-1">
+                  {chatSessions.map((session) => {
+                    const isActive = activeConversationId === session.id;
+                    return (
+                      <div
+                        key={session.id}
+                        onClick={() => void handleSelectSession(session.id)}
+                        onContextMenu={(e) => handleContextMenu(e, session.id)}
+                        className={`group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors ${isActive ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
+                      >
+                        <div
+                          className={`shrink-0 ${session.type === 'summary' ? 'text-accent-magenta' : 'text-accent-cyan'}`}
+                        >
+                          {session.type === 'summary' ? (
+                            <Sparkles size={14} />
+                          ) : (
+                            <MessageSquare size={14} />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium">{session.title}</div>
+                          <div className="text-[10px] text-slate-500">{session.timestamp}</div>
+                        </div>
+                        {isActive && (
+                          <div className="bg-accent-cyan h-1.5 w-1.5 rounded-full shadow-[0_0_5px_rgba(239,22,238,0.5)]"></div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {sessionsError && (
+                <div className="px-3 py-2 text-[10px] text-red-400">{sessionsError}</div>
+              )}
             </div>
 
             <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto p-4">
               <div className="my-4 text-center text-xs text-slate-600 select-none">
-                Current Session
+                {activeSession?.title ?? 'Current Session'}
               </div>
 
               {/* Welcome message */}
@@ -1016,37 +1296,25 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       {/* Context Menu Portal */}
       {contextMenu && (
         <div
-          className="animate-in fade-in zoom-in-95 fixed z-10000 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#0f172a] py-1 shadow-2xl duration-100 select-none"
+          className="animate-in fade-in zoom-in-95 fixed z-10000 w-48 overflow-hidden rounded-xl border border-white/10 bg-slate-900 py-1 shadow-2xl duration-100 select-none"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            onClick={handleRename}
+            onClick={handleRenameSession}
             className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
           >
             <Edit2 size={14} /> Rename
           </button>
           <button
-            onClick={() => handleExport('txt')}
+            onClick={handleExportSession}
             className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
           >
             <Share size={14} /> Export TXT
           </button>
-          <button
-            onClick={() => handleExport('srt')}
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
-          >
-            <Share size={14} /> Export SRT
-          </button>
-          <button
-            onClick={() => handleExport('ass')}
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
-          >
-            <Share size={14} /> Export ASS
-          </button>
           <div className="my-1 h-px bg-white/10"></div>
           <button
-            onClick={handleDelete}
+            onClick={handleDeleteSession}
             className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
           >
             <Trash2 size={14} /> Delete
