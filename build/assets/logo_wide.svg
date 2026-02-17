@@ -21,9 +21,9 @@
      inkscape:pageopacity="0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
-     inkscape:zoom="2.3166667"
-     inkscape:cx="76.402878"
-     inkscape:cy="0"
+     inkscape:zoom="6.5525229"
+     inkscape:cx="29.606917"
+     inkscape:cy="44.868214"
      inkscape:window-width="1920"
      inkscape:window-height="1012"
      inkscape:window-x="0"
@@ -57,25 +57,6 @@
      fill="url(#ts-logo-icon-gradient)"
      id="rect2"
      style="fill:url(#ts-logo-icon-gradient)" />
-  <g
-     transform="translate(8,12)"
-     stroke="#ffffff"
-     stroke-width="2"
-     stroke-linecap="round"
-     stroke-linejoin="round"
-     id="g3">
-    <path
-       d="m 11,7.601 -5.994,8.19 a 1,1 0 0 0 0.1,1.298 l 0.817,0.818 a 1,1 0 0 0 1.314,0.087 L 15.09,12"
-       id="path2" />
-    <path
-       d="M 16.5,21.174 C 15.5,20.5 14.372,20 13,20 10.942,20 9.072,22.356 7,22 4.928,21.644 4.225,18.631 5.5,17.5"
-       id="path3" />
-    <circle
-       cx="16"
-       cy="7"
-       r="5"
-       id="circle3" />
-  </g>
   <circle
      cx="38"
      cy="6"
@@ -101,4 +82,27 @@
      font-weight="700"
      letter-spacing="1.2"
      id="text5">SUITE</text>
+  <g
+     transform="matrix(1.2304833,0,0,1.2304833,5.0251472,9.2295352)"
+     stroke="#ffffff"
+     stroke-width="2"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     id="g3"
+     style="stroke-width:2.00003;stroke-dasharray:none">
+    <path
+       d="m 11,7.601 -5.994,8.19 a 1,1 0 0 0 0.1,1.298 l 0.817,0.818 a 1,1 0 0 0 1.314,0.087 L 15.09,12"
+       id="path2-1"
+       style="stroke-width:2.00003;stroke-dasharray:none" />
+    <path
+       d="M 16.5,21.174 C 15.5,20.5 14.372,20 13,20 10.942,20 9.072,22.356 7,22 4.928,21.644 4.225,18.631 5.5,17.5"
+       id="path3-2"
+       style="stroke-width:2.00003;stroke-dasharray:none" />
+    <circle
+       cx="16"
+       cy="7"
+       r="5"
+       id="circle3-7"
+       style="stroke-width:2.00003;stroke-dasharray:none" />
+  </g>
 </svg>
