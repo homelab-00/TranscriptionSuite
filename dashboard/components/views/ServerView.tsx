@@ -108,6 +108,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Derive status from Docker hook
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
+  const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
   const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
@@ -492,13 +493,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         {/* 2. Container Card (Config & Controls) */}
         <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
           <div
-            className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+            className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
           >
             <Box size={16} />
           </div>
           <GlassCard
             title="2. Instance Settings"
-            className={`transition-all duration-500 ease-in-out ${isRunning ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+            className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
           >
             <div className="space-y-6">
               {/* Runtime Profile Selector */}
@@ -543,13 +544,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
                   <StatusLight
                     status={
-                      isRunning && containerStatus.health === 'healthy'
+                      isRunningAndHealthy
                         ? 'active'
                         : containerStatus.exists
                           ? 'warning'
                           : 'inactive'
                     }
-                    animate={isRunning && containerStatus.health === 'healthy'}
+                    animate={isRunningAndHealthy}
                   />
                   <span
                     className={`font-mono text-sm transition-colors ${
