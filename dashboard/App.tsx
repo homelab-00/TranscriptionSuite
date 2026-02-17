@@ -54,6 +54,7 @@ const AppInner: React.FC = () => {
         onOpenAbout={() => setIsAboutOpen(true)}
         containerRunning={docker.container.running}
         containerExists={docker.container.exists}
+        containerHealth={docker.container.health}
         clientRunning={clientRunning}
       />
 

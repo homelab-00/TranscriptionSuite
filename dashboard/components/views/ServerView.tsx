@@ -534,8 +534,14 @@ export const ServerView: React.FC = () => {
               <div className="flex flex-wrap items-center gap-5">
                 <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
                   <StatusLight
-                    status={isRunning ? 'active' : containerStatus.exists ? 'warning' : 'inactive'}
-                    animate={isRunning}
+                    status={
+                      isRunning && containerStatus.health === 'healthy'
+                        ? 'active'
+                        : containerStatus.exists
+                          ? 'warning'
+                          : 'inactive'
+                    }
+                    animate={isRunning && containerStatus.health === 'healthy'}
                   />
                   <span
                     className={`font-mono text-sm transition-colors ${

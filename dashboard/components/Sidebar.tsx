@@ -10,6 +10,7 @@ interface SidebarProps {
   onOpenAbout: () => void;
   containerRunning: boolean;
   containerExists: boolean;
+  containerHealth?: string;
   clientRunning: boolean;
 }
 
@@ -20,20 +21,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAbout,
   containerRunning,
   containerExists,
+  containerHealth,
   clientRunning,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
 
   // Derive status for each sidebar item from Docker + client state
-  // Issue 17 — Session: pulsing green when server AND client running, orange when container exists, gray otherwise
+  // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
   const sessionStatus: 'active' | 'warning' | 'inactive' =
-    containerRunning && clientRunning ? 'active' : containerExists ? 'warning' : 'inactive';
-  // Issue 18 — Server: pulsing green when server running, orange when container exists, gray otherwise
-  const serverSidebarStatus: 'active' | 'warning' | 'inactive' = containerRunning
-    ? 'active'
-    : containerExists
-      ? 'warning'
-      : 'inactive';
+    containerRunning && clientRunning && containerHealth === 'healthy'
+      ? 'active'
+      : containerExists
+        ? 'warning'
+        : 'inactive';
+  // Issue 18 — Server: pulsing green when server running AND healthy, orange when container exists, gray otherwise
+  const serverSidebarStatus: 'active' | 'warning' | 'inactive' =
+    containerRunning && containerHealth === 'healthy'
+      ? 'active'
+      : containerExists
+        ? 'warning'
+        : 'inactive';
 
   // Top navigation items that get the sliding animation
   const navItems = [
