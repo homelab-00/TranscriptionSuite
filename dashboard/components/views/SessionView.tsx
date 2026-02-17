@@ -822,7 +822,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-5">
           {/* Left Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 right-2 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
@@ -834,7 +834,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Top Corner Mask */}
           <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute top-0 right-2 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
               backgroundImage:
@@ -1296,7 +1296,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Left Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute right-2 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
@@ -1308,7 +1308,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-2 bottom-0 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
               backgroundImage:
@@ -1324,7 +1324,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-7">
           {/* Right Top Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute top-0 right-2 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
@@ -1336,7 +1336,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Top Corner Mask */}
           <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute top-0 right-2 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
               backgroundImage:
@@ -1501,7 +1501,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
           {/* Right Bottom Scroll Indicator */}
           <div
-            className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
+            className={`pointer-events-none absolute right-2 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
           >
             <div
               className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
@@ -1513,7 +1513,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-2 bottom-0 z-20 h-4 w-4"
             style={{
               backgroundColor: '#0f172a',
               backgroundImage:
