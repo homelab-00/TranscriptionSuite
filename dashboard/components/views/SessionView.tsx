@@ -1487,9 +1487,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       {live.error && <div className="mt-2 text-xs text-red-400">{live.error}</div>}
                     </>
                   ) : (
-                    <div className="flex h-full flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                      <Radio size={48} strokeWidth={1} />
-                      <p>Live mode is off. Toggle the switch to start.</p>
+                    <div className="absolute inset-4 flex items-center justify-center">
+                      <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
+                        <Radio size={48} strokeWidth={1} />
+                        <p>Live mode is off. Toggle the switch to start.</p>
+                      </div>
                     </div>
                   )}
                 </div>
