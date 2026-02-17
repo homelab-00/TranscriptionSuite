@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { View } from '../types';
 import { Mic2, Book, Server, Settings, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { StatusLight } from './ui/StatusLight';
@@ -14,6 +14,11 @@ interface SidebarProps {
   clientRunning: boolean;
 }
 
+const SIDEBAR_COLLAPSED_WIDTH_PX = 80;
+const SIDEBAR_EXPANDED_BASE_WIDTH_PX = 192;
+const SIDEBAR_LOGO_HORIZONTAL_PADDING_PX = 24;
+const SIDEBAR_LOGO_COMFORT_BUFFER_PX = 16;
+
 export const Sidebar: React.FC<SidebarProps> = ({
   currentView,
   onChangeView,
@@ -25,8 +30,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
   clientRunning,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const [expandedWidthPx, setExpandedWidthPx] = useState(SIDEBAR_EXPANDED_BASE_WIDTH_PX);
+  const logoContentRef = useRef<HTMLDivElement | null>(null);
   const hasElectronApi = typeof window !== 'undefined' && Boolean((window as any).electronAPI);
   const useMockupStatusFallback = !hasElectronApi;
+
+  const updateExpandedWidth = useCallback(() => {
+    if (collapsed || !logoContentRef.current) return;
+
+    const logoContentWidth = Math.ceil(logoContentRef.current.getBoundingClientRect().width);
+    const minComfortableWidth =
+      logoContentWidth + SIDEBAR_LOGO_HORIZONTAL_PADDING_PX * 2 + SIDEBAR_LOGO_COMFORT_BUFFER_PX;
+    const nextWidth = Math.max(SIDEBAR_EXPANDED_BASE_WIDTH_PX, minComfortableWidth);
+
+    setExpandedWidthPx((previousWidth) => (previousWidth === nextWidth ? previousWidth : nextWidth));
+  }, [collapsed]);
+
+  useLayoutEffect(() => {
+    updateExpandedWidth();
+  }, [updateExpandedWidth]);
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleViewportChange = () => {
+      updateExpandedWidth();
+    };
+
+    window.addEventListener('resize', handleViewportChange);
+    return () => {
+      window.removeEventListener('resize', handleViewportChange);
+    };
+  }, [updateExpandedWidth]);
+
+  useLayoutEffect(() => {
+    if (typeof ResizeObserver === 'undefined' || !logoContentRef.current) return;
+
+    const logoResizeObserver = new ResizeObserver(() => {
+      updateExpandedWidth();
+    });
+
+    logoResizeObserver.observe(logoContentRef.current);
+    return () => {
+      logoResizeObserver.disconnect();
+    };
+  }, [updateExpandedWidth]);
 
   // Derive status for each sidebar item from Docker + client state
   // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
@@ -69,10 +117,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const activeIndex = navItems.findIndex((item) => item.id === currentView);
+  const sidebarWidthPx = collapsed ? SIDEBAR_COLLAPSED_WIDTH_PX : expandedWidthPx;
 
   return (
     <div
       className={`bg-glass-surface border-glass-border relative flex h-full shrink-0 flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-48'} `}
+      style={{
+        width: sidebarWidthPx,
+      }}
     >
       {/* Toggle Button */}
       <button
@@ -83,23 +135,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </button>
 
       {/* Logo Area */}
-      <div
-        className={`flex items-center p-6 ${collapsed ? 'justify-center' : 'gap-3'} transition-all duration-300`}
-      >
-        <div className="relative shrink-0">
-          <div className="from-accent-magenta to-accent-orange shadow-accent-magenta/20 flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br shadow-lg">
-            <Mic2 className="text-white" size={24} />
-          </div>
-          <div className="bg-accent-cyan absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-slate-900"></div>
-        </div>
-
+      <div className={`flex p-6 ${collapsed ? 'justify-center' : ''} transition-all duration-300`}>
         <div
-          className={`overflow-hidden transition-all duration-300 ${collapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}
+          ref={logoContentRef}
+          className={`inline-flex shrink-0 items-center transition-all duration-300 ${collapsed ? '' : 'gap-3'}`}
         >
-          <h1 className="text-lg leading-tight font-bold whitespace-nowrap text-white">
-            Transcription
-          </h1>
-          <h2 className="text-accent-cyan text-xs font-bold tracking-widest uppercase">Suite</h2>
+          <div className="relative shrink-0">
+            <div className="from-accent-magenta to-accent-orange shadow-accent-magenta/20 flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br shadow-lg">
+              <Mic2 className="text-white" size={24} />
+            </div>
+            <div className="bg-accent-cyan absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-slate-900"></div>
+          </div>
+
+          <div
+            className={`overflow-hidden transition-all duration-300 ${collapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}
+          >
+            <h1 className="text-lg leading-tight font-bold whitespace-nowrap text-white">
+              Transcription
+            </h1>
+            <h2 className="text-accent-cyan text-xs font-bold tracking-widest uppercase">Suite</h2>
+          </div>
         </div>
       </div>
 
