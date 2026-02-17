@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.9
+  spec_version: 1.0.10
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -407,6 +407,7 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-700
     - bg-slate-800
+    - bg-slate-900
     - bg-slate-900/80
     - bg-teal-500
     - bg-transparent
