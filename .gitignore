@@ -20,6 +20,7 @@ build/assets/videos/
 !.github/
 ### Making sure that the instructions folder is excluded
 .github/instructions/
+.github/prompts/
 
 ## etc
 __pycache__/
