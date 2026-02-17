@@ -82,6 +82,8 @@ function getComposeDir(): string {
 
 /** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
 export type RuntimeProfile = 'gpu' | 'cpu';
+export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
+export type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
 
 const VOLUME_NAMES = {
   data: 'transcriptionsuite-data',
@@ -128,6 +130,64 @@ export interface StartContainerOptions {
   imageTag?: string;
   tlsEnv?: Record<string, string>;
   hfToken?: string;
+  bootstrapCacheDir?: string;
+  hfTokenDecision?: HfTokenDecision;
+  uvCacheVolumeDecision?: UvCacheVolumeDecision;
+}
+
+const HF_DECISION_VALUES = new Set<HfTokenDecision>(['unset', 'provided', 'skipped']);
+const UV_CACHE_DECISION_VALUES = new Set<UvCacheVolumeDecision>(['unset', 'enabled', 'skipped']);
+const DEFAULT_BOOTSTRAP_CACHE_DIR = '/runtime-cache';
+const SKIPPED_BOOTSTRAP_CACHE_DIR = '/tmp/uv-cache';
+
+function normalizeHfTokenDecision(value: unknown): HfTokenDecision | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase() as HfTokenDecision;
+  return HF_DECISION_VALUES.has(normalized) ? normalized : undefined;
+}
+
+function normalizeUvCacheDecision(value: unknown): UvCacheVolumeDecision | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase() as UvCacheVolumeDecision;
+  return UV_CACHE_DECISION_VALUES.has(normalized) ? normalized : undefined;
+}
+
+function sanitizeEnvValue(value: string): string {
+  return value.replace(/[\r\n]+/g, '').trim();
+}
+
+function upsertComposeEnvValues(values: Record<string, string>): void {
+  const composeEnvPath = path.join(getComposeDir(), '.env');
+  const entries = Object.entries(values);
+  if (entries.length === 0) return;
+
+  let existingLines: string[] = [];
+  try {
+    const existing = fs.readFileSync(composeEnvPath, 'utf8');
+    existingLines = existing.split(/\r?\n/);
+  } catch {
+    existingLines = [];
+  }
+
+  const keys = new Set(entries.map(([key]) => key));
+  const filteredLines = existingLines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return true;
+    const keyMatch = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(trimmed);
+    if (!keyMatch) return true;
+    return !keys.has(keyMatch[1]);
+  });
+
+  const nextLines = [
+    ...filteredLines,
+    ...entries.map(([key, value]) => `${key}=${sanitizeEnvValue(value)}`),
+  ];
+
+  const normalizedText = nextLines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+  fs.writeFileSync(composeEnvPath, `${normalizedText}\n`, 'utf8');
 }
 
 // ─── Compose File Selection ─────────────────────────────────────────────────
@@ -463,8 +523,27 @@ async function getContainerStatus(): Promise<ContainerStatus> {
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
  */
 async function startContainer(options: StartContainerOptions): Promise<string> {
-  const { mode, runtimeProfile, imageTag, tlsEnv, hfToken } = options;
+  const {
+    mode,
+    runtimeProfile,
+    imageTag,
+    tlsEnv,
+    hfToken,
+    bootstrapCacheDir,
+    hfTokenDecision,
+    uvCacheVolumeDecision,
+  } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
+  const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
+  const normalizedUvDecision = normalizeUvCacheDecision(uvCacheVolumeDecision);
+  const resolvedBootstrapCacheDir =
+    typeof bootstrapCacheDir === 'string' && bootstrapCacheDir.trim().length > 0
+      ? bootstrapCacheDir.trim()
+      : normalizedUvDecision === 'skipped'
+        ? SKIPPED_BOOTSTRAP_CACHE_DIR
+        : normalizedUvDecision
+          ? DEFAULT_BOOTSTRAP_CACHE_DIR
+          : undefined;
 
   // Prefer a local image tag for dev workflows when no explicit tag is provided.
   let resolvedTag = imageTag;
@@ -492,9 +571,33 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
 
   // Pass HuggingFace token to the container for diarization model access
-  if (hfToken) {
+  if (hfToken !== undefined) {
     composeEnv['HUGGINGFACE_TOKEN'] = hfToken;
   }
+  if (normalizedHfDecision) {
+    composeEnv['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
+  }
+  if (normalizedUvDecision) {
+    composeEnv['UV_CACHE_VOLUME_DECISION'] = normalizedUvDecision;
+  }
+  if (resolvedBootstrapCacheDir) {
+    composeEnv['BOOTSTRAP_CACHE_DIR'] = resolvedBootstrapCacheDir;
+  }
+
+  const envUpdates: Record<string, string> = {};
+  if (hfToken !== undefined) {
+    envUpdates['HUGGINGFACE_TOKEN'] = hfToken;
+  }
+  if (normalizedHfDecision) {
+    envUpdates['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
+  }
+  if (normalizedUvDecision) {
+    envUpdates['UV_CACHE_VOLUME_DECISION'] = normalizedUvDecision;
+  }
+  if (resolvedBootstrapCacheDir) {
+    envUpdates['BOOTSTRAP_CACHE_DIR'] = resolvedBootstrapCacheDir;
+  }
+  upsertComposeEnvValues(envUpdates);
 
   const fileArgs = composeFileArgs(runtimeProfile);
 

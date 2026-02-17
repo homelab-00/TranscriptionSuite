@@ -67,7 +67,7 @@ services:
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
       - BOOTSTRAP_RUNTIME_DIR=/runtime
-      - BOOTSTRAP_CACHE_DIR=/runtime-cache
+      - BOOTSTRAP_CACHE_DIR=${BOOTSTRAP_CACHE_DIR:-/runtime-cache}
       - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
       - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
       - BOOTSTRAP_REQUIRE_HF_TOKEN=false

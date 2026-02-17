@@ -42,12 +42,16 @@ interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
   clientRunning: boolean;
   setClientRunning: (running: boolean) => void;
+  onStartServer: (mode: 'local' | 'remote', runtimeProfile: 'gpu' | 'cpu') => Promise<void>;
+  startupFlowPending: boolean;
 }
 
 export const SessionView: React.FC<SessionViewProps> = ({
   serverConnection,
   clientRunning,
   setClientRunning,
+  onStartServer,
+  startupFlowPending,
 }) => {
   // Global State
   const [showLogs, setShowLogs] = useState(false);
@@ -906,11 +910,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => docker.startContainer('local', runtimeProfile)}
-                          disabled={serverRunning || docker.operating}
+                          onClick={() => onStartServer('local', runtimeProfile)}
+                          disabled={serverRunning || docker.operating || startupFlowPending}
                           className="px-3 text-xs"
                         >
-                          {docker.operating ? (
+                          {docker.operating || startupFlowPending ? (
                             <Loader2 size={14} className="animate-spin" />
                           ) : (
                             'Start Local'
@@ -919,8 +923,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => docker.startContainer('remote', runtimeProfile)}
-                          disabled={serverRunning || docker.operating}
+                          onClick={() => onStartServer('remote', runtimeProfile)}
+                          disabled={serverRunning || docker.operating || startupFlowPending}
                           className="px-3 text-xs"
                         >
                           Start Remote

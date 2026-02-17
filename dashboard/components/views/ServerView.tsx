@@ -25,9 +25,17 @@ import { CustomSelect } from '../ui/CustomSelect';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
-import { getConfig } from '../../src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu';
+
+interface ServerViewProps {
+  onStartServer: (
+    mode: 'local' | 'remote',
+    runtimeProfile: RuntimeProfile,
+    imageTag?: string,
+  ) => Promise<void>;
+  startupFlowPending: boolean;
+}
 
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
 const LIVE_ALTERNATE_MODEL = 'Systran/faster-whisper-medium';
@@ -49,7 +57,7 @@ function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
 }
 
-export const ServerView: React.FC = () => {
+export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
   const { status: adminStatus } = useAdminStatus();
   const docker = useDockerContext();
 
@@ -172,15 +180,6 @@ export const ServerView: React.FC = () => {
       : selectedImage;
   const selectedTagForActions = resolvedImage.split(':').pop() || 'latest';
   const selectedTagForStart = docker.images.length > 0 ? selectedTagForActions : undefined;
-
-  // Start container with HF token from config
-  const handleStartContainer = useCallback(
-    async (mode: 'local' | 'remote') => {
-      const hfToken = (await getConfig<string>('server.hfToken')) || undefined;
-      await docker.startContainer(mode, runtimeProfile, undefined, selectedTagForStart, hfToken);
-    },
-    [docker, runtimeProfile, selectedTagForStart],
-  );
 
   // ─── Setup Checklist ────────────────────────────────────────────────────────
 
@@ -561,10 +560,10 @@ export const ServerView: React.FC = () => {
                     <Button
                       variant="secondary"
                       className="h-9 px-4"
-                      onClick={() => handleStartContainer('local')}
-                      disabled={docker.operating || isRunning}
+                      onClick={() => onStartServer('local', runtimeProfile, selectedTagForStart)}
+                      disabled={docker.operating || isRunning || startupFlowPending}
                     >
-                      {docker.operating ? (
+                      {docker.operating || startupFlowPending ? (
                         <Loader2 size={14} className="animate-spin" />
                       ) : (
                         'Start Local'
@@ -573,8 +572,8 @@ export const ServerView: React.FC = () => {
                     <Button
                       variant="secondary"
                       className="h-9 px-4"
-                      onClick={() => handleStartContainer('remote')}
-                      disabled={docker.operating || isRunning}
+                      onClick={() => onStartServer('remote', runtimeProfile, selectedTagForStart)}
+                      disabled={docker.operating || isRunning || startupFlowPending}
                     >
                       Start Remote
                     </Button>

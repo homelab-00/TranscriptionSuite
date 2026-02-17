@@ -3,7 +3,12 @@ import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
-import { dockerManager, type StartContainerOptions } from './dockerManager.js';
+import {
+  dockerManager,
+  type HfTokenDecision,
+  type StartContainerOptions,
+  type UvCacheVolumeDecision,
+} from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 
@@ -17,6 +22,8 @@ const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
 const CLIENT_LOG_FILE = 'client-debug.log';
 const STOP_SERVER_ON_QUIT_TIMEOUT_MS = 30_000;
+const DEFAULT_BOOTSTRAP_CACHE_DIR = '/runtime-cache';
+const SKIPPED_BOOTSTRAP_CACHE_DIR = '/tmp/uv-cache';
 
 function ensureClientLogFilePath(): string {
   const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
@@ -79,6 +86,10 @@ const store = new Store({
     'server.host': 'localhost',
     'server.port': 8000,
     'server.https': false,
+    'server.hfToken': '',
+    'server.hfTokenDecision': 'unset',
+    'server.uvCacheVolumeDecision': 'unset',
+    'server.containerExistsLastSeen': false,
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
     'server.runtimeProfile': 'gpu',
@@ -100,11 +111,29 @@ trayManager.setActions({
   startServer: async () => {
     try {
       const runtimeProfile = (store.get('server.runtimeProfile') as string) || 'gpu';
-      const hfToken = (store.get('server.hfToken') as string) || undefined;
+      const hfToken = ((store.get('server.hfToken') as string) || '').trim();
+      const rawHfDecision = store.get('server.hfTokenDecision');
+      const rawUvDecision = store.get('server.uvCacheVolumeDecision');
+      const hfDecision: HfTokenDecision =
+        rawHfDecision === 'provided' || rawHfDecision === 'skipped' || rawHfDecision === 'unset'
+          ? rawHfDecision
+          : hfToken
+            ? 'provided'
+            : 'unset';
+      const uvDecision: UvCacheVolumeDecision =
+        rawUvDecision === 'enabled' || rawUvDecision === 'skipped' || rawUvDecision === 'unset'
+          ? rawUvDecision
+          : 'unset';
+      const bootstrapCacheDir =
+        uvDecision === 'skipped' ? SKIPPED_BOOTSTRAP_CACHE_DIR : DEFAULT_BOOTSTRAP_CACHE_DIR;
+
       await dockerManager.startContainer({
         mode: 'local',
         runtimeProfile: runtimeProfile as 'gpu' | 'cpu',
         hfToken,
+        hfTokenDecision: hfDecision,
+        uvCacheVolumeDecision: uvDecision,
+        bootstrapCacheDir,
       });
       trayManager.setMenuState({ serverRunning: true });
     } catch (err) {

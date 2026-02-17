@@ -35,6 +35,15 @@ export interface VolumeInfo {
   size?: string;
 }
 
+export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
+export type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
+
+export interface StartContainerOnboardingOptions {
+  bootstrapCacheDir?: string;
+  hfTokenDecision?: HfTokenDecision;
+  uvCacheVolumeDecision?: UvCacheVolumeDecision;
+}
+
 export interface UseDockerReturn {
   available: boolean;
   loading: boolean;
@@ -55,6 +64,7 @@ export interface UseDockerReturn {
     tlsEnv?: Record<string, string>,
     imageTag?: string,
     hfToken?: string,
+    onboardingOptions?: StartContainerOnboardingOptions,
   ) => Promise<void>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
@@ -244,11 +254,19 @@ export function useDocker(): UseDockerReturn {
       tlsEnv?: Record<string, string>,
       imageTag?: string,
       hfToken?: string,
+      onboardingOptions?: StartContainerOnboardingOptions,
     ) => {
       const docker = api();
       if (!docker) return;
       await withOperation(async () => {
-        await docker.startContainer({ mode, runtimeProfile, tlsEnv, imageTag, hfToken });
+        await docker.startContainer({
+          mode,
+          runtimeProfile,
+          tlsEnv,
+          imageTag,
+          hfToken,
+          ...onboardingOptions,
+        });
         // Wait a moment then refresh status
         await new Promise((r) => setTimeout(r, 2000));
         setContainer(await docker.getContainerStatus());
