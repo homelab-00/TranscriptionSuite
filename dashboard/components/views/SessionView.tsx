@@ -1019,7 +1019,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           {clientStatusLabel}
                         </span>
                         <StatusLight
-                          status={clientRunning ? 'active' : 'inactive'}
+                          status={
+                            clientRunning && !serverConnection.reachable
+                              ? 'warning'
+                              : clientRunning
+                                ? 'active'
+                                : 'inactive'
+                          }
                           className="h-2 w-2"
                         />
                       </div>
