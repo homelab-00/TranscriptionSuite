@@ -348,6 +348,10 @@ ipcMain.handle('docker:getVolumes', async () => {
   return dockerManager.getVolumes();
 });
 
+ipcMain.handle('docker:checkModelsCached', async (_event, modelIds: string[]) => {
+  return dockerManager.checkModelsCached(modelIds);
+});
+
 ipcMain.handle('docker:removeVolume', async (_event, name: string) => {
   return dockerManager.removeVolume(name);
 });

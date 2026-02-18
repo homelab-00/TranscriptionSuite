@@ -475,6 +475,81 @@ const TimeSection: React.FC<{
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
   const [activeMenu, setActiveMenu] = useState<{ id: string; trigger: MenuTrigger } | null>(null);
   const isCompact = visibleSlots >= 4;
+
+  // Audio preview state
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopPreview = useCallback(() => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.removeAttribute('src');
+      previewAudioRef.current = null;
+    }
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+    setPreviewingId(null);
+  }, []);
+
+  // Global click listener to stop preview on any UI interaction
+  useEffect(() => {
+    if (!previewingId) return;
+    const handler = () => stopPreview();
+    // Use setTimeout to avoid the triggering click itself stopping the preview
+    const raf = requestAnimationFrame(() => {
+      document.addEventListener('click', handler, { capture: true, once: true });
+      document.addEventListener('contextmenu', handler, { capture: true, once: true });
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('click', handler, { capture: true });
+      document.removeEventListener('contextmenu', handler, { capture: true });
+    };
+  }, [previewingId, stopPreview]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPreview();
+  }, [stopPreview]);
+
+  const startPreview = useCallback((e: React.MouseEvent, evt: EventData) => {
+    e.stopPropagation();
+    if (!evt.recordingId) return;
+
+    // Stop any existing preview
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.removeAttribute('src');
+    }
+    if (previewTimeoutRef.current) clearTimeout(previewTimeoutRef.current);
+
+    const audio = new Audio(apiClient.getAudioUrl(evt.recordingId));
+    previewAudioRef.current = audio;
+    setPreviewingId(evt.id);
+
+    audio.play().catch(() => {
+      setPreviewingId(null);
+    });
+
+    // Auto-stop after 10 seconds
+    previewTimeoutRef.current = setTimeout(() => {
+      audio.pause();
+      audio.removeAttribute('src');
+      previewAudioRef.current = null;
+      setPreviewingId(null);
+    }, 10_000);
+
+    // Also stop when audio naturally ends (if shorter than 10s)
+    audio.onended = () => {
+      if (previewTimeoutRef.current) clearTimeout(previewTimeoutRef.current);
+      previewAudioRef.current = null;
+      setPreviewingId(null);
+    };
+  }, []);
+
   const handleContextMenu = (e: React.MouseEvent, evt: EventData) => {
     e.preventDefault();
     setActiveMenu({ id: evt.id, trigger: { type: 'point', x: e.clientX, y: e.clientY } });
@@ -536,7 +611,7 @@ const TimeSection: React.FC<{
                             </div>
                             {!isCompact && evt.tag === 'Diarized' && (
                               <div className="bg-accent-cyan/10 text-accent-cyan border-accent-cyan/20 rounded border px-1 py-0.5 text-[8px] font-bold tracking-wider uppercase">
-                                AI
+                                DIARIZED
                               </div>
                             )}
                           </div>
@@ -566,8 +641,12 @@ const TimeSection: React.FC<{
                                 <MoreHorizontal size={12} />
                               </button>
                               <button
-                                className="rounded-full p-1 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-                                onClick={(e) => e.stopPropagation()}
+                                className={`rounded-full p-1 transition-colors ${
+                                  previewingId === evt.id
+                                    ? 'bg-black text-white ring-2 ring-white'
+                                    : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                                }`}
+                                onClick={(e) => startPreview(e, evt)}
                               >
                                 <Play size={10} fill="currentColor" />
                               </button>

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
+import { AudioVisualizer } from '../AudioVisualizer';
 import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
 import type { ChatMessage, Conversation } from '../../src/api/types';
@@ -417,6 +418,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [audioError, setAudioError] = useState<string | null>(null);
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
+  // Web Audio API state for AudioVisualizer
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaSourceCreatedRef = useRef(false);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+
   // Summary State
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [summaryText, setSummaryText] = useState('');
@@ -510,6 +516,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+
+    return () => {
+      // Clean up Web Audio API resources when modal closes
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      mediaSourceCreatedRef.current = false;
+      setAnalyserNode(null);
+    };
   }, [isOpen, note?.recordingId]);
 
   // Fetch conversations for this recording whenever modal opens or note changes
@@ -795,6 +811,23 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     if (audio) {
       setDuration(audio.duration);
       setAudioError(null);
+
+      // Set up Web Audio API pipeline for AudioVisualizer (only once per element)
+      if (!mediaSourceCreatedRef.current) {
+        try {
+          const ctx = audioContextRef.current || new AudioContext();
+          audioContextRef.current = ctx;
+          const source = ctx.createMediaElementSource(audio);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 2048;
+          source.connect(analyser);
+          analyser.connect(ctx.destination);
+          setAnalyserNode(analyser);
+          mediaSourceCreatedRef.current = true;
+        } catch {
+          // MediaElementSource can only be created once — ignore if already done
+        }
+      }
     }
   };
 
@@ -1164,19 +1197,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                   onEnded={handleAudioEnded}
                   onError={handleAudioError}
                   preload="metadata"
+                  crossOrigin="anonymous"
                 />
               )}
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1 opacity-20">
-                {Array.from({ length: 60 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="bg-accent-cyan w-1 rounded-full transition-all duration-300"
-                    style={{
-                      height: `${20 + Math.random() * 60}%`,
-                      opacity: i > progress / 1.6 ? 0.3 : 1,
-                    }}
-                  ></div>
-                ))}
+              <div className="pointer-events-none absolute inset-0 opacity-30">
+                <AudioVisualizer analyserNode={analyserNode} className="h-full" />
               </div>
               <div className="relative z-10 flex flex-col items-center gap-4">
                 <div className="font-mono text-3xl font-light tracking-widest text-white">

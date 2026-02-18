@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Box,
   Cpu,
@@ -76,6 +76,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
+
+  // Model download cache state (checks Docker volume for HF model dirs)
+  const [modelCacheStatus, setModelCacheStatus] = useState<Record<string, { exists: boolean }>>({});
+  const modelCacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Runtime profile (persisted in electron-store)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
@@ -200,6 +204,39 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
         : LIVE_ALTERNATE_MODEL;
+
+  // Active diarization model name
+  const activeDiarizationModel =
+    diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
+      ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
+      : DIARIZATION_DEFAULT_MODEL;
+
+  // Check model download cache whenever the active model names or container state change
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.checkModelsCached || !isRunning) return;
+
+    // Collect unique model IDs to check
+    const modelIds = [...new Set([activeTranscriber, activeLiveModel, activeDiarizationModel])].filter(
+      (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER,
+    );
+    if (modelIds.length === 0) return;
+
+    // Debounce the check
+    if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
+    modelCacheCheckRef.current = setTimeout(() => {
+      api.docker
+        .checkModelsCached(modelIds)
+        .then((result: Record<string, { exists: boolean }>) => {
+          setModelCacheStatus(result);
+        })
+        .catch(() => {});
+    }, 500);
+
+    return () => {
+      if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
+    };
+  }, [activeTranscriber, activeLiveModel, activeDiarizationModel, isRunning]);
 
   // Image selection state — "Most Recent (auto)" always picks the newest available tag
   const MOST_RECENT = 'Most Recent (auto)';
@@ -703,7 +740,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-300">Main Transcriber</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-300">Main Transcriber</label>
+                    {isRunning && activeTranscriber && activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER && (
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`} />
+                        <span className={`font-mono text-[10px] ${modelCacheStatus[activeTranscriber]?.exists ? 'text-green-400' : 'text-slate-500'}`}>
+                          {modelCacheStatus[activeTranscriber]?.exists ? 'Downloaded' : 'Missing'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   <CustomSelect
                     value={mainModelSelection}
                     onChange={setMainModelSelection}
@@ -725,7 +772,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   )}
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-300">Live Mode Model</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-300">Live Mode Model</label>
+                    {isRunning && activeLiveModel && activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER && activeLiveModel !== activeTranscriber && (
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeLiveModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`} />
+                        <span className={`font-mono text-[10px] ${modelCacheStatus[activeLiveModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}>
+                          {modelCacheStatus[activeLiveModel]?.exists ? 'Downloaded' : 'Missing'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   <CustomSelect
                     value={liveModelSelection}
                     onChange={setLiveModelSelection}
@@ -749,10 +806,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <p className="font-mono text-xs text-slate-500">Using: {activeTranscriber}</p>
                   )}
                 </div>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-                <div className="font-mono text-xs text-slate-500">Main: {activeTranscriber}</div>
-                <div className="font-mono text-xs text-slate-500">Live: {activeLiveModel}</div>
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
@@ -796,7 +849,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           </div>
           <GlassCard title="4. Diarization Models Configuration">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-300">Diarization Model</label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-300">Diarization Model</label>
+                {isRunning && activeDiarizationModel && (
+                  <div className="flex items-center gap-1.5">
+                    <span className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeDiarizationModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`} />
+                    <span className={`font-mono text-[10px] ${modelCacheStatus[activeDiarizationModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}>
+                      {modelCacheStatus[activeDiarizationModel]?.exists ? 'Downloaded' : 'Missing'}
+                    </span>
+                  </div>
+                )}
+              </div>
               <CustomSelect
                 value={diarizationModelSelection}
                 onChange={setDiarizationModelSelection}

@@ -946,6 +946,53 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
   return { gpu, toolkit };
 }
 
+// ─── Model Cache Inspection ─────────────────────────────────────────────────
+
+/**
+ * Check whether HuggingFace model repos exist in the models volume.
+ *
+ * Runs `docker exec ls /models/hub/` inside the running container and
+ * checks for `models--{org}--{name}` directories.
+ *
+ * Returns a record mapping each model ID to `{ exists: boolean }`.
+ */
+async function checkModelsCached(
+  modelIds: string[],
+): Promise<Record<string, { exists: boolean }>> {
+  const result: Record<string, { exists: boolean }> = {};
+
+  // Default all to missing
+  for (const id of modelIds) {
+    result[id] = { exists: false };
+  }
+
+  try {
+    const output = await exec('docker', [
+      'exec',
+      CONTAINER_NAME,
+      'ls',
+      '/models/hub/',
+    ]);
+
+    const entries = new Set(
+      output
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean),
+    );
+
+    for (const id of modelIds) {
+      // HuggingFace convention: "Systran/faster-whisper-large-v3" → "models--Systran--faster-whisper-large-v3"
+      const cacheName = `models--${id.trim().replace(/\//g, '--')}`;
+      result[id] = { exists: entries.has(cacheName) };
+    }
+  } catch {
+    // Container not running or volume empty — all remain { exists: false }
+  }
+
+  return result;
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export const dockerManager = {
@@ -966,6 +1013,7 @@ export const dockerManager = {
   startLogStream,
   stopLogStream,
   getLogs,
+  checkModelsCached,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

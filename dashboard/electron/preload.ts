@@ -81,6 +81,9 @@ export interface ElectronAPI {
     getVolumes: () => Promise<
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
+    checkModelsCached: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean }>>;
     removeVolume: (name: string) => Promise<string>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;
@@ -150,6 +153,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopContainer: () => ipcRenderer.invoke('docker:stopContainer'),
     removeContainer: () => ipcRenderer.invoke('docker:removeContainer'),
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),
+    checkModelsCached: (modelIds: string[]) =>
+      ipcRenderer.invoke('docker:checkModelsCached', modelIds) as Promise<
+        Record<string, { exists: boolean }>
+      >,
     removeVolume: (name: string) => ipcRenderer.invoke('docker:removeVolume', name),
     getLogs: (tail?: number) => ipcRenderer.invoke('docker:getLogs', tail),
     startLogStream: (tail?: number) => ipcRenderer.invoke('docker:startLogStream', tail),

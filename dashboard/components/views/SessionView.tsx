@@ -203,6 +203,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Client connection state — tracked at App level via props
   const admin = useAdminStatus();
   const [modelsOperationPending, setModelsOperationPending] = useState(false);
+  const [modelsOperationType, setModelsOperationType] = useState<'loading' | 'unloading' | null>(null);
+  const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
   // Active model name (for capability checks & tray tooltip)
   const activeModel = admin.status?.config?.transcription?.model ?? null;
@@ -356,6 +358,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   const handleUnloadAllModels = useCallback(async () => {
     setModelsOperationPending(true);
+    setModelsOperationType('unloading');
     try {
       await Promise.allSettled([apiClient.unloadModels(), apiClient.unloadLLMModel()]);
       logClientEvent('Client', 'Requested unload for all models', 'warning');
@@ -363,7 +366,36 @@ export const SessionView: React.FC<SessionViewProps> = ({
       serverConnection.refresh();
     } finally {
       setModelsOperationPending(false);
+      setModelsOperationType(null);
     }
+  }, [admin, serverConnection]);
+
+  const handleReloadModels = useCallback(() => {
+    setModelsOperationPending(true);
+    setModelsOperationType('loading');
+
+    // Clean up any previous load stream
+    if (modelsLoadCleanupRef.current) modelsLoadCleanupRef.current();
+
+    const cleanup = apiClient.loadModelsStream({
+      onProgress: (msg) => {
+        logClientEvent('Client', `Model load: ${msg}`);
+      },
+      onComplete: () => {
+        logClientEvent('Client', 'Models reloaded successfully');
+        setModelsOperationPending(false);
+        setModelsOperationType(null);
+        admin.refresh();
+        serverConnection.refresh();
+      },
+      onError: (msg) => {
+        logClientEvent('Client', `Model load failed: ${msg}`, 'error');
+        setModelsOperationPending(false);
+        setModelsOperationType(null);
+      },
+    });
+
+    modelsLoadCleanupRef.current = cleanup;
   }, [admin, serverConnection]);
 
   // System Health Check for Visual Effects
@@ -940,22 +972,34 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </Button>
                       </div>
                       <div className="ml-auto shrink-0">
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={handleUnloadAllModels}
-                          disabled={!serverConnection.reachable || modelsOperationPending}
-                          className="px-3 text-xs"
-                        >
-                          {modelsOperationPending ? (
-                            <>
-                              <Loader2 size={14} className="mr-1 animate-spin" />
-                              Unloading...
-                            </>
-                          ) : (
-                            'Unload Models'
-                          )}
-                        </Button>
+                        {admin.status?.models_loaded === false && !modelsOperationPending ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleReloadModels}
+                            disabled={!serverConnection.reachable || modelsOperationPending}
+                            className="px-3 text-xs"
+                          >
+                            Reload Models
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={handleUnloadAllModels}
+                            disabled={!serverConnection.reachable || modelsOperationPending}
+                            className="px-3 text-xs"
+                          >
+                            {modelsOperationPending ? (
+                              <>
+                                <Loader2 size={14} className="mr-1 animate-spin" />
+                                {modelsOperationType === 'loading' ? 'Loading...' : 'Unloading...'}
+                              </>
+                            ) : (
+                              'Unload Models'
+                            )}
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
