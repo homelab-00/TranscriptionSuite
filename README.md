@@ -92,20 +92,17 @@ is Dockerized for fast setup.
 
 #### Screenshots
 
-<table>
-  <tr>
-    <td><img src="./build/assets/shot-1.png" alt="Home tab" width="400"/></td>
-    <td><img src="./build/assets/shot-2.png" alt="Docker Server tab" width="400"/></td>
-  </tr>
-  <tr>
-    <td><img src="./build/assets/shot-3.png" alt="Audio Notebook - Calendar view" width="400"/></td>
-    <td><img src="./build/assets/shot-4.png" alt="Audio Notebook - Day view" width="400"/></td>
-  </tr>
-  <tr>
-    <td><img src="./build/assets/shot-5.png" alt="Audio Notebook - Note view" width="400"/></td>
-    <td><img src="./build/assets/shot-6.png" alt="Audio Notebook - Note view w/ diarization" width="400"/></td>
-  </tr>
-</table>
+**Session Tab**
+![Session Tab](./build/assets/shot-1.png)
+
+**Notebook Tab**
+![Notebook Tab](./build/assets/shot-2.png)
+
+**Audio Note View**
+![Audio Note View](./build/assets/shot-3.png)
+
+**Server Tab**
+![Server Tab](./build/assets/shot-4.png)
 
 </div>
 
@@ -114,7 +111,7 @@ is Dockerized for fast setup.
 
 #### Video Demo
 
-https://github.com/user-attachments/assets/ea801ae2-d263-493b-a6c5-d431b59601ee
+**COMING SOON**
 
 </div>
 
