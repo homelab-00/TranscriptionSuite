@@ -284,8 +284,6 @@ async function exec(
  * All stages log diagnostics to the main-process console for debugging.
  */
 async function dockerAvailable(): Promise<boolean> {
-  const env = buildProcessEnv();
-
   // Stage 1: validate full daemon connectivity (matches original working code)
   try {
     const ver = await exec('docker', ['version', '--format', '{{.Server.Version}}']);
@@ -311,7 +309,7 @@ async function dockerAvailable(): Promise<boolean> {
     return true;
   } catch (err: any) {
     console.error('[DockerManager] Docker not found at all:', err.message);
-    console.error('[DockerManager] PATH used:', env.PATH); // codeql[js/clear-text-logging] — PATH is not sensitive
+    console.error('[DockerManager] Verify Docker is installed and available on PATH.');
   }
 
   return false;
