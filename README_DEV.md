@@ -154,7 +154,6 @@ cd dashboard && npm run package:mac
 | Build Docker image | `cd server/docker && docker compose build` |
 | View server logs | `docker compose logs -f` |
 | Build & publish image | `./build/docker-build-push.sh` |
-| Bump project versions + refresh deps | `./build/update-project-versions.sh` |
 | Run dashboard (dev) | `cd dashboard && npm run dev` |
 | Run dashboard (Electron) | `cd dashboard && npm run dev:electron` |
 | Lint code (Python) | `./build/.venv/bin/ruff check .` |
@@ -256,15 +255,20 @@ TranscriptionSuite/
 │   │   ├── updateManager.ts      # Opt-in update checker (app via GitHub, image via GHCR)
 │   │   └── tsconfig.json         # TypeScript config for main process
 │   ├── src/                      # Shared source (API, config, hooks, services)
-│   │   ├── api/client.ts         # REST API client for server communication
+│   │   ├── api/
+│   │   │   ├── client.ts         # REST API client for server communication
+│   │   │   └── types.ts          # API request/response type definitions
 │   │   ├── config/store.ts       # Client config (electron-store / localStorage)
 │   │   ├── hooks/                # React hooks (see Key Modules section)
 │   │   ├── services/             # Core services
 │   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
 │   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
-│   │   │   └── modelCapabilities.ts # Translation support detection per model variant
+│   │   │   ├── modelCapabilities.ts # Translation support detection per model variant
+│   │   │   └── clientDebugLog.ts # Client-side debug logging service
 │   │   ├── index.css             # Tailwind CSS + global styles
-│   │   └── types/electron.d.ts   # TypeScript declarations for Electron IPC
+│   │   └── types/
+│   │       ├── electron.d.ts     # TypeScript declarations for Electron IPC
+│   │       └── audio-worklet.d.ts # AudioWorklet type declarations
 │   ├── components/               # React UI components
 │   │   ├── Sidebar.tsx           # Collapsible sidebar navigation
 │   │   ├── AudioVisualizer.tsx   # Canvas-based waveform visualizer
@@ -289,7 +293,6 @@ TranscriptionSuite/
 │   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
 │   ├── generate-ico.sh           # Generate PNG/ICO/ICNS logo assets from SVG sources
 │   ├── docker-build-push.sh      # Build and push Docker image
-│   ├── update-project-versions.sh # Bump project versions + refresh dependency locks
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
 │
@@ -325,22 +328,11 @@ Keep these version fields aligned for a release:
 - `server/backend/pyproject.toml`
 - `dashboard/package.json`
 
-Use the helper script to bump all three and refresh dependencies:
-
-```bash
-# Interactive prompt (asks for target version)
-./build/update-project-versions.sh
-
-# Non-interactive usage
-./build/update-project-versions.sh 1.0.3
-```
-
-What the script does:
-- Prompts for the new version (or uses arg 1)
-- Updates the version value in the three files above
-- Runs `uv lock --upgrade && uv sync` in `build/`
-- Runs `uv lock --upgrade && uv sync` in `server/backend/`
-- Runs `npm update` in `dashboard/`
+**Manual version bump process:**
+1. Update the `version` field in all three files above
+2. Run `uv lock --upgrade && uv sync` in `build/`
+3. Run `uv lock --upgrade && uv sync` in `server/backend/`
+4. Run `npm update` in `dashboard/`
 
 *Note: Release tags should continue to match the Dashboard `package.json` version.*
 
@@ -991,6 +983,7 @@ npm run dev:electron
 | `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
 | `modelCapabilities.ts` | Translation support detection per Whisper model variant |
+| `clientDebugLog.ts` | Client-side debug logging with structured log capture |
 
 **React Hooks (`src/hooks/`):**
 
@@ -1009,15 +1002,19 @@ npm run dev:electron
 | `useAdminStatus.ts` | Admin authentication state |
 | `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
+| `useClientDebugLogs.ts` | Client-side debug log capture and display |
+| `DockerContext.tsx` | React context provider for Docker state sharing |
 
 **Shared Source (`src/`):**
 
 | Module | Purpose |
 |--------|---------|
 | `api/client.ts` | REST API client for server communication |
+| `api/types.ts` | API request/response type definitions |
 | `config/store.ts` | Client config persistence (electron-store / localStorage fallback) |
 | `index.css` | Tailwind CSS entry point + global styles |
 | `types/electron.d.ts` | TypeScript declarations for Electron IPC bridge |
+| `types/audio-worklet.d.ts` | AudioWorklet API type declarations |
 
 **React Components (`components/`):**
 

@@ -36,6 +36,12 @@ is Dockerized for fast setup.
   </tr>
 </table>
 
+
+<div align="center">
+
+![Session Tab](./build/assets/shot-1.png)
+</div>
+
 ---
 
 ## Table of Contents
@@ -43,7 +49,6 @@ is Dockerized for fast setup.
 - [1. Features](#1-features)
 - [2. Prerequisites](#2-prerequisites)
   - [2.1 Docker](#21-docker)
-  - [2.2 Git](#22-git)
 - [3. Installation](#3-installation)
   - [3.1 Verify Download (Kleopatra)](#31-verify-download-kleopatra)
 - [4. First time setup](#4-first-time-setup)
@@ -54,14 +59,13 @@ is Dockerized for fast setup.
 - [6. Remote Access](#6-remote-access)
   - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
   - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
-- [7. Web Interface](#7-web-interface)
-- [8. Database & Backups](#8-database--backups)
-- [9. Troubleshooting](#9-troubleshooting)
-  - [9.1 Server Won't Start](#91-server-wont-start)
-  - [9.2 GPU Not Detected](#92-gpu-not-detected)
-  - [9.3 Connection Issues (Remote Mode)](#93-connection-issues-remote-mode)
-- [10. License](#10-license)
-- [11. Acknowledgments](#11-acknowledgments)
+- [7. Database & Backups](#7-database--backups)
+- [8. Troubleshooting](#8-troubleshooting)
+  - [8.1 Server Won't Start](#81-server-wont-start)
+  - [8.2 GPU Not Detected](#82-gpu-not-detected)
+  - [8.3 Connection Issues (Remote Mode)](#83-connection-issues-remote-mode)
+- [9. License](#9-license)
+- [10. Acknowledgments](#10-acknowledgments)
 
 ---
 
@@ -80,11 +84,6 @@ is Dockerized for fast setup.
   (utilizing Tailscale)
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
-- **System Tray**: Minimise to tray with state-aware icons, context menu controls, and quick-access file transcription
-- **Setup Checklist**: First-run setup wizard with automatic GPU detection, Docker verification, and HuggingFace token management
-- **Update Checker**: Opt-in update notifications for both the app and server Docker image
-- **Model-Aware Translation**: Translation toggle auto-disables for models that don't support it (turbo, .en, distil variants)
-- **Recording Management**: Edit recording dates, summaries, and titles directly from the Notebook
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
@@ -103,15 +102,6 @@ is Dockerized for fast setup.
 
 **Server Tab**
 ![Server Tab](./build/assets/shot-4.png)
-
-</div>
-
-
-<div align="center">
-
-#### Video Demo
-
-**COMING SOON**
 
 </div>
 
@@ -139,20 +129,6 @@ is Dockerized for fast setup.
 **macOS (Apple Silicon):**
 1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
 2. GPU mode is not available on macOS — the server runs in CPU mode automatically
-
-### 2.2 Git
-
-**Linux:**
-
-* For Arch run `sudo pacman -S --needed git`
-* For Ubuntu/Debian run `sudo apt install git`
-* For other distros refer to the [Git documentation](https://git-scm.com/install/linux)
-
-**Windows:**
-* Download and install [Git for Windows](https://git-scm.com/download/win)
-
-**macOS:**
-* Git is included with Xcode Command Line Tools: `xcode-select --install`
 
 ---
 
@@ -349,30 +325,7 @@ must be enabled in your Tailnet.
 
 ---
 
-## 7. Web Interface
-
-Access the web interface at your server's address:
-- **Local**: http://localhost:8000
-- **Remote**: https://your-machine.your-tailnet.ts.net:8443
-
-It offers two things; the Audio Notebook mode and web implementation of the client.
-The Notebook features are listed below. The web client is a way to access the
-transcription service on devices without Dashboard app builds.
-
-**Audio Notebook Features:**
-- Calendar view of recordings with day/month views
-- Full-text search across all transcriptions
-- Audio playback with click-to-seek timestamps
-- AI chat about recordings (requires LM Studio)
-- Import external audio files with drag-and-drop
-- Conditional export formats per note capability:
-  - `TXT` for pure transcription notes (no word timestamps, no diarization)
-  - `SRT` / `ASS` for timestamp-capable notes (word timestamps with or without diarization)
-- Context menu actions: Export, Change date/time, Delete
-
----
-
-## 8. Database & Backups
+## 7. Database & Backups
 
 TranscriptionSuite automatically backs up the SQLite database on server startup:
 
@@ -425,9 +378,9 @@ When diarization is present, subtitle exports include normalized speaker labels
 
 ---
 
-## 9. Troubleshooting
+## 8. Troubleshooting
 
-### 9.1 Server Won't Start
+### 8.1 Server Won't Start
 
 Check Docker logs:
 ```bash
@@ -438,7 +391,7 @@ Alternatively install `lazydocker`, it's an excellent cli tool to manage docker.
 *(Then simply run it by running `lazydocker` in your terminal. Select your container on*
 *the left and you'll see its logs on the right.)*
 
-### 9.2 GPU Not Detected
+### 8.2 GPU Not Detected
 
 Verify NVIDIA Container Toolkit is installed:
 ```bash
@@ -450,7 +403,7 @@ If you don't have an NVIDIA GPU or prefer not to use GPU acceleration, switch to
 the container. CPU mode works on all platforms (Linux, Windows, macOS) but transcription
 will be significantly slower.
 
-### 9.3 Connection Issues (Remote Mode)
+### 8.3 Connection Issues (Remote Mode)
 
 1. Verify Tailscale is connected: `tailscale status`
 2. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
@@ -472,13 +425,13 @@ See [README_DEV.md](README_DEV.md#133-tailscale-dns-resolution) for detailed tro
 
 ---
 
-## 10. License
+## 9. License
 
 GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](LICENSE).
 
 ---
 
-## 11. Acknowledgments
+## 10. Acknowledgments
 
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
