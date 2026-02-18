@@ -127,7 +127,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
-    autoCopy: false,
+    autoCopy: true,
     showNotifications: true,
     stopServerOnQuit: true,
     startMinimized: false,

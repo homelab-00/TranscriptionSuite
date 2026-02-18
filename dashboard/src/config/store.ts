@@ -91,7 +91,7 @@ const DEFAULT_CONFIG: ClientConfig = {
     autoAdd: true,
   },
   app: {
-    autoCopy: false,
+    autoCopy: true,
     showNotifications: true,
     stopServerOnQuit: true,
     startMinimized: false,

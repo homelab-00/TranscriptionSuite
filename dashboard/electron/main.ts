@@ -75,7 +75,7 @@ const store = new Store({
     'diarization.constrainSpeakers': false,
     'diarization.numSpeakers': 2,
     'notebook.autoAdd': true,
-    'app.autoCopy': false,
+    'app.autoCopy': true,
     'app.showNotifications': true,
     'app.stopServerOnQuit': true,
     'app.startMinimized': false,
