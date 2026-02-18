@@ -202,6 +202,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const serverRunning = docker.container.running;
   // Client connection state — tracked at App level via props
   const admin = useAdminStatus();
+  const isAsrModelsLoaded =
+    admin.status?.models_loaded ??
+    Boolean(
+      (admin.status?.models as { transcription?: { loaded?: boolean } } | undefined)?.transcription
+        ?.loaded,
+    );
+  const showUnloadModelsState = !serverRunning || isAsrModelsLoaded;
   const [modelsOperationPending, setModelsOperationPending] = useState(false);
   const [modelsOperationType, setModelsOperationType] = useState<'loading' | 'unloading' | null>(
     null,
@@ -975,13 +982,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                       <div className="ml-auto shrink-0">
                         <Button
-                          variant={admin.status?.models_loaded === false ? 'secondary' : 'danger'}
+                          variant={showUnloadModelsState ? 'danger' : 'secondary'}
                           size="sm"
-                          onClick={
-                            admin.status?.models_loaded === false
-                              ? handleReloadModels
-                              : handleUnloadAllModels
-                          }
+                          onClick={isAsrModelsLoaded ? handleUnloadAllModels : handleReloadModels}
                           disabled={!serverConnection.reachable || modelsOperationPending}
                           className="px-3 text-xs"
                         >
@@ -990,10 +993,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               <Loader2 size={14} className="mr-1 animate-spin" />
                               {modelsOperationType === 'loading' ? 'Loading...' : 'Unloading...'}
                             </>
-                          ) : admin.status?.models_loaded === false ? (
-                            'Load Models'
-                          ) : (
+                          ) : showUnloadModelsState ? (
                             'Unload Models'
+                          ) : (
+                            'Reload Models'
                           )}
                         </Button>
                       </div>

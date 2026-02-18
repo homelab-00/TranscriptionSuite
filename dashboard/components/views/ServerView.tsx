@@ -61,8 +61,14 @@ function normalizeModelName(value: string): string {
 }
 
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
-  const { status: adminStatus } = useAdminStatus();
+  const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatus();
   const docker = useDockerContext();
+  const isAsrModelsLoaded =
+    adminStatus?.models_loaded ??
+    Boolean(
+      (adminStatus?.models as { transcription?: { loaded?: boolean } } | undefined)?.transcription
+        ?.loaded,
+    );
 
   // Model selection state
   const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
@@ -120,6 +126,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
+  const showUnloadModelsState = !isRunning || isAsrModelsLoaded;
   const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
@@ -340,7 +347,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       /* errors shown via admin status */
     }
     setModelsLoading(false);
-  }, []);
+    refreshAdminStatus();
+  }, [refreshAdminStatus]);
 
   const handleUnloadModels = useCallback(async () => {
     setModelsLoading(true);
@@ -350,7 +358,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       /* ignore */
     }
     setModelsLoading(false);
-  }, []);
+    refreshAdminStatus();
+  }, [refreshAdminStatus]);
 
   return (
     <div className="custom-scrollbar h-full w-full overflow-y-auto">
@@ -826,28 +835,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
-                  variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
+                  variant={showUnloadModelsState ? 'danger' : 'secondary'}
                   className="h-9 px-4"
-                  onClick={
-                    adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
-                  }
+                  onClick={isAsrModelsLoaded ? handleUnloadModels : handleLoadModels}
                   disabled={modelsLoading || !isRunning}
                 >
                   {modelsLoading ? (
                     <>
                       <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
                     </>
-                  ) : adminStatus?.models_loaded === false ? (
-                    'Load Models'
-                  ) : (
+                  ) : showUnloadModelsState ? (
                     'Unload Models'
+                  ) : (
+                    'Reload Models'
                   )}
                 </Button>
-                {adminStatus?.models_loaded !== undefined && (
+                {adminStatus && (
                   <span
-                    className={`ml-auto self-center font-mono text-xs ${adminStatus.models_loaded ? 'text-green-400' : 'text-slate-500'}`}
+                    className={`ml-auto self-center font-mono text-xs ${isAsrModelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
                   >
-                    {adminStatus.models_loaded ? 'Models Loaded' : 'Models Not Loaded'}
+                    {isAsrModelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
                   </span>
                 )}
               </div>
