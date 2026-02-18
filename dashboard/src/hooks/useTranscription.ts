@@ -7,7 +7,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { TranscriptionSocket, ConnectionState, ServerMessage } from '../services/websocket';
+import { TranscriptionSocket, ServerMessage } from '../services/websocket';
 import { AudioCapture } from '../services/audioCapture';
 
 export type TranscriptionStatus =

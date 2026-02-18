@@ -11,26 +11,6 @@ import { spawn } from 'child_process';
 
 const VITE_PORT = 3000;
 
-/** Poll until Vite dev server responds */
-function waitForVite(port, maxAttempts = 60) {
-  let attempts = 0;
-  return new Promise((resolve, reject) => {
-    const poll = () => {
-      attempts++;
-      fetch(`http://localhost:${port}/`)
-        .then(() => resolve())
-        .catch(() => {
-          if (attempts >= maxAttempts) {
-            reject(new Error(`Vite not ready after ${maxAttempts} attempts`));
-          } else {
-            setTimeout(poll, 500);
-          }
-        });
-    };
-    poll();
-  });
-}
-
 // 1. Start Vite dev server
 const vite = spawn('npx', ['vite'], {
   stdio: ['ignore', 'pipe', 'pipe'],

@@ -29,8 +29,11 @@ function ensureClientLogFilePath(): string {
   const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
   fs.mkdirSync(logDir, { recursive: true });
   const logFilePath = path.join(logDir, CLIENT_LOG_FILE);
-  if (!fs.existsSync(logFilePath)) {
-    fs.writeFileSync(logFilePath, '', 'utf8');
+  // Use atomic create-if-not-exists to avoid TOCTOU race between existsSync and writeFileSync
+  try {
+    fs.writeFileSync(logFilePath, '', { flag: 'wx' });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
   }
   return logFilePath;
 }

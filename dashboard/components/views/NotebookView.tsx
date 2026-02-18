@@ -30,7 +30,6 @@ import { AudioNoteModal } from './AudioNoteModal';
 import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
-import { useUpload } from '../../src/hooks/useUpload';
 import { useImportQueue } from '../../src/hooks/useImportQueue';
 import type { ImportJob } from '../../src/hooks/useImportQueue';
 import { apiClient } from '../../src/api/client';
@@ -148,7 +147,14 @@ interface MenuProps {
   onPlay: (id: string) => void;
 }
 
-const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, noteTitle, onRefresh, onPlay }) => {
+const NoteActionMenu: React.FC<MenuProps> = ({
+  trigger,
+  onClose,
+  noteId,
+  noteTitle,
+  onRefresh,
+  onPlay,
+}) => {
   const recordingId = parseInt(noteId, 10);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(noteTitle);
@@ -168,7 +174,10 @@ const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, noteTit
 
   const commitRename = async () => {
     const trimmed = renameValue.trim();
-    if (!trimmed || trimmed === noteTitle) { onClose(); return; }
+    if (!trimmed || trimmed === noteTitle) {
+      onClose();
+      return;
+    }
     setRenameLoading(true);
     try {
       await apiClient.updateRecordingTitle(recordingId, trimmed);
@@ -288,7 +297,7 @@ const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, noteTit
                 if (e.key === 'Escape') onClose();
               }}
               autoFocus
-              className="flex-1 min-w-0 rounded bg-white/10 px-2 py-1 text-xs text-white outline-none ring-1 ring-white/20 focus:ring-accent-cyan"
+              className="focus:ring-accent-cyan min-w-0 flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white ring-1 ring-white/20 outline-none"
             />
             <button
               onClick={commitRename}
@@ -508,7 +517,11 @@ const TimeSection: React.FC<{
   onRefresh,
 }) => {
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
-  const [activeMenu, setActiveMenu] = useState<{ id: string; title: string; trigger: MenuTrigger } | null>(null);
+  const [activeMenu, setActiveMenu] = useState<{
+    id: string;
+    title: string;
+    trigger: MenuTrigger;
+  } | null>(null);
   const isCompact = visibleSlots >= 4;
 
   // Audio preview state
@@ -587,7 +600,11 @@ const TimeSection: React.FC<{
 
   const handleContextMenu = (e: React.MouseEvent, evt: EventData) => {
     e.preventDefault();
-    setActiveMenu({ id: evt.id, title: evt.title, trigger: { type: 'point', x: e.clientX, y: e.clientY } });
+    setActiveMenu({
+      id: evt.id,
+      title: evt.title,
+      trigger: { type: 'point', x: e.clientX, y: e.clientY },
+    });
   };
   return (
     <div className="bg-glass-surface border-glass-border flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border shadow-xl backdrop-blur-xl">
@@ -669,7 +686,11 @@ const TimeSection: React.FC<{
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const rect = e.currentTarget.getBoundingClientRect();
-                                  setActiveMenu({ id: evt.id, title: evt.title, trigger: { type: 'rect', rect } });
+                                  setActiveMenu({
+                                    id: evt.id,
+                                    title: evt.title,
+                                    trigger: { type: 'rect', rect },
+                                  });
                                 }}
                                 className="rounded-full p-1 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
                               >

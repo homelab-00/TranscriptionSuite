@@ -69,7 +69,9 @@ def test_query_token_allows_audio_route(monkeypatch):
 
 def test_query_token_allows_export_route(monkeypatch):
     client = _build_client(monkeypatch)
-    response = client.get("/api/notebook/recordings/1/export?format=txt&token=valid-token")
+    response = client.get(
+        "/api/notebook/recordings/1/export?format=txt&token=valid-token"
+    )
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 

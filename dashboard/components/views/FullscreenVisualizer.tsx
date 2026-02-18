@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Activity, Mic, Minimize2, Waves, Zap, Cpu, BarChart3 } from 'lucide-react';
+import { X, Activity, Mic, Minimize2, Waves, Zap, Cpu } from 'lucide-react';
 import { AudioVisualizer } from '../AudioVisualizer';
 import { Button } from '../ui/Button';
 

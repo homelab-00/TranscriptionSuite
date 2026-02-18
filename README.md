@@ -36,6 +36,7 @@ is Dockerized for fast setup.
   </tr>
 </table>
 
+<br>
 
 <div align="center">
 
