@@ -311,7 +311,7 @@ async function dockerAvailable(): Promise<boolean> {
     return true;
   } catch (err: any) {
     console.error('[DockerManager] Docker not found at all:', err.message);
-    console.error('[DockerManager] PATH used:', env.PATH); // lgtm[js/clear-text-logging] — PATH is not sensitive
+    console.error('[DockerManager] PATH used:', env.PATH); // codeql[js/clear-text-logging] — PATH is not sensitive
   }
 
   return false;

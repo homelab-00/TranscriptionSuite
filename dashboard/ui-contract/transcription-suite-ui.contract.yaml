@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.13
+  spec_version: 1.0.14
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -395,8 +395,6 @@ utility_allowlist:
     - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
-    - bg-gradient-to-b
-    - bg-gradient-to-t
     - bg-green-500
     - bg-green-500/10
     - bg-linear-to-b

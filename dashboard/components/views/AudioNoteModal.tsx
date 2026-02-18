@@ -416,8 +416,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [audioError, setAudioError] = useState<string | null>(null);
-  // lgtm[js/unused-local-variable] — progress will be consumed by the progress-bar UI once wired up
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0; // codeql[js/unused-local-variable] — will be consumed by the progress-bar UI once wired up
 
   // Web Audio API state for AudioVisualizer
   const audioContextRef = useRef<AudioContext | null>(null);
