@@ -805,6 +805,44 @@ async function removeVolume(name: string): Promise<string> {
   return exec('docker', ['volume', 'rm', name]);
 }
 
+/**
+ * Read a single key from the compose .env file.
+ * Returns the value string if the key exists and has a non-empty value, otherwise null.
+ */
+function readComposeEnvValue(key: string): string | null {
+  const composeEnvPath = path.join(getComposeDir(), '.env');
+  let lines: string[] = [];
+  try {
+    lines = fs.readFileSync(composeEnvPath, 'utf8').split(/\r?\n/);
+  } catch {
+    return null;
+  }
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const lineKey = trimmed.slice(0, eqIdx).trim();
+    if (lineKey === key) {
+      const value = trimmed.slice(eqIdx + 1).trim();
+      return value.length > 0 ? value : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check whether a Docker volume with the given name exists.
+ */
+async function volumeExists(name: string): Promise<boolean> {
+  try {
+    await exec('docker', ['volume', 'inspect', '--format', '{{.Name}}', name]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Log Streaming ──────────────────────────────────────────────────────────
 
 let logProcess: ChildProcess | null = null;
@@ -1003,6 +1041,8 @@ export const dockerManager = {
   removeContainer,
   getVolumes,
   removeVolume,
+  readComposeEnvValue,
+  volumeExists,
   startLogStream,
   stopLogStream,
   getLogs,

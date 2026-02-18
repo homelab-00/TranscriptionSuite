@@ -356,6 +356,14 @@ ipcMain.handle('docker:removeVolume', async (_event, name: string) => {
   return dockerManager.removeVolume(name);
 });
 
+ipcMain.handle('docker:readComposeEnvValue', async (_event, key: string) => {
+  return dockerManager.readComposeEnvValue(key);
+});
+
+ipcMain.handle('docker:volumeExists', async (_event, name: string) => {
+  return dockerManager.volumeExists(name);
+});
+
 ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
   return dockerManager.getLogs(tail);
 });

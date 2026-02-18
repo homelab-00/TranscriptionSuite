@@ -79,6 +79,8 @@ interface ElectronAPI {
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
     removeVolume: (name: string) => Promise<string>;
+    readComposeEnvValue: (key: string) => Promise<string | null>;
+    volumeExists: (name: string) => Promise<boolean>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;

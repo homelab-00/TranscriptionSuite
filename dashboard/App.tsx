@@ -188,29 +188,51 @@ const AppInner: React.FC = () => {
               await setConfig('server.hfTokenDecision', hfDecision);
             }
           } else if (hfDecision === 'unset') {
-            const hfPromptResult = await requestHfPrompt();
-            if (hfPromptResult.action === 'cancel') return;
-
-            if (hfPromptResult.action === 'provided') {
-              hfToken = hfPromptResult.token.trim();
+            // Also skip if the .env already has a HUGGINGFACE_TOKEN set
+            const envToken = (await (window as any).electronAPI?.docker
+              ?.readComposeEnvValue('HUGGINGFACE_TOKEN')
+              .catch(() => null)) as string | null | undefined;
+            if (envToken) {
+              hfToken = envToken;
               hfDecision = 'provided';
+              await Promise.all([
+                setConfig('server.hfToken', hfToken),
+                setConfig('server.hfTokenDecision', hfDecision),
+              ]);
             } else {
-              hfToken = '';
-              hfDecision = 'skipped';
-            }
+              const hfPromptResult = await requestHfPrompt();
+              if (hfPromptResult.action === 'cancel') return;
 
-            await Promise.all([
-              setConfig('server.hfToken', hfToken),
-              setConfig('server.hfTokenDecision', hfDecision),
-            ]);
+              if (hfPromptResult.action === 'provided') {
+                hfToken = hfPromptResult.token.trim();
+                hfDecision = 'provided';
+              } else {
+                hfToken = '';
+                hfDecision = 'skipped';
+              }
+
+              await Promise.all([
+                setConfig('server.hfToken', hfToken),
+                setConfig('server.hfTokenDecision', hfDecision),
+              ]);
+            }
           }
 
           if (uvDecision === 'unset') {
-            const uvPromptResult = await requestUvPrompt();
-            if (uvPromptResult === 'cancel') return;
+            // Skip prompt if the UV cache volume already exists
+            const uvVolumeAlreadyExists = (await (window as any).electronAPI?.docker
+              ?.volumeExists('transcriptionsuite-uv-cache')
+              .catch(() => false)) as boolean | undefined;
+            if (uvVolumeAlreadyExists) {
+              uvDecision = 'enabled';
+              await setConfig('server.uvCacheVolumeDecision', uvDecision);
+            } else {
+              const uvPromptResult = await requestUvPrompt();
+              if (uvPromptResult === 'cancel') return;
 
-            uvDecision = uvPromptResult === 'enabled' ? 'enabled' : 'skipped';
-            await setConfig('server.uvCacheVolumeDecision', uvDecision);
+              uvDecision = uvPromptResult === 'enabled' ? 'enabled' : 'skipped';
+              await setConfig('server.uvCacheVolumeDecision', uvDecision);
+            }
           }
 
           await docker.startContainer(mode, runtimeProfile, undefined, imageTag, hfToken, {
