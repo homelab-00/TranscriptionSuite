@@ -143,26 +143,38 @@ interface MenuProps {
   trigger: MenuTrigger;
   onClose: () => void;
   noteId: string;
+  noteTitle: string;
   onRefresh: () => void;
   onPlay: (id: string) => void;
 }
 
-const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, onRefresh, onPlay }) => {
+const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, noteTitle, onRefresh, onPlay }) => {
   const recordingId = parseInt(noteId, 10);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(noteTitle);
+  const [renameLoading, setRenameLoading] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const handlePlay = () => {
     onPlay(noteId);
     onClose();
   };
 
-  const handleRename = async () => {
-    const newTitle = window.prompt('Enter new title:');
-    if (!newTitle) return;
+  const startRename = () => {
+    setRenameValue(noteTitle);
+    setRenaming(true);
+    setTimeout(() => renameInputRef.current?.select(), 30);
+  };
+
+  const commitRename = async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === noteTitle) { onClose(); return; }
+    setRenameLoading(true);
     try {
-      await apiClient.updateRecordingTitle(recordingId, newTitle);
+      await apiClient.updateRecordingTitle(recordingId, trimmed);
       onRefresh();
     } catch {
-      alert('Failed to rename recording.');
+      /* swallow – menu will close */
     }
     onClose();
   };
@@ -265,13 +277,36 @@ const NoteActionMenu: React.FC<MenuProps> = ({ trigger, onClose, noteId, onRefre
           Play Recording
         </button>
         <div className="mx-2 my-1 h-px bg-white/5"></div>
-        <button
-          onClick={handleRename}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <Edit2 size={14} />
-          Rename
-        </button>
+        {renaming ? (
+          <div className="flex items-center gap-1.5 px-3 py-2" onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') onClose();
+              }}
+              autoFocus
+              className="flex-1 min-w-0 rounded bg-white/10 px-2 py-1 text-xs text-white outline-none ring-1 ring-white/20 focus:ring-accent-cyan"
+            />
+            <button
+              onClick={commitRename}
+              disabled={renameLoading}
+              className="shrink-0 rounded p-1 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50"
+            >
+              {renameLoading ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={startRename}
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Edit2 size={14} />
+            Rename
+          </button>
+        )}
         <button
           onClick={() => handleExport('txt')}
           className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
@@ -473,7 +508,7 @@ const TimeSection: React.FC<{
   onRefresh,
 }) => {
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
-  const [activeMenu, setActiveMenu] = useState<{ id: string; trigger: MenuTrigger } | null>(null);
+  const [activeMenu, setActiveMenu] = useState<{ id: string; title: string; trigger: MenuTrigger } | null>(null);
   const isCompact = visibleSlots >= 4;
 
   // Audio preview state
@@ -552,7 +587,7 @@ const TimeSection: React.FC<{
 
   const handleContextMenu = (e: React.MouseEvent, evt: EventData) => {
     e.preventDefault();
-    setActiveMenu({ id: evt.id, trigger: { type: 'point', x: e.clientX, y: e.clientY } });
+    setActiveMenu({ id: evt.id, title: evt.title, trigger: { type: 'point', x: e.clientX, y: e.clientY } });
   };
   return (
     <div className="bg-glass-surface border-glass-border flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border shadow-xl backdrop-blur-xl">
@@ -634,7 +669,7 @@ const TimeSection: React.FC<{
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const rect = e.currentTarget.getBoundingClientRect();
-                                  setActiveMenu({ id: evt.id, trigger: { type: 'rect', rect } });
+                                  setActiveMenu({ id: evt.id, title: evt.title, trigger: { type: 'rect', rect } });
                                 }}
                                 className="rounded-full p-1 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
                               >
@@ -686,6 +721,7 @@ const TimeSection: React.FC<{
           trigger={activeMenu.trigger}
           onClose={() => setActiveMenu(null)}
           noteId={activeMenu.id}
+          noteTitle={activeMenu.title}
           onRefresh={onRefresh}
           onPlay={(id) => {
             const evt = events.find((e) => e.id === id);
