@@ -783,18 +783,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {isRunning &&
                       activeLiveModel &&
                       activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
-                      activeLiveModel !== activeTranscriber && (
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeLiveModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                          />
-                          <span
-                            className={`font-mono text-[10px] ${modelCacheStatus[activeLiveModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}
-                          >
-                            {modelCacheStatus[activeLiveModel]?.exists ? 'Downloaded' : 'Missing'}
-                          </span>
-                        </div>
-                      )}
+                      (() => {
+                        const liveKey =
+                          liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
+                            ? activeTranscriber
+                            : activeLiveModel;
+                        const liveExists = modelCacheStatus[liveKey ?? '']?.exists;
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`inline-block h-2 w-2 rounded-full ${liveExists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                            />
+                            <span
+                              className={`font-mono text-[10px] ${liveExists ? 'text-green-400' : 'text-slate-500'}`}
+                            >
+                              {liveExists ? 'Downloaded' : 'Missing'}
+                            </span>
+                          </div>
+                        );
+                      })()}
                   </div>
                   <CustomSelect
                     value={liveModelSelection}
@@ -815,33 +822,24 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
                     />
                   )}
-                  {liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION && (
-                    <p className="font-mono text-xs text-slate-500">Using: {activeTranscriber}</p>
-                  )}
                 </div>
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
-                  variant="secondary"
+                  variant={adminStatus?.models_loaded ? 'danger' : 'secondary'}
                   className="h-9 px-4"
-                  onClick={handleLoadModels}
+                  onClick={adminStatus?.models_loaded ? handleUnloadModels : handleLoadModels}
                   disabled={modelsLoading || !isRunning}
                 >
                   {modelsLoading ? (
                     <>
                       <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
                     </>
+                  ) : adminStatus?.models_loaded ? (
+                    'Unload Models'
                   ) : (
                     'Load Models'
                   )}
-                </Button>
-                <Button
-                  variant="danger"
-                  className="h-9 px-4"
-                  onClick={handleUnloadModels}
-                  disabled={modelsLoading || !isRunning}
-                >
-                  Unload Models
                 </Button>
                 {adminStatus?.models_loaded !== undefined && (
                   <span
