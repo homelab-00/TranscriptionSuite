@@ -62,6 +62,9 @@ const AppInner: React.FC = () => {
   const [uvPromptOpen, setUvPromptOpen] = useState(false);
   const uvResolverRef = useRef<((result: 'cancel' | 'enabled' | 'skipped') => void) | null>(null);
 
+  const [firstRunInfoOpen, setFirstRunInfoOpen] = useState(false);
+  const firstRunInfoResolverRef = useRef<(() => void) | null>(null);
+
   const containerLastSeenRef = useRef<boolean | null>(null);
 
   useEffect(() => {
@@ -106,6 +109,20 @@ const AppInner: React.FC = () => {
     });
   }, []);
 
+  const requestFirstRunInfo = useCallback(async (): Promise<void> => {
+    return new Promise((resolve) => {
+      firstRunInfoResolverRef.current = resolve;
+      setFirstRunInfoOpen(true);
+    });
+  }, []);
+
+  const resolveFirstRunInfo = useCallback(() => {
+    setFirstRunInfoOpen(false);
+    const resolver = firstRunInfoResolverRef.current;
+    firstRunInfoResolverRef.current = null;
+    resolver?.();
+  }, []);
+
   useEffect(() => {
     return () => {
       if (hfResolverRef.current) {
@@ -115,6 +132,10 @@ const AppInner: React.FC = () => {
       if (uvResolverRef.current) {
         uvResolverRef.current('cancel');
         uvResolverRef.current = null;
+      }
+      if (firstRunInfoResolverRef.current) {
+        firstRunInfoResolverRef.current();
+        firstRunInfoResolverRef.current = null;
       }
     };
   }, []);
@@ -233,6 +254,19 @@ const AppInner: React.FC = () => {
               uvDecision = uvPromptResult === 'enabled' ? 'enabled' : 'skipped';
               await setConfig('server.uvCacheVolumeDecision', uvDecision);
             }
+          }
+
+          // Check if both data and models volumes are absent — first-ever startup
+          const [dataVolExists, modelsVolExists] = await Promise.all([
+            (window as any).electronAPI?.docker
+              ?.volumeExists('transcriptionsuite-data')
+              .catch(() => false) as Promise<boolean>,
+            (window as any).electronAPI?.docker
+              ?.volumeExists('transcriptionsuite-models')
+              .catch(() => false) as Promise<boolean>,
+          ]);
+          if (!dataVolExists && !modelsVolExists) {
+            await requestFirstRunInfo();
           }
 
           await docker.startContainer(mode, runtimeProfile, undefined, imageTag, hfToken, {
@@ -395,6 +429,43 @@ const AppInner: React.FC = () => {
                 }}
               >
                 Save Token
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {firstRunInfoOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={resolveFirstRunInfo}
+          />
+          <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
+            <div className="flex flex-none items-center border-b border-white/10 bg-white/5 px-6 py-4 select-none">
+              <h2 className="text-lg font-semibold text-white">First Startup — Please Wait</h2>
+            </div>
+            <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
+              <div className="space-y-3 text-sm text-slate-300">
+                <p>
+                  This is the server's first startup. It needs to download roughly{' '}
+                  <span className="font-semibold text-white">20 GB</span> of AI models before it's
+                  ready.
+                </p>
+                <p className="text-slate-400">
+                  Expect the server to take up to{' '}
+                  <span className="font-semibold text-white">~10 minutes</span> to fully start
+                  depending on your internet connection.
+                </p>
+                <p className="text-slate-400">
+                  The app is <span className="font-semibold text-white">not stuck</span> — sit back
+                  and let it finish.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-none justify-end border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+              <Button variant="primary" onClick={resolveFirstRunInfo}>
+                Got it
               </Button>
             </div>
           </div>
