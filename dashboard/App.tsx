@@ -401,14 +401,29 @@ const AppInner: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
-              <Button variant="ghost" onClick={() => resolveUvPrompt('cancel')}>
+            <div className="flex flex-none justify-end gap-2 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+              <Button
+                size="sm"
+                className="whitespace-nowrap"
+                variant="ghost"
+                onClick={() => resolveUvPrompt('cancel')}
+              >
                 Cancel
               </Button>
-              <Button variant="danger" onClick={() => resolveUvPrompt('skipped')}>
+              <Button
+                size="sm"
+                className="whitespace-nowrap"
+                variant="danger"
+                onClick={() => resolveUvPrompt('skipped')}
+              >
                 Skip for now
               </Button>
-              <Button variant="primary" onClick={() => resolveUvPrompt('enabled')}>
+              <Button
+                size="sm"
+                className="whitespace-nowrap"
+                variant="primary"
+                onClick={() => resolveUvPrompt('enabled')}
+              >
                 Enable Cache
               </Button>
             </div>
