@@ -17,6 +17,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  Users,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -42,6 +43,8 @@ const LIVE_ALTERNATE_MODEL = 'Systran/faster-whisper-medium';
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
 const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
+const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
 
 function getString(value: unknown): string | null {
@@ -67,6 +70,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [liveModelSelection, setLiveModelSelection] = useState(LIVE_MODEL_SAME_AS_MAIN_OPTION);
   const [liveCustomModel, setLiveCustomModel] = useState('');
   const [modelsHydrated, setModelsHydrated] = useState(false);
+  const [diarizationModelSelection, setDiarizationModelSelection] = useState(
+    DIARIZATION_DEFAULT_MODEL,
+  );
+  const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
+  const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
   // Runtime profile (persisted in electron-store)
@@ -165,6 +173,23 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     setModelsHydrated(true);
   }, [adminStatus, configuredMainModel, configuredLiveModel, modelsHydrated]);
 
+  useEffect(() => {
+    if (diarizationHydrated || !adminStatus) return;
+
+    if (
+      configuredDiarizationModel &&
+      normalizeModelName(configuredDiarizationModel) !== normalizeModelName(DIARIZATION_DEFAULT_MODEL)
+    ) {
+      setDiarizationModelSelection(DIARIZATION_MODEL_CUSTOM_OPTION);
+      setDiarizationCustomModel(configuredDiarizationModel);
+    } else {
+      setDiarizationModelSelection(DIARIZATION_DEFAULT_MODEL);
+      setDiarizationCustomModel('');
+    }
+
+    setDiarizationHydrated(true);
+  }, [adminStatus, configuredDiarizationModel, diarizationHydrated]);
+
   const activeTranscriber =
     mainModelSelection === MAIN_MODEL_CUSTOM_OPTION
       ? mainCustomModel.trim() || configuredMainModel
@@ -175,7 +200,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
         : LIVE_ALTERNATE_MODEL;
-  const activeDiarizationModel = configuredDiarizationModel || '(empty)';
 
   // Image selection state — "Most Recent (auto)" always picks the newest available tag
   const MOST_RECENT = 'Most Recent (auto)';
@@ -670,12 +694,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           </GlassCard>
         </div>
 
-        {/* 3. Models Card */}
+        {/* 3. ASR Models Card */}
         <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
           <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
             <Cpu size={14} />
           </div>
-          <GlassCard title="3. AI Models Configuration">
+          <GlassCard title="3. ASR Models Configuration">
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -729,9 +753,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
                 <div className="font-mono text-xs text-slate-500">Main: {activeTranscriber}</div>
                 <div className="font-mono text-xs text-slate-500">Live: {activeLiveModel}</div>
-                <div className="font-mono text-xs text-slate-500">
-                  Diarization: {activeDiarizationModel}
-                </div>
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
@@ -768,13 +789,40 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           </GlassCard>
         </div>
 
-        {/* 4. Volumes Card */}
+        {/* 4. Diarization Models Card */}
+        <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+          <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+            <Users size={14} />
+          </div>
+          <GlassCard title="4. Diarization Models Configuration">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-300">Diarization Model</label>
+              <CustomSelect
+                value={diarizationModelSelection}
+                onChange={setDiarizationModelSelection}
+                options={[DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
+                className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+              />
+              {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
+                <input
+                  type="text"
+                  value={diarizationCustomModel}
+                  onChange={(e) => setDiarizationCustomModel(e.target.value)}
+                  placeholder="owner/model-name"
+                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                />
+              )}
+            </div>
+          </GlassCard>
+        </div>
+
+        {/* 5. Volumes Card */}
         <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
           <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
             <HardDrive size={14} />
           </div>
           <GlassCard
-            title="4. Persistent Volumes"
+            title="5. Persistent Volumes"
             action={
               <Button
                 variant="ghost"

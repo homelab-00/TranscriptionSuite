@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.12
+  spec_version: 1.0.13
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -27,7 +27,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-17T17:17:39.523Z
+    generated_at: 2026-02-17T23:59:41.631Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -179,8 +179,10 @@ foundation:
       classes:
         - shadow
         - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
@@ -256,8 +258,10 @@ foundation:
         - min-h-[calc(100vh-30rem)]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
@@ -549,6 +553,7 @@ utility_allowlist:
     - hover:border-accent-cyan/50
     - hover:border-white/10
     - hover:border-white/20
+    - hover:opacity-85
     - hover:scale-105
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
@@ -799,6 +804,7 @@ utility_allowlist:
     - text-slate-500
     - text-slate-600
     - text-slate-700
+    - text-slate-900
     - text-sm
     - text-white
     - text-white/80
@@ -887,8 +893,10 @@ utility_allowlist:
     - min-h-[calc(100vh-30rem)]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
+    - shadow-[0_0_15px_rgba(251,146,60,0.5)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+    - shadow-[0_0_15px_rgba(34,211,238,0.5)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
