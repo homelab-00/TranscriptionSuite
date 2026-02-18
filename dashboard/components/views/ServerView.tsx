@@ -826,19 +826,21 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
-                  variant={adminStatus?.models_loaded ? 'danger' : 'secondary'}
+                  variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
                   className="h-9 px-4"
-                  onClick={adminStatus?.models_loaded ? handleUnloadModels : handleLoadModels}
+                  onClick={
+                    adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
+                  }
                   disabled={modelsLoading || !isRunning}
                 >
                   {modelsLoading ? (
                     <>
                       <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
                     </>
-                  ) : adminStatus?.models_loaded ? (
-                    'Unload Models'
-                  ) : (
+                  ) : adminStatus?.models_loaded === false ? (
                     'Load Models'
+                  ) : (
+                    'Unload Models'
                   )}
                 </Button>
                 {adminStatus?.models_loaded !== undefined && (

@@ -974,34 +974,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </Button>
                       </div>
                       <div className="ml-auto shrink-0">
-                        {admin.status?.models_loaded === false && !modelsOperationPending ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={handleReloadModels}
-                            disabled={!serverConnection.reachable || modelsOperationPending}
-                            className="px-3 text-xs"
-                          >
-                            Reload Models
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={handleUnloadAllModels}
-                            disabled={!serverConnection.reachable || modelsOperationPending}
-                            className="px-3 text-xs"
-                          >
-                            {modelsOperationPending ? (
-                              <>
-                                <Loader2 size={14} className="mr-1 animate-spin" />
-                                {modelsOperationType === 'loading' ? 'Loading...' : 'Unloading...'}
-                              </>
-                            ) : (
-                              'Unload Models'
-                            )}
-                          </Button>
-                        )}
+                        <Button
+                          variant={admin.status?.models_loaded === false ? 'secondary' : 'danger'}
+                          size="sm"
+                          onClick={
+                            admin.status?.models_loaded === false
+                              ? handleReloadModels
+                              : handleUnloadAllModels
+                          }
+                          disabled={!serverConnection.reachable || modelsOperationPending}
+                          className="px-3 text-xs"
+                        >
+                          {modelsOperationPending ? (
+                            <>
+                              <Loader2 size={14} className="mr-1 animate-spin" />
+                              {modelsOperationType === 'loading' ? 'Loading...' : 'Unloading...'}
+                            </>
+                          ) : admin.status?.models_loaded === false ? (
+                            'Load Models'
+                          ) : (
+                            'Unload Models'
+                          )}
+                        </Button>
                       </div>
                     </div>
                   </div>
