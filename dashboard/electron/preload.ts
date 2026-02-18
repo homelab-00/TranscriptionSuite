@@ -81,9 +81,7 @@ export interface ElectronAPI {
     getVolumes: () => Promise<
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
-    checkModelsCached: (
-      modelIds: string[],
-    ) => Promise<Record<string, { exists: boolean }>>;
+    checkModelsCached: (modelIds: string[]) => Promise<Record<string, { exists: boolean }>>;
     removeVolume: (name: string) => Promise<string>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;

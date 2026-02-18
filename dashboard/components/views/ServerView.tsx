@@ -70,9 +70,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [liveModelSelection, setLiveModelSelection] = useState(LIVE_MODEL_SAME_AS_MAIN_OPTION);
   const [liveCustomModel, setLiveCustomModel] = useState('');
   const [modelsHydrated, setModelsHydrated] = useState(false);
-  const [diarizationModelSelection, setDiarizationModelSelection] = useState(
-    DIARIZATION_DEFAULT_MODEL,
-  );
+  const [diarizationModelSelection, setDiarizationModelSelection] =
+    useState(DIARIZATION_DEFAULT_MODEL);
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -182,7 +181,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
     if (
       configuredDiarizationModel &&
-      normalizeModelName(configuredDiarizationModel) !== normalizeModelName(DIARIZATION_DEFAULT_MODEL)
+      normalizeModelName(configuredDiarizationModel) !==
+        normalizeModelName(DIARIZATION_DEFAULT_MODEL)
     ) {
       setDiarizationModelSelection(DIARIZATION_MODEL_CUSTOM_OPTION);
       setDiarizationCustomModel(configuredDiarizationModel);
@@ -217,9 +217,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!api?.docker?.checkModelsCached || !isRunning) return;
 
     // Collect unique model IDs to check
-    const modelIds = [...new Set([activeTranscriber, activeLiveModel, activeDiarizationModel])].filter(
-      (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER,
-    );
+    const modelIds = [
+      ...new Set([activeTranscriber, activeLiveModel, activeDiarizationModel]),
+    ].filter((id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER);
     if (modelIds.length === 0) return;
 
     // Debounce the check
@@ -742,14 +742,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-slate-300">Main Transcriber</label>
-                    {isRunning && activeTranscriber && activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER && (
-                      <div className="flex items-center gap-1.5">
-                        <span className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`} />
-                        <span className={`font-mono text-[10px] ${modelCacheStatus[activeTranscriber]?.exists ? 'text-green-400' : 'text-slate-500'}`}>
-                          {modelCacheStatus[activeTranscriber]?.exists ? 'Downloaded' : 'Missing'}
-                        </span>
-                      </div>
-                    )}
+                    {isRunning &&
+                      activeTranscriber &&
+                      activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER && (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                          />
+                          <span
+                            className={`font-mono text-[10px] ${modelCacheStatus[activeTranscriber]?.exists ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {modelCacheStatus[activeTranscriber]?.exists ? 'Downloaded' : 'Missing'}
+                          </span>
+                        </div>
+                      )}
                   </div>
                   <CustomSelect
                     value={mainModelSelection}
@@ -774,14 +780,21 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-slate-300">Live Mode Model</label>
-                    {isRunning && activeLiveModel && activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER && activeLiveModel !== activeTranscriber && (
-                      <div className="flex items-center gap-1.5">
-                        <span className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeLiveModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`} />
-                        <span className={`font-mono text-[10px] ${modelCacheStatus[activeLiveModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}>
-                          {modelCacheStatus[activeLiveModel]?.exists ? 'Downloaded' : 'Missing'}
-                        </span>
-                      </div>
-                    )}
+                    {isRunning &&
+                      activeLiveModel &&
+                      activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
+                      activeLiveModel !== activeTranscriber && (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeLiveModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                          />
+                          <span
+                            className={`font-mono text-[10px] ${modelCacheStatus[activeLiveModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {modelCacheStatus[activeLiveModel]?.exists ? 'Downloaded' : 'Missing'}
+                          </span>
+                        </div>
+                      )}
                   </div>
                   <CustomSelect
                     value={liveModelSelection}
@@ -853,8 +866,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <label className="text-sm font-medium text-slate-300">Diarization Model</label>
                 {isRunning && activeDiarizationModel && (
                   <div className="flex items-center gap-1.5">
-                    <span className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeDiarizationModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`} />
-                    <span className={`font-mono text-[10px] ${modelCacheStatus[activeDiarizationModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}>
+                    <span
+                      className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeDiarizationModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                    />
+                    <span
+                      className={`font-mono text-[10px] ${modelCacheStatus[activeDiarizationModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}
+                    >
                       {modelCacheStatus[activeDiarizationModel]?.exists ? 'Downloaded' : 'Missing'}
                     </span>
                   </div>

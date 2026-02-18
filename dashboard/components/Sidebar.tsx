@@ -43,7 +43,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       logoContentWidth + SIDEBAR_LOGO_HORIZONTAL_PADDING_PX * 2 + SIDEBAR_LOGO_COMFORT_BUFFER_PX;
     const nextWidth = Math.max(SIDEBAR_EXPANDED_BASE_WIDTH_PX, minComfortableWidth);
 
-    setExpandedWidthPx((previousWidth) => (previousWidth === nextWidth ? previousWidth : nextWidth));
+    setExpandedWidthPx((previousWidth) =>
+      previousWidth === nextWidth ? previousWidth : nextWidth,
+    );
   }, [collapsed]);
 
   useLayoutEffect(() => {

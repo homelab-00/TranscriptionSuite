@@ -203,7 +203,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Client connection state — tracked at App level via props
   const admin = useAdminStatus();
   const [modelsOperationPending, setModelsOperationPending] = useState(false);
-  const [modelsOperationType, setModelsOperationType] = useState<'loading' | 'unloading' | null>(null);
+  const [modelsOperationType, setModelsOperationType] = useState<'loading' | 'unloading' | null>(
+    null,
+  );
   const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
   // Active model name (for capability checks & tray tooltip)

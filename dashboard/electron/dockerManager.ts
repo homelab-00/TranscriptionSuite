@@ -956,9 +956,7 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
  *
  * Returns a record mapping each model ID to `{ exists: boolean }`.
  */
-async function checkModelsCached(
-  modelIds: string[],
-): Promise<Record<string, { exists: boolean }>> {
+async function checkModelsCached(modelIds: string[]): Promise<Record<string, { exists: boolean }>> {
   const result: Record<string, { exists: boolean }> = {};
 
   // Default all to missing
@@ -967,12 +965,7 @@ async function checkModelsCached(
   }
 
   try {
-    const output = await exec('docker', [
-      'exec',
-      CONTAINER_NAME,
-      'ls',
-      '/models/hub/',
-    ]);
+    const output = await exec('docker', ['exec', CONTAINER_NAME, 'ls', '/models/hub/']);
 
     const entries = new Set(
       output
