@@ -1,0 +1,151 @@
+@import 'tailwindcss';
+
+/* --- Tailwind Theme Extension (migrated from CDN config) --- */
+@theme {
+  --font-sans: 'Inter', sans-serif;
+
+  /* Glass colors */
+  --color-glass-100: rgba(0, 0, 0, 0.3);
+  --color-glass-200: rgba(0, 0, 0, 0.5);
+  --color-glass-300: rgba(0, 0, 0, 0.7);
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-glass-surface: rgba(0, 0, 0, 0.4);
+
+  /* Accent colors */
+  --color-accent-cyan: #22d3ee;
+  --color-accent-magenta: #d946ef;
+  --color-accent-orange: #fb923c;
+
+  /* Backdrop blur */
+  --backdrop-blur-xs: 2px;
+
+  /*
+   * Tailwind v3 sRGB palette overrides.
+   * Tailwind v4 redefines the default palette in oklch, which shifts
+   * perceived hue/saturation after gamut-mapping to sRGB for display.
+   * Pin every referenced shade back to the exact v3 hex value so the
+   * rendered output matches the original mockup (which used v3 CDN).
+   */
+
+  /* slate */
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+
+  /* green */
+  --color-green-300: #86efac;
+  --color-green-400: #4ade80;
+  --color-green-500: #22c55e;
+
+  /* red */
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-900: #7f1d1d;
+
+  /* blue */
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-900: #1e3a5f;
+
+  /* cyan */
+  --color-cyan-300: #67e8f9;
+
+  /* orange */
+  --color-orange-200: #fed7aa;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+
+  /* amber */
+  --color-amber-400: #fbbf24;
+
+  /* indigo */
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+
+  /* purple */
+  --color-purple-500: #a855f7;
+  --color-purple-900: #581c87;
+
+  /* teal */
+  --color-teal-500: #14b8a6;
+
+  /* rose */
+  --color-rose-400: #fb7185;
+
+  /* fuchsia */
+  --color-fuchsia-300: #f0abfc;
+
+  /* black / white (confirm sRGB identity values) */
+  --color-black: #000000;
+  --color-white: #ffffff;
+}
+
+/* Tailwind v4 maps bg-gradient-* to oklab interpolation; force mockup-like sRGB behavior. */
+.bg-gradient-to-b {
+  --tw-gradient-position: to bottom;
+  background-image: linear-gradient(var(--tw-gradient-stops));
+}
+
+.bg-gradient-to-t {
+  --tw-gradient-position: to top;
+  background-image: linear-gradient(var(--tw-gradient-stops));
+}
+
+/* --- Global Styles --- */
+body {
+  background-color: #0f172a;
+  background-image:
+    radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%),
+    radial-gradient(at 50% 0%, hsla(225, 39%, 30%, 1) 0, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(339, 49%, 30%, 1) 0, transparent 50%);
+  color: white;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Global Selection Styling */
+::selection {
+  background-color: #22d3ee;
+  color: #0f172a;
+}
+
+::-moz-selection {
+  background-color: #22d3ee;
+  color: #0f172a;
+}
+
+/* Utility for allowing selection in specific areas */
+.selectable-text {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Custom Scrollbar - Opt-in via .custom-scrollbar class */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}

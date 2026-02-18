@@ -142,10 +142,22 @@ class TranscriptionSession:
             engine = model_manager.transcription_engine
 
             # Transcribe
+            task = (
+                "translate"
+                if getattr(self, "translation_enabled", False)
+                else "transcribe"
+            )
+            translation_target = (
+                getattr(self, "translation_target_language", "en")
+                if task == "translate"
+                else None
+            )
             result = engine.transcribe_file(
                 file_path=str(self.temp_file),
                 language=self.language,
                 word_timestamps=True,
+                task=task,
+                translation_target_language=translation_target,
             )
 
             # Send final result
@@ -180,6 +192,8 @@ class TranscriptionSession:
         self,
         language: Optional[str] = None,
         use_vad: bool = False,
+        translation_enabled: bool = False,
+        translation_target_language: str = "en",
     ) -> None:
         """
         Start a recording session.
@@ -187,9 +201,13 @@ class TranscriptionSession:
         Args:
             language: Target language code
             use_vad: Use VAD for automatic start/stop detection
+            translation_enabled: Enable source→target translation
+            translation_target_language: Translation target (v1: "en" only)
         """
         self.is_recording = True
         self.language = language
+        self.translation_enabled = translation_enabled
+        self.translation_target_language = translation_target_language
         self.audio_chunks = []
         self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
 
@@ -326,7 +344,13 @@ async def handle_client_message(
 
         language = message.get("data", {}).get("language")
         use_vad = message.get("data", {}).get("use_vad", False)
-        await session.start_recording(language, use_vad)
+        translation_enabled = message.get("data", {}).get("translation_enabled", False)
+        translation_target_language = message.get("data", {}).get(
+            "translation_target_language", "en"
+        )
+        await session.start_recording(
+            language, use_vad, translation_enabled, translation_target_language
+        )
 
     elif msg_type == "stop":
         await session.stop_recording()

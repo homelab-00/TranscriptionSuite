@@ -24,6 +24,7 @@ from server.api.routes.utils import (
     authenticate_websocket_from_headers,
     require_admin,
 )
+from server.config import resolve_live_transcriber_model, resolve_main_transcriber_model
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +40,43 @@ async def get_admin_status(request: Request) -> Dict[str, Any]:
     try:
         model_manager = request.app.state.model_manager
         config = request.app.state.config
+        main_cfg = config.get("main_transcriber", default={}) or {}
+        live_cfg = config.get("live_transcriber", default={}) or {}
+        legacy_cfg = config.transcription or {}
+
+        if not isinstance(main_cfg, dict):
+            main_cfg = {}
+        if not isinstance(live_cfg, dict):
+            live_cfg = {}
+        if not isinstance(legacy_cfg, dict):
+            legacy_cfg = {}
+
+        main_model = resolve_main_transcriber_model(config)
+        live_model = resolve_live_transcriber_model(config)
+        main_device = main_cfg.get("device") or legacy_cfg.get("device")
+        live_device = live_cfg.get("device") or main_device
 
         return {
             "status": "running",
             "models": model_manager.get_status(),
             "config": {
                 "server": config.server,
+                "main_transcriber": {
+                    "model": main_model,
+                    "device": main_device,
+                },
+                "live_transcriber": {
+                    "model": live_model,
+                    "device": live_device,
+                },
+                # Backward-compat aliases consumed by older clients.
                 "transcription": {
-                    "model": config.transcription.get("model"),
-                    "device": config.transcription.get("device"),
+                    "model": main_model,
+                    "device": main_device,
+                },
+                "live_transcription": {
+                    "model": live_model,
+                    "device": live_device,
                 },
             },
         }

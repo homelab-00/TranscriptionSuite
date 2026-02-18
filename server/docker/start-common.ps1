@@ -14,7 +14,8 @@ $ErrorActionPreference = "Stop"
 # Constants
 # ============================================================================
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DockerImage = "ghcr.io/homelab-00/transcriptionsuite-server:latest"
+$DockerImage = "ghcr.io/homelab-00/transcriptionsuite-server:$($env:TAG)"
+if (-not $env:TAG) { throw 'TAG environment variable must be set' }
 $ContainerName = "transcriptionsuite-container"
 $HfDiarizationTermsUrl = "https://huggingface.co/pyannote/speaker-diarization-community-1"
 $script:PromptTimeOffsetSeconds = 0

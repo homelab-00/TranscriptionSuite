@@ -17,6 +17,7 @@ import os
 import threading
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+from server.config import resolve_main_transcriber_model
 
 # Type-only imports for hints (no runtime cost)
 if TYPE_CHECKING:
@@ -269,8 +270,7 @@ class ModelManager:
     @property
     def main_model_name(self) -> str:
         """Get the configured main transcription model name."""
-        main_cfg = self.config.get("main_transcriber", {})
-        return main_cfg.get("model", "Systran/faster-whisper-large-v3")
+        return resolve_main_transcriber_model(self.config)
 
     def is_same_model(self, model_a: str, model_b: str) -> bool:
         """
@@ -314,7 +314,7 @@ class ModelManager:
 
         return AudioToTextRecorder(
             instance_name="file_transcriber",
-            model=main_cfg.get("model", "Systran/faster-whisper-large-v3"),
+            model=main_cfg.get("model") or resolve_main_transcriber_model(self.config),
             device=main_cfg.get("device", "cuda"),
             compute_type=main_cfg.get("compute_type", "default"),
             beam_size=main_cfg.get("beam_size", 5),

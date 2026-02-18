@@ -24,6 +24,7 @@ Provides a single API serving:
 # Imports are placed after timing instrumentation intentionally
 import asyncio  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -93,6 +94,10 @@ PUBLIC_PREFIXES = (
     "/docs",
     "/openapi.json",
     "/redoc",
+)
+
+NOTEBOOK_QUERY_TOKEN_ROUTES = re.compile(
+    r"^/api/notebook/recordings/\d+/(audio|export)$"
 )
 
 
@@ -172,6 +177,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             token = auth_header[7:]
         elif auth_cookie:
             token = auth_cookie
+        elif NOTEBOOK_QUERY_TOKEN_ROUTES.match(path):
+            query_token = request.query_params.get("token", "").strip()
+            if query_token:
+                token = query_token
 
         if token:
             token_store = get_token_store()

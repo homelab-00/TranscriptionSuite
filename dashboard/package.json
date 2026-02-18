@@ -1,0 +1,141 @@
+{
+  "name": "transcriptionsuite",
+  "private": true,
+  "version": "1.0.2",
+  "description": "Desktop dashboard for managing TranscriptionSuite server and transcription workflows.",
+  "author": "TranscriptionSuite Team",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run format:check && npm run ui:contract:check",
+    "build:electron": "npm run build && tsc -p electron/tsconfig.json",
+    "preview": "vite preview",
+    "package:linux": "npm run build:electron && electron-builder --linux AppImage",
+    "package:windows": "npm run build:electron && electron-builder --win nsis",
+    "package:mac": "npm run build:electron && electron-builder --mac dmg zip",
+    "ui:contract:extract": "node scripts/ui-contract/extract-facts.mjs",
+    "ui:contract:build": "node scripts/ui-contract/build-contract.mjs",
+    "ui:contract:validate": "node scripts/ui-contract/validate-contract.mjs",
+    "ui:contract:check": "npm run ui:contract:validate && npm run ui:contract:test",
+    "ui:contract:diff": "node scripts/ui-contract/diff-contract.mjs",
+    "ui:contract:test": "node scripts/ui-contract/test-contract.mjs"
+  },
+  "dependencies": {
+    "electron-store": "^11.0.2",
+    "lucide-react": "^0.564.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^25.2.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "ajv": "^8.18.0",
+    "autoprefixer": "^10.4.24",
+    "electron": "^40.4.1",
+    "electron-builder": "^26.7.0",
+    "prettier": "^3.8.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1",
+    "yaml": "^2.8.2"
+  },
+  "build": {
+    "appId": "com.transcriptionsuite.dashboard",
+    "productName": "TranscriptionSuite",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../build/assets/tray-icon.png",
+        "to": "tray-icon.png"
+      },
+      {
+        "from": "../build/assets/tray-icon@1x.png",
+        "to": "tray-icon@1x.png"
+      },
+      {
+        "from": "../build/assets/tray-icon@2x.png",
+        "to": "tray-icon@2x.png"
+      },
+      {
+        "from": "../server/docker/docker-compose.yml",
+        "to": "docker/docker-compose.yml"
+      },
+      {
+        "from": "../server/docker/docker-compose.linux-host.yml",
+        "to": "docker/docker-compose.linux-host.yml"
+      },
+      {
+        "from": "../server/docker/docker-compose.desktop-vm.yml",
+        "to": "docker/docker-compose.desktop-vm.yml"
+      },
+      {
+        "from": "../server/docker/docker-compose.gpu.yml",
+        "to": "docker/docker-compose.gpu.yml"
+      }
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility",
+      "icon": "../build/assets/logo.png"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "../build/assets/logo.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "../build/assets/logo.icns"
+    },
+    "dmg": {
+      "sign": false,
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,499 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://transcription-suite.local/schemas/transcription-suite-ui.contract.schema.json",
+  "title": "UIContract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "meta",
+    "foundation",
+    "global_behaviors",
+    "utility_allowlist",
+    "inline_style_allowlist",
+    "component_contracts",
+    "validation_policy"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spec_version",
+        "contract_mode",
+        "source_scope",
+        "validation_method",
+        "generated_from"
+      ],
+      "properties": {
+        "spec_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "contract_mode": {
+          "type": "string",
+          "enum": ["closed_set"]
+        },
+        "source_scope": {
+          "type": "string",
+          "enum": ["mockup_repo"]
+        },
+        "validation_method": {
+          "type": "string",
+          "enum": ["static_source_scan"]
+        },
+        "generated_from": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repo_path", "source_files", "generated_at"],
+          "properties": {
+            "repo_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_files": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "generated_at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "foundation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tailwind", "tokens"],
+      "properties": {
+        "color_space": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy",
+            "enforcement",
+            "plugin_name",
+            "rule",
+            "prohibited_css_functions",
+            "prohibited_color_spaces"
+          ],
+          "properties": {
+            "policy": {
+              "type": "string"
+            },
+            "enforcement": {
+              "type": "string"
+            },
+            "plugin_name": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "string"
+            },
+            "prohibited_css_functions": {
+              "$ref": "#/$defs/stringSet"
+            },
+            "prohibited_color_spaces": {
+              "$ref": "#/$defs/stringSet"
+            }
+          }
+        },
+        "tailwind": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dark_mode",
+            "font_family_sans",
+            "accent_scale",
+            "glass_scale",
+            "backdrop_blur_scale"
+          ],
+          "properties": {
+            "dark_mode": {
+              "type": ["string", "null"]
+            },
+            "font_family_sans": {
+              "$ref": "#/$defs/stringSet"
+            },
+            "accent_scale": {
+              "$ref": "#/$defs/stringMap"
+            },
+            "glass_scale": {
+              "$ref": "#/$defs/stringMap"
+            },
+            "backdrop_blur_scale": {
+              "$ref": "#/$defs/stringMap"
+            }
+          }
+        },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "colors",
+            "blur_levels",
+            "shadow_levels",
+            "motion",
+            "radii",
+            "z_index_levels",
+            "spacing_and_size_constraints",
+            "status_states"
+          ],
+          "properties": {
+            "colors": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "literal_palette",
+                "accent_scale",
+                "glass_scale",
+                "semantic_status_palette"
+              ],
+              "properties": {
+                "literal_palette": {
+                  "$ref": "#/$defs/stringSet"
+                },
+                "accent_scale": {
+                  "$ref": "#/$defs/stringMap"
+                },
+                "glass_scale": {
+                  "$ref": "#/$defs/stringMap"
+                },
+                "semantic_status_palette": {
+                  "$ref": "#/$defs/objectMap"
+                }
+              }
+            },
+            "blur_levels": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["backdrop", "filter"],
+              "properties": {
+                "backdrop": {
+                  "$ref": "#/$defs/stringSet"
+                },
+                "filter": {
+                  "$ref": "#/$defs/stringSet"
+                }
+              }
+            },
+            "shadow_levels": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["classes"],
+              "properties": {
+                "classes": {
+                  "$ref": "#/$defs/stringSet"
+                }
+              }
+            },
+            "motion": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "duration_ms",
+                "easings",
+                "keyframes",
+                "animation_classes",
+                "animation_strings"
+              ],
+              "properties": {
+                "duration_ms": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "uniqueItems": true
+                },
+                "easings": {
+                  "$ref": "#/$defs/stringSet"
+                },
+                "keyframes": {
+                  "$ref": "#/$defs/stringSet"
+                },
+                "animation_classes": {
+                  "$ref": "#/$defs/stringSet"
+                },
+                "animation_strings": {
+                  "$ref": "#/$defs/stringSet"
+                }
+              }
+            },
+            "radii": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["classes"],
+              "properties": {
+                "classes": {
+                  "$ref": "#/$defs/stringSet"
+                }
+              }
+            },
+            "z_index_levels": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["classes"],
+              "properties": {
+                "classes": {
+                  "$ref": "#/$defs/stringSet"
+                }
+              }
+            },
+            "spacing_and_size_constraints": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["arbitrary_classes"],
+              "properties": {
+                "arbitrary_classes": {
+                  "$ref": "#/$defs/stringSet"
+                }
+              }
+            },
+            "status_states": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["allowed", "visual_mappings"],
+              "properties": {
+                "allowed": {
+                  "$ref": "#/$defs/stringSet"
+                },
+                "visual_mappings": {
+                  "$ref": "#/$defs/objectMap"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "global_behaviors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["css_blocks", "selection", "text_selectability", "scrollbar", "portals"],
+      "properties": {
+        "css_blocks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "body",
+            "selection",
+            "moz_selection",
+            "selectable_text",
+            "custom_scrollbar_root",
+            "custom_scrollbar_track",
+            "custom_scrollbar_thumb",
+            "custom_scrollbar_thumb_hover",
+            "custom_scrollbar_corner"
+          ],
+          "properties": {
+            "body": { "type": "string" },
+            "selection": { "type": "string" },
+            "moz_selection": { "type": "string" },
+            "selectable_text": { "type": "string" },
+            "custom_scrollbar_root": { "type": "string" },
+            "custom_scrollbar_track": { "type": "string" },
+            "custom_scrollbar_thumb": { "type": "string" },
+            "custom_scrollbar_thumb_hover": { "type": "string" },
+            "custom_scrollbar_corner": { "type": "string" }
+          }
+        },
+        "selection": {
+          "$ref": "#/$defs/objectMap"
+        },
+        "text_selectability": {
+          "$ref": "#/$defs/objectMap"
+        },
+        "scrollbar": {
+          "$ref": "#/$defs/objectMap"
+        },
+        "portals": {
+          "$ref": "#/$defs/objectMap"
+        }
+      }
+    },
+    "utility_allowlist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_classes", "arbitrary_classes"],
+      "properties": {
+        "exact_classes": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "arbitrary_classes": {
+          "$ref": "#/$defs/stringSet"
+        }
+      }
+    },
+    "inline_style_allowlist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_properties",
+        "allowed_literals",
+        "keyframes",
+        "animation_strings",
+        "cubic_beziers"
+      ],
+      "properties": {
+        "allowed_properties": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "allowed_literals": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "keyframes": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "animation_strings": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "cubic_beziers": {
+          "$ref": "#/$defs/stringSet"
+        }
+      }
+    },
+    "component_contracts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/componentContract"
+      }
+    },
+    "validation_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unknown_utility_class",
+        "missing_required_field",
+        "missing_component_contract",
+        "semver_bump_required"
+      ],
+      "properties": {
+        "unknown_utility_class": {
+          "type": "string",
+          "enum": ["error"]
+        },
+        "missing_required_field": {
+          "type": "string",
+          "enum": ["error"]
+        },
+        "missing_component_contract": {
+          "type": "string",
+          "enum": ["error"]
+        },
+        "semver_bump_required": {
+          "type": "string",
+          "enum": ["error"]
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stringSet": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "stringMap": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "objectMap": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": true
+    },
+    "componentContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "required_tokens",
+        "allowed_variants",
+        "structural_invariants",
+        "behavior_rules",
+        "state_rules"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_tokens": {
+          "$ref": "#/$defs/stringSet"
+        },
+        "allowed_variants": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/stringSet"
+          }
+        },
+        "structural_invariants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ruleEntry"
+          },
+          "minItems": 1
+        },
+        "behavior_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ruleEntry"
+          },
+          "minItems": 1
+        },
+        "state_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ruleEntry"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "ruleEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "rule"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

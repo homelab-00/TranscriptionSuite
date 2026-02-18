@@ -4,6 +4,9 @@ paths:
   - server/
 paths-ignore:
   - dist
+  - '**/dist/**'
+  - '**/dist-electron/**'
+  - '**/release/**'
   - '**/*.test.*'
   - '**/*.spec.*'
 queries:

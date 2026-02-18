@@ -1,0 +1,1671 @@
+meta:
+  spec_version: 1.0.13
+  contract_mode: closed_set
+  source_scope: mockup_repo
+  validation_method: static_source_scan
+  generated_from:
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
+    source_files:
+      - App.tsx
+      - components/AudioVisualizer.tsx
+      - components/Sidebar.tsx
+      - components/ui/AppleSwitch.tsx
+      - components/ui/Button.tsx
+      - components/ui/CustomSelect.tsx
+      - components/ui/GlassCard.tsx
+      - components/ui/LogTerminal.tsx
+      - components/ui/StatusLight.tsx
+      - components/views/AboutModal.tsx
+      - components/views/AddNoteModal.tsx
+      - components/views/AudioNoteModal.tsx
+      - components/views/FullscreenVisualizer.tsx
+      - components/views/NotebookView.tsx
+      - components/views/ServerView.tsx
+      - components/views/SessionView.tsx
+      - components/views/SettingsModal.tsx
+      - index.html
+      - index.tsx
+      - src/index.css
+      - types.ts
+    generated_at: 2026-02-17T23:59:41.631Z
+    notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
+foundation:
+  color_space:
+    policy: srgb_only
+    enforcement: postcss_plugin
+    plugin_name: strip-oklab-supports
+    rule: All Tailwind v4 @supports blocks that upgrade color rendering from sRGB fallbacks to oklab color-mix or oklab gradient interpolation must be stripped at build time. The original UI mockup (Tailwind v3 CDN) uses sRGB exclusively. Default palette shades are pinned to their Tailwind v3 hex values in @theme to prevent oklch gamut-mapping drift.
+    prohibited_css_functions:
+      - color-mix(in oklab, ...)
+      - color-mix(in lab, ...)
+    prohibited_color_spaces:
+      - oklch
+      - oklab
+  tailwind:
+    dark_mode: class
+    font_family_sans:
+      - Inter
+      - sans-serif
+    accent_scale: &a1
+      cyan: "#22d3ee"
+      magenta: "#d946ef"
+      orange: "#fb923c"
+    glass_scale: &a2
+      "100": rgba(0, 0, 0, 0.3)
+      "200": rgba(0, 0, 0, 0.5)
+      "300": rgba(0, 0, 0, 0.7)
+      border: rgba(255, 255, 255, 0.1)
+      surface: rgba(0, 0, 0, 0.4)
+    backdrop_blur_scale:
+      xs: 2px
+  tokens:
+    colors:
+      literal_palette:
+        - "#000000"
+        - "#0b1120"
+        - "#0f172a"
+        - "#14b8a6"
+        - "#1e293b"
+        - "#1e3a5f"
+        - "#22c55e"
+        - "#22d3ee"
+        - "#2563eb"
+        - "#334155"
+        - "#3b82f6"
+        - "#475569"
+        - "#4ade80"
+        - "#581c87"
+        - "#60a5fa"
+        - "#6366f1"
+        - "#64748b"
+        - "#67e8f9"
+        - "#7f1d1d"
+        - "#818cf8"
+        - "#86efac"
+        - "#94a3b8"
+        - "#a855f7"
+        - "#cbd5e1"
+        - "#d946ef"
+        - "#e2e8f0"
+        - "#ef4444"
+        - "#f0abfc"
+        - "#f87171"
+        - "#f97316"
+        - "#fb7185"
+        - "#fb923c"
+        - "#fbbf24"
+        - "#fca5a5"
+        - "#fed7aa"
+        - "#fff"
+        - "#ffffff"
+        - hsla(225, 39%, 30%, 1)
+        - hsla(225,39%,30%,1)
+        - hsla(253, 16%, 7%, 1)
+        - hsla(253,16%,7%,1)
+        - hsla(339, 49%, 30%, 1)
+        - hsla(339,49%,30%,1)
+        - rgb(230,230,230)
+        - rgba(${r}, ${g}, ${b}, ${alpha})
+        - rgba(0, 0, 0, 0.3)
+        - rgba(0, 0, 0, 0.4)
+        - rgba(0, 0, 0, 0.5)
+        - rgba(0, 0, 0, 0.7)
+        - rgba(0,0,0,0.3)
+        - rgba(0,0,0,0.4)
+        - rgba(217, 70, 239, 0.5)
+        - rgba(217,70,239,0.5)
+        - rgba(22,31,50,0.9)
+        - rgba(239,22,238,0.5)
+        - rgba(239,68,68,0.6)
+        - rgba(251, 146, 60, 0.3)
+        - rgba(251,146,60,0.5)
+        - rgba(255, 255, 255, 0.1)
+        - rgba(255, 255, 255, 0.2)
+        - rgba(255, 255, 255, 0.4)
+        - rgba(255,145,0,0.15)
+        - rgba(255,255,255,0.3)
+        - rgba(34, 211, 238, 0.6)
+        - rgba(34, 211, 238, 0.8)
+        - rgba(34,211,238,0.05)
+        - rgba(34,211,238,0.15)
+        - rgba(34,211,238,0.2)
+        - rgba(34,211,238,0.4)
+        - rgba(34,211,238,0.5)
+        - rgba(34,211,238,0.6)
+      accent_scale: *a1
+      glass_scale: *a2
+      semantic_status_palette: &a3
+        active:
+          classes:
+            - bg-green-500
+            - shadow-green-500/50
+          bg: bg-green-500
+          shadow: shadow-green-500/50
+        inactive:
+          classes:
+            - bg-slate-500
+            - shadow-slate-500/50
+          bg: bg-slate-500
+          shadow: shadow-slate-500/50
+        warning:
+          classes:
+            - bg-accent-orange
+            - shadow-accent-orange/50
+          bg: bg-accent-orange
+          shadow: shadow-accent-orange/50
+        error:
+          classes:
+            - bg-red-500
+            - shadow-red-500/50
+          bg: bg-red-500
+          shadow: shadow-red-500/50
+        loading:
+          classes:
+            - bg-blue-400
+            - shadow-blue-400/50
+          bg: bg-blue-400
+          shadow: shadow-blue-400/50
+    blur_levels:
+      backdrop:
+        - backdrop-blur-2xl
+        - backdrop-blur-3xl
+        - backdrop-blur-md
+        - backdrop-blur-sm
+        - backdrop-blur-xl
+        - backdrop-blur-xs
+      filter:
+        - blur-2xl
+    shadow_levels:
+      classes:
+        - shadow
+        - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
+        - shadow-[0_0_15px_rgba(34,211,238,0.2)]
+        - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_20px_rgba(255,255,255,0.3)]
+        - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+        - shadow-[0_0_5px_rgba(239,68,68,0.6)]
+        - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+        - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+        - shadow-2xl
+        - shadow-accent-cyan/20
+        - shadow-accent-cyan/40
+        - shadow-accent-magenta/20
+        - shadow-accent-orange/50
+        - shadow-blue-400/50
+        - shadow-green-500/50
+        - shadow-inner
+        - shadow-lg
+        - shadow-red-500/50
+        - shadow-slate-500/50
+        - shadow-sm
+        - shadow-xl
+    motion:
+      duration_ms:
+        - 100
+        - 150
+        - 200
+        - 300
+        - 500
+        - 700
+      easings:
+        - ease-[cubic-bezier(0.16, 1, 0.3, 1)]
+        - ease-[cubic-bezier(0.22,1,0.36,1)]
+        - ease-[cubic-bezier(0.25,0.1,0.25,1)]
+        - ease-[cubic-bezier(0.32,0.72,0,1)]
+        - ease-[cubic-bezier(0.33,1,0.68,1)]
+        - ease-in-out
+        - ease-out
+      keyframes:
+        - slideInLeft
+        - slideInRight
+        - slideUpFromBottomEdge
+      animation_classes:
+        - animate-in
+        - animate-ping
+        - animate-pulse
+      animation_strings: []
+    radii:
+      classes:
+        - rounded
+        - rounded-2xl
+        - rounded-3xl
+        - rounded-b-2xl
+        - rounded-br-full
+        - rounded-full
+        - rounded-lg
+        - rounded-md
+        - rounded-r-full
+        - rounded-t-2xl
+        - rounded-tl-none
+        - rounded-tr-none
+        - rounded-xl
+    z_index_levels:
+      classes: &a4
+        - z-0
+        - z-10
+        - z-10000
+        - z-20
+        - z-50
+        - z-60
+        - z-9999
+    spacing_and_size_constraints:
+      arbitrary_classes:
+        - h-[85%]
+        - h-[85vh]
+        - max-h-[80vh]
+        - min-h-[calc(100vh-30rem)]
+        - p-[3px]
+        - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
+        - shadow-[0_0_15px_rgba(34,211,238,0.2)]
+        - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_20px_rgba(255,255,255,0.3)]
+        - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+        - shadow-[0_0_5px_rgba(239,68,68,0.6)]
+        - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+        - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+        - text-[10px]
+        - text-[11px]
+        - text-[8px]
+        - text-[9px]
+        - w-[calc(50%-4px)]
+    status_states:
+      allowed:
+        - active
+        - error
+        - inactive
+        - loading
+        - warning
+      visual_mappings: *a3
+global_behaviors:
+  css_blocks:
+    body: |-
+      body {
+        background-color: #0f172a;
+        background-image:
+          radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%),
+          radial-gradient(at 50% 0%, hsla(225, 39%, 30%, 1) 0, transparent 50%),
+          radial-gradient(at 100% 0%, hsla(339, 49%, 30%, 1) 0, transparent 50%);
+        color: white;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    selection: |-
+      ::selection {
+        background-color: #22d3ee;
+        color: #0f172a;
+      }
+    moz_selection: |-
+      ::-moz-selection {
+        background-color: #22d3ee;
+        color: #0f172a;
+      }
+    selectable_text: |-
+      .selectable-text {
+        user-select: text !important;
+        -webkit-user-select: text !important;
+      }
+    custom_scrollbar_root: |-
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+    custom_scrollbar_track: |-
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+        border-radius: 9999px;
+      }
+    custom_scrollbar_thumb: |-
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.2);
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+    custom_scrollbar_thumb_hover: |-
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(255, 255, 255, 0.4);
+      }
+    custom_scrollbar_corner: |-
+      .custom-scrollbar::-webkit-scrollbar-corner {
+        background: transparent;
+      }
+  selection:
+    enforce_custom_selection: true
+    selectors:
+      - ::selection
+      - ::-moz-selection
+    rationale: Maintain high-contrast cyan selection identity.
+  text_selectability:
+    default_user_select: none
+    selectable_override_class: selectable-text
+    rule: Content remains non-selectable by default except explicit selectable regions.
+  scrollbar:
+    opt_in_class: custom-scrollbar
+    rule: Scrollbar styling is opt-in and must use canonical WebKit selector blocks.
+  portals:
+    required_z_layers: *a4
+    rule: Portals and overlays must remain within declared z-index class set.
+utility_allowlist:
+  exact_classes:
+    - -bottom-1
+    - -left-4.25
+    - -mt-1
+    - -mt-12
+    - -right-1
+    - -right-3
+    - -skew-x-12
+    - -top-1
+    - -translate-y-1/2
+    - absolute
+    - active
+    - animate-in
+    - animate-ping
+    - animate-pulse
+    - backdrop-blur-2xl
+    - backdrop-blur-3xl
+    - backdrop-blur-md
+    - backdrop-blur-sm
+    - backdrop-blur-xl
+    - backdrop-blur-xs
+    - bg-accent-cyan
+    - bg-accent-cyan/10
+    - bg-accent-cyan/20
+    - bg-accent-cyan/5
+    - bg-accent-magenta
+    - bg-accent-magenta/10
+    - bg-accent-orange
+    - bg-accent-orange/10
+    - bg-black/10
+    - bg-black/20
+    - bg-black/30
+    - bg-black/40
+    - bg-black/50
+    - bg-black/60
+    - bg-blue-400
+    - bg-blue-500
+    - bg-blue-500/10
+    - bg-glass-100
+    - bg-glass-100/30
+    - bg-glass-100/50
+    - bg-glass-200
+    - bg-glass-surface
+    - bg-gradient-to-b
+    - bg-gradient-to-t
+    - bg-green-500
+    - bg-green-500/10
+    - bg-linear-to-b
+    - bg-linear-to-br
+    - bg-linear-to-r
+    - bg-linear-to-t
+    - bg-orange-500
+    - bg-orange-500/10
+    - bg-purple-500
+    - bg-red-400/10
+    - bg-red-500
+    - bg-red-500/10
+    - bg-slate-500
+    - bg-slate-700
+    - bg-slate-800
+    - bg-slate-900/80
+    - bg-teal-500
+    - bg-transparent
+    - bg-white
+    - bg-white/1
+    - bg-white/10
+    - bg-white/2
+    - bg-white/20
+    - bg-white/5
+    - block
+    - blur-2xl
+    - border
+    - border-2
+    - border-4
+    - border-accent-cyan/10
+    - border-accent-cyan/20
+    - border-accent-cyan/40
+    - border-accent-cyan/40!
+    - border-accent-magenta/20
+    - border-accent-magenta/5
+    - border-accent-orange/20
+    - border-b
+    - border-b-2
+    - border-blue-500/20
+    - border-dashed
+    - border-glass-100
+    - border-glass-border
+    - border-green-500/30
+    - border-l
+    - border-l-2
+    - border-orange-500/20
+    - border-r
+    - border-red-400/20
+    - border-red-500/20
+    - border-slate-900
+    - border-t
+    - border-transparent
+    - border-white/10
+    - border-white/20
+    - border-white/5
+    - bottom-0
+    - bottom-1
+    - bottom-6
+    - cursor-pointer
+    - custom-scrollbar
+    - delay-100
+    - delay-150
+    - delay-200
+    - duration-100
+    - duration-150
+    - duration-200
+    - duration-300
+    - duration-500
+    - duration-700
+    - ease-in-out
+    - ease-out
+    - fade-in
+    - fill-mode-forwards
+    - fixed
+    - flex
+    - flex-1
+    - flex-col
+    - flex-none
+    - flex-nowrap
+    - flex-row-reverse
+    - flex-wrap
+    - font-bold
+    - font-light
+    - font-medium
+    - font-mono
+    - font-sans
+    - font-semibold
+    - font-src
+    - from-accent-cyan
+    - from-accent-cyan/20
+    - from-accent-magenta
+    - from-accent-orange/10
+    - from-black/60
+    - from-glass-200
+    - from-indigo-500/10
+    - from-slate-700
+    - from-slate-900/10
+    - from-white/10
+    - from-white/5
+    - gap-1
+    - gap-1.5
+    - gap-2
+    - gap-2.5
+    - gap-3
+    - gap-4
+    - gap-5
+    - gap-6
+    - gap-8
+    - gap-px
+    - grid
+    - grid-cols-1
+    - grid-cols-2
+    - grid-cols-3
+    - grid-cols-7
+    - group
+    - h-1
+    - h-1.5
+    - h-10
+    - h-11.5
+    - h-12
+    - h-14
+    - h-16
+    - h-2
+    - h-2.5
+    - h-20
+    - h-24
+    - h-3
+    - h-3.5
+    - h-32
+    - h-4
+    - h-4.5
+    - h-48
+    - h-5
+    - h-6
+    - h-8
+    - h-9
+    - h-full
+    - h-px
+    - h-screen
+    - hidden
+    - hover:-translate-y-1
+    - hover:bg-accent-cyan
+    - hover:bg-accent-cyan/30
+    - hover:bg-accent-cyan/5
+    - hover:bg-black/40
+    - hover:bg-cyan-300
+    - hover:bg-glass-100
+    - hover:bg-glass-300
+    - hover:bg-red-500/10
+    - hover:bg-red-500/20
+    - hover:bg-white/10
+    - hover:bg-white/2
+    - hover:bg-white/5
+    - hover:bg-white/8
+    - hover:border-accent-cyan/50
+    - hover:border-white/10
+    - hover:border-white/20
+    - hover:opacity-85
+    - hover:scale-105
+    - hover:shadow-accent-cyan/40
+    - hover:shadow-lg
+    - hover:text-accent-cyan
+    - hover:text-black
+    - hover:text-cyan-300
+    - hover:text-green-300
+    - hover:text-red-300
+    - hover:text-red-400
+    - hover:text-slate-300
+    - hover:text-white
+    - hover:underline
+    - inline-block
+    - inline-flex
+    - inset-0
+    - inset-4
+    - italic
+    - items-center
+    - items-end
+    - items-start
+    - items-stretch
+    - justify-between
+    - justify-center
+    - justify-end
+    - leading-none
+    - leading-relaxed
+    - leading-snug
+    - leading-tight
+    - left-0
+    - left-3
+    - left-4
+    - left-8
+    - lg:col-span-2
+    - lg:flex
+    - lg:grid-cols-2
+    - lg:grid-cols-3
+    - lg:p-10
+    - line-clamp-2
+    - mask-gradient-right
+    - max-h-32
+    - max-h-40
+    - max-h-60
+    - max-h-75
+    - max-w-2xl
+    - max-w-3xl
+    - max-w-4xl
+    - max-w-6xl
+    - max-w-7xl
+    - max-w-sm
+    - max-w-xl
+    - max-w-xs
+    - mb-0.5
+    - mb-1
+    - mb-1.5
+    - mb-2
+    - mb-3
+    - mb-4
+    - mb-6
+    - mb-8
+    - md:grid-cols-2
+    - md:grid-cols-4
+    - min-h-0
+    - min-h-32
+    - min-h-50
+    - min-h-full
+    - min-w-0
+    - min-w-100
+    - min-w-25
+    - min-w-32.5
+    - min-w-6
+    - ml-0.5
+    - ml-1
+    - ml-2
+    - ml-3
+    - ml-auto
+    - mr-1
+    - mr-2
+    - mr-4
+    - mt-0.5
+    - mt-1
+    - mt-1.5
+    - mt-10
+    - mt-2
+    - mt-3
+    - mt-4
+    - mt-6
+    - mt-8
+    - mt-auto
+    - mx-2
+    - mx-auto
+    - my-1
+    - my-2
+    - opacity-0
+    - opacity-10
+    - opacity-30
+    - opacity-50
+    - opacity-60
+    - opacity-70
+    - opacity-75
+    - opacity-80
+    - opacity-90
+    - outline-none
+    - overflow-hidden
+    - overflow-x-auto
+    - overflow-y-auto
+    - p-0.5
+    - p-1
+    - p-1.5
+    - p-12
+    - p-2
+    - p-2.5
+    - p-3
+    - p-4
+    - p-5
+    - p-6
+    - p-8
+    - pb-0
+    - pb-1
+    - pb-10
+    - pb-2
+    - pb-4
+    - pb-8
+    - pl-0
+    - pl-10
+    - pl-12
+    - pl-2
+    - pl-4
+    - pl-6
+    - pl-8
+    - pointer-events-none
+    - pr-10
+    - pr-12
+    - pr-20
+    - pr-3
+    - pr-4
+    - pr-5
+    - pr-6
+    - pr-8
+    - pt-0
+    - pt-1
+    - pt-1.5
+    - pt-2
+    - pt-4
+    - pt-6
+    - pt-8
+    - px-1
+    - px-1.5
+    - px-2
+    - px-3
+    - px-4
+    - px-5
+    - px-6
+    - px-8
+    - px-px
+    - py-0.5
+    - py-1
+    - py-1.5
+    - py-12
+    - py-2
+    - py-2.5
+    - py-3
+    - py-3.5
+    - py-4
+    - py-6
+    - py-8
+    - relative
+    - right-0
+    - right-2
+    - right-3
+    - right-4
+    - ring-0
+    - ring-1
+    - ring-white/5
+    - rounded
+    - rounded-2xl
+    - rounded-3xl
+    - rounded-b-2xl
+    - rounded-br-full
+    - rounded-full
+    - rounded-lg
+    - rounded-md
+    - rounded-r-full
+    - rounded-t-2xl
+    - rounded-tl-none
+    - rounded-tr-none
+    - rounded-xl
+    - select-all
+    - select-none
+    - selectable-text
+    - shadow
+    - shadow-2xl
+    - shadow-accent-cyan/20
+    - shadow-accent-magenta/20
+    - shadow-accent-orange/50
+    - shadow-blue-400/50
+    - shadow-green-500/50
+    - shadow-inner
+    - shadow-lg
+    - shadow-red-500/50
+    - shadow-slate-500/50
+    - shadow-sm
+    - shadow-xl
+    - shrink-0
+    - slide-in-from-bottom-2
+    - slide-in-from-bottom-4
+    - slide-in-from-right-8
+    - slide-in-from-top-4
+    - sm:block
+    - snap-mandatory
+    - snap-start
+    - snap-x
+    - space-x-1
+    - space-x-2
+    - space-x-2.5
+    - space-x-3
+    - space-y-1
+    - space-y-1.5
+    - space-y-2
+    - space-y-2.5
+    - space-y-3
+    - space-y-4
+    - space-y-6
+    - space-y-8
+    - sticky
+    - text-2xl
+    - text-3xl
+    - text-accent-cyan
+    - text-accent-magenta
+    - text-accent-orange
+    - text-amber-400
+    - text-base
+    - text-black
+    - text-blue-400
+    - text-center
+    - text-green-400
+    - text-green-400/70
+    - text-indigo-400
+    - text-left
+    - text-lg
+    - text-orange-200
+    - text-orange-400
+    - text-orange-500
+    - text-red-400
+    - text-right
+    - text-slate-200
+    - text-slate-300
+    - text-slate-400
+    - text-slate-500
+    - text-slate-600
+    - text-slate-700
+    - text-slate-900
+    - text-sm
+    - text-white
+    - text-white/80
+    - text-white/90
+    - text-xl
+    - text-xs
+    - to-accent-magenta/20
+    - to-accent-orange
+    - to-black/20
+    - to-blue-500
+    - to-glass-100
+    - to-slate-800
+    - to-transparent
+    - top-0
+    - top-1
+    - top-1/2
+    - top-10
+    - top-2
+    - top-2.5
+    - top-3.5
+    - top-4
+    - tracking-tight
+    - tracking-wide
+    - tracking-wider
+    - tracking-widest
+    - transition
+    - transition-all
+    - transition-colors
+    - transition-opacity
+    - transition-shadow
+    - transition-transform
+    - translate-x-4
+    - translate-x-5
+    - truncate
+    - uppercase
+    - via-blue-600/10
+    - via-blue-900/10
+    - via-red-900/10
+    - via-transparent
+    - w-1
+    - w-1.5
+    - w-10
+    - w-11
+    - w-12
+    - w-14
+    - w-16
+    - w-2
+    - w-2.5
+    - w-24
+    - w-3
+    - w-3.5
+    - w-32
+    - w-35
+    - w-4
+    - w-4.5
+    - w-44
+    - w-48
+    - w-6
+    - w-8
+    - w-80
+    - w-9
+    - w-full
+    - w-px
+    - w-screen
+    - whitespace-nowrap
+    - whitespace-pre-wrap
+    - z-0
+    - z-10
+    - z-10000
+    - z-20
+    - z-50
+    - z-60
+    - z-9999
+  arbitrary_classes:
+    - bg-[#0b1120]
+    - bg-slate-900
+    - bg-[rgba(22,31,50,0.9)]
+    - border-[#0f172a]
+    - ease-[cubic-bezier(0.22,1,0.36,1)]
+    - ease-[cubic-bezier(0.25,0.1,0.25,1)]
+    - ease-[cubic-bezier(0.32,0.72,0,1)]
+    - ease-[cubic-bezier(0.33,1,0.68,1)]
+    - h-[85%]
+    - h-[85vh]
+    - max-h-[80vh]
+    - min-h-[calc(100vh-30rem)]
+    - p-[3px]
+    - shadow-[0_0_10px_#22d3ee]
+    - shadow-[0_0_15px_rgba(251,146,60,0.5)]
+    - shadow-[0_0_15px_rgba(34,211,238,0.2)]
+    - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+    - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+    - shadow-[0_0_20px_rgba(255,255,255,0.3)]
+    - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+    - shadow-[0_0_5px_rgba(239,68,68,0.6)]
+    - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+    - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+    - text-[10px]
+    - text-[11px]
+    - text-[8px]
+    - text-[9px]
+    - w-[calc(50%-4px)]
+inline_style_allowlist:
+  allowed_properties:
+    - animation
+    - animationDelay
+    - backgroundAttachment
+    - backgroundColor
+    - backgroundImage
+    - backgroundSize
+    - gridTemplateRows
+    - height
+    - left
+    - maskImage
+    - opacity
+    - top
+    - transform
+    - WebkitMaskImage
+    - width
+  allowed_literals:
+    - "#0f172a"
+    - ${100 / visibleSlots}%
+    - ${20 + Math.random() * 60}%
+    - "0"
+    - "0.16"
+    - "0.3"
+    - 0.4s
+    - 0.5rem
+    - 0%
+    - "1"
+    - 1.5rem
+    - "1.6"
+    - "100"
+    - 100%
+    - 16%
+    - 1px
+    - 1rem
+    - "20"
+    - 20px
+    - 20px 20px
+    - "225"
+    - "253"
+    - 3.5rem
+    - 30%
+    - "339"
+    - 39%
+    - 3rem
+    - 49%
+    - 50%
+    - "60"
+    - 7%
+    - "90"
+    - auto repeat(${gridRows}, 1fr)
+    - fixed
+    - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
+    - linear-gradient(to bottom, black 50%, transparent 100%)
+    - linear-gradient(to top, black 50%, transparent 100%)
+    - none
+    - radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)
+    - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
+    - radial-gradient(circle at top left, transparent 1rem, black 1rem)
+    - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
+    - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
+  keyframes:
+    - slideInLeft
+    - slideInRight
+    - slideUpFromBottomEdge
+  animation_strings: []
+  cubic_beziers:
+    - cubic-bezier(0.16, 1, 0.3, 1)
+    - cubic-bezier(0.22,1,0.36,1)
+    - cubic-bezier(0.25,0.1,0.25,1)
+    - cubic-bezier(0.32,0.72,0,1)
+    - cubic-bezier(0.33,1,0.68,1)
+component_contracts:
+  AboutModal:
+    file: components/views/AboutModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - z_index
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+      isVisible:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: about-modal-layout
+        rule: About modal keeps gradient banner, floating avatar, links grid, and footer section hierarchy.
+    behavior_rules:
+      - id: about-modal-transition
+        rule: Backdrop and modal slide transitions remain bound to approved duration/ease tokens.
+    state_rules:
+      - id: profile-badge
+        rule: Profile link indicator badge retains cyan accent and dark border treatment.
+  AddNoteModal:
+    file: components/views/AddNoteModal.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - scrollbar
+      - z_index
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+      isVisible:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: add-note-shell
+        rule: Add-note modal keeps header, upload dropzone, options card, and footer action structure.
+    behavior_rules:
+      - id: modal-scale-fade
+        rule: Open/close modal uses approved scale/opacity/translate transitions and timing tokens.
+    state_rules:
+      - id: option-switches
+        rule: Import option toggles remain AppleSwitch-based with current labels and descriptions.
+  App:
+    file: App.tsx
+    required_tokens:
+      - colors
+      - motion
+      - layout
+      - typography
+      - z_index
+    allowed_variants:
+      view:
+        - SESSION
+        - NOTEBOOK
+        - SERVER
+    structural_invariants:
+      - id: app-shell
+        rule: Preserve 2-pane app shell with persistent sidebar, content main, and modal mounts at root level.
+    behavior_rules:
+      - id: view-transition
+        rule: View container transitions must use approved animate/fade/slide utility classes and contract motion durations.
+    state_rules:
+      - id: current-view-routing
+        rule: Only SESSION, NOTEBOOK, SERVER view states are allowed for top-level routing.
+  AppInner:
+    file: App.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  AppleSwitch:
+    file: components/ui/AppleSwitch.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - spacing_and_size_constraints
+    allowed_variants:
+      size:
+        - sm
+        - md
+      checked:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: switch-geometry
+        rule: Switch track and knob dimensions/translations remain tied to current sm/md geometry math.
+    behavior_rules:
+      - id: switch-transition
+        rule: Switch color and knob transform transitions use approved duration/easing tokens only.
+    state_rules:
+      - id: focus-ring
+        rule: Focusable switch keeps cyan ring and slate offset ring styling for keyboard visibility.
+  AudioNoteModal:
+    file: components/views/AudioNoteModal.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - scrollbar
+      - z_index
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+      isVisible:
+        - "true"
+        - "false"
+      isSidebarOpen:
+        - "true"
+        - "false"
+      llmStatus:
+        - active
+        - inactive
+      summaryExpanded:
+        - "true"
+        - "false"
+      isPlaying:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: split-modal-layout
+        rule: AudioNote modal keeps left transcript/player pane and optional right LM sidebar pane in a single shell.
+    behavior_rules:
+      - id: sidebar-slide
+        rule: LM sidebar open/close width and translate transitions stay within approved motion set.
+      - id: summary-stream-state
+        rule: Summary generation state keeps progressive text reveal and cursor pulse behavior.
+    state_rules:
+      - id: context-menu-layer
+        rule: Session context menu remains on top portal layer and uses approved dropdown motion tokens.
+  AudioVisualizer:
+    file: components/AudioVisualizer.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants:
+      mode:
+        - embedded
+        - fullscreen
+    structural_invariants:
+      - id: canvas-layering
+        rule: Canvas visualizer keeps grid overlay, bordered surface, and rounded container hierarchy.
+    behavior_rules:
+      - id: raf-loop
+        rule: Visualizer animation must run via requestAnimationFrame and retain layered cyan/magenta/orange wave rendering.
+    state_rules:
+      - id: responsive-resize
+        rule: Canvas dimensions must track parent element resize behavior before drawing frames.
+  Button:
+    file: components/ui/Button.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+    allowed_variants:
+      variant:
+        - primary
+        - secondary
+        - danger
+        - ghost
+        - glass
+      size:
+        - sm
+        - md
+        - lg
+        - icon
+    structural_invariants:
+      - id: button-base
+        rule: All button variants inherit shared base class stack for radius, typography, transitions, and disabled behavior.
+    behavior_rules:
+      - id: button-motion
+        rule: Button hover/active/disabled transitions use only approved duration/easing and scale classes.
+    state_rules:
+      - id: variant-closed-set
+        rule: Only declared variant/size combinations are allowed without contract/version update.
+  CalendarTab:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - z_index
+    allowed_variants:
+      slideDirection:
+        - left
+        - right
+        - "null"
+      visibleSlots:
+        - "2"
+        - "3"
+        - "4"
+    structural_invariants:
+      - id: calendar-plus-time-sections
+        rule: Calendar tab keeps month grid pane plus morning/afternoon TimeSection stack.
+    behavior_rules:
+      - id: month-slide-motion
+        rule: Month navigation maintains slideInRight/slideInLeft keyframe classes and 0.3s easing profile.
+    state_rules:
+      - id: jan-highlight
+        rule: Highlighted January event count and selected-day treatment remain explicit in current mock data states.
+  CollapsibleSection:
+    file: components/views/SettingsModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: collapsible-header-body
+        rule: CollapsibleSection keeps clickable header row and overflow-hidden content body container.
+    behavior_rules:
+      - id: collapsible-motion
+        rule: Open/close height/opacity/rotation transitions remain tied to approved 200/300ms tokens.
+    state_rules:
+      - id: open-accent
+        rule: Open state title accent remains magenta and chevron rotates with white highlighted background.
+  CustomSelect:
+    file: components/ui/CustomSelect.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+      - z_index
+    allowed_variants:
+      accentColor:
+        - cyan
+        - magenta
+      isOpen:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: portal-dropdown
+        rule: Dropdown content must render in portal with fixed positioning and approved z-index layer.
+    behavior_rules:
+      - id: open-close-motion
+        rule: Chevron rotation and dropdown open animation remain constrained to approved motion tokens.
+    state_rules:
+      - id: active-option-dot
+        rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
+  FullscreenVisualizer:
+    file: components/views/FullscreenVisualizer.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - z_index
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+      isVisible:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: fullscreen-hud-layout
+        rule: Fullscreen visualizer keeps backdrop layer, top HUD, main visualizer region, and bottom stats grid.
+    behavior_rules:
+      - id: fullscreen-entry
+        rule: Fullscreen shell and staged reveal animations must stay within approved 500/700ms timing family.
+    state_rules:
+      - id: hud-accent-system
+        rule: HUD cards and live indicators keep cyan/magenta/orange/blue role mapping from contract palette.
+  GlassCard:
+    file: components/ui/GlassCard.tsx
+    required_tokens:
+      - glass
+      - colors
+      - radii
+      - shadows
+      - blur
+    allowed_variants:
+      header:
+        - with_header
+        - without_header
+    structural_invariants:
+      - id: glass-card-shell
+        rule: GlassCard preserves gradient glass shell, optional header row, and content body region.
+    behavior_rules:
+      - id: surface-consistency
+        rule: Glass surface gradients, border strength, and shadow depth stay within registered token values.
+    state_rules:
+      - id: header-optional
+        rule: Title/action header is optional but when present must retain h-14 bordered header pattern.
+  HistoryPicker:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - z_index
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+      isVisible:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: year-month-grid
+        rule: History picker keeps centered year controls and 3-column month button grid.
+    behavior_rules:
+      - id: picker-fade-scale
+        rule: Picker open/close uses opacity/scale/translate transitions with approved cubic-bezier easing.
+    state_rules:
+      - id: current-month-indicator
+        rule: Current month indicator dot remains cyan when month is not currently selected.
+  HudCard:
+    file: components/views/FullscreenVisualizer.tsx
+    required_tokens:
+      - colors
+      - radii
+      - shadows
+      - motion
+    allowed_variants:
+      color:
+        - cyan
+        - magenta
+        - orange
+        - blue
+    structural_invariants:
+      - id: hud-card-layout
+        rule: HUD card keeps icon capsule + text stack composition and border-backed glass surface.
+    behavior_rules:
+      - id: hud-hover
+        rule: HUD hover visual response remains transition-color only and does not add new transform motion.
+    state_rules:
+      - id: color-role-map
+        rule: HudCard color variants map to fixed accent token sets and must not accept ad hoc colors.
+  ImportTab:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants:
+      upload_state:
+        - idle
+        - hover
+    structural_invariants:
+      - id: dropzone-plus-options
+        rule: Import tab preserves dashed upload dropzone followed by import options glass card.
+    behavior_rules:
+      - id: dropzone-hover
+        rule: Upload dropzone hover border/background/icon scaling remains constrained to approved transitions.
+    state_rules:
+      - id: import-switch-options
+        rule: Speaker diarization and word timestamp option switches remain present in fixed order.
+  LogTerminal:
+    file: components/ui/LogTerminal.tsx
+    required_tokens:
+      - colors
+      - typography
+      - radii
+      - shadows
+      - scrollbar
+    allowed_variants:
+      color:
+        - cyan
+        - magenta
+        - orange
+    structural_invariants:
+      - id: terminal-layout
+        rule: Terminal keeps bordered shell with header row and custom-scrollbar scroll body.
+    behavior_rules:
+      - id: auto-scroll
+        rule: Log append behavior must preserve automatic scroll-to-bottom synchronization.
+    state_rules:
+      - id: log-type-colors
+        rule: Info/success/warning/error message coloring remains bound to approved text tokens.
+  NoteActionMenu:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - z_index
+    allowed_variants:
+      trigger_type:
+        - rect
+        - point
+    structural_invariants:
+      - id: context-menu-portal
+        rule: Context menu renders in portal overlay with fixed absolute menu card anchored to trigger.
+    behavior_rules:
+      - id: menu-slide-up
+        rule: Menu entry animation uses slideUpFromBottomEdge keyframe and approved cubic-bezier timing.
+    state_rules:
+      - id: danger-action-slot
+        rule: Delete action keeps destructive red treatment separate from neutral actions.
+  NotebookView:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - scrollbar
+      - z_index
+    allowed_variants:
+      activeTab:
+        - CALENDAR
+        - SEARCH
+        - IMPORT
+    structural_invariants:
+      - id: tabbed-notebook-shell
+        rule: Notebook view keeps top tab switcher and single active content surface with modal mounts.
+    behavior_rules:
+      - id: tab-content-animation
+        rule: Tab content transition classes and month navigation animations stay within approved motion tokens.
+    state_rules:
+      - id: tab-state-closed-set
+        rule: Only CALENDAR, SEARCH, IMPORT tab states are allowed for notebook routing.
+  SearchTab:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - scrollbar
+    allowed_variants:
+      result_count:
+        - "0"
+        - 1_plus
+    structural_invariants:
+      - id: search-results-layout
+        rule: Search tab keeps top search input, filter row, and vertically stacked selectable result cards.
+    behavior_rules:
+      - id: result-hover-motion
+        rule: Search result hover state is limited to approved transition-color token family.
+    state_rules:
+      - id: selectable-body-copy
+        rule: Result content body remains selectable while metadata chrome remains non-selectable where defined.
+  Section:
+    file: components/views/SettingsModal.tsx
+    required_tokens:
+      - colors
+      - radii
+      - shadows
+    allowed_variants:
+      section_type:
+        - settings_group
+    structural_invariants:
+      - id: section-shell
+        rule: Section helper keeps rounded container, uppercase heading row, and stacked content body.
+    behavior_rules:
+      - id: section-static-motion
+        rule: Section helper itself does not introduce additional motion tokens beyond inherited children.
+    state_rules:
+      - id: heading-divider
+        rule: Heading divider line remains part of section title structure.
+  ServerView:
+    file: components/views/ServerView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - scrollbar
+      - status_states
+    allowed_variants:
+      imageStatus:
+        - active
+        - inactive
+      status:
+        - active
+        - stopped
+        - removed
+    structural_invariants:
+      - id: timeline-cards
+        rule: Server configuration remains a vertical timeline of numbered glass cards with icon nodes.
+    behavior_rules:
+      - id: status-accent-transitions
+        rule: Image/container status accents and opacity transitions are constrained to approved duration/ease tokens.
+    state_rules:
+      - id: removed-disable-pattern
+        rule: Removed state keeps dimmed/pointer-disabled configuration areas instead of hard removal.
+  SessionView:
+    file: components/views/SessionView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - scrollbar
+      - status_states
+    allowed_variants:
+      audioSource:
+        - mic
+        - system
+      showLogs:
+        - "true"
+        - "false"
+      isLive:
+        - "true"
+        - "false"
+      isMuted:
+        - "true"
+        - "false"
+      isFullscreenVisualizerOpen:
+        - "true"
+        - "false"
+      serverRunning:
+        - "true"
+        - "false"
+      clientConnected:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: two-column-session-layout
+        rule: Session view preserves left controls/right monitoring split with scroll indicators and masked corners.
+      - id: scroll-indicator-offset
+        rule: Scroll fade indicators and corner masks must use right-3 (0.75rem) offset to align with the scrollbar track width plus padding, matching the original mockup layout.
+      - id: live-mode-min-height
+        rule: Live Mode GlassCard must use min-h-[calc(100vh-30rem)] to ensure the offline placeholder text centers properly within the transcript area.
+    behavior_rules:
+      - id: logs-drawer-animation
+        rule: Bottom logs drawer open/close behavior remains tied to approved durations and easing curves.
+      - id: scroll-shadow-updates
+        rule: Scroll indicator opacity behavior must continue to derive from top/bottom scroll state checks.
+    state_rules:
+      - id: health-accent-state
+        rule: Healthy system state keeps cyan border/glow emphasis on control center card only when both statuses active.
+  SettingsModal:
+    file: components/views/SettingsModal.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - blur
+      - scrollbar
+      - z_index
+    allowed_variants:
+      activeTab:
+        - App
+        - Client
+        - Server
+        - Notebook
+      isOpen:
+        - "true"
+        - "false"
+      isVisible:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: settings-modal-shell
+        rule: Settings modal preserves backdrop, fixed-height modal shell, tab header, scroll body, and footer actions.
+    behavior_rules:
+      - id: modal-enter-exit
+        rule: Open/close and tab-pane animation classes use only approved durations and cubic-bezier easing tokens.
+    state_rules:
+      - id: tab-closed-set
+        rule: Settings tab set is fixed to App/Client/Server/Notebook labels.
+  Sidebar:
+    file: components/Sidebar.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - z_index
+    allowed_variants:
+      collapsed:
+        - "true"
+        - "false"
+      active_view:
+        - SESSION
+        - NOTEBOOK
+        - SERVER
+      status_light_bindings:
+        - SESSION=sessionStatus
+        - NOTEBOOK=serverSidebarStatus
+        - SERVER=serverSidebarStatus
+    structural_invariants:
+      - id: sidebar-width-modes
+        rule: Sidebar must keep collapsed/expanded width modes and preserve active navigation pill with cyan indicator.
+    behavior_rules:
+      - id: collapse-motion
+        rule: Collapse/expand and active pill transitions must remain within approved duration/easing tokens.
+    state_rules:
+      - id: status-dots
+        rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
+  StatusLight:
+    file: components/ui/StatusLight.tsx
+    required_tokens:
+      - colors
+      - motion
+      - shadows
+      - status_states
+    allowed_variants:
+      status:
+        - active
+        - inactive
+        - warning
+        - error
+        - loading
+      animate:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: two-layer-light
+        rule: Status light keeps base dot and optional ping halo layers with same circular geometry.
+    behavior_rules:
+      - id: clock-sync-ping
+        rule: Animated non-inactive states preserve system-clock synchronized ping offset behavior.
+    state_rules:
+      - id: status-color-map
+        rule: Each status maps to registered bg/shadow token pair and cannot drift from status palette.
+  TimeSection:
+    file: components/views/NotebookView.tsx
+    required_tokens:
+      - glass
+      - colors
+      - motion
+      - radii
+      - shadows
+      - scrollbar
+      - spacing_and_size_constraints
+    allowed_variants:
+      visibleSlots:
+        - "2"
+        - "3"
+        - "4"
+    structural_invariants:
+      - id: hour-lane-layout
+        rule: TimeSection keeps sticky hour column and horizontal snapping event lane with add-note slot.
+    behavior_rules:
+      - id: card-hover-motion
+        rule: Event card hover/active transforms must remain within approved transition and scale values.
+    state_rules:
+      - id: compact-density-mode
+        rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
+validation_policy:
+  unknown_utility_class: error
+  missing_required_field: error
+  missing_component_contract: error
+  semver_bump_required: error
+  notes: Closed-set enforcement for canonical mockup-derived renderer contract.

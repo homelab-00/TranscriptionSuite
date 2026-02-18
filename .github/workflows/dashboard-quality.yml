@@ -1,0 +1,39 @@
+name: Dashboard Quality Gates
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-quality.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-quality.yml"
+
+jobs:
+  dashboard-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript + JavaScript checks
+        run: npm run typecheck
+
+      - name: UI contract checks
+        run: npm run ui:contract:check

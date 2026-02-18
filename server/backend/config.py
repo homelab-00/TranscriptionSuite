@@ -20,6 +20,8 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+FALLBACK_MAIN_TRANSCRIBER_MODEL = "Systran/faster-whisper-large-v3"
+
 
 def get_user_config_dir() -> Path:
     """
@@ -258,6 +260,60 @@ class ServerConfig:
     def stt(self) -> Dict[str, Any]:
         """Get STT (speech-to-text) configuration."""
         return self.config.get("stt", {})
+
+
+def _non_empty_string(value: Any) -> Optional[str]:
+    """Return a trimmed string only when value is a non-empty string."""
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed if trimmed else None
+
+
+def _dict_get(payload: Dict[str, Any], *keys: str) -> Any:
+    """Safely fetch a nested value from a plain dict."""
+    current: Any = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def resolve_main_transcriber_model(config: ServerConfig | Dict[str, Any]) -> str:
+    """
+    Resolve the main transcription model from config with a single fallback.
+
+    This is the canonical resolver used across backend modules so defaults are
+    not duplicated in multiple files.
+    """
+    if isinstance(config, ServerConfig):
+        main_model = _non_empty_string(config.get("main_transcriber", "model"))
+        legacy_model = _non_empty_string(config.get("transcription", "model"))
+    else:
+        main_model = _non_empty_string(_dict_get(config, "main_transcriber", "model"))
+        legacy_model = _non_empty_string(_dict_get(config, "transcription", "model"))
+
+    return main_model or legacy_model or FALLBACK_MAIN_TRANSCRIBER_MODEL
+
+
+def resolve_live_transcriber_model(config: ServerConfig | Dict[str, Any]) -> str:
+    """
+    Resolve the live transcription model from config.
+
+    Per server/config.yaml, live_transcriber.model defaults to
+    main_transcriber.model when not explicitly set.
+    """
+    if isinstance(config, ServerConfig):
+        live_model = _non_empty_string(config.get("live_transcriber", "model"))
+        legacy_live_model = _non_empty_string(config.get("live_transcription", "model"))
+    else:
+        live_model = _non_empty_string(_dict_get(config, "live_transcriber", "model"))
+        legacy_live_model = _non_empty_string(
+            _dict_get(config, "live_transcription", "model")
+        )
+
+    return live_model or legacy_live_model or resolve_main_transcriber_model(config)
 
 
 # Global config instance

@@ -22,6 +22,7 @@ set -euo pipefail
 # Colors for output
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
@@ -66,9 +67,9 @@ check_prerequisites() {
 check_docker_login() {
     log_info "Checking Docker registry authentication..."
     
-    # Try to list repositories to verify authentication
-    if ! docker manifest inspect "$IMAGE_NAME:latest" &> /dev/null && \
-       ! docker pull "$IMAGE_NAME:latest" &> /dev/null 2>&1; then
+    # Try docker login status to verify authentication
+    if ! docker manifest inspect "$IMAGE_NAME:$custom_tag" &> /dev/null 2>&1 && \
+       ! docker login ghcr.io --get-login &> /dev/null 2>&1; then
         log_warning "Not authenticated with GHCR or image doesn't exist yet"
         log_info "To authenticate, run: docker login ghcr.io -u <username>"
         log_info "Continuing anyway (you'll need auth to push)..."
@@ -115,7 +116,6 @@ cleanup_old_images() {
 
 main() {
     local custom_tag="${1:-${TAG:-}}"
-    local is_release=false
     
     echo "=========================================="
     echo "  TranscriptionSuite Docker Push Only"
@@ -150,12 +150,6 @@ main() {
         log_success "Image found: $IMAGE_NAME:$custom_tag"
     fi
     
-    # Check if tag looks like a release version (v*.*.*)
-    if [[ "$custom_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        is_release=true
-        log_info "Detected release version: $custom_tag"
-    fi
-
     # Push the requested tag
     echo ""
     log_info "Pushing image to GHCR..."
@@ -163,17 +157,8 @@ main() {
         exit 1
     fi
     
-    # For release versions, also tag as 'latest' and push
-    if [[ "$is_release" == true ]]; then
-        echo ""
-        log_info "Tagging and pushing 'latest' alias..."
-        if ! tag_image "$custom_tag" "latest"; then
-            exit 1
-        fi
-        if ! push_image "latest"; then
-            exit 1
-        fi
-    fi
+    # Release versions are no longer auto-tagged as 'latest'
+    # All images use explicit version tags only
     
     # Success summary
     echo ""
@@ -184,9 +169,7 @@ main() {
     echo "📦 Registry: GitHub Container Registry (GHCR)"
     echo "🏷️  Tags pushed:"
     echo "   • $IMAGE_NAME:$custom_tag"
-    if [[ "$is_release" == true ]]; then
-        echo "   • $IMAGE_NAME:latest"
-    fi
+
     echo ""
     echo "📥 Pull command:"
     echo "   docker pull $IMAGE_NAME:$custom_tag"

@@ -20,12 +20,7 @@ build/assets/videos/
 !.github/
 ### Making sure that the instructions folder is excluded
 .github/instructions/
-
-## .md files
-*.md
-### READMEs exception
-!README.md
-!README_DEV.md
+.github/prompts/
 
 ## etc
 __pycache__/
@@ -35,4 +30,4 @@ __pycache__/
 *.log
 *.mp3
 .directory
-codeql-agent-results/
+CLAUDE.md

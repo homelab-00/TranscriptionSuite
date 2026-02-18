@@ -1,0 +1,120 @@
+name: Desktop Release (GPG-Signed Artifacts)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target_name: linux-x64
+            package_cmd: npm run package:linux
+            artifact_glob: |
+              dashboard/release/*.AppImage
+              dashboard/release/*.AppImage.asc
+          - os: windows-latest
+            target_name: windows-x64
+            package_cmd: npm run package:windows
+            artifact_glob: |
+              dashboard/release/*.exe
+              dashboard/release/*.exe.asc
+          - os: macos-14
+            target_name: macos-arm64
+            package_cmd: npm run package:mac
+            artifact_glob: |
+              dashboard/release/*.dmg
+              dashboard/release/*.dmg.asc
+              dashboard/release/*.zip
+              dashboard/release/*.zip.asc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Ensure GPG is installed (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command gpg -ErrorAction SilentlyContinue)) {
+            choco install gnupg --no-progress -y
+          }
+
+      - name: Package desktop app
+        working-directory: dashboard
+        run: ${{ matrix.package_cmd }}
+
+      - name: Import signing key
+        shell: bash
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$GPG_PRIVATE_KEY" ]]; then
+            echo "Missing required secret: GPG_PRIVATE_KEY"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.gnupg"
+          chmod 700 "$HOME/.gnupg"
+
+          if [[ "$GPG_PRIVATE_KEY" == *"BEGIN PGP PRIVATE KEY BLOCK"* ]]; then
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            printf '%s' "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          fi
+
+      - name: Create armored signatures (.asc)
+        shell: bash
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_TIMEOUT_MINUTES: "90"
+        run: bash build/sign-electron-artifacts.sh
+
+      - name: Upload packaged artifacts + signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: TranscriptionSuite-${{ matrix.target_name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/**/*
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

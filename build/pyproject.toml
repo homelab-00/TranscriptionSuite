@@ -1,6 +1,6 @@
 [project]
 name = "transcriptionsuite-build"
-version = "0.5.6"
+version = "1.0.2"
 description = "TranscriptionSuite build env for the standalone client"
 requires-python = ">=3.13,<3.14"
 license = "GPL-3.0-or-later"
@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [tool.ruff]
-line-length = 90
+line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]

@@ -1,11 +1,25 @@
-# TranscriptionSuite Docker Compose Configuration
-# Unified local + remote deployment with GPU support
+# TranscriptionSuite Docker Compose — Base Configuration
+# ======================================================
+# This is the base compose file with common service definition, volumes, and env.
+# It is combined with platform and runtime overlays by the Electron dockerManager.
+#
+# Layered compose files:
+#   docker-compose.yml              — This file (base: service, env, volumes)
+#   docker-compose.linux-host.yml   — Linux: host networking
+#   docker-compose.desktop-vm.yml   — macOS/Windows: bridge networking + port mapping
+#   docker-compose.gpu.yml          — NVIDIA GPU reservation
+#
+# Manual usage (Linux + GPU, the default):
+#   docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+#
+# Manual usage (macOS/Windows, CPU mode):
+#   docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+#
+# For convenience, the Electron dashboard selects the correct stack automatically.
+# For backward-compatible single-file Linux+GPU usage see: start-local.sh
 #
 # Build:
 #   docker compose build
-#
-# Run (local HTTP):
-#   docker compose up -d
 #
 # Run (remote HTTPS with Tailscale):
 #   1. Generate certs: tailscale cert your-machine.tailnet-name.ts.net
@@ -13,12 +27,7 @@
 #      TLS_ENABLED=true \
 #      TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 #      TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-#      docker compose up -d
-#
-# Switch between modes:
-#   NOTE: Use "docker compose up -d" (not "start") to apply env var changes!
-#   - Local:  docker compose up -d
-#   - Remote: TLS_ENABLED=true TLS_CERT_PATH=... TLS_KEY_PATH=... docker compose up -d
+#      docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 #
 # Optional environment variables:
 #   HUGGINGFACE_TOKEN=xxx  # For downloading diarization models
@@ -34,6 +43,9 @@
 #     $env:USER_CONFIG_DIR="$env:USERPROFILE\Documents\TranscriptionSuite"
 #     docker compose up -d
 #
+#   macOS:
+#     USER_CONFIG_DIR=~/Library/Application\ Support/TranscriptionSuite docker compose up -d
+#
 #   To customize settings, copy config.yaml from the repo to your USER_CONFIG_DIR
 #   and edit as needed. The server will use your custom config instead of defaults.
 
@@ -42,21 +54,8 @@ services:
     build:
       context: ../..
       dockerfile: server/docker/Dockerfile
-    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
+    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG}
     container_name: transcriptionsuite-container
-    
-    # Use host network mode for direct access to host services (LM Studio)
-    # Note: Ports are exposed directly on host (no port mapping needed)
-    network_mode: "host"
-    
-    # GPU support (NVIDIA)
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     
     # Environment variables
     environment:
@@ -68,14 +67,14 @@ services:
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
       - BOOTSTRAP_RUNTIME_DIR=/runtime
-      - BOOTSTRAP_CACHE_DIR=/runtime-cache
+      - BOOTSTRAP_CACHE_DIR=${BOOTSTRAP_CACHE_DIR:-/runtime-cache}
       - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
       - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
       - BOOTSTRAP_REQUIRE_HF_TOKEN=false
       - BOOTSTRAP_FINGERPRINT_SOURCE=${BOOTSTRAP_FINGERPRINT_SOURCE:-lockfile}
       - BOOTSTRAP_REBUILD_POLICY=${BOOTSTRAP_REBUILD_POLICY:-abi_only}
       - BOOTSTRAP_LOG_CHANGES=${BOOTSTRAP_LOG_CHANGES:-true}
-      # LM Studio URL for chat features (localhost works with host network mode)
+      # LM Studio URL — overridden in platform overlay (host.docker.internal for VM platforms)
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
       # TLS settings for remote access (optional)
       - TLS_ENABLED=${TLS_ENABLED:-false}
@@ -92,6 +91,7 @@ services:
       # Set USER_CONFIG_DIR to mount your local config directory:
       #   Linux: USER_CONFIG_DIR=~/.config/TranscriptionSuite
       #   Windows: USER_CONFIG_DIR=$HOME/Documents/TranscriptionSuite
+      #   macOS: USER_CONFIG_DIR=~/Library/Application Support/TranscriptionSuite
       - ${USER_CONFIG_DIR:-./.empty}:/user-config
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
       - ${TLS_CERT_PATH:-./.empty}:/certs/cert.crt:ro

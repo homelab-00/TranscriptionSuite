@@ -14,7 +14,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [2.2 Platform Architectures](#22-platform-architectures)
   - [2.3 Security Model](#23-security-model)
 - [3. Project Structure](#3-project-structure)
-  - [3.1 pyproject.toml Files](#31-pyprojecttoml-files)
+  - [3.1 Configuration Files](#31-configuration-files)
   - [3.2 Version Management](#32-version-management)
 - [4. Development Workflow](#4-development-workflow)
   - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
@@ -25,16 +25,19 @@ Technical documentation for developing and building TranscriptionSuite.
 - [5. Build Workflow](#5-build-workflow)
   - [5.1 Prerequisites](#51-prerequisites)
   - [5.2 Build Matrix](#52-build-matrix)
-  - [5.3 KDE AppImage (Linux)](#53-kde-appimage-linux)
-  - [5.4 GNOME AppImage (Linux)](#54-gnome-appimage-linux)
-  - [5.5 Windows Executable](#55-windows-executable)
+  - [5.3 Linux AppImage](#53-linux-appimage)
+  - [5.4 Windows Installer](#54-windows-installer)
+  - [5.5 macOS DMG + ZIP (Unsigned)](#55-macos-dmg--zip-unsigned)
   - [5.6 Build Assets](#56-build-assets)
+  - [5.7 End-User Verification Docs](#57-end-user-verification-docs)
 - [6. Docker Reference](#6-docker-reference)
-  - [6.1 Local vs Remote Mode](#61-local-vs-remote-mode)
-  - [6.2 Tailscale HTTPS Setup](#62-tailscale-https-setup)
-  - [6.3 Docker Volume Structure](#63-docker-volume-structure)
-  - [6.4 Docker Image Selection](#64-docker-image-selection)
-  - [6.5 Server Update Lifecycle](#65-server-update-lifecycle)
+  - [6.1 Compose File Layering](#61-compose-file-layering)
+  - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
+  - [6.3 CPU Mode](#63-cpu-mode)
+  - [6.4 Tailscale HTTPS Setup](#64-tailscale-https-setup)
+  - [6.5 Docker Volume Structure](#65-docker-volume-structure)
+  - [6.6 Docker Image Selection](#66-docker-image-selection)
+  - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
 - [7. API Reference](#7-api-reference)
   - [7.1 API Endpoints](#71-api-endpoints)
   - [7.2 WebSocket Protocol](#72-websocket-protocol)
@@ -46,12 +49,12 @@ Technical documentation for developing and building TranscriptionSuite.
   - [8.4 Testing](#84-testing)
 - [9. Dashboard Development](#9-dashboard-development)
   - [9.1 Running from Source](#91-running-from-source)
-  - [9.2 Verbose Logging](#92-verbose-logging)
+  - [9.2 Tech Stack](#92-tech-stack)
   - [9.3 Key Modules](#93-key-modules)
-    - [9.3.1 Settings Exposure Rules](#931-settings-exposure-rules)
-  - [9.4 Dashboard Architecture & Refactoring](#94-dashboard-architecture--refactoring)
+  - [9.4 UI Contract System](#94-ui-contract-system)
   - [9.5 Server Busy Handling](#95-server-busy-handling)
   - [9.6 Model Management](#96-model-management)
+  - [9.7 Package Management](#97-package-management)
 - [10. Configuration Reference](#10-configuration-reference)
   - [10.1 Server Configuration](#101-server-configuration)
   - [10.2 Dashboard Configuration](#102-dashboard-configuration)
@@ -68,13 +71,11 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.2 Health Check Issues](#132-health-check-issues)
   - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
-  - [13.5 Windows Docker Networking](#135-windows-docker-networking)
+  - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
   - [13.6 Checking Installed Packages](#136-checking-installed-packages)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
-- [15. Known Issues & Future Work](#15-known-issues--future-work)
-  - [15.1 Live Mode Language Setting](#151-live-mode-language-setting)
 
 ---
 
@@ -83,15 +84,20 @@ Technical documentation for developing and building TranscriptionSuite.
 ### 1.1 Development Commands
 
 ```bash
-# 1. Setup virtual environments
-cd dashboard && uv venv --python 3.13 && uv sync --extra kde && cd ..
+# 1. Install dashboard dependencies
+cd dashboard && npm install && cd ..
+
+# 2. Build tools (for linting/testing server Python)
 cd build && uv venv --python 3.13 && uv sync && cd ..
 
-# 2. Build and run Docker server
+# 3. Build and run Docker server
 cd server/docker && docker compose build && docker compose up -d
 
-# 3. Run dashboard
-cd dashboard && uv run transcription-dashboard
+# 4. Run dashboard (browser dev mode)
+cd dashboard && npm run dev
+
+# 5. Run dashboard (Electron dev mode)
+cd dashboard && npm run dev:electron
 ```
 
 ### 1.2 Running from Source (Development)
@@ -104,30 +110,38 @@ uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
 
 # 2. Run dashboard (in a separate terminal)
 cd dashboard
-uv venv --python 3.13 && uv sync --extra kde  # or --extra gnome / --extra windows
-uv run transcription-dashboard --host localhost --port 8000
+npm install
+npm run dev           # Vite dev server at http://localhost:3000
+# or
+npm run dev:electron  # Full Electron window with Vite hot-reload
 ```
 
 **Notes:**
 - Backend runs on port 8000
-- Dashboard connects directly to backend API on port 8000
-- Backend must be running for dashboard to function
-- This setup enables hot-reload for the backend
+- Dashboard Vite dev server runs on port 3000
+- Backend must be running for live API features to work
+- `npm run dev` enables hot-reload for the renderer; `npm run dev:electron` also compiles the Electron main process
 
 ### 1.3 Build Commands
 
 ```bash
-# KDE AppImage (Linux)
-./build/build-appimage-kde.sh
-# Output: build/dist/TranscriptionSuite-KDE-x86_64.AppImage
+# Linux AppImage (Electron)
+./build/build-electron-linux.sh
+# Output: dashboard/release/TranscriptionSuite-*-x86_64.AppImage
 
-# GNOME AppImage (Linux)
-./build/build-appimage-gnome.sh
-# Output: build/dist/TranscriptionSuite-GNOME-x86_64.AppImage
+# Or from within dashboard/
+cd dashboard && npm run package:linux
 
 # Windows (on Windows machine)
-.\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\dist .\dashboard\src\dashboard\build\pyinstaller-windows.spec
-# Output: build\dist\TranscriptionSuite.exe
+cd dashboard && npm run package:windows
+# Output: dashboard/release/TranscriptionSuite Setup *.exe
+
+# macOS (on macOS machine, Apple Silicon)
+./build/build-electron-mac.sh
+# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+
+# Or from within dashboard/
+cd dashboard && npm run package:mac
 ```
 
 ### 1.4 Common Tasks
@@ -140,11 +154,15 @@ uv run transcription-dashboard --host localhost --port 8000
 | Build Docker image | `cd server/docker && docker compose build` |
 | View server logs | `docker compose logs -f` |
 | Build & publish image | `./build/docker-build-push.sh` |
-| Run dashboard (local) | `cd dashboard && uv run transcription-dashboard --host localhost --port 8000` |
-| Run dashboard (remote) | `cd dashboard && uv run transcription-dashboard --host <tailscale-hostname> --port 8443 --https` |
-| Lint code | `./build/.venv/bin/ruff check .` |
-| Format code | `./build/.venv/bin/ruff format .` |
-| Type check | `./build/.venv/bin/pyright` |
+| Bump project versions + refresh deps | `./build/update-project-versions.sh` |
+| Run dashboard (dev) | `cd dashboard && npm run dev` |
+| Run dashboard (Electron) | `cd dashboard && npm run dev:electron` |
+| Lint code (Python) | `./build/.venv/bin/ruff check .` |
+| Format code (Python) | `./build/.venv/bin/ruff format .` |
+| Type check (Python) | `./build/.venv/bin/pyright` |
+| Format code (TypeScript + JavaScript) | `cd dashboard && npm run format` |
+| Format check (TypeScript + JavaScript) | `cd dashboard && npm run format:check` |
+| Type check (TypeScript + JavaScript) | `cd dashboard && npm run typecheck` |
 
 ---
 
@@ -167,16 +185,13 @@ TranscriptionSuite uses a **client-server architecture**:
 └─────────────────────────────────────────────────────────┘
                            ↕
 ┌─────────────────────────────────────────────────────────┐
-│                   Native Dashboards                     │
-│     ┌─────────────┐ ┌─────────────┐ ┌─────────────┐     │
-│     │   KDE Tray  │ │ GNOME Tray  │ │Windows Tray │     │
-│     │   (PyQt6)   │ │(GTK3+D-Bus) │ │  (PyQt6)    │     │
-│     └─────────────┘ └──────┬──────┘ └─────────────┘     │
-│                            │ D-Bus IPC                  │
-│                      ┌─────┴──────┐                     │
-│                      │ Dashboard  │                     │
-│                      │  (PyQt6)   │                     │
-│                      └────────────┘                     │
+│              Electron Dashboard (Single Codebase)       │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  Renderer: React + TypeScript + Tailwind CSS      │  │
+│  │  Main Process: Electron (Node.js)                 │  │
+│  │  Targets: Linux (AppImage) + Windows (NSIS)       │  │
+│  │           + macOS (DMG + ZIP, arm64, unsigned)    │  │
+│  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -193,20 +208,24 @@ TranscriptionSuite uses a **client-server architecture**:
 
 ### 2.2 Platform Architectures
 
-| Platform | Architecture | UI Toolkit | Notes |
-|----------|--------------|------------|-------|
-| **KDE Plasma** | Single-process | PyQt6 | Tray and Dashboard share one process |
-| **Windows** | Single-process | PyQt6 | Same as KDE |
-| **GNOME** | Dual-process | GTK3 + PyQt6 | Tray (GTK3) and Dashboard (PyQt6) via D-Bus |
+| Platform | Architecture | UI Stack | Runtime Profile | Notes |
+|----------|--------------|----------|-----------------|-------|
+| **Linux** | Single-process | Electron + React | GPU (default) or CPU | Packaged as AppImage via electron-builder |
+| **Windows** | Single-process | Electron + React | GPU (default) or CPU | Packaged as NSIS installer via electron-builder |
+| **macOS** | Single-process | Electron + React | CPU only (v1) | Packaged as DMG + ZIP (arm64), unsigned |
 
-**GNOME Dual-Process Design**: The tray uses GTK3 + AppIndicator3, while the Dashboard uses PyQt6. They run in separate processes and communicate via D-Bus (`com.transcriptionsuite.Dashboard`).
-
-**Dashboard UI Design**: All platforms feature a **sidebar navigation** layout:
+**Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
-- Status lights show Server and Client states with color indicators (green=running, red=unhealthy, blue=starting, orange=stopped, gray=not set up)
-- Main content area on the right with views: Home, Notebook, Docker Server, Client
+- Status lights show Server and Client states with color indicators (green=running AND healthy, orange=container exists but not healthy, gray=missing, red=unhealthy/error, blue=starting)
+- Main content area on the right with views: Session, Notebook, Server
 - Notebook tab contains Calendar, Search, and Import sub-tabs
-- Settings accessible via hamburger menu with four tabs: App, Client, Server, Notebook
+- Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
+- App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
+- System tray integration with 11 state-aware icons, context menu controls, and quick-access file transcription
+- First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
+- Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
+- Model-aware translation toggle (auto-disables for turbo, .en, and distil model variants)
+- Glassmorphism design language with dark frosted glass aesthetic
 
 ### 2.3 Security Model
 
@@ -228,45 +247,59 @@ TranscriptionSuite uses layered security for remote access:
 
 ```
 TranscriptionSuite/
-├── dashboard/                    # Native dashboard application
-│   ├── src/dashboard/            # Python package source
-│   │   ├── common/               # Shared code (API client, orchestrator, config)
-│   │   ├── kde/                  # KDE Plasma (PyQt6)
-│   │   │   ├── dashboard.py      # Main window (654 lines)
-│   │   │   ├── server_mixin.py   # Server control methods (739 lines)
-│   │   │   ├── client_mixin.py   # Client control methods (530 lines)
-│   │   │   ├── dialogs.py        # About/README dialogs (458 lines)
-│   │   │   ├── log_window.py     # Log viewer with highlighting (406 lines)
-│   │   │   ├── styles.py         # Stylesheets (566 lines)
-│   │   │   ├── utils.py          # Utilities & constants (106 lines)
-│   │   │   ├── views/            # View creation functions
-│   │   │   │   ├── server_view.py # Server management view (341 lines)
-│   │   │   │   └── client_view.py # Client management view (339 lines)
-│   │   │   ├── tray.py           # System tray
-│   │   │   ├── settings_dialog.py # Settings UI
-│   │   │   ├── notebook_view.py  # Audio notebook
-│   │   │   └── ... (other UI components)
-│   │   ├── gnome/                # GNOME tray + D-Bus IPC
-│   │   │   ├── tray.py           # GTK3 AppIndicator tray
-│   │   │   ├── dbus_service.py   # D-Bus IPC for tray ↔ dashboard
-│   │   │   └── qt_dashboard_main.py # Qt dashboard entrypoint
-│   │   ├── windows/              # Windows (PyQt6)
-│   │   │   ├── tray.py           # System tray
-│   │   │   └── ... (other UI components)
-│   │   └── build/                # PyInstaller spec files
-│   └── pyproject.toml            # Dashboard package + dependencies
+├── dashboard/                    # Electron + React dashboard application
+│   ├── electron/                 # Electron main process
+│   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
+│   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
+│   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
+│   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons
+│   │   ├── updateManager.ts      # Opt-in update checker (app via GitHub, image via GHCR)
+│   │   └── tsconfig.json         # TypeScript config for main process
+│   ├── src/                      # Shared source (API, config, hooks, services)
+│   │   ├── api/client.ts         # REST API client for server communication
+│   │   ├── config/store.ts       # Client config (electron-store / localStorage)
+│   │   ├── hooks/                # React hooks (see Key Modules section)
+│   │   ├── services/             # Core services
+│   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
+│   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
+│   │   │   └── modelCapabilities.ts # Translation support detection per model variant
+│   │   ├── index.css             # Tailwind CSS + global styles
+│   │   └── types/electron.d.ts   # TypeScript declarations for Electron IPC
+│   ├── components/               # React UI components
+│   │   ├── Sidebar.tsx           # Collapsible sidebar navigation
+│   │   ├── AudioVisualizer.tsx   # Canvas-based waveform visualizer
+│   │   ├── ui/                   # Primitives (Button, GlassCard, StatusLight, etc.)
+│   │   └── views/                # View components (SessionView, NotebookView, ServerView, modals)
+│   ├── public/                   # Static assets (served at /)
+│   │   ├── audio-worklet-processor.js  # AudioWorklet for mic capture
+│   │   └── logo.svg              # App logo for notifications/favicon
+│   ├── ui-contract/              # Machine-validated UI contract (design enforcement)
+│   ├── scripts/                  # Dev scripts + UI contract tooling
+│   ├── App.tsx                   # Root React component
+│   ├── index.tsx                 # React entry point
+│   ├── index.html                # HTML shell
+│   ├── types.ts                  # Shared TypeScript enums/interfaces
+│   ├── vite.config.ts            # Vite bundler config
+│   ├── tsconfig.json             # TypeScript config for renderer
+│   └── package.json              # Dependencies + build config
 │
 ├── build/                        # Build and development tools
-│   ├── build-appimage-kde.sh     # Build KDE AppImage
-│   ├── build-appimage-gnome.sh   # Build GNOME AppImage
+│   ├── build-electron-linux.sh   # Build Electron AppImage
+│   ├── build-electron-mac.sh     # Build Electron DMG + ZIP (macOS arm64)
+│   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
+│   ├── generate-ico.sh           # Generate PNG/ICO/ICNS logo assets from SVG sources
 │   ├── docker-build-push.sh      # Build and push Docker image
+│   ├── update-project-versions.sh # Bump project versions + refresh dependency locks
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
 │
 ├── server/                       # Server source code
 │   ├── docker/                   # Docker infrastructure
 │   │   ├── Dockerfile            # Runtime-bootstrap image (small base + first-run sync)
-│   │   ├── docker-compose.yml    # Container orchestration
+│   │   ├── docker-compose.yml    # Base container orchestration (service, env, volumes)
+│   │   ├── docker-compose.linux-host.yml   # Linux overlay: host networking
+│   │   ├── docker-compose.desktop-vm.yml   # macOS/Windows overlay: bridge + port mapping
+│   │   ├── docker-compose.gpu.yml          # NVIDIA GPU overlay
 │   │   └── entrypoint.py         # Container entrypoint
 │   ├── backend/                  # FastAPI backend
 │   │   ├── api/                  # FastAPI routes
@@ -276,19 +309,40 @@ TranscriptionSuite/
 │   └── config.yaml               # Server configuration template
 ```
 
-### 3.1 pyproject.toml Files
+### 3.1 Configuration Files
 
 | File | Purpose |
 |------|---------|
-| `dashboard/pyproject.toml` | Dashboard runtime deps with platform extras (`kde`, `gnome`, `windows`) |
-| `build/pyproject.toml` | All dev/build tools (ruff, pyright, pytest, pyinstaller) |
+| `dashboard/package.json` | Dashboard dependencies, Electron build config, scripts |
+| `build/pyproject.toml` | Dev/build tools (ruff, pyright, pytest) |
 | `server/backend/pyproject.toml` | Server deps with pinned versions for reproducible Docker builds |
 
 ### 3.2 Version Management
 
-Each `pyproject.toml` defines its component's version. All version strings are dynamically sourced from these files - update the version in one place.
+Keep these version fields aligned for a release:
 
-*Note: The tags and releases version numbers always refer to the Dashboard toml's version.*
+- `build/pyproject.toml`
+- `server/backend/pyproject.toml`
+- `dashboard/package.json`
+
+Use the helper script to bump all three and refresh dependencies:
+
+```bash
+# Interactive prompt (asks for target version)
+./build/update-project-versions.sh
+
+# Non-interactive usage
+./build/update-project-versions.sh 1.0.3
+```
+
+What the script does:
+- Prompts for the new version (or uses arg 1)
+- Updates the version value in the three files above
+- Runs `uv lock --upgrade && uv sync` in `build/`
+- Runs `uv lock --upgrade && uv sync` in `server/backend/`
+- Runs `npm update` in `dashboard/`
+
+*Note: Release tags should continue to match the Dashboard `package.json` version.*
 
 ---
 
@@ -297,13 +351,12 @@ Each `pyproject.toml` defines its component's version. All version strings are d
 ### 4.1 Step 1: Environment Setup
 
 ```bash
-# Dashboard virtual environment
+# Dashboard (Node.js)
 cd dashboard
-uv venv --python 3.13
-uv sync --extra kde    # or --extra gnome / --extra windows
+npm install
 cd ..
 
-# Build tools virtual environment
+# Build tools (Python — for server linting/testing)
 cd build
 uv venv --python 3.13
 uv sync
@@ -374,8 +427,12 @@ docker image prune -f
 # Start the server
 cd server/docker && docker compose up -d
 
-# Run the dashboard
-cd dashboard && uv run transcription-dashboard --host localhost --port 8000
+# Run the dashboard (browser)
+cd dashboard && npm run dev
+# Opens at http://localhost:3000
+
+# Or run in Electron
+cd dashboard && npm run dev:electron
 ```
 
 ### 4.4 Step 4: Run Dashboard Remotely (Tailscale)
@@ -388,9 +445,8 @@ TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 
-# Dashboard side: Connect via HTTPS
-cd dashboard
-uv run transcription-dashboard --host <your-machine>.tail1234.ts.net --port 8443 --https
+# Dashboard side: Configure server host in Settings
+# Set host to <your-machine>.tail1234.ts.net, port 8443, HTTPS enabled
 ```
 
 ### 4.5 Publishing Docker Images
@@ -419,103 +475,178 @@ Prerequisite: You must have built the image first (see Step 2).
 ### 5.1 Prerequisites
 
 ```bash
+# Dashboard: Node.js 24+ and npm
+cd dashboard && npm install
+
+# Server Python tools (linting, testing)
 cd build
 uv venv --python 3.13
-uv sync    # Installs PyInstaller, build, ruff, pytest
+uv sync
 ```
 
 ### 5.2 Build Matrix
 
 | Platform | Method | Output | Target Requirements |
 |----------|--------|--------|---------------------|
-| **KDE (Linux)** | PyInstaller + AppImage | Fully standalone | None |
-| **GNOME (Linux)** | Source bundle + AppImage | Semi-portable | Python 3.13+, GTK3, AppIndicator3, PyQt6 |
-| **Windows** | PyInstaller | Fully standalone | None |
+| **Linux** | Electron + electron-builder | AppImage | None |
+| **Windows** | Electron + electron-builder | NSIS installer | None |
+| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | None |
 
-### 5.3 KDE AppImage (Linux)
-
-```bash
-./build/build-appimage-kde.sh
-# Output: build/dist/TranscriptionSuite-KDE-x86_64.AppImage
-```
-
-### 5.4 GNOME AppImage (Linux)
+### 5.3 Linux AppImage
 
 ```bash
-./build/build-appimage-gnome.sh
-# Output: build/dist/TranscriptionSuite-GNOME-x86_64.AppImage
+./build/build-electron-linux.sh
+# Output: dashboard/release/TranscriptionSuite-*-x86_64.AppImage
 ```
 
-**Target system dependencies:**
+Or manually:
 ```bash
-# Arch Linux
-sudo pacman -S --needed python gtk3 libappindicator-gtk3 python-gobject python-pyaudio \
-    python-numpy python-aiohttp python-pyqt6 wl-clipboard
-
-# Ubuntu/Debian
-sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 python3-pyaudio \
-    python3-numpy python3-aiohttp python3-pyqt6 wl-clipboard
+cd dashboard
+npm run package:linux
 ```
 
-### 5.5 Windows Executable
+### 5.4 Windows Installer
 
-**Prerequisites (on Windows):**
 ```powershell
-# Install uv
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Install ImageMagick for icon generation
-winget install ImageMagick.ImageMagick
+cd dashboard
+npm run package:windows
+# Output: dashboard\release\TranscriptionSuite Setup *.exe
 ```
 
-**Build steps:**
-```powershell
-cd build
-uv venv --python 3.13
-uv sync
-cd ..
+### 5.5 macOS DMG + ZIP (Unsigned)
 
-# Generate Windows icon
-magick build\assets\logo.png -background transparent -define icon:auto-resize=256,48,32,16 build\assets\logo.ico
-
-# Build executable
-.\build\.venv\Scripts\pyinstaller.exe --clean --distpath build\dist .\dashboard\src\dashboard\build\pyinstaller-windows.spec
-# Output: build\dist\TranscriptionSuite.exe
+```bash
+./build/build-electron-mac.sh
+# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+#         dashboard/release/TranscriptionSuite-*-arm64-mac.zip
 ```
+
+Or manually:
+```bash
+cd dashboard
+npm run package:mac
+```
+
+Optional armored signatures (`.asc`) for all desktop artifacts:
+
+```bash
+export GPG_KEY_ID="<your-key-id-or-fingerprint>"
+export GPG_TIMEOUT_MINUTES=60
+./build/sign-electron-artifacts.sh
+```
+
+The signing script prompts for your key passphrase by default (or uses `GPG_PASSPHRASE` in non-interactive environments).
+
+CI release workflow: `.github/workflows/release-desktop.yml`
+
+Required GitHub secrets for CI signing:
+| Variable | Description |
+|----------|-------------|
+| `GPG_PRIVATE_KEY` | Private key block (ASCII armored) or base64-encoded private key |
+| `GPG_KEY_ID` | Key id or fingerprint used to sign artifacts |
+| `GPG_PASSPHRASE` | Passphrase for `GPG_PRIVATE_KEY` |
 
 ### 5.6 Build Assets
 
 **Source files (manually maintained in `build/assets/`):**
-- `logo.svg` (1024×1024) - Master vector logo
-- `logo.png` (1024×1024) - High-resolution raster export
-- `profile.png` - Author profile picture for About dialog
+- `logo.svg` — Master vector logo (source of truth)
+- `logo_wide.svg` — Wide variant for documentation/marketing
+- `profile.png` — Author profile picture for About dialog
+- `homelab-00_0xBFE4CC5D72020691_public.asc` — Public key used by users to verify release `.asc` signatures
 
-**Generated automatically during builds:**
-- `logo.ico` - Multi-resolution Windows icon
-- 256×256 PNG - Rescaled for AppImage
+**Generated files (created by `build/generate-ico.sh`):**
+- `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
+- `logo.ico` — Multi-resolution Windows icon (16, 32, 48, 256px)
+- `logo.icns` — macOS app icon (requires `iconutil` on macOS or `png2icns`/`libicns` on Linux)
+- `logo_wide.png` (440px tall, aspect-preserved) — Sharp wide logo used in packaged app assets
+- `logo_wide_readme.png` (880px tall, aspect-preserved) — Extra-sharp wide logo for README rendering
+
+**Regenerate derived assets:**
+```bash
+cd build && ./generate-ico.sh
+```
+
+### 5.7 End-User Verification Docs
+
+- User-facing verification steps are documented in `README.md` section `3.1 Verify Download (Kleopatra)`.
+- Keep this key path stable for docs and releases: `build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
+- Kleopatra reference page used in docs: https://apps.kde.org/kleopatra/
 
 ---
 
 ## 6. Docker Reference
 
-### 6.1 Local vs Remote Mode
+### 6.1 Compose File Layering
+
+Docker Compose configuration is split into layered files for cross-platform and CPU/GPU support:
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Base: service definition, environment, volumes |
+| `docker-compose.linux-host.yml` | Linux: host networking (direct localhost access) |
+| `docker-compose.desktop-vm.yml` | macOS/Windows: bridge networking + port mapping + `host.docker.internal` |
+| `docker-compose.gpu.yml` | NVIDIA GPU device reservation |
+
+**Usage examples:**
 
 ```bash
-# Local mode (default)
-docker compose up -d
+# Linux + GPU (most common, equivalent to previous default)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 
-# Remote mode with HTTPS
+# Linux + CPU only
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml up -d
+
+# macOS or Windows + CPU (Docker Desktop)
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+
+# Windows + GPU (Docker Desktop with NVIDIA WSL support)
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
+```
+
+The Electron dashboard selects the correct compose file stack automatically based on the detected platform and the user's runtime profile setting.
+
+The `start-local.sh` / `start-remote.sh` convenience scripts default to Linux + GPU mode.
+
+### 6.2 Local vs Remote Mode
+
+```bash
+# Local mode (Linux + GPU, default)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+
+# Remote mode with HTTPS (Linux + GPU)
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 ```
 
 **Ports:**
 - `8000` — HTTP API (always available)
 - `8443` — HTTPS (only when `TLS_ENABLED=true`)
 
-### 6.2 Tailscale HTTPS Setup
+### 6.3 CPU Mode
+
+CPU mode runs the server without NVIDIA GPU reservation. The server automatically falls back
+to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
+
+**When to use CPU mode:**
+- macOS (no NVIDIA GPU support in Docker)
+- Systems without an NVIDIA GPU
+- Testing/development without GPU overhead
+- Running on VMs without GPU passthrough
+
+**How CPU mode works:**
+1. The GPU compose overlay (`docker-compose.gpu.yml`) is omitted from the compose stack
+2. `CUDA_VISIBLE_DEVICES` is set to empty string, ensuring deterministic CPU-only behavior
+3. The server's engine detects no CUDA availability and uses CPU for all inference
+
+**Performance expectations (CPU vs GPU):**
+- CPU mode is **5–20× slower** than GPU depending on model size and audio length
+- Recommended to use smaller models (`small`, `base`, `tiny`) in CPU mode
+- `large-v3` model in CPU mode: ~10–30× real-time (30 min audio ≈ 15–30 min transcription)
+- `small` model in CPU mode: ~2–5× real-time (much more practical)
+
+### 6.4 Tailscale HTTPS Setup
 
 1. **Install and authenticate Tailscale:**
    ```bash
@@ -543,7 +674,7 @@ docker compose up -d
    docker compose up -d
    ```
 
-### 6.3 Docker Volume Structure
+### 6.5 Docker Volume Structure
 
 **`transcriptionsuite-data`** (mounted to `/data`):
 
@@ -578,7 +709,7 @@ docker compose up -d
 
 When `USER_CONFIG_DIR` is set, mounts custom config and logs.
 
-### 6.4 Docker Image Selection
+### 6.6 Docker Image Selection
 
 The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcriptionsuite-server`) with flexible tag selection:
 
@@ -612,7 +743,7 @@ TAG=my-custom docker compose up -d
 
 **Note:** The `TAG` environment variable is the only way to override which image version is used. If you have multiple local images with different tags, you must explicitly specify which one via `TAG=...` or it defaults to looking for the `latest` tag.
 
-### 6.5 Server Update Lifecycle
+### 6.7 Server Update Lifecycle
 
 This section describes exactly what updates when the Docker image changes versus when runtime dependency volumes change.
 
@@ -712,6 +843,9 @@ Use runtime reset only for recovery/maintenance. Prefer keeping `transcriptionsu
 | `/api/notebook/recordings/{id}/export` | GET | Export recording (`txt` for pure notes, `srt`/`ass` for timestamp-capable notes) |
 | `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization (`translation_enabled`, `translation_target_language` supported) |
 | `/api/notebook/calendar` | GET | Get recordings by date range |
+| `/api/notebook/recordings/{id}/title` | PATCH | Rename a recording |
+| `/api/notebook/recordings/{id}/date` | PATCH | Change recording date |
+| `/api/notebook/recordings/{id}/summary` | PATCH | Update or clear recording summary |
 | `/backups` | GET | List available database backups |
 | `/backup` | POST | Create new database backup |
 | `/restore` | POST | Restore database from backup |
@@ -821,119 +955,175 @@ All modules use `get_config()` from `server.config`. Configuration is loaded wit
 
 ```bash
 cd dashboard
-uv venv --python 3.13
-uv sync --extra kde    # or --extra gnome / --extra windows
+npm install
 
-uv run transcription-dashboard
+# Browser dev mode (Vite hot-reload at http://localhost:3000)
+npm run dev
+
+# Electron dev mode (Vite + Electron window)
+npm run dev:electron
 ```
 
-### 9.2 Verbose Logging
+### 9.2 Tech Stack
 
-```bash
-uv run transcription-dashboard --verbose
-```
-
-**Log locations:**
-| Platform | Log File |
-|----------|----------|
-| Linux | `~/.config/TranscriptionSuite/dashboard.log` |
-| Windows | `%APPDATA%\TranscriptionSuite\dashboard.log` |
-| macOS | `~/Library/Application Support/TranscriptionSuite/dashboard.log` |
+- **Renderer**: React 19 + TypeScript 5.9 + Tailwind CSS 4 (Vite-bundled)
+- **Main Process**: Electron (Node.js)
+- **Build**: Vite (renderer) + tsc (main process) + electron-builder (packaging)
+- **Icons**: Lucide React
+- **Config**: electron-store (JSON) for client settings
 
 ### 9.3 Key Modules
 
-**Common (Shared):**
+**Electron Main Process (`electron/`):**
 
 | Module | Purpose |
 |--------|---------|
-| `common/api_client.py` | HTTP client, WebSocket, error handling, backup/export methods |
-| `common/orchestrator.py` | Main controller, state machine |
-| `common/docker_manager.py` | Docker server control |
-| `common/setup_wizard.py` | First-time setup |
-| `common/tailscale_resolver.py` | Tailscale IP fallback when DNS fails |
+| `main.ts` | Window creation, IPC handlers, app lifecycle |
+| `preload.ts` | Context bridge (safe IPC between renderer and main) |
+| `dockerManager.ts` | Docker CLI wrapper for container/image management |
+| `trayManager.ts` | System tray with 11 state-aware icons, context menu, and runtime icon tinting |
+| `updateManager.ts` | Opt-in update checker for app releases (GitHub) and server image (GHCR) |
 
-**KDE (PyQt6) - Modular Architecture:**
-
-| Module | Purpose | Lines |
-|--------|---------|-------|
-| `kde/dashboard.py` | Main window with sidebar, navigation, and lifecycle | 654 |
-| `kde/server_mixin.py` | Server control methods (start/stop, image/volume mgmt, logs) | 739 |
-| `kde/client_mixin.py` | Client control methods (start/stop, models, live transcriber) | 530 |
-| `kde/dialogs.py` | About dialog, README viewer, hamburger menu | 458 |
-| `kde/log_window.py` | Log viewer with syntax highlighting and line numbers | 406 |
-| `kde/styles.py` | Stylesheet definitions for consistent theming | 566 |
-| `kde/utils.py` | Utility functions (path resolution) and constants | 106 |
-| `kde/views/server_view.py` | Server management view UI creation | 341 |
-| `kde/views/client_view.py` | Client management view UI creation | 339 |
-| `kde/settings_dialog.py` | Settings dialog with Notebook backup/restore tab |  |
-| `kde/notebook_view.py` | Audio Notebook with Calendar, Search, Import tabs |  |
-| `kde/calendar_widget.py` | Calendar view with export context menu |  |
-
-**GNOME (GTK3 Tray + Qt Dashboard):**
+**Services (`src/services/`):**
 
 | Module | Purpose |
 |--------|---------|
-| `gnome/tray.py` | GTK3 AppIndicator tray + D-Bus service |
-| `gnome/dbus_service.py` | D-Bus IPC interface |
-| `gnome/qt_dashboard_main.py` | Qt dashboard entrypoint |
+| `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
+| `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
+| `modelCapabilities.ts` | Translation support detection per Whisper model variant |
 
-**Architecture Notes:**
-- **KDE**: Fully modularized with mixins (`ServerControlMixin`, `ClientControlMixin`, `DialogsMixin`) for clean separation of concerns. Main dashboard.py is 654 lines.
-- **GNOME**: Uses the same PyQt6 dashboard as KDE/Windows, launched from the GTK3 tray via D-Bus.
-- **View Creation**: KDE uses factory functions in `views/` package for server and client views, keeping dashboard.py focused on navigation and lifecycle.
+**React Hooks (`src/hooks/`):**
 
-### 9.3.1 Settings Exposure Rules
+| Hook | Purpose |
+|------|---------|
+| `useServerStatus.ts` | Poll server health/status, connection state |
+| `useDocker.ts` | Docker container control via IPC (start/stop/status) |
+| `useTranscription.ts` | Real-time WebSocket transcription session |
+| `useLiveMode.ts` | Live Mode continuous transcription |
+| `useRecording.ts` | Fetch/manage individual recordings |
+| `useCalendar.ts` | Calendar view data fetching |
+| `useSearch.ts` | Full-text search across recordings |
+| `useUpload.ts` | Audio file upload with progress |
+| `useBackups.ts` | Database backup/restore operations |
+| `useLanguages.ts` | Available transcription languages |
+| `useAdminStatus.ts` | Admin authentication state |
+| `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
+| `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
 
-- **Single-source UI exposure**: Every setting must be shown **either** in one of the Dashboard Client/Server views or the Settings dialog tabs (App/Client/Notebook) **or** in the Settings dialog Server tab — never both.
-- **Server tab descriptions**: The Server tab reads descriptions directly from comments in the active user `config.yaml` (e.g., `~/.config/TranscriptionSuite/config.yaml`). If you change those comments, the UI descriptions update automatically on next open.
+**Shared Source (`src/`):**
 
-### 9.4 Dashboard Architecture & Refactoring
+| Module | Purpose |
+|--------|---------|
+| `api/client.ts` | REST API client for server communication |
+| `config/store.ts` | Client config persistence (electron-store / localStorage fallback) |
+| `index.css` | Tailwind CSS entry point + global styles |
+| `types/electron.d.ts` | TypeScript declarations for Electron IPC bridge |
 
-#### KDE Dashboard Refactoring (Completed)
+**React Components (`components/`):**
 
-The KDE dashboard was refactored from a single 4035-line `dashboard.py` file into modular, maintainable components:
+| Component | Purpose |
+|-----------|---------|
+| `Sidebar.tsx` | Collapsible sidebar navigation with status lights |
+| `AudioVisualizer.tsx` | Canvas-based audio waveform visualizer |
+| `ui/Button.tsx` | 5 variants (primary/secondary/danger/ghost/glass), 4 sizes |
+| `ui/GlassCard.tsx` | Glassmorphism container with optional header |
+| `ui/AppleSwitch.tsx` | iOS-style toggle switch |
+| `ui/CustomSelect.tsx` | Portal-based dropdown selector |
+| `ui/StatusLight.tsx` | Animated pulse indicator (5 states) |
+| `ui/LogTerminal.tsx` | Terminal-style log viewer with color coding |
 
-**Refactoring Strategy:**
-1. **Mixins for Functionality**: Extracted server and client control logic into reusable mixins
-2. **Utility Modules**: Separated stylesheets, utilities, and constants into dedicated files
-3. **Dialog Management**: Centralized all dialog-related code (About, README viewer, menus)
-4. **View Factories**: Created factory functions for server and client views to keep main dashboard focused
+**View Components (`components/views/`):**
 
-**File Breakdown:**
+| View | Purpose |
+|------|---------|
+| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications |
+| `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
+| `ServerView.tsx` | Docker server management: image selection, container control |
+| `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
+| `AboutModal.tsx` | Profile card, version, links |
+| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
+| `AddNoteModal.tsx` | Create new recording from calendar time slot |
+| `FullscreenVisualizer.tsx` | Fullscreen audio visualizer overlay |
 
-| Component | File | Lines | Responsibility |
-|-----------|------|-------|-----------------|
-| **Main Window** | `dashboard.py` | 654 | Window setup, navigation, lifecycle, view management |
-| **Server Control** | `server_mixin.py` | 739 | Docker server start/stop, image/volume management, server logs |
-| **Client Control** | `client_mixin.py` | 530 | Client start/stop, model management, live transcriber, notifications |
-| **Dialogs** | `dialogs.py` | 458 | About dialog, README viewer, hamburger menu, help menu |
-| **Log Viewer** | `log_window.py` | 406 | Syntax-highlighted log display with line numbers |
-| **Stylesheets** | `styles.py` | 566 | QSS stylesheets for consistent theming |
-| **Utilities** | `utils.py` | 106 | Path resolution, constants (GitHub URLs) |
-| **Server View** | `views/server_view.py` | 341 | Server management UI (status, controls, volumes) |
-| **Client View** | `views/client_view.py` | 339 | Client management UI (status, controls, live preview) |
+### 9.4 UI Contract System
 
-**Total**: 4,139 lines across 9 files (all under 800 lines each)
+The dashboard enforces design consistency via a machine-validated UI contract. The contract operates in `closed_set` mode: any Tailwind class, token, or inline style not explicitly in the allowlists is a validation error.
 
-**Benefits:**
-- **Maintainability**: Each file has a single, clear responsibility
-- **Testability**: Mixins can be tested independently
-- **Reusability**: Mixins can be shared with other UI frameworks if needed
-- **Readability**: Reduced cognitive load per file
-- **Scalability**: Easy to add new features without bloating main dashboard
+#### 9.4.1 Contract Files
 
-**Mixin Architecture:**
+| File | Purpose |
+|------|---------|
+| `ui-contract/transcription-suite-ui.contract.yaml` | Canonical contract — single source of truth for renderer styling |
+| `ui-contract/transcription-suite-ui.contract.schema.json` | JSON Schema for structural validation |
+| `ui-contract/contract-baseline.json` | Content hash + version lock for semver bump enforcement |
+| `ui-contract/design-language.md` | Qualitative design direction (dark frosted glass, accent palette, motion rules) |
+| `scripts/ui-contract/extract-facts.mjs` | Extracts class/token/style facts from source files |
+| `scripts/ui-contract/build-contract.mjs` | Rebuilds contract YAML from extracted facts |
+| `scripts/ui-contract/validate-contract.mjs` | Validates schema + token drift + semver policy |
+| `scripts/ui-contract/diff-contract.mjs` | Generates structured mismatch report |
+| `scripts/ui-contract/test-contract.mjs` | Fixture-based contract tests |
+| `scripts/ui-contract/shared.mjs` | Shared extraction/comparison utilities |
 
-```python
-class DashboardWindow(ServerControlMixin, ClientControlMixin, DialogsMixin, QMainWindow):
-    """Main dashboard inherits all control logic from mixins."""
-    # Focuses on: window setup, navigation, view management, lifecycle
+#### 9.4.2 Commands
+
+```bash
+# Extract facts from current source
+npm run ui:contract:extract
+
+# Rebuild contract from extracted facts
+node scripts/ui-contract/build-contract.mjs
+
+# Validate contract (schema + semantic drift + semver)
+npm run ui:contract:validate
+
+# Generate detailed mismatch report
+npm run ui:contract:diff
+
+# Run fixture-based contract tests
+npm run ui:contract:test
+
+# Update baseline (after intentional change + spec_version bump)
+node scripts/ui-contract/validate-contract.mjs --update-baseline
 ```
 
-#### Future Refactoring Opportunities
+#### 9.4.3 Contract Structure
 
-- **Windows Dashboard**: Apply mixin pattern once fully implemented
-- **Shared Mixins**: Consider moving `ServerControlMixin` and `ClientControlMixin` to `common/` for potential reuse across platforms
+The YAML contract contains these top-level sections:
+
+| Section | Contents |
+|---------|----------|
+| `meta` | Contract identity: `spec_version` (semver), `contract_mode: closed_set`, validation method |
+| `foundation.tailwind` | Canonical Tailwind theme extensions (fonts, glass/accent color scales, custom blur) |
+| `foundation.tokens` | Frozen token registries: colors, blur levels, shadows, motion, radii, z-index, spacing, status mappings |
+| `global_behaviors` | Global CSS policy: body styles, selection styling, scrollbar definitions, portal layering |
+| `utility_allowlist` | Full allowed class universe — `exact_classes` (normal) + `arbitrary_classes` (bracket-value) |
+| `inline_style_allowlist` | Allowed inline style properties and animation-related literals |
+| `component_contracts` | Per-component constraints: `required_tokens`, `allowed_variants`, `structural_invariants`, `behavior_rules`, `state_rules` |
+| `validation_policy` | Enforcement severity for each check (all currently `error`) |
+
+#### 9.4.4 Change Workflow
+
+When modifying UI styling, tokens, or component structure:
+
+1. Make the source changes
+2. Run `npm run ui:contract:extract` to extract updated facts
+3. Run `node scripts/ui-contract/build-contract.mjs` to rebuild the contract
+4. Run `npm run ui:contract:validate` to check for drift
+5. If changes are intentional, bump `meta.spec_version` in the contract YAML
+6. Run `node scripts/ui-contract/validate-contract.mjs --update-baseline` to lock the new baseline
+7. Run `npm run ui:contract:test` to verify fixtures
+
+#### 9.4.5 Validation Failures
+
+Validation fails when:
+
+- A new utility or arbitrary class appears that is not in allowlists
+- Token registries drift (colors, shadows, motion, radii, z-index, etc.)
+- Global CSS blocks differ from the contract
+- A discovered component has no entry in `component_contracts`
+- Contract content changes but `meta.spec_version` is not bumped
+
+**CI gate**: `npm run ui:contract:validate` runs automatically (workflow: `.github/workflows/ui-contract.yml`).
 
 ### 9.5 Server Busy Handling
 
@@ -943,7 +1133,7 @@ The dashboard handles server busy conditions automatically:
 
 ### 9.6 Model Management
 
-The dashboard provides a convenient way to manage GPU memory via the system tray and client view:
+The dashboard provides controls for managing GPU memory:
 - Automatically disabled when server is stopped or becomes unhealthy
 - Checks server for active transcriptions before unloading
 - Returns HTTP 409 if server is busy
@@ -953,6 +1143,68 @@ The dashboard provides a convenient way to manage GPU memory via the system tray
 - Live Mode uses the same model as main_transcriber by default (configurable in config.yaml)
 - When Live Mode stops, main model is reloaded for normal transcription
 - This ensures efficient VRAM usage on consumer GPUs (e.g., RTX 3060 12GB)
+
+### 9.7 Package Management
+
+**Check for outdated packages:**
+```bash
+cd dashboard
+npm outdated
+```
+
+This shows a table with:
+- `Package`: Package name
+- `Current`: Currently installed version
+- `Wanted`: Latest version satisfying semver range in package.json
+- `Latest`: Latest version available on npm registry
+
+**Understanding npm update vs npm install:**
+
+| Command | Behavior |
+|---------|----------|
+| `npm install <package>@latest` | Updates specific package to latest version, modifies package.json |
+| `npm install` | Installs exact versions from package-lock.json |
+| `npm update` | Updates packages to `Wanted` version (respects semver ranges like `^` or `~`) |
+| `npm update <package>` | Updates specific package within semver range |
+
+**Safe updates (respects semver):**
+```bash
+cd dashboard
+npm update           # Updates all packages within their semver ranges
+npm update electron  # Updates only electron within its range
+```
+
+**Major version updates (breaking changes allowed):**
+```bash
+# Update specific packages to latest
+npm install electron@latest --save-dev
+npm install react@latest react-dom@latest
+
+# Or update all to latest (more risky)
+# Edit package.json manually to change versions, then:
+npm install
+```
+
+**Clean reinstall (recommended after major updates):**
+```bash
+cd dashboard
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**Verify updates don't break the build:**
+```bash
+npm run typecheck    # TypeScript + JavaScript static type checking
+npm run build        # Production build
+npm run dev:electron # Test in development mode
+```
+
+**Best practices:**
+- Run `npm outdated` periodically to check for updates
+- Read changelogs for major version bumps (especially Electron, React, Vite)
+- Test thoroughly after updates (typecheck → build → runtime)
+- Update `README_DEV.md` dependency version numbers after major updates
+- npm deprecation warnings from transitive dependencies (like `inflight`, `glob` in electron-builder) are usually harmless and cannot be eliminated until upstream packages update
 
 ---
 
@@ -1003,30 +1255,38 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 
 ### 10.2 Dashboard Configuration
 
-Config file: `~/.config/TranscriptionSuite/dashboard.yaml`
+The Electron dashboard persists settings via **electron-store** (JSON) at the
+platform-specific config path (e.g. `~/.config/transcription-suite/config.json`
+on Linux). Settings are managed through the **Settings** modal in the UI.
 
-```yaml
-server:
-  host: localhost              # Local server hostname
-  port: 8000                   # Server port
-  use_https: false             # Enable HTTPS (required for remote/Tailscale)
-  token: ""                    # Authentication token
-  use_remote: false            # Use remote_host instead of host
-  remote_host: ""              # Remote server hostname (no protocol/port)
-  auto_reconnect: true         # Auto-reconnect on disconnect
-  reconnect_interval: 10       # Seconds between attempts
+| Key | Default | Description |
+|-----|---------|-------------|
+| `connection.localHost` | `localhost` | Local server hostname |
+| `connection.remoteHost` | `""` | Remote server hostname (no protocol/port) |
+| `connection.useRemote` | `false` | Use remote host instead of local |
+| `connection.authToken` | `""` | Authentication token |
+| `connection.port` | `8000` | Server port |
+| `connection.useHttps` | `false` | Enable HTTPS (required for remote/Tailscale) |
+| `audio.gracePeriod` | `0.5` | Seconds of silence before finalising a recording chunk |
+| `diarization.constrainSpeakers` | `false` | Constrain speaker count for diarization |
+| `diarization.numSpeakers` | `2` | Number of speakers when constrained |
+| `notebook.autoAdd` | `true` | Auto-add longform transcriptions to Notebook |
+| `server.hfToken` | `""` | HuggingFace token for PyAnnote diarization models |
+| `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` — controls Docker GPU reservation |
+| `app.autoCopy` | `true` | Copy transcription to clipboard on completion |
+| `app.showNotifications` | `true` | Show desktop notifications |
+| `app.stopServerOnQuit` | `false` | Stop Docker container when quitting the app |
+| `app.startMinimized` | `false` | Start minimised to system tray |
+| `app.updateChecksEnabled` | `false` | Enable opt-in update checking |
+| `app.updateCheckIntervalMode` | `daily` | Check interval: `hourly`, `daily`, `weekly`, or `custom` |
+| `app.updateCheckCustomHours` | `12` | Custom interval in hours (when mode is `custom`) |
 
-recording:
-  sample_rate: 16000           # Audio sample rate (fixed for Whisper)
-  device_index: null           # Audio input device (null = default)
-
-clipboard:
-  auto_copy: true              # Copy transcription to clipboard
-
-ui:
-  notifications: true          # Show desktop notifications
-  start_minimized: false       # Start with tray icon only
-```
+> **`server.runtimeProfile`** — Controls whether the Docker container is
+> launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).
+> When set to `cpu`, the `docker-compose.gpu.yml` overlay is omitted and
+> `CUDA_VISIBLE_DEVICES` is set to an empty string, forcing faster-whisper
+> to use the CPU compute backend. Change this from the **Server View** or
+> **Settings → App tab** in the dashboard UI.
 
 ---
 
@@ -1111,8 +1371,15 @@ All Python code quality tools are installed in the build environment. Run these 
 **Check specific directories:**
 ```bash
 ./build/.venv/bin/ruff check server/backend/
-./build/.venv/bin/ruff format dashboard/
-./build/.venv/bin/pyright dashboard/
+./build/.venv/bin/ruff format server/backend/
+```
+
+**Dashboard (TypeScript + JavaScript) quality commands:**
+```bash
+cd dashboard && npm run format
+cd dashboard && npm run format:check
+cd dashboard && npm run typecheck
+cd dashboard && npm run ui:contract:check
 ```
 
 **Preview changes without modifying files:**
@@ -1139,6 +1406,13 @@ Run all checks across the entire codebase:
 
 # 2. Python tests
 ./build/.venv/bin/pytest server/backend/tests
+
+# 3. TypeScript + JavaScript checks (dashboard)
+cd dashboard && npm run format:check
+cd dashboard && npm run typecheck
+
+# 4. UI contract validation
+cd dashboard && npm run ui:contract:validate
 ```
 
 ### 12.3 GitHub CodeQL Layout
@@ -1147,6 +1421,7 @@ The repository uses two different `.github` locations for different purposes:
 
 - `.github/workflows/`: GitHub Actions workflow definitions (when jobs run, trigger rules, runner setup).
 - `.github/codeql/`: CodeQL configuration consumed by workflows (for example, `codeql-config.yml` path filters and query configuration).
+- Active CodeQL language matrix in `.github/workflows/codeql-analysis.yml`: `python`, `javascript-typescript`.
 
 Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs and conflicting results.
 
@@ -1177,7 +1452,13 @@ docker compose exec transcriptionsuite-container curl -f http://localhost:8000/h
 
 ### 13.3 Tailscale DNS Resolution
 
-If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses.
+If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses with intelligent retry logic:
+
+1. First attempts DNS resolution of the configured hostname
+2. If DNS fails, queries `tailscale status --json` to discover available IPs
+3. Attempts connection to each IP (both IPv4 and IPv6) with per-IP timeout
+4. Returns success on first working IP, continues to next on failure
+5. Shows clear error messages distinguishing DNS vs connection failures
 
 **To diagnose:**
 ```bash
@@ -1194,31 +1475,27 @@ sudo systemctl restart tailscaled
 
 ```bash
 # Run from terminal to see errors
-./TranscriptionSuite-KDE-x86_64.AppImage
+./TranscriptionSuite-*-x86_64.AppImage
 
 # Check for missing libraries
-./TranscriptionSuite-KDE-x86_64.AppImage --appimage-extract
-ldd squashfs-root/usr/bin/TranscriptionSuite-KDE
+./TranscriptionSuite-*-x86_64.AppImage --appimage-extract
+ldd squashfs-root/usr/bin/transcriptionsuite
 ```
 
-### 13.5 Windows Docker Networking
+### 13.5 Windows / macOS Docker Networking
 
-**Issue**: On Windows Docker Desktop, `network_mode: "host"` doesn't expose container ports to the Windows host because containers run inside a Linux VM (WSL2/Hyper-V). The server listens inside the VM but Windows can't reach `localhost:8000`.
+**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected — the server listens inside the VM but the host can't reach `localhost:8000`.
 
-**Solution**: The setup wizard automatically generates platform-specific `docker-compose.yml`:
-- **Linux**: Uses `network_mode: "host"` for direct access
-- **Windows**: Uses explicit port mappings (`8000:8000`, `8443:8443`) with bridge networking
-- **LM Studio URL**: Windows uses `host.docker.internal:1234` to reach host services (works with LM Studio 0.4.0+ v1 API)
+**Solution**: The layered compose system handles this automatically:
+- **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
+- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mappings `8000:8000`, `8443:8443`)
+- **LM Studio URL**: Windows/macOS uses `host.docker.internal:1234` to reach host services
 
-**For existing installations**, manually edit `docker-compose.yml`:
-```yaml
-# Replace:
-network_mode: "host"
+The Electron dashboard selects the correct overlay automatically based on `process.platform`.
 
-# With:
-ports:
-  - "8000:8000"
-  - "8443:8443"
+**Manual CLI usage** (Windows/macOS):
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
 ```
 
 Then restart: `docker compose down && docker compose up -d`
@@ -1271,28 +1548,11 @@ These checks are useful for:
 
 ### 14.2 Dashboard
 
-- Python 3.13
-- aiohttp (async HTTP client)
-- PyAudio (audio recording)
-- PyQt6 (KDE/Windows) or GTK3+AppIndicator (GNOME)
-
----
-
-## 15. Known Issues & Future Work
-
-### 15.1 Live Mode Language Setting
-
-**Issue**: The `live_language` setting in `server/config.yaml` (line 117) is currently not being respected by the Live Mode transcription engine.
-
-**Current State**:
-- Setting is commented out in config.yaml with a TODO note
-- Dashboard UIs (KDE/GNOME) have a language selector, but it may not override the server's behavior
-- Language can be set through the dashboard, but effectiveness needs verification
-
-**Action Required**:
-- Investigate why the setting isn't being applied to the Live Mode engine
-- Verify the data flow from dashboard → API → live engine configuration
-- Ensure language preference is properly passed to the underlying transcription model
-- Test with various languages to confirm the setting takes effect
-
-**Workaround**: Use the language selector in the dashboard Client view, which attempts to set the language via the WebSocket configuration payload.
+- Node.js 24+
+- Electron 40+
+- React 19 + TypeScript 5.9
+- Vite 7 (bundler)
+- Tailwind CSS 4
+- electron-builder (packaging)
+- electron-store (client config persistence)
+- Lucide React (icons)

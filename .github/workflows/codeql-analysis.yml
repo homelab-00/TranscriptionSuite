@@ -21,7 +21,7 @@ on:
       languages:
         description: Languages to analyze (extension compatibility; workflow currently uses matrix below)
         required: false
-        default: python
+        default: python,javascript-typescript
   schedule:
     - cron: '34 16 * * 1'
 
@@ -50,6 +50,8 @@ jobs:
       matrix:
         include:
         - language: python
+          build-mode: none
+        - language: javascript-typescript
           build-mode: none
         # CodeQL supports the following values keywords for 'language': 'actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'
         # Use `c-cpp` to analyze code written in C, C++ or both
@@ -98,13 +100,13 @@ jobs:
         exit 1
 
     - name: Perform CodeQL Analysis
-      if: ${{ env.ACT != 'true' }}
+      if: ${{ github.actor != 'nektos/act' }}
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
 
     - name: Perform CodeQL Analysis (local act)
-      if: ${{ env.ACT == 'true' }}
+      if: ${{ github.actor == 'nektos/act' }}
       uses: github/codeql-action/analyze@v4
       env:
         CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/codeql-analysis.yml:analyze

@@ -36,7 +36,7 @@ import torch
 from faster_whisper import BatchedInferencePipeline
 from scipy.signal import resample
 
-from server.config import get_config
+from server.config import get_config, resolve_main_transcriber_model
 from server.core.stt.capabilities import validate_translation_request
 from server.core.stt.vad import VoiceActivityDetector
 
@@ -178,9 +178,7 @@ class AudioToTextRecorder:
         stt_cfg = cfg.stt
 
         self.instance_name = instance_name
-        self.model_name = model or main_cfg.get(
-            "model", "Systran/faster-whisper-large-v3"
-        )
+        self.model_name = model or resolve_main_transcriber_model(cfg)
         self.download_root = download_root
         self.language = language
         self.task = (task or "transcribe").strip().lower()

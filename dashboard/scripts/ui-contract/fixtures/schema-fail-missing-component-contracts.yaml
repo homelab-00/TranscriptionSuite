@@ -1,0 +1,80 @@
+meta:
+  spec_version: 1.0.0
+  contract_mode: closed_set
+  source_scope: mockup_repo
+  validation_method: static_source_scan
+  generated_from:
+    repo_path: /tmp/mock
+    source_files:
+      - App.tsx
+    generated_at: 2026-02-14T00:00:00.000Z
+foundation:
+  tailwind:
+    dark_mode: class
+    font_family_sans:
+      - Inter
+      - sans-serif
+    accent_scale:
+      cyan: '#22d3ee'
+    glass_scale:
+      '100': rgba(0, 0, 0, 0.3)
+    backdrop_blur_scale:
+      xs: 2px
+  tokens:
+    colors:
+      literal_palette:
+        - '#22d3ee'
+      accent_scale:
+        cyan: '#22d3ee'
+      glass_scale:
+        '100': rgba(0, 0, 0, 0.3)
+      semantic_status_palette: {}
+    blur_levels:
+      backdrop: []
+      filter: []
+    shadow_levels:
+      classes: []
+    motion:
+      duration_ms: []
+      easings: []
+      keyframes: []
+      animation_classes: []
+      animation_strings: []
+    radii:
+      classes: []
+    z_index_levels:
+      classes: []
+    spacing_and_size_constraints:
+      arbitrary_classes: []
+    status_states:
+      allowed: []
+      visual_mappings: {}
+global_behaviors:
+  css_blocks:
+    body: body {}
+    selection: ::selection {}
+    moz_selection: '::-moz-selection {}'
+    selectable_text: .selectable-text {}
+    custom_scrollbar_root: .custom-scrollbar::-webkit-scrollbar {}
+    custom_scrollbar_track: .custom-scrollbar::-webkit-scrollbar-track {}
+    custom_scrollbar_thumb: .custom-scrollbar::-webkit-scrollbar-thumb {}
+    custom_scrollbar_thumb_hover: .custom-scrollbar::-webkit-scrollbar-thumb:hover {}
+    custom_scrollbar_corner: .custom-scrollbar::-webkit-scrollbar-corner {}
+  selection: {}
+  text_selectability: {}
+  scrollbar: {}
+  portals: {}
+utility_allowlist:
+  exact_classes: []
+  arbitrary_classes: []
+inline_style_allowlist:
+  allowed_properties: []
+  allowed_literals: []
+  keyframes: []
+  animation_strings: []
+  cubic_beziers: []
+validation_policy:
+  unknown_utility_class: error
+  missing_required_field: error
+  missing_component_contract: error
+  semver_bump_required: error
