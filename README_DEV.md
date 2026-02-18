@@ -66,6 +66,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [12.1 Python Code Quality](#121-python-code-quality)
   - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
   - [12.3 GitHub CodeQL Layout](#123-github-codeql-layout)
+  - [12.4 Pre-Commit Hook](#124-pre-commit-hook)
 - [13. Troubleshooting](#13-troubleshooting)
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
   - [13.2 Health Check Issues](#132-health-check-issues)
@@ -1421,6 +1422,27 @@ The repository uses two different `.github` locations for different purposes:
 - Active CodeQL language matrix in `.github/workflows/codeql-analysis.yml`: `python`, `javascript-typescript`.
 
 Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs and conflicting results.
+
+### 12.4 Pre-Commit Hook
+
+The hook lives at `hooks/pre-commit` and is **tracked in git**. Git is configured to use this directory via `core.hooksPath hooks` (stored in `.git/config`). It runs three checks on every `git commit` invocation:
+
+| Order | Check | Tool / command |
+|-------|-------|----------------|
+| 1 | Python formatting | `./build/.venv/bin/ruff format .` |
+| 2 | Dashboard formatting | `cd dashboard && npm run format` |
+| 3 | UI contract validation + fixture tests | `cd dashboard && npm run ui:contract:check` |
+
+Checks 1 and 2 auto-format files in place. If any staged file is modified on disk as a result, the hook aborts and asks you to re-stage the formatted files before committing. Check 3 is read-only: it validates the contract YAML against the schema, checks for token drift / semver policy, and runs fixture-based contract tests — it does **not** extract or rebuild the contract (those are explicit developer actions; see §9.4.4).
+
+**First-time setup after a fresh clone** (one-time, per developer):
+```bash
+git config core.hooksPath hooks
+```
+
+That's it — git will then automatically pick up `hooks/pre-commit` (and any future hooks added to the directory) without copying or symlinking anything.
+
+**Extending the hook:** add a new `check_<name>()` function to `hooks/pre-commit` and append the function name to the `CHECKS` array at the bottom of the file.
 
 ---
 
