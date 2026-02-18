@@ -1,0 +1,69 @@
+---
+# Pre-commit hook configuration for TranscriptionSuite.
+#
+# Setup:   cd build && uv sync && cd .. && ./build/.venv/bin/pre-commit install
+# Ad-hoc:  ./build/.venv/bin/pre-commit run            (staged files only)
+#          ./build/.venv/bin/pre-commit run --all-files (entire repo)
+#
+# Docs:    https://pre-commit.com
+
+repos:
+
+  # ── Generic file checks ──────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-yaml
+        args: ["--unsafe"]          # allow custom YAML tags (e.g. docker-compose)
+
+  # ── Validate pyproject.toml files ─────────────────────────────────────────
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.24.1
+    hooks:
+      - id: validate-pyproject
+
+  # ── Python: ruff format + lint ────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.2
+    hooks:
+      - id: ruff-format
+        args: ["--config=build/pyproject.toml"]
+      - id: ruff
+        args: ["--config=build/pyproject.toml", "--fix"]
+
+  # ── Spell check ──────────────────────────────────────────────────────────
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args:
+          - "--skip=*.lock,*.svg,*.ico,*.icns,*.png,*.woff,*.woff2,package-lock.json,node_modules,dist-electron,release,.git,dashboard/dist,contract-baseline.json"
+          - "--ignore-words-list=ect,crate,ser"
+        exclude: "^(dashboard/release/|dashboard/dist-electron/)"
+
+  # ── Dashboard: Prettier format ───────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (dashboard)
+        entry: npx --prefix dashboard prettier --write --ignore-unknown
+        language: system
+        files: ^dashboard/
+        types_or: [javascript, jsx, ts, tsx, css, json, html, markdown, yaml]
+        exclude: "^dashboard/(dist|dist-electron|release|node_modules)/"
+
+  # ── Dashboard: UI contract validation + fixture tests ────────────────────
+  - repo: local
+    hooks:
+      - id: ui-contract-check
+        name: UI contract (validate + test)
+        entry: bash -c 'cd dashboard && npm run ui:contract:check --silent'
+        language: system
+        files: ^dashboard/
+        pass_filenames: false

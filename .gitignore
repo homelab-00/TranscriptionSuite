@@ -18,6 +18,8 @@ build/assets/videos/
 .*/
 ### GitHub folder exception (needed for workflows)
 !.github/
+### Pre-commit config exception (tracked for all contributors)
+!.pre-commit-config.yaml
 ### Making sure that the instructions folder is excluded
 .github/instructions/
 .github/prompts/

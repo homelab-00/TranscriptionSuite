@@ -66,7 +66,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [12.1 Python Code Quality](#121-python-code-quality)
   - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
   - [12.3 GitHub CodeQL Layout](#123-github-codeql-layout)
-  - [12.4 Pre-Commit Hook](#124-pre-commit-hook)
+  - [12.4 Pre-Commit Hooks](#124-pre-commit-hooks)
 - [13. Troubleshooting](#13-troubleshooting)
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
   - [13.2 Health Check Issues](#132-health-check-issues)
@@ -349,11 +349,14 @@ cd dashboard
 npm install
 cd ..
 
-# Build tools (Python — for server linting/testing)
+# Build tools (Python — for server linting/testing + pre-commit)
 cd build
 uv venv --python 3.13
 uv sync
 cd ..
+
+# Install pre-commit hooks (one-time, see §12.4)
+./build/.venv/bin/pre-commit install
 ```
 
 ### 4.2 Step 2: Build Docker Image
@@ -1423,26 +1426,56 @@ The repository uses two different `.github` locations for different purposes:
 
 Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs and conflicting results.
 
-### 12.4 Pre-Commit Hook
+### 12.4 Pre-Commit Hooks
 
-The hook lives at `hooks/pre-commit` and is **tracked in git**. Git is configured to use this directory via `core.hooksPath hooks` (stored in `.git/config`). It runs three checks on every `git commit` invocation:
+Pre-commit checks are managed by the [pre-commit](https://pre-commit.com) framework. Configuration lives in `.pre-commit-config.yaml` at the repo root — this is the **only** tracked file related to pre-commit.
 
-| Order | Check | Tool / command |
-|-------|-------|----------------|
-| 1 | Python formatting | `./build/.venv/bin/ruff format .` |
-| 2 | Dashboard formatting | `cd dashboard && npm run format` |
-| 3 | UI contract validation + fixture tests | `cd dashboard && npm run ui:contract:check` |
+#### Hooks
 
-Checks 1 and 2 auto-format files in place. If any staged file is modified on disk as a result, the hook aborts and asks you to re-stage the formatted files before committing. Check 3 is read-only: it validates the contract YAML against the schema, checks for token drift / semver policy, and runs fixture-based contract tests — it does **not** extract or rebuild the contract (those are explicit developer actions; see §9.4.4).
+| Hook | Source | Description |
+|------|--------|-------------|
+| `check-added-large-files` | pre-commit-hooks | Prevents giant files from being committed |
+| `check-ast` | pre-commit-hooks | Validates Python syntax |
+| `check-json` | pre-commit-hooks | Validates JSON syntax |
+| `check-merge-conflict` | pre-commit-hooks | Detects leftover merge conflict markers |
+| `check-symlinks` | pre-commit-hooks | Detects broken symlinks |
+| `check-toml` | pre-commit-hooks | Validates TOML syntax |
+| `check-yaml` | pre-commit-hooks | Validates YAML syntax |
+| `validate-pyproject` | validate-pyproject | Validates `pyproject.toml` files against PEP standards |
+| `ruff-format` | ruff-pre-commit | Auto-formats Python (uses `build/pyproject.toml` config) |
+| `ruff` | ruff-pre-commit | Lints Python with auto-fix (uses `build/pyproject.toml` config) |
+| `codespell` | codespell | Catches common spelling mistakes |
+| `prettier` | local | Auto-formats dashboard files (TypeScript, CSS, JSON, etc.) |
+| `ui-contract-check` | local | Validates UI contract schema + token drift + fixture tests (§9.4) |
 
-**First-time setup after a fresh clone** (one-time, per developer):
+Formatters (`ruff-format`, `prettier`) modify files in place. If any staged file changes, `pre-commit` aborts the commit so you can re-stage and retry.
+
+#### Setup (one-time, per clone)
+
 ```bash
-git config core.hooksPath hooks
+cd build && uv sync && cd ..
+./build/.venv/bin/pre-commit install
 ```
 
-That's it — git will then automatically pick up `hooks/pre-commit` (and any future hooks added to the directory) without copying or symlinking anything.
+This writes a small stub into `.git/hooks/pre-commit` (untracked) that delegates to the framework.
 
-**Extending the hook:** add a new `check_<name>()` function to `hooks/pre-commit` and append the function name to the `CHECKS` array at the bottom of the file.
+#### Running ad-hoc
+
+```bash
+# Run on staged files only (same as what runs on commit)
+./build/.venv/bin/pre-commit run
+
+# Run on every file in the repo
+./build/.venv/bin/pre-commit run --all-files
+
+# Run a single hook by id
+./build/.venv/bin/pre-commit run ruff-format --all-files
+./build/.venv/bin/pre-commit run ui-contract-check --all-files
+```
+
+#### Extending
+
+Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for third-party hooks or `repo: local` for project-specific scripts. See the [pre-commit docs](https://pre-commit.com/#plugins) for details.
 
 ---
 
