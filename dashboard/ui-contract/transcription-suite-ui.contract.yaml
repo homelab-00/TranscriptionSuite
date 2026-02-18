@@ -126,6 +126,7 @@ foundation:
         - rgba(255,255,255,0.3)
         - rgba(34, 211, 238, 0.6)
         - rgba(34, 211, 238, 0.8)
+        - rgba(34,197,94,0.5)
         - rgba(34,211,238,0.05)
         - rgba(34,211,238,0.15)
         - rgba(34,211,238,0.2)
@@ -411,6 +412,7 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-700
     - bg-slate-800
+    - bg-slate-900
     - bg-slate-900/80
     - bg-teal-500
     - bg-transparent
@@ -726,6 +728,7 @@ utility_allowlist:
     - right-4
     - ring-0
     - ring-1
+    - ring-white/20
     - ring-white/5
     - rounded
     - rounded-2xl
@@ -880,9 +883,7 @@ utility_allowlist:
     - z-9999
   arbitrary_classes:
     - bg-[#0b1120]
-    - bg-slate-900
     - bg-[rgba(22,31,50,0.9)]
-    - border-[#0f172a]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -927,7 +928,6 @@ inline_style_allowlist:
   allowed_literals:
     - "#0f172a"
     - ${100 / visibleSlots}%
-    - ${20 + Math.random() * 60}%
     - "0"
     - "0.16"
     - "0.3"
@@ -936,13 +936,11 @@ inline_style_allowlist:
     - 0%
     - "1"
     - 1.5rem
-    - "1.6"
     - "100"
     - 100%
     - 16%
     - 1px
     - 1rem
-    - "20"
     - 20px
     - 20px 20px
     - "225"
@@ -954,7 +952,6 @@ inline_style_allowlist:
     - 3rem
     - 49%
     - 50%
-    - "60"
     - 7%
     - "90"
     - auto repeat(${gridRows}, 1fr)
