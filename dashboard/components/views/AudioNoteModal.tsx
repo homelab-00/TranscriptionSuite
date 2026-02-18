@@ -1561,7 +1561,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       {/* Context Menu Portal */}
       {contextMenu && (
         <div
-          className="animate-in fade-in zoom-in-95 fixed z-10000 w-48 overflow-hidden rounded-xl border border-[#0f172a] bg-[#0f172a] py-1 shadow-2xl duration-100 select-none"
+          className="animate-in fade-in zoom-in-95 fixed z-10000 w-48 overflow-hidden rounded-xl border border-slate-900 bg-slate-900 py-1 shadow-2xl duration-100 select-none"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >

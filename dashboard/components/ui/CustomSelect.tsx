@@ -124,7 +124,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
               left: coords.left,
               width: coords.width,
             }}
-            className="animate-in fade-in zoom-in-95 fixed z-9999 overflow-hidden rounded-xl border border-white/10 bg-[#0f172a] shadow-2xl ring-1 ring-white/5 duration-100"
+            className="animate-in fade-in zoom-in-95 fixed z-9999 overflow-hidden rounded-xl border border-white/10 bg-slate-900 shadow-2xl ring-1 ring-white/5 duration-100"
           >
             <div className="custom-scrollbar max-h-60 overflow-y-auto py-1">
               {options.map((option) => (
