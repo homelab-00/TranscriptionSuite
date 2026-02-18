@@ -1529,7 +1529,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </div>
                       )}
                       {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
-                        <div className="flex h-full flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
+                        <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
                           <Activity size={32} strokeWidth={1} className="animate-pulse" />
                           <p>Listening... speak to see transcription.</p>
                         </div>
