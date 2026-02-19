@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.15
+  spec_version: 1.0.16
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -1572,23 +1572,6 @@ component_contracts:
     state_rules:
       - id: tab-closed-set
         rule: Settings tab set is fixed to App/Client/Server/Notebook labels.
-  ShortcutRow:
-    file: components/views/SettingsModal.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   Sidebar:
     file: components/Sidebar.tsx
     required_tokens:

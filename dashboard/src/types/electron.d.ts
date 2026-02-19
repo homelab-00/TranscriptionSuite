@@ -100,14 +100,6 @@ interface ElectronAPI {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
   };
-  shortcuts: {
-    reregister: () => Promise<void>;
-    getBindings: () => Promise<{
-      enabled: boolean;
-      startRecording: string;
-      stopAndTranscribe: string;
-    }>;
-  };
 }
 
 interface ComponentUpdateStatus {

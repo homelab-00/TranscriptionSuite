@@ -20,7 +20,6 @@ import {
   Shield,
   Copy,
   Check,
-  Keyboard,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -138,14 +137,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     runtimeProfile: 'gpu' as 'gpu' | 'cpu',
   });
 
-  // Keyboard shortcuts state
-  const [shortcutSettings, setShortcutSettings] = useState({
-    enabled: true,
-    startRecording: 'CommandOrControl+Shift+R',
-    stopAndTranscribe: 'CommandOrControl+Shift+T',
-  });
-  const [recordingShortcut, setRecordingShortcut] = useState<string | null>(null);
-
   // Update check status (loaded from main process)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
@@ -218,13 +209,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 runtimeProfile:
                   (cfg['server.runtimeProfile'] as 'gpu' | 'cpu') ?? prev.runtimeProfile,
               }));
-              setShortcutSettings((prev) => ({
-                ...prev,
-                enabled: (cfg['shortcuts.enabled'] as boolean) ?? prev.enabled,
-                startRecording: (cfg['shortcuts.startRecording'] as string) ?? prev.startRecording,
-                stopAndTranscribe:
-                  (cfg['shortcuts.stopAndTranscribe'] as string) ?? prev.stopAndTranscribe,
-              }));
             }
           })
           .catch(() => {});
@@ -274,14 +258,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.updateCheckIntervalMode', appSettings.updateCheckIntervalMode],
         ['app.updateCheckCustomHours', appSettings.updateCheckCustomHours],
         ['server.runtimeProfile', appSettings.runtimeProfile],
-        ['shortcuts.enabled', shortcutSettings.enabled],
-        ['shortcuts.startRecording', shortcutSettings.startRecording],
-        ['shortcuts.stopAndTranscribe', shortcutSettings.stopAndTranscribe],
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
-
-      // Re-register global shortcuts with updated bindings
-      api.shortcuts?.reregister?.().catch(() => {});
     }
 
     // Sync API client with new config so connection target updates immediately
@@ -290,7 +268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
     setIsDirty(false);
     onClose();
-  }, [clientSettings, appSettings, shortcutSettings, onClose]);
+  }, [clientSettings, appSettings, onClose]);
 
   if (!isRendered) return null;
 
@@ -490,71 +468,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             )}
           </div>
         )}
-      </Section>
-      <Section title="Keyboard Shortcuts">
-        <div className="space-y-4">
-          <AppleSwitch
-            checked={shortcutSettings.enabled}
-            onChange={(v) => {
-              setShortcutSettings((prev) => ({ ...prev, enabled: v }));
-              setIsDirty(true);
-            }}
-            label="Enable global keyboard shortcuts"
-          />
-          {shortcutSettings.enabled && (
-            <div className="space-y-3">
-              <p className="text-xs text-slate-400">
-                Shortcuts work globally while the app is running, even when minimized to the system
-                tray. Click a binding to record a new key combination.
-              </p>
-              <ShortcutRow
-                label="Start Recording"
-                description="Begin a longform transcription recording"
-                binding={shortcutSettings.startRecording}
-                isRecording={recordingShortcut === 'startRecording'}
-                onStartRecording={() => setRecordingShortcut('startRecording')}
-                onBindingChange={(binding) => {
-                  setShortcutSettings((prev) => ({ ...prev, startRecording: binding }));
-                  setRecordingShortcut(null);
-                  setIsDirty(true);
-                }}
-                onCancel={() => setRecordingShortcut(null)}
-              />
-              <ShortcutRow
-                label="Stop & Transcribe"
-                description="Stop recording and send audio for transcription"
-                binding={shortcutSettings.stopAndTranscribe}
-                isRecording={recordingShortcut === 'stopAndTranscribe'}
-                onStartRecording={() => setRecordingShortcut('stopAndTranscribe')}
-                onBindingChange={(binding) => {
-                  setShortcutSettings((prev) => ({ ...prev, stopAndTranscribe: binding }));
-                  setRecordingShortcut(null);
-                  setIsDirty(true);
-                }}
-                onCancel={() => setRecordingShortcut(null)}
-              />
-              <button
-                onClick={() => {
-                  setShortcutSettings({
-                    enabled: true,
-                    startRecording: 'CommandOrControl+Shift+R',
-                    stopAndTranscribe: 'CommandOrControl+Shift+T',
-                  });
-                  setIsDirty(true);
-                }}
-                className="text-xs text-slate-500 transition-colors hover:text-slate-300"
-              >
-                Reset to defaults
-              </button>
-              <p className="text-[10px] text-slate-600 italic">
-                On Linux Wayland, global shortcuts require the app to run under XWayland (default
-                Electron behavior). If you launch with{' '}
-                <code className="text-slate-500">--ozone-platform=wayland</code>, global shortcuts
-                may not work.
-              </p>
-            </div>
-          )}
-        </div>
       </Section>
     </div>
   );
@@ -1299,123 +1212,6 @@ const CollapsibleSection: React.FC<{
       >
         <div className="border-t border-white/5 p-4 pt-0">{children}</div>
       </div>
-    </div>
-  );
-};
-
-/**
- * Convert a KeyboardEvent into an Electron accelerator string.
- * Examples: "CommandOrControl+Shift+R", "Alt+T"
- */
-function keyEventToAccelerator(e: React.KeyboardEvent): string | null {
-  // Ignore bare modifier presses
-  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return null;
-
-  const parts: string[] = [];
-  if (e.ctrlKey || e.metaKey) parts.push('CommandOrControl');
-  if (e.altKey) parts.push('Alt');
-  if (e.shiftKey) parts.push('Shift');
-
-  // Require at least one modifier
-  if (parts.length === 0) return null;
-
-  // Normalize the key name to Electron's accelerator format
-  const keyMap: Record<string, string> = {
-    ' ': 'Space',
-    ArrowUp: 'Up',
-    ArrowDown: 'Down',
-    ArrowLeft: 'Left',
-    ArrowRight: 'Right',
-    Delete: 'Delete',
-    Backspace: 'Backspace',
-    Enter: 'Return',
-    Escape: 'Escape',
-    Tab: 'Tab',
-  };
-
-  let key = keyMap[e.key] || e.key;
-  // Single character keys should be uppercase
-  if (key.length === 1) key = key.toUpperCase();
-
-  parts.push(key);
-  return parts.join('+');
-}
-
-/**
- * Format an Electron accelerator string for display.
- * "CommandOrControl+Shift+R" → "Ctrl+Shift+R" (Linux/Windows) or "⌘+Shift+R" (macOS)
- */
-function formatAccelerator(accel: string): string {
-  const platform = window.electronAPI?.app?.getPlatform?.() ?? 'linux';
-  const isMac = platform === 'darwin';
-  return accel
-    .replace(/CommandOrControl/gi, isMac ? '⌘' : 'Ctrl')
-    .replace(/CmdOrCtrl/gi, isMac ? '⌘' : 'Ctrl')
-    .replace(/Command/gi, '⌘')
-    .replace(/Control/gi, 'Ctrl');
-}
-
-const ShortcutRow: React.FC<{
-  label: string;
-  description: string;
-  binding: string;
-  isRecording: boolean;
-  onStartRecording: () => void;
-  onBindingChange: (binding: string) => void;
-  onCancel: () => void;
-}> = ({
-  label,
-  description,
-  binding,
-  isRecording,
-  onStartRecording,
-  onBindingChange,
-  onCancel,
-}) => {
-  return (
-    <div className="flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-4 py-3">
-      <div>
-        <div className="flex items-center gap-2 text-sm font-medium text-slate-200">
-          <Keyboard size={14} className="text-slate-400" />
-          {label}
-        </div>
-        <p className="mt-0.5 text-xs text-slate-500">{description}</p>
-      </div>
-      {isRecording ? (
-        <div className="flex items-center gap-2">
-          <div
-            className="border-accent-cyan/40 bg-accent-cyan/10 text-accent-cyan animate-pulse cursor-pointer rounded-lg border px-3 py-1.5 font-mono text-xs"
-            tabIndex={0}
-            autoFocus
-            onKeyDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (e.key === 'Escape') {
-                onCancel();
-                return;
-              }
-              const accel = keyEventToAccelerator(e);
-              if (accel) onBindingChange(accel);
-            }}
-            onBlur={onCancel}
-          >
-            Press shortcut…
-          </div>
-          <button
-            onClick={onCancel}
-            className="text-xs text-slate-500 transition-colors hover:text-slate-300"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={onStartRecording}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 font-mono text-xs text-slate-300 transition-colors hover:border-white/20 hover:bg-white/10"
-        >
-          {formatAccelerator(binding)}
-        </button>
-      )}
     </div>
   );
 };
