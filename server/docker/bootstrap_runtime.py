@@ -568,6 +568,11 @@ def ensure_runtime_dependencies(
 
         log("Runtime dependencies installed")
 
+        # Prune UV package cache to reclaim space from the runtime volume.
+        # Packages are now installed in the venv; the cache is no longer needed.
+        log("Pruning UV cache to reclaim space from runtime volume...")
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
     log_timing(
         f"ensure_runtime_dependencies complete (mode={final_sync_mode})",
         ensure_start,

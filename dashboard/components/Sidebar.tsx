@@ -1,6 +1,7 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { View } from '../types';
 import { Mic2, Book, Server, Settings, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import logoUrl from '../../build/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
 
 interface SidebarProps {
@@ -144,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <div className="relative shrink-0">
             <img
-              src="/logo.svg"
+              src={logoUrl}
               alt="TranscriptionSuite"
               className="h-10 w-10 rounded-xl shadow-lg"
               draggable={false}
