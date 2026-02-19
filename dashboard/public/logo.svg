@@ -5,8 +5,8 @@
       <stop offset="1" stop-color="#FB923C"/>
     </linearGradient>
   </defs>
-  <!-- Rounded rectangle background -->
-  <rect x="0" y="4" width="40" height="40" rx="12" fill="url(#ts-icon-gradient)"/>
+  <!-- Rounded rectangle background with notch for indicator dot -->
+  <path d="M 12 4 C 5.352 4 0 9.352 0 16 L 0 32 C 0 38.648 5.352 44 12 44 L 28 44 C 34.648 44 40 38.648 40 32 L 40 16 C 40 14.526 39.736 13.115 39.254 11.813 A 5.975 5.975 0 0 1 37.975 11.951 A 5.975 5.975 0 0 1 32 5.975 A 5.975 5.975 0 0 1 32.133 4.725 C 30.846 4.255 29.454 4 28 4 L 12 4 z" fill="url(#ts-icon-gradient)"/>
   <!-- Mic/checkmark icon -->
   <g transform="matrix(1.2304833,0,0,1.2304833,5.024889,9.229705)" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
     <path d="m 11,7.601 -5.994,8.19 a 1,1 0 0 0 0.1,1.298 l 0.817,0.818 a 1,1 0 0 0 1.314,0.087 L 15.09,12"/>

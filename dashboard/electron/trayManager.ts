@@ -109,6 +109,8 @@ export class TrayManager {
   };
   private completeTimer: ReturnType<typeof setTimeout> | null = null;
   private previousState: TrayState = 'idle';
+  private connectingDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly CONNECTING_DEBOUNCE_MS = 250;
   private isDev: boolean;
   private getWindow: () => BrowserWindow | null;
 
@@ -157,14 +159,22 @@ export class TrayManager {
     this.tray.setToolTip(STATE_TOOLTIP_MAP[this.state]);
     this.rebuildMenu();
 
-    // Left-click: only start a longform recording when in standby; do nothing otherwise
+    // Left-click: toggle recording — start if standby, stop & transcribe if recording.
+    // On Linux (AppIndicator/StatusNotifier) middle-click is not supported,
+    // so left-click acts as a toggle to cover both actions.
     this.tray.on('click', () => {
-      if (this.menuState.isStandby && !this.menuState.isRecording && !this.menuState.isLive) {
+      if (this.menuState.isRecording && !this.menuState.isLive) {
+        this.actions.stopRecording?.();
+      } else if (
+        this.menuState.isStandby &&
+        !this.menuState.isRecording &&
+        !this.menuState.isLive
+      ) {
         this.actions.startRecording?.();
       }
     });
 
-    // Middle-click: only stop & transcribe a longform recording; do nothing otherwise
+    // Middle-click: stop & transcribe (works on Windows/macOS; no-op on Linux AppIndicator)
     this.tray.on('middle-click', () => {
       if (this.menuState.isRecording) {
         this.actions.stopRecording?.();
@@ -175,6 +185,7 @@ export class TrayManager {
   /** Destroy the tray (called on app quit). */
   destroy(): void {
     if (this.completeTimer) clearTimeout(this.completeTimer);
+    if (this.connectingDebounceTimer) clearTimeout(this.connectingDebounceTimer);
     this.tray?.destroy();
     this.tray = null;
   }
@@ -187,9 +198,14 @@ export class TrayManager {
       this.completeTimer = null;
     }
 
+    if (this.connectingDebounceTimer) {
+      clearTimeout(this.connectingDebounceTimer);
+      this.connectingDebounceTimer = null;
+    }
+
     if (newState === 'complete') {
       // Don't save previousState — we'll let the renderer push the correct
-      // post-completion state. The 3s timer just clears the 'complete' display
+      // post-completion state. The timer just clears the 'complete' display
       // and falls back to 'active' (server should still be running after transcription).
       this.state = 'complete';
       this.applyState();
@@ -200,7 +216,23 @@ export class TrayManager {
         // 'processing' state that was active before completion.
         this.state = 'active';
         this.applyState();
-      }, 3000);
+      }, 1000);
+    } else if (newState === 'connecting' && (this.state === 'active' || this.state === 'idle')) {
+      // Debounce the 'connecting' state to suppress brief yellow flash
+      // when transitioning quickly to 'recording'.
+      this.connectingDebounceTimer = setTimeout(() => {
+        this.connectingDebounceTimer = null;
+        // Only apply if still in connecting (hasn't been superseded)
+        if (this.state !== 'connecting') {
+          this.previousState = this.state;
+          this.state = 'connecting';
+          this.applyState();
+        }
+      }, TrayManager.CONNECTING_DEBOUNCE_MS);
+      // Update internal state immediately so subsequent setState calls
+      // know we're in connecting
+      this.previousState = this.state;
+      this.state = 'connecting';
     } else {
       this.state = newState;
       this.applyState();
@@ -319,7 +351,15 @@ export class TrayManager {
       ? this.getIcon(this.state, TrayManager.MODELS_UNLOADED_COLOR)
       : this.getIcon(this.state);
     this.tray.setImage(icon);
-    this.tray.setToolTip(STATE_TOOLTIP_MAP[this.state]);
+
+    // On Linux StatusNotifier, setImage alone may not trigger a visual refresh.
+    // Setting the title forces a DBus property-change signal that nudges the
+    // tray host to re-read the icon.
+    const tooltip = STATE_TOOLTIP_MAP[this.state];
+    if (process.platform === 'linux') {
+      this.tray.setTitle(tooltip);
+    }
+    this.tray.setToolTip(tooltip);
     this.rebuildMenu();
   }
 

@@ -240,8 +240,9 @@ Once the server is running, navigate to the **Session** view to start transcribi
 The Dashboard features **sidebar navigation** with these main views:
 
 - **Session**: Main transcription interface with:
-  - Recording controls and Live Mode toggle
-  - Audio visualizer
+  - Main Transcription controls (language, translate, record/stop) and Audio Configuration below
+  - Audio visualizer with amplitude zoom (+/− buttons, hover to reveal)
+  - Live Mode toggle and real-time transcript display
   - Transcription output with copy/download buttons
   - Processing logs
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
@@ -251,7 +252,10 @@ The Dashboard features **sidebar navigation** with these main views:
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
 recording state (11 distinct states), and the context menu provides quick controls
 (start/stop server, open dashboard, transcribe file, quit). Left-click the tray icon to
-start a recording; middle-click to stop and transcribe.
+toggle recording: starts a recording when idle/standby, or stops and transcribes if already
+recording. On Windows/macOS, middle-click also stops and transcribes.
+
+> **Note:** "Transcribe File" from the system tray always uses pure transcription (no diarization), regardless of main transcriber settings.
 
 > **GNOME note:** GNOME desktop requires the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension for system tray support.
 
@@ -269,9 +273,12 @@ Shortcuts are enabled by default. To change bindings or disable them, open
 **Settings → App → Keyboard Shortcuts**. Click the current binding and press your
 desired key combination to reassign.
 
-> **Wayland note:** On Wayland compositors, global shortcuts require the app to have
-> been granted the `GlobalShortcuts` portal permission. Some compositors may not
-> support this — in that case shortcuts will only work when the window is focused.
+> **Linux note:** The AppImage runs under **XWayland** on Wayland compositors
+> (`--ozone-platform=x11` is set automatically). This ensures reliable global shortcuts
+> and system tray integration on KDE Plasma 6, GNOME, and other Wayland desktops.
+> If you specifically need native Wayland rendering, launch the AppImage with
+> `--ozone-platform=wayland` (note: tray icon updates and global shortcuts may be less
+> reliable in native Wayland mode).
 
 **Setup Checklist**: On first launch a setup checklist guides you through Docker verification,
 GPU detection, and HuggingFace token entry.

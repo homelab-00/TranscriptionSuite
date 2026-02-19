@@ -16,6 +16,8 @@ import {
   Loader2,
   X,
   Download,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -58,6 +60,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [logsRendered, setLogsRendered] = useState(false);
   const [logsVisible, setLogsVisible] = useState(false);
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
+  const [visualizerAmplitudeScale, setVisualizerAmplitudeScale] = useState(1.0);
 
   // Runtime profile (read from persisted config)
   const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu'>('gpu');
@@ -432,7 +435,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       try {
         const { name, buffer, mimeType } = await window.electronAPI!.app.readLocalFile(filePath);
         const file = new File([buffer], name, { type: mimeType });
-        await apiClient.uploadAndTranscribe(file, { enable_diarization: true });
+        await apiClient.uploadAndTranscribe(file, { enable_diarization: false });
       } catch (err: any) {
         console.error('Tray transcribe file failed:', err);
       }
@@ -1076,127 +1079,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 </div>
               </GlassCard>
 
-              {/* Audio Configuration */}
-              <GlassCard title="Audio Configuration" className="flex-none">
-                <div className="space-y-6">
-                  <div>
-                    <label className="mb-2 ml-1 block text-xs font-medium tracking-wider text-slate-400 uppercase">
-                      Active Input Source
-                    </label>
-                    <div className="relative flex rounded-xl border border-white/5 bg-black/60 p-1 shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]">
-                      <div
-                        className={`absolute top-1 bottom-1 z-0 w-[calc(50%-4px)] rounded-lg border-t border-white/10 bg-slate-700 shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${audioSource === 'system' ? 'translate-x-[calc(100%+4px)]' : 'translate-x-0'}`}
-                      />
-                      <button
-                        onClick={() => handleAudioSourceChange('mic')}
-                        className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'mic' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        <Mic
-                          size={18}
-                          className={`transition-all duration-300 ${audioSource === 'mic' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
-                        />
-                        <span>Microphone</span>
-                      </button>
-                      <button
-                        onClick={() => handleAudioSourceChange('system')}
-                        className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'system' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        <Laptop
-                          size={18}
-                          className={`transition-all duration-300 ${audioSource === 'system' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
-                        />
-                        <span>System Audio</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="h-px w-full bg-white/5"></div>
-                  <div className="space-y-4">
-                    <div
-                      className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'mic' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Mic
-                            size={14}
-                            className={
-                              audioSource === 'mic' ? 'text-accent-cyan' : 'text-slate-500'
-                            }
-                          />
-                          <label
-                            className={`text-xs font-medium ${audioSource === 'mic' ? 'text-white' : 'text-slate-400'}`}
-                          >
-                            Microphone Device
-                          </label>
-                        </div>
-                        {audioSource === 'mic' && (
-                          <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
-                            Live
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <CustomSelect
-                            value={micDevice}
-                            onChange={handleMicDeviceChange}
-                            options={micDevices.length > 0 ? micDevices : ['Default Microphone']}
-                            className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
-                          />
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="shrink-0"
-                          icon={<RefreshCw size={14} />}
-                          onClick={enumerateDevices}
-                        />
-                      </div>
-                    </div>
-                    <div
-                      className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'system' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Laptop
-                            size={14}
-                            className={
-                              audioSource === 'system' ? 'text-accent-cyan' : 'text-slate-500'
-                            }
-                          />
-                          <label
-                            className={`text-xs font-medium ${audioSource === 'system' ? 'text-white' : 'text-slate-400'}`}
-                          >
-                            System Device
-                          </label>
-                        </div>
-                        {audioSource === 'system' && (
-                          <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
-                            Live
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <CustomSelect
-                            value={sysDevice}
-                            onChange={handleSystemDeviceChange}
-                            options={sysDevices.length > 0 ? sysDevices : ['Default Output']}
-                            className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
-                          />
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="shrink-0"
-                          icon={<RefreshCw size={14} />}
-                          onClick={enumerateDevices}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </GlassCard>
-
               {/* Main Transcription */}
               <GlassCard title="Main Transcription" className="flex-none">
                 <div className="space-y-4">
@@ -1335,6 +1217,127 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 </div>
               </GlassCard>
 
+              {/* Audio Configuration */}
+              <GlassCard title="Audio Configuration" className="flex-none">
+                <div className="space-y-6">
+                  <div>
+                    <label className="mb-2 ml-1 block text-xs font-medium tracking-wider text-slate-400 uppercase">
+                      Active Input Source
+                    </label>
+                    <div className="relative flex rounded-xl border border-white/5 bg-black/60 p-1 shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]">
+                      <div
+                        className={`absolute top-1 bottom-1 z-0 w-[calc(50%-4px)] rounded-lg border-t border-white/10 bg-slate-700 shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${audioSource === 'system' ? 'translate-x-[calc(100%+4px)]' : 'translate-x-0'}`}
+                      />
+                      <button
+                        onClick={() => handleAudioSourceChange('mic')}
+                        className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'mic' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                      >
+                        <Mic
+                          size={18}
+                          className={`transition-all duration-300 ${audioSource === 'mic' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
+                        />
+                        <span>Microphone</span>
+                      </button>
+                      <button
+                        onClick={() => handleAudioSourceChange('system')}
+                        className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'system' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                      >
+                        <Laptop
+                          size={18}
+                          className={`transition-all duration-300 ${audioSource === 'system' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
+                        />
+                        <span>System Audio</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="h-px w-full bg-white/5"></div>
+                  <div className="space-y-4">
+                    <div
+                      className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'mic' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Mic
+                            size={14}
+                            className={
+                              audioSource === 'mic' ? 'text-accent-cyan' : 'text-slate-500'
+                            }
+                          />
+                          <label
+                            className={`text-xs font-medium ${audioSource === 'mic' ? 'text-white' : 'text-slate-400'}`}
+                          >
+                            Microphone Device
+                          </label>
+                        </div>
+                        {audioSource === 'mic' && (
+                          <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
+                            Live
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <CustomSelect
+                            value={micDevice}
+                            onChange={handleMicDeviceChange}
+                            options={micDevices.length > 0 ? micDevices : ['Default Microphone']}
+                            className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
+                          />
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="shrink-0"
+                          icon={<RefreshCw size={14} />}
+                          onClick={enumerateDevices}
+                        />
+                      </div>
+                    </div>
+                    <div
+                      className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'system' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Laptop
+                            size={14}
+                            className={
+                              audioSource === 'system' ? 'text-accent-cyan' : 'text-slate-500'
+                            }
+                          />
+                          <label
+                            className={`text-xs font-medium ${audioSource === 'system' ? 'text-white' : 'text-slate-400'}`}
+                          >
+                            System Device
+                          </label>
+                        </div>
+                        {audioSource === 'system' && (
+                          <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
+                            Live
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <CustomSelect
+                            value={sysDevice}
+                            onChange={handleSystemDeviceChange}
+                            options={sysDevices.length > 0 ? sysDevices : ['Default Output']}
+                            className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
+                          />
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="shrink-0"
+                          icon={<RefreshCw size={14} />}
+                          onClick={enumerateDevices}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </GlassCard>
+
               <div className="pt-2">
                 <div
                   onClick={toggleLogs}
@@ -1445,8 +1448,29 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   </div>
                 </div>
                 <div className="group relative">
-                  <AudioVisualizer analyserNode={activeAnalyser} />
-                  <div className="absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100">
+                  <AudioVisualizer
+                    analyserNode={activeAnalyser}
+                    amplitudeScale={visualizerAmplitudeScale}
+                  />
+                  <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      onClick={() =>
+                        setVisualizerAmplitudeScale((s) => Math.max(0.25, +(s - 0.25).toFixed(2)))
+                      }
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/50 text-slate-400 backdrop-blur-sm transition-colors hover:bg-white/10 hover:text-white"
+                      title="Decrease sensitivity"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <button
+                      onClick={() =>
+                        setVisualizerAmplitudeScale((s) => Math.min(4, +(s + 0.25).toFixed(2)))
+                      }
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/50 text-slate-400 backdrop-blur-sm transition-colors hover:bg-white/10 hover:text-white"
+                      title="Increase sensitivity"
+                    >
+                      <Plus size={14} />
+                    </button>
                     <Button
                       variant="secondary"
                       size="icon"

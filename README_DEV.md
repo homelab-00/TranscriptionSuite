@@ -221,7 +221,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - Notebook tab contains Calendar, Search, and Import sub-tabs
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
 - App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
-- System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and click shortcuts (left-click: start recording, middle-click: stop & transcribe)
+- System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and left-click toggle (start recording when standby; stop & transcribe when recording). Middle-click also stops & transcribes on Windows/macOS (Linux AppIndicator does not support middle-click). "Transcribe File" from the tray always uses pure transcription (diarization disabled). Tray icon updates are forced via `setTitle` on Linux to ensure StatusNotifier/AppIndicator refreshes the icon on state changes (e.g. live mode). Connecting state is debounced 250 ms to suppress brief yellow flash before red recording state; completion state shows for 1 s before reverting
 - First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
 - Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
 - Model-aware translation toggle (auto-disables for turbo, .en, and distil model variants)
@@ -500,6 +500,8 @@ Or manually:
 cd dashboard
 npm run package:linux
 ```
+
+**XWayland enforcement:** The AppImage automatically passes `--ozone-platform=x11` to Chromium via `app.commandLine.appendSwitch()` in `main.ts`. This forces XWayland on Wayland compositors (KDE Plasma 6, GNOME, etc.), which ensures reliable global keyboard shortcuts and consistent system tray icon behaviour. To override, launch with `ELECTRON_OZONE_PLATFORM_HINT=auto` or append `--ozone-platform=wayland` manually — note that tray icon refresh and global shortcuts may be less reliable in native Wayland mode.
 
 ### 5.4 Windows Installer
 
@@ -1025,7 +1027,7 @@ npm run dev:electron
 | Component | Purpose |
 |-----------|---------|
 | `Sidebar.tsx` | Collapsible sidebar navigation with status lights |
-| `AudioVisualizer.tsx` | Canvas-based bar visualizer with breathing idle animation |
+| `AudioVisualizer.tsx` | Canvas-based bar visualizer with breathing idle animation and `amplitudeScale` prop for zoom (+/− buttons in Session view, 0.25–4.0×, step 0.25) |
 | `ui/Button.tsx` | 5 variants (primary/secondary/danger/ghost/glass), 4 sizes |
 | `ui/GlassCard.tsx` | Glassmorphism container with optional header |
 | `ui/AppleSwitch.tsx` | iOS-style toggle switch |
@@ -1037,7 +1039,7 @@ npm run dev:electron
 
 | View | Purpose |
 |------|---------|
-| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications |
+| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications. Layout order: Main Transcription card first, Audio Configuration below |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
 | `ServerView.tsx` | Docker server management: image selection, container control |
 | `SettingsModal.tsx` | 4-tab settings: App (incl. keyboard shortcuts), Client, Server, Notebook |
@@ -1534,6 +1536,14 @@ sudo systemctl restart tailscaled
 # Check for missing libraries
 ./TranscriptionSuite-*-x86_64.AppImage --appimage-extract
 ldd squashfs-root/usr/bin/transcriptionsuite
+```
+
+**Wayland / XWayland:** The AppImage enforces XWayland by default (`--ozone-platform=x11`). If the app fails to start on a Wayland compositor, verify the `DISPLAY` environment variable is set (XWayland must be running). Most Wayland compositors start XWayland on demand — check with `echo $DISPLAY` (should be `:0` or similar).
+
+If you intentionally want native Wayland mode:
+```bash
+# Override XWayland enforcement
+ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
 ```
 
 ### 13.5 Windows / macOS Docker Networking

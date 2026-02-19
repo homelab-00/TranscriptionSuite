@@ -4,11 +4,14 @@ interface AudioVisualizerProps {
   className?: string;
   /** When provided, draws real frequency data instead of the sine simulation */
   analyserNode?: AnalyserNode | null;
+  /** Multiplier for visualizer amplitude (default 1.0, range ~0.25–4.0) */
+  amplitudeScale?: number;
 }
 
 export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   className = 'h-48',
   analyserNode,
+  amplitudeScale = 1.0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -96,7 +99,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       for (let i = 0; i < barCount; i++) {
         const value = freqData[i * step];
         const normalized = value / 255;
-        const barHeight = normalized * height * 0.85;
+        const barHeight = Math.min(normalized * amplitudeScale, 1) * height * 0.85;
 
         // Gradient color: cyan at low frequencies → magenta at high
         const ratio = i / barCount;
@@ -121,7 +124,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       const sliceWidth = width / timeData.length;
       for (let i = 0; i < timeData.length; i++) {
         const v = timeData[i] / 128.0;
-        const y = (v * height) / 2;
+        const y = (((v - 1) * amplitudeScale + 1) * height) / 2;
         if (i === 0) ctx.moveTo(0, y);
         else ctx.lineTo(i * sliceWidth, y);
       }
@@ -143,7 +146,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(animationId);
     };
-  }, [analyserNode]);
+  }, [analyserNode, amplitudeScale]);
 
   return (
     <div

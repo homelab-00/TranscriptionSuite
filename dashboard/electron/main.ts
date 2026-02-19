@@ -14,6 +14,11 @@ import { UpdateManager } from './updateManager.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Force X11/XWayland on Linux for reliable global shortcuts and system tray support
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+}
+
 // Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
 
@@ -128,7 +133,7 @@ trayManager.setActions({
         hfToken,
         hfTokenDecision: hfDecision,
       });
-      trayManager.setMenuState({ serverRunning: true });
+      trayManager.setMenuState({ serverRunning: true, isStandby: true });
     } catch (err) {
       console.error('Tray: failed to start server', err);
     }
@@ -136,7 +141,12 @@ trayManager.setActions({
   stopServer: async () => {
     try {
       await dockerManager.stopContainer();
-      trayManager.setMenuState({ serverRunning: false, isRecording: false, isLive: false });
+      trayManager.setMenuState({
+        serverRunning: false,
+        isRecording: false,
+        isLive: false,
+        isStandby: false,
+      });
     } catch (err) {
       console.error('Tray: failed to stop server', err);
     }
