@@ -67,3 +67,13 @@ repos:
         language: system
         files: ^dashboard/
         pass_filenames: false
+
+  # ── Auto-stage formatter changes (ruff + prettier) ───────────────────────
+  - repo: local
+    hooks:
+      - id: stage-formatter-changes
+        name: stage formatter changes (ruff + prettier)
+        entry: git add
+        language: system
+        types_or: [python, pyi, javascript, jsx, ts, tsx, css, json, html, markdown, yaml]
+        exclude: "^dashboard/(dist|dist-electron|release|node_modules)/"
