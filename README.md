@@ -142,12 +142,30 @@ Download the Dashboard for your platform from the [Releases](https://github.com/
 
 | Platform | Download | Notes |
 |----------|----------|-------|
-| **Linux** | `TranscriptionSuite-x86_64.AppImage` | Standalone, no dependencies |
+| **Linux** | `TranscriptionSuite-x86_64.AppImage` | May require FUSE 2 (see below) |
 | **Windows** | `TranscriptionSuite Setup.exe` | Standalone installer |
 | **macOS** | `TranscriptionSuite-arm64.dmg` | Unsigned build for Apple Silicon |
 
 >* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
 >* *Each release artifact includes an armored detached signature (`.asc`)*
+
+#### Linux AppImage Prerequisites
+
+AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on
+most modern distributions. If you see `dlopen(): error loading libfuse.so.2`, install
+the appropriate package:
+
+| Distribution | Package | Install Command |
+|---|---|---|
+| Ubuntu 22.04 / Debian | `libfuse2` | `sudo apt install libfuse2` |
+| Ubuntu 24.04+ | `libfuse2t64` | `sudo apt install libfuse2t64` |
+| Fedora | `fuse-libs` | `sudo dnf install fuse-libs` |
+| Arch Linux | `fuse2` | `sudo pacman -S fuse2` |
+
+> **Sandbox note:** The AppImage automatically disables Chromium's SUID sandbox
+> (`--no-sandbox`) since the AppImage squashfs mount cannot satisfy its permission
+> requirements. This is the standard approach for Electron-based AppImages and does
+> not affect application security.
 
 ### 3.1 Verify Download (Kleopatra)
 

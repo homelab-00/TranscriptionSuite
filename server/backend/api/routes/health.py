@@ -2,10 +2,11 @@
 Health and status endpoints for TranscriptionSuite server.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from server.api.routes.live import is_live_mode_active
 
 from server import __version__
 
@@ -13,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> dict[str, str]:
     """Basic health check endpoint (no auth required)."""
     return {"status": "healthy", "service": "transcriptionsuite"}
 
@@ -35,9 +36,14 @@ async def readiness_check(request: Request) -> JSONResponse:
         # Check if transcription model is loaded
         is_ready = status.get("transcription", {}).get("loaded", False)
 
-        if is_ready:
+        # Server is also considered ready when Live Mode is active (main
+        # model is intentionally unloaded to free VRAM for the live engine).
+        if is_ready or is_live_mode_active():
             return JSONResponse(
-                content={"status": "ready", "models": status},
+                content={
+                    "status": "ready_live_mode" if not is_ready else "ready",
+                    "models": status,
+                },
                 status_code=200,
             )
         else:
@@ -53,7 +59,7 @@ async def readiness_check(request: Request) -> JSONResponse:
 
 
 @router.get("/api/status")
-async def get_status(request: Request) -> Dict[str, Any]:
+async def get_status(request: Request) -> dict[str, Any]:
     """
     Get detailed server status including GPU and model information.
     """

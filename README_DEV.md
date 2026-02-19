@@ -1543,11 +1543,28 @@ sudo systemctl restart tailscaled
 ldd squashfs-root/usr/bin/transcriptionsuite
 ```
 
-**Wayland / XWayland:** The AppImage enforces XWayland by default (`--ozone-platform=x11`). If the app fails to start on a Wayland compositor, verify the `DISPLAY` environment variable is set (XWayland must be running). Most Wayland compositors start XWayland on demand — check with `echo $DISPLAY` (should be `:0` or similar).
+**FUSE 2 missing (`dlopen(): error loading libfuse.so.2`):** AppImages require FUSE 2 which most modern distros no longer ship by default (they use FUSE 3). Install the appropriate package:
 
-If you intentionally want native Wayland mode:
+| Distribution | Package | Install Command |
+|---|---|---|
+| Ubuntu 22.04 / Debian | `libfuse2` | `sudo apt install libfuse2` |
+| Ubuntu 24.04+ | `libfuse2t64` | `sudo apt install libfuse2t64` |
+| Fedora | `fuse-libs` | `sudo dnf install fuse-libs` |
+| Arch Linux | `fuse2` | `sudo pacman -S fuse2` |
+
+**SUID sandbox error (`chrome-sandbox is owned by root and has mode 4755`):** This is handled automatically — the AppImage detects it is running inside an AppImage (via the `APPIMAGE` environment variable) and passes `--no-sandbox` to Chromium. This is the standard workaround for Electron AppImages since the squashfs mount cannot satisfy SUID permission requirements. If you still encounter this error on Ubuntu or Fedora GNOME (which use AppArmor to restrict unprivileged user namespaces), you can pass the flag manually:
+
 ```bash
-# Override XWayland enforcement
+./TranscriptionSuite-*-x86_64.AppImage --no-sandbox
+```
+
+**Wayland / XWayland:** If the app has rendering issues on a Wayland compositor, you can try forcing XWayland mode or native Wayland mode:
+
+```bash
+# Force XWayland
+./TranscriptionSuite-*-x86_64.AppImage --ozone-platform=x11
+
+# Force native Wayland
 ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
 ```
 

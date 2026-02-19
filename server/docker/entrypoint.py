@@ -8,6 +8,7 @@ Runs the unified FastAPI server with all services:
 - Admin API
 """
 
+import logging
 import os
 import sys
 import time
@@ -123,16 +124,14 @@ def prepare_tls_certs(data_dir: Path) -> tuple[str | None, str | None]:
         print(f"ERROR: Cannot read TLS files: {e}")
         return None, None
 
-    print(f"Using TLS certificates:")
+    print("Using TLS certificates:")
     print(f"  Cert: {cert_path}")
     print(f"  Key:  {key_path}")
 
     return str(cert_path), str(key_path)
 
 
-def print_banner(
-    data_dir: Path, log_dir: Path, port: int, tls_enabled: bool = False
-) -> None:
+def print_banner(data_dir: Path, log_dir: Path, port: int, tls_enabled: bool = False) -> None:
     """Print startup banner."""
     scheme = "https" if tls_enabled else "http"
     actual_port = 8443 if tls_enabled else port
@@ -218,6 +217,19 @@ def main() -> None:
     else:
         uvicorn_config["port"] = port
         print(f"TLS disabled - listening on http://{host}:{port}")
+
+    # Suppress access log entries for routine health/status polling (200 OK).
+    # Non-200 responses (e.g. 503 during model loading) are still logged.
+    class _QuietHealthFilter(logging.Filter):
+        _QUIET_PATHS = ("/health", "/ready", "/api/status", "/api/admin/status")
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            if " 200 " not in msg:
+                return True
+            return not any(f'"{p} ' in msg or f" {p} " in msg for p in self._QUIET_PATHS)
+
+    logging.getLogger("uvicorn.access").addFilter(_QuietHealthFilter())
 
     # Run uvicorn
     _log_time("starting uvicorn (will load main.py module)...")

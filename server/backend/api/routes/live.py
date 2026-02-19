@@ -17,13 +17,13 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from server.api.routes.utils import authenticate_websocket_from_message
+from server.config import get_config, resolve_live_transcriber_model
 from server.core.live_engine import (
     LiveModeConfig,
     LiveModeEngine,
     LiveModeState,
 )
 from server.core.model_manager import get_model_manager
-from server.config import get_config, resolve_live_transcriber_model
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
 
@@ -34,6 +34,11 @@ router = APIRouter()
 # Track active Live Mode session (only one at a time)
 _live_mode_state: dict[str, Optional["LiveModeSession"]] = {"active_session": None}
 _session_lock = asyncio.Lock()
+
+
+def is_live_mode_active() -> bool:
+    """Check if a Live Mode session is currently active."""
+    return _live_mode_state["active_session"] is not None
 
 
 class LiveModeSession:
@@ -51,11 +56,14 @@ class LiveModeSession:
     ):
         self.websocket = websocket
         self.client_name = client_name
-        self._engine: Optional[LiveModeEngine] = None
+        self._engine: LiveModeEngine | None = None
         self._message_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._running = False
+        # Capture the event loop so engine callbacks (from background threads)
+        # can safely enqueue messages via call_soon_threadsafe.
+        self._loop = asyncio.get_running_loop()
 
-    async def send_message(self, msg_type: str, data: Optional[dict] = None) -> None:
+    async def send_message(self, msg_type: str, data: dict | None = None) -> None:
         """Send a JSON message to the client."""
         if (
             self.websocket.client_state != WebSocketState.CONNECTED
@@ -74,17 +82,19 @@ class LiveModeSession:
             # Socket can close between state check and send.
             logger.debug(f"Failed to send message (socket closed): {e}")
 
-    def _queue_message(self, msg_type: str, data: Optional[dict] = None) -> None:
-        """Queue a message from the engine thread to be sent async."""
+    def _queue_message(self, msg_type: str, data: dict | None = None) -> None:
+        """Queue a message from the engine thread to be sent async.
+
+        asyncio.Queue is NOT thread-safe, so we use call_soon_threadsafe
+        to schedule the put_nowait on the event loop from the engine's
+        background thread.
+        """
+        msg = {"type": msg_type, "data": data or {}}
         try:
-            self._message_queue.put_nowait(
-                {
-                    "type": msg_type,
-                    "data": data or {},
-                }
-            )
-        except asyncio.QueueFull:
-            logger.warning("Message queue full, dropping message")
+            self._loop.call_soon_threadsafe(self._message_queue.put_nowait, msg)
+        except RuntimeError:
+            # Event loop closed — session is shutting down
+            logger.debug("Event loop closed, dropping queued message")
 
     def _on_sentence(self, text: str) -> None:
         """Callback when a sentence is completed."""
@@ -98,7 +108,7 @@ class LiveModeSession:
         """Callback when engine state changes."""
         self._queue_message("state", {"state": state.name})
 
-    async def start_engine(self, config_data: Optional[dict] = None) -> bool:
+    async def start_engine(self, config_data: dict | None = None) -> bool:
         """
         Start the Live Mode engine.
 
@@ -138,9 +148,7 @@ class LiveModeSession:
                         config.translation_enabled = bool(raw_enabled)
                 if "translation_target_language" in config_data:
                     config.translation_target_language = (
-                        str(config_data["translation_target_language"] or "en")
-                        .strip()
-                        .lower()
+                        str(config_data["translation_target_language"] or "en").strip().lower()
                     )
                 if "silero_sensitivity" in config_data:
                     config.silero_sensitivity = float(config_data["silero_sensitivity"])
@@ -155,9 +163,7 @@ class LiveModeSession:
                 if config.translation_target_language != "en":
                     await self.send_message(
                         "error",
-                        {
-                            "message": "Live Mode translation target must be English ('en') in v1."
-                        },
+                        {"message": "Live Mode translation target must be English ('en') in v1."},
                     )
                     return False
                 if not supports_english_translation(config.model):
@@ -289,7 +295,7 @@ class LiveModeSession:
             try:
                 msg = await asyncio.wait_for(self._message_queue.get(), timeout=0.1)
                 await self.send_message(msg["type"], msg["data"])
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Check if we should exit - only exit when:
                 # 1. _running is False (engine stopped)
                 # 2. Queue is empty (no pending messages)
@@ -328,16 +334,14 @@ async def handle_client_message(session: LiveModeSession, message: dict) -> None
 
     else:
         logger.warning(f"Unknown message type: {msg_type}")
-        await session.send_message(
-            "error", {"message": f"Unknown message type: {msg_type}"}
-        )
+        await session.send_message("error", {"message": f"Unknown message type: {msg_type}"})
 
 
 @router.websocket("/ws/live")
 async def live_mode_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for Live Mode transcription."""
     await websocket.accept()
-    session: Optional[LiveModeSession] = None
+    session: LiveModeSession | None = None
 
     # Check source host for logging
     client_host = websocket.client.host if websocket.client else None
@@ -354,9 +358,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
             return
 
         if auth.is_localhost_bypass:
-            logger.info(
-                "Live Mode connection from localhost - bypassing authentication"
-            )
+            logger.info("Live Mode connection from localhost - bypassing authentication")
 
         client_name = auth.client_name
 
@@ -366,9 +368,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_json(
                     {
                         "type": "error",
-                        "data": {
-                            "message": "Another Live Mode session is already active"
-                        },
+                        "data": {"message": "Another Live Mode session is already active"},
                         "timestamp": asyncio.get_event_loop().time(),
                     }
                 )
@@ -430,7 +430,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("Live Mode WebSocket disconnected")
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Live Mode WebSocket authentication timeout")
         await websocket.close()
 
@@ -439,9 +439,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
         try:
             await websocket.close()
         except Exception as close_error:
-            logger.debug(
-                "Failed to close Live Mode websocket after error: %s", close_error
-            )
+            logger.debug("Failed to close Live Mode websocket after error: %s", close_error)
 
     finally:
         # Clean up session

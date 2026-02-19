@@ -252,6 +252,11 @@ export class TrayManager {
     return this.state;
   }
 
+  /** Rebuild the context menu to reflect current window visibility. */
+  notifyWindowVisibilityChanged(): void {
+    this.rebuildMenu();
+  }
+
   // ─── Icon Generation ───────────────────────────────────────────────────
 
   private loadBaseIcon(): Electron.NativeImage {
@@ -465,6 +470,7 @@ export class TrayManager {
           w.show();
           w.focus();
         }
+        this.rebuildMenu();
       },
     });
 

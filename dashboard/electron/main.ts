@@ -14,6 +14,14 @@ import { UpdateManager } from './updateManager.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// AppImage on Linux: disable the SUID sandbox. The chrome-sandbox binary inside
+// the squashfs mount cannot have root ownership / mode 4755, so Chromium's SUID
+// sandbox check fails. This affects Ubuntu and Fedora GNOME (AppArmor restricts
+// unprivileged user namespaces). The APPIMAGE env var is set by the AppImage runtime.
+if (process.platform === 'linux' && process.env.APPIMAGE) {
+  app.commandLine.appendSwitch('--no-sandbox');
+}
+
 // Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
 
@@ -475,7 +483,13 @@ app.whenReady().then(() => {
       if (!isQuitting) {
         event.preventDefault();
         mainWindow?.hide();
+        trayManager.notifyWindowVisibilityChanged();
       }
+    });
+
+    // Keep tray menu label in sync when the window is shown by any means
+    mainWindow.on('show', () => {
+      trayManager.notifyWindowVisibilityChanged();
     });
   }
 
@@ -487,7 +501,12 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', async (event) => {
-  if (isQuitting) return; // Already in quit sequence
+  if (isQuitting) {
+    // Block re-entrant quit attempts (e.g. double-click, OS signal) so the
+    // first invocation's Docker stop can finish before the process exits.
+    event.preventDefault();
+    return;
+  }
   isQuitting = true;
 
   const shouldStopServer = store.get('app.stopServerOnQuit') as boolean;
