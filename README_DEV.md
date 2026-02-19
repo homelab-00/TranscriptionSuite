@@ -511,6 +511,11 @@ npm run package:windows
 # Output: dashboard\release\TranscriptionSuite Setup *.exe
 ```
 
+**Important**: Windows builds require Developer Mode to be enabled for symlink creation:
+- Go to **Settings → System → Advanced → Developer Mode** and toggle ON
+- Alternatively, run PowerShell as Administrator
+- This resolves `electron-builder` code signing extraction errors during packaging
+
 ### 5.5 macOS DMG + ZIP (Unsigned)
 
 ```bash
