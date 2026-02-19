@@ -35,6 +35,10 @@ interface TrayMenuState {
   isRecording?: boolean;
   isLive?: boolean;
   isMuted?: boolean;
+  modelsLoaded?: boolean;
+  isLocalConnection?: boolean;
+  canCancel?: boolean;
+  isStandby?: boolean;
 }
 
 interface ElectronAPI {

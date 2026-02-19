@@ -38,6 +38,10 @@ export interface TrayMenuState {
   isRecording: boolean;
   isLive: boolean;
   isMuted: boolean;
+  modelsLoaded: boolean;
+  isLocalConnection: boolean;
+  canCancel: boolean;
+  isStandby: boolean;
 }
 
 // ─── Runtime Icon Generation ────────────────────────────────────────────────
@@ -98,6 +102,10 @@ export class TrayManager {
     isRecording: false,
     isLive: false,
     isMuted: false,
+    modelsLoaded: true,
+    isLocalConnection: true,
+    canCancel: false,
+    isStandby: false,
   };
   private completeTimer: ReturnType<typeof setTimeout> | null = null;
   private previousState: TrayState = 'idle';
@@ -108,7 +116,13 @@ export class TrayManager {
   private baseIcon: Electron.NativeImage | null = null;
 
   /** Cache of generated tinted icons so we tint each state only once. */
-  private iconCache = new Map<TrayState, Electron.NativeImage>();
+  private iconCache = new Map<string, Electron.NativeImage>();
+
+  /**
+   * Dark desaturated green for "models unloaded" state —
+   * matches v0.5.6's rgb(45, 140, 45) appearance.
+   */
+  private static readonly MODELS_UNLOADED_COLOR: RGB = { r: 0x2d, g: 0x8c, b: 0x2d };
 
   /** IPC callbacks — set via setActions() so main.ts controls Docker / renderer */
   private actions: {
@@ -116,8 +130,13 @@ export class TrayManager {
     stopServer?: () => Promise<void>;
     startRecording?: () => void;
     stopRecording?: () => void;
+    cancelRecording?: () => void;
     toggleMute?: () => void;
     transcribeFile?: () => void;
+    startLiveMode?: () => void;
+    stopLiveMode?: () => void;
+    toggleLiveMute?: () => void;
+    toggleModels?: () => void;
   } = {};
 
   constructor(isDev: boolean, getWindow: () => BrowserWindow | null) {
@@ -138,7 +157,19 @@ export class TrayManager {
     this.tray.setToolTip(STATE_TOOLTIP_MAP[this.state]);
     this.rebuildMenu();
 
+    // Left-click: start recording when standby (not in live mode),
+    // otherwise toggle window visibility (v0.5.6 behavior)
     this.tray.on('click', () => {
+      const isLiveState =
+        this.state === 'live-listening' ||
+        this.state === 'live-processing' ||
+        this.state === 'muted';
+
+      if (!isLiveState && this.menuState.isStandby && !this.menuState.isRecording) {
+        this.actions.startRecording?.();
+        return;
+      }
+
       const win = this.getWindow();
       if (win) {
         if (win.isVisible()) {
@@ -147,6 +178,27 @@ export class TrayManager {
           win.show();
           win.focus();
         }
+      }
+    });
+
+    // Middle-click: toggle mute in live mode, or stop recording (v0.5.6 behavior)
+    this.tray.on('middle-click', () => {
+      const isLiveState =
+        this.state === 'live-listening' ||
+        this.state === 'live-processing' ||
+        this.state === 'muted';
+
+      if (isLiveState) {
+        this.actions.toggleLiveMute?.();
+      } else if (this.state === 'recording') {
+        this.actions.stopRecording?.();
+      }
+    });
+
+    // Double-click: stop recording (Windows fallback for middle-click)
+    this.tray.on('double-click', () => {
+      if (this.state === 'recording') {
+        this.actions.stopRecording?.();
       }
     });
   }
@@ -211,12 +263,16 @@ export class TrayManager {
   /**
    * Get (or lazily generate) the icon for a tray state.
    * Icons are cached after first generation.
+   * An optional override color can be used for special cases (e.g. models unloaded).
    */
-  private getIcon(state: TrayState): Electron.NativeImage {
-    const cached = this.iconCache.get(state);
+  private getIcon(state: TrayState, overrideColor?: RGB): Electron.NativeImage {
+    const cacheKey = overrideColor
+      ? `${state}:${overrideColor.r},${overrideColor.g},${overrideColor.b}`
+      : state;
+    const cached = this.iconCache.get(cacheKey);
     if (cached) return cached;
-    const icon = this.generateIcon(state);
-    this.iconCache.set(state, icon);
+    const icon = this.generateIcon(state, overrideColor);
+    this.iconCache.set(cacheKey, icon);
     return icon;
   }
 
@@ -232,17 +288,17 @@ export class TrayManager {
    * Electron's nativeImage.toBitmap() returns raw pixels in BGRA format
    * (Chromium/Skia kBGRA_8888 on all platforms).
    */
-  private generateIcon(state: TrayState): Electron.NativeImage {
+  private generateIcon(state: TrayState, overrideColor?: RGB): Electron.NativeImage {
     if (!this.baseIcon) return this.loadBaseIcon();
 
-    // 'active' → use the original unmodified logo
-    if (state === 'active') return this.baseIcon;
+    // 'active' with no override → use the original unmodified logo
+    if (state === 'active' && !overrideColor) return this.baseIcon;
 
     const { width, height } = this.baseIcon.getSize();
     const srcBitmap = this.baseIcon.toBitmap();
     const bitmap = Buffer.from(srcBitmap); // writable copy
 
-    const color = STATE_COLORS[state];
+    const color = overrideColor ?? STATE_COLORS[state];
     const dimFactor = state === 'disconnected' ? 0.4 : 1.0;
 
     for (let i = 0; i < bitmap.length; i += 4) {
@@ -285,7 +341,15 @@ export class TrayManager {
 
   private applyState(): void {
     if (!this.tray) return;
-    this.tray.setImage(this.getIcon(this.state));
+    // When models are unloaded but server is running, use dark green icon
+    const useModelsUnloaded =
+      !this.menuState.modelsLoaded &&
+      this.menuState.serverRunning &&
+      (this.state === 'active' || this.state === 'connecting');
+    const icon = useModelsUnloaded
+      ? this.getIcon(this.state, TrayManager.MODELS_UNLOADED_COLOR)
+      : this.getIcon(this.state);
+    this.tray.setImage(icon);
     this.tray.setToolTip(STATE_TOOLTIP_MAP[this.state]);
     this.rebuildMenu();
   }
@@ -293,87 +357,126 @@ export class TrayManager {
   private rebuildMenu(): void {
     if (!this.tray) return;
 
+    const {
+      serverRunning,
+      isRecording,
+      isLive,
+      isMuted,
+      modelsLoaded,
+      isLocalConnection,
+      canCancel,
+      isStandby,
+    } = this.menuState;
+
     const win = this.getWindow();
     const windowVisible = win?.isVisible() ?? false;
 
-    const template: Electron.MenuItemConstructorOptions[] = [
-      {
-        label: windowVisible ? 'Hide Window' : 'Show Window',
-        click: () => {
-          const w = this.getWindow();
-          if (!w) return;
-          if (w.isVisible()) {
-            w.hide();
-          } else {
-            w.show();
-            w.focus();
+    const template: Electron.MenuItemConstructorOptions[] = [];
+
+    // ── Recording actions (match v0.5.6 order) ──────────────────────────
+
+    template.push({
+      label: 'Start Recording',
+      enabled: isStandby && !isRecording && !isLive,
+      click: () => this.actions.startRecording?.(),
+    });
+
+    template.push({
+      label: 'Stop Recording',
+      enabled: isRecording && !isLive,
+      click: () => this.actions.stopRecording?.(),
+    });
+
+    template.push({
+      label: 'Cancel',
+      enabled: canCancel,
+      click: () => this.actions.cancelRecording?.(),
+    });
+
+    template.push({ type: 'separator' });
+
+    // ── File transcription ──────────────────────────────────────────────
+
+    template.push({
+      label: 'Transcribe File…',
+      enabled: isStandby,
+      click: () => this.actions.transcribeFile?.(),
+    });
+
+    template.push({ type: 'separator' });
+
+    // ── Live Mode (v0.5.6: Start/Stop toggles label) ───────────────────
+
+    template.push({
+      label: isLive ? 'Stop Live Mode' : 'Start Live Mode',
+      enabled: isStandby || isLive,
+      click: () => {
+        if (isLive) {
+          this.actions.stopLiveMode?.();
+        } else {
+          this.actions.startLiveMode?.();
+        }
+      },
+    });
+
+    template.push({
+      label: isMuted ? 'Unmute Live Mode' : 'Mute Live Mode',
+      enabled: isLive,
+      click: () => this.actions.toggleLiveMute?.(),
+    });
+
+    template.push({ type: 'separator' });
+
+    // ── Model management (v0.5.6: local connection only) ────────────────
+
+    template.push({
+      label: modelsLoaded ? 'Unload All Models' : 'Reload Models',
+      enabled: isStandby && isLocalConnection,
+      click: () => this.actions.toggleModels?.(),
+    });
+
+    template.push({ type: 'separator' });
+
+    // ── Show / Hide App ─────────────────────────────────────────────────
+
+    template.push({
+      label: windowVisible ? 'Hide App' : 'Show App',
+      click: () => {
+        const w = this.getWindow();
+        if (!w) return;
+        if (w.isVisible()) {
+          w.hide();
+        } else {
+          w.show();
+          w.focus();
+        }
+      },
+    });
+
+    template.push({ type: 'separator' });
+
+    // ── Server control ──────────────────────────────────────────────────
+
+    template.push(
+      serverRunning
+        ? {
+            label: 'Stop Server',
+            click: () => this.actions.stopServer?.(),
           }
-        },
-      },
-      { type: 'separator' },
+        : {
+            label: 'Start Server',
+            click: () => this.actions.startServer?.(),
+          },
+    );
 
-      ...(this.menuState.serverRunning
-        ? [
-            {
-              label: 'Stop Server',
-              click: () => {
-                this.actions.stopServer?.();
-              },
-            } as Electron.MenuItemConstructorOptions,
-          ]
-        : [
-            {
-              label: 'Start Server',
-              click: () => {
-                this.actions.startServer?.();
-              },
-            } as Electron.MenuItemConstructorOptions,
-          ]),
+    template.push({ type: 'separator' });
 
-      ...(this.menuState.serverRunning
-        ? [
-            { type: 'separator' as const },
-            ...(this.menuState.isRecording || this.menuState.isLive
-              ? [
-                  {
-                    label: this.menuState.isLive ? 'Stop Live Mode' : 'Stop Recording',
-                    click: () => {
-                      this.actions.stopRecording?.();
-                    },
-                  } as Electron.MenuItemConstructorOptions,
-                  {
-                    label: this.menuState.isMuted ? 'Unmute' : 'Mute',
-                    click: () => {
-                      this.actions.toggleMute?.();
-                    },
-                  } as Electron.MenuItemConstructorOptions,
-                ]
-              : [
-                  {
-                    label: 'Start Recording',
-                    click: () => {
-                      this.actions.startRecording?.();
-                    },
-                  } as Electron.MenuItemConstructorOptions,
-                ]),
-            { type: 'separator' as const },
-            {
-              label: 'Transcribe File…',
-              click: () => {
-                this.actions.transcribeFile?.();
-              },
-            } as Electron.MenuItemConstructorOptions,
-          ]
-        : []),
+    // ── Quit ────────────────────────────────────────────────────────────
 
-      { type: 'separator' },
-      {
-        label: 'Quit',
-        click: () => {
-          app.quit();
-        },
-      },
-    ];
+    template.push({
+      label: 'Quit',
+      click: () => app.quit(),
+    });
 
     this.tray.setContextMenu(Menu.buildFromTemplate(template));
   }

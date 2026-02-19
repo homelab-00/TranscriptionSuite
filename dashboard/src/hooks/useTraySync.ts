@@ -28,11 +28,20 @@ interface TrySyncDeps {
   muted: boolean;
   /** Active transcription model name (for tooltip) */
   activeModel?: string;
+  /** Whether ASR models are currently loaded on the server */
+  modelsLoaded?: boolean;
+  /** Whether the server connection is local (enables model management) */
+  isLocalConnection?: boolean;
   /** Callbacks to forward tray context-menu actions */
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  onCancelRecording?: () => void;
   onToggleMute?: () => void;
   onTranscribeFile?: (filePath: string) => void;
+  onStartLiveMode?: () => void;
+  onStopLiveMode?: () => void;
+  onToggleLiveMute?: () => void;
+  onToggleModels?: () => void;
 }
 
 /**
@@ -110,8 +119,16 @@ export function useTraySync(deps: TrySyncDeps): void {
   const callbacksRef = useRef(deps);
   callbacksRef.current = deps;
 
-  const { serverStatus, containerRunning, transcriptionStatus, liveStatus, muted, activeModel } =
-    deps;
+  const {
+    serverStatus,
+    containerRunning,
+    transcriptionStatus,
+    liveStatus,
+    muted,
+    activeModel,
+    modelsLoaded,
+    isLocalConnection,
+  } = deps;
 
   // Push TrayState whenever inputs change
   useEffect(() => {
@@ -137,13 +154,37 @@ export function useTraySync(deps: TrySyncDeps): void {
     const isRecording = transcriptionStatus === 'recording' || transcriptionStatus === 'processing';
     const isLive =
       liveStatus === 'listening' || liveStatus === 'processing' || liveStatus === 'starting';
+
+    // canCancel: during one-shot recording, processing (v0.5.6: recording + uploading + transcribing)
+    const canCancel = transcriptionStatus === 'recording' || transcriptionStatus === 'processing';
+
+    // isStandby: server connected and ready, nothing active
+    const isStandby =
+      containerRunning &&
+      serverStatus === 'active' &&
+      !isRecording &&
+      !isLive &&
+      transcriptionStatus !== 'complete';
+
     window.electronAPI!.tray.setMenuState({
       serverRunning: containerRunning,
       isRecording,
       isLive,
       isMuted: muted,
+      modelsLoaded: modelsLoaded ?? true,
+      isLocalConnection: isLocalConnection ?? true,
+      canCancel,
+      isStandby,
     });
-  }, [containerRunning, transcriptionStatus, liveStatus, muted]);
+  }, [
+    containerRunning,
+    transcriptionStatus,
+    liveStatus,
+    muted,
+    serverStatus,
+    modelsLoaded,
+    isLocalConnection,
+  ]);
 
   // Listen for tray context-menu actions forwarded from the main process
   useEffect(() => {
@@ -155,11 +196,26 @@ export function useTraySync(deps: TrySyncDeps): void {
         case 'stop-recording':
           callbacksRef.current.onStopRecording?.();
           break;
+        case 'cancel-recording':
+          callbacksRef.current.onCancelRecording?.();
+          break;
         case 'toggle-mute':
           callbacksRef.current.onToggleMute?.();
           break;
         case 'transcribe-file':
           if (args[0]) callbacksRef.current.onTranscribeFile?.(args[0] as string);
+          break;
+        case 'start-live-mode':
+          callbacksRef.current.onStartLiveMode?.();
+          break;
+        case 'stop-live-mode':
+          callbacksRef.current.onStopLiveMode?.();
+          break;
+        case 'toggle-live-mute':
+          callbacksRef.current.onToggleLiveMute?.();
+          break;
+        case 'toggle-models':
+          callbacksRef.current.onToggleModels?.();
           break;
       }
     });

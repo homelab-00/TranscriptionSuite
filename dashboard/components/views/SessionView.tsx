@@ -419,11 +419,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
     liveStatus: live.status,
     muted: live.muted,
     activeModel: activeModel ?? undefined,
+    modelsLoaded: isAsrModelsLoaded,
+    isLocalConnection: true,
     onStartRecording: () => transcription.start(),
     onStopRecording: () => {
       if (isLive) live.stop();
       else transcription.stop();
     },
+    onCancelRecording: () => transcription.reset(),
     onToggleMute: () => live.toggleMute(),
     onTranscribeFile: async (filePath: string) => {
       try {
@@ -433,6 +436,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
       } catch (err: any) {
         console.error('Tray transcribe file failed:', err);
       }
+    },
+    onStartLiveMode: () => handleLiveToggle(true),
+    onStopLiveMode: () => live.stop(),
+    onToggleLiveMute: () => live.toggleMute(),
+    onToggleModels: () => {
+      if (isAsrModelsLoaded) handleUnloadAllModels();
+      else handleReloadModels();
     },
   });
 

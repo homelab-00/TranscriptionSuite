@@ -160,8 +160,23 @@ trayManager.setActions({
   stopRecording: () => {
     mainWindow?.webContents.send('tray:action', 'stop-recording');
   },
+  cancelRecording: () => {
+    mainWindow?.webContents.send('tray:action', 'cancel-recording');
+  },
   toggleMute: () => {
     mainWindow?.webContents.send('tray:action', 'toggle-mute');
+  },
+  startLiveMode: () => {
+    mainWindow?.webContents.send('tray:action', 'start-live-mode');
+  },
+  stopLiveMode: () => {
+    mainWindow?.webContents.send('tray:action', 'stop-live-mode');
+  },
+  toggleLiveMute: () => {
+    mainWindow?.webContents.send('tray:action', 'toggle-live-mute');
+  },
+  toggleModels: () => {
+    mainWindow?.webContents.send('tray:action', 'toggle-models');
   },
   transcribeFile: async () => {
     const win = mainWindow;
@@ -446,6 +461,10 @@ ipcMain.handle(
       isRecording?: boolean;
       isLive?: boolean;
       isMuted?: boolean;
+      modelsLoaded?: boolean;
+      isLocalConnection?: boolean;
+      canCancel?: boolean;
+      isStandby?: boolean;
     },
   ) => {
     trayManager.setMenuState(menuState);
