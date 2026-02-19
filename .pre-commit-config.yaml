@@ -43,7 +43,7 @@ repos:
     hooks:
       - id: codespell
         args:
-          - "--skip=*.lock,*.svg,*.ico,*.icns,*.png,*.woff,*.woff2,package-lock.json,node_modules,dist-electron,release,.git,dashboard/dist,contract-baseline.json"
+          - "--skip=*.lock,*.svg,*.ico,*.icns,*.png,*.woff,*.woff2,*package-lock.json,node_modules,dist-electron,release,.git,dashboard/dist,contract-baseline.json"
           - "--ignore-words-list=ect,crate,ser"
         exclude: "^(dashboard/release/|dashboard/dist-electron/)"
 
@@ -52,7 +52,7 @@ repos:
     hooks:
       - id: prettier
         name: prettier (dashboard)
-        entry: npx --prefix dashboard prettier --write --ignore-unknown
+        entry: bash -c 'cd dashboard && npx prettier --write --ignore-unknown "${@#dashboard/}"' --
         language: system
         files: ^dashboard/
         types_or: [javascript, jsx, ts, tsx, css, json, html, markdown, yaml]
