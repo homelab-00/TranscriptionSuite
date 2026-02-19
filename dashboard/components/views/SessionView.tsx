@@ -95,7 +95,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [micDeviceIds, setMicDeviceIds] = useState<Record<string, string>>({});
 
   // Desktop sources for system audio capture (Electron only)
-  const [desktopSources, setDesktopSources] = useState<
+  const [_desktopSources, setDesktopSources] = useState<
     // codeql[js/unused-local-variable] — will be consumed once the source-picker UI is wired up
     Array<{ id: string; name: string; thumbnail: string }>
   >([]);
@@ -447,7 +447,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   );
 
   // Helpers for main transcription controls
-  const isRecording = transcription.status === 'recording'; // codeql[js/unused-local-variable] — reserved for upcoming recording-state UI
+  const _isRecording = transcription.status === 'recording'; // codeql[js/unused-local-variable] — reserved for upcoming recording-state UI
   const isProcessing = transcription.status === 'processing';
   const isConnecting = transcription.status === 'connecting';
   const canStartRecording =

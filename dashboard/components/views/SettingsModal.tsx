@@ -47,7 +47,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // Animation State
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
-  const [isDirty, setIsDirty] = useState(false); // codeql[js/unused-local-variable] — read side reserved for future "unsaved changes" indicator
+  const [_isDirty, setIsDirty] = useState(false); // codeql[js/unused-local-variable] — read side reserved for future "unsaved changes" indicator
 
   // Backups hook for Notebook tab
   const {
