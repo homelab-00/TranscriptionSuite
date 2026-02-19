@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.13
+  spec_version: 1.0.14
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -105,27 +105,26 @@ foundation:
         - hsla(339, 49%, 30%, 1)
         - hsla(339,49%,30%,1)
         - rgb(230,230,230)
-        - rgba(${r}, ${g}, ${b}, ${alpha})
+        - rgba(${r}, ${g}, ${b}, 0.3)
+        - rgba(${r}, ${g}, ${b}, 0.6)
+        - rgba(${r}, ${g}, ${b}, 0.9)
+        - rgba(${r}, ${g}, ${b}, 1)
         - rgba(0, 0, 0, 0.3)
         - rgba(0, 0, 0, 0.4)
         - rgba(0, 0, 0, 0.5)
         - rgba(0, 0, 0, 0.7)
         - rgba(0,0,0,0.3)
         - rgba(0,0,0,0.4)
-        - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.6)
-        - rgba(251, 146, 60, 0.3)
         - rgba(251,146,60,0.5)
         - rgba(255, 255, 255, 0.1)
         - rgba(255, 255, 255, 0.2)
         - rgba(255, 255, 255, 0.4)
         - rgba(255,145,0,0.15)
         - rgba(255,255,255,0.3)
-        - rgba(34, 211, 238, 0.6)
-        - rgba(34, 211, 238, 0.8)
         - rgba(34,197,94,0.5)
         - rgba(34,211,238,0.05)
         - rgba(34,211,238,0.15)
@@ -192,7 +191,6 @@ foundation:
         - shadow-2xl
         - shadow-accent-cyan/20
         - shadow-accent-cyan/40
-        - shadow-accent-magenta/20
         - shadow-accent-orange/50
         - shadow-blue-400/50
         - shadow-green-500/50
@@ -360,7 +358,6 @@ utility_allowlist:
     - -right-1
     - -right-3
     - -skew-x-12
-    - -top-1
     - -translate-y-1/2
     - absolute
     - active
@@ -486,7 +483,6 @@ utility_allowlist:
     - font-src
     - from-accent-cyan
     - from-accent-cyan/20
-    - from-accent-magenta
     - from-accent-orange/10
     - from-black/60
     - from-glass-200
@@ -747,7 +743,6 @@ utility_allowlist:
     - shadow
     - shadow-2xl
     - shadow-accent-cyan/20
-    - shadow-accent-magenta/20
     - shadow-accent-orange/50
     - shadow-blue-400/50
     - shadow-green-500/50
@@ -813,7 +808,6 @@ utility_allowlist:
     - text-xl
     - text-xs
     - to-accent-magenta/20
-    - to-accent-orange
     - to-black/20
     - to-blue-500
     - to-glass-100
@@ -1471,6 +1465,24 @@ component_contracts:
     state_rules:
       - id: heading-divider
         rule: Heading divider line remains part of section title structure.
+  ShortcutRow:
+    file: components/views/SettingsModal.tsx
+    required_tokens:
+      - colors
+      - radii
+    allowed_variants:
+      isRecording:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: shortcut-row-layout
+        rule: ShortcutRow keeps label+description left column and binding button right column.
+    behavior_rules:
+      - id: shortcut-recording-mode
+        rule: Recording state shows pulsing capture area and cancel button; idle state shows formatted accelerator button.
+    state_rules:
+      - id: shortcut-binding-display
+        rule: Binding display uses mono font in both recording and idle states.
   ServerView:
     file: components/views/ServerView.tsx
     required_tokens:

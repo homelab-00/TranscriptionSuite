@@ -138,3 +138,17 @@ echo "✓ Created logo_wide.png (440px tall, aspect preserved)"
 
 render_svg_to_png_height "$ASSETS_DIR/logo_wide.svg" "$ASSETS_DIR/logo_wide_readme.png" 880
 echo "✓ Created logo_wide_readme.png (880px tall, aspect preserved)"
+
+# Generate tray icon PNGs from the square logo SVG.
+# These are used by the Electron tray manager as base icons that get
+# runtime-tinted per state.
+render_svg_to_png_size "$ASSETS_DIR/logo.svg" "$ASSETS_DIR/tray-icon.png" 32 32
+echo "✓ Created tray-icon.png (32x32)"
+render_svg_to_png_size "$ASSETS_DIR/logo.svg" "$ASSETS_DIR/tray-icon@1x.png" 16 16
+echo "✓ Created tray-icon@1x.png (16x16)"
+render_svg_to_png_size "$ASSETS_DIR/logo.svg" "$ASSETS_DIR/tray-icon@2x.png" 32 32
+echo "✓ Created tray-icon@2x.png (32x32)"
+
+# Copy square logo SVG into dashboard/public/ for favicon and in-app usage.
+cp "$ASSETS_DIR/logo.svg" "$SCRIPT_DIR/../dashboard/public/logo.svg"
+echo "✓ Copied logo.svg → dashboard/public/logo.svg"

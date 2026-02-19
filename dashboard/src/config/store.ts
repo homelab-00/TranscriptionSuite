@@ -57,6 +57,12 @@ export interface ClientConfig {
   ui: {
     sidebarCollapsed: boolean;
   };
+  /** Global keyboard shortcuts */
+  shortcuts: {
+    enabled: boolean;
+    startRecording: string;
+    stopAndTranscribe: string;
+  };
 }
 
 const DEFAULT_CONFIG: ClientConfig = {
@@ -101,6 +107,11 @@ const DEFAULT_CONFIG: ClientConfig = {
   },
   ui: {
     sidebarCollapsed: false,
+  },
+  shortcuts: {
+    enabled: true,
+    startRecording: 'CommandOrControl+Shift+R',
+    stopAndTranscribe: 'CommandOrControl+Shift+T',
   },
 };
 

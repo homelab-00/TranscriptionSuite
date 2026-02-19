@@ -249,7 +249,7 @@ TranscriptionSuite uses layered security for remote access:
 TranscriptionSuite/
 ├── dashboard/                    # Electron + React dashboard application
 │   ├── electron/                 # Electron main process
-│   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
+│   │   ├── main.ts               # Window creation, IPC handlers, global shortcuts, app lifecycle
 │   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
 │   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
 │   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons
@@ -272,12 +272,12 @@ TranscriptionSuite/
 │   │       └── audio-worklet.d.ts # AudioWorklet type declarations
 │   ├── components/               # React UI components
 │   │   ├── Sidebar.tsx           # Collapsible sidebar navigation
-│   │   ├── AudioVisualizer.tsx   # Canvas-based waveform visualizer
+│   │   ├── AudioVisualizer.tsx   # Canvas-based bar visualizer with idle breathing animation
 │   │   ├── ui/                   # Primitives (Button, GlassCard, StatusLight, etc.)
 │   │   └── views/                # View components (SessionView, NotebookView, ServerView, modals)
 │   ├── public/                   # Static assets (served at /)
 │   │   ├── audio-worklet-processor.js  # AudioWorklet for mic capture
-│   │   └── logo.svg              # App logo for notifications/favicon
+│   │   └── logo.svg              # App logo (copied from build/assets/ by generate-ico.sh)
 │   ├── ui-contract/              # Machine-validated UI contract (design enforcement)
 │   ├── scripts/                  # Dev scripts + UI contract tooling
 │   ├── App.tsx                   # Root React component
@@ -292,7 +292,7 @@ TranscriptionSuite/
 │   ├── build-electron-linux.sh   # Build Electron AppImage
 │   ├── build-electron-mac.sh     # Build Electron DMG + ZIP (macOS arm64)
 │   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
-│   ├── generate-ico.sh           # Generate PNG/ICO/ICNS logo assets from SVG sources
+│   ├── generate-ico.sh           # Generate PNG/ICO/ICNS/tray-icon assets + copy logo.svg to dashboard/public/
 │   ├── docker-build-push.sh      # Build and push Docker image
 │   ├── assets/                   # Logo, icons, profile picture
 │   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
@@ -545,10 +545,14 @@ Required GitHub secrets for CI signing:
 ### 5.6 Build Assets
 
 **Source files (manually maintained in `build/assets/`):**
-- `logo.svg` — Master vector logo (source of truth)
+- `logo.svg` — Master vector logo (**source of truth for all raster derivatives**)
 - `logo_wide.svg` — Wide variant for documentation/marketing
 - `profile.png` — Author profile picture for About dialog
 - `homelab-00_0xBFE4CC5D72020691_public.asc` — Public key used by users to verify release `.asc` signatures
+
+> **Important:** `build/assets/` is the single source of truth for SVG logos.
+> Never edit the copies in `dashboard/public/` directly — run `generate-ico.sh`
+> to propagate changes.
 
 **Generated files (created by `build/generate-ico.sh`):**
 - `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
@@ -556,6 +560,12 @@ Required GitHub secrets for CI signing:
 - `logo.icns` — macOS app icon (requires `iconutil` on macOS or `png2icns`/`libicns` on Linux)
 - `logo_wide.png` (440px tall, aspect-preserved) — Sharp wide logo used in packaged app assets
 - `logo_wide_readme.png` (880px tall, aspect-preserved) — Extra-sharp wide logo for README rendering
+- `tray-icon.png` (32×32) — System tray icon
+- `tray-icon@1x.png` (16×16) — 1× DPI tray icon
+- `tray-icon@2x.png` (32×32) — 2× DPI tray icon
+
+The script also copies `logo.svg` into `dashboard/public/` so the renderer can
+reference it at `/logo.svg` (e.g. sidebar brand mark, notification icon).
 
 **Regenerate derived assets:**
 ```bash
@@ -974,7 +984,7 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle |
+| `main.ts` | Window creation, IPC handlers, global keyboard shortcuts, app lifecycle |
 | `preload.ts` | Context bridge (safe IPC between renderer and main) |
 | `dockerManager.ts` | Docker CLI wrapper for container/image management |
 | `trayManager.ts` | System tray with 11 state-aware icons, context menu, and runtime icon tinting |
@@ -1025,7 +1035,7 @@ npm run dev:electron
 | Component | Purpose |
 |-----------|---------|
 | `Sidebar.tsx` | Collapsible sidebar navigation with status lights |
-| `AudioVisualizer.tsx` | Canvas-based audio waveform visualizer |
+| `AudioVisualizer.tsx` | Canvas-based bar visualizer with breathing idle animation |
 | `ui/Button.tsx` | 5 variants (primary/secondary/danger/ghost/glass), 4 sizes |
 | `ui/GlassCard.tsx` | Glassmorphism container with optional header |
 | `ui/AppleSwitch.tsx` | iOS-style toggle switch |
@@ -1040,7 +1050,7 @@ npm run dev:electron
 | `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
 | `ServerView.tsx` | Docker server management: image selection, container control |
-| `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
+| `SettingsModal.tsx` | 4-tab settings: App (incl. keyboard shortcuts), Client, Server, Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
 | `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
 | `AddNoteModal.tsx` | Create new recording from calendar time slot |
@@ -1281,6 +1291,9 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `app.updateChecksEnabled` | `false` | Enable opt-in update checking |
 | `app.updateCheckIntervalMode` | `daily` | Check interval: `hourly`, `daily`, `weekly`, or `custom` |
 | `app.updateCheckCustomHours` | `12` | Custom interval in hours (when mode is `custom`) |
+| `shortcuts.enabled` | `true` | Enable global keyboard shortcuts |
+| `shortcuts.startRecording` | `CommandOrControl+Shift+R` | Accelerator for starting a longform recording |
+| `shortcuts.stopAndTranscribe` | `CommandOrControl+Shift+T` | Accelerator for stopping recording and transcribing |
 
 > **`server.runtimeProfile`** — Controls whether the Docker container is
 > launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).

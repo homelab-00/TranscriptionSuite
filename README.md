@@ -57,6 +57,7 @@ is Dockerized for fast setup.
 - [5. Usage](#5-usage)
   - [5.1 Quick Start](#51-quick-start)
   - [5.2 Dashboard Views](#52-dashboard-views)
+  - [5.3 Keyboard Shortcuts](#53-keyboard-shortcuts)
 - [6. Remote Access](#6-remote-access)
   - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
   - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
@@ -85,6 +86,8 @@ is Dockerized for fast setup.
   (utilizing Tailscale)
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
+- **Global Keyboard Shortcuts**: System-wide hotkeys for hands-free recording control
+  (start recording, stop & transcribe) — configurable in Settings
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
@@ -243,11 +246,29 @@ The Dashboard features **sidebar navigation** with these main views:
   - Processing logs
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
 - **Server**: Docker server management (container, images, volumes)
-- **Settings**: Connection, audio, diarization, notebook, app behaviour, and HuggingFace token management
+- **Settings**: Connection, audio, diarization, notebook, keyboard shortcuts, app behaviour, and HuggingFace token management
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
 recording state (11 distinct states), and the context menu provides quick controls
 (start/stop server, open dashboard, transcribe file, quit).
+
+### 5.3 Keyboard Shortcuts
+
+Global keyboard shortcuts let you control recording from anywhere — even when the
+Dashboard window is not focused.
+
+| Action | Default Shortcut |
+|--------|------------------|
+| **Start Recording** | `Ctrl+Shift+R` |
+| **Stop & Transcribe** | `Ctrl+Shift+T` |
+
+Shortcuts are enabled by default. To change bindings or disable them, open
+**Settings → App → Keyboard Shortcuts**. Click the current binding and press your
+desired key combination to reassign.
+
+> **Wayland note:** On Wayland compositors, global shortcuts require the app to have
+> been granted the `GlobalShortcuts` portal permission. Some compositors may not
+> support this — in that case shortcuts will only work when the window is focused.
 
 **Setup Checklist**: On first launch a setup checklist guides you through Docker verification,
 GPU detection, and HuggingFace token entry.

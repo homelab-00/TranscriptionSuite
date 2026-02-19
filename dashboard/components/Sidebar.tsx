@@ -143,10 +143,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`inline-flex shrink-0 items-center transition-all duration-300 ${collapsed ? '' : 'gap-3'}`}
         >
           <div className="relative shrink-0">
-            <div className="from-accent-magenta to-accent-orange shadow-accent-magenta/20 flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br shadow-lg">
-              <Mic2 className="text-white" size={24} />
-            </div>
-            <div className="bg-accent-cyan absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-slate-900"></div>
+            <img
+              src="/logo.svg"
+              alt="TranscriptionSuite"
+              className="h-10 w-10 rounded-xl shadow-lg"
+              draggable={false}
+            />
           </div>
 
           <div

@@ -1425,8 +1425,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       <Activity size={20} className={isLive ? 'animate-pulse' : ''} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white">Soundwave Monitor</h3>
-                      <p className="text-xs text-slate-400">Frequency Analysis</p>
+                      <h3 className="font-semibold text-white">Audio Visualizer</h3>
+                      <p className="text-xs text-slate-400">
+                        {activeAnalyser ? 'Live — listening' : 'Idle — awaiting input'}
+                      </p>
                     </div>
                   </div>
                 </div>

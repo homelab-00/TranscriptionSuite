@@ -1,145 +1,137 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 
 interface AudioVisualizerProps {
   className?: string;
-  /** When provided, draws real frequency data instead of the sine simulation */
+  /** When provided, draws real frequency data instead of the idle simulation */
   analyserNode?: AnalyserNode | null;
 }
+
+const BAR_COUNT = 64;
+const BAR_GAP = 3;
+const IDLE_LERP = 0.08;
+const LIVE_LERP = 0.18;
+const TARGET_UPDATE_INTERVAL = 8; // frames between idle target recalculation
 
 export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   className = 'h-48',
   analyserNode,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationRef = useRef<number>(0);
+  const barsRef = useRef<number[]>([]);
+  const targetBarsRef = useRef<number[]>([]);
+  const tickRef = useRef(0);
+
+  const initBars = useCallback(() => {
+    if (barsRef.current.length === 0) {
+      barsRef.current = Array.from({ length: BAR_COUNT }, () => Math.random() * 0.15);
+      targetBarsRef.current = Array.from({ length: BAR_COUNT }, () => Math.random() * 0.15);
+    }
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationId: number;
-    let t = 0;
+    initBars();
 
-    // Frequency data buffer (reused each frame when analyser is available)
     const freqData = analyserNode ? new Uint8Array(analyserNode.frequencyBinCount) : null;
 
     const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
       if (canvas.parentElement) {
-        canvas.width = canvas.parentElement.offsetWidth;
-        canvas.height = canvas.parentElement.offsetHeight;
+        canvas.width = canvas.parentElement.offsetWidth * dpr;
+        canvas.height = canvas.parentElement.offsetHeight * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
     };
 
     resize();
     window.addEventListener('resize', resize);
 
-    const drawSimulation = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const width = canvas.width;
-      const height = canvas.height;
-      const centerY = height / 2;
-      const layers = 3;
+    const drawBars = () => {
+      const w = canvas.width / (window.devicePixelRatio || 1);
+      const h = canvas.height / (window.devicePixelRatio || 1);
+      ctx.clearRect(0, 0, w, h);
 
-      for (let j = 0; j < layers; j++) {
+      tickRef.current++;
+      const tick = tickRef.current;
+      const bars = barsRef.current;
+      const targets = targetBarsRef.current;
+
+      if (analyserNode && freqData) {
+        // ── Live audio mode: drive bars from frequency data ──
+        analyserNode.getByteFrequencyData(freqData);
+        const step = Math.max(1, Math.floor(freqData.length / BAR_COUNT));
+        for (let i = 0; i < BAR_COUNT; i++) {
+          targets[i] = freqData[i * step] / 255;
+        }
+        for (let i = 0; i < BAR_COUNT; i++) {
+          bars[i] += (targets[i] - bars[i]) * LIVE_LERP;
+        }
+      } else {
+        // ── Idle breathing wave animation ──
+        if (tick % TARGET_UPDATE_INTERVAL === 0) {
+          for (let i = 0; i < BAR_COUNT; i++) {
+            const wave = Math.sin((i / BAR_COUNT) * Math.PI * 2 + tick * 0.02) * 0.3 + 0.3;
+            const noise = Math.random() * 0.4;
+            targets[i] = wave + noise * 0.5;
+          }
+        }
+        for (let i = 0; i < BAR_COUNT; i++) {
+          bars[i] += (targets[i] - bars[i]) * IDLE_LERP;
+        }
+      }
+
+      // ── Draw rounded bars centered vertically ──
+      const barWidth = (w - BAR_GAP * (BAR_COUNT - 1)) / BAR_COUNT;
+      const centerY = h / 2;
+      const radius = barWidth / 2;
+
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const val = bars[i];
+        const barH = Math.max(4, val * h * 0.8);
+        const x = i * (barWidth + BAR_GAP);
+
+        // Gradient from cyan to magenta based on bar position
+        const ratio = i / BAR_COUNT;
+        const r = Math.round(20 + ratio * 200);
+        const g = Math.round(200 - ratio * 120);
+        const b = Math.round(230 - ratio * 60 + ratio * 100);
+
+        const gradient = ctx.createLinearGradient(x, centerY - barH / 2, x, centerY + barH / 2);
+        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.9)`);
+        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 1)`);
+        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.6)`);
+
+        ctx.fillStyle = gradient;
         ctx.beginPath();
-        const color =
-          j === 0
-            ? 'rgba(34, 211, 238, 0.6)'
-            : j === 1
-              ? 'rgba(217, 70, 239, 0.5)'
-              : 'rgba(251, 146, 60, 0.3)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.lineJoin = 'round';
+        ctx.roundRect(x, centerY - barH / 2, barWidth, barH, radius);
+        ctx.fill();
 
-        for (let x = 0; x < width; x += 2) {
-          const amplitudeScale = height / 200;
-          const y =
-            centerY +
-            Math.sin(x * 0.01 + t * (j + 1)) * (30 * amplitudeScale) * Math.sin(t * 0.5) +
-            Math.sin(x * 0.03 + t * 2) * (10 * amplitudeScale);
-          if (x === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-
-        if (j === 0) {
-          ctx.lineTo(width, height);
-          ctx.lineTo(0, height);
-          ctx.fillStyle = 'rgba(34,211,238,0.05)';
-          ctx.fill();
-        }
+        // Glow effect
+        ctx.shadowColor = `rgba(${r}, ${g}, ${b}, 0.3)`;
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
       }
-      t += 0.05;
-    };
-
-    const drawReal = () => {
-      if (!analyserNode || !freqData) return;
-
-      analyserNode.getByteFrequencyData(freqData);
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const width = canvas.width;
-      const height = canvas.height;
-
-      // Number of bars — use a subset of frequency bins for visual clarity
-      const barCount = Math.min(freqData.length, Math.floor(width / 3));
-      const barWidth = width / barCount;
-      const step = Math.floor(freqData.length / barCount);
-
-      for (let i = 0; i < barCount; i++) {
-        const value = freqData[i * step];
-        const normalized = value / 255;
-        const barHeight = normalized * height * 0.85;
-
-        // Gradient color: cyan at low frequencies → magenta at high
-        const ratio = i / barCount;
-        const r = Math.round(34 + ratio * 183); // 34 → 217
-        const g = Math.round(211 - ratio * 141); // 211 → 70
-        const b = Math.round(238 + ratio * 1); // 238 → 239
-        const alpha = 0.4 + normalized * 0.5;
-
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-        ctx.fillRect(i * barWidth + 1, height - barHeight, barWidth - 2, barHeight);
-      }
-
-      // Draw a waveform overlay using time-domain data
-      const timeData = new Uint8Array(analyserNode.fftSize);
-      analyserNode.getByteTimeDomainData(timeData);
-
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(34, 211, 238, 0.8)';
-      ctx.lineWidth = 1.5;
-      ctx.lineJoin = 'round';
-
-      const sliceWidth = width / timeData.length;
-      for (let i = 0; i < timeData.length; i++) {
-        const v = timeData[i] / 128.0;
-        const y = (v * height) / 2;
-        if (i === 0) ctx.moveTo(0, y);
-        else ctx.lineTo(i * sliceWidth, y);
-      }
-      ctx.stroke();
     };
 
     const draw = () => {
-      if (analyserNode && freqData) {
-        drawReal();
-      } else {
-        drawSimulation();
-      }
-      animationId = requestAnimationFrame(draw);
+      drawBars();
+      animationRef.current = requestAnimationFrame(draw);
     };
 
     draw();
 
     return () => {
       window.removeEventListener('resize', resize);
-      cancelAnimationFrame(animationId);
+      cancelAnimationFrame(animationRef.current);
     };
-  }, [analyserNode]);
+  }, [analyserNode, initBars]);
 
   return (
     <div

@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Store from 'electron-store';
@@ -96,6 +96,9 @@ const store = new Store({
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
     'server.runtimeProfile': 'gpu',
+    'shortcuts.enabled': true,
+    'shortcuts.startRecording': 'CommandOrControl+Shift+R',
+    'shortcuts.stopAndTranscribe': 'CommandOrControl+Shift+T',
   },
 });
 
@@ -185,12 +188,17 @@ trayManager.setActions({
 function createWindow(): void {
   const startMinimized = store.get('app.startMinimized') as boolean;
 
+  const iconPath = isDev
+    ? path.join(__dirname, '../../build/assets/logo.png')
+    : path.join(process.resourcesPath, 'logo.png');
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: 1530,
+    height: 860,
     minWidth: 960,
     minHeight: 600,
     show: !startMinimized,
+    icon: iconPath,
     frame: true,
     autoHideMenuBar: true,
     backgroundColor: '#0f172a',
@@ -444,6 +452,57 @@ ipcMain.handle(
   },
 );
 
+// ─── Global Keyboard Shortcuts ──────────────────────────────────────────────
+
+/**
+ * Register global keyboard shortcuts from the config store.
+ * Sends actions via the same tray:action IPC channel so the renderer's
+ * useTraySync hook dispatches them automatically.
+ */
+function registerShortcuts(): void {
+  globalShortcut.unregisterAll();
+
+  const enabled = store.get('shortcuts.enabled') as boolean;
+  if (!enabled) return;
+
+  const bindings: Array<{ key: string; action: string }> = [
+    {
+      key: store.get('shortcuts.startRecording') as string,
+      action: 'start-recording',
+    },
+    {
+      key: store.get('shortcuts.stopAndTranscribe') as string,
+      action: 'stop-recording',
+    },
+  ];
+
+  for (const { key, action } of bindings) {
+    if (!key) continue;
+    try {
+      const ok = globalShortcut.register(key, () => {
+        mainWindow?.webContents.send('tray:action', action);
+      });
+      if (!ok) {
+        console.warn(`Global shortcut registration failed (already in use?): ${key} → ${action}`);
+      }
+    } catch (err) {
+      console.warn(`Global shortcut error for ${key}:`, err);
+    }
+  }
+}
+
+ipcMain.handle('shortcuts:reregister', () => {
+  registerShortcuts();
+});
+
+ipcMain.handle('shortcuts:getBindings', () => {
+  return {
+    enabled: store.get('shortcuts.enabled') as boolean,
+    startRecording: store.get('shortcuts.startRecording') as string,
+    stopAndTranscribe: store.get('shortcuts.stopAndTranscribe') as string,
+  };
+});
+
 // ─── App Lifecycle ──────────────────────────────────────────────────────────
 
 let isQuitting = false;
@@ -452,6 +511,7 @@ app.whenReady().then(() => {
   trayManager.create();
   updateManager.start();
   createWindow();
+  registerShortcuts();
 
   // Handle close-to-tray: hide window instead of quitting
   if (mainWindow) {
@@ -473,6 +533,7 @@ app.whenReady().then(() => {
 app.on('before-quit', async (event) => {
   if (isQuitting) return; // Already in quit sequence
   isQuitting = true;
+  globalShortcut.unregisterAll();
 
   const shouldStopServer = store.get('app.stopServerOnQuit') as boolean;
   if (shouldStopServer) {

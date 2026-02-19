@@ -103,6 +103,14 @@ export interface ElectronAPI {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
   };
+  shortcuts: {
+    reregister: () => Promise<void>;
+    getBindings: () => Promise<{
+      enabled: boolean;
+      startRecording: string;
+      stopAndTranscribe: string;
+    }>;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -190,5 +198,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updates: {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),
     checkNow: () => ipcRenderer.invoke('updates:checkNow'),
+  },
+  shortcuts: {
+    reregister: () => ipcRenderer.invoke('shortcuts:reregister'),
+    getBindings: () => ipcRenderer.invoke('shortcuts:getBindings'),
   },
 } satisfies ElectronAPI);

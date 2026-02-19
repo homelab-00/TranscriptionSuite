@@ -21,11 +21,11 @@
      inkscape:pageopacity="0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
-     inkscape:zoom="7.0871384"
-     inkscape:cx="12.840161"
-     inkscape:cy="25.539222"
-     inkscape:window-width="1280"
-     inkscape:window-height="956"
+     inkscape:zoom="10.022727"
+     inkscape:cx="59.963719"
+     inkscape:cy="18.058957"
+     inkscape:window-width="1920"
+     inkscape:window-height="1012"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
@@ -48,14 +48,10 @@
          id="stop2" />
     </linearGradient>
   </defs>
-  <rect
-     x="0"
-     y="4"
-     width="40"
-     height="40"
-     rx="12"
-     fill="url(#ts-icon-gradient)"
-     id="rect2" />
+  <path
+     id="rect2"
+     style="fill:url(#ts-icon-gradient)"
+     d="M 12 4 C 5.352 4 0 9.352 0 16 L 0 32 C 0 38.648 5.352 44 12 44 L 28 44 C 34.648 44 40 38.648 40 32 L 40 16 C 40 14.52561 39.73615 13.115155 39.253906 11.8125 A 5.9754095 5.9754095 0 0 1 37.974609 11.951172 A 5.9754095 5.9754095 0 0 1 32 5.9746094 A 5.9754095 5.9754095 0 0 1 32.132812 4.7246094 C 30.845603 4.2553219 29.453505 4 28 4 L 12 4 z " />
   <g
      transform="matrix(1.2304833,0,0,1.2304833,5.024889,9.229705)"
      stroke="#ffffff"
@@ -78,9 +74,10 @@
   <circle
      cx="38"
      cy="6"
-     r="5"
-     fill="#22D3EE"
+     fill="#22d3ee"
      stroke="#0F172A"
      stroke-width="2"
-     id="circle4" />
+     id="circle4"
+     style="stroke:none"
+     r="4" />
 </svg>
