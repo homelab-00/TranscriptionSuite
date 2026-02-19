@@ -21,14 +21,14 @@ ENV PYTHONUNBUFFERED="1"
 ENV PYTHONDONTWRITEBYTECODE="1"
 ENV UV_PYTHON="3.13"
 ENV BOOTSTRAP_RUNTIME_DIR="/runtime"
-ENV BOOTSTRAP_CACHE_DIR="/runtime-cache"
+ENV BOOTSTRAP_CACHE_DIR="/runtime/cache"
 ENV BOOTSTRAP_STATUS_FILE="/runtime/bootstrap-status.json"
 ENV BOOTSTRAP_TIMEOUT_SECONDS="1800"
 ENV BOOTSTRAP_REQUIRE_HF_TOKEN="false"
 ENV BOOTSTRAP_FINGERPRINT_SOURCE="lockfile"
 ENV BOOTSTRAP_REBUILD_POLICY="abi_only"
 ENV BOOTSTRAP_LOG_CHANGES="true"
-ENV UV_CACHE_DIR="/runtime-cache"
+ENV UV_CACHE_DIR="/runtime/cache"
 ENV HF_HOME="/models"
 
 # Install runtime + bootstrap build prerequisites.
@@ -75,9 +75,9 @@ COPY server/config.yaml ./config.yaml
 
 # Create data directories with correct permissions
 # /runtime is for first-run dependency bootstrap.
-# /runtime-cache stores uv package cache to speed up incremental updates.
-RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /data/certs /models /user-config /certs /runtime /runtime-cache && \
-    chown -R appuser:appuser /data /models /user-config /runtime /runtime-cache
+# /runtime/cache stores uv package cache (inside the runtime volume) for incremental updates.
+RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /data/certs /models /user-config /certs /runtime /runtime/cache && \
+    chown -R appuser:appuser /data /models /user-config /runtime
 
 # Environment variables
 ENV DATA_DIR="/data"

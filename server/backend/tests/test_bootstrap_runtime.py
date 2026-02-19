@@ -34,13 +34,10 @@ def _write_marker(runtime_dir: Path, payload: dict[str, str]) -> None:
     marker_file.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _patch_fingerprint_context(
-    module: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _patch_fingerprint_context(module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module, "compute_dependency_fingerprint", lambda **_: "fp")
     monkeypatch.setattr(module, "python_abi_tag", lambda: "abi")
     monkeypatch.setattr(module.platform, "machine", lambda: "arch")
-    monkeypatch.setattr(module, "run_best_effort_uv_cache_prune", lambda **_: None)
 
 
 def test_marker_match_integrity_pass_uses_skip(
@@ -72,9 +69,7 @@ def test_marker_match_integrity_pass_uses_skip(
     monkeypatch.setattr(
         module,
         "run_dependency_sync",
-        lambda **_: (_ for _ in ()).throw(
-            AssertionError("sync should not run in skip")
-        ),
+        lambda **_: (_ for _ in ()).throw(AssertionError("sync should not run in skip")),
     )
 
     _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
@@ -498,9 +493,7 @@ def test_main_reuses_cached_diarization_status_when_preload_key_matches(
         return runtime_dir / ".venv", "skip", {}, diagnostics
 
     def fail_diarization_check(**_: object) -> None:  # type: ignore[no-untyped-def]
-        raise AssertionError(
-            "check_diarization_access should be skipped when cache key matches"
-        )
+        raise AssertionError("check_diarization_access should be skipped when cache key matches")
 
     captured_status: dict[str, object] = {}
 

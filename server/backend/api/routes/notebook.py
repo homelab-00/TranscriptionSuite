@@ -12,7 +12,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any
 
 import aiofiles
 from fastapi import (
@@ -27,10 +27,10 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
-
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 from server.core.subtitle_export import build_subtitle_cues, render_ass, render_srt
+from server.database.backup import DatabaseBackupManager
 
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
@@ -45,11 +45,10 @@ from server.database.database import (
     get_time_slot_info,
     get_words,
     save_longform_to_database,
-    update_recording_title,
-    update_recording_summary,
     update_recording_date,
+    update_recording_summary,
+    update_recording_title,
 )
-from server.database.backup import DatabaseBackupManager
 
 logger = logging.getLogger(__name__)
 
@@ -62,28 +61,28 @@ class RecordingResponse(BaseModel):
     id: int
     filename: str
     filepath: str
-    title: Optional[str] = None
+    title: str | None = None
     duration_seconds: float
     recorded_at: str
-    imported_at: Optional[str] = None
+    imported_at: str | None = None
     word_count: int = 0
     has_diarization: bool = False
-    summary: Optional[str] = None
-    summary_model: Optional[str] = None
+    summary: str | None = None
+    summary_model: str | None = None
 
 
 class RecordingDetailResponse(RecordingResponse):
     """Detailed recording response with segments and words."""
 
-    segments: List[Dict[str, Any]] = []
-    words: List[Dict[str, Any]] = []
+    segments: list[dict[str, Any]] = []
+    words: list[dict[str, Any]] = []
 
 
 class SummaryUpdate(BaseModel):
     """Request body for updating a recording's summary."""
 
-    summary: Optional[str] = None
-    summary_model: Optional[str] = None
+    summary: str | None = None
+    summary_model: str | None = None
 
 
 class TitleUpdate(BaseModel):
@@ -98,11 +97,11 @@ class DateUpdate(BaseModel):
     recorded_at: str
 
 
-@router.get("/recordings", response_model=List[RecordingResponse])
+@router.get("/recordings", response_model=list[RecordingResponse])
 async def list_recordings(
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-) -> List[Dict[str, Any]]:
+    start_date: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+) -> list[dict[str, Any]]:
     """
     List all recordings, optionally filtered by date range.
     """
@@ -116,11 +115,11 @@ async def list_recordings(
 
     except Exception as e:
         logger.error(f"Failed to list recordings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/recordings/{recording_id}", response_model=RecordingDetailResponse)
-async def get_recording_detail(recording_id: int) -> Dict[str, Any]:
+async def get_recording_detail(recording_id: int) -> dict[str, Any]:
     """
     Get a single recording with full details including segments and words.
     """
@@ -140,7 +139,7 @@ async def get_recording_detail(recording_id: int) -> Dict[str, Any]:
 
 
 @router.delete("/recordings/{recording_id}")
-async def remove_recording(recording_id: int) -> Dict[str, str]:
+async def remove_recording(recording_id: int) -> dict[str, str]:
     """
     Delete a recording and all associated data.
 
@@ -173,8 +172,8 @@ async def remove_recording(recording_id: int) -> Dict[str, str]:
 async def update_summary_put(
     recording_id: int,
     summary: str,
-    summary_model: Optional[str] = None,
-) -> Dict[str, Any]:
+    summary_model: str | None = None,
+) -> dict[str, Any]:
     """
     Update the summary for a recording (PUT with query param).
     """
@@ -196,7 +195,7 @@ async def update_summary_put(
 async def update_summary_patch(
     recording_id: int,
     body: SummaryUpdate,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Update the summary for a recording (PATCH with JSON body).
     """
@@ -218,7 +217,7 @@ async def update_summary_patch(
 async def update_title_patch(
     recording_id: int,
     body: TitleUpdate,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Update the title for a recording (PATCH with JSON body)."""
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -237,7 +236,7 @@ async def update_title_patch(
 async def update_date_patch(
     recording_id: int,
     body: DateUpdate,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Update the recorded_at date for a recording."""
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -255,7 +254,7 @@ async def update_date_patch(
 @router.get("/recordings/{recording_id}/audio")
 async def get_audio_file(
     recording_id: int,
-    range: Optional[str] = Header(None, alias="Range"),
+    range: str | None = Header(None, alias="Range"),
 ) -> Response:
     """
     Stream the audio file for a recording with HTTP Range request support.
@@ -337,7 +336,7 @@ async def get_audio_file(
 
 
 @router.get("/recordings/{recording_id}/transcription")
-async def get_transcription(recording_id: int) -> Dict[str, Any]:
+async def get_transcription(recording_id: int) -> dict[str, Any]:
     """
     Get the transcription for a recording (segments with words).
     """
@@ -349,7 +348,7 @@ async def get_transcription(recording_id: int) -> Dict[str, Any]:
     words = get_words(recording_id)
 
     # Group words by segment_id
-    words_by_segment: Dict[int, List[Dict[str, Any]]] = {}
+    words_by_segment: dict[int, list[dict[str, Any]]] = {}
     for word in words:
         seg_id = word.get("segment_id")
         if seg_id not in words_by_segment:
@@ -388,21 +387,22 @@ class UploadResponse(BaseModel):
 
     recording_id: int
     message: str
-    diarization: Dict[str, Any]
+    diarization: dict[str, Any]
 
 
 @router.post("/transcribe/upload", response_model=UploadResponse)
 async def upload_and_transcribe(
     request: Request,
-    file: UploadFile = File(...),
-    language: Optional[str] = Form(None),
+    file: Annotated[UploadFile, File(...)],
+    language: str | None = Form(None),
     translation_enabled: bool = Form(False),
-    translation_target_language: Optional[str] = Form(None),
+    translation_target_language: str | None = Form(None),
     enable_diarization: bool = Form(False),
     enable_word_timestamps: bool = Form(True),
-    file_created_at: Optional[str] = Form(None),
-    expected_speakers: Optional[int] = Form(None),
-) -> Dict[str, Any]:
+    file_created_at: str | None = Form(None),
+    expected_speakers: int | None = Form(None),
+    title: str | None = Form(None),
+) -> dict[str, Any]:
     """
     Upload an audio file, transcribe it, and save to the notebook database.
 
@@ -470,7 +470,7 @@ async def upload_and_transcribe(
 
         # Run diarization if enabled
         diarization_segments = None
-        diarization_outcome: Dict[str, Any] = {
+        diarization_outcome: dict[str, Any] = {
             "requested": bool(enable_diarization),
             "performed": False,
             "reason": None,
@@ -482,9 +482,7 @@ async def upload_and_transcribe(
                 diar_engine = model_manager.diarization_engine
 
                 # Load audio for diarization
-                audio_data, sample_rate = load_audio(
-                    str(tmp_path), target_sample_rate=16000
-                )
+                audio_data, sample_rate = load_audio(str(tmp_path), target_sample_rate=16000)
                 diar_result = diar_engine.diarize_audio(
                     audio_data, sample_rate, num_speakers=expected_speakers
                 )
@@ -493,36 +491,26 @@ async def upload_and_transcribe(
                 diarization_segments = [seg.to_dict() for seg in diar_result.segments]
                 diarization_outcome["performed"] = True
                 diarization_outcome["reason"] = "ready"
-                logger.info(
-                    f"Diarization complete: {diar_result.num_speakers} speakers found"
-                )
+                logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
             except ValueError as e:
                 # HF_TOKEN missing - log helpful message
                 logger.error(f"Diarization requires HuggingFace token: {e}")
-                logger.error(
-                    "Set HUGGINGFACE_TOKEN env var when starting docker compose"
-                )
-                diarization_outcome["reason"] = (
-                    model_manager.get_diarization_feature_status().get(
-                        "reason", "token_missing"
-                    )
+                logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
+                diarization_outcome["reason"] = model_manager.get_diarization_feature_status().get(
+                    "reason", "token_missing"
                 )
             except Exception as e:
                 logger.error(f"Diarization failed (continuing without): {e}")
                 # Don't fail the whole upload if diarization fails
-                diarization_outcome["reason"] = (
-                    model_manager.get_diarization_feature_status().get(
-                        "reason", "unavailable"
-                    )
+                diarization_outcome["reason"] = model_manager.get_diarization_feature_status().get(
+                    "reason", "unavailable"
                 )
 
         # Determine recorded_at timestamp
         recorded_at = None
         if file_created_at:
             try:
-                recorded_at = datetime.fromisoformat(
-                    file_created_at.replace("Z", "+00:00")
-                )
+                recorded_at = datetime.fromisoformat(file_created_at.replace("Z", "+00:00"))
             except ValueError:
                 logger.warning(
                     f"Invalid file_created_at format: {sanitize_for_log(file_created_at)}"
@@ -541,9 +529,7 @@ async def upload_and_transcribe(
 
         # Convert audio to MP3 and save to permanent storage
         config = get_config()
-        audio_dir = Path(
-            config.get("audio_notebook", "audio_dir", default="/data/audio")
-        )
+        audio_dir = Path(config.get("audio_notebook", "audio_dir", default="/data/audio"))
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Keep original filename, convert to .mp3 extension
@@ -578,6 +564,8 @@ async def upload_and_transcribe(
                     word_timestamps_list.extend(seg["words"])
 
         # Save to database
+        # Use provided title if given, otherwise database falls back to filename stem
+        clean_title = title.strip() if title else None
         recording_id = save_longform_to_database(
             audio_path=dest_path,
             duration_seconds=result.duration,
@@ -585,12 +573,11 @@ async def upload_and_transcribe(
             word_timestamps=word_timestamps_list,
             diarization_segments=diarization_segments,
             recorded_at=recorded_at,
+            title=clean_title or None,
         )
 
         if not recording_id:
-            raise HTTPException(
-                status_code=500, detail="Failed to save recording to database"
-            )
+            raise HTTPException(status_code=500, detail="Failed to save recording to database")
 
         return {
             "recording_id": recording_id,
@@ -599,14 +586,14 @@ async def upload_and_transcribe(
         }
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except HTTPException:
         raise
 
     except Exception as e:
         logger.error(f"Upload transcription failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     finally:
         # Release the job slot
@@ -623,7 +610,7 @@ async def upload_and_transcribe(
 async def get_calendar_data(
     year: int = Query(..., description="Year"),
     month: int = Query(..., description="Month (1-12)"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get recordings grouped by day for calendar view.
     """
@@ -638,7 +625,7 @@ async def get_calendar_data(
         recordings = get_recordings_by_date_range(start_date, end_date)
 
         # Group by day
-        days: Dict[str, List[Dict[str, Any]]] = {}
+        days: dict[str, list[dict[str, Any]]] = {}
         for rec in recordings:
             recorded_at = rec.get("recorded_at", "")
             if recorded_at:
@@ -656,14 +643,14 @@ async def get_calendar_data(
 
     except Exception as e:
         logger.error(f"Failed to get calendar data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/timeslot")
 async def get_timeslot_info(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     hour: int = Query(..., ge=0, le=23, description="Hour (0-23)"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get information about a specific time slot.
 
@@ -680,7 +667,7 @@ async def get_timeslot_info(
 
     except Exception as e:
         logger.error(f"Failed to get time slot info: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/recordings/{recording_id}/export")
@@ -887,7 +874,7 @@ def _get_backup_manager() -> DatabaseBackupManager:
 
 
 @router.get("/backups")
-async def list_backups() -> Dict[str, Any]:
+async def list_backups() -> dict[str, Any]:
     """
     List all available database backups.
 
@@ -903,11 +890,11 @@ async def list_backups() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to list backups: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/backup")
-async def create_backup() -> Dict[str, Any]:
+async def create_backup() -> dict[str, Any]:
     """
     Create a manual database backup.
 
@@ -930,7 +917,7 @@ async def create_backup() -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to create backup: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class RestoreRequest(BaseModel):
@@ -940,7 +927,7 @@ class RestoreRequest(BaseModel):
 
 
 @router.post("/restore")
-async def restore_backup(body: RestoreRequest) -> Dict[str, Any]:
+async def restore_backup(body: RestoreRequest) -> dict[str, Any]:
     """
     Restore the database from a backup.
 
@@ -963,15 +950,11 @@ async def restore_backup(body: RestoreRequest) -> Dict[str, Any]:
                 break
 
         if not backup_path:
-            raise HTTPException(
-                status_code=404, detail=f"Backup not found: {body.filename}"
-            )
+            raise HTTPException(status_code=404, detail=f"Backup not found: {body.filename}")
 
         # Verify backup is valid
         if not manager.verify_backup(backup_path):
-            raise HTTPException(
-                status_code=400, detail="Backup file is invalid or corrupted"
-            )
+            raise HTTPException(status_code=400, detail="Backup file is invalid or corrupted")
 
         # Perform restore
         success = manager.restore_backup(backup_path)
@@ -989,4 +972,4 @@ async def restore_backup(body: RestoreRequest) -> Dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Failed to restore backup: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

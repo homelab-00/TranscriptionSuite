@@ -22,6 +22,7 @@ import {
   RotateCcw,
   XCircle,
   AlertCircle,
+  Info,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -1189,6 +1190,18 @@ const ImportTab = () => {
   const [isDragOver, setIsDragOver] = useState(false);
   const queue = useImportQueue();
 
+  // Constraint: diarization ON → force timestamps ON
+  const handleDiarizationChange = useCallback((enabled: boolean) => {
+    setDiarization(enabled);
+    if (enabled) setWordTimestamps(true);
+  }, []);
+
+  // Constraint: timestamps OFF → force diarization OFF
+  const handleTimestampsChange = useCallback((enabled: boolean) => {
+    setWordTimestamps(enabled);
+    if (!enabled) setDiarization(false);
+  }, []);
+
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
@@ -1332,18 +1345,27 @@ const ImportTab = () => {
         </GlassCard>
       )}
 
+      {/* Import Info Note */}
+      <div className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2.5">
+        <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
+        <p className="text-xs leading-relaxed text-slate-500">
+          Imported audio files will be saved as audio notes using the file name as the note title
+          and the file's creation date as the recording date.
+        </p>
+      </div>
+
       <GlassCard title="Import Options">
         <div className="space-y-4">
           <AppleSwitch
             checked={diarization}
-            onChange={setDiarization}
+            onChange={handleDiarizationChange}
             label="Speaker Diarization"
             description="Identify distinct speakers in the audio"
           />
           <div className="h-px bg-white/5"></div>
           <AppleSwitch
             checked={wordTimestamps}
-            onChange={setWordTimestamps}
+            onChange={handleTimestampsChange}
             label="Word-level Timestamps"
             description="Generate precise timestamps for every word"
           />

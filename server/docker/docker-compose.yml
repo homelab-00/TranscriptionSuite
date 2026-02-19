@@ -67,7 +67,7 @@ services:
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
       - BOOTSTRAP_RUNTIME_DIR=/runtime
-      - BOOTSTRAP_CACHE_DIR=${BOOTSTRAP_CACHE_DIR:-/runtime-cache}
+      - BOOTSTRAP_CACHE_DIR=/runtime/cache
       - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json
       - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
       - BOOTSTRAP_REQUIRE_HF_TOKEN=false
@@ -85,8 +85,7 @@ services:
     volumes:
       - transcription-data:/data  # Database, audio files, tokens, logs
       - huggingface-models:/models  # Whisper and diarization models cache
-      - runtime-deps:/runtime  # Runtime virtualenv and bootstrap marker state
-      - uv-cache:/runtime-cache  # Persistent uv cache for delta dependency updates
+      - runtime-deps:/runtime  # Runtime virtualenv, bootstrap marker state, and uv cache
       # User config directory (optional - for custom config.yaml and logs)
       # Set USER_CONFIG_DIR to mount your local config directory:
       #   Linux: USER_CONFIG_DIR=~/.config/TranscriptionSuite
@@ -115,5 +114,3 @@ volumes:
     name: transcriptionsuite-models
   runtime-deps:
     name: transcriptionsuite-runtime
-  uv-cache:
-    name: transcriptionsuite-uv-cache

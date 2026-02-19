@@ -17,7 +17,6 @@ type TrayState =
 
 type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
-type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
 
 interface StartContainerOptions {
   mode: 'local' | 'remote';
@@ -25,9 +24,7 @@ interface StartContainerOptions {
   imageTag?: string;
   tlsEnv?: Record<string, string>;
   hfToken?: string;
-  bootstrapCacheDir?: string;
   hfTokenDecision?: HfTokenDecision;
-  uvCacheVolumeDecision?: UvCacheVolumeDecision;
 }
 
 interface TrayMenuState {

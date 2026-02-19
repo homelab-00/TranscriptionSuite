@@ -31,7 +31,6 @@ export interface TrayMenuState {
 
 export type RuntimeProfile = 'gpu' | 'cpu';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
-export type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
 
 export interface StartContainerOptions {
   mode: 'local' | 'remote';
@@ -39,9 +38,7 @@ export interface StartContainerOptions {
   imageTag?: string;
   tlsEnv?: Record<string, string>;
   hfToken?: string;
-  bootstrapCacheDir?: string;
   hfTokenDecision?: HfTokenDecision;
-  uvCacheVolumeDecision?: UvCacheVolumeDecision;
 }
 
 export interface ElectronAPI {

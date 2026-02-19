@@ -83,13 +83,11 @@ function getComposeDir(): string {
 /** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
 export type RuntimeProfile = 'gpu' | 'cpu';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
-export type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
 
 const VOLUME_NAMES = {
   data: 'transcriptionsuite-data',
   models: 'transcriptionsuite-models',
   runtime: 'transcriptionsuite-runtime',
-  uvCache: 'transcriptionsuite-uv-cache',
 } as const;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -130,26 +128,15 @@ export interface StartContainerOptions {
   imageTag?: string;
   tlsEnv?: Record<string, string>;
   hfToken?: string;
-  bootstrapCacheDir?: string;
   hfTokenDecision?: HfTokenDecision;
-  uvCacheVolumeDecision?: UvCacheVolumeDecision;
 }
 
 const HF_DECISION_VALUES = new Set<HfTokenDecision>(['unset', 'provided', 'skipped']);
-const UV_CACHE_DECISION_VALUES = new Set<UvCacheVolumeDecision>(['unset', 'enabled', 'skipped']);
-const DEFAULT_BOOTSTRAP_CACHE_DIR = '/runtime-cache';
-const SKIPPED_BOOTSTRAP_CACHE_DIR = '/tmp/uv-cache';
 
 function normalizeHfTokenDecision(value: unknown): HfTokenDecision | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim().toLowerCase() as HfTokenDecision;
   return HF_DECISION_VALUES.has(normalized) ? normalized : undefined;
-}
-
-function normalizeUvCacheDecision(value: unknown): UvCacheVolumeDecision | undefined {
-  if (typeof value !== 'string') return undefined;
-  const normalized = value.trim().toLowerCase() as UvCacheVolumeDecision;
-  return UV_CACHE_DECISION_VALUES.has(normalized) ? normalized : undefined;
 }
 
 function sanitizeEnvValue(value: string): string {
@@ -521,27 +508,9 @@ async function getContainerStatus(): Promise<ContainerStatus> {
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
  */
 async function startContainer(options: StartContainerOptions): Promise<string> {
-  const {
-    mode,
-    runtimeProfile,
-    imageTag,
-    tlsEnv,
-    hfToken,
-    bootstrapCacheDir,
-    hfTokenDecision,
-    uvCacheVolumeDecision,
-  } = options;
+  const { mode, runtimeProfile, imageTag, tlsEnv, hfToken, hfTokenDecision } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
-  const normalizedUvDecision = normalizeUvCacheDecision(uvCacheVolumeDecision);
-  const resolvedBootstrapCacheDir =
-    typeof bootstrapCacheDir === 'string' && bootstrapCacheDir.trim().length > 0
-      ? bootstrapCacheDir.trim()
-      : normalizedUvDecision === 'skipped'
-        ? SKIPPED_BOOTSTRAP_CACHE_DIR
-        : normalizedUvDecision
-          ? DEFAULT_BOOTSTRAP_CACHE_DIR
-          : undefined;
 
   // Prefer a local image tag for dev workflows when no explicit tag is provided.
   let resolvedTag = imageTag;
@@ -575,12 +544,6 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   if (normalizedHfDecision) {
     composeEnv['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
   }
-  if (normalizedUvDecision) {
-    composeEnv['UV_CACHE_VOLUME_DECISION'] = normalizedUvDecision;
-  }
-  if (resolvedBootstrapCacheDir) {
-    composeEnv['BOOTSTRAP_CACHE_DIR'] = resolvedBootstrapCacheDir;
-  }
 
   const envUpdates: Record<string, string> = {};
   if (hfToken !== undefined) {
@@ -588,12 +551,6 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
   if (normalizedHfDecision) {
     envUpdates['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
-  }
-  if (normalizedUvDecision) {
-    envUpdates['UV_CACHE_VOLUME_DECISION'] = normalizedUvDecision;
-  }
-  if (resolvedBootstrapCacheDir) {
-    envUpdates['BOOTSTRAP_CACHE_DIR'] = resolvedBootstrapCacheDir;
   }
   upsertComposeEnvValues(envUpdates);
 
@@ -657,7 +614,6 @@ const VOLUME_LABELS: Record<string, string> = {
   [VOLUME_NAMES.data]: 'Data Volume',
   [VOLUME_NAMES.models]: 'Models Volume',
   [VOLUME_NAMES.runtime]: 'Runtime Volume',
-  [VOLUME_NAMES.uvCache]: 'UV Cache Volume',
 };
 
 /**

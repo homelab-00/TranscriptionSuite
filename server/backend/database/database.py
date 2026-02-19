@@ -15,10 +15,11 @@ import sqlite3
 import subprocess
 import tempfile
 import wave
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -28,8 +29,8 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 # Default paths - can be overridden via environment or config
-_data_dir: Optional[Path] = None
-_db_path: Optional[Path] = None
+_data_dir: Path | None = None
+_db_path: Path | None = None
 
 
 def set_data_directory(path: Path) -> None:
@@ -75,7 +76,7 @@ def get_audio_dir() -> Path:
 
 
 @contextmanager
-def get_connection() -> Generator[sqlite3.Connection, None, None]:
+def get_connection() -> Generator[sqlite3.Connection]:
     """Get a database connection with context manager.
 
     Connection is configured for multi-user safety:
@@ -97,7 +98,7 @@ def get_connection() -> Generator[sqlite3.Connection, None, None]:
 
 
 @contextmanager
-def get_db_session() -> Generator[sqlite3.Connection, None, None]:
+def get_db_session() -> Generator[sqlite3.Connection]:
     """Alias for get_connection for API compatibility."""
     with get_connection() as conn:
         yield conn
@@ -263,7 +264,7 @@ def init_db() -> None:
 class Recording:
     """Recording model class."""
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: dict[str, Any]):
         self.id = data.get("id")
         self.filename = data.get("filename")
         self.filepath = data.get("filepath")
@@ -276,7 +277,7 @@ class Recording:
         self.summary = data.get("summary")
         self.summary_model = data.get("summary_model")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "filename": self.filename,
@@ -298,7 +299,7 @@ def insert_recording(
     duration_seconds: float,
     recorded_at: str,
     has_diarization: bool = False,
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> int:
     """Insert a new recording and return its ID."""
     with get_connection() as conn:
@@ -322,7 +323,7 @@ def insert_recording(
         return cursor.lastrowid or 0
 
 
-def get_recording(recording_id: int) -> Optional[Dict[str, Any]]:
+def get_recording(recording_id: int) -> dict[str, Any] | None:
     """Get a recording by ID."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -331,7 +332,7 @@ def get_recording(recording_id: int) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
-def get_all_recordings() -> List[Dict[str, Any]]:
+def get_all_recordings() -> list[dict[str, Any]]:
     """Get all recordings ordered by date."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -339,15 +340,13 @@ def get_all_recordings() -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
-def get_recordings_by_date_range(
-    start_date: str, end_date: str
-) -> List[Dict[str, Any]]:
+def get_recordings_by_date_range(start_date: str, end_date: str) -> list[dict[str, Any]]:
     """Get recordings within a date range."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM recordings 
+            SELECT * FROM recordings
             WHERE date(recorded_at) BETWEEN date(?) AND date(?)
             ORDER BY recorded_at DESC
             """,
@@ -367,8 +366,8 @@ def delete_recording(recording_id: int) -> bool:
 
 def update_recording_summary(
     recording_id: int,
-    summary: Optional[str],
-    summary_model: Optional[str] = None,
+    summary: str | None,
+    summary_model: str | None = None,
 ) -> bool:
     """Update the summary for a recording."""
     with get_connection() as conn:
@@ -404,7 +403,7 @@ def insert_segment(
     text: str,
     start_time: float,
     end_time: float,
-    speaker: Optional[str] = None,
+    speaker: str | None = None,
 ) -> int:
     """Insert a segment and return its ID."""
     with get_connection() as conn:
@@ -427,7 +426,7 @@ def insert_word(
     word: str,
     start_time: float,
     end_time: float,
-    confidence: Optional[float] = None,
+    confidence: float | None = None,
 ) -> int:
     """Insert a word and return its ID."""
     with get_connection() as conn:
@@ -451,7 +450,7 @@ def insert_word(
         return cursor.lastrowid or 0
 
 
-def insert_words_batch(words: List[Dict[str, Any]]) -> None:
+def insert_words_batch(words: list[dict[str, Any]]) -> None:
     """Insert multiple words in a batch for efficiency."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -471,7 +470,7 @@ def update_recording_word_count(recording_id: int) -> None:
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE recordings 
+            UPDATE recordings
             SET word_count = (SELECT COUNT(*) FROM words WHERE recording_id = ?)
             WHERE id = ?
             """,
@@ -480,7 +479,7 @@ def update_recording_word_count(recording_id: int) -> None:
         conn.commit()
 
 
-def get_segments(recording_id: int) -> List[Dict[str, Any]]:
+def get_segments(recording_id: int) -> list[dict[str, Any]]:
     """Get all segments for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -491,7 +490,7 @@ def get_segments(recording_id: int) -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
-def get_words(recording_id: int) -> List[Dict[str, Any]]:
+def get_words(recording_id: int) -> list[dict[str, Any]]:
     """Get all words for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -507,7 +506,7 @@ def get_words(recording_id: int) -> List[Dict[str, Any]]:
 # =============================================================================
 
 
-def search_words(query: str, limit: int = 100) -> List[Dict[str, Any]]:
+def search_words(query: str, limit: int = 100) -> list[dict[str, Any]]:
     """Search words using FTS5."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -530,10 +529,10 @@ def search_words(query: str, limit: int = 100) -> List[Dict[str, Any]]:
 
 def search_words_by_date_range(
     query: str,
-    start_date: Optional[str],
-    end_date: Optional[str],
+    start_date: str | None,
+    end_date: str | None,
     limit: int = 100,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Search words using FTS5, optionally filtered by recording date."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -558,10 +557,10 @@ def search_words_by_date_range(
 
 def search_recording_metadata(
     query: str,
-    start_date: Optional[str],
-    end_date: Optional[str],
+    start_date: str | None,
+    end_date: str | None,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Search recordings by filename/title/summary."""
     like_query = f"%{query}%"
     with get_connection() as conn:
@@ -600,7 +599,7 @@ def search_recording_metadata(
     return filename_matches + summary_matches
 
 
-def search_recordings(query: str, limit: int = 50) -> List[Dict[str, Any]]:
+def search_recordings(query: str, limit: int = 50) -> list[dict[str, Any]]:
     """Search recordings by word content."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -639,14 +638,14 @@ def create_conversation(recording_id: int, title: str = "New Chat") -> int:
         return cursor.lastrowid or 0
 
 
-def get_conversations(recording_id: int) -> List[Dict[str, Any]]:
+def get_conversations(recording_id: int) -> list[dict[str, Any]]:
     """Get all conversations for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM conversations 
-            WHERE recording_id = ? 
+            SELECT * FROM conversations
+            WHERE recording_id = ?
             ORDER BY updated_at DESC
             """,
             (recording_id,),
@@ -658,8 +657,8 @@ def add_message(
     conversation_id: int,
     role: str,
     content: str,
-    model: Optional[str] = None,
-    tokens_used: Optional[int] = None,
+    model: str | None = None,
+    tokens_used: int | None = None,
 ) -> int:
     """Add a message to a conversation."""
     with get_connection() as conn:
@@ -680,14 +679,14 @@ def add_message(
         return cursor.lastrowid or 0
 
 
-def get_messages(conversation_id: int) -> List[Dict[str, Any]]:
+def get_messages(conversation_id: int) -> list[dict[str, Any]]:
     """Get all messages in a conversation."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM messages 
-            WHERE conversation_id = ? 
+            SELECT * FROM messages
+            WHERE conversation_id = ?
             ORDER BY created_at ASC
             """,
             (conversation_id,),
@@ -704,7 +703,7 @@ def delete_conversation(conversation_id: int) -> bool:
         return cursor.rowcount > 0
 
 
-def get_conversation(conversation_id: int) -> Optional[Dict[str, Any]]:
+def get_conversation(conversation_id: int) -> dict[str, Any] | None:
     """Get a conversation by ID."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -719,7 +718,7 @@ def update_conversation_title(conversation_id: int, title: str) -> bool:
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE conversations 
+            UPDATE conversations
             SET title = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
@@ -729,15 +728,13 @@ def update_conversation_title(conversation_id: int, title: str) -> bool:
         return cursor.rowcount > 0
 
 
-def update_conversation_response_id(
-    conversation_id: int, response_id: Optional[str]
-) -> bool:
+def update_conversation_response_id(conversation_id: int, response_id: str | None) -> bool:
     """Update a conversation's LM Studio response_id for stateful sessions."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE conversations 
+            UPDATE conversations
             SET response_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
@@ -747,7 +744,7 @@ def update_conversation_response_id(
         return cursor.rowcount > 0
 
 
-def get_conversation_with_messages(conversation_id: int) -> Optional[Dict[str, Any]]:
+def get_conversation_with_messages(conversation_id: int) -> dict[str, Any] | None:
     """Get a conversation with all its messages."""
     conversation = get_conversation(conversation_id)
     if conversation:
@@ -769,13 +766,13 @@ def delete_message(message_id: int) -> bool:
 # =============================================================================
 
 
-def get_recordings_for_month(year: int, month: int) -> List[Dict[str, Any]]:
+def get_recordings_for_month(year: int, month: int) -> list[dict[str, Any]]:
     """Get recordings for a specific month."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM recordings 
+            SELECT * FROM recordings
             WHERE strftime('%Y', recorded_at) = ? AND strftime('%m', recorded_at) = ?
             ORDER BY recorded_at DESC
             """,
@@ -784,13 +781,13 @@ def get_recordings_for_month(year: int, month: int) -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
-def get_recordings_for_hour(date_str: str, hour: int) -> List[Dict[str, Any]]:
+def get_recordings_for_hour(date_str: str, hour: int) -> list[dict[str, Any]]:
     """Get recordings for a specific date and hour, ordered by recorded_at."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT * FROM recordings 
+            SELECT * FROM recordings
             WHERE date(recorded_at) = date(?)
             AND CAST(strftime('%H', recorded_at) AS INTEGER) = ?
             ORDER BY recorded_at ASC
@@ -815,8 +812,8 @@ def update_recording_date(recording_id: int, recorded_at: str) -> bool:
 def check_time_slot_overlap(
     start_time: datetime,
     duration_seconds: float,
-    exclude_recording_id: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    exclude_recording_id: int | None = None,
+) -> dict[str, Any] | None:
     """
     Check if a recording would overlap with existing recordings.
 
@@ -842,7 +839,7 @@ def check_time_slot_overlap(
             WHERE datetime(recorded_at) < datetime(?, 'unixepoch')
               AND datetime(recorded_at, '+' || CAST(duration_seconds AS TEXT) || ' seconds') > datetime(?, 'unixepoch')
         """
-        params: List[Any] = [end_time, start_time.timestamp()]
+        params: list[Any] = [end_time, start_time.timestamp()]
 
         if exclude_recording_id:
             query += " AND id != ?"
@@ -861,7 +858,7 @@ def check_time_slot_overlap(
 def get_next_available_start_time(
     target_date: str,
     hour: int,
-) -> Optional[datetime]:
+) -> datetime | None:
     """
     Get the next available start time for a given hour slot.
 
@@ -910,9 +907,7 @@ def get_next_available_start_time(
         )
 
         for row in cursor.fetchall():
-            rec_start = datetime.fromisoformat(
-                row["recorded_at"].replace("Z", "+00:00")
-            )
+            rec_start = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
             rec_end_timestamp = rec_start.timestamp() + row["duration_seconds"]
             if rec_end_timestamp > latest_end_timestamp:
                 latest_end_timestamp = rec_end_timestamp
@@ -944,7 +939,7 @@ def get_next_available_start_time(
     return next_start
 
 
-def get_time_slot_info(target_date: str, hour: int) -> Dict[str, Any]:
+def get_time_slot_info(target_date: str, hour: int) -> dict[str, Any]:
     """
     Get information about a time slot including available time and existing recordings.
 
@@ -982,7 +977,7 @@ def get_time_slot_info(target_date: str, hour: int) -> Dict[str, Any]:
     }
 
 
-def get_recording_summary(recording_id: int) -> Optional[str]:
+def get_recording_summary(recording_id: int) -> str | None:
     """Get the AI summary for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -991,7 +986,7 @@ def get_recording_summary(recording_id: int) -> Optional[str]:
         return row["summary"] if row else None
 
 
-def get_transcription(recording_id: int) -> Dict[str, Any]:
+def get_transcription(recording_id: int) -> dict[str, Any]:
     """Get full transcription with segments and words."""
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -1010,7 +1005,7 @@ def get_transcription(recording_id: int) -> Dict[str, Any]:
             placeholders = ",".join("?" * len(segment_ids))
             cursor.execute(
                 f"""
-                SELECT 
+                SELECT
                     w.segment_id,
                     w.word,
                     w.start_time,
@@ -1069,17 +1064,17 @@ def get_transcription(recording_id: int) -> Dict[str, Any]:
 def search_words_enhanced(
     query: str,
     fuzzy: bool = False,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 100,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Search for words in transcriptions using FTS5, plus filenames and summaries.
     Returns matching words with context (surrounding words, recording info).
     """
     with get_connection() as conn:
         cursor = conn.cursor()
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         # 1. Search in words using FTS5
         if fuzzy:
@@ -1088,7 +1083,7 @@ def search_words_enhanced(
             fts_query = f'"{query}"'
 
         sql = """
-            SELECT 
+            SELECT
                 w.id,
                 w.recording_id,
                 w.segment_id,
@@ -1105,7 +1100,7 @@ def search_words_enhanced(
             JOIN segments s ON w.segment_id = s.id
             WHERE words_fts MATCH ?
         """
-        params: List[Any] = [fts_query]
+        params: list[Any] = [fts_query]
 
         if start_date:
             sql += " AND date(r.recorded_at) >= date(?)"
@@ -1125,11 +1120,11 @@ def search_words_enhanced(
             # Get context (surrounding words)
             cursor.execute(
                 """
-                SELECT word, start_time, end_time 
-                FROM words 
-                WHERE segment_id = ? 
-                AND word_index BETWEEN 
-                    (SELECT word_index FROM words WHERE id = ?) - 5 
+                SELECT word, start_time, end_time
+                FROM words
+                WHERE segment_id = ?
+                AND word_index BETWEEN
+                    (SELECT word_index FROM words WHERE id = ?) - 5
                     AND (SELECT word_index FROM words WHERE id = ?) + 5
                 ORDER BY word_index
                 """,
@@ -1144,7 +1139,7 @@ def search_words_enhanced(
         # 2. Search in filenames
         like_pattern = f"%{query}%"
         filename_sql = """
-            SELECT 
+            SELECT
                 r.id as recording_id,
                 r.filename,
                 r.recorded_at,
@@ -1152,7 +1147,7 @@ def search_words_enhanced(
             FROM recordings r
             WHERE LOWER(r.filename) LIKE LOWER(?)
         """
-        filename_params: List[Any] = [like_pattern]
+        filename_params: list[Any] = [like_pattern]
 
         if start_date:
             filename_sql += " AND date(r.recorded_at) >= date(?)"
@@ -1191,7 +1186,7 @@ def search_words_enhanced(
 
         # 3. Search in summaries
         summary_sql = """
-            SELECT 
+            SELECT
                 r.id as recording_id,
                 r.filename,
                 r.recorded_at,
@@ -1199,7 +1194,7 @@ def search_words_enhanced(
             FROM recordings r
             WHERE r.summary IS NOT NULL AND LOWER(r.summary) LIKE LOWER(?)
         """
-        summary_params: List[Any] = [like_pattern]
+        summary_params: list[Any] = [like_pattern]
 
         if start_date:
             summary_sql += " AND date(r.recorded_at) >= date(?)"
@@ -1272,8 +1267,8 @@ def ensure_audio_dir() -> bool:
 def convert_audio_to_mp3(
     audio_data: np.ndarray,
     sample_rate: int = 16000,
-    output_path: Optional[Path] = None,
-) -> Optional[Path]:
+    output_path: Path | None = None,
+) -> Path | None:
     """
     Convert numpy audio array to MP3 file.
 
@@ -1349,7 +1344,7 @@ def _insert_single_segment_with_words(
     recording_id: int,
     text: str,
     duration: float,
-    word_timestamps: List[Dict[str, Any]],
+    word_timestamps: list[dict[str, Any]],
 ) -> None:
     """Insert a single segment with word timestamps (internal helper).
 
@@ -1394,8 +1389,8 @@ def _insert_single_segment_with_words(
 def _insert_diarization_segments_with_words(
     cursor: sqlite3.Cursor,
     recording_id: int,
-    diarization_segments: List[Dict[str, Any]],
-    alignment_words: Optional[List[Dict[str, Any]]] = None,
+    diarization_segments: list[dict[str, Any]],
+    alignment_words: list[dict[str, Any]] | None = None,
     save_words: bool = True,
 ) -> None:
     """Insert diarization segments with optional word timestamps (internal helper).
@@ -1409,9 +1404,9 @@ def _insert_diarization_segments_with_words(
 
     Note: This function does NOT commit - caller is responsible for transaction management.
     """
-    word_map: List[Dict[str, Any]] = alignment_words or []
+    word_map: list[dict[str, Any]] = alignment_words or []
 
-    inserted_segments: List[Dict[str, Any]] = []
+    inserted_segments: list[dict[str, Any]] = []
 
     for seg_idx, segment in enumerate(diarization_segments):
         speaker = segment.get("speaker")
@@ -1421,7 +1416,7 @@ def _insert_diarization_segments_with_words(
 
         cursor.execute(
             """
-            INSERT INTO segments 
+            INSERT INTO segments
             (recording_id, segment_index, text, start_time, end_time, speaker)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
@@ -1438,7 +1433,7 @@ def _insert_diarization_segments_with_words(
         )
 
     if word_map and inserted_segments:
-        words_by_segment_id: Dict[int, List[Dict[str, Any]]] = {
+        words_by_segment_id: dict[int, list[dict[str, Any]]] = {
             int(seg["segment_id"]): [] for seg in inserted_segments
         }
 
@@ -1447,9 +1442,9 @@ def _insert_diarization_segments_with_words(
             w_end = float(w.get("end", w.get("end_time", w_start)) or w_start)
             w_mid = (w_start + w_end) / 2.0
 
-            best_segment_id: Optional[int] = None
+            best_segment_id: int | None = None
             best_overlap: float = 0.0
-            best_distance: Optional[float] = None
+            best_distance: float | None = None
 
             for seg in inserted_segments:
                 seg_start = float(seg.get("start", 0.0))
@@ -1505,9 +1500,7 @@ def _insert_diarization_segments_with_words(
                         "segment_id": segment_id,
                         "word_index": i,
                         "word": w.get("word", ""),
-                        "start_time": float(
-                            w.get("start", w.get("start_time", 0.0)) or 0.0
-                        ),
+                        "start_time": float(w.get("start", w.get("start_time", 0.0)) or 0.0),
                         "end_time": float(
                             w.get(
                                 "end",
@@ -1537,10 +1530,11 @@ def save_longform_to_database(
     audio_path: Path,
     duration_seconds: float,
     transcription_text: str,
-    word_timestamps: Optional[List[Dict[str, Any]]] = None,
-    diarization_segments: Optional[List[Dict[str, Any]]] = None,
-    recorded_at: Optional[datetime] = None,
-) -> Optional[int]:
+    word_timestamps: list[dict[str, Any]] | None = None,
+    diarization_segments: list[dict[str, Any]] | None = None,
+    recorded_at: datetime | None = None,
+    title: str | None = None,
+) -> int | None:
     """
     Save a longform recording to the database atomically.
 
@@ -1555,6 +1549,7 @@ def save_longform_to_database(
             (automatically provided when diarization is enabled for text alignment)
         diarization_segments: Optional list of speaker segments
         recorded_at: Optional timestamp (defaults to now)
+        title: Optional title (defaults to audio filename stem)
 
     Returns:
         Recording ID on success, None on error
@@ -1562,8 +1557,7 @@ def save_longform_to_database(
     db_path = get_db_path()
     if not db_path.exists():
         logger.warning(
-            f"Database not found at {db_path}. "
-            "Start the server first to initialize the database."
+            f"Database not found at {db_path}. Start the server first to initialize the database."
         )
         return None
 
@@ -1595,7 +1589,7 @@ def save_longform_to_database(
                 (
                     audio_path.name,
                     str(audio_path),
-                    audio_path.stem,
+                    title or audio_path.stem,
                     duration_seconds,
                     recorded_at.isoformat(),
                     int(has_diarization),
@@ -1668,9 +1662,9 @@ def save_longform_recording(
     audio_data: np.ndarray,
     transcription_text: str,
     sample_rate: int = 16000,
-    word_timestamps: Optional[List[Dict[str, Any]]] = None,
-    diarization_segments: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[int]:
+    word_timestamps: list[dict[str, Any]] | None = None,
+    diarization_segments: list[dict[str, Any]] | None = None,
+) -> int | None:
     """
     High-level function to save a longform recording.
 
@@ -1706,7 +1700,7 @@ def save_longform_recording(
 def get_word_timestamps_from_audio(
     audio_data: np.ndarray,
     model: Any = None,
-    language: Optional[str] = None,
+    language: str | None = None,
 ) -> tuple:
     """
     Transcribe audio with word-level timestamps using faster-whisper directly.

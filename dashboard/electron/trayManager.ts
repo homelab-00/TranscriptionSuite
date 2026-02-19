@@ -157,47 +157,16 @@ export class TrayManager {
     this.tray.setToolTip(STATE_TOOLTIP_MAP[this.state]);
     this.rebuildMenu();
 
-    // Left-click: start recording when standby (not in live mode),
-    // otherwise toggle window visibility (v0.5.6 behavior)
+    // Left-click: only start a longform recording when in standby; do nothing otherwise
     this.tray.on('click', () => {
-      const isLiveState =
-        this.state === 'live-listening' ||
-        this.state === 'live-processing' ||
-        this.state === 'muted';
-
-      if (!isLiveState && this.menuState.isStandby && !this.menuState.isRecording) {
+      if (this.menuState.isStandby && !this.menuState.isRecording && !this.menuState.isLive) {
         this.actions.startRecording?.();
-        return;
-      }
-
-      const win = this.getWindow();
-      if (win) {
-        if (win.isVisible()) {
-          win.hide();
-        } else {
-          win.show();
-          win.focus();
-        }
       }
     });
 
-    // Middle-click: toggle mute in live mode, or stop recording (v0.5.6 behavior)
+    // Middle-click: only stop & transcribe a longform recording; do nothing otherwise
     this.tray.on('middle-click', () => {
-      const isLiveState =
-        this.state === 'live-listening' ||
-        this.state === 'live-processing' ||
-        this.state === 'muted';
-
-      if (isLiveState) {
-        this.actions.toggleLiveMute?.();
-      } else if (this.state === 'recording') {
-        this.actions.stopRecording?.();
-      }
-    });
-
-    // Double-click: stop recording (Windows fallback for middle-click)
-    this.tray.on('double-click', () => {
-      if (this.state === 'recording') {
+      if (this.menuState.isRecording) {
         this.actions.stopRecording?.();
       }
     });
@@ -356,6 +325,12 @@ export class TrayManager {
 
   private rebuildMenu(): void {
     if (!this.tray) return;
+
+    // On Linux, the AppIndicator/StatusNotifier tray may not update the
+    // context menu unless we destroy and recreate it. Clear first.
+    if (process.platform === 'linux') {
+      this.tray.setContextMenu(null as unknown as Electron.Menu);
+    }
 
     const {
       serverRunning,

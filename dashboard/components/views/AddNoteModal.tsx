@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Upload, FileAudio, Calendar, Trash2 } from 'lucide-react';
+import { X, Upload, FileAudio, Calendar, Trash2, Info } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { GlassCard } from '../ui/GlassCard';
@@ -63,8 +63,14 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
 
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
-    setSelectedFiles((prev) => [...prev, ...Array.from(files)]);
+    const fileArray = Array.from(files);
+    setSelectedFiles((prev) => [...prev, ...fileArray]);
     setError(null);
+    // Default title to first file's name (minus extension)
+    if (fileArray[0]) {
+      const nameWithoutExt = fileArray[0].name.replace(/\.[^.]+$/, '');
+      setTitle(nameWithoutExt);
+    }
   }, []);
 
   const removeFile = useCallback((index: number) => {
@@ -100,6 +106,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
           enable_diarization: isDiarizationEnabled,
           enable_word_timestamps: isTimestampsEnabled,
           file_created_at: fileCreatedAt,
+          title: title.trim() || undefined,
         });
       }
       // Success — reset and close
@@ -119,6 +126,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     onCreated,
     onClose,
     selectedDateKey,
+    title,
   ]);
 
   useEffect(() => {
@@ -269,6 +277,15 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
               ))}
             </div>
           )}
+
+          {/* Import Info Note */}
+          <div className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2.5">
+            <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
+            <p className="text-xs leading-relaxed text-slate-500">
+              Imported audio files will be saved as audio notes using the file name as the note
+              title and the file's creation date as the recording date.
+            </p>
+          </div>
 
           {/* 3. Configuration Options */}
           <GlassCard title="Import Options">

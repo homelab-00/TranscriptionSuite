@@ -939,15 +939,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                       <div className="flex items-center gap-2.5">
                         <span className="text-xs font-medium text-slate-400">
-                          {serverRunning
+                          {serverRunning && docker.container.health === 'healthy'
                             ? 'Docker Container Running'
-                            : docker.container.exists
-                              ? 'Container Stopped'
-                              : 'Container Missing'}
+                            : serverRunning
+                              ? 'Container Starting\u2026'
+                              : docker.container.exists
+                                ? 'Container Stopped'
+                                : 'Container Missing'}
                         </span>
                         <StatusLight
                           status={
-                            serverRunning
+                            serverRunning && docker.container.health === 'healthy'
                               ? 'active'
                               : docker.container.exists
                                 ? 'warning'

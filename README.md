@@ -228,7 +228,7 @@ Once the server is running, navigate to the **Session** view to start transcribi
 * Navigate to **Notebook** → **Import** tab
 * Drag and drop audio/video files or click to browse
 * Queue multiple files at once — each is transcribed with individual progress and retry on failure
-* Completed files are automatically added to the Audio Notebook
+* Completed files are automatically added to the Audio Notebook using the file name as the note title
 
 **Translation (English-only, optional):**
 * Enable `Translation` toggle in the Session controls
@@ -250,7 +250,10 @@ The Dashboard features **sidebar navigation** with these main views:
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
 recording state (11 distinct states), and the context menu provides quick controls
-(start/stop server, open dashboard, transcribe file, quit).
+(start/stop server, open dashboard, transcribe file, quit). Left-click the tray icon to
+start a recording; middle-click to stop and transcribe.
+
+> **GNOME note:** GNOME desktop requires the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension for system tray support.
 
 ### 5.3 Keyboard Shortcuts
 

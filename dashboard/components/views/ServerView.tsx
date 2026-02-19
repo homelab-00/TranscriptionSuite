@@ -928,7 +928,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     'transcriptionsuite-data': 'bg-blue-500',
                     'transcriptionsuite-models': 'bg-purple-500',
                     'transcriptionsuite-runtime': 'bg-orange-500',
-                    'transcriptionsuite-uv-cache': 'bg-teal-500',
                   };
                   return (
                     <div key={vol.name} className="flex items-center justify-between py-1 text-sm">

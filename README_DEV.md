@@ -221,7 +221,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - Notebook tab contains Calendar, Search, and Import sub-tabs
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
 - App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
-- System tray integration with 11 state-aware icons, context menu controls, and quick-access file transcription
+- System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and click shortcuts (left-click: start recording, middle-click: stop & transcribe)
 - First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
 - Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
 - Model-aware translation toggle (auto-disables for turbo, .en, and distil model variants)
@@ -369,7 +369,7 @@ docker compose build
 **What happens:**
 1. Builds a small server image with app code and bootstrap tooling
 2. Defers Python dependency install to first startup (`bootstrap_runtime.py`)
-3. Stores runtime venv in `transcriptionsuite-runtime` and uv cache in `transcriptionsuite-uv-cache`
+3. Stores runtime venv and uv cache in `transcriptionsuite-runtime`
 
 **Build with specific tag:**
 To build an image with a specific tag (instead of default `latest`):
@@ -704,12 +704,7 @@ to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
 | `/runtime/.venv/` | Runtime Python virtualenv used by the server |
 | `/runtime/.runtime-bootstrap-marker.json` | Fingerprint + sync metadata |
 | `/runtime/bootstrap-status.json` | Bootstrap feature status (diarization availability, etc.) |
-
-**`transcriptionsuite-uv-cache`** (mounted to `/runtime-cache`):
-
-| Path | Description |
-|------|-------------|
-| `/runtime-cache/` | uv package cache used for delta dependency updates |
+| `/runtime/cache/` | uv package cache used for delta dependency updates |
 
 **Optional user config** (bind mount to `/user-config`):
 
@@ -772,7 +767,6 @@ This section describes exactly what updates when the Docker image changes versus
   - Any base OS/image-layer changes included in the new tag.
 - Usually not updated:
   - `transcriptionsuite-runtime` (`/runtime/.venv`) unless bootstrap decides sync/rebuild is needed.
-  - `transcriptionsuite-uv-cache` (`/runtime-cache`) unless explicitly removed.
   - `transcriptionsuite-data` and `transcriptionsuite-models`.
 
 In short: an image update mainly changes code and runtime tooling; dependency downloads happen only if bootstrap detects dependency drift, runtime incompatibility, or runtime integrity failure.
@@ -791,21 +785,18 @@ In short: an image update mainly changes code and runtime tooling; dependency do
 
 **How runtime updates minimize download size**
 - Bootstrap runs `uv sync --frozen --no-dev` against existing `/runtime/.venv` for delta updates.
-- `UV_CACHE_DIR` is persisted in `transcriptionsuite-uv-cache` (`/runtime-cache`), so rebuilt venvs can reuse cached wheels.
+- `UV_CACHE_DIR` is stored inside the runtime volume at `/runtime/cache`, so rebuilt venvs can reuse cached wheels.
 - Only changed packages are downloaded when possible; unchanged packages are reused.
 - Large dependency jumps (for example major torch/CUDA changes) may still require large downloads.
-- If UV cache is enabled in `.env` but the Docker `transcriptionsuite-uv-cache` volume is manually deleted, startup keeps cache mode enabled, logs a cold-cache warning, and Docker recreates the volume on next `up -d`.
 
 **Operational scenarios**
 
-| Scenario | Image Pull | Runtime Venv (`/runtime`) | UV Cache (`/runtime-cache`) | Expected Network Cost |
-|----------|------------|---------------------------|-----------------------------|-----------------------|
-| App-only release, unchanged `uv.lock` | Yes (new image layers) | `skip` | Reused | Low (image only) |
-| Release with dependency changes in `uv.lock` | Yes | `delta-sync` | Reused | Medium (changed deps only) |
-| Runtime venv removed, cache kept | No/Yes | `rebuild-sync` | Reused | Medium (often reduced via cache) |
-| Runtime + cache removed | No/Yes | `rebuild-sync` | Recreated empty | High (full dependency fetch) |
-| UV cache removed manually (decision still enabled) | No/Yes | `skip`/`delta-sync` based on runtime integrity and lock drift | Recreated empty | Low to High (depends on dependency drift) |
-| Python ABI/arch incompatibility | Usually Yes | `rebuild-sync` | Reused | Medium to High |
+| Scenario | Image Pull | Runtime Venv (`/runtime`) | Expected Network Cost |
+|----------|------------|---------------------------|-----------------------|
+| App-only release, unchanged `uv.lock` | Yes (new image layers) | `skip` | Low (image only) |
+| Release with dependency changes in `uv.lock` | Yes | `delta-sync` | Medium (changed deps only) |
+| Runtime volume removed | No/Yes | `rebuild-sync` | High (full dependency fetch) |
+| Python ABI/arch incompatibility | Usually Yes | `rebuild-sync` | Medium to High |
 
 **Recommended update flow (least disruption)**
 ```bash
@@ -814,11 +805,10 @@ docker compose pull
 docker compose up -d
 ```
 
-Use runtime reset only for recovery/maintenance. Prefer keeping `transcriptionsuite-uv-cache` unless you explicitly want a fully cold reinstall.
+Use runtime reset only for recovery/maintenance.
 
 **Config reset semantics**
 - Normal image/runtime updates do **not** require deleting `~/.config/TranscriptionSuite` (or platform equivalent).
-- Manually deleting UV cache volume does **not** require config removal.
 - Remove config only for full reset or severe config corruption/recovery scenarios.
 - Dashboard "Also remove config directory" now performs a full dashboard state reset:
   - Removes primary config directory (`~/.config/TranscriptionSuite` on Linux).
@@ -1254,8 +1244,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 |----------|---------|
 | `HF_TOKEN` | HuggingFace token for PyAnnote models |
 | `HUGGINGFACE_TOKEN_DECISION` | One-time onboarding state: `unset`, `provided`, `skipped` |
-| `UV_CACHE_VOLUME_DECISION` | One-time UV cache onboarding state: `unset`, `enabled`, `skipped` |
-| `BOOTSTRAP_CACHE_DIR` | Runtime package cache path (`/runtime-cache` when enabled, `/tmp/uv-cache` when skipped) |
+| `BOOTSTRAP_CACHE_DIR` | Runtime package cache path (default: `/runtime/cache`) |
 | `USER_CONFIG_DIR` | Path to user config directory |
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, WARNING) |
 | `TLS_ENABLED` | Enable HTTPS |
@@ -1582,12 +1571,10 @@ To validate full lock-level runtime integrity (all packages, not piecemeal check
 ```bash
 docker exec transcriptionsuite-container env \
   UV_PROJECT_ENVIRONMENT=/runtime/.venv \
-  UV_CACHE_DIR=/runtime-cache \
+  UV_CACHE_DIR=/runtime/cache \
   UV_PYTHON=/usr/bin/python3.13 \
   uv sync --check --frozen --no-dev --project /app/server
 ```
-
-If persistent UV cache is disabled, use `UV_CACHE_DIR=/tmp/uv-cache` instead.
 
 If this command exits non-zero, the runtime environment is not fully aligned with `uv.lock`.
 

@@ -15,28 +15,14 @@ import { getConfig, setConfig } from './src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
-type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
 
 const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
-const DEFAULT_BOOTSTRAP_CACHE_DIR = '/runtime-cache';
-const SKIPPED_BOOTSTRAP_CACHE_DIR = '/tmp/uv-cache';
 
 function normalizeHfDecision(value: unknown): HfTokenDecision {
   if (value === 'provided' || value === 'skipped' || value === 'unset') {
     return value;
   }
   return 'unset';
-}
-
-function normalizeUvCacheDecision(value: unknown): UvCacheVolumeDecision {
-  if (value === 'enabled' || value === 'skipped' || value === 'unset') {
-    return value;
-  }
-  return 'unset';
-}
-
-function getBootstrapCacheDir(decision: UvCacheVolumeDecision): string {
-  return decision === 'skipped' ? SKIPPED_BOOTSTRAP_CACHE_DIR : DEFAULT_BOOTSTRAP_CACHE_DIR;
 }
 
 const AppInner: React.FC = () => {
@@ -58,9 +44,6 @@ const AppInner: React.FC = () => {
   const hfResolverRef = useRef<
     ((result: { action: 'cancel' | 'skip' | 'provided'; token: string }) => void) | null
   >(null);
-
-  const [uvPromptOpen, setUvPromptOpen] = useState(false);
-  const uvResolverRef = useRef<((result: 'cancel' | 'enabled' | 'skipped') => void) | null>(null);
 
   const [firstRunInfoOpen, setFirstRunInfoOpen] = useState(false);
   const firstRunInfoResolverRef = useRef<(() => void) | null>(null);
@@ -95,20 +78,6 @@ const AppInner: React.FC = () => {
     });
   }, []);
 
-  const resolveUvPrompt = useCallback((result: 'cancel' | 'enabled' | 'skipped') => {
-    setUvPromptOpen(false);
-    const resolver = uvResolverRef.current;
-    uvResolverRef.current = null;
-    resolver?.(result);
-  }, []);
-
-  const requestUvPrompt = useCallback(async (): Promise<'cancel' | 'enabled' | 'skipped'> => {
-    return new Promise((resolve) => {
-      uvResolverRef.current = resolve;
-      setUvPromptOpen(true);
-    });
-  }, []);
-
   const requestFirstRunInfo = useCallback(async (): Promise<void> => {
     return new Promise((resolve) => {
       firstRunInfoResolverRef.current = resolve;
@@ -128,10 +97,6 @@ const AppInner: React.FC = () => {
       if (hfResolverRef.current) {
         hfResolverRef.current({ action: 'cancel', token: '' });
         hfResolverRef.current = null;
-      }
-      if (uvResolverRef.current) {
-        uvResolverRef.current('cancel');
-        uvResolverRef.current = null;
       }
       if (firstRunInfoResolverRef.current) {
         firstRunInfoResolverRef.current();
@@ -165,10 +130,7 @@ const AppInner: React.FC = () => {
     void setConfig('server.containerExistsLastSeen', currentExists);
 
     if (previousExists && !currentExists) {
-      void Promise.all([
-        setConfig('server.hfTokenDecision', 'unset'),
-        setConfig('server.uvCacheVolumeDecision', 'unset'),
-      ]);
+      void setConfig('server.hfTokenDecision', 'unset');
     }
   }, [docker.container.exists, docker.loading]);
 
@@ -200,7 +162,6 @@ const AppInner: React.FC = () => {
         const storedTokenRaw = await getConfig<string>('server.hfToken');
         let hfToken = typeof storedTokenRaw === 'string' ? storedTokenRaw.trim() : '';
         let hfDecision = normalizeHfDecision(await getConfig('server.hfTokenDecision'));
-        let uvDecision = normalizeUvCacheDecision(await getConfig('server.uvCacheVolumeDecision'));
 
         if (shouldRunPrompts) {
           if (hfToken.length > 0) {
@@ -239,23 +200,6 @@ const AppInner: React.FC = () => {
             }
           }
 
-          if (uvDecision === 'unset') {
-            // Skip prompt if the UV cache volume already exists
-            const uvVolumeAlreadyExists = (await (window as any).electronAPI?.docker
-              ?.volumeExists('transcriptionsuite-uv-cache')
-              .catch(() => false)) as boolean | undefined;
-            if (uvVolumeAlreadyExists) {
-              uvDecision = 'enabled';
-              await setConfig('server.uvCacheVolumeDecision', uvDecision);
-            } else {
-              const uvPromptResult = await requestUvPrompt();
-              if (uvPromptResult === 'cancel') return;
-
-              uvDecision = uvPromptResult === 'enabled' ? 'enabled' : 'skipped';
-              await setConfig('server.uvCacheVolumeDecision', uvDecision);
-            }
-          }
-
           // Check if both data and models volumes are absent — first-ever startup
           const [dataVolExists, modelsVolExists] = await Promise.all([
             (window as any).electronAPI?.docker
@@ -270,9 +214,7 @@ const AppInner: React.FC = () => {
           }
 
           await docker.startContainer(mode, runtimeProfile, undefined, imageTag, hfToken, {
-            bootstrapCacheDir: getBootstrapCacheDir(uvDecision),
             hfTokenDecision: hfDecision,
-            uvCacheVolumeDecision: uvDecision,
           });
           return;
         }
@@ -289,7 +231,7 @@ const AppInner: React.FC = () => {
         setStartupFlowPending(false);
       }
     },
-    [docker, requestHfPrompt, requestUvPrompt],
+    [docker, requestHfPrompt],
   );
 
   const renderView = () => {
@@ -449,7 +391,7 @@ const AppInner: React.FC = () => {
               <div className="space-y-3 text-sm text-slate-300">
                 <p>
                   This is the server's first startup. It needs to download roughly{' '}
-                  <span className="font-semibold text-white">20 GB</span> of AI models before it's
+                  <span className="font-semibold text-white">10 GB</span> of AI models before it's
                   ready.
                 </p>
                 <p className="text-slate-400">
@@ -466,58 +408,6 @@ const AppInner: React.FC = () => {
             <div className="flex flex-none justify-end border-t border-white/10 bg-white/5 px-6 py-4 select-none">
               <Button variant="primary" onClick={resolveFirstRunInfo}>
                 Got it
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {uvPromptOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
-            onClick={() => resolveUvPrompt('cancel')}
-          />
-          <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
-            <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
-              <h2 className="text-lg font-semibold text-white">Optional Update Cache</h2>
-            </div>
-            <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
-              <div className="space-y-3 text-sm text-slate-300">
-                <p>Enable persistent UV cache for faster future updates?</p>
-                <p className="text-slate-400">
-                  Recommended for smoother Docker image and dependency updates.
-                </p>
-                <p className="text-slate-400">Estimated disk usage: up to ~8GB.</p>
-                <p className="text-slate-400">
-                  If skipped, the server still works normally, but updates may take longer.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-none justify-end gap-2 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
-              <Button
-                size="sm"
-                className="whitespace-nowrap"
-                variant="ghost"
-                onClick={() => resolveUvPrompt('cancel')}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="whitespace-nowrap"
-                variant="danger"
-                onClick={() => resolveUvPrompt('skipped')}
-              >
-                Skip for now
-              </Button>
-              <Button
-                size="sm"
-                className="whitespace-nowrap"
-                variant="primary"
-                onClick={() => resolveUvPrompt('enabled')}
-              >
-                Enable Cache
               </Button>
             </div>
           </div>

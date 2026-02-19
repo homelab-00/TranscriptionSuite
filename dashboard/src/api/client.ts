@@ -386,6 +386,7 @@ export class APIClient {
     if (options?.expected_speakers)
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
+    if (options?.title) fd.append('title', options.title);
     return this.postFormData('/api/notebook/transcribe/upload', fd);
   }
 

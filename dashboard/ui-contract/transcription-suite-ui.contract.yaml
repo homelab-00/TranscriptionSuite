@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.14
+  spec_version: 1.0.15
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -27,7 +27,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-18T23:32:44.435Z
+    generated_at: 2026-02-19T12:44:53.023Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -105,26 +105,27 @@ foundation:
         - hsla(339, 49%, 30%, 1)
         - hsla(339,49%,30%,1)
         - rgb(230,230,230)
-        - rgba(${r}, ${g}, ${b}, 0.3)
-        - rgba(${r}, ${g}, ${b}, 0.6)
-        - rgba(${r}, ${g}, ${b}, 0.9)
-        - rgba(${r}, ${g}, ${b}, 1)
+        - rgba(${r}, ${g}, ${b}, ${alpha})
         - rgba(0, 0, 0, 0.3)
         - rgba(0, 0, 0, 0.4)
         - rgba(0, 0, 0, 0.5)
         - rgba(0, 0, 0, 0.7)
         - rgba(0,0,0,0.3)
         - rgba(0,0,0,0.4)
+        - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.6)
+        - rgba(251, 146, 60, 0.3)
         - rgba(251,146,60,0.5)
         - rgba(255, 255, 255, 0.1)
         - rgba(255, 255, 255, 0.2)
         - rgba(255, 255, 255, 0.4)
         - rgba(255,145,0,0.15)
         - rgba(255,255,255,0.3)
+        - rgba(34, 211, 238, 0.6)
+        - rgba(34, 211, 238, 0.8)
         - rgba(34,197,94,0.5)
         - rgba(34,211,238,0.05)
         - rgba(34,211,238,0.15)
@@ -409,7 +410,6 @@ utility_allowlist:
     - bg-slate-800
     - bg-slate-900
     - bg-slate-900/80
-    - bg-teal-500
     - bg-transparent
     - bg-white
     - bg-white/1
@@ -1465,24 +1465,6 @@ component_contracts:
     state_rules:
       - id: heading-divider
         rule: Heading divider line remains part of section title structure.
-  ShortcutRow:
-    file: components/views/SettingsModal.tsx
-    required_tokens:
-      - colors
-      - radii
-    allowed_variants:
-      isRecording:
-        - "true"
-        - "false"
-    structural_invariants:
-      - id: shortcut-row-layout
-        rule: ShortcutRow keeps label+description left column and binding button right column.
-    behavior_rules:
-      - id: shortcut-recording-mode
-        rule: Recording state shows pulsing capture area and cancel button; idle state shows formatted accelerator button.
-    state_rules:
-      - id: shortcut-binding-display
-        rule: Binding display uses mono font in both recording and idle states.
   ServerView:
     file: components/views/ServerView.tsx
     required_tokens:
@@ -1590,6 +1572,23 @@ component_contracts:
     state_rules:
       - id: tab-closed-set
         rule: Settings tab set is fixed to App/Client/Server/Notebook labels.
+  ShortcutRow:
+    file: components/views/SettingsModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   Sidebar:
     file: components/Sidebar.tsx
     required_tokens:

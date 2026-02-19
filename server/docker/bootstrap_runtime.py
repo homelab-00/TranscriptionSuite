@@ -18,7 +18,7 @@ import subprocess
 import sys
 import sysconfig
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +92,7 @@ def python_abi_tag() -> str:
 
 
 def update_hash_with_file(hasher: Any, label: str, path: Path) -> None:
-    hasher.update(f"{label}:".encode("utf-8"))
+    hasher.update(f"{label}:".encode())
     hasher.update(path.name.encode("utf-8"))
     if path.exists():
         hasher.update(path.read_bytes())
@@ -106,10 +106,10 @@ def compute_dependency_fingerprint(
     arch: str,
 ) -> str:
     hasher = hashlib.sha256()
-    hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode("utf-8"))
-    hasher.update(f"source={fingerprint_source}".encode("utf-8"))
-    hasher.update(f"abi={python_abi}".encode("utf-8"))
-    hasher.update(f"arch={arch}".encode("utf-8"))
+    hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
+    hasher.update(f"source={fingerprint_source}".encode())
+    hasher.update(f"abi={python_abi}".encode())
+    hasher.update(f"arch={arch}".encode())
 
     # Recommended mode: lockfile-only (dependency-resolving source of truth).
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
@@ -136,41 +136,8 @@ def run_command(
     )
     if result.returncode != 0:
         output = (result.stdout or "") + (result.stderr or "")
-        raise RuntimeError(
-            f"Command failed ({result.returncode}): {' '.join(cmd)}\n{output}"
-        )
+        raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(cmd)}\n{output}")
     return result
-
-
-def run_best_effort_uv_cache_prune(
-    cache_dir: Path,
-    timeout_seconds: int,
-    env: dict[str, str],
-) -> None:
-    """Prune stale cache entries without failing bootstrap."""
-    prune_timeout = max(60, min(timeout_seconds, 600))
-    try:
-        result = subprocess.run(
-            ["uv", "cache", "prune"],
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=prune_timeout,
-            check=False,
-        )
-    except Exception as exc:
-        log(f"UV cache prune failed (non-fatal): {exc}")
-        return
-
-    if result.returncode == 0:
-        log(f"UV cache prune complete ({cache_dir})")
-        return
-
-    output = ((result.stdout or "") + (result.stderr or "")).strip()
-    if output:
-        log(f"UV cache prune failed (non-fatal): {output}")
-    else:
-        log("UV cache prune failed (non-fatal)")
 
 
 def load_marker(marker_file: Path) -> dict[str, Any]:
@@ -244,9 +211,7 @@ def summarize_failure_snippet(
     returncode: int,
 ) -> str:
     """Create a short, stable one-line failure summary from command output."""
-    merged = "\n".join(
-        part for part in ((stdout or "").strip(), (stderr or "").strip()) if part
-    )
+    merged = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
     lines = [line.strip() for line in merged.splitlines() if line.strip()]
 
     if lines:
@@ -339,9 +304,7 @@ def summarize_package_delta(
 
     added = sorted(after_keys - before_keys)
     removed = sorted(before_keys - after_keys)
-    updated = sorted(
-        key for key in (before_keys & after_keys) if before.get(key) != after.get(key)
-    )
+    updated = sorted(key for key in (before_keys & after_keys) if before.get(key) != after.get(key))
 
     summary = {
         "added": len(added),
@@ -415,10 +378,7 @@ def ensure_runtime_dependencies(
         marker_arch = str(marker_data.get("arch", ""))
         marker_has_abi_info = bool(marker_abi and marker_arch)
         abi_compatible = bool(
-            venv_exists
-            and marker_has_abi_info
-            and marker_abi == python_abi
-            and marker_arch == arch
+            venv_exists and marker_has_abi_info and marker_abi == python_abi and marker_arch == arch
         )
 
         if rebuild_policy == "always":
@@ -426,9 +386,7 @@ def ensure_runtime_dependencies(
         elif rebuild_policy == "never":
             rebuild_required = False
         else:  # abi_only
-            rebuild_required = bool(
-                venv_exists and marker_has_abi_info and not abi_compatible
-            )
+            rebuild_required = bool(venv_exists and marker_has_abi_info and not abi_compatible)
 
         marker_matches = bool(
             venv_exists
@@ -470,19 +428,12 @@ def ensure_runtime_dependencies(
             if pre_ok:
                 diagnostics["selection_reason"] = "marker_match_integrity_ok"
                 diagnostics["integrity"]["status"] = "pass"
-                log(
-                    "Bootstrap path selected: mode=skip reason=marker_match_integrity_ok"
-                )
+                log("Bootstrap path selected: mode=skip reason=marker_match_integrity_ok")
                 log("Runtime dependencies already up-to-date (mode=skip)")
-                log_timing(
-                    "ensure_runtime_dependencies complete (mode=skip)", ensure_start
-                )
+                log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
                 return venv_dir, "skip", package_delta, diagnostics
             diagnostics["selection_reason"] = "marker_match_integrity_failed"
-            log(
-                "Bootstrap path selected: mode=delta-sync "
-                "reason=marker_match_integrity_failed"
-            )
+            log("Bootstrap path selected: mode=delta-sync reason=marker_match_integrity_failed")
             log(f"Runtime integrity check failed (pre-sync): {pre_msg}")
         else:
             diagnostics["selection_reason"] = "fingerprint_drift"
@@ -542,10 +493,7 @@ def ensure_runtime_dependencies(
                     diagnostics["integrity"]["failure_snippet"] = failure_snippet
 
                 if attempt_mode == "delta-sync" and idx + 1 < len(attempt_modes):
-                    log(
-                        "Dependency sync failed for mode=delta-sync; "
-                        "escalating to rebuild-sync"
-                    )
+                    log("Dependency sync failed for mode=delta-sync; escalating to rebuild-sync")
                     log(f"Delta-sync failure snippet: {failure_snippet}")
                     continue
 
@@ -571,15 +519,10 @@ def ensure_runtime_dependencies(
 
             log(f"Runtime integrity check failed after {attempt_mode}: {post_msg}")
             if attempt_mode == "delta-sync" and idx + 1 < len(attempt_modes):
-                log(
-                    "Bootstrap escalation: mode=rebuild-sync "
-                    "reason=post_delta_integrity_failed"
-                )
+                log("Bootstrap escalation: mode=rebuild-sync reason=post_delta_integrity_failed")
                 continue
 
-            raise RuntimeError(
-                f"Runtime integrity check failed after {attempt_mode}: {post_msg}"
-            )
+            raise RuntimeError(f"Runtime integrity check failed after {attempt_mode}: {post_msg}")
 
         if final_sync_mode is None:
             raise RuntimeError("Runtime dependency sync did not converge")
@@ -590,9 +533,7 @@ def ensure_runtime_dependencies(
 
         if log_changes:
             after_packages = collect_installed_packages(venv_python, timeout_seconds)
-            package_delta, samples = summarize_package_delta(
-                before_packages, after_packages
-            )
+            package_delta, samples = summarize_package_delta(before_packages, after_packages)
             log(
                 "Package delta: "
                 f"added={package_delta['added']} "
@@ -605,14 +546,6 @@ def ensure_runtime_dependencies(
                 log(f"Sample updated packages: {', '.join(samples['updated'])}")
             if samples["removed"]:
                 log(f"Sample removed packages: {', '.join(samples['removed'])}")
-
-        prune_start = time.perf_counter()
-        run_best_effort_uv_cache_prune(
-            cache_dir=cache_dir,
-            timeout_seconds=timeout_seconds,
-            env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
-        )
-        log_timing("uv cache prune step complete", prune_start)
 
         marker_write_start = time.perf_counter()
         write_marker(
@@ -628,7 +561,7 @@ def ensure_runtime_dependencies(
                 "selection_reason": diagnostics["selection_reason"],
                 "integrity_status": diagnostics["integrity"]["status"],
                 "package_delta": package_delta,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             },
         )
         log_timing("runtime bootstrap marker write complete", marker_write_start)
@@ -739,9 +672,7 @@ def compute_diarization_preload_cache_key(
         "schema_version": 1,
         "model": diarization_model.strip(),
         "token_hash": token_hash,
-        "cache_state": collect_hf_model_cache_state(
-            hf_home=hf_home, model_id=diarization_model
-        ),
+        "cache_state": collect_hf_model_cache_state(hf_home=hf_home, model_id=diarization_model),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -854,7 +785,7 @@ def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
 def main() -> int:
     log_timing("bootstrap main() started")
     runtime_dir = Path(os.environ.get("BOOTSTRAP_RUNTIME_DIR", "/runtime"))
-    cache_dir = Path(os.environ.get("BOOTSTRAP_CACHE_DIR", "/runtime-cache"))
+    cache_dir = Path(os.environ.get("BOOTSTRAP_CACHE_DIR", "/runtime/cache"))
     status_file = Path(
         os.environ.get(
             "BOOTSTRAP_STATUS_FILE",
@@ -952,7 +883,7 @@ def main() -> int:
     write_status_file(
         status_file,
         {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "bootstrap": {
                 "schema_version": BOOTSTRAP_SCHEMA_VERSION,
                 "sync_mode": sync_mode,

@@ -36,12 +36,9 @@ export interface VolumeInfo {
 }
 
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
-export type UvCacheVolumeDecision = 'unset' | 'enabled' | 'skipped';
 
 export interface StartContainerOnboardingOptions {
-  bootstrapCacheDir?: string;
   hfTokenDecision?: HfTokenDecision;
-  uvCacheVolumeDecision?: UvCacheVolumeDecision;
 }
 
 export interface UseDockerReturn {
