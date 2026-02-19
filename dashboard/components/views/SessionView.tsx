@@ -416,7 +416,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Sync tray icon state with application state
   useTraySync({
-    serverStatus: serverRunning ? 'active' : 'inactive',
+    serverStatus: clientRunning ? serverConnection.serverStatus : 'inactive',
     containerRunning: serverRunning,
     transcriptionStatus: transcription.status,
     liveStatus: live.status,
