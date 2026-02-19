@@ -130,26 +130,10 @@ export function useTraySync(deps: TrySyncDeps): void {
     isLocalConnection,
   } = deps;
 
-  // Push TrayState whenever inputs change
-  useEffect(() => {
-    const newState = resolveTrayState({
-      serverStatus,
-      containerRunning,
-      transcriptionStatus,
-      liveStatus,
-      muted,
-    });
-    if (newState !== prevStateRef.current) {
-      prevStateRef.current = newState;
-      window.electronAPI!.tray.setState(newState);
-    }
-    // Also set custom tooltip with model info when server is active
-    if (activeModel && containerRunning) {
-      window.electronAPI!.tray.setTooltip(`TranscriptionSuite — Model: ${activeModel}`);
-    }
-  }, [serverStatus, containerRunning, transcriptionStatus, liveStatus, muted, activeModel]);
-
-  // Push menu state so the context menu shows the right labels
+  // Push menu state FIRST so it is applied before setState triggers a rebuildMenu in the
+  // main process. React fires effects in definition order within the same render cycle,
+  // and IPC messages are processed sequentially, so this guarantees menuState is
+  // up-to-date before applyState() → rebuildMenu() runs.
   useEffect(() => {
     const isRecording = transcriptionStatus === 'recording' || transcriptionStatus === 'processing';
     const isLive =
@@ -158,13 +142,10 @@ export function useTraySync(deps: TrySyncDeps): void {
     // canCancel: during one-shot recording, processing (v0.5.6: recording + uploading + transcribing)
     const canCancel = transcriptionStatus === 'recording' || transcriptionStatus === 'processing';
 
-    // isStandby: server connected and ready, nothing active
-    const isStandby =
-      containerRunning &&
-      serverStatus === 'active' &&
-      !isRecording &&
-      !isLive &&
-      transcriptionStatus !== 'complete';
+    // isStandby: server connected and ready, nothing active.
+    // 'complete' is intentionally NOT excluded — the tray should allow starting a new
+    // recording immediately after a previous one finishes (mirrors canStartRecording in SessionView).
+    const isStandby = containerRunning && serverStatus === 'active' && !isRecording && !isLive;
 
     window.electronAPI!.tray.setMenuState({
       serverRunning: containerRunning,
@@ -185,6 +166,25 @@ export function useTraySync(deps: TrySyncDeps): void {
     modelsLoaded,
     isLocalConnection,
   ]);
+
+  // Push TrayState after menu state so applyState() → rebuildMenu() sees the latest menuState.
+  useEffect(() => {
+    const newState = resolveTrayState({
+      serverStatus,
+      containerRunning,
+      transcriptionStatus,
+      liveStatus,
+      muted,
+    });
+    if (newState !== prevStateRef.current) {
+      prevStateRef.current = newState;
+      window.electronAPI!.tray.setState(newState);
+    }
+    // Also set custom tooltip with model info when server is active
+    if (activeModel && containerRunning) {
+      window.electronAPI!.tray.setTooltip(`TranscriptionSuite — Model: ${activeModel}`);
+    }
+  }, [serverStatus, containerRunning, transcriptionStatus, liveStatus, muted, activeModel]);
 
   // Listen for tray context-menu actions forwarded from the main process
   useEffect(() => {
