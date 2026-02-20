@@ -214,7 +214,7 @@ export class TrayManager {
         // Revert to 'idle' (server is running & healthy) after the white flash.
         this.state = 'idle';
         this.applyState();
-      }, 500);
+      }, 200);
     } else {
       this.state = newState;
       this.applyState();
