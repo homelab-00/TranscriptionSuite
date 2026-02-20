@@ -471,6 +471,58 @@ ipcMain.handle(
 // ─── App Lifecycle ──────────────────────────────────────────────────────────
 
 let isQuitting = false;
+let shutdownPromise: Promise<void> | null = null;
+
+/**
+ * Shared shutdown cleanup: stop the Docker container (if configured),
+ * destroy tray and update manager.  Idempotent — only runs once; every
+ * caller awaits the same Promise.
+ */
+function gracefulShutdown(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+  isQuitting = true;
+
+  shutdownPromise = (async () => {
+    const shouldStopServer = store.get('app.stopServerOnQuit') as boolean;
+    if (shouldStopServer) {
+      try {
+        console.log('[Shutdown] Stopping server container…');
+        await Promise.race([
+          dockerManager.stopContainer(),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`Timed out after ${STOP_SERVER_ON_QUIT_TIMEOUT_MS}ms`)),
+              STOP_SERVER_ON_QUIT_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+        console.log('[Shutdown] Server container stopped.');
+      } catch (err) {
+        console.error('[Shutdown] Graceful stop failed; forcing container stop:', err);
+        try {
+          await dockerManager.forceStopContainer(3);
+        } catch (forceErr) {
+          console.error('[Shutdown] Forced stop also failed:', forceErr);
+        }
+      }
+    }
+
+    trayManager.destroy();
+    updateManager.destroy();
+  })();
+
+  return shutdownPromise;
+}
+
+// Catch SIGINT / SIGTERM / SIGHUP so Docker cleanup runs even when the process
+// is killed by a signal (Ctrl-C, terminal close, systemd stop, Wayland session
+// teardown, etc.) rather than through Electron's normal app.quit() path.
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  process.on(sig, () => {
+    console.log(`[Shutdown] Received ${sig}`);
+    gracefulShutdown().finally(() => app.exit(0));
+  });
+}
 
 app.whenReady().then(() => {
   trayManager.create();
@@ -500,48 +552,9 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', async (event) => {
-  if (isQuitting) {
-    // Block re-entrant quit attempts (e.g. double-click, OS signal) so the
-    // first invocation's Docker stop can finish before the process exits.
-    event.preventDefault();
-    return;
-  }
-  isQuitting = true;
-
-  const shouldStopServer = store.get('app.stopServerOnQuit') as boolean;
-  if (shouldStopServer) {
-    event.preventDefault();
-    try {
-      console.log('Stopping server on quit…');
-      // Give compose stop a bounded grace period before forcing a direct stop.
-      await Promise.race([
-        dockerManager.stopContainer(),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Timed out after ${STOP_SERVER_ON_QUIT_TIMEOUT_MS}ms`)),
-            STOP_SERVER_ON_QUIT_TIMEOUT_MS,
-          ),
-        ),
-      ]);
-    } catch (err) {
-      console.error('Graceful stop on quit failed; forcing container stop:', err);
-      try {
-        await dockerManager.forceStopContainer(3);
-      } catch (forceErr) {
-        console.error('Forced stop on quit failed:', forceErr);
-      }
-    } finally {
-      trayManager.destroy();
-      updateManager.destroy();
-      // Use app.exit() to avoid re-triggering before-quit
-      app.exit(0);
-    }
-  } else {
-    trayManager.destroy();
-    updateManager.destroy();
-    app.exit(0);
-  }
+app.on('before-quit', (event) => {
+  event.preventDefault();
+  gracefulShutdown().finally(() => app.exit(0));
 });
 
 app.on('window-all-closed', () => {
