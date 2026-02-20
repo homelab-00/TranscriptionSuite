@@ -474,21 +474,46 @@ let isQuitting = false;
 let shutdownPromise: Promise<void> | null = null;
 
 /**
- * Shared shutdown cleanup: stop the Docker container (if configured),
- * destroy tray and update manager.  Idempotent — only runs once; every
- * caller awaits the same Promise.
+ * Persistent shutdown logger — writes to both console and a log file so that
+ * shutdown diagnostics survive Wayland stdout teardown.
+ */
+function shutdownLog(message: string): void {
+  const line = `${new Date().toISOString()} ${message}`;
+  console.log(line);
+  try {
+    const logDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'shutdown.log'), line + '\n');
+  } catch {
+    // Best-effort — don't let logging failures block shutdown
+  }
+}
+
+/**
+ * Shared shutdown cleanup: stop the Docker container (if configured and in
+ * local mode), destroy tray and update manager.  Idempotent — only runs once;
+ * every caller awaits the same Promise.
  */
 function gracefulShutdown(): Promise<void> {
   if (shutdownPromise) return shutdownPromise;
   isQuitting = true;
 
   shutdownPromise = (async () => {
-    const shouldStopServer = store.get('app.stopServerOnQuit') as boolean;
-    if (shouldStopServer) {
+    shutdownLog('[Shutdown] Graceful shutdown started.');
+
+    // Use store.store (raw flat-key object) instead of store.get() because the
+    // persisted JSON uses literal dot-notation keys (e.g. "app.stopServerOnQuit")
+    // and store.get() traverses them as nested paths, returning undefined.
+    const raw = store.store as Record<string, unknown>;
+    const shouldStopServer = (raw['app.stopServerOnQuit'] as boolean) ?? true;
+    const useRemote = (raw['connection.useRemote'] as boolean) ?? false;
+    shutdownLog(`[Shutdown] stopServerOnQuit=${shouldStopServer}, useRemote=${useRemote}`);
+
+    if (shouldStopServer && !useRemote) {
       try {
-        console.log('[Shutdown] Stopping server container…');
+        shutdownLog('[Shutdown] Stopping server container (docker stop)…');
         await Promise.race([
-          dockerManager.stopContainer(),
+          dockerManager.forceStopContainer(10),
           new Promise<never>((_, reject) =>
             setTimeout(
               () => reject(new Error(`Timed out after ${STOP_SERVER_ON_QUIT_TIMEOUT_MS}ms`)),
@@ -496,19 +521,17 @@ function gracefulShutdown(): Promise<void> {
             ),
           ),
         ]);
-        console.log('[Shutdown] Server container stopped.');
+        shutdownLog('[Shutdown] Server container stopped.');
       } catch (err) {
-        console.error('[Shutdown] Graceful stop failed; forcing container stop:', err);
-        try {
-          await dockerManager.forceStopContainer(3);
-        } catch (forceErr) {
-          console.error('[Shutdown] Forced stop also failed:', forceErr);
-        }
+        shutdownLog(`[Shutdown] Container stop failed: ${err}`);
       }
+    } else {
+      shutdownLog('[Shutdown] Skipping container stop.');
     }
 
     trayManager.destroy();
     updateManager.destroy();
+    shutdownLog('[Shutdown] Cleanup complete.');
   })();
 
   return shutdownPromise;
@@ -519,7 +542,7 @@ function gracefulShutdown(): Promise<void> {
 // teardown, etc.) rather than through Electron's normal app.quit() path.
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   process.on(sig, () => {
-    console.log(`[Shutdown] Received ${sig}`);
+    shutdownLog(`[Shutdown] Received ${sig}`);
     gracefulShutdown().finally(() => app.exit(0));
   });
 }
@@ -553,6 +576,12 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', (event) => {
+  if (shutdownPromise) {
+    // Shutdown already triggered (e.g. by signal handler) — let the quit
+    // proceed naturally but chain app.exit as a safety net.
+    shutdownPromise.finally(() => app.exit(0));
+    return;
+  }
   event.preventDefault();
   gracefulShutdown().finally(() => app.exit(0));
 });
