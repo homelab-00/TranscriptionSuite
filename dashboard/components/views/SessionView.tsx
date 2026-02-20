@@ -422,7 +422,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     containerRunning: serverRunning,
     transcriptionStatus: transcription.status,
     liveStatus: live.status,
-    muted: live.muted,
+    muted: transcription.muted || live.muted,
     activeModel: activeModel ?? undefined,
     modelsLoaded: isAsrModelsLoaded,
     isLocalConnection: true,
@@ -433,7 +433,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
       else transcription.stop();
     },
     onCancelRecording: () => transcription.reset(),
-    onToggleMute: () => live.toggleMute(),
+    onToggleMute: () => {
+      if (transcription.status === 'recording' || transcription.status === 'connecting') {
+        transcription.toggleMute();
+      } else {
+        live.toggleMute();
+      }
+    },
     onTranscribeFile: async (filePath: string) => {
       try {
         const { name, buffer, mimeType } = await window.electronAPI!.app.readLocalFile(filePath);

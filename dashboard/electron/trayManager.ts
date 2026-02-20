@@ -445,9 +445,21 @@ export class TrayManager {
     });
 
     template.push({
-      label: isMuted ? 'Unmute Live Mode' : 'Mute Live Mode',
-      enabled: isLive,
-      click: () => this.actions.toggleLiveMute?.(),
+      label: isMuted
+        ? isRecording && !isLive
+          ? 'Unmute Recording'
+          : 'Unmute Live Mode'
+        : isRecording && !isLive
+          ? 'Mute Recording'
+          : 'Mute Live Mode',
+      enabled: isLive || isRecording,
+      click: () => {
+        if (isRecording && !isLive) {
+          this.actions.toggleMute?.();
+        } else {
+          this.actions.toggleLiveMute?.();
+        }
+      },
     });
 
     template.push({ type: 'separator' });

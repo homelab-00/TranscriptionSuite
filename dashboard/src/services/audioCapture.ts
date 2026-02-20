@@ -30,6 +30,7 @@ export class AudioCapture {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private gainNode: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   private onChunk: AudioChunkCallback;
@@ -98,6 +99,9 @@ export class AudioCapture {
     // 4. Create nodes
     this.sourceNode = this.ctx.createMediaStreamSource(this.stream);
 
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.gain.value = 1;
+
     this.analyserNode = this.ctx.createAnalyser();
     this.analyserNode.fftSize = 2048;
     this.analyserNode.smoothingTimeConstant = 0.8;
@@ -113,8 +117,10 @@ export class AudioCapture {
     };
 
     // 6. Wire the graph:
-    //    source → analyser → worklet → (silence — worklet has no output)
-    this.sourceNode.connect(this.analyserNode);
+    //    source → gain → analyser → worklet → (silence — worklet has no output)
+    //    Gain is set to 0 when muted so the visualiser also flatlines.
+    this.sourceNode.connect(this.gainNode);
+    this.gainNode.connect(this.analyserNode);
     this.analyserNode.connect(this.workletNode);
     // Don't connect worklet to destination — we don't want to play back the mic
   }
@@ -129,6 +135,10 @@ export class AudioCapture {
     if (this.sourceNode) {
       this.sourceNode.disconnect();
       this.sourceNode = null;
+    }
+    if (this.gainNode) {
+      this.gainNode.disconnect();
+      this.gainNode = null;
     }
     if (this.analyserNode) {
       this.analyserNode.disconnect();
@@ -145,14 +155,16 @@ export class AudioCapture {
     this._muted = false;
   }
 
-  /** Mute — stops sending audio chunks but keeps the capture running. */
+  /** Mute — stops sending audio chunks and silences the visualiser. */
   mute(): void {
     this._muted = true;
+    if (this.gainNode) this.gainNode.gain.value = 0;
   }
 
-  /** Unmute — resumes sending audio chunks. */
+  /** Unmute — resumes sending audio chunks and restores the visualiser. */
   unmute(): void {
     this._muted = false;
+    if (this.gainNode) this.gainNode.gain.value = 1;
   }
 
   get isMuted(): boolean {

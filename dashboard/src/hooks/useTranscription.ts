@@ -45,6 +45,10 @@ export interface TranscriptionState {
   reset: () => void;
   /** VAD state from the server */
   vadActive: boolean;
+  /** Whether audio is muted (capture continues but chunks not sent) */
+  muted: boolean;
+  /** Toggle mute during recording */
+  toggleMute: () => void;
 }
 
 export function useTranscription(): TranscriptionState {
@@ -53,6 +57,7 @@ export function useTranscription(): TranscriptionState {
   const [error, setError] = useState<string | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [vadActive, setVadActive] = useState(false);
+  const [muted, setMuted] = useState(false);
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
@@ -163,6 +168,7 @@ export function useTranscription(): TranscriptionState {
       setResult(null);
       setError(null);
       setVadActive(false);
+      setMuted(false);
       startOptsRef.current = options ?? {};
 
       setStatus('connecting');
@@ -205,7 +211,20 @@ export function useTranscription(): TranscriptionState {
     setError(null);
     setAnalyser(null);
     setVadActive(false);
+    setMuted(false);
   }, []);
 
-  return { status, result, error, analyser, start, stop, reset, vadActive };
+  const toggleMute = useCallback(() => {
+    setMuted((prev) => {
+      const next = !prev;
+      if (next) {
+        captureRef.current?.mute();
+      } else {
+        captureRef.current?.unmute();
+      }
+      return next;
+    });
+  }, []);
+
+  return { status, result, error, analyser, start, stop, reset, vadActive, muted, toggleMute };
 }

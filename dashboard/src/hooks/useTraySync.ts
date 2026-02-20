@@ -79,18 +79,12 @@ function resolveTrayState(
     return 'error';
   }
 
-  // One-shot transcription states (higher priority than live)
-  if (transcriptionStatus === 'recording') {
+  // One-shot transcription ACTIVE states (higher priority than live)
+  if (transcriptionStatus === 'connecting' || transcriptionStatus === 'recording') {
     return muted ? 'recording-muted' : 'recording';
   }
   if (transcriptionStatus === 'processing') {
     return 'processing';
-  }
-  if (transcriptionStatus === 'complete') {
-    return 'complete';
-  }
-  if (transcriptionStatus === 'error') {
-    return 'error';
   }
 
   // Live mode states
@@ -100,7 +94,12 @@ function resolveTrayState(
   if (liveStatus === 'processing') {
     return 'processing';
   }
-  if (liveStatus === 'error') {
+
+  // Terminal one-shot states (must not block live mode above)
+  if (transcriptionStatus === 'complete') {
+    return 'complete';
+  }
+  if (transcriptionStatus === 'error' || liveStatus === 'error') {
     return 'error';
   }
 
@@ -147,7 +146,10 @@ export function useTraySync(deps: TrySyncDeps): void {
   // and IPC messages are processed sequentially, so this guarantees menuState is
   // up-to-date before applyState() → rebuildMenu() runs.
   useEffect(() => {
-    const isRecording = transcriptionStatus === 'recording' || transcriptionStatus === 'processing';
+    const isRecording =
+      transcriptionStatus === 'connecting' ||
+      transcriptionStatus === 'recording' ||
+      transcriptionStatus === 'processing';
     const isLive =
       liveStatus === 'listening' || liveStatus === 'processing' || liveStatus === 'starting';
 
