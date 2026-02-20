@@ -95,6 +95,7 @@
         "to": "docker/docker-compose.gpu.yml"
       }
     ],
+    "afterPack": "./scripts/afterPack.cjs",
     "linux": {
       "target": "AppImage",
       "category": "Utility",

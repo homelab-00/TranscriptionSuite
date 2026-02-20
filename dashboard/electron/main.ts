@@ -14,10 +14,11 @@ import { UpdateManager } from './updateManager.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// AppImage on Linux: disable the SUID sandbox. The chrome-sandbox binary inside
-// the squashfs mount cannot have root ownership / mode 4755, so Chromium's SUID
-// sandbox check fails. This affects Ubuntu and Fedora GNOME (AppArmor restricts
-// unprivileged user namespaces). The APPIMAGE env var is set by the AppImage runtime.
+// AppImage on Linux: the afterPack build hook wraps the Electron binary with a
+// shell script that passes --no-sandbox as a real CLI argument (the zygote sandbox
+// check runs before this JS executes, so the flag must be in argv from the start).
+// This appendSwitch call is a belt-and-suspenders fallback for non-AppImage cases
+// or if the wrapper is bypassed.
 if (process.platform === 'linux' && process.env.APPIMAGE) {
   app.commandLine.appendSwitch('no-sandbox');
 }
