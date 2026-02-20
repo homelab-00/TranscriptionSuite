@@ -74,6 +74,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
   - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
   - [13.6 Checking Installed Packages](#136-checking-installed-packages)
+  - [13.7 macOS DMG Build Failure (dmgbuild binary)](#137-macos-dmg-build-failure-dmgbuild-binary)
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
@@ -486,7 +487,7 @@ uv sync
 |----------|--------|--------|---------------------|
 | **Linux** | Electron + electron-builder | AppImage | None |
 | **Windows** | Electron + electron-builder | NSIS installer | None |
-| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | None |
+| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Python 3 + pip (for `dmgbuild`, see §13.7) |
 
 ### 5.3 Linux AppImage
 
@@ -527,6 +528,16 @@ Or manually:
 cd dashboard
 npm run package:mac
 ```
+
+> **macOS < 15.7:** The bundled `dmgbuild` binary in electron-builder ≥ 26.7 requires macOS 15.7 (Sequoia).
+> On older macOS versions, install `dmgbuild` via pip and set the env var before building:
+> ```bash
+> pip3 install dmgbuild
+> # Use the full path — pip user installs may not be on PATH
+> export CUSTOM_DMGBUILD_PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user") + "/dmgbuild")')"
+> npm run package:mac
+> ```
+> The `build-electron-mac.sh` script handles this automatically.
 
 Optional armored signatures (`.asc`) for all desktop artifacts:
 
@@ -1608,6 +1619,26 @@ These checks are useful for:
 - Verifying package versions
 - Debugging dependency conflicts
 - Confirming successful repair after bootstrap `delta-sync` or `rebuild-sync`
+
+### 13.7 macOS DMG Build Failure (dmgbuild binary)
+
+**Issue**: `electron-builder` ≥ 26.7 bundles a `dmgbuild` binary (`dmg-builder@1.2.0`) that was compiled for **macOS 15.7 (Sequoia)**. On older macOS versions, the build fails with:
+```
+dyld: Library not loaded: /usr/local/opt/gettext/lib/libintl.8.dylib
+  (built for macOS 15.7 which is newer than running OS)
+```
+
+**Solution**: Install `dmgbuild` locally via pip and tell electron-builder to use it:
+```bash
+pip3 install dmgbuild
+# Use the full path — pip user installs may not be on PATH (e.g. ~/Library/Python/3.x/bin)
+export CUSTOM_DMGBUILD_PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user") + "/dmgbuild")')"
+npm run package:mac
+```
+
+The `build-electron-mac.sh` script does this automatically. If you run `npm run package:mac` directly, set `CUSTOM_DMGBUILD_PATH` first.
+
+**Alternative**: Upgrade macOS to 15.7+ (Sequoia), which is the minimum version the bundled binary supports.
 
 ---
 
