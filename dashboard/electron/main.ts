@@ -19,7 +19,7 @@ const __dirname = path.dirname(__filename);
 // sandbox check fails. This affects Ubuntu and Fedora GNOME (AppArmor restricts
 // unprivileged user namespaces). The APPIMAGE env var is set by the AppImage runtime.
 if (process.platform === 'linux' && process.env.APPIMAGE) {
-  app.commandLine.appendSwitch('--no-sandbox');
+  app.commandLine.appendSwitch('no-sandbox');
 }
 
 // Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
