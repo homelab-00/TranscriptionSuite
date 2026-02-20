@@ -78,6 +78,7 @@ function getResolvedAppVersion(): string {
 // ─── Persistent Config Store ────────────────────────────────────────────────
 const store = new Store({
   name: 'dashboard-config',
+  accessPropertiesByDotNotation: false,
   defaults: {
     'connection.localHost': 'localhost',
     'connection.remoteHost': '',
@@ -518,12 +519,8 @@ function gracefulShutdown(): Promise<void> {
   shutdownPromise = (async () => {
     shutdownLog('[Shutdown] Graceful shutdown started.');
 
-    // Use store.store (raw flat-key object) instead of store.get() because the
-    // persisted JSON uses literal dot-notation keys (e.g. "app.stopServerOnQuit")
-    // and store.get() traverses them as nested paths, returning undefined.
-    const raw = store.store as Record<string, unknown>;
-    const shouldStopServer = (raw['app.stopServerOnQuit'] as boolean) ?? true;
-    const useRemote = (raw['connection.useRemote'] as boolean) ?? false;
+    const shouldStopServer = (store.get('app.stopServerOnQuit') as boolean) ?? true;
+    const useRemote = (store.get('connection.useRemote') as boolean) ?? false;
     shutdownLog(`[Shutdown] stopServerOnQuit=${shouldStopServer}, useRemote=${useRemote}`);
 
     if (shouldStopServer && !useRemote) {
