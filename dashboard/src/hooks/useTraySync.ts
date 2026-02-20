@@ -20,6 +20,8 @@ interface TrySyncDeps {
   serverStatus: ConnectionState;
   /** Whether the Docker container is running */
   containerRunning: boolean;
+  /** Docker container health status ('healthy' | 'starting' | 'unhealthy' | undefined) */
+  containerHealth?: string;
   /** Transcription (one-shot recording) status */
   transcriptionStatus: TranscriptionStatus;
   /** Live mode status */
@@ -54,6 +56,7 @@ function resolveTrayState(
     TrySyncDeps,
     | 'serverStatus'
     | 'containerRunning'
+    | 'containerHealth'
     | 'transcriptionStatus'
     | 'liveStatus'
     | 'muted'
@@ -64,6 +67,7 @@ function resolveTrayState(
   const {
     serverStatus,
     containerRunning,
+    containerHealth,
     transcriptionStatus,
     liveStatus,
     muted,
@@ -71,8 +75,11 @@ function resolveTrayState(
     modelsLoaded,
   } = deps;
 
-  // Anything not healthy+running = disconnected (except server stopped entirely)
+  // Not running, inactive, or Docker healthcheck not yet passed → gray
   if (!containerRunning || serverStatus === 'inactive') {
+    return 'disconnected';
+  }
+  if (containerHealth === 'starting' || containerHealth === 'unhealthy') {
     return 'disconnected';
   }
   if (serverStatus === 'error') {
@@ -132,6 +139,7 @@ export function useTraySync(deps: TrySyncDeps): void {
   const {
     serverStatus,
     containerRunning,
+    containerHealth,
     transcriptionStatus,
     liveStatus,
     muted,
@@ -159,7 +167,12 @@ export function useTraySync(deps: TrySyncDeps): void {
     // isStandby: server connected and ready, nothing active.
     // 'complete' is intentionally NOT excluded — the tray should allow starting a new
     // recording immediately after a previous one finishes (mirrors canStartRecording in SessionView).
-    const isStandby = containerRunning && serverStatus === 'active' && !isRecording && !isLive;
+    const isStandby =
+      containerRunning &&
+      containerHealth === 'healthy' &&
+      serverStatus === 'active' &&
+      !isRecording &&
+      !isLive;
 
     window.electronAPI!.tray.setMenuState({
       serverRunning: containerRunning,
@@ -173,6 +186,7 @@ export function useTraySync(deps: TrySyncDeps): void {
     });
   }, [
     containerRunning,
+    containerHealth,
     transcriptionStatus,
     liveStatus,
     muted,
@@ -186,6 +200,7 @@ export function useTraySync(deps: TrySyncDeps): void {
     const newState = resolveTrayState({
       serverStatus,
       containerRunning,
+      containerHealth,
       transcriptionStatus,
       liveStatus,
       muted,
@@ -203,6 +218,7 @@ export function useTraySync(deps: TrySyncDeps): void {
   }, [
     serverStatus,
     containerRunning,
+    containerHealth,
     transcriptionStatus,
     liveStatus,
     muted,

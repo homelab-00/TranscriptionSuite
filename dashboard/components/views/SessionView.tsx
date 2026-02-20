@@ -420,6 +420,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   useTraySync({
     serverStatus: clientRunning ? serverConnection.serverStatus : 'inactive',
     containerRunning: serverRunning,
+    containerHealth: docker.container.health,
     transcriptionStatus: transcription.status,
     liveStatus: live.status,
     muted: transcription.muted || live.muted,

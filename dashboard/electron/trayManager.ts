@@ -272,7 +272,7 @@ export class TrayManager {
     const bitmap = Buffer.from(srcBitmap); // writable copy
 
     const color = overrideColor ?? STATE_COLORS[state];
-    const dimFactor = state === 'disconnected' ? 0.4 : 1.0;
+    const dimFactor = state === 'disconnected' ? 0.65 : 1.0;
     const isModelsUnloaded = state === 'models-unloaded';
 
     for (let i = 0; i < bitmap.length; i += 4) {
