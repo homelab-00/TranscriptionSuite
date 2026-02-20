@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, shell, dialog } from 'electron';
 import Store from 'electron-store';
 import {
   dockerManager,
@@ -438,6 +438,12 @@ ipcMain.handle('audio:getDesktopSources', async () => {
     // desktopCapturer not available in this Electron version
   }
   return [];
+});
+
+// ─── Clipboard IPC ──────────────────────────────────────────────────────────
+
+ipcMain.handle('clipboard:writeText', (_event, text: string) => {
+  clipboard.writeText(text);
 });
 
 // ─── Update Check IPC ───────────────────────────────────────────────────────

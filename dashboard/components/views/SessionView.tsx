@@ -28,6 +28,7 @@ import { LogTerminal } from '../ui/LogTerminal';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { useLanguages } from '../../src/hooks/useLanguages';
+import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
 import { useLiveMode } from '../../src/hooks/useLiveMode';
 import { useDockerContext } from '../../src/hooks/DockerContext';
@@ -518,7 +519,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Copy transcription result to clipboard
   const handleCopyTranscription = useCallback(() => {
     if (!transcription.result?.text) return;
-    navigator.clipboard.writeText(transcription.result.text).catch(() => {});
+    writeToClipboard(transcription.result.text).catch(() => {});
   }, [transcription.result?.text]);
 
   // Download transcription as TXT file
@@ -691,7 +692,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       e.stopPropagation();
       const allLogs = [...serverLogs, ...clientLogs];
       const logText = allLogs.map((l) => `[${l.timestamp}] [${l.source}] ${l.message}`).join('\n');
-      navigator.clipboard.writeText(logText).catch(() => {});
+      writeToClipboard(logText).catch(() => {});
     },
     [serverLogs, clientLogs],
   );
@@ -703,7 +704,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     prevStatusRef.current = transcription.status;
     if (wasProcessing && transcription.status === 'complete' && transcription.result?.text) {
       // Auto-copy to clipboard
-      navigator.clipboard.writeText(transcription.result.text).catch(() => {});
+      writeToClipboard(transcription.result.text).catch(() => {});
       // Desktop notification (if permission granted)
       if (Notification.permission === 'granted') {
         new Notification('Transcription Complete', {
@@ -1563,7 +1564,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     variant="ghost"
                     size="sm"
                     icon={<Copy size={14} />}
-                    onClick={() => navigator.clipboard.writeText(live.getText())}
+                    onClick={() => writeToClipboard(live.getText())}
                     className="ml-auto h-8 shrink-0 whitespace-nowrap"
                   >
                     Copy

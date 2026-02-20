@@ -26,6 +26,7 @@ import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
+import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
 import type { AuthToken } from '../../src/api/types';
 
@@ -620,7 +621,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <div className="absolute top-2 right-2 flex items-center gap-1">
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(clientSettings.authToken);
+                    writeToClipboard(clientSettings.authToken).catch(() => {});
                     setTokenCopied(true);
                     setTimeout(() => setTokenCopied(false), 2000);
                   }}
@@ -744,7 +745,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                           </code>
                           <button
                             onClick={() => {
-                              navigator.clipboard.writeText(createdTokenPlaintext);
+                              writeToClipboard(createdTokenPlaintext).catch(() => {});
                               setCopiedTokenId('new');
                               setTimeout(() => setCopiedTokenId(null), 2000);
                             }}

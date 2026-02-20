@@ -26,6 +26,7 @@ import { CustomSelect } from '../ui/CustomSelect';
 import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
+import { writeToClipboard } from '../../src/hooks/useClipboard';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
@@ -693,7 +694,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <div className="absolute top-2 right-2 flex items-center gap-1">
                       <button
                         onClick={() => {
-                          navigator.clipboard.writeText(authToken);
+                          writeToClipboard(authToken).catch(() => {});
                           setAuthTokenCopied(true);
                           setTimeout(() => setAuthTokenCopied(false), 2000);
                         }}

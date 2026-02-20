@@ -104,6 +104,9 @@ export interface ElectronAPI {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
   };
+  clipboard: {
+    writeText: (text: string) => Promise<void>;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -191,5 +194,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updates: {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),
     checkNow: () => ipcRenderer.invoke('updates:checkNow'),
+  },
+  clipboard: {
+    writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
   },
 } satisfies ElectronAPI);
