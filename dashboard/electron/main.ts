@@ -1,7 +1,7 @@
 import fs from 'fs';
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import Store from 'electron-store';
 import {
   dockerManager,
@@ -10,6 +10,16 @@ import {
 } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
+
+// When launched via a wrapper (e.g. AppImage through GearLevel), the stdout/stderr
+// pipes may already be closed.  Any console.log/warn/error call will then raise
+// EPIPE which Node promotes to an uncaught exception, showing the Electron error
+// dialog.  Silently dropping EPIPE on these streams is the standard Node.js fix.
+for (const stream of [process.stdout, process.stderr] as NodeJS.WriteStream[]) {
+  stream.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'EPIPE') throw err;
+  });
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
