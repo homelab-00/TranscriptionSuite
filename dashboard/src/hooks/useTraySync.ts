@@ -26,6 +26,8 @@ interface TrySyncDeps {
   liveStatus: LiveStatus;
   /** Whether audio is muted (live mode or recording) */
   muted: boolean;
+  /** Whether a file upload or batch import is in progress */
+  isUploading?: boolean;
   /** Active transcription model name (for tooltip) */
   activeModel?: string;
   /** Whether ASR models are currently loaded on the server */
@@ -50,66 +52,75 @@ interface TrySyncDeps {
 function resolveTrayState(
   deps: Pick<
     TrySyncDeps,
-    'serverStatus' | 'containerRunning' | 'transcriptionStatus' | 'liveStatus' | 'muted'
+    | 'serverStatus'
+    | 'containerRunning'
+    | 'transcriptionStatus'
+    | 'liveStatus'
+    | 'muted'
+    | 'isUploading'
+    | 'modelsLoaded'
   >,
 ): TrayState {
-  const { serverStatus, containerRunning, transcriptionStatus, liveStatus, muted } = deps;
+  const {
+    serverStatus,
+    containerRunning,
+    transcriptionStatus,
+    liveStatus,
+    muted,
+    isUploading,
+    modelsLoaded,
+  } = deps;
 
-  // Muted takes visual priority while recording/listening
-  if (
-    muted &&
-    (transcriptionStatus === 'recording' ||
-      liveStatus === 'listening' ||
-      liveStatus === 'processing')
-  ) {
-    return 'muted';
-  }
-
-  // One-shot transcription states (higher priority than live)
-  switch (transcriptionStatus) {
-    case 'connecting':
-      return 'connecting';
-    case 'recording':
-      return 'recording';
-    case 'processing':
-      return 'processing';
-    case 'complete':
-      return 'complete';
-    case 'error':
-      return 'error';
-  }
-
-  // Live mode states
-  switch (liveStatus) {
-    case 'connecting':
-    case 'starting':
-      return 'connecting';
-    case 'listening':
-      return 'live-listening';
-    case 'processing':
-      return 'live-processing';
-    case 'error':
-      return 'error';
-  }
-
-  // Server / connection states
-  if (serverStatus === 'inactive' && !containerRunning) {
-    return 'idle';
-  }
-  if (serverStatus === 'inactive') {
+  // Anything not healthy+running = disconnected (except server stopped entirely)
+  if (!containerRunning || serverStatus === 'inactive') {
     return 'disconnected';
-  }
-  if (serverStatus === 'warning') {
-    return 'connecting';
-  }
-  if (serverStatus === 'active') {
-    return 'active';
   }
   if (serverStatus === 'error') {
     return 'error';
   }
 
-  return 'idle';
+  // One-shot transcription states (higher priority than live)
+  if (transcriptionStatus === 'recording') {
+    return muted ? 'recording-muted' : 'recording';
+  }
+  if (transcriptionStatus === 'processing') {
+    return 'processing';
+  }
+  if (transcriptionStatus === 'complete') {
+    return 'complete';
+  }
+  if (transcriptionStatus === 'error') {
+    return 'error';
+  }
+
+  // Live mode states
+  if (liveStatus === 'listening' || liveStatus === 'starting' || liveStatus === 'connecting') {
+    return muted ? 'live-muted' : 'live-active';
+  }
+  if (liveStatus === 'processing') {
+    return 'processing';
+  }
+  if (liveStatus === 'error') {
+    return 'error';
+  }
+
+  // Upload / import in progress
+  if (isUploading) {
+    return 'uploading';
+  }
+
+  // Server running but models unloaded
+  if (modelsLoaded === false) {
+    return 'models-unloaded';
+  }
+
+  // Server running, healthy, nothing active
+  if (serverStatus === 'active') {
+    return 'idle';
+  }
+
+  // Fallback for 'warning' / 'loading' — server not fully healthy
+  return 'disconnected';
 }
 
 export function useTraySync(deps: TrySyncDeps): void {
@@ -125,6 +136,7 @@ export function useTraySync(deps: TrySyncDeps): void {
     transcriptionStatus,
     liveStatus,
     muted,
+    isUploading,
     activeModel,
     modelsLoaded,
     isLocalConnection,
@@ -175,6 +187,8 @@ export function useTraySync(deps: TrySyncDeps): void {
       transcriptionStatus,
       liveStatus,
       muted,
+      isUploading,
+      modelsLoaded,
     });
     if (newState !== prevStateRef.current) {
       prevStateRef.current = newState;
@@ -184,7 +198,16 @@ export function useTraySync(deps: TrySyncDeps): void {
     if (activeModel && containerRunning) {
       window.electronAPI!.tray.setTooltip(`TranscriptionSuite — Model: ${activeModel}`);
     }
-  }, [serverStatus, containerRunning, transcriptionStatus, liveStatus, muted, activeModel]);
+  }, [
+    serverStatus,
+    containerRunning,
+    transcriptionStatus,
+    liveStatus,
+    muted,
+    isUploading,
+    modelsLoaded,
+    activeModel,
+  ]);
 
   // Listen for tray context-menu actions forwarded from the main process
   useEffect(() => {

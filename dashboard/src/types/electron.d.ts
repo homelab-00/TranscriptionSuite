@@ -4,14 +4,14 @@
 
 type TrayState =
   | 'idle'
-  | 'active'
-  | 'connecting'
   | 'recording'
   | 'processing'
-  | 'live-listening'
-  | 'live-processing'
-  | 'muted'
   | 'complete'
+  | 'live-active'
+  | 'recording-muted'
+  | 'live-muted'
+  | 'uploading'
+  | 'models-unloaded'
   | 'error'
   | 'disconnected';
 

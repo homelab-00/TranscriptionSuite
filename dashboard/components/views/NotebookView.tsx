@@ -36,7 +36,11 @@ import type { ImportJob } from '../../src/hooks/useImportQueue';
 import { apiClient } from '../../src/api/client';
 import type { Recording } from '../../src/api/types';
 
-export const NotebookView: React.FC = () => {
+interface NotebookViewProps {
+  onUploadingChange?: (uploading: boolean) => void;
+}
+
+export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange }) => {
   const [activeTab, setActiveTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
   const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
 
@@ -77,7 +81,7 @@ export const NotebookView: React.FC = () => {
       case NotebookTab.SEARCH:
         return <SearchTab onNoteClick={handleNoteClick} />;
       case NotebookTab.IMPORT:
-        return <ImportTab />;
+        return <ImportTab onUploadingChange={onUploadingChange} />;
     }
   };
 
@@ -1183,12 +1187,18 @@ const SearchTab: React.FC<{ onNoteClick: (note: any) => void }> = ({ onNoteClick
   );
 };
 
-const ImportTab = () => {
+const ImportTab = ({ onUploadingChange }: { onUploadingChange?: (uploading: boolean) => void }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diarization, setDiarization] = useState(true);
   const [wordTimestamps, setWordTimestamps] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const queue = useImportQueue();
+
+  // Report upload/import activity to parent for tray icon sync
+  useEffect(() => {
+    onUploadingChange?.(queue.isProcessing || queue.pendingCount > 0);
+    return () => onUploadingChange?.(false);
+  }, [queue.isProcessing, queue.pendingCount, onUploadingChange]);
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {

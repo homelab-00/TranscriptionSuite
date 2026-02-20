@@ -36,6 +36,9 @@ const AppInner: React.FC = () => {
   // Track clientRunning at app level so Sidebar can derive Session status
   const [clientRunning, setClientRunning] = useState(false);
 
+  // Lifted upload/import status so tray sync (in SessionView) can reflect it
+  const [isUploading, setIsUploading] = useState(false);
+
   const [startupFlowPending, setStartupFlowPending] = useState(false);
   const startupFlowPendingRef = useRef(false);
 
@@ -245,10 +248,11 @@ const AppInner: React.FC = () => {
             setClientRunning={setClientRunning}
             onStartServer={startServerWithOnboarding}
             startupFlowPending={startupFlowPending}
+            isUploading={isUploading}
           />
         );
       case View.NOTEBOOK:
-        return <NotebookView />;
+        return <NotebookView onUploadingChange={setIsUploading} />;
       case View.SERVER:
         return (
           <ServerView
@@ -264,6 +268,7 @@ const AppInner: React.FC = () => {
             setClientRunning={setClientRunning}
             onStartServer={startServerWithOnboarding}
             startupFlowPending={startupFlowPending}
+            isUploading={isUploading}
           />
         );
     }

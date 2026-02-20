@@ -3,8 +3,10 @@
  * dynamic context menu, and IPC bridge to the renderer process.
  *
  * Icons are produced by tinting the base logo PNG at runtime:
- *  • 'active' → original logo (no modification)
- *  • 'idle' / 'disconnected' → grayscale conversion (disconnected dimmed)
+ *  • 'idle' → original logo (no modification, server running & healthy)
+ *  • 'disconnected' → grayscale + dimmed
+ *  • 'models-unloaded' → desaturated + dimmed original
+ *  • 'error' → red background + black X overlay
  *  • All others → grayscale mic symbol + state-colored background area
  *
  * The renderer pushes state updates via IPC; the tray manager resolves the
@@ -21,17 +23,17 @@ const __dirname = path.dirname(__filename);
 // ─── Tray State Enum ────────────────────────────────────────────────────────
 
 export type TrayState =
-  | 'idle' // Server stopped, no recording
-  | 'active' // Server running, no session (original logo)
-  | 'connecting' // WebSocket connecting
-  | 'recording' // One-shot recording active
-  | 'processing' // Transcription processing
-  | 'live-listening' // Live mode listening
-  | 'live-processing' // Live mode processing
-  | 'muted' // Recording/live but muted
-  | 'complete' // Transcription complete (reverts after 3s)
-  | 'error' // Error state
-  | 'disconnected'; // Server unreachable
+  | 'idle' // Server running, healthy, nothing active (original logo)
+  | 'recording' // Long-form recording in progress
+  | 'processing' // Transcription in progress (any type)
+  | 'complete' // Transcription finished (white flash → revert to idle)
+  | 'live-active' // Live mode on, unmuted
+  | 'recording-muted' // Recording but muted
+  | 'live-muted' // Live mode on, muted
+  | 'uploading' // File upload/import in progress
+  | 'models-unloaded' // Server running but models unloaded
+  | 'error' // Server reports error (red + black X)
+  | 'disconnected'; // Server not running / unreachable
 
 export interface TrayMenuState {
   serverRunning: boolean;
@@ -54,16 +56,16 @@ interface RGB {
 
 /** Vivid, maximally-distinct colors for each state's background area. */
 const STATE_COLORS: Record<TrayState, RGB | null> = {
-  idle: null, // grayscale only
-  active: null, // original logo
-  connecting: { r: 0xff, g: 0xd6, b: 0x00 }, // vivid yellow
-  recording: { r: 0xf4, g: 0x43, b: 0x36 }, // red
-  processing: { r: 0xff, g: 0x91, b: 0x00 }, // bright orange
-  'live-listening': { r: 0x00, g: 0xe6, b: 0x76 }, // neon green
-  'live-processing': { r: 0x00, g: 0xe5, b: 0xff }, // electric cyan
-  muted: { r: 0x7c, g: 0x4d, b: 0xff }, // deep violet
-  complete: { r: 0x29, g: 0x79, b: 0xff }, // bright blue
-  error: { r: 0xff, g: 0x00, b: 0xff }, // magenta
+  idle: null, // original logo (no tint)
+  recording: { r: 0xff, g: 0xd6, b: 0x00 }, // yellow #FFD600
+  processing: { r: 0xff, g: 0x91, b: 0x00 }, // orange #FF9100
+  complete: { r: 0xff, g: 0xff, b: 0xff }, // white flash
+  'live-active': { r: 0xf4, g: 0x43, b: 0x36 }, // red #F44336
+  'recording-muted': { r: 0x80, g: 0x6b, b: 0x00 }, // dimmed yellow (~0.5 brightness)
+  'live-muted': { r: 0x80, g: 0x00, b: 0x00 }, // maroon #800000
+  uploading: { r: 0x29, g: 0x79, b: 0xff }, // blue #2979FF
+  'models-unloaded': null, // special handling (desaturated + dimmed)
+  error: { r: 0xd3, g: 0x2f, b: 0x2f }, // red #D32F2F
   disconnected: null, // dimmed grayscale
 };
 
@@ -79,15 +81,15 @@ const STATE_COLORS: Record<TrayState, RGB | null> = {
 const MIC_LUMINANCE_THRESHOLD = 190;
 
 const STATE_TOOLTIP_MAP: Record<TrayState, string> = {
-  idle: 'TranscriptionSuite — Server stopped',
-  active: 'TranscriptionSuite — Ready',
-  connecting: 'TranscriptionSuite — Connecting…',
+  idle: 'TranscriptionSuite — Ready',
   recording: 'TranscriptionSuite — Recording',
   processing: 'TranscriptionSuite — Processing…',
-  'live-listening': 'TranscriptionSuite — Live Mode',
-  'live-processing': 'TranscriptionSuite — Live Processing…',
-  muted: 'TranscriptionSuite — Muted',
   complete: 'TranscriptionSuite — Complete',
+  'live-active': 'TranscriptionSuite — Live Mode',
+  'recording-muted': 'TranscriptionSuite — Recording (Muted)',
+  'live-muted': 'TranscriptionSuite — Live Mode (Muted)',
+  uploading: 'TranscriptionSuite — Uploading…',
+  'models-unloaded': 'TranscriptionSuite — Models Unloaded',
   error: 'TranscriptionSuite — Error',
   disconnected: 'TranscriptionSuite — Disconnected',
 };
@@ -108,9 +110,6 @@ export class TrayManager {
     isStandby: false,
   };
   private completeTimer: ReturnType<typeof setTimeout> | null = null;
-  private previousState: TrayState = 'idle';
-  private connectingDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private static readonly CONNECTING_DEBOUNCE_MS = 250;
   private isDev: boolean;
   private getWindow: () => BrowserWindow | null;
 
@@ -119,12 +118,6 @@ export class TrayManager {
 
   /** Cache of generated tinted icons so we tint each state only once. */
   private iconCache = new Map<string, Electron.NativeImage>();
-
-  /**
-   * Dark desaturated green for "models unloaded" state —
-   * matches v0.5.6's rgb(45, 140, 45) appearance.
-   */
-  private static readonly MODELS_UNLOADED_COLOR: RGB = { r: 0x2d, g: 0x8c, b: 0x2d };
 
   /** IPC callbacks — set via setActions() so main.ts controls Docker / renderer */
   private actions: {
@@ -185,7 +178,6 @@ export class TrayManager {
   /** Destroy the tray (called on app quit). */
   destroy(): void {
     if (this.completeTimer) clearTimeout(this.completeTimer);
-    if (this.connectingDebounceTimer) clearTimeout(this.connectingDebounceTimer);
     this.tray?.destroy();
     this.tray = null;
   }
@@ -198,41 +190,16 @@ export class TrayManager {
       this.completeTimer = null;
     }
 
-    if (this.connectingDebounceTimer) {
-      clearTimeout(this.connectingDebounceTimer);
-      this.connectingDebounceTimer = null;
-    }
-
     if (newState === 'complete') {
-      // Don't save previousState — we'll let the renderer push the correct
-      // post-completion state. The timer just clears the 'complete' display
-      // and falls back to 'active' (server should still be running after transcription).
       this.state = 'complete';
       this.applyState();
 
       this.completeTimer = setTimeout(() => {
         this.completeTimer = null;
-        // Revert to 'active' (server is running) rather than the transient
-        // 'processing' state that was active before completion.
-        this.state = 'active';
+        // Revert to 'idle' (server is running & healthy) after the white flash.
+        this.state = 'idle';
         this.applyState();
-      }, 1000);
-    } else if (newState === 'connecting' && (this.state === 'active' || this.state === 'idle')) {
-      // Debounce the 'connecting' state to suppress brief yellow flash
-      // when transitioning quickly to 'recording'.
-      this.connectingDebounceTimer = setTimeout(() => {
-        this.connectingDebounceTimer = null;
-        // Only apply if still in connecting (hasn't been superseded)
-        if (this.state !== 'connecting') {
-          this.previousState = this.state;
-          this.state = 'connecting';
-          this.applyState();
-        }
-      }, TrayManager.CONNECTING_DEBOUNCE_MS);
-      // Update internal state immediately so subsequent setState calls
-      // know we're in connecting
-      this.previousState = this.state;
-      this.state = 'connecting';
+      }, 500);
     } else {
       this.state = newState;
       this.applyState();
@@ -297,8 +264,8 @@ export class TrayManager {
   private generateIcon(state: TrayState, overrideColor?: RGB): Electron.NativeImage {
     if (!this.baseIcon) return this.loadBaseIcon();
 
-    // 'active' with no override → use the original unmodified logo
-    if (state === 'active' && !overrideColor) return this.baseIcon;
+    // 'idle' with no override → use the original unmodified logo
+    if (state === 'idle' && !overrideColor) return this.baseIcon;
 
     const { width, height } = this.baseIcon.getSize();
     const srcBitmap = this.baseIcon.toBitmap();
@@ -306,6 +273,7 @@ export class TrayManager {
 
     const color = overrideColor ?? STATE_COLORS[state];
     const dimFactor = state === 'disconnected' ? 0.4 : 1.0;
+    const isModelsUnloaded = state === 'models-unloaded';
 
     for (let i = 0; i < bitmap.length; i += 4) {
       // BGRA byte order
@@ -318,7 +286,16 @@ export class TrayManager {
 
       const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-      if (lum > MIC_LUMINANCE_THRESHOLD) {
+      if (isModelsUnloaded) {
+        // Desaturate: grayscale + 30% original color, then dim to 70%
+        const gray = lum;
+        const blendR = Math.round((gray * 0.7 + r * 0.3) * 0.7);
+        const blendG = Math.round((gray * 0.7 + g * 0.3) * 0.7);
+        const blendB = Math.round((gray * 0.7 + b * 0.3) * 0.7);
+        bitmap[i] = Math.min(blendB, 255);
+        bitmap[i + 1] = Math.min(blendG, 255);
+        bitmap[i + 2] = Math.min(blendR, 255);
+      } else if (lum > MIC_LUMINANCE_THRESHOLD) {
         // Bright pixel → mic symbol → grayscale
         const gray = Math.round(Math.min(lum * dimFactor, 255));
         bitmap[i] = gray;
@@ -332,11 +309,46 @@ export class TrayManager {
         bitmap[i + 1] = Math.round(Math.min(color.g * factor, 255));
         bitmap[i + 2] = Math.round(Math.min(color.r * factor, 255));
       } else {
-        // null color (idle / disconnected) → plain grayscale
+        // null color (disconnected) → plain grayscale
         const gray = Math.round(Math.min(lum * dimFactor, 255));
         bitmap[i] = gray;
         bitmap[i + 1] = gray;
         bitmap[i + 2] = gray;
+      }
+    }
+
+    // Draw black X overlay for error state
+    if (state === 'error') {
+      const xSize = Math.round(Math.min(width, height) * 0.6);
+      const offsetX = Math.round((width - xSize) / 2);
+      const offsetY = Math.round((height - xSize) / 2);
+      const thickness = 2;
+
+      for (let step = 0; step < xSize; step++) {
+        for (let t = -thickness; t <= thickness; t++) {
+          // Diagonal top-left → bottom-right
+          const x1 = offsetX + step;
+          const y1 = offsetY + step + t;
+          if (x1 >= 0 && x1 < width && y1 >= 0 && y1 < height) {
+            const idx = (y1 * width + x1) * 4;
+            if (bitmap[idx + 3] > 10) {
+              bitmap[idx] = 0; // B
+              bitmap[idx + 1] = 0; // G
+              bitmap[idx + 2] = 0; // R
+            }
+          }
+          // Diagonal top-right → bottom-left
+          const x2 = offsetX + xSize - 1 - step;
+          const y2 = offsetY + step + t;
+          if (x2 >= 0 && x2 < width && y2 >= 0 && y2 < height) {
+            const idx = (y2 * width + x2) * 4;
+            if (bitmap[idx + 3] > 10) {
+              bitmap[idx] = 0; // B
+              bitmap[idx + 1] = 0; // G
+              bitmap[idx + 2] = 0; // R
+            }
+          }
+        }
       }
     }
 
@@ -347,14 +359,7 @@ export class TrayManager {
 
   private applyState(): void {
     if (!this.tray) return;
-    // When models are unloaded but server is running, use dark green icon
-    const useModelsUnloaded =
-      !this.menuState.modelsLoaded &&
-      this.menuState.serverRunning &&
-      (this.state === 'active' || this.state === 'connecting');
-    const icon = useModelsUnloaded
-      ? this.getIcon(this.state, TrayManager.MODELS_UNLOADED_COLOR)
-      : this.getIcon(this.state);
+    const icon = this.getIcon(this.state);
     this.tray.setImage(icon);
 
     // On Linux StatusNotifier, setImage alone may not trigger a visual refresh.

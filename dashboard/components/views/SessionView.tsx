@@ -46,6 +46,7 @@ interface SessionViewProps {
   setClientRunning: (running: boolean) => void;
   onStartServer: (mode: 'local' | 'remote', runtimeProfile: 'gpu' | 'cpu') => Promise<void>;
   startupFlowPending: boolean;
+  isUploading?: boolean;
 }
 
 export const SessionView: React.FC<SessionViewProps> = ({
@@ -54,6 +55,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   setClientRunning,
   onStartServer,
   startupFlowPending,
+  isUploading,
 }) => {
   // Global State
   const [showLogs, setShowLogs] = useState(false);
@@ -424,6 +426,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     activeModel: activeModel ?? undefined,
     modelsLoaded: isAsrModelsLoaded,
     isLocalConnection: true,
+    isUploading,
     onStartRecording: () => transcription.start(),
     onStopRecording: () => {
       if (isLive) live.stop();
