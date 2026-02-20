@@ -185,6 +185,8 @@ export class APIClient {
 
   /**
    * Combined connectivity check — returns a summary of server state.
+   * Uses a single GET /api/status request whose ``ready`` field
+   * consolidates the old /health + /ready + /api/status triple.
    * Does not throw; returns an error state object on failure.
    */
   async checkConnection(): Promise<{
@@ -194,25 +196,15 @@ export class APIClient {
     error: string | null;
   }> {
     try {
-      await this.healthCheck();
-    } catch {
-      return { reachable: false, ready: false, status: null, error: 'Server unreachable' };
-    }
-    try {
-      const [readiness, status] = await Promise.all([this.getReadiness(), this.getStatus()]);
+      const status = await this.getStatus();
       return {
         reachable: true,
-        ready: readiness.status === 'ready',
+        ready: status.ready === true,
         status,
         error: null,
       };
-    } catch (err) {
-      return {
-        reachable: true,
-        ready: false,
-        status: null,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      };
+    } catch {
+      return { reachable: false, ready: false, status: null, error: 'Server unreachable' };
     }
   }
 

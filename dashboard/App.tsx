@@ -8,7 +8,8 @@ import { ServerView } from './components/views/ServerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { Button } from './components/ui/Button';
-import { useServerStatus } from './src/hooks/useServerStatus';
+import { ServerStatusProvider, useServerStatusContext } from './src/hooks/ServerStatusContext';
+import { AdminStatusProvider } from './src/hooks/AdminStatusContext';
 import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
@@ -29,7 +30,7 @@ const AppInner: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.SESSION);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const serverConnection = useServerStatus();
+  const serverConnection = useServerStatusContext();
   const docker = useDockerContext();
 
   // Track clientRunning at app level so Sidebar can derive Session status
@@ -419,7 +420,11 @@ const AppInner: React.FC = () => {
 
 const App: React.FC = () => (
   <DockerProvider>
-    <AppInner />
+    <ServerStatusProvider>
+      <AdminStatusProvider>
+        <AppInner />
+      </AdminStatusProvider>
+    </ServerStatusProvider>
   </DockerProvider>
 );
 

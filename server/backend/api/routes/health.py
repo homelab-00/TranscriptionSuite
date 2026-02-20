@@ -62,16 +62,22 @@ async def readiness_check(request: Request) -> JSONResponse:
 async def get_status(request: Request) -> dict[str, Any]:
     """
     Get detailed server status including GPU and model information.
+
+    The ``ready`` field consolidates the logic from ``/ready`` so that
+    dashboard clients can poll a single endpoint instead of three.
     """
     try:
         model_manager = request.app.state.model_manager
         status = model_manager.get_status()
+        is_ready = status.get("transcription", {}).get("loaded", False)
     except AttributeError:
         status = {"error": "Model manager not initialized"}
+        is_ready = False
 
     return {
         "status": "running",
         "version": __version__,
         "models": status,
         "features": status.get("features", {}),
+        "ready": is_ready or is_live_mode_active(),
     }

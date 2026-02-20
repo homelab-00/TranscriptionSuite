@@ -33,7 +33,7 @@ import { useLiveMode } from '../../src/hooks/useLiveMode';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
-import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
 import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { getConfig, setConfig } from '../../src/config/store';
@@ -205,7 +205,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const docker = useDockerContext();
   const serverRunning = docker.container.running;
   // Client connection state — tracked at App level via props
-  const admin = useAdminStatus();
+  const admin = useAdminStatusContext();
   const isAsrModelsLoaded =
     admin.status?.models_loaded ??
     Boolean(

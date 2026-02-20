@@ -26,7 +26,7 @@ import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
-import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
 import type { AuthToken } from '../../src/api/types';
 
 interface SettingsModalProps {
@@ -61,10 +61,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
   // Admin status for Server tab (read-only config display)
-  const { status: adminStatus, loading: adminLoading } = useAdminStatus(
-    10000,
-    isOpen && activeTab === 'Server',
-  );
+  const { status: adminStatus, loading: adminLoading } = useAdminStatusContext();
 
   // Edited server config values (key → value; only populated when user edits)
   const [serverConfigEdits, setServerConfigEdits] = useState<Record<string, string>>({});

@@ -20,6 +20,7 @@ export interface ServerStatus {
   version?: string;
   models?: Record<string, unknown>;
   features?: Record<string, unknown>;
+  ready?: boolean;
   uptime?: number;
   gpu_available?: boolean;
   gpu_memory?: string;

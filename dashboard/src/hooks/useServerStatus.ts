@@ -26,9 +26,13 @@ export interface ServerConnectionInfo {
  * Hook that polls the TranscriptionSuite server for health/status.
  * Returns StatusLight-compatible states for server and client indicators.
  *
- * @param pollInterval  Polling interval in ms (default: 5000)
+ * Uses a single GET /api/status request per cycle (not the old
+ * /health + /ready + /api/status triple) and skips state updates
+ * when the response hasn't changed.
+ *
+ * @param pollInterval  Polling interval in ms (default: 10 000)
  */
-export function useServerStatus(pollInterval = 5000): ServerConnectionInfo {
+export function useServerStatus(pollInterval = 10_000): ServerConnectionInfo {
   const [serverStatus, setServerStatus] = useState<ConnectionState>('loading');
   const [clientStatus, setClientStatus] = useState<ConnectionState>('loading');
   const [details, setDetails] = useState<ServerStatus | null>(null);
@@ -37,11 +41,17 @@ export function useServerStatus(pollInterval = 5000): ServerConnectionInfo {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const prevJsonRef = useRef<string>('');
 
   const check = useCallback(async () => {
     const result = await apiClient.checkConnection();
 
     if (!mountedRef.current) return;
+
+    // Skip state updates when the response is identical to the previous one
+    const json = JSON.stringify(result);
+    if (json === prevJsonRef.current) return;
+    prevJsonRef.current = json;
 
     setReachable(result.reachable);
     setReady(result.ready);
