@@ -302,13 +302,6 @@ GPU detection, and HuggingFace token entry.
 **Update Checker**: Opt-in background checks for new app releases (GitHub) and server Docker
 image updates (GHCR). Configurable interval in Settings.
 
-**Status Lights**: The sidebar shows real-time status indicators:
-- 🟢 Green (pulsing): Running AND healthy
-- 🟠 Orange (glowing): Container exists but not running/healthy
-- ⚪ Gray: Container missing
-- 🔴 Red: Unhealthy/Error state
-- 🔵 Blue: Starting/Loading
-
 ---
 
 ## 6. Remote Access
