@@ -249,7 +249,7 @@ TranscriptionSuite uses layered security for remote access:
 TranscriptionSuite/
 ├── dashboard/                    # Electron + React dashboard application
 │   ├── electron/                 # Electron main process
-│   │   ├── main.ts               # Window creation, IPC handlers, global shortcuts, app lifecycle
+│   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
 │   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
 │   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
 │   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons
@@ -501,8 +501,6 @@ cd dashboard
 npm run package:linux
 ```
 
-**XWayland enforcement:** The AppImage automatically passes `--ozone-platform=x11` to Chromium via `app.commandLine.appendSwitch()` in `main.ts`. This forces XWayland on Wayland compositors (KDE Plasma 6, GNOME, etc.), which ensures reliable global keyboard shortcuts and consistent system tray icon behaviour. To override, launch with `ELECTRON_OZONE_PLATFORM_HINT=auto` or append `--ozone-platform=wayland` manually — note that tray icon refresh and global shortcuts may be less reliable in native Wayland mode.
-
 ### 5.4 Windows Installer
 
 ```powershell
@@ -539,8 +537,6 @@ export GPG_TIMEOUT_MINUTES=60
 ```
 
 The signing script prompts for your key passphrase by default (or uses `GPG_PASSPHRASE` in non-interactive environments).
-
-CI release workflow: `.github/workflows/release-desktop.yml`
 
 Required GitHub secrets for CI signing:
 | Variable | Description |
@@ -911,7 +907,6 @@ server/backend/
 │   ├── main.py                   # App factory, lifespan, routing
 │   └── routes/                   # API endpoint modules
 ├── core/
-│   ├── stt/engine.py             # AudioToTextRecorder (main STT engine)
 │   ├── diarization_engine.py     # PyAnnote wrapper
 │   ├── model_manager.py          # Model lifecycle, job tracking
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
@@ -981,7 +976,7 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, global keyboard shortcuts, app lifecycle |
+| `main.ts` | Window creation, IPC handlers, app lifecycle |
 | `preload.ts` | Context bridge (safe IPC between renderer and main) |
 | `dockerManager.ts` | Docker CLI wrapper for container/image management |
 | `trayManager.ts` | System tray with 11 state-aware icons, context menu, and runtime icon tinting |
@@ -1015,6 +1010,8 @@ npm run dev:electron
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
 | `useClientDebugLogs.ts` | Client-side debug log capture and display |
 | `DockerContext.tsx` | React context provider for Docker state sharing |
+| `ServerStatusContext.tsx` | React context provider for server connection state |
+| `AdminStatusContext.tsx` | React context provider for admin authentication state |
 
 **Shared Source (`src/`):**
 
@@ -1047,7 +1044,7 @@ npm run dev:electron
 | `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications. Layout order: Main Transcription card first, Audio Configuration below |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
 | `ServerView.tsx` | Docker server management: image selection, container control |
-| `SettingsModal.tsx` | 4-tab settings: App (incl. keyboard shortcuts), Client, Server, Notebook |
+| `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
 | `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
 | `AddNoteModal.tsx` | Create new recording from calendar time slot |
@@ -1131,7 +1128,7 @@ Validation fails when:
 - A discovered component has no entry in `component_contracts`
 - Contract content changes but `meta.spec_version` is not bumped
 
-**CI gate**: `npm run ui:contract:validate` runs automatically (workflow: `.github/workflows/ui-contract.yml`).
+**CI gate**: `npm run ui:contract:check` runs automatically (workflow: `.github/workflows/dashboard-quality.yml`).
 
 ### 9.5 Server Busy Handling
 
@@ -1263,7 +1260,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 ### 10.2 Dashboard Configuration
 
 The Electron dashboard persists settings via **electron-store** (JSON) at the
-platform-specific config path (e.g. `~/.config/transcription-suite/config.json`
+platform-specific config path (e.g. `~/.config/TranscriptionSuite/dashboard-config.json`
 on Linux). Settings are managed through the **Settings** modal in the UI.
 
 | Key | Default | Description |
@@ -1282,14 +1279,11 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` — controls Docker GPU reservation |
 | `app.autoCopy` | `true` | Copy transcription to clipboard on completion |
 | `app.showNotifications` | `true` | Show desktop notifications |
-| `app.stopServerOnQuit` | `false` | Stop Docker container when quitting the app |
+| `app.stopServerOnQuit` | `true` | Stop Docker container when quitting the app |
 | `app.startMinimized` | `false` | Start minimised to system tray |
 | `app.updateChecksEnabled` | `false` | Enable opt-in update checking |
-| `app.updateCheckIntervalMode` | `daily` | Check interval: `hourly`, `daily`, `weekly`, or `custom` |
-| `app.updateCheckCustomHours` | `12` | Custom interval in hours (when mode is `custom`) |
-| `shortcuts.enabled` | `true` | Enable global keyboard shortcuts |
-| `shortcuts.startRecording` | `CommandOrControl+Shift+R` | Accelerator for starting a longform recording |
-| `shortcuts.stopAndTranscribe` | `CommandOrControl+Shift+T` | Accelerator for stopping recording and transcribing |
+| `app.updateCheckIntervalMode` | `24h` | Check interval: `24h`, `7d`, `28d`, or `custom` |
+| `app.updateCheckCustomHours` | `24` | Custom interval in hours (when mode is `custom`) |
 
 > **`server.runtimeProfile`** — Controls whether the Docker container is
 > launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).

@@ -40,14 +40,19 @@ is Dockerized for fast setup.
 
 <div align="center">
 
-![Session Tab](./build/assets/shot-1.png)
+**Demo**
+
+https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
+
 </div>
 
 ---
 
 ## Table of Contents
 
-- [1. Features](#1-features)
+- [1. Introduction](#1-introduction)
+  - [1.1 Features](#11-features)
+  - [1.2 Screenshots](#12-screenshots)
 - [2. Prerequisites](#2-prerequisites)
   - [2.1 Docker](#21-docker)
 - [3. Installation](#3-installation)
@@ -57,7 +62,6 @@ is Dockerized for fast setup.
 - [5. Usage](#5-usage)
   - [5.1 Quick Start](#51-quick-start)
   - [5.2 Dashboard Views](#52-dashboard-views)
-  - [5.3 Keyboard Shortcuts](#53-keyboard-shortcuts)
 - [6. Remote Access](#6-remote-access)
   - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
   - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
@@ -71,10 +75,11 @@ is Dockerized for fast setup.
 
 ---
 
-## 1. Features
+## 1. Introduction
 
-- **100% Local**: *Everything* runs on your own computer, the app doesn't need internet
-  beyond the initial setup
+### 1.1 Features
+
+- **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
 - **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS (Apple Silicon)
 - **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
@@ -86,14 +91,13 @@ is Dockerized for fast setup.
   (utilizing Tailscale)
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
-- **Global Keyboard Shortcuts**: System-wide hotkeys for hands-free recording control
-  (start recording, stop & transcribe) — configurable in Settings
+- **System Tray Control**: Quickly start/stop a recording, plus a lot of other controls, available via the system tray.
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
 
-<div align="center">
+### 1.2 Screenshots
 
-#### Screenshots
+<div align="center">
 
 **Session Tab**
 ![Session Tab](./build/assets/shot-1.png)
@@ -263,7 +267,7 @@ The Dashboard features **sidebar navigation** with these main views:
   - Processing logs
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
 - **Server**: Docker server management (container, images, volumes)
-- **Settings**: Connection, audio, diarization, notebook, keyboard shortcuts, app behaviour, and HuggingFace token management
+- **Settings**: Connection, audio, diarization, notebook, app behaviour, and HuggingFace token management
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
 recording state (11 distinct states), and the context menu provides quick controls
@@ -274,27 +278,6 @@ recording. On Windows/macOS, middle-click also stops and transcribes.
 > **Note:** "Transcribe File" from the system tray always uses pure transcription (no diarization), regardless of main transcriber settings.
 
 > **GNOME note:** GNOME desktop requires the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension for system tray support.
-
-### 5.3 Keyboard Shortcuts
-
-Global keyboard shortcuts let you control recording from anywhere — even when the
-Dashboard window is not focused.
-
-| Action | Default Shortcut |
-|--------|------------------|
-| **Start Recording** | `Ctrl+Shift+R` |
-| **Stop & Transcribe** | `Ctrl+Shift+T` |
-
-Shortcuts are enabled by default. To change bindings or disable them, open
-**Settings → App → Keyboard Shortcuts**. Click the current binding and press your
-desired key combination to reassign.
-
-> **Linux note:** The AppImage runs under **XWayland** on Wayland compositors
-> (`--ozone-platform=x11` is set automatically). This ensures reliable global shortcuts
-> and system tray integration on KDE Plasma 6, GNOME, and other Wayland desktops.
-> If you specifically need native Wayland rendering, launch the AppImage with
-> `--ozone-platform=wayland` (note: tray icon updates and global shortcuts may be less
-> reliable in native Wayland mode).
 
 **Setup Checklist**: On first launch a setup checklist guides you through Docker verification,
 GPU detection, and HuggingFace token entry.
