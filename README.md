@@ -151,9 +151,7 @@ Download the Dashboard for your platform from the [Releases](https://github.com/
 
 #### Linux AppImage Prerequisites
 
-AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on
-most modern distributions. If you see `dlopen(): error loading libfuse.so.2`, install
-the appropriate package:
+AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
 
 | Distribution | Package | Install Command |
 |---|---|---|
