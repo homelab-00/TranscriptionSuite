@@ -45,6 +45,31 @@ if [[ -z "${CUSTOM_DMGBUILD_PATH:-}" ]]; then
     echo "→ Using local dmgbuild: $CUSTOM_DMGBUILD_PATH"
 fi
 
+# Generate logo.icns if missing (requires iconutil, available on every macOS)
+ICNS_PATH="$PROJECT_ROOT/build/assets/logo.icns"
+if [[ ! -f "$ICNS_PATH" ]]; then
+    echo "→ Generating logo.icns from logo.png..."
+    if ! command -v iconutil &> /dev/null; then
+        echo "ERROR: iconutil not found. This should be available on every macOS install."
+        exit 1
+    fi
+    SRC_PNG="$PROJECT_ROOT/build/assets/logo.png"
+    if [[ ! -f "$SRC_PNG" ]]; then
+        echo "ERROR: $SRC_PNG not found. Run build/generate-ico.sh first."
+        exit 1
+    fi
+    ICONSET_DIR="$(mktemp -d)/logo.iconset"
+    mkdir -p "$ICONSET_DIR"
+    for sz in 16 32 64 128 256 512; do
+        sips -z "$sz" "$sz" "$SRC_PNG" --out "$ICONSET_DIR/icon_${sz}x${sz}.png" &> /dev/null
+        dbl=$((sz * 2))
+        sips -z "$dbl" "$dbl" "$SRC_PNG" --out "$ICONSET_DIR/icon_${sz}x${sz}@2x.png" &> /dev/null
+    done
+    iconutil -c icns -o "$ICNS_PATH" "$ICONSET_DIR"
+    rm -rf "$(dirname "$ICONSET_DIR")"
+    echo "✓ Created logo.icns"
+fi
+
 # Install dependencies
 echo "→ Installing dependencies..."
 cd "$DASHBOARD_DIR"
