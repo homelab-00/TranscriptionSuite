@@ -153,9 +153,22 @@ export class TrayManager {
     this.rebuildMenu();
 
     // Left-click: toggle recording — start if standby, stop & transcribe if recording.
+    // When server is not running (gray icon), toggle app window visibility instead.
     // On Linux (AppIndicator/StatusNotifier) middle-click is not supported,
     // so left-click acts as a toggle to cover both actions.
     this.tray.on('click', () => {
+      if (this.state === 'disconnected') {
+        const w = this.getWindow();
+        if (!w) return;
+        if (w.isVisible()) {
+          w.hide();
+        } else {
+          w.show();
+          w.focus();
+        }
+        this.rebuildMenu();
+        return;
+      }
       if (this.menuState.isRecording && !this.menuState.isLive) {
         this.actions.stopRecording?.();
       } else if (
@@ -168,7 +181,9 @@ export class TrayManager {
     });
 
     // Middle-click: stop & transcribe (works on Windows/macOS; no-op on Linux AppIndicator)
+    // No-op when server is not running (gray icon).
     this.tray.on('middle-click', () => {
+      if (this.state === 'disconnected') return;
       if (this.menuState.isRecording) {
         this.actions.stopRecording?.();
       }
