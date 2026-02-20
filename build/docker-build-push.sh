@@ -157,8 +157,16 @@ main() {
         exit 1
     fi
     
-    # Release versions are no longer auto-tagged as 'latest'
-    # All images use explicit version tags only
+    # Auto-tag release versions as 'latest'
+    local tagged_latest=false
+    if [[ "$custom_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_info "Release version detected — tagging as 'latest'..."
+        if tag_image "$custom_tag" "latest" && push_image "latest"; then
+            tagged_latest=true
+        else
+            log_warning "Failed to tag/push 'latest' — version tag was pushed successfully"
+        fi
+    fi
     
     # Success summary
     echo ""
@@ -169,6 +177,9 @@ main() {
     echo "📦 Registry: GitHub Container Registry (GHCR)"
     echo "🏷️  Tags pushed:"
     echo "   • $IMAGE_NAME:$custom_tag"
+    if [[ "$tagged_latest" == true ]]; then
+        echo "   • $IMAGE_NAME:latest"
+    fi
 
     echo ""
     echo "📥 Pull command:"
