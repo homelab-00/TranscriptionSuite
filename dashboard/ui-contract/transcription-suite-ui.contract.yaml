@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.16
+  spec_version: 1.0.17
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -526,6 +526,7 @@ utility_allowlist:
     - h-48
     - h-5
     - h-6
+    - h-7
     - h-8
     - h-9
     - h-full
@@ -858,6 +859,7 @@ utility_allowlist:
     - w-44
     - w-48
     - w-6
+    - w-7
     - w-8
     - w-80
     - w-9

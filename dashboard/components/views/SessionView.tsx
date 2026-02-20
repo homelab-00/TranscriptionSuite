@@ -1080,7 +1080,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
               </GlassCard>
 
               {/* Main Transcription */}
-              <GlassCard title="Main Transcription" className="flex-none">
+              <GlassCard
+                title="Main Transcription"
+                className="flex-none"
+                action={
+                  <button
+                    onClick={() => live.toggleMute()}
+                    className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                    title={live.muted ? 'Unmute' : 'Mute'}
+                  >
+                    {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                  </button>
+                }
+              >
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-6 p-1">
                     <div className="flex min-w-0 flex-1 flex-col">
@@ -1446,40 +1458,40 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </p>
                     </div>
                   </div>
-                </div>
-                <div className="group relative">
-                  <AudioVisualizer
-                    analyserNode={activeAnalyser}
-                    amplitudeScale={visualizerAmplitudeScale}
-                  />
-                  <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 rounded-lg border border-white/5 bg-black/20 p-0.5">
+                      <button
+                        onClick={() =>
+                          setVisualizerAmplitudeScale((s) => Math.max(0.25, +(s - 0.25).toFixed(2)))
+                        }
+                        className="rounded p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Decrease sensitivity"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <button
+                        onClick={() =>
+                          setVisualizerAmplitudeScale((s) => Math.min(4, +(s + 0.25).toFixed(2)))
+                        }
+                        className="rounded p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Increase sensitivity"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
                     <button
-                      onClick={() =>
-                        setVisualizerAmplitudeScale((s) => Math.max(0.25, +(s - 0.25).toFixed(2)))
-                      }
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/50 text-slate-400 backdrop-blur-sm transition-colors hover:bg-white/10 hover:text-white"
-                      title="Decrease sensitivity"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <button
-                      onClick={() =>
-                        setVisualizerAmplitudeScale((s) => Math.min(4, +(s + 0.25).toFixed(2)))
-                      }
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/50 text-slate-400 backdrop-blur-sm transition-colors hover:bg-white/10 hover:text-white"
-                      title="Increase sensitivity"
-                    >
-                      <Plus size={14} />
-                    </button>
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      className="h-8 w-8 bg-black/50 backdrop-blur-sm"
-                      icon={<Maximize2 size={14} />}
                       onClick={() => setIsFullscreenVisualizerOpen(true)}
-                    />
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                      title="Fullscreen"
+                    >
+                      <Maximize2 size={14} />
+                    </button>
                   </div>
                 </div>
+                <AudioVisualizer
+                  analyserNode={activeAnalyser}
+                  amplitudeScale={visualizerAmplitudeScale}
+                />
               </GlassCard>
 
               {/* Live Mode (Text + Controls) */}
@@ -1487,14 +1499,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 className="flex min-h-[calc(100vh-30rem)] flex-1 flex-col transition-all duration-300"
                 title="Live Mode"
                 action={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Copy size={14} />}
-                    onClick={() => navigator.clipboard.writeText(live.getText())}
+                  <button
+                    onClick={() => live.toggleMute()}
+                    className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                    title={live.muted ? 'Unmute' : 'Mute'}
                   >
-                    Copy
-                  </Button>
+                    {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                  </button>
                 }
               >
                 {/* Live Mode Controls Toolbar */}
@@ -1507,16 +1518,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     </span>
                     <AppleSwitch checked={isLive} onChange={handleLiveToggle} size="sm" />
                   </div>
-                  <Button
-                    variant={live.muted ? 'danger' : 'secondary'}
-                    size="sm"
-                    icon={live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                    onClick={() => live.toggleMute()}
-                    disabled={!isLive}
-                    className={`h-8 shrink-0 whitespace-nowrap ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400' : 'text-slate-300'}`}
-                  >
-                    {live.muted ? 'Muted' : 'Audio On'}
-                  </Button>
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
                   <div className="flex h-8 shrink-0 items-center gap-2">
                     <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 flex aspect-square h-full items-center justify-center rounded-lg border">
@@ -1547,6 +1548,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       disabled={!canTranslate}
                     />
                   </div>
+                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Copy size={14} />}
+                    onClick={() => navigator.clipboard.writeText(live.getText())}
+                    className="ml-auto h-8 shrink-0 whitespace-nowrap"
+                  >
+                    Copy
+                  </Button>
                 </div>
 
                 {/* Transcript Area */}
