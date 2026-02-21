@@ -81,7 +81,7 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup
 - **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py)
-- **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS (Apple Silicon)
+- **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS
 - **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
@@ -172,8 +172,8 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 ### 3.1 Verify Download (Kleopatra)
 
 1. Download both files from the same release:
-   - installer/app (`.AppImage`, `.exe`, `.dmg`, or `.zip`)
-   - matching signature file (`.asc`)
+   - installer/app (`.AppImage`, `.exe` or `.dmg`)
+   - matching signature file (`.sig`)
 2. Install Kleopatra: https://apps.kde.org/kleopatra/
 3. Import the public key in Kleopatra from this repository:
    - [`build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](./build/assets/homelab-00_0xBFE4CC5D72020691_public.asc)

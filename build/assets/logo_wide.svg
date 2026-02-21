@@ -23,8 +23,8 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
      inkscape:zoom="6.5525229"
-     inkscape:cx="78.443068"
-     inkscape:cy="44.868214"
+     inkscape:cx="78.366762"
+     inkscape:cy="26.554657"
      inkscape:window-width="1920"
      inkscape:window-height="1012"
      inkscape:window-x="0"
@@ -33,6 +33,18 @@
      inkscape:current-layer="svg5" />
   <defs
      id="defs2">
+    <linearGradient
+       id="linearGradient2"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#ffffff;stop-opacity:1;"
+         offset="0"
+         id="stop3" />
+      <stop
+         style="stop-color:#ffffff;stop-opacity:0;"
+         offset="1"
+         id="stop4" />
+    </linearGradient>
     <linearGradient
        id="ts-logo-icon-gradient"
        x1="0"
@@ -58,6 +70,15 @@
        x2="40"
        y2="44"
        gradientTransform="translate(0,-2.0000027)" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient2"
+       id="linearGradient4"
+       x1="56.65918"
+       y1="16.928711"
+       x2="172.63086"
+       y2="16.928711"
+       gradientUnits="userSpaceOnUse" />
   </defs>
   <path
      id="rect2-9"
@@ -98,7 +119,8 @@
      font-family="Inter, sans-serif"
      font-size="18px"
      font-weight="700"
-     id="text4">Transcription</text>
+     id="text4"
+     style="fill:#ffffff;fill-opacity:1;stroke:#22d3ee;stroke-opacity:1;stroke-width:0.4;stroke-dasharray:none;paint-order:markers stroke fill">Transcription</text>
   <text
      x="56"
      y="37"
