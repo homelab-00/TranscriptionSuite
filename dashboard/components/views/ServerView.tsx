@@ -242,20 +242,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
       : DIARIZATION_DEFAULT_MODEL;
 
-  // Detect whether selected models differ from the server-configured models
-  const asrModelChanged =
-    isRunning &&
-    modelsHydrated &&
-    configuredMainModel !== '' &&
-    (normalizeModelName(activeTranscriber) !== normalizeModelName(configuredMainModel) ||
-      normalizeModelName(activeLiveModel) !== normalizeModelName(configuredLiveModel));
-
-  const diarizationModelChanged =
-    isRunning &&
-    diarizationHydrated &&
-    configuredDiarizationModel !== '' &&
-    normalizeModelName(activeDiarizationModel) !== normalizeModelName(configuredDiarizationModel);
-
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -817,6 +803,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     ]}
                     accentColor="magenta"
                     className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                    disabled={isRunning}
                   />
                   {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
                     <input
@@ -824,7 +811,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       value={mainCustomModel}
                       onChange={(e) => setMainCustomModel(e.target.value)}
                       placeholder="owner/model-name"
-                      className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                      disabled={isRunning}
+                      className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                     />
                   )}
                 </div>
@@ -867,6 +855,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       LIVE_MODEL_CUSTOM_OPTION,
                     ]}
                     className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                    disabled={isRunning}
                   />
                   {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
                     <input
@@ -874,41 +863,36 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       value={liveCustomModel}
                       onChange={(e) => setLiveCustomModel(e.target.value)}
                       placeholder="owner/model-name"
-                      className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                      disabled={isRunning}
+                      className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                     />
                   )}
                 </div>
               </div>
-              {asrModelChanged && (
-                <div className="border-accent-orange/20 bg-accent-orange/5 text-accent-orange flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
-                  <AlertTriangle size={14} className="shrink-0" />
-                  <span>
-                    Model configuration changed. Restart the server for changes to take effect.
-                  </span>
-                </div>
-              )}
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
-                  variant={showUnloadModelsState ? 'danger' : 'secondary'}
+                  variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
                   className="h-9 px-4"
-                  onClick={isAsrModelsLoaded ? handleUnloadModels : handleLoadModels}
+                  onClick={
+                    adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
+                  }
                   disabled={modelsLoading || !isRunning}
                 >
                   {modelsLoading ? (
                     <>
                       <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
                     </>
-                  ) : showUnloadModelsState ? (
-                    'Unload Models'
+                  ) : adminStatus?.models_loaded === false ? (
+                    'Load Models'
                   ) : (
-                    'Reload Models'
+                    'Unload Models'
                   )}
                 </Button>
-                {adminStatus && (
+                {adminStatus?.models_loaded !== undefined && (
                   <span
-                    className={`ml-auto self-center font-mono text-xs ${isAsrModelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
+                    className={`ml-auto self-center font-mono text-xs ${adminStatus.models_loaded ? 'text-green-400' : 'text-slate-500'}`}
                   >
-                    {isAsrModelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
+                    {adminStatus.models_loaded ? 'Models Loaded' : 'Models Not Loaded'}
                   </span>
                 )}
               </div>
@@ -943,6 +927,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 onChange={setDiarizationModelSelection}
                 options={[DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
                 className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                disabled={isRunning}
               />
               {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
                 <input
@@ -950,16 +935,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   value={diarizationCustomModel}
                   onChange={(e) => setDiarizationCustomModel(e.target.value)}
                   placeholder="owner/model-name"
-                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                  disabled={isRunning}
+                  className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                 />
-              )}
-              {diarizationModelChanged && (
-                <div className="border-accent-orange/20 bg-accent-orange/5 text-accent-orange flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
-                  <AlertTriangle size={14} className="shrink-0" />
-                  <span>
-                    Model configuration changed. Restart the server for changes to take effect.
-                  </span>
-                </div>
               )}
             </div>
           </GlassCard>

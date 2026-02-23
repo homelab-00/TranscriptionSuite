@@ -9,6 +9,7 @@ interface CustomSelectProps {
   className?: string;
   placeholder?: string;
   accentColor?: 'cyan' | 'magenta';
+  disabled?: boolean;
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -18,6 +19,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   className = '',
   placeholder = 'Select...',
   accentColor = 'cyan',
+  disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
@@ -70,6 +72,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   }, [isOpen]);
 
   const toggleOpen = () => {
+    if (disabled) return;
     if (!isOpen) {
       // Calculate coords immediately before opening to prevent flash at 0,0
       updateCoords();
@@ -106,7 +109,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         type="button"
         onClick={toggleOpen}
         title={value || placeholder}
-        className={`flex h-full w-full min-w-0 items-center justify-between text-left ${className}`}
+        disabled={disabled}
+        className={`flex h-full w-full min-w-0 items-center justify-between text-left ${disabled ? 'cursor-not-allowed opacity-50' : ''} ${className}`}
       >
         <span className="mr-2 truncate">{value || placeholder}</span>
         <ChevronDown
