@@ -75,6 +75,67 @@ class ParakeetBackend(STTBackend):
         self._model_name: str | None = None
 
     # ------------------------------------------------------------------
+    # CUDA graph workaround
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _disable_cuda_graphs(model: Any) -> None:
+        """Disable CUDA graphs in NeMo's RNNT/TDT decoding stack.
+
+        NeMo 2.6's ``tdt_label_looping._full_graph_compile`` unpacks 6
+        values from ``cu_call(cudaStreamGetCaptureInfo_v3, ...)``, but
+        newer CUDA toolkit versions (≥ 12.8) return only 5 values,
+        causing ``ValueError: not enough values to unpack``.
+
+        Disabling CUDA graphs forces the fallback ``loop_labels_impl``
+        path which avoids the incompatibility.
+
+        The fix is applied at the **config level** so that any future
+        decoding strategy recreation (e.g. ``transcribe(timestamps=True)``)
+        also inherits the disabled setting.
+        """
+        from omegaconf import OmegaConf, open_dict
+
+        # ---- Config-level fix (persistent across strategy rebuilds) ----
+        cfg = getattr(model, "cfg", None)
+        decoding_cfg = cfg.get("decoding", None) if cfg is not None else None
+
+        if decoding_cfg is not None:
+            greedy_cfg = decoding_cfg.get("greedy", None)
+            if greedy_cfg is not None and greedy_cfg.get("use_cuda_graph_decoder", False):
+                with open_dict(decoding_cfg):
+                    greedy_cfg.use_cuda_graph_decoder = False
+                logger.info("Patched model.cfg.decoding.greedy.use_cuda_graph_decoder = False")
+
+                # Rebuild the current decoding stack from the patched config
+                if hasattr(model, "change_decoding_strategy"):
+                    try:
+                        model.change_decoding_strategy(
+                            decoding_cfg=OmegaConf.to_container(decoding_cfg, resolve=True),
+                        )
+                        logger.info("Rebuilt decoding strategy via change_decoding_strategy()")
+                        return
+                    except Exception:
+                        logger.warning(
+                            "change_decoding_strategy() failed; falling back to runtime patch",
+                            exc_info=True,
+                        )
+
+        # ---- Fallback: runtime object patch ----
+        decoding = getattr(model, "decoding", None)
+        if decoding is None:
+            return
+
+        inner = getattr(decoding, "decoding", None)
+        if inner is None:
+            return
+
+        computer = getattr(inner, "decoding_computer", None)
+        if computer is not None and getattr(computer, "use_cuda_graphs", False):
+            computer.use_cuda_graphs = False
+            logger.info("Disabled CUDA graphs on decoding_computer (runtime fallback)")
+
+    # ------------------------------------------------------------------
     # STTBackend interface
     # ------------------------------------------------------------------
 
@@ -86,6 +147,8 @@ class ParakeetBackend(STTBackend):
         model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
         model = model.to(device)
         model.eval()
+
+        self._disable_cuda_graphs(model)
 
         self._model = model
         self._model_name = model_name
@@ -246,6 +309,99 @@ class ParakeetBackend(STTBackend):
         )
         return all_segments, info
 
+    # ------------------------------------------------------------------
+    # Hypothesis helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_timestamp_dict(obj: Any) -> dict | None:
+        """Extract the timestamp dict from a NeMo Hypothesis-like object.
+
+        NeMo has used ``timestamp``, ``timestamps``, and ``timestep`` across
+        versions.  Return the first truthy dict found, or *None*.
+        """
+        for attr in ("timestamp", "timestamps", "timestep"):
+            ts = getattr(obj, attr, None)
+            if ts and isinstance(ts, dict):
+                return ts
+        return None
+
+    def _hypothesis_to_segments(
+        self,
+        hypothesis: Any,
+        *,
+        word_timestamps: bool = True,
+    ) -> list[BackendSegment]:
+        """Convert a single NeMo Hypothesis object into BackendSegments."""
+        segments: list[BackendSegment] = []
+        ts = self._get_timestamp_dict(hypothesis)
+
+        if ts is not None:
+            seg_timestamps = ts.get("segment", [])
+            word_timestamps_data = ts.get("word", [])
+
+            if seg_timestamps:
+                for seg_ts in seg_timestamps:
+                    text = seg_ts.get("text", seg_ts.get("label", "")).strip()
+                    start = float(seg_ts.get("start", 0.0))
+                    end = float(seg_ts.get("end", 0.0))
+
+                    words: list[dict[str, Any]] = []
+                    if word_timestamps and word_timestamps_data:
+                        for w in word_timestamps_data:
+                            w_start = float(w.get("start", 0.0))
+                            w_end = float(w.get("end", 0.0))
+                            if w_start >= start - 0.01 and w_end <= end + 0.01:
+                                words.append(
+                                    {
+                                        "word": w.get("text", w.get("label", "")),
+                                        "start": w_start,
+                                        "end": w_end,
+                                        "probability": float(w.get("confidence", 1.0)),
+                                    }
+                                )
+
+                    if text:
+                        segments.append(
+                            BackendSegment(text=text, start=start, end=end, words=words)
+                        )
+
+                if segments:
+                    return segments
+
+            # Timestamps dict exists but no segment entries — build words-only
+            if word_timestamps_data:
+                all_words: list[dict[str, Any]] = []
+                text_parts: list[str] = []
+                for w in word_timestamps_data:
+                    w_text = w.get("text", w.get("label", w.get("char", "")))
+                    all_words.append(
+                        {
+                            "word": w_text,
+                            "start": float(w.get("start", 0.0)),
+                            "end": float(w.get("end", 0.0)),
+                            "probability": float(w.get("confidence", 1.0)),
+                        }
+                    )
+                    text_parts.append(w_text)
+                joined = " ".join(text_parts).strip()
+                if joined:
+                    start = all_words[0]["start"]
+                    end = all_words[-1]["end"]
+                    segments.append(
+                        BackendSegment(text=joined, start=start, end=end, words=all_words)
+                    )
+                    return segments
+
+        # Fall back to text-only
+        text = getattr(hypothesis, "text", None)
+        if text is None:
+            text = str(hypothesis)
+        text = text.strip() if isinstance(text, str) else ""
+        if text:
+            segments.append(BackendSegment(text=text, start=0.0, end=0.0))
+        return segments
+
     def _parse_output(
         self,
         output: Any,
@@ -255,74 +411,52 @@ class ParakeetBackend(STTBackend):
         """Convert NeMo transcription output to BackendSegment list."""
         segments: list[BackendSegment] = []
 
-        # NeMo output structure varies by model version. The common pattern
-        # for models with timestamps is:
-        #   output[0]  — list of Hypothesis objects (one per input file)
-        #   hypothesis.timestamp['segment'] — list of segment dicts
-        #   hypothesis.timestamp['word'] — list of word dicts
-        #
-        # For models without timestamps or when timestamps=False, output is
-        # a list of plain text strings.
+        # NeMo output structure varies by model version. Known shapes:
+        #   List[str]              — plain text (return_hypotheses=False)
+        #   List[Hypothesis]       — with timestamps / return_hypotheses=True
+        #   List[List[str]]        — batched plain text
+        #   List[List[Hypothesis]] — batched hypotheses
 
         if not output:
+            logger.info("_parse_output: output is falsy: %r", output)
             return segments
 
-        # Handle plain text output (no timestamps requested or model doesn't support them)
-        first = output[0]
-        if isinstance(first, str):
-            if first.strip():
-                segments.append(BackendSegment(text=first.strip(), start=0.0, end=0.0))
-            return segments
+        logger.info(
+            "_parse_output: type(output)=%s, len=%s, repr=%.500r",
+            type(output).__name__,
+            getattr(output, "__len__", lambda: "N/A")(),
+            output,
+        )
 
-        # Handle list-of-lists (batch output where first element is list of strings)
-        if isinstance(first, list):
-            for item in first:
-                if isinstance(item, str) and item.strip():
+        # Iterate over all items in output (one per input file)
+        for idx, item in enumerate(output):
+            logger.info(
+                "_parse_output: item[%d] type=%s, repr=%.500r",
+                idx,
+                type(item).__name__,
+                item,
+            )
+
+            if isinstance(item, str):
+                # Plain text result
+                if item.strip():
                     segments.append(BackendSegment(text=item.strip(), start=0.0, end=0.0))
-            return segments
+                continue
 
-        # Handle Hypothesis object with timestamps
-        hypothesis = first
-        ts = getattr(hypothesis, "timestamp", None) or getattr(hypothesis, "timestamps", None)
+            if isinstance(item, list):
+                # Nested list — iterate inner items
+                for inner in item:
+                    if isinstance(inner, str):
+                        if inner.strip():
+                            segments.append(BackendSegment(text=inner.strip(), start=0.0, end=0.0))
+                    else:
+                        segments.extend(
+                            self._hypothesis_to_segments(inner, word_timestamps=word_timestamps)
+                        )
+                continue
 
-        if ts is None:
-            # Fall back to text-only
-            text = getattr(hypothesis, "text", str(hypothesis))
-            if text and text.strip():
-                segments.append(BackendSegment(text=text.strip(), start=0.0, end=0.0))
-            return segments
+            # Hypothesis-like object
+            segments.extend(self._hypothesis_to_segments(item, word_timestamps=word_timestamps))
 
-        seg_timestamps = ts.get("segment", []) if isinstance(ts, dict) else []
-        word_timestamps_data = ts.get("word", []) if isinstance(ts, dict) else []
-
-        if seg_timestamps:
-            for seg_ts in seg_timestamps:
-                text = seg_ts.get("text", seg_ts.get("label", "")).strip()
-                start = float(seg_ts.get("start", 0.0))
-                end = float(seg_ts.get("end", 0.0))
-
-                words: list[dict[str, Any]] = []
-                if word_timestamps and word_timestamps_data:
-                    # Attach words that fall within this segment's time range
-                    for w in word_timestamps_data:
-                        w_start = float(w.get("start", 0.0))
-                        w_end = float(w.get("end", 0.0))
-                        if w_start >= start - 0.01 and w_end <= end + 0.01:
-                            words.append(
-                                {
-                                    "word": w.get("text", w.get("label", "")),
-                                    "start": w_start,
-                                    "end": w_end,
-                                    "probability": float(w.get("confidence", 1.0)),
-                                }
-                            )
-
-                if text:
-                    segments.append(BackendSegment(text=text, start=start, end=end, words=words))
-        else:
-            # No segment timestamps — try to build from text
-            text = getattr(hypothesis, "text", "")
-            if text and text.strip():
-                segments.append(BackendSegment(text=text.strip(), start=0.0, end=0.0))
-
+        logger.info("_parse_output: returning %d segments", len(segments))
         return segments
