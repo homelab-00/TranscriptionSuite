@@ -40,7 +40,15 @@ interface ServerViewProps {
 }
 
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
-const LIVE_ALTERNATE_MODEL = 'Systran/faster-whisper-medium';
+
+// Whisper model presets
+const WHISPER_LARGE_V3 = 'Systran/faster-whisper-large-v3';
+const WHISPER_MEDIUM = 'Systran/faster-whisper-medium';
+const WHISPER_SMALL = 'Systran/faster-whisper-small';
+
+// Parakeet model presets
+const PARAKEET_CTC_1_1B = 'nvidia/parakeet-tdt-0.6b-v3';
+
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
 const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
@@ -173,8 +181,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (normalizedLive === normalizedMain) {
       setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
       setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(LIVE_ALTERNATE_MODEL)) {
-      setLiveModelSelection(LIVE_ALTERNATE_MODEL);
+    } else if (normalizedLive === normalizeModelName(WHISPER_LARGE_V3)) {
+      setLiveModelSelection(WHISPER_LARGE_V3);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(WHISPER_MEDIUM)) {
+      setLiveModelSelection(WHISPER_MEDIUM);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(WHISPER_SMALL)) {
+      setLiveModelSelection(WHISPER_SMALL);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(PARAKEET_CTC_1_1B)) {
+      setLiveModelSelection(PARAKEET_CTC_1_1B);
       setLiveCustomModel('');
     } else {
       setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
@@ -211,7 +228,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       ? activeTranscriber
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
-        : LIVE_ALTERNATE_MODEL;
+        : liveModelSelection;
 
   // Active diarization model name
   const activeDiarizationModel =
@@ -771,7 +788,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     value={mainModelSelection}
                     onChange={setMainModelSelection}
                     options={[
-                      configuredMainModel || MODEL_DEFAULT_LOADING_PLACEHOLDER,
+                      WHISPER_LARGE_V3,
+                      WHISPER_MEDIUM,
+                      WHISPER_SMALL,
+                      PARAKEET_CTC_1_1B,
                       MAIN_MODEL_CUSTOM_OPTION,
                     ]}
                     accentColor="magenta"
@@ -818,7 +838,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     onChange={setLiveModelSelection}
                     options={[
                       LIVE_MODEL_SAME_AS_MAIN_OPTION,
-                      LIVE_ALTERNATE_MODEL,
+                      WHISPER_LARGE_V3,
+                      WHISPER_MEDIUM,
+                      WHISPER_SMALL,
+                      PARAKEET_CTC_1_1B,
                       LIVE_MODEL_CUSTOM_OPTION,
                     ]}
                     className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"

@@ -16,15 +16,17 @@ import logging
 import os
 import threading
 import uuid
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
 from server.config import resolve_main_transcriber_model
 
 # Type-only imports for hints (no runtime cost)
 if TYPE_CHECKING:
-    from server.core.stt.engine import AudioToTextRecorder
+    from server.core.client_detector import ClientType
     from server.core.diarization_engine import DiarizationEngine
     from server.core.realtime_engine import RealtimeTranscriptionEngine
-    from server.core.client_detector import ClientType
+    from server.core.stt.engine import AudioToTextRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +47,12 @@ class TranscriptionJobTracker:
     """
 
     def __init__(self):
-        self._active_job_id: Optional[str] = None
-        self._active_user: Optional[str] = None
+        self._active_job_id: str | None = None
+        self._active_user: str | None = None
         self._cancelled: bool = False
         self._lock = threading.Lock()
 
-    def try_start_job(self, user: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    def try_start_job(self, user: str) -> tuple[bool, str | None, str | None]:
         """
         Attempt to start a new transcription job.
 
@@ -85,16 +87,14 @@ class TranscriptionJobTracker:
         """
         with self._lock:
             if self._active_job_id == job_id:
-                logger.info(
-                    f"Ended transcription job {job_id[:8]} for user '{self._active_user}'"
-                )
+                logger.info(f"Ended transcription job {job_id[:8]} for user '{self._active_user}'")
                 self._active_job_id = None
                 self._active_user = None
                 self._cancelled = False
                 return True
             return False
 
-    def cancel_job(self) -> Tuple[bool, Optional[str]]:
+    def cancel_job(self) -> tuple[bool, str | None]:
         """
         Request cancellation of the currently running job.
 
@@ -126,7 +126,7 @@ class TranscriptionJobTracker:
         with self._lock:
             return self._cancelled
 
-    def is_busy(self) -> Tuple[bool, Optional[str]]:
+    def is_busy(self) -> tuple[bool, str | None]:
         """
         Check if a transcription job is currently running.
 
@@ -138,15 +138,13 @@ class TranscriptionJobTracker:
                 return (True, self._active_user)
             return (False, None)
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get the current job tracker status."""
         with self._lock:
             return {
                 "is_busy": self._active_job_id is not None,
                 "active_user": self._active_user,
-                "active_job_id": self._active_job_id[:8]
-                if self._active_job_id
-                else None,
+                "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
                 "cancellation_requested": self._cancelled,
             }
 
@@ -164,7 +162,7 @@ class ModelManager:
     - Speaker diarization (DiarizationEngine)
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """
         Initialize the model manager.
 
@@ -175,11 +173,13 @@ class ModelManager:
         from server.core.audio_utils import check_cuda_available, get_gpu_memory_info
 
         self.config = config
-        self._transcription_engine: Optional["AudioToTextRecorder"] = None
-        self._diarization_engine: Optional[Any] = None  # Will be DiarizationEngine
-        self._realtime_engines: Dict[str, "RealtimeTranscriptionEngine"] = {}
+        self._transcription_engine: AudioToTextRecorder | None = None
+        self._diarization_engine: Any | None = None  # Will be DiarizationEngine
+        self._realtime_engines: dict[str, RealtimeTranscriptionEngine] = {}
         self._diarization_feature_available: bool = False
         self._diarization_feature_reason: str = "token_missing"
+        self._nemo_feature_available: bool = False
+        self._nemo_feature_reason: str = "not_requested"
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -188,23 +188,20 @@ class ModelManager:
         self.gpu_available = check_cuda_available()
         if self.gpu_available:
             gpu_info = get_gpu_memory_info()
-            logger.info(
-                f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory"
-            )
+            logger.info(f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory")
         else:
             logger.warning("No GPU available, using CPU for transcription")
 
-        # Initialize diarization feature status from bootstrap output if available.
+        # Initialize feature status from bootstrap output if available.
         self._initialize_diarization_feature_status()
+        self._initialize_nemo_feature_status()
 
     def _initialize_diarization_feature_status(self) -> None:
         """Initialize diarization feature availability from bootstrap state/env."""
-        status_file = os.environ.get(
-            "BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json"
-        )
+        status_file = os.environ.get("BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json")
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
 
             path = Path(status_file)
             if path.exists():
@@ -224,13 +221,38 @@ class ModelManager:
         # Fallback to env/config signal only.
         diar_cfg = self.config.get("diarization", {})
         token = (
-            os.environ.get("HF_TOKEN", "").strip()
-            or str(diar_cfg.get("hf_token") or "").strip()
+            os.environ.get("HF_TOKEN", "").strip() or str(diar_cfg.get("hf_token") or "").strip()
         )
         if token:
             self._set_diarization_feature_status(True, "ready")
         else:
             self._set_diarization_feature_status(False, "token_missing")
+
+    def _initialize_nemo_feature_status(self) -> None:
+        """Initialize NeMo feature availability from bootstrap state/env."""
+        status_file = os.environ.get("BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json")
+        try:
+            import json
+            from pathlib import Path
+
+            path = Path(status_file)
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                nemo = payload.get("features", {}).get("nemo", {})
+                available = bool(nemo.get("available", False))
+                reason = str(nemo.get("reason", "not_requested") or "not_requested")
+                self._nemo_feature_available = available
+                self._nemo_feature_reason = reason
+                logger.info(
+                    "Loaded NeMo feature status from bootstrap: "
+                    f"available={available}, reason={reason}"
+                )
+                return
+        except Exception as e:
+            logger.debug(f"Could not load NeMo feature status from bootstrap: {e}")
+
+        self._nemo_feature_available = False
+        self._nemo_feature_reason = "not_requested"
 
     def _set_diarization_feature_status(self, available: bool, reason: str) -> None:
         """Set diarization feature availability metadata."""
@@ -244,15 +266,9 @@ class ModelManager:
 
         if "huggingface token required" in message or "set hf_token" in message:
             return "token_missing"
-        if (
-            status_code == 401
-            or "invalid token" in message
-            or "unauthorized" in message
-        ):
+        if status_code == 401 or "invalid token" in message or "unauthorized" in message:
             return "token_invalid"
-        if status_code == 403 and (
-            "gated" in message or "terms" in message or "accept" in message
-        ):
+        if status_code == 403 and ("gated" in message or "terms" in message or "accept" in message):
             return "terms_not_accepted"
         if status_code == 403:
             return "token_invalid"
@@ -260,7 +276,7 @@ class ModelManager:
             return "terms_not_accepted"
         return "unavailable"
 
-    def get_diarization_feature_status(self) -> Dict[str, Any]:
+    def get_diarization_feature_status(self) -> dict[str, Any]:
         """Return diarization capability metadata for API clients."""
         return {
             "available": self._diarization_feature_available,
@@ -291,7 +307,7 @@ class ModelManager:
         def normalize(name: str) -> str:
             name = name.lower().strip()
             # Remove common prefixes
-            for prefix in ["systran/", "faster-whisper-", "openai/whisper-"]:
+            for prefix in ["systran/", "faster-whisper-", "openai/whisper-", "nvidia/"]:
                 if name.startswith(prefix):
                     name = name[len(prefix) :]
             return name
@@ -320,14 +336,8 @@ class ModelManager:
             beam_size=main_cfg.get("beam_size", 5),
             batch_size=main_cfg.get("batch_size", 16),
             language=trans_opts.get("language", ""),
-            task=(
-                "translate"
-                if trans_opts.get("translation_enabled", False)
-                else "transcribe"
-            ),
-            translation_target_language=trans_opts.get(
-                "translation_target_language", "en"
-            ),
+            task=("translate" if trans_opts.get("translation_enabled", False) else "transcribe"),
+            translation_target_language=trans_opts.get("translation_target_language", "en"),
             faster_whisper_vad_filter=main_cfg.get("faster_whisper_vad_filter", True),
             initial_prompt=main_cfg.get("initial_prompt"),
         )
@@ -381,9 +391,7 @@ class ModelManager:
             except Exception as e:
                 reason = self._classify_diarization_error(e)
                 self._set_diarization_feature_status(False, reason)
-                logger.warning(
-                    f"Diarization model load failed: reason={reason}, error={e}"
-                )
+                logger.warning(f"Diarization model load failed: reason={reason}, error={e}")
                 raise
             logger.info("Diarization model ready")
             self._set_diarization_feature_status(True, "ready")
@@ -409,7 +417,7 @@ class ModelManager:
         self,
         session_id: str,
         client_type: "ClientType | None" = None,
-        language: Optional[str] = None,
+        language: str | None = None,
         **callbacks: Callable,
     ) -> "RealtimeTranscriptionEngine":
         """
@@ -482,7 +490,7 @@ class ModelManager:
         clear_gpu_cache()
         logger.info("All models unloaded")
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get status information about loaded models."""
         from server.core.audio_utils import get_gpu_memory_info
 
@@ -506,11 +514,15 @@ class ModelManager:
             "job_tracker": self.job_tracker.get_status(),
             "features": {
                 "diarization": self.get_diarization_feature_status(),
+                "nemo": {
+                    "available": self._nemo_feature_available,
+                    "reason": self._nemo_feature_reason,
+                },
             },
         }
         return status
 
-    def reload_config(self, new_config: Dict[str, Any]) -> None:
+    def reload_config(self, new_config: dict[str, Any]) -> None:
         """
         Reload with new configuration.
 
@@ -529,10 +541,10 @@ class ModelManager:
 
 
 # Global model manager instance
-_manager: Optional[ModelManager] = None
+_manager: ModelManager | None = None
 
 
-def get_model_manager(config: Optional[Dict[str, Any]] = None) -> ModelManager:
+def get_model_manager(config: dict[str, Any] | None = None) -> ModelManager:
     """Get or create the global model manager instance."""
     global _manager
     if _manager is None:

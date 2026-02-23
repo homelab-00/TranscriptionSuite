@@ -25,18 +25,16 @@ import queue
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
-import faster_whisper
 import numpy as np
-import soundfile as sf
 import torch
-from faster_whisper import BatchedInferencePipeline
 from scipy.signal import resample
-
 from server.config import get_config, resolve_main_transcriber_model
+from server.core.stt.backends.factory import create_backend
 from server.core.stt.capabilities import validate_translation_request
 from server.core.stt.vad import VoiceActivityDetector
 
@@ -54,14 +52,14 @@ class TranscriptionResult:
     """Result of a transcription operation."""
 
     text: str
-    language: Optional[str] = None
+    language: str | None = None
     language_probability: float = 0.0
     duration: float = 0.0
-    segments: List[Dict[str, Any]] = field(default_factory=list)
-    words: List[Dict[str, Any]] = field(default_factory=list)
+    segments: list[dict[str, Any]] = field(default_factory=list)
+    words: list[dict[str, Any]] = field(default_factory=list)
     num_speakers: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
         return {
             "text": self.text,
@@ -95,43 +93,43 @@ class AudioToTextRecorder:
     def __init__(
         self,
         instance_name: str = "server_recorder",
-        model: Optional[str] = None,
-        download_root: Optional[str] = None,
+        model: str | None = None,
+        download_root: str | None = None,
         language: str = "",
         task: str = "transcribe",
         translation_target_language: str = "en",
-        compute_type: Optional[str] = None,
-        gpu_device_index: Union[int, List[int]] = 0,
-        device: Optional[str] = None,
-        batch_size: Optional[int] = None,
-        beam_size: Optional[int] = None,
+        compute_type: str | None = None,
+        gpu_device_index: int | list[int] = 0,
+        device: str | None = None,
+        batch_size: int | None = None,
+        beam_size: int | None = None,
         # VAD parameters
-        silero_sensitivity: Optional[float] = None,
+        silero_sensitivity: float | None = None,
         silero_use_onnx: bool = False,
         silero_deactivity_detection: bool = False,
-        webrtc_sensitivity: Optional[int] = None,
+        webrtc_sensitivity: int | None = None,
         # Timing parameters
-        post_speech_silence_duration: Optional[float] = None,
-        min_length_of_recording: Optional[float] = None,
-        min_gap_between_recordings: Optional[float] = None,
-        pre_recording_buffer_duration: Optional[float] = None,
+        post_speech_silence_duration: float | None = None,
+        min_length_of_recording: float | None = None,
+        min_gap_between_recordings: float | None = None,
+        pre_recording_buffer_duration: float | None = None,
         # Processing parameters
-        faster_whisper_vad_filter: Optional[bool] = None,
-        normalize_audio: Optional[bool] = None,
-        early_transcription_on_silence: Optional[int] = None,
-        allowed_latency_limit: Optional[int] = None,
+        faster_whisper_vad_filter: bool | None = None,
+        normalize_audio: bool | None = None,
+        early_transcription_on_silence: int | None = None,
+        allowed_latency_limit: int | None = None,
         # Text processing
-        ensure_sentence_starting_uppercase: Optional[bool] = None,
-        ensure_sentence_ends_with_period: Optional[bool] = None,
+        ensure_sentence_starting_uppercase: bool | None = None,
+        ensure_sentence_ends_with_period: bool | None = None,
         # Callbacks
-        on_recording_start: Optional[Callable[[], None]] = None,
-        on_recording_stop: Optional[Callable[[], None]] = None,
-        on_transcription_start: Optional[Callable[[np.ndarray], bool]] = None,
-        on_vad_start: Optional[Callable[[], None]] = None,
-        on_vad_stop: Optional[Callable[[], None]] = None,
-        on_recorded_chunk: Optional[Callable[[bytes], None]] = None,
-        initial_prompt: Optional[str] = None,
-        suppress_tokens: Optional[List[int]] = None,
+        on_recording_start: Callable[[], None] | None = None,
+        on_recording_stop: Callable[[], None] | None = None,
+        on_transcription_start: Callable[[np.ndarray], bool] | None = None,
+        on_vad_start: Callable[[], None] | None = None,
+        on_vad_stop: Callable[[], None] | None = None,
+        on_recorded_chunk: Callable[[bytes], None] | None = None,
+        initial_prompt: str | None = None,
+        suppress_tokens: list[int] | None = None,
     ):
         """
         Initialize the server-side audio recorder.
@@ -182,17 +180,11 @@ class AudioToTextRecorder:
         self.download_root = download_root
         self.language = language
         self.task = (task or "transcribe").strip().lower()
-        self.translation_target_language = (
-            (translation_target_language or "en").strip().lower()
-        )
+        self.translation_target_language = (translation_target_language or "en").strip().lower()
         self.compute_type = compute_type or main_cfg.get("compute_type", "default")
         self.gpu_device_index = gpu_device_index
-        self.batch_size = (
-            batch_size if batch_size is not None else main_cfg.get("batch_size", 16)
-        )
-        self.beam_size = (
-            beam_size if beam_size is not None else main_cfg.get("beam_size", 5)
-        )
+        self.batch_size = batch_size if batch_size is not None else main_cfg.get("batch_size", 16)
+        self.beam_size = beam_size if beam_size is not None else main_cfg.get("beam_size", 5)
 
         # VAD parameters - resolve from config (stt section is primary, live_transcriber for silero)
         silero_sensitivity = (
@@ -273,9 +265,7 @@ class AudioToTextRecorder:
 
         # Token suppression - from stt config
         self.suppress_tokens = (
-            suppress_tokens
-            if suppress_tokens is not None
-            else stt_cfg.get("suppress_tokens", [-1])
+            suppress_tokens if suppress_tokens is not None else stt_cfg.get("suppress_tokens", [-1])
         )
 
         # Silero deactivity detection from stt config
@@ -287,9 +277,7 @@ class AudioToTextRecorder:
 
         # Set device - resolve from config if not provided
         device = device or main_cfg.get("device", "cuda")
-        self.device = (
-            "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
-        )
+        self.device = "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
         logger.info(f"Using device: {self.device}")
 
         # Get buffer size from config
@@ -312,13 +300,11 @@ class AudioToTextRecorder:
         # Audio buffers
         self.audio_queue: queue.Queue[bytes] = queue.Queue()
         self.audio_buffer: collections.deque = collections.deque(
-            maxlen=int(
-                (SAMPLE_RATE // buffer_size) * self.pre_recording_buffer_duration
-            )
+            maxlen=int((SAMPLE_RATE // buffer_size) * self.pre_recording_buffer_duration)
         )
         self._buffer_size = buffer_size
-        self.frames: List[bytes] = []
-        self.audio: Optional[np.ndarray] = None
+        self.frames: list[bytes] = []
+        self.audio: np.ndarray | None = None
         self._feed_buffer = bytearray()
 
         # Events and locks
@@ -339,73 +325,44 @@ class AudioToTextRecorder:
             use_silero_deactivity=silero_deactivity_detection,
         )
 
-        # Initialize transcription model
-        self._model: Optional[Any] = None
+        # Initialize transcription backend
+        self._backend: Any | None = None
         self._model_loaded = False
         self._load_model()
 
         # Start recording worker thread
-        self.recording_thread = threading.Thread(
-            target=self._recording_worker, daemon=True
-        )
+        self.recording_thread = threading.Thread(target=self._recording_worker, daemon=True)
         self.recording_thread.start()
 
         logger.info(f"AudioToTextRecorder '{instance_name}' initialized")
 
     def _load_model(self) -> None:
-        """Load the Whisper model."""
-        logger.info(f"Loading Whisper model: {self.model_name}")
+        """Load the STT model via the appropriate backend."""
+        logger.info(f"Loading STT model: {self.model_name}")
 
         try:
-            model = faster_whisper.WhisperModel(
-                model_size_or_path=self.model_name,
+            backend = create_backend(self.model_name)
+            backend.load(
+                model_name=self.model_name,
                 device=self.device,
                 compute_type=self.compute_type,
-                device_index=self.gpu_device_index,
+                gpu_device_index=self.gpu_device_index,
                 download_root=self.download_root,
+                batch_size=self.batch_size,
             )
+            backend.warmup()
 
-            if self.batch_size > 0:
-                model = BatchedInferencePipeline(model=model)
-
-            # Run warmup transcription
-            self._warmup_model(model)
-
-            self._model = model
+            self._backend = backend
             self._model_loaded = True
-            logger.info("Whisper model loaded and ready")
+            logger.info(f"STT model loaded and ready (backend={backend.backend_name})")
 
         except Exception as e:
-            logger.exception(f"Error loading Whisper model: {e}")
+            logger.exception(f"Error loading STT model: {e}")
             raise
-
-    def _warmup_model(self, model: Any) -> None:
-        """Run a warmup transcription to initialize the model."""
-        try:
-            warmup_path = Path(__file__).parent / "warmup_audio.wav"
-
-            if not warmup_path.exists():
-                # Create a short silent audio for warmup
-                logger.warning("Warmup audio not found, using silent audio")
-                warmup_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
-            else:
-                warmup_audio, _ = sf.read(str(warmup_path), dtype="float32")
-
-            segments, _ = model.transcribe(
-                audio=warmup_audio,
-                language="en",
-                beam_size=1,
-            )
-            # Consume segments
-            _ = " ".join(seg.text for seg in segments)
-            logger.debug("Model warmup complete")
-
-        except Exception as e:
-            logger.warning(f"Model warmup failed (non-critical): {e}")
 
     def feed_audio(
         self,
-        chunk: Union[bytes, bytearray, np.ndarray],
+        chunk: bytes | bytearray | np.ndarray,
         original_sample_rate: int = SAMPLE_RATE,
     ) -> None:
         """
@@ -578,7 +535,7 @@ class AudioToTextRecorder:
 
     def _perform_transcription(
         self,
-        audio: Optional[np.ndarray] = None,
+        audio: np.ndarray | None = None,
     ) -> TranscriptionResult:
         """
         Perform transcription on audio data.
@@ -611,8 +568,8 @@ class AudioToTextRecorder:
                 )
                 start_time = time.time()
 
-                # Transcribe
-                segments, info = self._model.transcribe(
+                # Transcribe via backend
+                backend_segments, backend_info = self._backend.transcribe(
                     audio,
                     language=self.language if self.language else None,
                     task=self.task,
@@ -628,24 +585,16 @@ class AudioToTextRecorder:
                 all_words = []
                 full_text_parts = []
 
-                for segment in segments:
+                for segment in backend_segments:
                     seg_dict = {
                         "text": segment.text,
                         "start": segment.start,
                         "end": segment.end,
                     }
 
-                    if hasattr(segment, "words") and segment.words:
-                        seg_dict["words"] = [
-                            {
-                                "word": w.word,
-                                "start": w.start,
-                                "end": w.end,
-                                "probability": w.probability,
-                            }
-                            for w in segment.words
-                        ]
-                        all_words.extend(seg_dict["words"])
+                    if segment.words:
+                        seg_dict["words"] = segment.words
+                        all_words.extend(segment.words)
 
                     all_segments.append(seg_dict)
                     full_text_parts.append(segment.text)
@@ -660,8 +609,8 @@ class AudioToTextRecorder:
 
                 return TranscriptionResult(
                     text=full_text,
-                    language=info.language,
-                    language_probability=info.language_probability,
+                    language=backend_info.language,
+                    language_probability=backend_info.language_probability,
                     duration=len(audio) / SAMPLE_RATE,
                     segments=all_segments,
                     words=all_words,
@@ -675,12 +624,12 @@ class AudioToTextRecorder:
     def transcribe_file(
         self,
         file_path: str,
-        language: Optional[str] = None,
-        task: Optional[str] = None,
-        translation_target_language: Optional[str] = None,
+        language: str | None = None,
+        task: str | None = None,
+        translation_target_language: str | None = None,
         word_timestamps: bool = True,
         apply_vad_preprocessing: bool = True,
-        cancellation_check: Optional[Callable[[], bool]] = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> TranscriptionResult:
         """
         Transcribe an audio/video file directly (bypasses streaming recording workflow).
@@ -743,12 +692,12 @@ class AudioToTextRecorder:
     def transcribe_audio(
         self,
         audio_data: np.ndarray,
-        language: Optional[str] = None,
-        task: Optional[str] = None,
-        translation_target_language: Optional[str] = None,
+        language: str | None = None,
+        task: str | None = None,
+        translation_target_language: str | None = None,
         word_timestamps: bool = True,
-        initial_prompt: Optional[str] = None,
-        cancellation_check: Optional[Callable[[], bool]] = None,
+        initial_prompt: str | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> TranscriptionResult:
         """
         Transcribe preprocessed audio data directly (bypasses streaming recording workflow).
@@ -786,9 +735,7 @@ class AudioToTextRecorder:
                         audio_data = (audio_data / peak) * 0.95
 
                 # Use provided language or fall back to instance language
-                lang = (
-                    language if language else (self.language if self.language else None)
-                )
+                lang = language if language else (self.language if self.language else None)
                 effective_task = (task or self.task or "transcribe").strip().lower()
                 _ = validate_translation_request(
                     model_name=self.model_name,
@@ -803,8 +750,8 @@ class AudioToTextRecorder:
 
                 start_time = time.time()
 
-                # Transcribe
-                segments, info = self._model.transcribe(
+                # Transcribe via backend
+                backend_segments, backend_info = self._backend.transcribe(
                     audio_data,
                     language=lang,
                     task=effective_task,
@@ -820,7 +767,7 @@ class AudioToTextRecorder:
                 all_words = []
                 full_text_parts = []
 
-                for segment in segments:
+                for segment in backend_segments:
                     # Check for cancellation between segments
                     if cancellation_check and cancellation_check():
                         from server.core.model_manager import (
@@ -828,9 +775,7 @@ class AudioToTextRecorder:
                         )
 
                         logger.info("Transcription cancelled by user")
-                        raise TranscriptionCancelledError(
-                            "Transcription cancelled by user"
-                        )
+                        raise TranscriptionCancelledError("Transcription cancelled by user")
 
                     seg_dict = {
                         "text": segment.text.strip(),
@@ -839,13 +784,13 @@ class AudioToTextRecorder:
                         "duration": round(segment.end - segment.start, 3),
                     }
 
-                    if word_timestamps and hasattr(segment, "words") and segment.words:
+                    if word_timestamps and segment.words:
                         seg_dict["words"] = [
                             {
-                                "word": w.word,
-                                "start": round(w.start, 3),
-                                "end": round(w.end, 3),
-                                "probability": round(w.probability, 3),
+                                "word": w.get("word", ""),
+                                "start": round(w.get("start", 0.0), 3),
+                                "end": round(w.get("end", 0.0), 3),
+                                "probability": round(w.get("probability", 0.0), 3),
                             }
                             for w in segment.words
                         ]
@@ -860,15 +805,15 @@ class AudioToTextRecorder:
                 elapsed = time.time() - start_time
                 logger.info(
                     f"Transcription completed in {elapsed:.2f}s: "
-                    f"{len(all_segments)} segments, language={info.language}, task={effective_task}"
+                    f"{len(all_segments)} segments, language={backend_info.language}, task={effective_task}"
                 )
 
                 return TranscriptionResult(
                     text=full_text,
                     segments=all_segments,
                     words=all_words,
-                    language=info.language,
-                    language_probability=info.language_probability,
+                    language=backend_info.language,
+                    language_probability=backend_info.language_probability,
                     duration=len(audio_data) / SAMPLE_RATE,
                 )
 
@@ -906,9 +851,7 @@ class AudioToTextRecorder:
                                 if self.on_vad_start:
                                     self.on_vad_start()
 
-                                logger.info(
-                                    "Voice activity detected, starting recording"
-                                )
+                                logger.info("Voice activity detected, starting recording")
                                 self.start()
                                 self.start_recording_on_voice_activity = False
 
@@ -934,9 +877,7 @@ class AudioToTextRecorder:
                                 if self.extended_silence_start == 0:
                                     self.extended_silence_start = time.time()
                                 elif not self.is_trimming_silence:
-                                    silence_duration = (
-                                        time.time() - self.extended_silence_start
-                                    )
+                                    silence_duration = time.time() - self.extended_silence_start
                                     if silence_duration >= self.max_silence_duration:
                                         self.is_trimming_silence = True
                                         logger.info(
@@ -970,9 +911,7 @@ class AudioToTextRecorder:
                                 if self.on_vad_stop:
                                     self.on_vad_stop()
 
-                                logger.info(
-                                    "Voice deactivity detected, stopping recording"
-                                )
+                                logger.info("Voice deactivity detected, stopping recording")
                                 self.frames.append(data)
                                 self.stop()
                                 self.stop_recording_on_voice_deactivity = False
@@ -1030,8 +969,8 @@ class AudioToTextRecorder:
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=5)
 
-        # Cleanup model
-        self._model = None
+        # Cleanup backend
+        self._backend = None
         self._model_loaded = False
 
         logger.info("AudioToTextRecorder shutdown complete")
@@ -1048,34 +987,25 @@ class AudioToTextRecorder:
         if not self._model_loaded:
             return
 
-        logger.info("Unloading Whisper model")
-        self._model = None
+        logger.info("Unloading STT model")
+        if self._backend is not None:
+            self._backend.unload()
+        self._backend = None
         self._model_loaded = False
-
-        # Clear GPU cache
-        try:
-            import gc
-
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except Exception as e:
-            logger.debug(f"Could not clear GPU cache: {e}")
-
         logger.info("Model unloaded")
 
     def is_loaded(self) -> bool:
         """Check if the model is loaded."""
         return self._model_loaded
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get engine status information."""
         return {
             "model": self.model_name,
             "device": self.device,
             "compute_type": self.compute_type,
             "loaded": self._model_loaded,
+            "backend": self._backend.backend_name if self._backend else None,
             "language": self.language if self.language else None,
             "task": self.task,
             "translation_target_language": self.translation_target_language,

@@ -57,6 +57,9 @@ const AppInner: React.FC = () => {
   const [firstRunInfoOpen, setFirstRunInfoOpen] = useState(false);
   const firstRunInfoResolverRef = useRef<(() => void) | null>(null);
 
+  const [nemoPromptOpen, setNemoPromptOpen] = useState(false);
+  const nemoResolverRef = useRef<((install: boolean | null) => void) | null>(null);
+
   const containerLastSeenRef = useRef<boolean | null>(null);
 
   useEffect(() => {
@@ -101,6 +104,20 @@ const AppInner: React.FC = () => {
     resolver?.();
   }, []);
 
+  const requestNemoPrompt = useCallback(async (): Promise<boolean | null> => {
+    return new Promise((resolve) => {
+      nemoResolverRef.current = resolve;
+      setNemoPromptOpen(true);
+    });
+  }, []);
+
+  const resolveNemoPrompt = useCallback((install: boolean | null) => {
+    setNemoPromptOpen(false);
+    const resolver = nemoResolverRef.current;
+    nemoResolverRef.current = null;
+    resolver?.(install);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (hfResolverRef.current) {
@@ -110,6 +127,10 @@ const AppInner: React.FC = () => {
       if (firstRunInfoResolverRef.current) {
         firstRunInfoResolverRef.current();
         firstRunInfoResolverRef.current = null;
+      }
+      if (nemoResolverRef.current) {
+        nemoResolverRef.current(null);
+        nemoResolverRef.current = null;
       }
     };
   }, []);
@@ -140,6 +161,7 @@ const AppInner: React.FC = () => {
 
     if (previousExists && !currentExists) {
       void setConfig('server.hfTokenDecision', 'unset');
+      void setConfig('server.nemoDecision', 'unset');
     }
   }, [docker.container.exists, docker.loading]);
 
@@ -178,7 +200,7 @@ const AppInner: React.FC = () => {
               hfDecision = 'provided';
               await setConfig('server.hfTokenDecision', hfDecision);
             }
-          } else if (hfDecision === 'unset') {
+          } else {
             // Also skip if the .env already has a HUGGINGFACE_TOKEN set
             const envToken = (await (window as any).electronAPI?.docker
               ?.readComposeEnvValue('HUGGINGFACE_TOKEN')
@@ -209,6 +231,27 @@ const AppInner: React.FC = () => {
             }
           }
 
+          // NeMo / Parakeet prompt — only on first container creation
+          let installNemo = false;
+          const storedNemoDecision = await getConfig<string>('server.nemoDecision');
+          if (!storedNemoDecision || storedNemoDecision === 'unset') {
+            // Check if .env already has INSTALL_NEMO set
+            const envNemo = (await (window as any).electronAPI?.docker
+              ?.readComposeEnvValue('INSTALL_NEMO')
+              .catch(() => null)) as string | null | undefined;
+            if (envNemo === 'true') {
+              installNemo = true;
+              await setConfig('server.nemoDecision', 'enabled');
+            } else {
+              const nemoResult = await requestNemoPrompt();
+              if (nemoResult === null) return; // cancelled
+              installNemo = nemoResult;
+              await setConfig('server.nemoDecision', installNemo ? 'enabled' : 'skipped');
+            }
+          } else {
+            installNemo = storedNemoDecision === 'enabled';
+          }
+
           // Check if both data and models volumes are absent — first-ever startup
           const [dataVolExists, modelsVolExists] = await Promise.all([
             (window as any).electronAPI?.docker
@@ -224,6 +267,7 @@ const AppInner: React.FC = () => {
 
           await docker.startContainer(mode, runtimeProfile, undefined, imageTag, hfToken, {
             hfTokenDecision: hfDecision,
+            installNemo,
           });
           return;
         }
@@ -240,7 +284,7 @@ const AppInner: React.FC = () => {
         setStartupFlowPending(false);
       }
     },
-    [docker, requestHfPrompt],
+    [docker, requestHfPrompt, requestNemoPrompt],
   );
 
   const renderView = () => {
@@ -384,6 +428,46 @@ const AppInner: React.FC = () => {
                 }}
               >
                 Save Token
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {nemoPromptOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
+            onClick={() => resolveNemoPrompt(null)}
+          />
+          <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+            <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
+              <h2 className="text-lg font-semibold text-white">Optional NVIDIA Parakeet Setup</h2>
+            </div>
+            <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
+              <div className="space-y-3 text-sm text-slate-300">
+                <p>Install NVIDIA NeMo toolkit for Parakeet ASR models?</p>
+                <p className="text-slate-400">
+                  Parakeet models offer high-accuracy multilingual transcription as an alternative
+                  to Whisper. This is a large optional dependency (~2 GB+).
+                </p>
+                <p className="text-slate-400">
+                  If skipped, Whisper models will still work normally. You can enable this later by
+                  setting{' '}
+                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">INSTALL_NEMO=true</code>{' '}
+                  in your Docker environment.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 whitespace-nowrap select-none">
+              <Button variant="ghost" onClick={() => resolveNemoPrompt(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => resolveNemoPrompt(false)}>
+                Skip for now
+              </Button>
+              <Button variant="primary" onClick={() => resolveNemoPrompt(true)}>
+                Install NeMo
               </Button>
             </div>
           </div>

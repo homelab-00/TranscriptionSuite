@@ -884,6 +884,39 @@ def main() -> int:
             f"({diarization_status.get('reason', 'unavailable')})"
         )
 
+    # ── NeMo toolkit (optional, for NVIDIA Parakeet ASR models) ──────────
+    nemo_start = time.perf_counter()
+    install_nemo = parse_bool_env("INSTALL_NEMO", False)
+    nemo_status: dict[str, Any]
+
+    if install_nemo:
+        log("Installing NeMo toolkit for NVIDIA Parakeet support...")
+        try:
+            run_command(
+                [
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    str(venv_python),
+                    "nemo_toolkit[asr]>=2.2.0",
+                ],
+                timeout_seconds=timeout_seconds,
+                env=build_uv_sync_env(
+                    venv_dir=venv_dir,
+                    cache_dir=cache_dir,
+                ),
+            )
+            nemo_status = {"available": True, "reason": "ready"}
+            log("NeMo toolkit installed")
+        except Exception as exc:
+            nemo_status = {"available": False, "reason": f"install_failed: {exc}"}
+            log(f"NeMo toolkit installation failed: {exc}")
+    else:
+        nemo_status = {"available": False, "reason": "not_requested"}
+        log("NeMo not requested, skipping")
+    log_timing("NeMo feature check complete", nemo_start)
+
     status_write_start = time.perf_counter()
     write_status_file(
         status_file,
@@ -901,6 +934,7 @@ def main() -> int:
             },
             "features": {
                 "diarization": diarization_status,
+                "nemo": nemo_status,
             },
         },
     )

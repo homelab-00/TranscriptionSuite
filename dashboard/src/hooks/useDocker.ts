@@ -39,6 +39,7 @@ export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
 export interface StartContainerOnboardingOptions {
   hfTokenDecision?: HfTokenDecision;
+  installNemo?: boolean;
 }
 
 export interface UseDockerReturn {

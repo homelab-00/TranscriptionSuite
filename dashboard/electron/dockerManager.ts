@@ -129,6 +129,7 @@ export interface StartContainerOptions {
   tlsEnv?: Record<string, string>;
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
+  installNemo?: boolean;
 }
 
 const HF_DECISION_VALUES = new Set<HfTokenDecision>(['unset', 'provided', 'skipped']);
@@ -508,7 +509,7 @@ async function getContainerStatus(): Promise<ContainerStatus> {
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
  */
 async function startContainer(options: StartContainerOptions): Promise<string> {
-  const { mode, runtimeProfile, imageTag, tlsEnv, hfToken, hfTokenDecision } = options;
+  const { mode, runtimeProfile, imageTag, tlsEnv, hfToken, hfTokenDecision, installNemo } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
 
@@ -552,6 +553,14 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   if (normalizedHfDecision) {
     envUpdates['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
   }
+
+  // Pass NeMo install preference to the container for Parakeet ASR support
+  if (installNemo !== undefined) {
+    const nemoValue = installNemo ? 'true' : 'false';
+    composeEnv['INSTALL_NEMO'] = nemoValue;
+    envUpdates['INSTALL_NEMO'] = nemoValue;
+  }
+
   upsertComposeEnvValues(envUpdates);
 
   const fileArgs = composeFileArgs(runtimeProfile);

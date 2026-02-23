@@ -246,6 +246,11 @@ export interface AdminStatus {
     };
     [key: string]: unknown;
   };
+  features?: {
+    diarization?: { available: boolean; reason: string };
+    nemo?: { available: boolean; reason: string };
+    [key: string]: unknown;
+  };
 }
 
 export interface LogEntry {

@@ -4,6 +4,10 @@ Model capability helpers for STT translation support.
 
 from __future__ import annotations
 
+import re
+
+_PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
+
 
 def normalize_model_name(model_name: str | None) -> str:
     """Normalize model name for capability checks."""
@@ -19,6 +23,10 @@ def supports_english_translation(model_name: str | None) -> bool:
     name = normalize_model_name(model_name)
     if not name:
         return True
+
+    # NVIDIA Parakeet / NeMo models are ASR-only (no translation).
+    if _PARAKEET_PATTERN.match(name):
+        return False
 
     # Whisper turbo is not intended for translation.
     if "turbo" in name:
