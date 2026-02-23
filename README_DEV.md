@@ -177,7 +177,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  TranscriptionSuite Server                        │  │
 │  │  - FastAPI REST API + WebSocket                   │  │
-│  │  - faster-whisper + NeMo Parakeet transcription    │  │
+│  │  - faster-whisper + NeMo Parakeet/Canary ASR       │  │
 │  │  - Live Mode (RealtimeSTT) continuous transcribe  │  │
 │  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
@@ -225,7 +225,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and left-click toggle (start recording when standby; stop & transcribe when recording). Middle-click also stops & transcribes on Windows/macOS (Linux AppIndicator does not support middle-click). "Transcribe File" from the tray always uses pure transcription (diarization disabled). Tray icon updates are forced via `setTitle` on Linux to ensure StatusNotifier/AppIndicator refreshes the icon on state changes (e.g. live mode). Connecting state is debounced 250 ms to suppress brief yellow flash before red recording state; completion state shows for 1 s before reverting
 - First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
 - Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
-- Model-aware translation toggle (auto-disables for turbo, .en, distil, and Parakeet model variants)
+- Model-aware translation toggle (auto-disables for turbo, .en, distil, and Parakeet model variants; auto-enables for Canary)
 - Glassmorphism design language with dark frosted glass aesthetic
 
 ### 2.3 Security Model
@@ -935,6 +935,7 @@ server/backend/
 │           ├── base.py           # STTBackend ABC, BackendSegment, BackendTranscriptionInfo
 │           ├── whisper_backend.py # faster-whisper backend
 │           ├── parakeet_backend.py # NVIDIA NeMo Parakeet backend
+│           ├── canary_backend.py  # NVIDIA NeMo Canary multitask backend
 │           └── factory.py        # Backend detection and creation
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
@@ -1242,7 +1243,7 @@ npm run dev:electron # Test in development mode
 Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPROFILE\Documents\TranscriptionSuite\config.yaml` (Windows)
 
 **Key sections:**
-- `main_transcriber` - Primary transcription model (Whisper or Parakeet), device, batch settings
+- `main_transcriber` - Primary transcription model (Whisper, Parakeet, or Canary), device, batch settings
 - `live_transcriber` - Live Mode continuous transcription (uses same model as main by default)
 - `diarization` - PyAnnote model and speaker detection
 - `remote_server` - Host, port, TLS settings
@@ -1264,6 +1265,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `longform_recording.translation_enabled` - Enable translation for longform/static/notebook transcription flows
 - `longform_recording.translation_target_language` - Translation target (v1: `"en"` only)
 - Translation uses native Whisper/Faster-Whisper `task="translate"` (source-language -> English)
+- Canary models support bidirectional English ↔ other language translation (X→English and English→X; v1 uses X→English only)
 - **Note:** Translation is not supported by Parakeet models; the toggle is auto-disabled when a Parakeet model is selected
 
 **Environment variables:**
@@ -1271,7 +1273,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 |----------|---------|
 | `HF_TOKEN` | HuggingFace token for PyAnnote models |
 | `HUGGINGFACE_TOKEN_DECISION` | One-time onboarding state: `unset`, `provided`, `skipped` |
-| `INSTALL_NEMO` | Enable NeMo toolkit installation for Parakeet ASR models (`true`/`false`) |
+| `INSTALL_NEMO` | Enable NeMo toolkit installation for Parakeet and Canary ASR models (`true`/`false`) |
 | `BOOTSTRAP_CACHE_DIR` | Runtime package cache path (default: `/runtime/cache`) |
 | `USER_CONFIG_DIR` | Path to user config directory |
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, WARNING) |

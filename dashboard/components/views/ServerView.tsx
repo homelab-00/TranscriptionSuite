@@ -46,8 +46,9 @@ const WHISPER_LARGE_V3 = 'Systran/faster-whisper-large-v3';
 const WHISPER_MEDIUM = 'Systran/faster-whisper-medium';
 const WHISPER_SMALL = 'Systran/faster-whisper-small';
 
-// Parakeet model presets
-const PARAKEET_CTC_1_1B = 'nvidia/parakeet-tdt-0.6b-v3';
+// NeMo model presets
+const PARAKEET_TDT_0_6B = 'nvidia/parakeet-tdt-0.6b-v3';
+const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
 
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
@@ -190,8 +191,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     } else if (normalizedLive === normalizeModelName(WHISPER_SMALL)) {
       setLiveModelSelection(WHISPER_SMALL);
       setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(PARAKEET_CTC_1_1B)) {
-      setLiveModelSelection(PARAKEET_CTC_1_1B);
+    } else if (normalizedLive === normalizeModelName(PARAKEET_TDT_0_6B)) {
+      setLiveModelSelection(PARAKEET_TDT_0_6B);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(CANARY_1B_V2)) {
+      setLiveModelSelection(CANARY_1B_V2);
       setLiveCustomModel('');
     } else {
       setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
@@ -807,7 +811,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       WHISPER_LARGE_V3,
                       WHISPER_MEDIUM,
                       WHISPER_SMALL,
-                      PARAKEET_CTC_1_1B,
+                      PARAKEET_TDT_0_6B,
+                      CANARY_1B_V2,
                       MAIN_MODEL_CUSTOM_OPTION,
                     ]}
                     accentColor="magenta"
@@ -857,7 +862,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       WHISPER_LARGE_V3,
                       WHISPER_MEDIUM,
                       WHISPER_SMALL,
-                      PARAKEET_CTC_1_1B,
+                      PARAKEET_TDT_0_6B,
+                      CANARY_1B_V2,
                       LIVE_MODEL_CUSTOM_OPTION,
                     ]}
                     className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"

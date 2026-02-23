@@ -4,12 +4,13 @@
  */
 
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
+const CANARY_PATTERN = /^nvidia\/canary/i;
 
 /**
- * The 25 languages supported by nvidia/parakeet-tdt-0.6b-v3.
- * Source: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+ * The 25 European languages supported by NeMo ASR models
+ * (nvidia/parakeet-tdt-0.6b-v3 and nvidia/canary-1b-v2).
  */
-const PARAKEET_LANGUAGES: ReadonlySet<string> = new Set([
+const NEMO_LANGUAGES: ReadonlySet<string> = new Set([
   'Bulgarian',
   'Croatian',
   'Czech',
@@ -38,7 +39,7 @@ const PARAKEET_LANGUAGES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Returns true if the model is an NVIDIA Parakeet / NeMo ASR model.
+ * Returns true if the model is an NVIDIA Parakeet / NeMo ASR-only model.
  */
 export function isParakeetModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
@@ -46,16 +47,31 @@ export function isParakeetModel(modelName: string | null | undefined): boolean {
 }
 
 /**
+ * Returns true if the model is an NVIDIA Canary multitask ASR+translation model.
+ */
+export function isCanaryModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return CANARY_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model is any NVIDIA NeMo model (Parakeet or Canary).
+ */
+export function isNemoModel(modelName: string | null | undefined): boolean {
+  return isParakeetModel(modelName) || isCanaryModel(modelName);
+}
+
+/**
  * Filter a language list to only those supported by the given model.
- * Whisper models support everything; Parakeet models support 25 languages.
+ * Whisper models support everything; NeMo models (Parakeet, Canary) support 25 languages.
  * The "Auto Detect" entry is always preserved.
  */
 export function filterLanguagesForModel(
   languages: string[],
   modelName: string | null | undefined,
 ): string[] {
-  if (!isParakeetModel(modelName)) return languages;
-  return languages.filter((l) => l === 'Auto Detect' || PARAKEET_LANGUAGES.has(l));
+  if (!isNemoModel(modelName)) return languages;
+  return languages.filter((l) => l === 'Auto Detect' || NEMO_LANGUAGES.has(l));
 }
 
 /**
@@ -68,7 +84,10 @@ export function supportsTranslation(modelName: string | null | undefined): boole
   const name = (modelName ?? '').trim().toLowerCase();
   if (!name) return true; // unknown model → allow
 
+  // Parakeet models are ASR-only (no translation)
   if (isParakeetModel(modelName)) return false;
+  // Canary models support translation (X↔English)
+  if (isCanaryModel(modelName)) return true;
   if (name.includes('turbo')) return false;
   if (name.endsWith('.en')) return false;
   if (name.includes('distil-large-v3')) return false;

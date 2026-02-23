@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
+_CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 
 
 def normalize_model_name(model_name: str | None) -> str:
@@ -24,9 +25,13 @@ def supports_english_translation(model_name: str | None) -> bool:
     if not name:
         return True
 
-    # NVIDIA Parakeet / NeMo models are ASR-only (no translation).
+    # NVIDIA Parakeet / NeMo ASR-only models (no translation).
     if _PARAKEET_PATTERN.match(name):
         return False
+
+    # NVIDIA Canary models support X↔English translation.
+    if _CANARY_PATTERN.match(name):
+        return True
 
     # Whisper turbo is not intended for translation.
     if "turbo" in name:
@@ -66,7 +71,7 @@ def validate_translation_request(
 
     if not supports_english_translation(model_name):
         raise ValueError(
-            "Selected model does not support translation. Choose a multilingual non-turbo Whisper model."
+            "Selected model does not support translation. Choose a multilingual Whisper or Canary model."
         )
 
     return target

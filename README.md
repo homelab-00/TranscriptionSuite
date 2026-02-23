@@ -15,7 +15,7 @@ diarization, Audio Notebook mode,
 LM Studio integration, and both longform
 and live transcription. Electron
 dashboard + Python backend powered by
-faster-whisper and NVIDIA Parakeet with
+faster-whisper, NVIDIA Parakeet & Canary with
 GPU acceleration or CPU mode. The server
 is Dockerized for fast setup.
 </pre>
@@ -80,10 +80,10 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup
-- **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py) (Whisper) and English (Parakeet)
+- **Truly Multilingual**: Supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py) (Whisper) and 25 European languages (Parakeet, Canary)
 - **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS
 - **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
-- **Multiple ASR Backends**: Choose between Whisper (faster-whisper) and NVIDIA Parakeet (NeMo) models
+- **Multiple ASR Backends**: Choose between Whisper (faster-whisper), NVIDIA Parakeet, and NVIDIA Canary (NeMo) models
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows
 - **Speaker Diarization**: PyAnnote-based speaker identification
@@ -260,7 +260,7 @@ Once the server is running, navigate to the **Session** view to start transcribi
 * Enable `Translation` toggle in the Session controls
 * Applies to: longform recordings, file transcription, Live Mode, and Notebook uploads
 * Translates source language to English
-* **Note:** Translation is only available with Whisper models; Parakeet models do not support translation
+* **Note:** Translation is available with Whisper and Canary models. Canary supports bidirectional English ↔ other language translation. Parakeet models do not support translation
 
 ### 5.2 Dashboard Views
 
@@ -466,7 +466,7 @@ GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](LICENSE).
 
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
-- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) (Parakeet ASR models)
+- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) (Parakeet & Canary ASR models)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [Tailscale](https://tailscale.com/)
 - [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)

@@ -231,7 +231,7 @@ const AppInner: React.FC = () => {
             }
           }
 
-          // NeMo / Parakeet prompt — only on first container creation
+          // NeMo / Parakeet+Canary prompt — only on first container creation
           let installNemo = false;
           const storedNemoDecision = await getConfig<string>('server.nemoDecision');
           if (!storedNemoDecision || storedNemoDecision === 'unset') {
@@ -442,14 +442,15 @@ const AppInner: React.FC = () => {
           />
           <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
-              <h2 className="text-lg font-semibold text-white">Optional NVIDIA Parakeet Setup</h2>
+              <h2 className="text-lg font-semibold text-white">Optional NVIDIA NeMo Setup</h2>
             </div>
             <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
               <div className="space-y-3 text-sm text-slate-300">
-                <p>Install NVIDIA NeMo toolkit for Parakeet ASR models?</p>
+                <p>Install NVIDIA NeMo toolkit for Parakeet and Canary models?</p>
                 <p className="text-slate-400">
-                  Parakeet models offer high-accuracy multilingual transcription as an alternative
-                  to Whisper. This is a large optional dependency (~2 GB+).
+                  Parakeet and Canary models offer high-accuracy multilingual transcription and
+                  translation as an alternative to Whisper. This is a large optional dependency (~2
+                  GB+).
                 </p>
                 <p className="text-slate-400">
                   If skipped, Whisper models will still work normally. You can enable this later by
