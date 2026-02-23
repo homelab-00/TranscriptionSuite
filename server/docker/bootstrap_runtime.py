@@ -597,18 +597,25 @@ def extract_config_value(content: str, section: str, key: str, default: str) -> 
 
 
 def load_config_models() -> tuple[str, str]:
+    # Environment variables take precedence (set by dashboard via docker-compose)
+    env_main = os.environ.get("MAIN_TRANSCRIBER_MODEL", "").strip()
+    env_diar = os.environ.get("DIARIZATION_MODEL", "").strip()
+
     config_file = USER_CONFIG_FILE if USER_CONFIG_FILE.exists() else DEFAULT_CONFIG_FILE
     if not config_file.exists():
-        return (DEFAULT_MAIN_MODEL, DEFAULT_DIARIZATION_MODEL)
+        return (
+            env_main or DEFAULT_MAIN_MODEL,
+            env_diar or DEFAULT_DIARIZATION_MODEL,
+        )
 
     content = config_file.read_text(encoding="utf-8", errors="replace")
-    main_model = extract_config_value(
+    main_model = env_main or extract_config_value(
         content,
         section="main_transcriber",
         key="model",
         default=DEFAULT_MAIN_MODEL,
     )
-    diar_model = extract_config_value(
+    diar_model = env_diar or extract_config_value(
         content,
         section="diarization",
         key="model",

@@ -35,6 +35,11 @@ interface ServerViewProps {
     mode: 'local' | 'remote',
     runtimeProfile: RuntimeProfile,
     imageTag?: string,
+    models?: {
+      mainTranscriberModel?: string;
+      liveTranscriberModel?: string;
+      diarizationModel?: string;
+    },
   ) => Promise<void>;
   startupFlowPending: boolean;
 }
@@ -56,6 +61,20 @@ const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
+
+const UI_SENTINEL_VALUES = new Set([
+  MODEL_DEFAULT_LOADING_PLACEHOLDER,
+  MAIN_MODEL_CUSTOM_OPTION,
+  LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
+]);
+
+function sanitizeModelName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || UI_SENTINEL_VALUES.has(trimmed)) return '';
+  return trimmed;
+}
 
 function getString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -664,7 +683,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="secondary"
                       className="h-9 px-4"
-                      onClick={() => onStartServer('local', runtimeProfile, selectedTagForStart)}
+                      onClick={() =>
+                        onStartServer('local', runtimeProfile, selectedTagForStart, {
+                          mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                          liveTranscriberModel: sanitizeModelName(activeLiveModel),
+                          diarizationModel: sanitizeModelName(activeDiarizationModel),
+                        })
+                      }
                       disabled={docker.operating || isRunning || startupFlowPending}
                     >
                       {docker.operating || startupFlowPending ? (
@@ -676,7 +701,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="secondary"
                       className="h-9 px-4"
-                      onClick={() => onStartServer('remote', runtimeProfile, selectedTagForStart)}
+                      onClick={() =>
+                        onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                          mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                          liveTranscriberModel: sanitizeModelName(activeLiveModel),
+                          diarizationModel: sanitizeModelName(activeDiarizationModel),
+                        })
+                      }
                       disabled={docker.operating || isRunning || startupFlowPending}
                     >
                       Start Remote

@@ -130,6 +130,9 @@ export interface StartContainerOptions {
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
   installNemo?: boolean;
+  mainTranscriberModel?: string;
+  liveTranscriberModel?: string;
+  diarizationModel?: string;
 }
 
 const HF_DECISION_VALUES = new Set<HfTokenDecision>(['unset', 'provided', 'skipped']);
@@ -509,7 +512,18 @@ async function getContainerStatus(): Promise<ContainerStatus> {
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
  */
 async function startContainer(options: StartContainerOptions): Promise<string> {
-  const { mode, runtimeProfile, imageTag, tlsEnv, hfToken, hfTokenDecision, installNemo } = options;
+  const {
+    mode,
+    runtimeProfile,
+    imageTag,
+    tlsEnv,
+    hfToken,
+    hfTokenDecision,
+    installNemo,
+    mainTranscriberModel,
+    liveTranscriberModel,
+    diarizationModel,
+  } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
 
@@ -559,6 +573,20 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     const nemoValue = installNemo ? 'true' : 'false';
     composeEnv['INSTALL_NEMO'] = nemoValue;
     envUpdates['INSTALL_NEMO'] = nemoValue;
+  }
+
+  // Pass ASR model selections to the container (empty string = use config.yaml default)
+  if (mainTranscriberModel !== undefined) {
+    composeEnv['MAIN_TRANSCRIBER_MODEL'] = mainTranscriberModel;
+    envUpdates['MAIN_TRANSCRIBER_MODEL'] = mainTranscriberModel;
+  }
+  if (liveTranscriberModel !== undefined) {
+    composeEnv['LIVE_TRANSCRIBER_MODEL'] = liveTranscriberModel;
+    envUpdates['LIVE_TRANSCRIBER_MODEL'] = liveTranscriberModel;
+  }
+  if (diarizationModel !== undefined) {
+    composeEnv['DIARIZATION_MODEL'] = diarizationModel;
+    envUpdates['DIARIZATION_MODEL'] = diarizationModel;
   }
 
   upsertComposeEnvValues(envUpdates);

@@ -74,6 +74,10 @@ services:
       - BOOTSTRAP_FINGERPRINT_SOURCE=${BOOTSTRAP_FINGERPRINT_SOURCE:-lockfile}
       - BOOTSTRAP_REBUILD_POLICY=${BOOTSTRAP_REBUILD_POLICY:-abi_only}
       - BOOTSTRAP_LOG_CHANGES=${BOOTSTRAP_LOG_CHANGES:-true}
+      # ASR model overrides (set by dashboard, empty = use config.yaml defaults)
+      - MAIN_TRANSCRIBER_MODEL=${MAIN_TRANSCRIBER_MODEL:-}
+      - LIVE_TRANSCRIBER_MODEL=${LIVE_TRANSCRIBER_MODEL:-}
+      - DIARIZATION_MODEL=${DIARIZATION_MODEL:-}
       # NeMo toolkit for NVIDIA Parakeet ASR models (optional, large dependency)
       - INSTALL_NEMO=${INSTALL_NEMO:-false}
       # LM Studio URL — overridden in platform overlay (host.docker.internal for VM platforms)

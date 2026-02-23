@@ -40,6 +40,9 @@ export interface StartContainerOptions {
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
   installNemo?: boolean;
+  mainTranscriberModel?: string;
+  liveTranscriberModel?: string;
+  diarizationModel?: string;
 }
 
 export interface ElectronAPI {

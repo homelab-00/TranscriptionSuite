@@ -45,7 +45,16 @@ interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
   clientRunning: boolean;
   setClientRunning: (running: boolean) => void;
-  onStartServer: (mode: 'local' | 'remote', runtimeProfile: 'gpu' | 'cpu') => Promise<void>;
+  onStartServer: (
+    mode: 'local' | 'remote',
+    runtimeProfile: 'gpu' | 'cpu',
+    imageTag?: string,
+    models?: {
+      mainTranscriberModel?: string;
+      liveTranscriberModel?: string;
+      diarizationModel?: string;
+    },
+  ) => Promise<void>;
   startupFlowPending: boolean;
   isUploading?: boolean;
   live: LiveModeState;

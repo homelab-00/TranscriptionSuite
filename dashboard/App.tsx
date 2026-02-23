@@ -181,7 +181,16 @@ const AppInner: React.FC = () => {
   }, []);
 
   const startServerWithOnboarding = useCallback(
-    async (mode: 'local' | 'remote', runtimeProfile: RuntimeProfile, imageTag?: string) => {
+    async (
+      mode: 'local' | 'remote',
+      runtimeProfile: RuntimeProfile,
+      imageTag?: string,
+      models?: {
+        mainTranscriberModel?: string;
+        liveTranscriberModel?: string;
+        diarizationModel?: string;
+      },
+    ) => {
       if (startupFlowPendingRef.current || docker.operating || docker.loading) return;
 
       startupFlowPendingRef.current = true;
@@ -268,6 +277,7 @@ const AppInner: React.FC = () => {
           await docker.startContainer(mode, runtimeProfile, undefined, imageTag, hfToken, {
             hfTokenDecision: hfDecision,
             installNemo,
+            ...models,
           });
           return;
         }
@@ -278,6 +288,7 @@ const AppInner: React.FC = () => {
           undefined,
           imageTag,
           hfToken || undefined,
+          models ? { ...models } : undefined,
         );
       } finally {
         startupFlowPendingRef.current = false;
