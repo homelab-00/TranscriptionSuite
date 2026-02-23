@@ -222,7 +222,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const activeTranscriber =
     mainModelSelection === MAIN_MODEL_CUSTOM_OPTION
       ? mainCustomModel.trim() || configuredMainModel
-      : configuredMainModel || mainModelSelection;
+      : mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER
+        ? configuredMainModel || mainModelSelection
+        : mainModelSelection;
   const activeLiveModel =
     liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
       ? activeTranscriber
@@ -235,6 +237,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
       : DIARIZATION_DEFAULT_MODEL;
+
+  // Detect whether selected models differ from the server-configured models
+  const asrModelChanged =
+    isRunning &&
+    modelsHydrated &&
+    configuredMainModel !== '' &&
+    (normalizeModelName(activeTranscriber) !== normalizeModelName(configuredMainModel) ||
+      normalizeModelName(activeLiveModel) !== normalizeModelName(configuredLiveModel));
+
+  const diarizationModelChanged =
+    isRunning &&
+    diarizationHydrated &&
+    configuredDiarizationModel !== '' &&
+    normalizeModelName(activeDiarizationModel) !== normalizeModelName(configuredDiarizationModel);
 
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
@@ -857,6 +873,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   )}
                 </div>
               </div>
+              {asrModelChanged && (
+                <div className="border-accent-orange/20 bg-accent-orange/5 text-accent-orange flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>
+                    Model configuration changed. Restart the server for changes to take effect.
+                  </span>
+                </div>
+              )}
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
                   variant={showUnloadModelsState ? 'danger' : 'secondary'}
@@ -922,6 +946,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   placeholder="owner/model-name"
                   className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
                 />
+              )}
+              {diarizationModelChanged && (
+                <div className="border-accent-orange/20 bg-accent-orange/5 text-accent-orange flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>
+                    Model configuration changed. Restart the server for changes to take effect.
+                  </span>
+                </div>
               )}
             </div>
           </GlassCard>

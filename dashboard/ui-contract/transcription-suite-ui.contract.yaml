@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.17
+  spec_version: 1.0.18
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -378,6 +378,7 @@ utility_allowlist:
     - bg-accent-magenta
     - bg-accent-magenta/10
     - bg-accent-orange
+    - bg-accent-orange/5
     - bg-accent-orange/10
     - bg-black/10
     - bg-black/20
