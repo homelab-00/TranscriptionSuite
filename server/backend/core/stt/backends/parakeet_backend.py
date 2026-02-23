@@ -30,11 +30,35 @@ MAX_CHUNK_DURATION = 20 * 60  # 20 minutes
 logger = logging.getLogger(__name__)
 
 
+def _patch_sampler_for_python313() -> None:
+    """Fix lhotse compatibility with Python 3.13+.
+
+    Python 3.13 made ``object.__init__()`` strict about rejecting keyword
+    arguments.  lhotse's ``CutSampler`` calls
+    ``super().__init__(data_source=None)`` which reaches ``object.__init__``
+    when PyTorch's ``Sampler`` does not override ``__init__``, causing a
+    ``TypeError``.  This patch adds a thin ``__init__`` that accepts and
+    ignores the deprecated ``data_source`` parameter.
+    """
+    try:
+        from torch.utils.data import Sampler
+
+        if Sampler.__init__ is object.__init__:
+
+            def _sampler_init(self, data_source=None):  # noqa: ARG001
+                pass
+
+            Sampler.__init__ = _sampler_init  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+
+
 def _import_nemo_asr() -> Any:
     """Lazy-import ``nemo.collections.asr`` with a clear error message."""
     try:
         import nemo.collections.asr as nemo_asr  # type: ignore[import-untyped]
 
+        _patch_sampler_for_python313()
         return nemo_asr
     except ImportError as exc:
         raise ImportError(
