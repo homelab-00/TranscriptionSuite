@@ -129,6 +129,7 @@ export function useLiveMode(): LiveModeState {
           setStatus('processing');
         } else if (state === 'STOPPED') {
           setStatus('idle');
+          setStatusMessage(null);
         }
         break;
       }
@@ -169,6 +170,7 @@ export function useLiveMode(): LiveModeState {
         setStatus('error');
         captureRef.current?.stop();
         setAnalyser(null);
+        setStatusMessage(null);
         break;
     }
   }, []);
@@ -196,6 +198,7 @@ export function useLiveMode(): LiveModeState {
         onClose: () => {
           captureRef.current?.stop();
           setAnalyser(null);
+          setStatusMessage(null);
           setStatus('idle');
         },
       });
@@ -206,10 +209,11 @@ export function useLiveMode(): LiveModeState {
 
   const stop = useCallback(() => {
     socketRef.current?.sendJSON({ type: 'stop' });
+    socketRef.current?.disconnect(); // sets intentionalDisconnect=true, prevents reconnect loop
     captureRef.current?.stop();
     setAnalyser(null);
-    setPartial('');
-    // Status will be set to 'idle' when we receive the state STOPPED message or onClose
+    setStatusMessage(null);
+    setStatus('idle');
   }, []);
 
   const toggleMute = useCallback(() => {

@@ -360,6 +360,12 @@ cd ..
 ./build/.venv/bin/pre-commit install
 ```
 
+**Linux — Docker group membership:** The app talks to Docker without `sudo`, so your user must be in the `docker` group. If you haven't done this already:
+```bash
+sudo usermod -aG docker $USER
+```
+Then log out and back in (or reboot) for the change to take effect. Without this, Docker commands will fail with a permissions error.
+
 ### 4.2 Step 2: Build Docker Image
 
 ```bash

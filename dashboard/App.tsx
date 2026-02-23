@@ -13,6 +13,8 @@ import { AdminStatusProvider } from './src/hooks/AdminStatusContext';
 import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
+import { useLiveMode } from './src/hooks/useLiveMode';
+import type { LiveModeState } from './src/hooks/useLiveMode';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
@@ -35,6 +37,9 @@ const AppInner: React.FC = () => {
 
   // Track clientRunning at app level so Sidebar can derive Session status
   const [clientRunning, setClientRunning] = useState(false);
+
+  // Live mode lifted to App level so state survives tab switches
+  const live = useLiveMode();
 
   // Lifted upload/import status so tray sync (in SessionView) can reflect it
   const [isUploading, setIsUploading] = useState(false);
@@ -249,6 +254,7 @@ const AppInner: React.FC = () => {
             onStartServer={startServerWithOnboarding}
             startupFlowPending={startupFlowPending}
             isUploading={isUploading}
+            live={live}
           />
         );
       case View.NOTEBOOK:
@@ -269,6 +275,7 @@ const AppInner: React.FC = () => {
             onStartServer={startServerWithOnboarding}
             startupFlowPending={startupFlowPending}
             isUploading={isUploading}
+            live={live}
           />
         );
     }

@@ -124,7 +124,12 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 1. Install Docker Engine
     * For Arch run `sudo pacman -S --needed docker`
     * For other distros refer to the [Docker documentation](https://docs.docker.com/engine/install/)
-2. Install NVIDIA Container Toolkit (for GPU mode)
+2. Add your user to the `docker` group so the app can talk to Docker without `sudo`:
+    ```bash
+    sudo usermod -aG docker $USER
+    ```
+    Then **log out and back in** (or reboot) for the change to take effect.
+3. Install NVIDIA Container Toolkit (for GPU mode)
     * Refer to the [NVIDIA documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
     * Not required if using CPU mode
 

@@ -30,7 +30,7 @@ import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
-import { useLiveMode } from '../../src/hooks/useLiveMode';
+import type { LiveModeState } from '../../src/hooks/useLiveMode';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
@@ -48,6 +48,7 @@ interface SessionViewProps {
   onStartServer: (mode: 'local' | 'remote', runtimeProfile: 'gpu' | 'cpu') => Promise<void>;
   startupFlowPending: boolean;
   isUploading?: boolean;
+  live: LiveModeState;
 }
 
 export const SessionView: React.FC<SessionViewProps> = ({
@@ -57,6 +58,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   onStartServer,
   startupFlowPending,
   isUploading,
+  live,
 }) => {
   // Global State
   const [showLogs, setShowLogs] = useState(false);
@@ -89,7 +91,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Transcription hooks
   const transcription = useTranscription();
-  const live = useLiveMode();
   const { logs: clientLogs, logPath: clientLogPath } = useClientDebugLogs();
 
   // Active analyser: live mode takes priority when active, then one-shot
@@ -1573,7 +1574,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                 {/* Transcript Area */}
                 <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
-                  {isLive ? (
+                  {isLive || live.sentences.length > 0 || live.partial ? (
                     <>
                       {live.statusMessage && (
                         <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">

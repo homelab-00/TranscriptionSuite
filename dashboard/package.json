@@ -1,7 +1,7 @@
 {
   "name": "transcriptionsuite",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Desktop dashboard for managing TranscriptionSuite server and transcription workflows.",
   "author": "TranscriptionSuite Team",
   "type": "module",
