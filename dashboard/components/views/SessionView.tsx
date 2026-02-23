@@ -39,7 +39,7 @@ import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
-import { supportsTranslation } from '../../src/services/modelCapabilities';
+import { supportsTranslation, filterLanguagesForModel } from '../../src/services/modelCapabilities';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -83,7 +83,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Real language list from server
   const { languages, loading: languagesLoading } = useLanguages();
-  const languageOptions = useMemo(() => {
+  const allLanguageOptions = useMemo(() => {
     // useLanguages already includes 'Auto Detect' — deduplicate by filtering it out before prepending
     const filtered = languages.filter((l) => l.code !== 'auto').map((l) => l.name);
     return ['Auto Detect', ...filtered];
@@ -223,9 +223,26 @@ export const SessionView: React.FC<SessionViewProps> = ({
   );
   const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
-  // Active model name (for capability checks & tray tooltip)
-  const activeModel = admin.status?.config?.transcription?.model ?? null;
+  // Active model names (for capability checks & tray tooltip)
+  const activeModel =
+    admin.status?.config?.main_transcriber?.model ??
+    admin.status?.config?.transcription?.model ??
+    null;
+  const activeLiveModel =
+    admin.status?.config?.live_transcriber?.model ??
+    admin.status?.config?.live_transcription?.model ??
+    activeModel;
   const canTranslate = supportsTranslation(activeModel);
+
+  // Filter language options per model — Parakeet models only support 25 languages
+  const mainLanguageOptions = useMemo(
+    () => filterLanguagesForModel(allLanguageOptions, activeModel),
+    [allLanguageOptions, activeModel],
+  );
+  const liveLanguageOptions = useMemo(
+    () => filterLanguagesForModel(allLanguageOptions, activeLiveModel),
+    [allLanguageOptions, activeLiveModel],
+  );
 
   // Main Transcription State
   const [mainLanguage, setMainLanguage] = useState('Auto Detect');
@@ -321,13 +338,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   useEffect(() => {
     if (languagesLoading) return;
-    if (!languageOptions.includes(mainLanguage)) {
+    if (!mainLanguageOptions.includes(mainLanguage)) {
       setMainLanguage('Auto Detect');
     }
-    if (!languageOptions.includes(liveLanguage)) {
+    if (!liveLanguageOptions.includes(liveLanguage)) {
       setLiveLanguage('English');
     }
-  }, [languagesLoading, languageOptions, mainLanguage, liveLanguage]);
+  }, [languagesLoading, mainLanguageOptions, liveLanguageOptions, mainLanguage, liveLanguage]);
 
   // Derive active client connection from explicit state + hook activity
   const clientConnected =
@@ -1118,7 +1135,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         <CustomSelect
                           value={mainLanguage}
                           onChange={handleMainLanguageChange}
-                          options={languageOptions}
+                          options={mainLanguageOptions}
                           accentColor="magenta"
                           className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
                         />
@@ -1538,7 +1555,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     <CustomSelect
                       value={liveLanguage}
                       onChange={handleLiveLanguageChange}
-                      options={languageOptions}
+                      options={liveLanguageOptions}
                       accentColor="magenta"
                       className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                     />

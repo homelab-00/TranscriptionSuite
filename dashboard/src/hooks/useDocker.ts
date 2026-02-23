@@ -104,6 +104,7 @@ export function useDocker(): UseDockerReturn {
   const [pulling, setPulling] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const volumeRefreshedOnHealthyRef = useRef(false);
 
   // Initial discovery
   useEffect(() => {
@@ -142,6 +143,18 @@ export function useDocker(): UseDockerReturn {
         const [status, imgs] = await Promise.all([d.getContainerStatus(), d.listImages()]);
         setContainer(status);
         setImages(imgs);
+
+        // Auto-refresh volume sizes once when the server first reports healthy
+        if (status.health === 'healthy' && !volumeRefreshedOnHealthyRef.current) {
+          volumeRefreshedOnHealthyRef.current = true;
+          d.getVolumes()
+            .then((vols) => setVolumes(vols))
+            .catch(() => {});
+        }
+        // Reset flag when container stops so it triggers again on next startup
+        if (!status.running) {
+          volumeRefreshedOnHealthyRef.current = false;
+        }
       } catch {
         /* ignore */
       }
