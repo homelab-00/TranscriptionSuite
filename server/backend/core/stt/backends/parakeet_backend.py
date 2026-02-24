@@ -357,7 +357,10 @@ class ParakeetBackend(STTBackend):
 
             if seg_timestamps:
                 for seg_ts in seg_timestamps:
-                    text = seg_ts.get("text", seg_ts.get("label", "")).strip()
+                    # NeMo Parakeet uses "segment" key; other models may use "text"/"label"
+                    text = seg_ts.get(
+                        "text", seg_ts.get("label", seg_ts.get("segment", ""))
+                    ).strip()
                     start = float(seg_ts.get("start", 0.0))
                     end = float(seg_ts.get("end", 0.0))
 
@@ -369,7 +372,8 @@ class ParakeetBackend(STTBackend):
                             if w_start >= start - 0.01 and w_end <= end + 0.01:
                                 words.append(
                                     {
-                                        "word": w.get("text", w.get("label", "")),
+                                        # NeMo Parakeet uses "word" key; others use "text"/"label"
+                                        "word": w.get("word", w.get("text", w.get("label", ""))),
                                         "start": w_start,
                                         "end": w_end,
                                         "probability": float(w.get("confidence", 1.0)),
@@ -389,7 +393,8 @@ class ParakeetBackend(STTBackend):
                 all_words: list[dict[str, Any]] = []
                 text_parts: list[str] = []
                 for w in word_timestamps_data:
-                    w_text = w.get("text", w.get("label", w.get("char", "")))
+                    # NeMo Parakeet uses "word" key; other models use "text"/"label"/"char"
+                    w_text = w.get("word", w.get("text", w.get("label", w.get("char", ""))))
                     all_words.append(
                         {
                             "word": w_text,
