@@ -130,6 +130,7 @@ class AudioToTextRecorder:
         on_recorded_chunk: Callable[[bytes], None] | None = None,
         initial_prompt: str | None = None,
         suppress_tokens: list[int] | None = None,
+        shared_backend: Any | None = None,
     ):
         """
         Initialize the server-side audio recorder.
@@ -168,6 +169,10 @@ class AudioToTextRecorder:
             on_recorded_chunk: Callback for each recorded chunk
             initial_prompt: Initial prompt for transcription
             suppress_tokens: Token IDs to suppress
+            shared_backend: Pre-loaded STT backend to reuse instead of
+                loading a new one.  When provided, ``_load_model()`` is
+                skipped and the caller retains ownership (the backend
+                will NOT be unloaded when this recorder is shut down).
         """
         # Load config for default values
         cfg = get_config()
@@ -328,7 +333,16 @@ class AudioToTextRecorder:
         # Initialize transcription backend
         self._backend: Any | None = None
         self._model_loaded = False
-        self._load_model()
+        self._owns_backend = shared_backend is None
+        if shared_backend is not None:
+            self._backend = shared_backend
+            self._model_loaded = True
+            logger.info(
+                f"AudioToTextRecorder '{instance_name}' using shared backend "
+                f"(model={self.model_name})"
+            )
+        else:
+            self._load_model()
 
         # Start recording worker thread
         self.recording_thread = threading.Thread(target=self._recording_worker, daemon=True)
@@ -1002,7 +1016,7 @@ class AudioToTextRecorder:
             return
 
         logger.info("Unloading STT model")
-        if self._backend is not None:
+        if self._backend is not None and self._owns_backend:
             self._backend.unload()
         self._backend = None
         self._model_loaded = False

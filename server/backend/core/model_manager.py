@@ -410,6 +410,61 @@ class ModelManager:
             logger.info("Diarization model unloaded")
 
     # =========================================================================
+    # Backend Sharing (main ↔ live mode)
+    # =========================================================================
+
+    def detach_transcription_backend(self) -> Any:
+        """Detach the backend from the main transcription engine without unloading it.
+
+        The backend stays in GPU memory so the live engine can reuse it.
+        The main engine's ``_backend`` is set to ``None`` so it cannot
+        transcribe while the backend is borrowed.
+
+        Returns:
+            The backend object, or ``None`` if no backend is loaded.
+        """
+        engine = self._transcription_engine
+        if engine is None or engine._backend is None:
+            return None
+
+        backend = engine._backend
+        engine._backend = None
+        engine._model_loaded = False
+        logger.info("Detached transcription backend for sharing (model stays in GPU memory)")
+        return backend
+
+    def attach_transcription_backend(self, backend: Any) -> None:
+        """Re-attach a previously detached backend to the main transcription engine.
+
+        Args:
+            backend: The backend object returned by :meth:`detach_transcription_backend`.
+        """
+        engine = self._transcription_engine
+        if engine is None:
+            logger.warning("Cannot attach backend: transcription engine does not exist")
+            return
+
+        engine._backend = backend
+        engine._model_loaded = True
+        logger.info("Re-attached transcription backend to main engine")
+
+    def get_transcription_load_params(self) -> dict[str, Any]:
+        """Return the model-level parameters the main engine was loaded with.
+
+        These are the parameters baked into the backend at ``load()`` time.
+        A live engine can only reuse the backend if its own load params match.
+        """
+        engine = self._transcription_engine
+        if engine is None:
+            return {}
+        return {
+            "device": engine.device,
+            "compute_type": engine.compute_type,
+            "gpu_device_index": engine.gpu_device_index,
+            "batch_size": engine.batch_size,
+        }
+
+    # =========================================================================
     # Real-time Transcription Engine
     # =========================================================================
 

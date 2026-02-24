@@ -59,6 +59,8 @@ class LiveModeSession:
         self._engine: LiveModeEngine | None = None
         self._message_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._running = False
+        # Backend borrowed from the main engine (non-None when sharing).
+        self._shared_backend: object | None = None
         # Capture the event loop so engine callbacks (from background threads)
         # can safely enqueue messages via call_soon_threadsafe.
         self._loop = asyncio.get_running_loop()
@@ -112,12 +114,14 @@ class LiveModeSession:
         """
         Start the Live Mode engine.
 
-        This unloads the main transcription model to free VRAM, then
-        starts the Live Mode engine with its own (typically smaller) model.
+        When the live model is the same as the main model **and** the
+        model-level load parameters match, the GPU-loaded backend is
+        shared instead of unloaded and reloaded — saving significant
+        startup time.
 
-        If the Live Mode model is the same as the main model, the model
-        files are already cached and only need to be reloaded with
-        different configurations.
+        When models differ (or load params are incompatible), the main
+        model is fully unloaded to free VRAM before loading the live
+        model.
         """
         if self._engine and self._engine.is_running:
             await self.send_message("error", {"message": "Engine already running"})
@@ -185,42 +189,89 @@ class LiveModeSession:
                 config.model,
             )
 
+            # Determine whether we can share the backend (same model +
+            # compatible model-level load params).
+            can_share = False
             if is_same_model:
+                main_params = model_manager.get_transcription_load_params()
+                if main_params:
+                    can_share = (
+                        main_params.get("device") == config.device
+                        and main_params.get("compute_type") == config.compute_type
+                        and main_params.get("gpu_device_index") == config.gpu_device_index
+                        and main_params.get("batch_size") == config.batch_size
+                    )
+                    if not can_share:
+                        logger.info(
+                            "Same model but load params differ — falling back to "
+                            f"full reload (main={main_params}, live={{"
+                            f"device={config.device!r}, "
+                            f"compute_type={config.compute_type!r}, "
+                            f"gpu_device_index={config.gpu_device_index!r}, "
+                            f"batch_size={config.batch_size!r}}})"
+                        )
+
+            shared_backend = None
+
+            if can_share:
                 logger.info(
-                    f"Live Mode using same model as main ({config.model}) - "
-                    "model files already cached"
+                    f"Live Mode reusing main backend ({config.model}) — skipping unload/reload"
                 )
                 await self.send_message(
                     "status",
                     {
-                        "message": f"Using cached model ({config.model})...",
+                        "message": f"Reusing loaded model ({config.model})...",
                         "same_model": True,
                     },
                 )
+                shared_backend = model_manager.detach_transcription_backend()
+                if shared_backend is None:
+                    # Main model wasn't loaded — fall back to normal path
+                    logger.warning(
+                        "Backend detach returned None (main model not loaded), "
+                        "falling back to full load"
+                    )
+                    can_share = False
+
+            if not can_share:
+                if is_same_model:
+                    await self.send_message(
+                        "status",
+                        {
+                            "message": f"Using cached model ({config.model})...",
+                            "same_model": True,
+                        },
+                    )
+                else:
+                    await self.send_message(
+                        "status",
+                        {
+                            "message": f"Switching to Live Mode model ({config.model})...",
+                            "same_model": False,
+                        },
+                    )
+
+                # Unload the main transcription model to free VRAM for Live Mode
+                await self.send_message("status", {"message": "Unloading main model..."})
+                try:
+                    model_manager.unload_transcription_model()
+                    logger.info("Unloaded main transcription model for Live Mode")
+                except Exception as e:
+                    logger.warning(f"Failed to unload main model (may not be loaded): {e}")
+
+            # Create engine with callbacks (and shared backend when available)
+            if shared_backend is not None:
+                await self.send_message("status", {"message": "Starting Live Mode..."})
             else:
-                await self.send_message(
-                    "status",
-                    {
-                        "message": f"Switching to Live Mode model ({config.model})...",
-                        "same_model": False,
-                    },
-                )
+                await self.send_message("status", {"message": "Loading Live Mode model..."})
 
-            # Unload the main transcription model to free VRAM for Live Mode
-            await self.send_message("status", {"message": "Unloading main model..."})
-            try:
-                model_manager.unload_transcription_model()
-                logger.info("Unloaded main transcription model for Live Mode")
-            except Exception as e:
-                logger.warning(f"Failed to unload main model (may not be loaded): {e}")
-
-            # Create engine with callbacks
-            await self.send_message("status", {"message": "Loading Live Mode model..."})
+            self._shared_backend = shared_backend
             self._engine = LiveModeEngine(
                 config=config,
                 on_sentence=self._on_sentence,
                 on_realtime_update=self._on_realtime_update,
                 on_state_change=self._on_state_change,
+                shared_backend=shared_backend,
             )
 
             # Start the engine
@@ -229,15 +280,15 @@ class LiveModeSession:
                 logger.info(f"Live Mode started for {self.client_name}")
                 return True
             else:
-                # If start failed, try to reload main model
-                await self._reload_main_model()
+                # If start failed, restore main model
+                await self._restore_or_reload_main_model()
                 await self.send_message("error", {"message": "Failed to start engine"})
                 return False
 
         except Exception as e:
             logger.error(f"Failed to start Live Mode: {e}")
-            # Try to reload main model on failure
-            await self._reload_main_model()
+            # Restore main model on failure
+            await self._restore_or_reload_main_model()
             await self.send_message("error", {"message": str(e)})
             return False
 
@@ -251,12 +302,22 @@ class LiveModeSession:
         except Exception as e:
             logger.error(f"Failed to reload main transcription model: {e}")
 
+    async def _restore_or_reload_main_model(self) -> None:
+        """Return the shared backend to the main engine, or reload from scratch."""
+        if self._shared_backend is not None:
+            model_manager = get_model_manager()
+            model_manager.attach_transcription_backend(self._shared_backend)
+            self._shared_backend = None
+            logger.info("Returned shared backend to main engine")
+        else:
+            await self._reload_main_model()
+
     async def stop_engine(self) -> None:
         """
         Stop the Live Mode engine.
 
-        This stops the Live Mode engine and reloads the main transcription
-        model so normal transcription can resume.
+        When the backend was shared, it is returned to the main engine
+        without a reload.  Otherwise the main model is fully reloaded.
         """
         self._running = False
         if self._engine:
@@ -264,9 +325,12 @@ class LiveModeSession:
             self._engine = None
             logger.info(f"Live Mode stopped for {self.client_name}")
 
-            # Reload main transcription model
-            await self.send_message("status", {"message": "Reloading main model..."})
-            await self._reload_main_model()
+            # Restore or reload main transcription model
+            if self._shared_backend is not None:
+                await self.send_message("status", {"message": "Restoring main model (shared)..."})
+            else:
+                await self.send_message("status", {"message": "Reloading main model..."})
+            await self._restore_or_reload_main_model()
 
         await self.send_message("state", {"state": "STOPPED"})
 

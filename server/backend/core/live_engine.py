@@ -12,9 +12,10 @@ operates continuously and delivers sentences as they are detected via VAD.
 import logging
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -76,10 +77,11 @@ class LiveModeEngine:
 
     def __init__(
         self,
-        config: Optional[LiveModeConfig] = None,
-        on_sentence: Optional[Callable[[str], None]] = None,
-        on_realtime_update: Optional[Callable[[str], None]] = None,
-        on_state_change: Optional[Callable[[LiveModeState], None]] = None,
+        config: LiveModeConfig | None = None,
+        on_sentence: Callable[[str], None] | None = None,
+        on_realtime_update: Callable[[str], None] | None = None,
+        on_state_change: Callable[[LiveModeState], None] | None = None,
+        shared_backend: Any | None = None,
     ):
         """
         Initialize the Live Mode engine.
@@ -89,15 +91,18 @@ class LiveModeEngine:
             on_sentence: Callback for completed sentences
             on_realtime_update: Callback for real-time partial updates
             on_state_change: Callback for state changes
+            shared_backend: Pre-loaded STT backend to reuse from the main
+                engine instead of loading a new one.
         """
         self.config = config or LiveModeConfig()
         self._on_sentence = on_sentence
         self._on_realtime_update = on_realtime_update
         self._on_state_change = on_state_change
+        self._shared_backend = shared_backend
 
-        self._recorder: Optional[Any] = None
+        self._recorder: Any | None = None
         self._state = LiveModeState.STOPPED
-        self._loop_thread: Optional[threading.Thread] = None
+        self._loop_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
         # Track history for the UI
@@ -191,6 +196,7 @@ class LiveModeEngine:
                 batch_size=self.config.batch_size,
                 on_recording_start=self._on_recording_start,
                 on_recording_stop=self._on_recording_stop,
+                shared_backend=self._shared_backend,
             )
 
             self._set_state(LiveModeState.LISTENING)
@@ -244,7 +250,7 @@ class LiveModeEngine:
 
     def feed_audio(
         self,
-        audio_data: Union[bytes, bytearray, np.ndarray],
+        audio_data: bytes | bytearray | np.ndarray,
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
         """
