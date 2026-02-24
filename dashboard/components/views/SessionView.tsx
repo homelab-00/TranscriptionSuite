@@ -1225,7 +1225,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           )
                         }
                         onClick={handleStartRecording}
-                        disabled={isLive}
+                        disabled={isLive || !clientRunning || !serverConnection.ready}
                       >
                         {isConnecting ? 'Connecting...' : 'Start Recording'}
                       </Button>
@@ -1594,7 +1594,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     >
                       {live.status === 'starting' ? 'Loading...' : isLive ? 'Active' : 'Offline'}
                     </span>
-                    <AppleSwitch checked={isLive} onChange={handleLiveToggle} size="sm" />
+                    <AppleSwitch
+                      checked={isLive}
+                      onChange={handleLiveToggle}
+                      size="sm"
+                      disabled={!clientRunning || !serverConnection.ready}
+                    />
                   </div>
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
                   <div className="flex h-8 shrink-0 items-center gap-2">
@@ -1641,7 +1646,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     variant="ghost"
                     size="sm"
                     icon={<Copy size={14} />}
-                    onClick={() => writeToClipboard(live.getText())}
+                    onClick={() => {
+                      writeToClipboard(live.getText());
+                      live.clearHistory();
+                    }}
                     className="ml-auto h-8 shrink-0 whitespace-nowrap"
                   >
                     Copy
