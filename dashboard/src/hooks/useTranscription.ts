@@ -36,6 +36,7 @@ export interface TranscriptionState {
     language?: string;
     deviceId?: string;
     translate?: boolean;
+    translationTarget?: string;
     systemAudio?: boolean;
     desktopSourceId?: string;
   }) => void;
@@ -65,6 +66,7 @@ export function useTranscription(): TranscriptionState {
     language?: string;
     deviceId?: string;
     translate?: boolean;
+    translationTarget?: string;
     systemAudio?: boolean;
     desktopSourceId?: string;
   }>({});
@@ -86,7 +88,7 @@ export function useTranscription(): TranscriptionState {
           data: {
             language: startOptsRef.current.language,
             translation_enabled: startOptsRef.current.translate ?? false,
-            translation_target_language: 'en',
+            translation_target_language: startOptsRef.current.translationTarget ?? 'en',
           },
         });
         break;
@@ -161,6 +163,7 @@ export function useTranscription(): TranscriptionState {
       language?: string;
       deviceId?: string;
       translate?: boolean;
+      translationTarget?: string;
       systemAudio?: boolean;
       desktopSourceId?: string;
     }) => {

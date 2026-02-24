@@ -475,7 +475,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       <Section title="Audio">
         <div className="space-y-4">
           <div className="rounded-lg border border-white/5 bg-white/5 p-3 font-mono text-xs text-slate-400">
-            Sample Rate: <span className="text-accent-cyan">16000 Hz</span> (Fixed for Whisper)
+            Sample Rate: <span className="text-accent-cyan">16000 Hz</span> (Fixed for Whisper &amp;
+            Parakeet)
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-300">

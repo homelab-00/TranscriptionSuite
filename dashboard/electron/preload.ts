@@ -39,6 +39,10 @@ export interface StartContainerOptions {
   tlsEnv?: Record<string, string>;
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
+  installNemo?: boolean;
+  mainTranscriberModel?: string;
+  liveTranscriberModel?: string;
+  diarizationModel?: string;
 }
 
 export interface ElectronAPI {

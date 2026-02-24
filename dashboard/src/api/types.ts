@@ -105,6 +105,8 @@ export interface LanguagesResponse {
   languages: Record<string, string>;
   count: number;
   auto_detect: boolean;
+  backend_type?: 'whisper' | 'parakeet' | 'canary';
+  supports_translation?: boolean;
 }
 
 export interface TranscriptionCancelResponse {
@@ -244,6 +246,11 @@ export interface AdminStatus {
       device?: string;
       [key: string]: unknown;
     };
+    [key: string]: unknown;
+  };
+  features?: {
+    diarization?: { available: boolean; reason: string };
+    nemo?: { available: boolean; reason: string };
     [key: string]: unknown;
   };
 }

@@ -17,7 +17,7 @@ longform_recording:
     # v1 supports source-language -> English only.
     translation_enabled: false
 
-    # Translation output target language. Faster-whisper only offers English tranlsation.
+    # Translation output target language. Faster-whisper only offers English translation.
     translation_target_language: "en"
 
     # Automatically add longform recordings to Audio Notebook.
@@ -49,7 +49,9 @@ static_transcription:
 # The high-accuracy transcriber used for final transcription.
 main_transcriber:
     # Model from HuggingFace to use for transcription.
-    # Examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    # Whisper examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
+    # Parakeet examples: "nvidia/parakeet-tdt-0.6b-v3" (25 European languages, requires INSTALL_NEMO=true)
+    # Backend is auto-detected from the model name (nvidia/* → Parakeet, else → Whisper).
     model: "Systran/faster-whisper-large-v3"
 
     # Compute type for the model. "default" is recommended.
@@ -96,11 +98,12 @@ live_transcriber:
     # v1 supports source-language -> English only.
     translation_enabled: false
 
-    # Translation output target language. Faster-whisper only offers English tranlsation.
+    # Translation output target language. Faster-whisper only offers English translation.
     translation_target_language: "en"
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.
+    # Supports both Whisper and Parakeet models (e.g. "nvidia/parakeet-tdt-0.6b-v3").
     # model: "Systran/faster-whisper-large-v3"
     compute_type: "default"
     device: "cuda"

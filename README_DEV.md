@@ -177,7 +177,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  TranscriptionSuite Server                        │  │
 │  │  - FastAPI REST API + WebSocket                   │  │
-│  │  - faster-whisper transcription                   │  │
+│  │  - faster-whisper + NeMo Parakeet/Canary ASR       │  │
 │  │  - Live Mode (RealtimeSTT) continuous transcribe  │  │
 │  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
@@ -225,7 +225,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and left-click toggle (start recording when standby; stop & transcribe when recording). Middle-click also stops & transcribes on Windows/macOS (Linux AppIndicator does not support middle-click). "Transcribe File" from the tray always uses pure transcription (diarization disabled). Tray icon updates are forced via `setTitle` on Linux to ensure StatusNotifier/AppIndicator refreshes the icon on state changes (e.g. live mode). Connecting state is debounced 250 ms to suppress brief yellow flash before red recording state; completion state shows for 1 s before reverting
 - First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
 - Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
-- Model-aware translation toggle (auto-disables for turbo, .en, and distil model variants)
+- Model-aware translation toggle (auto-disables for turbo, .en, distil, and Parakeet model variants; auto-enables for Canary)
 - Glassmorphism design language with dark frosted glass aesthetic
 
 ### 2.3 Security Model
@@ -715,7 +715,7 @@ to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
 
 | Path | Description |
 |------|-------------|
-| `/models/hub/` | HuggingFace models cache (Whisper, PyAnnote) |
+| `/models/hub/` | HuggingFace models cache (Whisper, PyAnnote, NeMo/Parakeet) |
 
 **`transcriptionsuite-runtime`** (mounted to `/runtime`):
 
@@ -907,6 +907,7 @@ included **only** when diarization is enabled.
 - Sentence-by-sentence output: Completed sentences sent immediately
 - Mute control: Client can pause/resume audio capture without disconnecting
 - Model swapping: Unloads main model to free VRAM for Live Mode model
+- Backend-agnostic: Supports all STT backends — Whisper, NVIDIA Parakeet, and NVIDIA Canary
 
 **Audio format:**
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
@@ -930,7 +931,13 @@ server/backend/
 │   ├── live_engine.py            # Live Mode engine (RealtimeSTT)
 │   └── stt/                      # Real-time speech-to-text engine
 │       ├── engine.py             # AudioToTextRecorder with VAD
-│       └── vad.py                # Dual VAD (Silero + WebRTC)
+│       ├── vad.py                # Dual VAD (Silero + WebRTC)
+│       └── backends/             # STT backend abstraction
+│           ├── base.py           # STTBackend ABC, BackendSegment, BackendTranscriptionInfo
+│           ├── whisper_backend.py # faster-whisper backend
+│           ├── parakeet_backend.py # NVIDIA NeMo Parakeet backend
+│           ├── canary_backend.py  # NVIDIA NeMo Canary multitask backend
+│           └── factory.py        # Backend detection and creation
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
 └── config.py                     # Configuration management
@@ -1005,7 +1012,7 @@ npm run dev:electron
 |--------|---------|
 | `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
-| `modelCapabilities.ts` | Translation support detection per Whisper model variant |
+| `modelCapabilities.ts` | Translation support detection and language filtering per model variant (Whisper, Parakeet, Canary) |
 | `clientDebugLog.ts` | Client-side debug logging with structured log capture |
 
 **React Hooks (`src/hooks/`):**
@@ -1237,7 +1244,7 @@ npm run dev:electron # Test in development mode
 Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPROFILE\Documents\TranscriptionSuite\config.yaml` (Windows)
 
 **Key sections:**
-- `main_transcriber` - Primary Whisper model, device, batch settings
+- `main_transcriber` - Primary transcription model (Whisper, Parakeet, or Canary), device, batch settings
 - `live_transcriber` - Live Mode continuous transcription (uses same model as main by default)
 - `diarization` - PyAnnote model and speaker detection
 - `remote_server` - Host, port, TLS settings
@@ -1251,20 +1258,24 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `live_transcriber.live_language` - Language code for Live Mode (default: "en"; modified via Dashboard Client view)
 - `live_transcriber.translation_enabled` - Enable source-language -> English translation in Live Mode
 - `live_transcriber.translation_target_language` - Translation target (v1: `"en"` only)
-- Model is inherited from `main_transcriber.model` if not explicitly set
+- Model is inherited from `main_transcriber.model` if `live_transcriber.model` is not explicitly set in config.yaml
 - Automatically swaps models to free VRAM when Live Mode starts
-- **Note:** Live Mode always unloads the main model and starts its own engine. The dashboard currently sends the main model on Live Mode start unless you explicitly wire `live_transcriber.model` through the client/server path.
+- Supports all STT backends: Whisper, NVIDIA Parakeet, and NVIDIA Canary — set `live_transcriber.model` to any supported model name
+- **Note:** Parakeet models do not support translation in Live Mode; the translate toggle is auto-disabled when a Parakeet live model is detected. Canary models support X→English translation.
 
 **Main Transcription Translation (v1):**
 - `longform_recording.translation_enabled` - Enable translation for longform/static/notebook transcription flows
 - `longform_recording.translation_target_language` - Translation target (v1: `"en"` only)
 - Translation uses native Whisper/Faster-Whisper `task="translate"` (source-language -> English)
+- Canary models support bidirectional English ↔ other language translation (X→English and English→X; v1 uses X→English only)
+- **Note:** Translation is not supported by Parakeet models; the toggle is auto-disabled when a Parakeet model is selected
 
 **Environment variables:**
 | Variable | Purpose |
 |----------|---------|
 | `HF_TOKEN` | HuggingFace token for PyAnnote models |
 | `HUGGINGFACE_TOKEN_DECISION` | One-time onboarding state: `unset`, `provided`, `skipped` |
+| `INSTALL_NEMO` | Enable NeMo toolkit installation for Parakeet and Canary ASR models (`true`/`false`) |
 | `BOOTSTRAP_CACHE_DIR` | Runtime package cache path (default: `/runtime/cache`) |
 | `USER_CONFIG_DIR` | Path to user config directory |
 | `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, WARNING) |
@@ -1305,7 +1316,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 > **`server.runtimeProfile`** — Controls whether the Docker container is
 > launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).
 > When set to `cpu`, the `docker-compose.gpu.yml` overlay is omitted and
-> `CUDA_VISIBLE_DEVICES` is set to an empty string, forcing faster-whisper
+> `CUDA_VISIBLE_DEVICES` is set to an empty string, forcing the transcription engine
 > to use the CPU compute backend. Change this from the **Server View** or
 > **Settings → App tab** in the dashboard UI.
 
@@ -1655,6 +1666,7 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 - Python 3.13
 - FastAPI + Uvicorn
 - faster-whisper (CTranslate2 backend)
+- NVIDIA NeMo Toolkit (optional, for Parakeet ASR models)
 - RealtimeSTT 0.3.104+ (Live Mode continuous transcription)
 - PyAnnote Audio 4.0.3+ (speaker diarization)
 - PyTorch 2.8.0 + TorchAudio 2.8.0

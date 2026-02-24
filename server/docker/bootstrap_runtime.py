@@ -597,18 +597,25 @@ def extract_config_value(content: str, section: str, key: str, default: str) -> 
 
 
 def load_config_models() -> tuple[str, str]:
+    # Environment variables take precedence (set by dashboard via docker-compose)
+    env_main = os.environ.get("MAIN_TRANSCRIBER_MODEL", "").strip()
+    env_diar = os.environ.get("DIARIZATION_MODEL", "").strip()
+
     config_file = USER_CONFIG_FILE if USER_CONFIG_FILE.exists() else DEFAULT_CONFIG_FILE
     if not config_file.exists():
-        return (DEFAULT_MAIN_MODEL, DEFAULT_DIARIZATION_MODEL)
+        return (
+            env_main or DEFAULT_MAIN_MODEL,
+            env_diar or DEFAULT_DIARIZATION_MODEL,
+        )
 
     content = config_file.read_text(encoding="utf-8", errors="replace")
-    main_model = extract_config_value(
+    main_model = env_main or extract_config_value(
         content,
         section="main_transcriber",
         key="model",
         default=DEFAULT_MAIN_MODEL,
     )
-    diar_model = extract_config_value(
+    diar_model = env_diar or extract_config_value(
         content,
         section="diarization",
         key="model",
@@ -884,6 +891,39 @@ def main() -> int:
             f"({diarization_status.get('reason', 'unavailable')})"
         )
 
+    # ── NeMo toolkit (optional, for NVIDIA Parakeet ASR models) ──────────
+    nemo_start = time.perf_counter()
+    install_nemo = parse_bool_env("INSTALL_NEMO", False)
+    nemo_status: dict[str, Any]
+
+    if install_nemo:
+        log("Installing NeMo toolkit for NVIDIA Parakeet support...")
+        try:
+            run_command(
+                [
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    str(venv_python),
+                    "nemo_toolkit[asr]>=2.2.0",
+                ],
+                timeout_seconds=timeout_seconds,
+                env=build_uv_sync_env(
+                    venv_dir=venv_dir,
+                    cache_dir=cache_dir,
+                ),
+            )
+            nemo_status = {"available": True, "reason": "ready"}
+            log("NeMo toolkit installed")
+        except Exception as exc:
+            nemo_status = {"available": False, "reason": f"install_failed: {exc}"}
+            log(f"NeMo toolkit installation failed: {exc}")
+    else:
+        nemo_status = {"available": False, "reason": "not_requested"}
+        log("NeMo not requested, skipping")
+    log_timing("NeMo feature check complete", nemo_start)
+
     status_write_start = time.perf_counter()
     write_status_file(
         status_file,
@@ -901,6 +941,7 @@ def main() -> int:
             },
             "features": {
                 "diarization": diarization_status,
+                "nemo": nemo_status,
             },
         },
     )

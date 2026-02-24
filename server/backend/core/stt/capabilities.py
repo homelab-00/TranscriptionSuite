@@ -4,6 +4,11 @@ Model capability helpers for STT translation support.
 
 from __future__ import annotations
 
+import re
+
+_PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
+_CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
+
 
 def normalize_model_name(model_name: str | None) -> str:
     """Normalize model name for capability checks."""
@@ -18,6 +23,14 @@ def supports_english_translation(model_name: str | None) -> bool:
     """
     name = normalize_model_name(model_name)
     if not name:
+        return True
+
+    # NVIDIA Parakeet / NeMo ASR-only models (no translation).
+    if _PARAKEET_PATTERN.match(name):
+        return False
+
+    # NVIDIA Canary models support X↔English translation.
+    if _CANARY_PATTERN.match(name):
         return True
 
     # Whisper turbo is not intended for translation.
@@ -50,15 +63,21 @@ def validate_translation_request(
     if normalized_task != "translate":
         return "en"
 
-    target = (translation_target_language or "en").strip().lower()
-    if target != "en":
-        raise ValueError(
-            "Translation target language must be 'en' for v1 (English-only translation)."
-        )
-
     if not supports_english_translation(model_name):
         raise ValueError(
-            "Selected model does not support translation. Choose a multilingual non-turbo Whisper model."
+            "Selected model does not support translation. Choose a multilingual Whisper or Canary model."
+        )
+
+    target = (translation_target_language or "en").strip().lower()
+
+    # Canary supports bidirectional translation: any EU language is a valid target.
+    if _CANARY_PATTERN.match(normalize_model_name(model_name)):
+        return target
+
+    # All other models (Whisper) only support English as the translation target.
+    if target != "en":
+        raise ValueError(
+            "Translation target language must be 'en' for this model (English-only translation)."
         )
 
     return target

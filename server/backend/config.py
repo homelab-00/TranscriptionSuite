@@ -16,7 +16,7 @@ Configuration Priority (highest to lowest):
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import yaml
 
@@ -59,19 +59,19 @@ class ServerConfig:
     User config takes precedence over default config.
     """
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         """
         Initialize configuration.
 
         Args:
             config_path: Path to config file. If None, searches in priority order.
         """
-        self.config: Dict[str, Any] = {}
+        self.config: dict[str, Any] = {}
         self._config_path = config_path
-        self._loaded_from: Optional[Path] = None
+        self._loaded_from: Path | None = None
         self._load_config()
 
-    def _find_config_file(self) -> Optional[Path]:
+    def _find_config_file(self) -> Path | None:
         """
         Find the configuration file in priority order.
 
@@ -165,6 +165,7 @@ class ServerConfig:
                         "WARNING: Skipped invalid config file(s): "
                         + ", ".join(str(path) for path, _ in errors)
                     )
+                self._apply_env_overrides()
                 print(f"Loaded configuration from: {config_file}")
                 return
             except (yaml.YAMLError, OSError) as e:
@@ -178,8 +179,30 @@ class ServerConfig:
             raise RuntimeError("Failed to load configuration. Tried:\n" + details)
         raise RuntimeError("Failed to load configuration for unknown reasons.")
 
+    _ENV_MODEL_OVERRIDES = (
+        ("MAIN_TRANSCRIBER_MODEL", ("main_transcriber", "model")),
+        ("LIVE_TRANSCRIBER_MODEL", ("live_transcriber", "model")),
+        ("DIARIZATION_MODEL", ("diarization", "model")),
+    )
+
+    def _apply_env_overrides(self) -> None:
+        """Apply environment variable overrides for model selection.
+
+        Environment variables (set by the dashboard via docker-compose) take
+        precedence over config.yaml values.  Only non-empty values are applied.
+        """
+        for env_key, config_path in self._ENV_MODEL_OVERRIDES:
+            value = os.environ.get(env_key, "").strip()
+            if not value:
+                continue
+            # Ensure the nested dict structure exists
+            section = self.config
+            for key in config_path[:-1]:
+                section = section.setdefault(key, {})
+            section[config_path[-1]] = value
+
     @property
-    def loaded_from(self) -> Optional[Path]:
+    def loaded_from(self) -> Path | None:
         """Return the path of the loaded configuration file."""
         return self._loaded_from
 
@@ -227,42 +250,42 @@ class ServerConfig:
         return value
 
     @property
-    def transcription(self) -> Dict[str, Any]:
+    def transcription(self) -> dict[str, Any]:
         """Get transcription configuration."""
         return self.config.get("transcription", {})
 
     @property
-    def server(self) -> Dict[str, Any]:
+    def server(self) -> dict[str, Any]:
         """Get server configuration."""
         return self.config.get("server", {})
 
     @property
-    def logging(self) -> Dict[str, Any]:
+    def logging(self) -> dict[str, Any]:
         """Get logging configuration."""
         return self.config.get("logging", {})
 
     @property
-    def audio_notebook(self) -> Dict[str, Any]:
+    def audio_notebook(self) -> dict[str, Any]:
         """Get audio notebook configuration."""
         return self.config.get("audio_notebook", {})
 
     @property
-    def llm(self) -> Dict[str, Any]:
+    def llm(self) -> dict[str, Any]:
         """Get LLM configuration."""
         return self.config.get("llm", {})
 
     @property
-    def auth(self) -> Dict[str, Any]:
+    def auth(self) -> dict[str, Any]:
         """Get authentication configuration."""
         return self.config.get("auth", {})
 
     @property
-    def stt(self) -> Dict[str, Any]:
+    def stt(self) -> dict[str, Any]:
         """Get STT (speech-to-text) configuration."""
         return self.config.get("stt", {})
 
 
-def _non_empty_string(value: Any) -> Optional[str]:
+def _non_empty_string(value: Any) -> str | None:
     """Return a trimmed string only when value is a non-empty string."""
     if not isinstance(value, str):
         return None
@@ -270,7 +293,7 @@ def _non_empty_string(value: Any) -> Optional[str]:
     return trimmed if trimmed else None
 
 
-def _dict_get(payload: Dict[str, Any], *keys: str) -> Any:
+def _dict_get(payload: dict[str, Any], *keys: str) -> Any:
     """Safely fetch a nested value from a plain dict."""
     current: Any = payload
     for key in keys:
@@ -280,7 +303,7 @@ def _dict_get(payload: Dict[str, Any], *keys: str) -> Any:
     return current
 
 
-def resolve_main_transcriber_model(config: ServerConfig | Dict[str, Any]) -> str:
+def resolve_main_transcriber_model(config: ServerConfig | dict[str, Any]) -> str:
     """
     Resolve the main transcription model from config with a single fallback.
 
@@ -297,7 +320,7 @@ def resolve_main_transcriber_model(config: ServerConfig | Dict[str, Any]) -> str
     return main_model or legacy_model or FALLBACK_MAIN_TRANSCRIBER_MODEL
 
 
-def resolve_live_transcriber_model(config: ServerConfig | Dict[str, Any]) -> str:
+def resolve_live_transcriber_model(config: ServerConfig | dict[str, Any]) -> str:
     """
     Resolve the live transcription model from config.
 
@@ -309,18 +332,16 @@ def resolve_live_transcriber_model(config: ServerConfig | Dict[str, Any]) -> str
         legacy_live_model = _non_empty_string(config.get("live_transcription", "model"))
     else:
         live_model = _non_empty_string(_dict_get(config, "live_transcriber", "model"))
-        legacy_live_model = _non_empty_string(
-            _dict_get(config, "live_transcription", "model")
-        )
+        legacy_live_model = _non_empty_string(_dict_get(config, "live_transcription", "model"))
 
     return live_model or legacy_live_model or resolve_main_transcriber_model(config)
 
 
 # Global config instance
-_config: Optional[ServerConfig] = None
+_config: ServerConfig | None = None
 
 
-def get_config(config_path: Optional[Path] = None) -> ServerConfig:
+def get_config(config_path: Path | None = None) -> ServerConfig:
     """Get or create the global configuration instance."""
     global _config
     if _config is None:

@@ -35,18 +35,46 @@ interface ServerViewProps {
     mode: 'local' | 'remote',
     runtimeProfile: RuntimeProfile,
     imageTag?: string,
+    models?: {
+      mainTranscriberModel?: string;
+      liveTranscriberModel?: string;
+      diarizationModel?: string;
+    },
   ) => Promise<void>;
   startupFlowPending: boolean;
 }
 
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
-const LIVE_ALTERNATE_MODEL = 'Systran/faster-whisper-medium';
+
+// Whisper model presets
+const WHISPER_LARGE_V3 = 'Systran/faster-whisper-large-v3';
+const WHISPER_MEDIUM = 'Systran/faster-whisper-medium';
+const WHISPER_SMALL = 'Systran/faster-whisper-small';
+
+// NeMo model presets
+const PARAKEET_TDT_0_6B = 'nvidia/parakeet-tdt-0.6b-v3';
+const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
+
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
 const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
+
+const UI_SENTINEL_VALUES = new Set([
+  MODEL_DEFAULT_LOADING_PLACEHOLDER,
+  MAIN_MODEL_CUSTOM_OPTION,
+  LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
+]);
+
+function sanitizeModelName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || UI_SENTINEL_VALUES.has(trimmed)) return '';
+  return trimmed;
+}
 
 function getString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -173,8 +201,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (normalizedLive === normalizedMain) {
       setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
       setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(LIVE_ALTERNATE_MODEL)) {
-      setLiveModelSelection(LIVE_ALTERNATE_MODEL);
+    } else if (normalizedLive === normalizeModelName(WHISPER_LARGE_V3)) {
+      setLiveModelSelection(WHISPER_LARGE_V3);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(WHISPER_MEDIUM)) {
+      setLiveModelSelection(WHISPER_MEDIUM);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(WHISPER_SMALL)) {
+      setLiveModelSelection(WHISPER_SMALL);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(PARAKEET_TDT_0_6B)) {
+      setLiveModelSelection(PARAKEET_TDT_0_6B);
+      setLiveCustomModel('');
+    } else if (normalizedLive === normalizeModelName(CANARY_1B_V2)) {
+      setLiveModelSelection(CANARY_1B_V2);
       setLiveCustomModel('');
     } else {
       setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
@@ -205,13 +245,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const activeTranscriber =
     mainModelSelection === MAIN_MODEL_CUSTOM_OPTION
       ? mainCustomModel.trim() || configuredMainModel
-      : configuredMainModel || mainModelSelection;
+      : mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER
+        ? configuredMainModel || mainModelSelection
+        : mainModelSelection;
   const activeLiveModel =
     liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
       ? activeTranscriber
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
-        : LIVE_ALTERNATE_MODEL;
+        : liveModelSelection;
 
   // Active diarization model name
   const activeDiarizationModel =
@@ -641,7 +683,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="secondary"
                       className="h-9 px-4"
-                      onClick={() => onStartServer('local', runtimeProfile, selectedTagForStart)}
+                      onClick={() =>
+                        onStartServer('local', runtimeProfile, selectedTagForStart, {
+                          mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                          liveTranscriberModel: sanitizeModelName(activeLiveModel),
+                          diarizationModel: sanitizeModelName(activeDiarizationModel),
+                        })
+                      }
                       disabled={docker.operating || isRunning || startupFlowPending}
                     >
                       {docker.operating || startupFlowPending ? (
@@ -653,7 +701,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="secondary"
                       className="h-9 px-4"
-                      onClick={() => onStartServer('remote', runtimeProfile, selectedTagForStart)}
+                      onClick={() =>
+                        onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                          mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                          liveTranscriberModel: sanitizeModelName(activeLiveModel),
+                          diarizationModel: sanitizeModelName(activeDiarizationModel),
+                        })
+                      }
                       disabled={docker.operating || isRunning || startupFlowPending}
                     >
                       Start Remote
@@ -771,11 +825,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     value={mainModelSelection}
                     onChange={setMainModelSelection}
                     options={[
-                      configuredMainModel || MODEL_DEFAULT_LOADING_PLACEHOLDER,
+                      WHISPER_LARGE_V3,
+                      WHISPER_MEDIUM,
+                      WHISPER_SMALL,
+                      PARAKEET_TDT_0_6B,
+                      CANARY_1B_V2,
                       MAIN_MODEL_CUSTOM_OPTION,
                     ]}
                     accentColor="magenta"
                     className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                    disabled={isRunning}
                   />
                   {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
                     <input
@@ -783,7 +842,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       value={mainCustomModel}
                       onChange={(e) => setMainCustomModel(e.target.value)}
                       placeholder="owner/model-name"
-                      className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                      disabled={isRunning}
+                      className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                     />
                   )}
                 </div>
@@ -818,10 +878,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     onChange={setLiveModelSelection}
                     options={[
                       LIVE_MODEL_SAME_AS_MAIN_OPTION,
-                      LIVE_ALTERNATE_MODEL,
+                      WHISPER_LARGE_V3,
+                      WHISPER_MEDIUM,
+                      WHISPER_SMALL,
+                      PARAKEET_TDT_0_6B,
+                      CANARY_1B_V2,
                       LIVE_MODEL_CUSTOM_OPTION,
                     ]}
                     className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                    disabled={isRunning}
                   />
                   {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
                     <input
@@ -829,33 +894,36 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       value={liveCustomModel}
                       onChange={(e) => setLiveCustomModel(e.target.value)}
                       placeholder="owner/model-name"
-                      className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                      disabled={isRunning}
+                      className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                     />
                   )}
                 </div>
               </div>
               <div className="flex gap-2 border-t border-white/5 pt-2">
                 <Button
-                  variant={showUnloadModelsState ? 'danger' : 'secondary'}
+                  variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
                   className="h-9 px-4"
-                  onClick={isAsrModelsLoaded ? handleUnloadModels : handleLoadModels}
+                  onClick={
+                    adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
+                  }
                   disabled={modelsLoading || !isRunning}
                 >
                   {modelsLoading ? (
                     <>
                       <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
                     </>
-                  ) : showUnloadModelsState ? (
-                    'Unload Models'
+                  ) : adminStatus?.models_loaded === false ? (
+                    'Load Models'
                   ) : (
-                    'Reload Models'
+                    'Unload Models'
                   )}
                 </Button>
-                {adminStatus && (
+                {adminStatus?.models_loaded !== undefined && (
                   <span
-                    className={`ml-auto self-center font-mono text-xs ${isAsrModelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
+                    className={`ml-auto self-center font-mono text-xs ${adminStatus.models_loaded ? 'text-green-400' : 'text-slate-500'}`}
                   >
-                    {isAsrModelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
+                    {adminStatus.models_loaded ? 'Models Loaded' : 'Models Not Loaded'}
                   </span>
                 )}
               </div>
@@ -890,6 +958,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 onChange={setDiarizationModelSelection}
                 options={[DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
                 className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                disabled={isRunning}
               />
               {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
                 <input
@@ -897,7 +966,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   value={diarizationCustomModel}
                   onChange={(e) => setDiarizationCustomModel(e.target.value)}
                   placeholder="owner/model-name"
-                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1"
+                  disabled={isRunning}
+                  className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                 />
               )}
             </div>

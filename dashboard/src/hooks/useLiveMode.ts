@@ -51,6 +51,7 @@ export interface LiveStartOptions {
   language?: string;
   deviceId?: string;
   translate?: boolean;
+  translationTarget?: string;
   model?: string;
   systemAudio?: boolean;
   desktopSourceId?: string;
@@ -89,7 +90,7 @@ export function useLiveMode(): LiveModeState {
               language: startOptsRef.current.language,
               model: startOptsRef.current.model,
               translation_enabled: startOptsRef.current.translate ?? false,
-              translation_target_language: 'en',
+              translation_target_language: startOptsRef.current.translationTarget ?? 'en',
             },
           },
         });

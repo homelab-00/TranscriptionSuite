@@ -10,11 +10,10 @@ Handles:
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-
 from server.api.routes.utils import get_client_name
 from server.core.model_manager import TranscriptionCancelledError
 
@@ -26,9 +25,9 @@ router = APIRouter()
 class TranscriptionRequest(BaseModel):
     """Request model for transcription."""
 
-    language: Optional[str] = None
+    language: str | None = None
     translation_enabled: bool = False
-    translation_target_language: Optional[str] = None
+    translation_target_language: str | None = None
     word_timestamps: bool = True
     diarization: bool = False
 
@@ -37,9 +36,9 @@ class TranscriptionResponse(BaseModel):
     """Response model for transcription results."""
 
     text: str
-    segments: List[Dict[str, Any]]
-    words: List[Dict[str, Any]]
-    language: Optional[str] = None
+    segments: list[dict[str, Any]]
+    words: list[dict[str, Any]]
+    language: str | None = None
     language_probability: float = 0.0
     duration: float = 0.0
     num_speakers: int = 0
@@ -49,14 +48,14 @@ class TranscriptionResponse(BaseModel):
 @router.post("/file", response_model=TranscriptionResponse, include_in_schema=False)
 async def transcribe_audio(
     request: Request,
-    file: UploadFile = File(...),
-    language: Optional[str] = Form(None),
+    file: UploadFile = File(...),  # noqa: B008
+    language: str | None = Form(None),
     translation_enabled: bool = Form(False),
-    translation_target_language: Optional[str] = Form(None),
-    word_timestamps: Optional[bool] = Form(None),
-    diarization: Optional[bool] = Form(None),
-    expected_speakers: Optional[int] = Form(None),
-) -> Dict[str, Any]:
+    translation_target_language: str | None = Form(None),
+    word_timestamps: bool | None = Form(None),
+    diarization: bool | None = Form(None),
+    expected_speakers: int | None = Form(None),
+) -> dict[str, Any]:
     """
     Transcribe an uploaded audio file.
 
@@ -111,8 +110,7 @@ async def transcribe_audio(
         if diarization is None:
             diarization = False
         logger.debug(
-            f"Standalone client: word_timestamps={word_timestamps}, "
-            f"diarization={diarization}"
+            f"Standalone client: word_timestamps={word_timestamps}, diarization={diarization}"
         )
     else:
         # Recorder web UI: always disable word_timestamps and diarization
@@ -162,9 +160,7 @@ async def transcribe_audio(
                     audio_data, sample_rate, num_speakers=expected_speakers
                 )
 
-                logger.info(
-                    f"Diarization complete: {diar_result.num_speakers} speakers found"
-                )
+                logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
 
                 # TODO: Integrate diarization segments with transcription results
                 # For now, just log success - full integration requires aligning
@@ -175,15 +171,15 @@ async def transcribe_audio(
         return result.to_dict()
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except TranscriptionCancelledError:
         logger.info(f"Transcription cancelled for file: {file.filename}")
-        raise HTTPException(status_code=499, detail="Transcription cancelled by user")
+        raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
 
     except Exception as e:
         logger.error(f"Transcription failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     finally:
         # Release the job slot
@@ -199,11 +195,11 @@ async def transcribe_audio(
 @router.post("/quick", response_model=TranscriptionResponse)
 async def transcribe_quick(
     request: Request,
-    file: UploadFile = File(...),
-    language: Optional[str] = Form(None),
+    file: UploadFile = File(...),  # noqa: B008
+    language: str | None = Form(None),
     translation_enabled: bool = Form(False),
-    translation_target_language: Optional[str] = Form(None),
-) -> Dict[str, Any]:
+    translation_target_language: str | None = Form(None),
+) -> dict[str, Any]:
     """
     Quick transcription for Record view - text only, no word timestamps or diarization.
 
@@ -253,15 +249,15 @@ async def transcribe_quick(
         return result.to_dict()
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except TranscriptionCancelledError:
         logger.info(f"Quick transcription cancelled for file: {file.filename}")
-        raise HTTPException(status_code=499, detail="Transcription cancelled by user")
+        raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
 
     except Exception as e:
         logger.error(f"Quick transcription failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     finally:
         # Release the job slot
@@ -275,7 +271,7 @@ async def transcribe_quick(
 
 
 @router.post("/cancel")
-async def cancel_transcription(request: Request) -> Dict[str, Any]:
+async def cancel_transcription(request: Request) -> dict[str, Any]:
     """
     Cancel the currently running transcription job.
 
@@ -304,11 +300,46 @@ async def cancel_transcription(request: Request) -> Dict[str, Any]:
         }
 
 
-@router.get("/languages")
-async def get_supported_languages() -> Dict[str, Any]:
-    """Get list of supported languages."""
-    # Whisper supported languages
-    languages = {
+def _sorted_languages(langs: dict[str, str]) -> dict[str, str]:
+    """Return *langs* sorted: English first, then alphabetical by name."""
+    items = sorted(langs.items(), key=lambda kv: (kv[1] != "English", kv[1]))
+    return dict(items)
+
+
+# 25 European languages supported by NeMo models (Parakeet & Canary).
+_NEMO_LANGUAGES: dict[str, str] = _sorted_languages(
+    {
+        "bg": "Bulgarian",
+        "hr": "Croatian",
+        "cs": "Czech",
+        "da": "Danish",
+        "nl": "Dutch",
+        "en": "English",
+        "et": "Estonian",
+        "fi": "Finnish",
+        "fr": "French",
+        "de": "German",
+        "el": "Greek",
+        "hu": "Hungarian",
+        "it": "Italian",
+        "lv": "Latvian",
+        "lt": "Lithuanian",
+        "mt": "Maltese",
+        "pl": "Polish",
+        "pt": "Portuguese",
+        "ro": "Romanian",
+        "ru": "Russian",
+        "sk": "Slovak",
+        "sl": "Slovenian",
+        "es": "Spanish",
+        "sv": "Swedish",
+        "uk": "Ukrainian",
+    }
+)
+
+# Full Whisper language set (90 languages).
+_WHISPER_LANGUAGES: dict[str, str] = _sorted_languages(
+    {
         "en": "English",
         "zh": "Chinese",
         "de": "German",
@@ -349,7 +380,7 @@ async def get_supported_languages() -> Dict[str, Any]:
         "ml": "Malayalam",
         "cy": "Welsh",
         "sk": "Slovak",
-        "te": "Telugu",
+        "te": "Telugu",  # codespell:ignore te
         "fa": "Persian",
         "lv": "Latvian",
         "bn": "Bengali",
@@ -388,7 +419,7 @@ async def get_supported_languages() -> Dict[str, Any]:
         "yi": "Yiddish",
         "lo": "Lao",
         "uz": "Uzbek",
-        "fo": "Faroese",
+        "fo": "Faroese",  # codespell:ignore fo
         "ht": "Haitian Creole",
         "ps": "Pashto",
         "tk": "Turkmen",
@@ -409,9 +440,39 @@ async def get_supported_languages() -> Dict[str, Any]:
         "jw": "Javanese",
         "su": "Sundanese",
     }
+)
+
+
+@router.get("/languages")
+async def get_supported_languages(request: Request) -> dict[str, Any]:
+    """Get list of supported languages for the active transcription model.
+
+    Returns different language sets depending on the backend:
+    - **whisper**: All 90 Whisper languages, translation to English.
+    - **parakeet**: 25 European languages, no translation.
+    - **canary**: 25 European languages, bidirectional English ↔ EU translation.
+    """
+    from server.config import resolve_main_transcriber_model
+    from server.core.stt.backends.factory import detect_backend_type
+
+    try:
+        config = request.app.state.config
+        model_name = resolve_main_transcriber_model(config)
+        backend_type = detect_backend_type(model_name)
+    except Exception:
+        backend_type = "whisper"
+
+    if backend_type in ("parakeet", "canary"):
+        languages = _NEMO_LANGUAGES
+    else:
+        languages = _WHISPER_LANGUAGES
+
+    supports_translation = backend_type in ("whisper", "canary")
 
     return {
         "languages": languages,
         "count": len(languages),
         "auto_detect": True,
+        "backend_type": backend_type,
+        "supports_translation": supports_translation,
     }

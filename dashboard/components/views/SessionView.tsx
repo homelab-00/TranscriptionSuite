@@ -39,13 +39,27 @@ import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
-import { supportsTranslation } from '../../src/services/modelCapabilities';
+import {
+  supportsTranslation,
+  filterLanguagesForModel,
+  isCanaryModel,
+  CANARY_TRANSLATION_TARGETS,
+} from '../../src/services/modelCapabilities';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
   clientRunning: boolean;
   setClientRunning: (running: boolean) => void;
-  onStartServer: (mode: 'local' | 'remote', runtimeProfile: 'gpu' | 'cpu') => Promise<void>;
+  onStartServer: (
+    mode: 'local' | 'remote',
+    runtimeProfile: 'gpu' | 'cpu',
+    imageTag?: string,
+    models?: {
+      mainTranscriberModel?: string;
+      liveTranscriberModel?: string;
+      diarizationModel?: string;
+    },
+  ) => Promise<void>;
   startupFlowPending: boolean;
   isUploading?: boolean;
   live: LiveModeState;
@@ -81,10 +95,22 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, []);
 
-  // Real language list from server
-  const { languages, loading: languagesLoading } = useLanguages();
-  const languageOptions = useMemo(() => {
-    // useLanguages already includes 'Auto Detect' — deduplicate by filtering it out before prepending
+  // Admin status (needed early for model-aware language list)
+  const admin = useAdminStatusContext();
+  const activeModel =
+    admin.status?.config?.main_transcriber?.model ??
+    admin.status?.config?.transcription?.model ??
+    null;
+  const activeLiveModel =
+    admin.status?.config?.live_transcriber?.model ??
+    admin.status?.config?.live_transcription?.model ??
+    activeModel;
+
+  // Real language list from server — re-fetches when model backend changes
+  const { languages, loading: languagesLoading } = useLanguages(activeModel);
+  const allLanguageOptions = useMemo(() => {
+    // useLanguages returns sorted entries (English first, then alphabetical)
+    // with Auto Detect prepended. Ensure no duplicates.
     const filtered = languages.filter((l) => l.code !== 'auto').map((l) => l.name);
     return ['Auto Detect', ...filtered];
   }, [languages]);
@@ -209,7 +235,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const docker = useDockerContext();
   const serverRunning = docker.container.running;
   // Client connection state — tracked at App level via props
-  const admin = useAdminStatusContext();
   const isAsrModelsLoaded =
     admin.status?.models_loaded ??
     Boolean(
@@ -223,18 +248,36 @@ export const SessionView: React.FC<SessionViewProps> = ({
   );
   const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
-  // Active model name (for capability checks & tray tooltip)
-  const activeModel = admin.status?.config?.transcription?.model ?? null;
+  // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);
+  const canTranslateLive = supportsTranslation(activeLiveModel);
+
+  // Filter language options per model — Parakeet models only support 25 languages
+  const mainLanguageOptions = useMemo(
+    () => filterLanguagesForModel(allLanguageOptions, activeModel),
+    [allLanguageOptions, activeModel],
+  );
+  const liveLanguageOptions = useMemo(
+    () => filterLanguagesForModel(allLanguageOptions, activeLiveModel),
+    [allLanguageOptions, activeLiveModel],
+  );
 
   // Main Transcription State
   const [mainLanguage, setMainLanguage] = useState('Auto Detect');
   const [mainTranslate, setMainTranslate] = useState(false);
+  // Bidirectional translation target (used when Canary + source=English)
+  const [mainBidiTarget, setMainBidiTarget] = useState('Off');
 
   // Live Mode State
   const isLive = live.status !== 'idle' && live.status !== 'error';
   const [liveLanguage, setLiveLanguage] = useState('English');
   const [liveTranslate, setLiveTranslate] = useState(false);
+  // Bidirectional translation target (used when Canary + source=English)
+  const [liveBidiTarget, setLiveBidiTarget] = useState('Off');
+
+  // Canary bidirectional mode: when Canary model + source=English, show target dropdown
+  const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
+  const isCanaryLiveBidi = isCanaryModel(activeLiveModel) && liveLanguage === 'English';
 
   useEffect(() => {
     let active = true;
@@ -313,21 +356,22 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Reset translate toggles when model changes to one that doesn't support it
   useEffect(() => {
-    if (!canTranslate) {
-      setMainTranslate(false);
-      setLiveTranslate(false);
-    }
+    if (!canTranslate) setMainTranslate(false);
   }, [canTranslate]);
 
   useEffect(() => {
+    if (!canTranslateLive) setLiveTranslate(false);
+  }, [canTranslateLive]);
+
+  useEffect(() => {
     if (languagesLoading) return;
-    if (!languageOptions.includes(mainLanguage)) {
+    if (!mainLanguageOptions.includes(mainLanguage)) {
       setMainLanguage('Auto Detect');
     }
-    if (!languageOptions.includes(liveLanguage)) {
+    if (!liveLanguageOptions.includes(liveLanguage)) {
       setLiveLanguage('English');
     }
-  }, [languagesLoading, languageOptions, mainLanguage, liveLanguage]);
+  }, [languagesLoading, mainLanguageOptions, liveLanguageOptions, mainLanguage, liveLanguage]);
 
   // Derive active client connection from explicit state + hook activity
   const clientConnected =
@@ -484,10 +528,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (!canStartRecording) return;
     transcription.reset();
     const isSystemAudio = audioSource === 'system';
+    const mainTranslateActive = isCanaryMainBidi ? mainBidiTarget !== 'Off' : mainTranslate;
+    const mainTranslateTarget = isCanaryMainBidi ? (resolveLanguage(mainBidiTarget) ?? 'en') : 'en';
     transcription.start({
       language: resolveLanguage(mainLanguage),
       deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
-      translate: mainTranslate,
+      translate: mainTranslateActive,
+      translationTarget: mainTranslateTarget,
       systemAudio: isSystemAudio,
       desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
     });
@@ -496,6 +543,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription,
     mainLanguage,
     mainTranslate,
+    mainBidiTarget,
+    isCanaryMainBidi,
     audioSource,
     micDevice,
     micDeviceIds,
@@ -540,10 +589,15 @@ export const SessionView: React.FC<SessionViewProps> = ({
     (checked: boolean) => {
       if (checked) {
         const isSystemAudio = audioSource === 'system';
+        const liveTranslateActive = isCanaryLiveBidi ? liveBidiTarget !== 'Off' : liveTranslate;
+        const liveTranslateTarget = isCanaryLiveBidi
+          ? (resolveLanguage(liveBidiTarget) ?? 'en')
+          : 'en';
         live.start({
           language: resolveLanguage(liveLanguage),
           deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
-          translate: liveTranslate,
+          translate: liveTranslateActive,
+          translationTarget: liveTranslateTarget,
           systemAudio: isSystemAudio,
           desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
         });
@@ -555,6 +609,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
       live,
       liveLanguage,
       liveTranslate,
+      liveBidiTarget,
+      isCanaryLiveBidi,
       audioSource,
       micDevice,
       micDeviceIds,
@@ -1118,7 +1174,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         <CustomSelect
                           value={mainLanguage}
                           onChange={handleMainLanguageChange}
-                          options={languageOptions}
+                          options={mainLanguageOptions}
                           accentColor="magenta"
                           className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
                         />
@@ -1132,15 +1188,25 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       <label
                         className={`mt-1 mb-2 text-center text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
                       >
-                        Translate to English
+                        {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
                       </label>
                       <div className="flex h-11.5 items-center justify-center">
-                        <AppleSwitch
-                          checked={mainTranslate && canTranslate}
-                          onChange={setMainTranslate}
-                          size="sm"
-                          disabled={!canTranslate}
-                        />
+                        {isCanaryMainBidi ? (
+                          <CustomSelect
+                            value={mainBidiTarget}
+                            onChange={setMainBidiTarget}
+                            options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                            accentColor="magenta"
+                            className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                          />
+                        ) : (
+                          <AppleSwitch
+                            checked={mainTranslate && canTranslate}
+                            onChange={setMainTranslate}
+                            size="sm"
+                            disabled={!canTranslate}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1538,7 +1604,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     <CustomSelect
                       value={liveLanguage}
                       onChange={handleLiveLanguageChange}
-                      options={languageOptions}
+                      options={liveLanguageOptions}
                       accentColor="magenta"
                       className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                     />
@@ -1546,19 +1612,29 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
                   <div
                     className="flex h-8 shrink-0 items-center gap-2"
-                    title={canTranslate ? '' : 'Current model does not support translation'}
+                    title={canTranslateLive ? '' : 'Current model does not support translation'}
                   >
                     <span
-                      className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                      className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
                     >
-                      Translate to English
+                      {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
                     </span>
-                    <AppleSwitch
-                      checked={liveTranslate && canTranslate}
-                      onChange={setLiveTranslate}
-                      size="sm"
-                      disabled={!canTranslate}
-                    />
+                    {isCanaryLiveBidi ? (
+                      <CustomSelect
+                        value={liveBidiTarget}
+                        onChange={setLiveBidiTarget}
+                        options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                        accentColor="magenta"
+                        className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                      />
+                    ) : (
+                      <AppleSwitch
+                        checked={liveTranslate && canTranslateLive}
+                        onChange={setLiveTranslate}
+                        size="sm"
+                        disabled={!canTranslateLive}
+                      />
+                    )}
                   </div>
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
                   <Button
