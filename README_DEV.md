@@ -907,6 +907,7 @@ included **only** when diarization is enabled.
 - Sentence-by-sentence output: Completed sentences sent immediately
 - Mute control: Client can pause/resume audio capture without disconnecting
 - Model swapping: Unloads main model to free VRAM for Live Mode model
+- Backend-agnostic: Supports all STT backends — Whisper, NVIDIA Parakeet, and NVIDIA Canary
 
 **Audio format:**
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
@@ -1011,7 +1012,7 @@ npm run dev:electron
 |--------|---------|
 | `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
-| `modelCapabilities.ts` | Translation support detection per model variant (Whisper + Parakeet) |
+| `modelCapabilities.ts` | Translation support detection and language filtering per model variant (Whisper, Parakeet, Canary) |
 | `clientDebugLog.ts` | Client-side debug logging with structured log capture |
 
 **React Hooks (`src/hooks/`):**
@@ -1257,9 +1258,10 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `live_transcriber.live_language` - Language code for Live Mode (default: "en"; modified via Dashboard Client view)
 - `live_transcriber.translation_enabled` - Enable source-language -> English translation in Live Mode
 - `live_transcriber.translation_target_language` - Translation target (v1: `"en"` only)
-- Model is inherited from `main_transcriber.model` if not explicitly set
+- Model is inherited from `main_transcriber.model` if `live_transcriber.model` is not explicitly set in config.yaml
 - Automatically swaps models to free VRAM when Live Mode starts
-- **Note:** Live Mode always unloads the main model and starts its own engine. The dashboard currently sends the main model on Live Mode start unless you explicitly wire `live_transcriber.model` through the client/server path.
+- Supports all STT backends: Whisper, NVIDIA Parakeet, and NVIDIA Canary — set `live_transcriber.model` to any supported model name
+- **Note:** Parakeet models do not support translation in Live Mode; the translate toggle is auto-disabled when a Parakeet live model is detected. Canary models support X→English translation.
 
 **Main Transcription Translation (v1):**
 - `longform_recording.translation_enabled` - Enable translation for longform/static/notebook transcription flows

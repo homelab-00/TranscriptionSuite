@@ -245,6 +245,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);
+  const canTranslateLive = supportsTranslation(activeLiveModel);
 
   // Filter language options per model — Parakeet models only support 25 languages
   const mainLanguageOptions = useMemo(
@@ -342,11 +343,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Reset translate toggles when model changes to one that doesn't support it
   useEffect(() => {
-    if (!canTranslate) {
-      setMainTranslate(false);
-      setLiveTranslate(false);
-    }
+    if (!canTranslate) setMainTranslate(false);
   }, [canTranslate]);
+
+  useEffect(() => {
+    if (!canTranslateLive) setLiveTranslate(false);
+  }, [canTranslateLive]);
 
   useEffect(() => {
     if (languagesLoading) return;
@@ -1575,18 +1577,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
                   <div
                     className="flex h-8 shrink-0 items-center gap-2"
-                    title={canTranslate ? '' : 'Current model does not support translation'}
+                    title={canTranslateLive ? '' : 'Current model does not support translation'}
                   >
                     <span
-                      className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                      className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
                     >
                       Translate to English
                     </span>
                     <AppleSwitch
-                      checked={liveTranslate && canTranslate}
+                      checked={liveTranslate && canTranslateLive}
                       onChange={setLiveTranslate}
                       size="sm"
-                      disabled={!canTranslate}
+                      disabled={!canTranslateLive}
                     />
                   </div>
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>

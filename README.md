@@ -249,6 +249,7 @@ Once the server is running, navigate to the **Session** view to start transcribi
 * Speak naturally with pauses — sentences appear in real-time
 * Use Mute/Unmute to control audio capture
 * Completed sentences accumulate in the display
+* Works with all backends: Whisper, NVIDIA Parakeet, and NVIDIA Canary
 
 **Static File Transcription:**
 * Navigate to **Notebook** → **Import** tab
