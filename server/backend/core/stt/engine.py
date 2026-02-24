@@ -568,6 +568,9 @@ class AudioToTextRecorder:
                 )
                 start_time = time.time()
 
+                if self._backend is None:
+                    raise RuntimeError("STT model is not loaded")
+
                 # Transcribe via backend
                 backend_segments, backend_info = self._backend.transcribe(
                     audio,
@@ -578,6 +581,7 @@ class AudioToTextRecorder:
                     suppress_tokens=self.suppress_tokens,
                     vad_filter=self.faster_whisper_vad_filter,
                     word_timestamps=True,
+                    translation_target_language=self.translation_target_language,
                 )
 
                 # Collect results
@@ -750,6 +754,15 @@ class AudioToTextRecorder:
 
                 start_time = time.time()
 
+                if self._backend is None:
+                    raise RuntimeError("STT model is not loaded")
+
+                effective_target = (
+                    translation_target_language
+                    if translation_target_language is not None
+                    else self.translation_target_language
+                )
+
                 # Transcribe via backend
                 backend_segments, backend_info = self._backend.transcribe(
                     audio_data,
@@ -760,6 +773,7 @@ class AudioToTextRecorder:
                     suppress_tokens=self.suppress_tokens,
                     vad_filter=self.faster_whisper_vad_filter,
                     word_timestamps=word_timestamps,
+                    translation_target_language=effective_target,
                 )
 
                 # Collect results

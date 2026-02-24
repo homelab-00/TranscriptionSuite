@@ -10,7 +10,7 @@ const CANARY_PATTERN = /^nvidia\/canary/i;
  * The 25 European languages supported by NeMo ASR models
  * (nvidia/parakeet-tdt-0.6b-v3 and nvidia/canary-1b-v2).
  */
-const NEMO_LANGUAGES: ReadonlySet<string> = new Set([
+export const NEMO_LANGUAGES: ReadonlySet<string> = new Set([
   'Bulgarian',
   'Croatian',
   'Czech',
@@ -37,6 +37,37 @@ const NEMO_LANGUAGES: ReadonlySet<string> = new Set([
   'Swedish',
   'Ukrainian',
 ]);
+
+/**
+ * The 24 EU languages available as Canary translation targets (all NeMo languages except English).
+ * Shown as a dropdown when Canary is selected with English as the source language.
+ */
+export const CANARY_TRANSLATION_TARGETS: readonly string[] = [
+  'Bulgarian',
+  'Croatian',
+  'Czech',
+  'Danish',
+  'Dutch',
+  'Estonian',
+  'Finnish',
+  'French',
+  'German',
+  'Greek',
+  'Hungarian',
+  'Italian',
+  'Latvian',
+  'Lithuanian',
+  'Maltese',
+  'Polish',
+  'Portuguese',
+  'Romanian',
+  'Russian',
+  'Slovak',
+  'Slovenian',
+  'Spanish',
+  'Swedish',
+  'Ukrainian',
+];
 
 /**
  * Returns true if the model is an NVIDIA Parakeet / NeMo ASR-only model.

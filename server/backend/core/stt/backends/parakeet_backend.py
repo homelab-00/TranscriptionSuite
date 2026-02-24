@@ -203,6 +203,7 @@ class ParakeetBackend(STTBackend):
         suppress_tokens: list[int] | None = None,
         vad_filter: bool = True,
         word_timestamps: bool = True,
+        translation_target_language: str | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         if self._model is None:
             raise RuntimeError("Parakeet model is not loaded")

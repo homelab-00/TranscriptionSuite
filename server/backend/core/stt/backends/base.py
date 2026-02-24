@@ -64,6 +64,7 @@ class STTBackend(abc.ABC):
         suppress_tokens: list[int] | None = None,
         vad_filter: bool = True,
         word_timestamps: bool = True,
+        translation_target_language: str | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Transcribe audio and return normalised segments + info.
 
@@ -76,6 +77,9 @@ class STTBackend(abc.ABC):
             suppress_tokens: Token IDs to suppress.
             vad_filter: Whether to apply the backend's built-in VAD filter.
             word_timestamps: Whether to produce word-level timestamps.
+            translation_target_language: Target language code for translation
+                (e.g. "en", "fr"). Canary supports any EU language; Whisper
+                only supports "en".
 
         Returns:
             Tuple of (list of BackendSegment, BackendTranscriptionInfo).

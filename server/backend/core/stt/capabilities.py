@@ -63,15 +63,21 @@ def validate_translation_request(
     if normalized_task != "translate":
         return "en"
 
-    target = (translation_target_language or "en").strip().lower()
-    if target != "en":
-        raise ValueError(
-            "Translation target language must be 'en' for v1 (English-only translation)."
-        )
-
     if not supports_english_translation(model_name):
         raise ValueError(
             "Selected model does not support translation. Choose a multilingual Whisper or Canary model."
+        )
+
+    target = (translation_target_language or "en").strip().lower()
+
+    # Canary supports bidirectional translation: any EU language is a valid target.
+    if _CANARY_PATTERN.match(normalize_model_name(model_name)):
+        return target
+
+    # All other models (Whisper) only support English as the translation target.
+    if target != "en":
+        raise ValueError(
+            "Translation target language must be 'en' for this model (English-only translation)."
         )
 
     return target

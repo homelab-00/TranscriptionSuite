@@ -58,6 +58,7 @@ class CanaryBackend(ParakeetBackend):
         suppress_tokens: list[int] | None = None,
         vad_filter: bool = True,
         word_timestamps: bool = True,
+        translation_target_language: str | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         if self._model is None:
             raise RuntimeError("Canary model is not loaded")
@@ -66,8 +67,8 @@ class CanaryBackend(ParakeetBackend):
         source_lang = language if language else "en"
 
         if task == "translate":
-            # v1: always translate to English.
-            target_lang = "en"
+            # Use caller-specified target, defaulting to English.
+            target_lang = (translation_target_language or "en").strip().lower()
         else:
             # Same source and target = pure transcription.
             target_lang = source_lang

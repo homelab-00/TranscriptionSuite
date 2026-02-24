@@ -39,7 +39,12 @@ import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
-import { supportsTranslation, filterLanguagesForModel } from '../../src/services/modelCapabilities';
+import {
+  supportsTranslation,
+  filterLanguagesForModel,
+  isCanaryModel,
+  CANARY_TRANSLATION_TARGETS,
+} from '../../src/services/modelCapabilities';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -260,11 +265,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Main Transcription State
   const [mainLanguage, setMainLanguage] = useState('Auto Detect');
   const [mainTranslate, setMainTranslate] = useState(false);
+  // Bidirectional translation target (used when Canary + source=English)
+  const [mainBidiTarget, setMainBidiTarget] = useState('Off');
 
   // Live Mode State
   const isLive = live.status !== 'idle' && live.status !== 'error';
   const [liveLanguage, setLiveLanguage] = useState('English');
   const [liveTranslate, setLiveTranslate] = useState(false);
+  // Bidirectional translation target (used when Canary + source=English)
+  const [liveBidiTarget, setLiveBidiTarget] = useState('Off');
+
+  // Canary bidirectional mode: when Canary model + source=English, show target dropdown
+  const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
+  const isCanaryLiveBidi = isCanaryModel(activeLiveModel) && liveLanguage === 'English';
 
   useEffect(() => {
     let active = true;
@@ -515,10 +528,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (!canStartRecording) return;
     transcription.reset();
     const isSystemAudio = audioSource === 'system';
+    const mainTranslateActive = isCanaryMainBidi ? mainBidiTarget !== 'Off' : mainTranslate;
+    const mainTranslateTarget = isCanaryMainBidi ? (resolveLanguage(mainBidiTarget) ?? 'en') : 'en';
     transcription.start({
       language: resolveLanguage(mainLanguage),
       deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
-      translate: mainTranslate,
+      translate: mainTranslateActive,
+      translationTarget: mainTranslateTarget,
       systemAudio: isSystemAudio,
       desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
     });
@@ -527,6 +543,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription,
     mainLanguage,
     mainTranslate,
+    mainBidiTarget,
+    isCanaryMainBidi,
     audioSource,
     micDevice,
     micDeviceIds,
@@ -571,10 +589,15 @@ export const SessionView: React.FC<SessionViewProps> = ({
     (checked: boolean) => {
       if (checked) {
         const isSystemAudio = audioSource === 'system';
+        const liveTranslateActive = isCanaryLiveBidi ? liveBidiTarget !== 'Off' : liveTranslate;
+        const liveTranslateTarget = isCanaryLiveBidi
+          ? (resolveLanguage(liveBidiTarget) ?? 'en')
+          : 'en';
         live.start({
           language: resolveLanguage(liveLanguage),
           deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
-          translate: liveTranslate,
+          translate: liveTranslateActive,
+          translationTarget: liveTranslateTarget,
           systemAudio: isSystemAudio,
           desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
         });
@@ -586,6 +609,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
       live,
       liveLanguage,
       liveTranslate,
+      liveBidiTarget,
+      isCanaryLiveBidi,
       audioSource,
       micDevice,
       micDeviceIds,
@@ -1163,15 +1188,25 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       <label
                         className={`mt-1 mb-2 text-center text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
                       >
-                        Translate to English
+                        {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
                       </label>
                       <div className="flex h-11.5 items-center justify-center">
-                        <AppleSwitch
-                          checked={mainTranslate && canTranslate}
-                          onChange={setMainTranslate}
-                          size="sm"
-                          disabled={!canTranslate}
-                        />
+                        {isCanaryMainBidi ? (
+                          <CustomSelect
+                            value={mainBidiTarget}
+                            onChange={setMainBidiTarget}
+                            options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                            accentColor="magenta"
+                            className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                          />
+                        ) : (
+                          <AppleSwitch
+                            checked={mainTranslate && canTranslate}
+                            onChange={setMainTranslate}
+                            size="sm"
+                            disabled={!canTranslate}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1582,14 +1617,24 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     <span
                       className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
                     >
-                      Translate to English
+                      {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
                     </span>
-                    <AppleSwitch
-                      checked={liveTranslate && canTranslateLive}
-                      onChange={setLiveTranslate}
-                      size="sm"
-                      disabled={!canTranslateLive}
-                    />
+                    {isCanaryLiveBidi ? (
+                      <CustomSelect
+                        value={liveBidiTarget}
+                        onChange={setLiveBidiTarget}
+                        options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                        accentColor="magenta"
+                        className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                      />
+                    ) : (
+                      <AppleSwitch
+                        checked={liveTranslate && canTranslateLive}
+                        onChange={setLiveTranslate}
+                        size="sm"
+                        disabled={!canTranslateLive}
+                      />
+                    )}
                   </div>
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
                   <Button
