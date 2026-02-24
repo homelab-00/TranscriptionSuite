@@ -45,8 +45,14 @@ class WhisperBackend(STTBackend):
         gpu_device_index = kwargs.get("gpu_device_index", 0)
         download_root: str | None = kwargs.get("download_root")
         batch_size: int = kwargs.get("batch_size", 16)
+        progress_callback = kwargs.get("progress_callback")
 
-        logger.info(f"Loading Whisper model: {model_name}")
+        def report(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        report(f"Loading Whisper model: {model_name}")
 
         model = faster_whisper.WhisperModel(
             model_size_or_path=model_name,
@@ -57,11 +63,12 @@ class WhisperBackend(STTBackend):
         )
 
         if batch_size > 0:
+            report("Initializing batched inference pipeline...")
             model = BatchedInferencePipeline(model=model)
 
         self._model = model
         self._model_name = model_name
-        logger.info("Whisper model loaded")
+        report("Whisper model loaded")
 
     def unload(self) -> None:
         self._model = None

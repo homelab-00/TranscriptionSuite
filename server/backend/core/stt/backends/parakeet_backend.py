@@ -154,19 +154,29 @@ class ParakeetBackend(STTBackend):
     # ------------------------------------------------------------------
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
+        progress_callback = kwargs.get("progress_callback")
+
+        def report(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        report("Importing NeMo toolkit...")
         nemo_asr = _import_nemo_asr()
 
-        logger.info(f"Loading Parakeet model: {model_name}")
-
+        report(f"Loading Parakeet model: {model_name}")
         model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
+
+        report("Transferring model to GPU...")
         model = model.to(device)
         model.eval()
 
+        report("Applying CUDA graph workaround...")
         self._disable_cuda_graphs(model)
 
         self._model = model
         self._model_name = model_name
-        logger.info("Parakeet model loaded")
+        report("Parakeet model loaded")
 
     def unload(self) -> None:
         self._model = None

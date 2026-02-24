@@ -364,7 +364,7 @@ class ModelManager:
             report("Loading transcription model...")
             report(f"Model: {engine.model_name}")
             report("This may take a few minutes for first-time downloads...")
-            engine.load_model()
+            engine.load_model(progress_callback=progress_callback)
             report("Transcription model ready")
 
     def unload_transcription_model(self) -> None:

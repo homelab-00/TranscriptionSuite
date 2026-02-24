@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.20
+  spec_version: 1.0.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -12,8 +12,10 @@ meta:
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
       - components/ui/CustomSelect.tsx
+      - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
       - components/ui/LogTerminal.tsx
+      - components/ui/ProgressModal.tsx
       - components/ui/StatusLight.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
@@ -27,7 +29,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-19T12:44:53.023Z
+    generated_at: 2026-02-24T22:47:58.480Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -218,6 +220,7 @@ foundation:
         - ease-in-out
         - ease-out
       keyframes:
+        - progress-indeterminate
         - slideInLeft
         - slideInRight
         - slideUpFromBottomEdge
@@ -490,6 +493,7 @@ utility_allowlist:
     - from-black/60
     - from-glass-200
     - from-indigo-500/10
+    - from-red-500
     - from-slate-700
     - from-slate-900/10
     - from-white/10
@@ -629,6 +633,7 @@ utility_allowlist:
     - ml-1
     - ml-2
     - ml-3
+    - ml-4
     - ml-auto
     - mr-1
     - mr-2
@@ -817,6 +822,7 @@ utility_allowlist:
     - to-black/20
     - to-blue-500
     - to-glass-100
+    - to-red-600
     - to-slate-800
     - to-transparent
     - top-0
@@ -847,6 +853,7 @@ utility_allowlist:
     - via-transparent
     - w-1
     - w-1.5
+    - w-1/3
     - w-10
     - w-11
     - w-12
@@ -863,6 +870,7 @@ utility_allowlist:
     - w-4.5
     - w-44
     - w-48
+    - w-5
     - w-6
     - w-7
     - w-8
@@ -928,6 +936,7 @@ inline_style_allowlist:
   allowed_literals:
     - "#0f172a"
     - ${100 / visibleSlots}%
+    - ${progressPercent}%
     - "0"
     - "0.16"
     - "0.3"
@@ -966,6 +975,7 @@ inline_style_allowlist:
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
   keyframes:
+    - progress-indeterminate
     - slideInLeft
     - slideInRight
     - slideUpFromBottomEdge
@@ -1451,6 +1461,23 @@ component_contracts:
     state_rules:
       - id: tab-state-closed-set
         rule: Only CALENDAR, SEARCH, IMPORT tab states are allowed for notebook routing.
+  ProgressModal:
+    file: components/ui/ProgressModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   SearchTab:
     file: components/views/NotebookView.tsx
     required_tokens:

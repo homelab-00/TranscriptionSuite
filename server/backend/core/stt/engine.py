@@ -350,9 +350,15 @@ class AudioToTextRecorder:
 
         logger.info(f"AudioToTextRecorder '{instance_name}' initialized")
 
-    def _load_model(self) -> None:
+    def _load_model(self, progress_callback: Callable[[str], None] | None = None) -> None:
         """Load the STT model via the appropriate backend."""
-        logger.info(f"Loading STT model: {self.model_name}")
+
+        def report(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        report(f"Loading STT model: {self.model_name}")
 
         try:
             backend = create_backend(self.model_name)
@@ -363,12 +369,15 @@ class AudioToTextRecorder:
                 gpu_device_index=self.gpu_device_index,
                 download_root=self.download_root,
                 batch_size=self.batch_size,
+                progress_callback=progress_callback,
             )
+
+            report("Warming up model...")
             backend.warmup()
 
             self._backend = backend
             self._model_loaded = True
-            logger.info(f"STT model loaded and ready (backend={backend.backend_name})")
+            report(f"STT model ready (backend={backend.backend_name})")
 
         except Exception as e:
             logger.exception(f"Error loading STT model: {e}")
@@ -1003,12 +1012,12 @@ class AudioToTextRecorder:
 
         logger.info("AudioToTextRecorder shutdown complete")
 
-    def load_model(self) -> None:
+    def load_model(self, progress_callback: Callable[[str], None] | None = None) -> None:
         """Load the Whisper model (if not already loaded)."""
         if self._model_loaded:
             logger.debug("Model already loaded")
             return
-        self._load_model()
+        self._load_model(progress_callback=progress_callback)
 
     def unload_model(self) -> None:
         """Unload the model to free GPU memory."""
