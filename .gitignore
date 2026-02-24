@@ -32,4 +32,6 @@ __pycache__/
 *.log
 *.mp3
 .directory
+.gitnexus
 CLAUDE.md
+AGENTS.md
