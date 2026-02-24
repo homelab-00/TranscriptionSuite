@@ -100,28 +100,42 @@ class ParakeetBackend(STTBackend):
         cfg = getattr(model, "cfg", None)
         decoding_cfg = cfg.get("decoding", None) if cfg is not None else None
 
+        config_patched = False
         if decoding_cfg is not None:
             greedy_cfg = decoding_cfg.get("greedy", None)
-            if greedy_cfg is not None and greedy_cfg.get("use_cuda_graph_decoder", False):
+
+            # NeMo defaults use_cuda_graph_decoder=None to True when CUDA
+            # is available, so we must patch unless it is explicitly False.
+            if greedy_cfg is not None:
+                current = greedy_cfg.get("use_cuda_graph_decoder", None)
+                if current is not False:
+                    with open_dict(decoding_cfg):
+                        greedy_cfg.use_cuda_graph_decoder = False
+                    config_patched = True
+                    logger.info(
+                        "Patched model.cfg.decoding.greedy.use_cuda_graph_decoder = False (was %r)",
+                        current,
+                    )
+            else:
+                # greedy section missing — create it so rebuilds pick it up
                 with open_dict(decoding_cfg):
-                    greedy_cfg.use_cuda_graph_decoder = False
-                logger.info("Patched model.cfg.decoding.greedy.use_cuda_graph_decoder = False")
+                    decoding_cfg.greedy = {"use_cuda_graph_decoder": False}
+                config_patched = True
+                logger.info("Created model.cfg.decoding.greedy with use_cuda_graph_decoder = False")
 
-                # Rebuild the current decoding stack from the patched config
-                if hasattr(model, "change_decoding_strategy"):
-                    try:
-                        model.change_decoding_strategy(
-                            decoding_cfg=OmegaConf.to_container(decoding_cfg, resolve=True),
-                        )
-                        logger.info("Rebuilt decoding strategy via change_decoding_strategy()")
-                        return
-                    except Exception:
-                        logger.warning(
-                            "change_decoding_strategy() failed; falling back to runtime patch",
-                            exc_info=True,
-                        )
+            if config_patched and hasattr(model, "change_decoding_strategy"):
+                try:
+                    model.change_decoding_strategy(
+                        decoding_cfg=OmegaConf.to_container(decoding_cfg, resolve=True),
+                    )
+                    logger.info("Rebuilt decoding strategy via change_decoding_strategy()")
+                except Exception:
+                    logger.warning(
+                        "change_decoding_strategy() failed; will try runtime patch",
+                        exc_info=True,
+                    )
 
-        # ---- Fallback: runtime object patch ----
+        # ---- Belt-and-suspenders: runtime object patch ----
         decoding = getattr(model, "decoding", None)
         if decoding is None:
             return
