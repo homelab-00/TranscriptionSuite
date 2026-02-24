@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient, type ServerStatus } from '../api/client';
 
 export type ConnectionState = 'active' | 'inactive' | 'warning' | 'error' | 'loading';
@@ -22,78 +22,71 @@ export interface ServerConnectionInfo {
   refresh: () => void;
 }
 
+function deriveStatus(
+  result: Awaited<ReturnType<typeof apiClient.checkConnection>> | undefined,
+): Omit<ServerConnectionInfo, 'refresh'> {
+  if (!result) {
+    return {
+      serverStatus: 'loading',
+      clientStatus: 'loading',
+      details: null,
+      serverLabel: 'Connecting…',
+      reachable: false,
+      ready: false,
+      error: null,
+    };
+  }
+
+  if (!result.reachable) {
+    return {
+      serverStatus: 'inactive',
+      clientStatus: 'inactive',
+      details: result.status,
+      serverLabel: 'Server offline',
+      reachable: false,
+      ready: false,
+      error: result.error,
+    };
+  }
+
+  if (result.ready) {
+    return {
+      serverStatus: 'active',
+      clientStatus: 'active',
+      details: result.status,
+      serverLabel: 'Server ready',
+      reachable: true,
+      ready: true,
+      error: result.error,
+    };
+  }
+
+  return {
+    serverStatus: 'warning',
+    clientStatus: 'warning',
+    details: result.status,
+    serverLabel: 'Models loading…',
+    reachable: true,
+    ready: false,
+    error: result.error,
+  };
+}
+
 /**
  * Hook that polls the TranscriptionSuite server for health/status.
  * Returns StatusLight-compatible states for server and client indicators.
  *
- * Uses a single GET /api/status request per cycle (not the old
- * /health + /ready + /api/status triple) and skips state updates
- * when the response hasn't changed.
- *
  * @param pollInterval  Polling interval in ms (default: 10 000)
  */
 export function useServerStatus(pollInterval = 10_000): ServerConnectionInfo {
-  const [serverStatus, setServerStatus] = useState<ConnectionState>('loading');
-  const [clientStatus, setClientStatus] = useState<ConnectionState>('loading');
-  const [details, setDetails] = useState<ServerStatus | null>(null);
-  const [serverLabel, setServerLabel] = useState('Connecting…');
-  const [reachable, setReachable] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
-  const prevJsonRef = useRef<string>('');
-
-  const check = useCallback(async () => {
-    const result = await apiClient.checkConnection();
-
-    if (!mountedRef.current) return;
-
-    // Skip state updates when the response is identical to the previous one
-    const json = JSON.stringify(result);
-    if (json === prevJsonRef.current) return;
-    prevJsonRef.current = json;
-
-    setReachable(result.reachable);
-    setReady(result.ready);
-    setDetails(result.status);
-    setError(result.error);
-
-    if (!result.reachable) {
-      setServerStatus('inactive');
-      setClientStatus('inactive');
-      setServerLabel('Server offline');
-    } else if (result.ready) {
-      setServerStatus('active');
-      setClientStatus('active');
-      setServerLabel('Server ready');
-    } else {
-      // Reachable but not ready (models loading, etc.)
-      setServerStatus('warning');
-      setClientStatus('warning');
-      setServerLabel('Models loading…');
-    }
-  }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    check(); // Initial check immediately
-
-    const interval = setInterval(check, pollInterval);
-
-    return () => {
-      mountedRef.current = false;
-      clearInterval(interval);
-    };
-  }, [check, pollInterval]);
+  const { data, refetch } = useQuery({
+    queryKey: ['serverStatus'],
+    queryFn: () => apiClient.checkConnection(),
+    refetchInterval: pollInterval,
+  });
 
   return {
-    serverStatus,
-    clientStatus,
-    details,
-    serverLabel,
-    reachable,
-    ready,
-    error,
-    refresh: check,
+    ...deriveStatus(data),
+    refresh: () => void refetch(),
   };
 }

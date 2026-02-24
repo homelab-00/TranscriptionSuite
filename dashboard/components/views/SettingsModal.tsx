@@ -27,7 +27,9 @@ import { CustomSelect } from '../ui/CustomSelect';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
-import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { toast } from 'sonner';
+import { useConfirm } from '../../src/hooks/useConfirm';
 import type { AuthToken } from '../../src/api/types';
 
 interface SettingsModalProps {
@@ -39,6 +41,7 @@ const tabs = ['App', 'Client', 'Server', 'Notebook'];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('App');
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [serverSearch, setServerSearch] = useState('');
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
@@ -62,7 +65,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
   // Admin status for Server tab (read-only config display)
-  const { status: adminStatus, loading: adminLoading } = useAdminStatusContext();
+  const { status: adminStatus, loading: adminLoading } = useAdminStatus();
 
   // Edited server config values (key → value; only populated when user edits)
   const [serverConfigEdits, setServerConfigEdits] = useState<Record<string, string>>({});
@@ -710,14 +713,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                               )}
                               <button
                                 onClick={async () => {
-                                  if (!confirm(`Revoke token for "${t.client_name}"?`)) return;
+                                  if (
+                                    !(await confirm(`Revoke token for "${t.client_name}"?`, {
+                                      danger: true,
+                                      confirmLabel: 'Revoke',
+                                    }))
+                                  )
+                                    return;
                                   try {
                                     await apiClient.revokeToken(t.token_id);
                                     setTokens((prev) =>
                                       prev.filter((tk) => tk.token_id !== t.token_id),
                                     );
                                   } catch {
-                                    alert('Failed to revoke token.');
+                                    toast.error('Failed to revoke token.');
                                   }
                                 }}
                                 className="p-0.5 text-slate-500 transition-colors hover:text-red-400"
@@ -796,7 +805,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                               setTokens(list.tokens || []);
                             }
                           } catch {
-                            alert('Failed to create token.');
+                            toast.error('Failed to create token.');
                           }
                         }}
                         disabled={!newTokenName.trim()}
@@ -1105,67 +1114,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   };
 
   return (
-    <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out ${isVisible ? 'opacity-100' : 'opacity-0'}`}
-        onClick={onClose}
-      />
+    <>
+      {confirmDialog}
+      <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
+        {/* Backdrop */}
+        <div
+          className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+          onClick={onClose}
+        />
 
-      {/* Modal Window */}
-      <div
-        className={`bg-glass-surface border-glass-border relative flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} `}
-      >
-        {/* Header */}
-        <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
-          <h2 className="text-lg font-semibold text-white">Settings</h2>
-          <button onClick={onClose} className="text-slate-400 transition-colors hover:text-white">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex flex-none space-x-1 overflow-x-auto border-b border-white/5 px-6 pt-4 select-none">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${
-                activeTab === tab
-                  ? 'border-accent-cyan text-white'
-                  : 'rounded-t-lg border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200'
-              }`}
-            >
-              {getIconForTab(tab)}
-              {tab}
+        {/* Modal Window */}
+        <div
+          className={`bg-glass-surface border-glass-border relative flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} `}
+        >
+          {/* Header */}
+          <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
+            <h2 className="text-lg font-semibold text-white">Settings</h2>
+            <button onClick={onClose} className="text-slate-400 transition-colors hover:text-white">
+              <X size={20} />
             </button>
-          ))}
-        </div>
+          </div>
 
-        {/* Content Area - Entire area is selectable as requested */}
-        <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
-          <div
-            key={activeTab}
-            className="animate-in fade-in slide-in-from-right-8 fill-mode-forwards duration-300"
-          >
-            {activeTab === 'App' && renderAppTab()}
-            {activeTab === 'Client' && renderClientTab()}
-            {activeTab === 'Server' && renderServerTab()}
-            {activeTab === 'Notebook' && renderNotebookTab()}
+          {/* Tabs */}
+          <div className="flex flex-none space-x-1 overflow-x-auto border-b border-white/5 px-6 pt-4 select-none">
+            {tabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab
+                    ? 'border-accent-cyan text-white'
+                    : 'rounded-t-lg border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                }`}
+              >
+                {getIconForTab(tab)}
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Content Area - Entire area is selectable as requested */}
+          <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
+            <div
+              key={activeTab}
+              className="animate-in fade-in slide-in-from-right-8 fill-mode-forwards duration-300"
+            >
+              {activeTab === 'App' && renderAppTab()}
+              {activeTab === 'Client' && renderClientTab()}
+              {activeTab === 'Server' && renderServerTab()}
+              {activeTab === 'Notebook' && renderNotebookTab()}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleSave}>
+              Save Changes
+            </Button>
           </div>
         </div>
-
-        {/* Footer */}
-        <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={handleSave}>
-            Save Changes
-          </Button>
-        </div>
       </div>
-    </div>
+    </>
   );
 };
 

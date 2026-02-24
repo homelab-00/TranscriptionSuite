@@ -23,7 +23,7 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
-import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -90,7 +90,7 @@ function normalizeModelName(value: string): string {
 }
 
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
-  const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatusContext();
+  const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatus();
   const docker = useDockerContext();
   const isAsrModelsLoaded =
     adminStatus?.models_loaded ??

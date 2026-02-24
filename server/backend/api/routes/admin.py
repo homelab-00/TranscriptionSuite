@@ -9,7 +9,7 @@ Handles:
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -19,7 +19,6 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-
 from server.api.routes.utils import (
     authenticate_websocket_from_headers,
     require_admin,
@@ -32,7 +31,7 @@ router = APIRouter()
 
 
 @router.get("/status")
-async def get_admin_status(request: Request) -> Dict[str, Any]:
+async def get_admin_status(request: Request) -> dict[str, Any]:
     """Get detailed admin status information."""
     if not require_admin(request):
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -82,11 +81,11 @@ async def get_admin_status(request: Request) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to get admin status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/models/load")
-async def load_models(request: Request) -> Dict[str, str]:
+async def load_models(request: Request) -> dict[str, str]:
     """Explicitly load transcription models."""
     if not require_admin(request):
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -97,7 +96,7 @@ async def load_models(request: Request) -> Dict[str, str]:
         return {"status": "loaded"}
     except Exception as e:
         logger.error(f"Failed to load models: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.websocket("/models/load/stream")
@@ -127,17 +126,14 @@ async def load_models_stream(websocket: WebSocket) -> None:
     if auth is None:
         return
 
-    logger.info(
-        "WebSocket connected for model loading with progress "
-        f"(client={auth.client_name})"
-    )
+    logger.info(f"WebSocket connected for model loading with progress (client={auth.client_name})")
 
     try:
         # Get model manager from app state
         model_manager = websocket.app.state.model_manager
 
         # Track messages to send
-        message_queue: asyncio.Queue[Dict[str, str]] = asyncio.Queue()
+        message_queue: asyncio.Queue[dict[str, str]] = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
         async def send_progress(msg: str) -> None:
@@ -164,17 +160,13 @@ async def load_models_stream(websocket: WebSocket) -> None:
         sender_task = asyncio.create_task(message_sender())
 
         # Initial progress message
-        await websocket.send_json(
-            {"type": "progress", "message": "Initializing model loader..."}
-        )
+        await websocket.send_json({"type": "progress", "message": "Initializing model loader..."})
 
         # Run model loading in thread pool
         try:
             await loop.run_in_executor(
                 None,
-                lambda: model_manager.load_transcription_model(
-                    progress_callback=progress_callback
-                ),
+                lambda: model_manager.load_transcription_model(progress_callback=progress_callback),
             )
 
             # Send completion message
@@ -196,9 +188,7 @@ async def load_models_stream(websocket: WebSocket) -> None:
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
         except Exception as send_error:
-            logger.debug(
-                "Failed to send model loading error to websocket: %s", send_error
-            )
+            logger.debug("Failed to send model loading error to websocket: %s", send_error)
     finally:
         try:
             await websocket.close()
@@ -207,7 +197,7 @@ async def load_models_stream(websocket: WebSocket) -> None:
 
 
 @router.post("/models/unload")
-async def unload_models(request: Request) -> Dict[str, str]:
+async def unload_models(request: Request) -> dict[str, str]:
     """Unload transcription models to free memory."""
     if not require_admin(request):
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -229,15 +219,15 @@ async def unload_models(request: Request) -> Dict[str, str]:
         raise
     except Exception as e:
         logger.error(f"Failed to unload models: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/logs")
 async def get_logs(
-    service: Optional[str] = Query(None, description="Filter by service"),
-    level: Optional[str] = Query(None, description="Filter by level"),
+    service: str | None = Query(None, description="Filter by service"),
+    level: str | None = Query(None, description="Filter by level"),
     limit: int = Query(100, ge=1, le=1000, description="Number of lines"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get recent log entries.
 
@@ -291,9 +281,7 @@ async def get_logs(
                     lines_found = chunk_lines + lines_found
 
                 # Get the last N lines (may have extra from chunk reading)
-                lines = (
-                    lines_found[-limit:] if len(lines_found) > limit else lines_found
-                )
+                lines = lines_found[-limit:] if len(lines_found) > limit else lines_found
                 # Remove empty lines
                 lines = [line for line in lines if line.strip()]
         except Exception as e:
@@ -309,7 +297,7 @@ async def get_logs(
                 # Apply filters
                 if service and entry.get("service") != service:
                     continue
-                if level and entry.get("level") != level.upper():
+                if level and entry.get("level", "").upper() != level.upper():
                     continue
 
                 logs.append(entry)
@@ -328,4 +316,4 @@ async def get_logs(
 
     except Exception as e:
         logger.error(f"Failed to get logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

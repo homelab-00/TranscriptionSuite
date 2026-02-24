@@ -35,6 +35,8 @@ import { useImportQueue } from '../../src/hooks/useImportQueue';
 import type { ImportJob } from '../../src/hooks/useImportQueue';
 import { apiClient } from '../../src/api/client';
 import type { Recording } from '../../src/api/types';
+import { toast } from 'sonner';
+import { useConfirm } from '../../src/hooks/useConfirm';
 
 interface NotebookViewProps {
   onUploadingChange?: (uploading: boolean) => void;
@@ -161,6 +163,7 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   onPlay,
 }) => {
   const recordingId = parseInt(noteId, 10);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(noteTitle);
   const [renameLoading, setRenameLoading] = useState(false);
@@ -200,12 +203,18 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('Delete this recording? This cannot be undone.')) return;
+    if (
+      !(await confirm('Delete this recording? This cannot be undone.', {
+        danger: true,
+        confirmLabel: 'Delete',
+      }))
+    )
+      return;
     try {
       await apiClient.deleteRecording(recordingId);
       onRefresh();
     } catch {
-      alert('Failed to delete recording.');
+      toast.error('Failed to delete recording.');
     }
     onClose();
   };
@@ -256,103 +265,115 @@ const NoteActionMenu: React.FC<MenuProps> = ({
         }
     `;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-9999"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClose();
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
-    >
-      <style>{slideUpKeyframes}</style>
-      <div
-        ref={menuRef}
-        className="absolute w-44 origin-top-left rounded-xl border border-white/10 bg-black/50 py-1.5 shadow-2xl backdrop-blur-xl"
-        style={{
-          top: position ? position.top : 0,
-          left: position ? position.left : 0,
-          opacity: position ? 1 : 0,
-          ...animationStyle,
-          animation: position
-            ? 'slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards'
-            : 'none',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={handlePlay}
-          className="group flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+  return (
+    <>
+      {confirmDialog}
+      {createPortal(
+        <div
+          className="fixed inset-0 z-9999"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onClose();
+          }}
         >
-          <Play size={14} className="group-hover:text-accent-cyan" />
-          Play Recording
-        </button>
-        <div className="mx-2 my-1 h-px bg-white/5"></div>
-        {renaming ? (
-          <div className="flex items-center gap-1.5 px-3 py-2" onClick={(e) => e.stopPropagation()}>
-            <input
-              ref={renameInputRef}
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') onClose();
-              }}
-              autoFocus
-              className="focus:ring-accent-cyan min-w-0 flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white ring-1 ring-white/20 outline-none"
-            />
+          <style>{slideUpKeyframes}</style>
+          <div
+            ref={menuRef}
+            className="absolute w-44 origin-top-left rounded-xl border border-white/10 bg-black/50 py-1.5 shadow-2xl backdrop-blur-xl"
+            style={{
+              top: position ? position.top : 0,
+              left: position ? position.left : 0,
+              opacity: position ? 1 : 0,
+              ...animationStyle,
+              animation: position
+                ? 'slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards'
+                : 'none',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
-              onClick={commitRename}
-              disabled={renameLoading}
-              className="shrink-0 rounded p-1 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50"
+              onClick={handlePlay}
+              className="group flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
             >
-              {renameLoading ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+              <Play size={14} className="group-hover:text-accent-cyan" />
+              Play Recording
+            </button>
+            <div className="mx-2 my-1 h-px bg-white/5"></div>
+            {renaming ? (
+              <div
+                className="flex items-center gap-1.5 px-3 py-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename();
+                    if (e.key === 'Escape') onClose();
+                  }}
+                  autoFocus
+                  className="focus:ring-accent-cyan min-w-0 flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white ring-1 ring-white/20 outline-none"
+                />
+                <button
+                  onClick={commitRename}
+                  disabled={renameLoading}
+                  className="shrink-0 rounded p-1 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50"
+                >
+                  {renameLoading ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Check size={13} />
+                  )}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={startRename}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <Edit2 size={14} />
+                Rename
+              </button>
+            )}
+            <button
+              onClick={() => handleExport('txt')}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <Download size={14} />
+              Export TXT
+            </button>
+            <button
+              onClick={() => handleExport('srt')}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <Download size={14} />
+              Export SRT
+            </button>
+            <button
+              onClick={() => handleExport('ass')}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <Download size={14} />
+              Export ASS
+            </button>
+            <div className="mx-2 my-1 h-px bg-white/5"></div>
+            <button
+              onClick={handleDelete}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300"
+            >
+              <Trash2 size={14} />
+              Delete
             </button>
           </div>
-        ) : (
-          <button
-            onClick={startRename}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <Edit2 size={14} />
-            Rename
-          </button>
-        )}
-        <button
-          onClick={() => handleExport('txt')}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <Download size={14} />
-          Export TXT
-        </button>
-        <button
-          onClick={() => handleExport('srt')}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <Download size={14} />
-          Export SRT
-        </button>
-        <button
-          onClick={() => handleExport('ass')}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <Download size={14} />
-          Export ASS
-        </button>
-        <div className="mx-2 my-1 h-px bg-white/5"></div>
-        <button
-          onClick={handleDelete}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300"
-        >
-          <Trash2 size={14} />
-          Delete
-        </button>
-      </div>
-    </div>,
-    document.body,
+        </div>,
+        document.body,
+      )}
+    </>
   );
 };
 

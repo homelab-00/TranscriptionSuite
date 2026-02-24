@@ -164,6 +164,8 @@ cd dashboard && npm run package:mac
 | Format code (TypeScript + JavaScript) | `cd dashboard && npm run format` |
 | Format check (TypeScript + JavaScript) | `cd dashboard && npm run format:check` |
 | Type check (TypeScript + JavaScript) | `cd dashboard && npm run typecheck` |
+| Fetch OpenAPI spec (server must be running) | `cd dashboard && npm run types:spec` |
+| Generate TypeScript types from spec | `cd dashboard && npm run types:generate` |
 
 ---
 
@@ -938,10 +940,24 @@ server/backend/
 │           ├── parakeet_backend.py # NVIDIA NeMo Parakeet backend
 │           ├── canary_backend.py  # NVIDIA NeMo Canary multitask backend
 │           └── factory.py        # Backend detection and creation
+├── logging/
+│   └── setup.py                  # structlog unified logging (JSON file + console)
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
 └── config.py                     # Configuration management
 ```
+
+**Logging (`server/backend/logging/setup.py`):**
+
+All server modules use `get_logger(service_name)` from `server.backend.logging.setup`, which returns a structlog `BoundLogger` with the service name pre-bound:
+
+```python
+from server.backend.logging.setup import get_logger
+log = get_logger("api")
+log.info("Request received", path="/api/status")
+```
+
+Logs are written as JSON to `/data/logs/server.log` (for machine parsing) and as human-readable text to stdout. The `LOG_LEVEL` environment variable controls verbosity. structlog outputs lowercase level names (`"info"`, `"warning"`) in the JSON format — the admin log endpoint accounts for this automatically.
 
 ### 8.2 Running the Server Locally
 
@@ -991,8 +1007,13 @@ npm run dev:electron
 - **Renderer**: React 19 + TypeScript 5.9 + Tailwind CSS 4 (Vite-bundled)
 - **Main Process**: Electron (Node.js)
 - **Build**: Vite (renderer) + tsc (main process) + electron-builder (packaging)
+- **Server State**: TanStack Query v5 (`@tanstack/react-query`) — data fetching, caching, and mutations; replaces hand-rolled hooks and React Context polling
+- **UI Primitives**: Headless UI v2 (`@headlessui/react`) — accessible `Listbox` (select) and `Dialog` (confirmation dialogs)
+- **Notifications**: sonner — toast alerts replacing `alert()` calls
+- **Error Handling**: react-error-boundary — per-view crash recovery with reset button
 - **Icons**: Lucide React
 - **Config**: electron-store (JSON) for client settings
+- **Type Generation** (dev): `openapi-typescript` — generates TypeScript types from FastAPI's `/openapi.json` spec (see `npm run types:spec` / `npm run types:generate`)
 
 ### 9.3 Key Modules
 
@@ -1019,30 +1040,30 @@ npm run dev:electron
 
 | Hook | Purpose |
 |------|---------|
-| `useServerStatus.ts` | Poll server health/status, connection state |
+| `useServerStatus.ts` | Poll server health/status via TanStack Query (`refetchInterval: 10 s`); derives connection state from cached data |
 | `useDocker.ts` | Docker container control via IPC (start/stop/status) |
 | `useTranscription.ts` | Real-time WebSocket transcription session |
 | `useLiveMode.ts` | Live Mode continuous transcription |
 | `useRecording.ts` | Fetch/manage individual recordings |
 | `useCalendar.ts` | Calendar view data fetching |
-| `useSearch.ts` | Full-text search across recordings |
+| `useSearch.ts` | Full-text search via TanStack Query with debounced params; auto-cancels in-flight requests |
 | `useUpload.ts` | Audio file upload with progress |
-| `useBackups.ts` | Database backup/restore operations |
-| `useLanguages.ts` | Available transcription languages |
-| `useAdminStatus.ts` | Admin authentication state |
+| `useBackups.ts` | Database backup/restore via TanStack Query `useQuery` + `useMutation`; invalidates list on success |
+| `useLanguages.ts` | Available transcription languages via TanStack Query (`staleTime: Infinity`, keyed by backend type) |
+| `useAdminStatus.ts` | Admin authentication state via TanStack Query |
+| `useConfirm.tsx` | Promise-based confirmation dialog using Headless UI `Dialog`; returns `{ confirm, dialog }` pair for inline use |
 | `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
 | `useClientDebugLogs.ts` | Client-side debug log capture and display |
 | `DockerContext.tsx` | React context provider for Docker state sharing |
-| `ServerStatusContext.tsx` | React context provider for server connection state |
-| `AdminStatusContext.tsx` | React context provider for admin authentication state |
 
 **Shared Source (`src/`):**
 
 | Module | Purpose |
 |--------|---------|
 | `api/client.ts` | REST API client for server communication |
-| `api/types.ts` | API request/response type definitions |
+| `api/types.ts` | API request/response type definitions (hand-maintained; gradually replaceable via `types:generate`) |
+| `queryClient.ts` | TanStack Query `QueryClient` configured for Electron (`staleTime: 5000`, `retry: 1`, `refetchOnWindowFocus: false`) |
 | `config/store.ts` | Client config persistence (electron-store / localStorage fallback) |
 | `index.css` | Tailwind CSS entry point + global styles |
 | `types/electron.d.ts` | TypeScript declarations for Electron IPC bridge |
@@ -1057,7 +1078,8 @@ npm run dev:electron
 | `ui/Button.tsx` | 5 variants (primary/secondary/danger/ghost/glass), 4 sizes |
 | `ui/GlassCard.tsx` | Glassmorphism container with optional header |
 | `ui/AppleSwitch.tsx` | iOS-style toggle switch |
-| `ui/CustomSelect.tsx` | Portal-based dropdown selector |
+| `ui/CustomSelect.tsx` | Accessible dropdown selector built on Headless UI `Listbox`; keyboard navigation, ARIA, and `accentColor` theming |
+| `ui/ErrorFallback.tsx` | Error boundary fallback UI with styled error display and "Try again" reset button |
 | `ui/StatusLight.tsx` | Animated pulse indicator (5 states) |
 | `ui/LogTerminal.tsx` | Terminal-style log viewer with color coding |
 
@@ -1670,6 +1692,7 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 - RealtimeSTT 0.3.104+ (Live Mode continuous transcription)
 - PyAnnote Audio 4.0.3+ (speaker diarization)
 - PyTorch 2.8.0 + TorchAudio 2.8.0
+- structlog 24.4+ (structured JSON + console logging)
 - SQLite with FTS5
 - NVIDIA GPU with CUDA support
 
@@ -1680,6 +1703,11 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 - React 19 + TypeScript 5.9
 - Vite 7 (bundler)
 - Tailwind CSS 4
+- TanStack Query v5 (server state / data fetching)
+- Headless UI v2 (accessible select and dialog primitives)
+- sonner (toast notifications)
+- react-error-boundary (per-view crash recovery)
 - electron-builder (packaging)
 - electron-store (client config persistence)
 - Lucide React (icons)
+- openapi-typescript (dev — generates TypeScript types from OpenAPI spec)

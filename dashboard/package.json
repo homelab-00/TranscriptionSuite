@@ -24,18 +24,25 @@
     "ui:contract:validate": "node scripts/ui-contract/validate-contract.mjs",
     "ui:contract:check": "npm run ui:contract:validate && npm run ui:contract:test",
     "ui:contract:diff": "node scripts/ui-contract/diff-contract.mjs",
-    "ui:contract:test": "node scripts/ui-contract/test-contract.mjs"
+    "ui:contract:test": "node scripts/ui-contract/test-contract.mjs",
+    "types:spec": "curl -s http://localhost:8000/openapi.json > src/api/openapi.json",
+    "types:generate": "openapi-typescript src/api/openapi.json -o src/api/generated-types.ts"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.9",
+    "@tanstack/react-query": "^5.90.21",
     "electron-store": "^11.0.2",
     "lucide-react": "^0.564.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-error-boundary": "^5.0.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-query-devtools": "^5.91.3",
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -44,6 +51,7 @@
     "autoprefixer": "^10.4.24",
     "electron": "^40.4.1",
     "electron-builder": "^26.7.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.1.18",

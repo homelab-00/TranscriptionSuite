@@ -246,7 +246,7 @@ wheels = [
 
 [[package]]
 name = "hatchling"
-version = "1.28.0"
+version = "1.29.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
@@ -254,9 +254,9 @@ dependencies = [
     { name = "pluggy" },
     { name = "trove-classifiers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/8e/e480359492affde4119a131da729dd26da742c2c9b604dff74836e47eef9/hatchling-1.28.0.tar.gz", hash = "sha256:4d50b02aece6892b8cd0b3ce6c82cb218594d3ec5836dbde75bf41a21ab004c8", size = 55365, upload-time = "2025-11-27T00:31:13.766Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/9c/b4cfe330cd4f49cff17fd771154730555fa4123beb7f292cf0098b4e6c20/hatchling-1.29.0.tar.gz", hash = "sha256:793c31816d952cee405b83488ce001c719f325d9cda69f1fc4cd750527640ea6", size = 55656, upload-time = "2026-02-23T19:42:06.539Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/a5/48cb7efb8b4718b1a4c0c331e3364a3a33f614ff0d6afd2b93ee883d3c47/hatchling-1.28.0-py3-none-any.whl", hash = "sha256:dc48722b68b3f4bbfa3ff618ca07cdea6750e7d03481289ffa8be1521d18a961", size = 76075, upload-time = "2025-11-27T00:31:12.544Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/8a/44032265776062a89171285ede55a0bdaadc8ac00f27f0512a71a9e3e1c8/hatchling-1.29.0-py3-none-any.whl", hash = "sha256:50af9343281f34785fab12da82e445ed987a6efb34fd8c2fc0f6e6630dbcc1b0", size = 76356, upload-time = "2026-02-23T19:42:05.197Z" },
 ]
 
 [[package]]
@@ -843,16 +843,16 @@ wheels = [
 
 [[package]]
 name = "virtualenv"
-version = "20.38.0"
+version = "20.39.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "distlib" },
     { name = "filelock" },
     { name = "platformdirs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/03/a94d404ca09a89a7301a7008467aed525d4cdeb9186d262154dd23208709/virtualenv-20.38.0.tar.gz", hash = "sha256:94f39b1abaea5185bf7ea5a46702b56f1d0c9aa2f41a6c2b8b0af4ddc74c10a7", size = 5864558, upload-time = "2026-02-19T07:48:02.385Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/54/809199edc537dbace273495ac0884d13df26436e910a5ed4d0ec0a69806b/virtualenv-20.39.0.tar.gz", hash = "sha256:a15f0cebd00d50074fd336a169d53422436a12dfe15149efec7072cfe817df8b", size = 5869141, upload-time = "2026-02-23T18:09:13.349Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/d7/394801755d4c8684b655d35c665aea7836ec68320304f62ab3c94395b442/virtualenv-20.38.0-py3-none-any.whl", hash = "sha256:d6e78e5889de3a4742df2d3d44e779366325a90cf356f15621fddace82431794", size = 5837778, upload-time = "2026-02-19T07:47:59.778Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/b4/8268da45f26f4fe84f6eae80a6ca1485ffb490a926afecff75fc48f61979/virtualenv-20.39.0-py3-none-any.whl", hash = "sha256:44888bba3775990a152ea1f73f8e5f566d49f11bbd1de61d426fd7732770043e", size = 5839121, upload-time = "2026-02-23T18:09:11.173Z" },
 ]
 
 [[package]]

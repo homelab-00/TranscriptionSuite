@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.19
+  spec_version: 1.0.20
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -272,6 +272,7 @@ foundation:
         - text-[8px]
         - text-[9px]
         - w-[calc(50%-4px)]
+        - w-[var(--button-width)]
     status_states:
       allowed:
         - active
@@ -405,6 +406,7 @@ utility_allowlist:
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
+    - bg-red-500/5
     - bg-slate-500
     - bg-slate-700
     - bg-slate-800
@@ -451,6 +453,7 @@ utility_allowlist:
     - bottom-0
     - bottom-1
     - bottom-6
+    - bottom-right
     - cursor-pointer
     - custom-scrollbar
     - delay-100
@@ -599,6 +602,7 @@ utility_allowlist:
     - max-w-4xl
     - max-w-6xl
     - max-w-7xl
+    - max-w-md
     - max-w-sm
     - max-w-xl
     - max-w-xs
@@ -653,6 +657,7 @@ utility_allowlist:
     - opacity-80
     - opacity-90
     - outline-none
+    - overflow-auto
     - overflow-hidden
     - overflow-x-auto
     - overflow-y-auto
@@ -902,6 +907,7 @@ utility_allowlist:
     - text-[8px]
     - text-[9px]
     - w-[calc(50%-4px)]
+    - w-[var(--button-width)]
 inline_style_allowlist:
   allowed_properties:
     - animation
@@ -1245,6 +1251,23 @@ component_contracts:
     state_rules:
       - id: active-option-dot
         rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
+  ErrorFallback:
+    file: components/ui/ErrorFallback.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   FullscreenVisualizer:
     file: components/views/FullscreenVisualizer.tsx
     required_tokens:

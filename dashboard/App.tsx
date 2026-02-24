@@ -8,13 +8,17 @@ import { ServerView } from './components/views/ServerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { Button } from './components/ui/Button';
-import { ServerStatusProvider, useServerStatusContext } from './src/hooks/ServerStatusContext';
-import { AdminStatusProvider } from './src/hooks/AdminStatusContext';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { ErrorBoundary } from 'react-error-boundary';
+import { Toaster } from 'sonner';
+import { ErrorFallback } from './components/ui/ErrorFallback';
+import { queryClient } from './src/queryClient';
+import { useServerStatus } from './src/hooks/useServerStatus';
 import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
-import type { LiveModeState } from './src/hooks/useLiveMode';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
@@ -32,7 +36,7 @@ const AppInner: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.SESSION);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const serverConnection = useServerStatusContext();
+  const serverConnection = useServerStatus();
   const docker = useDockerContext();
 
   // Track clientRunning at app level so Sidebar can derive Session status
@@ -302,36 +306,46 @@ const AppInner: React.FC = () => {
     switch (currentView) {
       case View.SESSION:
         return (
-          <SessionView
-            serverConnection={serverConnection}
-            clientRunning={clientRunning}
-            setClientRunning={setClientRunning}
-            onStartServer={startServerWithOnboarding}
-            startupFlowPending={startupFlowPending}
-            isUploading={isUploading}
-            live={live}
-          />
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <SessionView
+              serverConnection={serverConnection}
+              clientRunning={clientRunning}
+              setClientRunning={setClientRunning}
+              onStartServer={startServerWithOnboarding}
+              startupFlowPending={startupFlowPending}
+              isUploading={isUploading}
+              live={live}
+            />
+          </ErrorBoundary>
         );
       case View.NOTEBOOK:
-        return <NotebookView onUploadingChange={setIsUploading} />;
+        return (
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <NotebookView onUploadingChange={setIsUploading} />
+          </ErrorBoundary>
+        );
       case View.SERVER:
         return (
-          <ServerView
-            onStartServer={startServerWithOnboarding}
-            startupFlowPending={startupFlowPending}
-          />
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <ServerView
+              onStartServer={startServerWithOnboarding}
+              startupFlowPending={startupFlowPending}
+            />
+          </ErrorBoundary>
         );
       default:
         return (
-          <SessionView
-            serverConnection={serverConnection}
-            clientRunning={clientRunning}
-            setClientRunning={setClientRunning}
-            onStartServer={startServerWithOnboarding}
-            startupFlowPending={startupFlowPending}
-            isUploading={isUploading}
-            live={live}
-          />
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <SessionView
+              serverConnection={serverConnection}
+              clientRunning={clientRunning}
+              setClientRunning={setClientRunning}
+              onStartServer={startServerWithOnboarding}
+              startupFlowPending={startupFlowPending}
+              isUploading={isUploading}
+              live={live}
+            />
+          </ErrorBoundary>
         );
     }
   };
@@ -527,13 +541,13 @@ const AppInner: React.FC = () => {
 };
 
 const App: React.FC = () => (
-  <DockerProvider>
-    <ServerStatusProvider>
-      <AdminStatusProvider>
-        <AppInner />
-      </AdminStatusProvider>
-    </ServerStatusProvider>
-  </DockerProvider>
+  <QueryClientProvider client={queryClient}>
+    <DockerProvider>
+      <AppInner />
+    </DockerProvider>
+    <Toaster position="bottom-right" theme="dark" richColors />
+    <ReactQueryDevtools initialIsOpen={false} />
+  </QueryClientProvider>
 );
 
 export default App;

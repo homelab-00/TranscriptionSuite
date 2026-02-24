@@ -34,7 +34,7 @@ import type { LiveModeState } from '../../src/hooks/useLiveMode';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
-import { useAdminStatusContext } from '../../src/hooks/AdminStatusContext';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { getConfig, setConfig } from '../../src/config/store';
@@ -96,7 +96,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   }, []);
 
   // Admin status (needed early for model-aware language list)
-  const admin = useAdminStatusContext();
+  const admin = useAdminStatus();
   const activeModel =
     admin.status?.config?.main_transcriber?.model ??
     admin.status?.config?.transcription?.model ??

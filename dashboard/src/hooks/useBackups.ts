@@ -2,7 +2,8 @@
  * useBackups — fetches the list of database backups.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 import type { BackupInfo } from '../api/types';
 
@@ -20,64 +21,48 @@ export interface BackupsState {
 }
 
 export function useBackups(): BackupsState {
-  const [backups, setBackups] = useState<BackupInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [operating, setOperating] = useState(false);
+  const queryClient = useQueryClient();
   const [operationResult, setOperationResult] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await apiClient.listBackups();
-      setBackups(data.backups);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load backups');
-      setBackups([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['backups'],
+    queryFn: () => apiClient.listBackups(),
+  });
 
-  useEffect(() => {
-    fetch();
-  }, [fetch]);
-
-  const createBackup = useCallback(async () => {
-    setOperating(true);
-    setOperationResult(null);
-    try {
-      const res = await apiClient.createBackup();
+  const createMutation = useMutation({
+    mutationFn: () => apiClient.createBackup(),
+    onSuccess: (res) => {
       setOperationResult(res.message);
-      await fetch(); // Refresh list
-    } catch (err) {
+      void queryClient.invalidateQueries({ queryKey: ['backups'] });
+    },
+    onError: (err) => {
       setOperationResult(err instanceof Error ? err.message : 'Backup failed');
-    } finally {
-      setOperating(false);
-    }
-  }, [fetch]);
+    },
+  });
 
-  const restoreBackup = useCallback(async (filename: string) => {
-    setOperating(true);
-    setOperationResult(null);
-    try {
-      const res = await apiClient.restoreBackup(filename);
+  const restoreMutation = useMutation({
+    mutationFn: (filename: string) => apiClient.restoreBackup(filename),
+    onSuccess: (res) => {
       setOperationResult(res.message);
-    } catch (err) {
+    },
+    onError: (err) => {
       setOperationResult(err instanceof Error ? err.message : 'Restore failed');
-    } finally {
-      setOperating(false);
-    }
-  }, []);
+    },
+  });
+
+  const operating = createMutation.isPending || restoreMutation.isPending;
 
   return {
-    backups,
-    loading,
-    error,
-    refresh: fetch,
-    createBackup,
-    restoreBackup,
+    backups: data?.backups ?? [],
+    loading: isLoading,
+    error: error instanceof Error ? error.message : error ? 'Failed to load backups' : null,
+    refresh: () => void refetch(),
+    createBackup: async () => {
+      await createMutation.mutateAsync();
+    },
+    restoreBackup: async (filename) => {
+      await restoreMutation.mutateAsync(filename);
+    },
     operating,
     operationResult,
   };
