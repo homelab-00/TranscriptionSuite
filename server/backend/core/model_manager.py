@@ -180,6 +180,7 @@ class ModelManager:
         self._diarization_feature_reason: str = "token_missing"
         self._nemo_feature_available: bool = False
         self._nemo_feature_reason: str = "not_requested"
+        self._nemo_import_thread: threading.Thread | None = None
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -195,6 +196,9 @@ class ModelManager:
         # Initialize feature status from bootstrap output if available.
         self._initialize_diarization_feature_status()
         self._initialize_nemo_feature_status()
+
+        # Fix 3: Start background NeMo import if NeMo models will be used
+        self._start_background_nemo_import()
 
     def _initialize_diarization_feature_status(self) -> None:
         """Initialize diarization feature availability from bootstrap state/env."""
@@ -253,6 +257,44 @@ class ModelManager:
 
         self._nemo_feature_available = False
         self._nemo_feature_reason = "not_requested"
+
+    def _start_background_nemo_import(self) -> None:
+        """Fix 3: Start background NeMo import to reduce startup latency.
+
+        If a NeMo model (Parakeet/Canary) is configured, start importing
+        nemo.collections.asr in a background thread. By the time backend.load()
+        runs, the import will be cached in sys.modules, eliminating B1.
+        """
+        if not self._nemo_feature_available:
+            return
+
+        # Check if main transcriber is a NeMo model
+        model_name = self.main_model_name.lower()
+        is_nemo_model = "parakeet" in model_name or "canary" in model_name
+
+        if not is_nemo_model:
+            return
+
+        def _import_nemo_async():
+            """Background thread to import NeMo."""
+            try:
+                logger.info("[BACKGROUND] Starting NeMo import...")
+                import time as time_module
+
+                start = time_module.perf_counter()
+
+                import nemo.collections.asr  # noqa: F401
+
+                elapsed = time_module.perf_counter() - start
+                logger.info(f"[BACKGROUND] NeMo import complete ({elapsed:.2f}s)")
+            except ImportError as e:
+                logger.warning(f"[BACKGROUND] NeMo import failed: {e}")
+            except Exception as e:
+                logger.warning(f"[BACKGROUND] Unexpected error in NeMo import: {e}")
+
+        self._nemo_import_thread = threading.Thread(target=_import_nemo_async, daemon=True)
+        self._nemo_import_thread.start()
+        logger.info("Started background NeMo import thread")
 
     def _set_diarization_feature_status(self, available: bool, reason: str) -> None:
         """Set diarization feature availability metadata."""
@@ -323,6 +365,13 @@ class ModelManager:
 
     def _create_transcription_engine(self) -> "AudioToTextRecorder":
         """Create the unified transcription engine from config."""
+        # Wait for background NeMo import to complete if it's running
+        if self._nemo_import_thread is not None and self._nemo_import_thread.is_alive():
+            logger.info("Waiting for background NeMo import to complete...")
+            self._nemo_import_thread.join(timeout=60.0)
+            if self._nemo_import_thread.is_alive():
+                logger.warning("Background NeMo import still running after 60s timeout")
+
         from server.core.stt.engine import AudioToTextRecorder
 
         main_cfg = self.config.get("main_transcriber", {})

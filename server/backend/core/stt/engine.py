@@ -372,12 +372,21 @@ class AudioToTextRecorder:
                 progress_callback=progress_callback,
             )
 
-            report("Warming up model...")
-            backend.warmup()
+            # Fix 4: Use background warmup for NeMo models to reduce startup blocking
+            backend_name = backend.backend_name
+            use_background_warmup = backend_name in ("parakeet", "canary")
+
+            if use_background_warmup:
+                report("Starting background warmup...")
+                backend.warmup(background=True)
+                report(f"STT model ready (backend={backend_name}, warmup running in background)")
+            else:
+                report("Warming up model...")
+                backend.warmup()
+                report(f"STT model ready (backend={backend_name})")
 
             self._backend = backend
             self._model_loaded = True
-            report(f"STT model ready (backend={backend.backend_name})")
 
         except Exception as e:
             logger.exception(f"Error loading STT model: {e}")

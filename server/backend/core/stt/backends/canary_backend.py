@@ -35,17 +35,55 @@ class CanaryBackend(ParakeetBackend):
     # STTBackend interface overrides
     # ------------------------------------------------------------------
 
-    def warmup(self) -> None:
+    def warmup(self, background: bool = False) -> None:
+        """Run warmup inference.
+
+        Args:
+            background: If True, run warmup in a background thread (Fix 4)
+        """
         if self._model is None:
             return
-        try:
-            silent_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
-            self._transcribe_array_canary(
-                silent_audio, source_lang="en", target_lang="en", timestamps=False
-            )
-            logger.debug("Canary model warmup complete")
-        except Exception as e:
-            logger.warning(f"Canary model warmup failed (non-critical): {e}")
+
+        if background:
+            # Start warmup in background thread
+            import threading
+            import time
+
+            def _warmup_worker():
+                try:
+                    warmup_start = time.perf_counter()
+                    logger.info("Starting Canary warmup...")
+                    silent_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
+                    self._transcribe_array_canary(
+                        silent_audio, source_lang="en", target_lang="en", timestamps=False
+                    )
+                    warmup_time = time.perf_counter() - warmup_start
+                    logger.info(f"[TIMING] Canary warmup complete ({warmup_time:.2f}s)")
+                    self._warmup_complete = True
+                except Exception as e:
+                    logger.warning(f"Canary model warmup failed (non-critical): {e}")
+                    self._warmup_complete = True
+
+            self._warmup_thread = threading.Thread(target=_warmup_worker, daemon=True)
+            self._warmup_thread.start()
+            logger.info("Started background warmup thread")
+        else:
+            # Blocking warmup
+            try:
+                import time
+
+                warmup_start = time.perf_counter()
+                logger.info("Starting Canary warmup...")
+                silent_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
+                self._transcribe_array_canary(
+                    silent_audio, source_lang="en", target_lang="en", timestamps=False
+                )
+                warmup_time = time.perf_counter() - warmup_start
+                logger.info(f"[TIMING] Canary warmup complete ({warmup_time:.2f}s)")
+                self._warmup_complete = True
+            except Exception as e:
+                logger.warning(f"Canary model warmup failed (non-critical): {e}")
+                self._warmup_complete = True
 
     def transcribe(
         self,

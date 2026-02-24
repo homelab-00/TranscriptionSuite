@@ -10,6 +10,8 @@ from __future__ import annotations
 import gc
 import logging
 import math
+import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -73,6 +75,62 @@ class ParakeetBackend(STTBackend):
     def __init__(self) -> None:
         self._model: Any | None = None
         self._model_name: str | None = None
+        self._warmup_complete: bool = False
+        self._warmup_thread: threading.Thread | None = None
+
+    @staticmethod
+    def _find_cached_nemo_file(model_name: str) -> str | None:
+        """Fix 5: Find cached .nemo file for the model to use restore_from().
+
+        Searches common cache locations for NeMo models downloaded by from_pretrained().
+        Returns path to .nemo file if found, None otherwise.
+        """
+        import os
+        from pathlib import Path
+
+        # Common cache locations
+        cache_dirs = []
+
+        # HuggingFace cache (most common for NeMo models)
+        hf_cache = os.environ.get("HF_HOME") or os.path.join(
+            os.path.expanduser("~"), ".cache", "huggingface"
+        )
+        cache_dirs.append(Path(hf_cache) / "hub")
+
+        # NeMo cache
+        nemo_cache = os.environ.get("NEMO_CACHE_DIR") or os.path.join(
+            os.path.expanduser("~"), ".cache", "nemo"
+        )
+        cache_dirs.append(Path(nemo_cache))
+
+        # Torch hub cache
+        torch_cache = os.environ.get("TORCH_HOME") or os.path.join(
+            os.path.expanduser("~"), ".cache", "torch"
+        )
+        cache_dirs.append(Path(torch_cache) / "hub")
+
+        # Normalize model name for searching (e.g., nvidia/parakeet-tdt-0.6b-v3)
+        search_patterns = [
+            model_name.lower().replace("/", "--").replace("_", "-"),
+            model_name.lower().replace("/", "_"),
+            model_name.split("/")[-1] if "/" in model_name else model_name,
+        ]
+
+        for cache_dir in cache_dirs:
+            if not cache_dir.exists():
+                continue
+
+            # Search for matching directories
+            for pattern in search_patterns:
+                # HuggingFace format: models--nvidia--parakeet-tdt-0.6b-v3
+                for subdir in cache_dir.glob(f"*{pattern}*"):
+                    if subdir.is_dir():
+                        # Look for .nemo files recursively
+                        for nemo_file in subdir.rglob("*.nemo"):
+                            logger.info(f"Found cached .nemo file: {nemo_file}")
+                            return str(nemo_file)
+
+        return None
 
     # ------------------------------------------------------------------
     # CUDA graph workaround
@@ -155,28 +213,101 @@ class ParakeetBackend(STTBackend):
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         progress_callback = kwargs.get("progress_callback")
+        load_start = time.perf_counter()
 
-        def report(msg: str) -> None:
-            logger.info(msg)
+        def report(msg: str, elapsed: float | None = None) -> None:
+            if elapsed is not None:
+                logger.info(f"[TIMING] {msg} ({elapsed:.2f}s)")
+            else:
+                logger.info(msg)
             if progress_callback:
                 progress_callback(msg)
 
+        # B1: NeMo Import
+        step_start = time.perf_counter()
         report("Importing NeMo toolkit...")
         nemo_asr = _import_nemo_asr()
+        import_time = time.perf_counter() - step_start
+        report("NeMo import complete", import_time)
 
+        # B2: Load model - use restore_from() for cached models (Fix 5)
+        step_start = time.perf_counter()
         report(f"Loading Parakeet model: {model_name}")
-        model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
 
+        # Fix 5: Check if model is cached locally and use restore_from()
+        import tempfile
+        from pathlib import Path
+
+        import yaml
+
+        local_nemo_path = self._find_cached_nemo_file(model_name)
+
+        config_override_path = None
+
+        try:
+            # Create a minimal config override to disable CUDA graphs (Fix 2)
+            override_dict = {"decoding": {"greedy": {"use_cuda_graph_decoder": False}}}
+
+            # Write to a temporary YAML file
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
+                yaml.dump(override_dict, tmp)
+                config_override_path = tmp.name
+
+            if local_nemo_path:
+                # Fix 5: Use restore_from() for cached models (faster, skips registry)
+                logger.info(f"Found cached model at {local_nemo_path}, using restore_from()")
+                try:
+                    model = nemo_asr.models.ASRModel.restore_from(
+                        restore_path=local_nemo_path, override_config_path=config_override_path
+                    )
+                    logger.info("Loaded from local cache using restore_from()")
+                except Exception as e:
+                    logger.warning(f"restore_from() failed: {e}, falling back to from_pretrained()")
+                    model = nemo_asr.models.ASRModel.from_pretrained(
+                        model_name=model_name, override_config_path=config_override_path
+                    )
+            else:
+                # No local cache, use from_pretrained()
+                logger.info("No cached model found, using from_pretrained()")
+                try:
+                    model = nemo_asr.models.ASRModel.from_pretrained(
+                        model_name=model_name, override_config_path=config_override_path
+                    )
+                except TypeError:
+                    # Fallback: override_config_path not supported in this NeMo version
+                    logger.warning("override_config_path not supported, loading without pre-patch")
+                    model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
+        finally:
+            # Clean up temporary config file
+            if config_override_path and Path(config_override_path).exists():
+                try:
+                    Path(config_override_path).unlink()
+                except Exception:
+                    pass
+
+        pretrained_time = time.perf_counter() - step_start
+        report("Model loading complete", pretrained_time)
+
+        # B3: model.to(device)
+        step_start = time.perf_counter()
         report("Transferring model to GPU...")
         model = model.to(device)
         model.eval()
+        to_device_time = time.perf_counter() - step_start
+        report("GPU transfer complete", to_device_time)
 
-        report("Applying CUDA graph workaround...")
+        # B4: CUDA graph verification (should be pre-patched by Fix 2)
+        step_start = time.perf_counter()
+        report("Verifying CUDA graph config...")
+        # Verify the config was applied, apply runtime patch if needed
         self._disable_cuda_graphs(model)
+        cuda_graph_time = time.perf_counter() - step_start
+        report("CUDA graph config verified", cuda_graph_time)
 
         self._model = model
         self._model_name = model_name
-        report("Parakeet model loaded")
+        total_time = time.perf_counter() - load_start
+        report(f"Parakeet model loaded (total: {total_time:.2f}s)")
 
     def unload(self) -> None:
         self._model = None
@@ -192,15 +323,62 @@ class ParakeetBackend(STTBackend):
     def is_loaded(self) -> bool:
         return self._model is not None
 
-    def warmup(self) -> None:
+    def warmup(self, background: bool = False) -> None:
+        """Run warmup inference.
+
+        Args:
+            background: If True, run warmup in a background thread (Fix 4)
+        """
         if self._model is None:
             return
+
+        if background:
+            # Start warmup in background thread
+            def _warmup_worker():
+                self._do_warmup()
+
+            self._warmup_thread = threading.Thread(target=_warmup_worker, daemon=True)
+            self._warmup_thread.start()
+            logger.info("Started background warmup thread")
+        else:
+            # Blocking warmup
+            self._do_warmup()
+
+    def _do_warmup(self) -> None:
+        """Internal method to perform actual warmup."""
         try:
+            # B5: First inference (warmup)
+            warmup_start = time.perf_counter()
+            logger.info("Starting Parakeet warmup...")
             silent_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
             self._transcribe_array(silent_audio, timestamps=False)
-            logger.debug("Parakeet model warmup complete")
+            warmup_time = time.perf_counter() - warmup_start
+            logger.info(f"[TIMING] Parakeet warmup complete ({warmup_time:.2f}s)")
+            self._warmup_complete = True
         except Exception as e:
             logger.warning(f"Parakeet model warmup failed (non-critical): {e}")
+            self._warmup_complete = True  # Mark complete even on failure
+
+    def wait_for_warmup(self, timeout: float = 60.0) -> bool:
+        """Wait for background warmup to complete.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if warmup completed, False if timeout
+        """
+        if self._warmup_complete:
+            return True
+
+        if self._warmup_thread is not None and self._warmup_thread.is_alive():
+            logger.info("Waiting for warmup to complete...")
+            self._warmup_thread.join(timeout=timeout)
+            if self._warmup_thread.is_alive():
+                logger.warning(f"Warmup still running after {timeout}s timeout")
+                return False
+
+        return self._warmup_complete
 
     def transcribe(
         self,
@@ -217,6 +395,10 @@ class ParakeetBackend(STTBackend):
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         if self._model is None:
             raise RuntimeError("Parakeet model is not loaded")
+
+        # Wait for warmup to complete if it's still running
+        if not self._warmup_complete:
+            self.wait_for_warmup()
 
         if task == "translate":
             raise ValueError(
