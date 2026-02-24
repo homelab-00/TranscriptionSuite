@@ -105,6 +105,8 @@ export interface LanguagesResponse {
   languages: Record<string, string>;
   count: number;
   auto_detect: boolean;
+  backend_type?: 'whisper' | 'parakeet' | 'canary';
+  supports_translation?: boolean;
 }
 
 export interface TranscriptionCancelResponse {

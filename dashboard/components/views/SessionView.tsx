@@ -90,10 +90,22 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, []);
 
-  // Real language list from server
-  const { languages, loading: languagesLoading } = useLanguages();
+  // Admin status (needed early for model-aware language list)
+  const admin = useAdminStatusContext();
+  const activeModel =
+    admin.status?.config?.main_transcriber?.model ??
+    admin.status?.config?.transcription?.model ??
+    null;
+  const activeLiveModel =
+    admin.status?.config?.live_transcriber?.model ??
+    admin.status?.config?.live_transcription?.model ??
+    activeModel;
+
+  // Real language list from server — re-fetches when model backend changes
+  const { languages, loading: languagesLoading } = useLanguages(activeModel);
   const allLanguageOptions = useMemo(() => {
-    // useLanguages already includes 'Auto Detect' — deduplicate by filtering it out before prepending
+    // useLanguages returns sorted entries (English first, then alphabetical)
+    // with Auto Detect prepended. Ensure no duplicates.
     const filtered = languages.filter((l) => l.code !== 'auto').map((l) => l.name);
     return ['Auto Detect', ...filtered];
   }, [languages]);
@@ -218,7 +230,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const docker = useDockerContext();
   const serverRunning = docker.container.running;
   // Client connection state — tracked at App level via props
-  const admin = useAdminStatusContext();
   const isAsrModelsLoaded =
     admin.status?.models_loaded ??
     Boolean(
@@ -232,15 +243,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   );
   const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
-  // Active model names (for capability checks & tray tooltip)
-  const activeModel =
-    admin.status?.config?.main_transcriber?.model ??
-    admin.status?.config?.transcription?.model ??
-    null;
-  const activeLiveModel =
-    admin.status?.config?.live_transcriber?.model ??
-    admin.status?.config?.live_transcription?.model ??
-    activeModel;
+  // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);
 
   // Filter language options per model — Parakeet models only support 25 languages
