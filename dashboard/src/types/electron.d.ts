@@ -26,6 +26,7 @@ interface StartContainerOptions {
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
   installNemo?: boolean;
+  installVibeVoiceAsr?: boolean;
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;

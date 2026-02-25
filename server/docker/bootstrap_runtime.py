@@ -1004,8 +1004,16 @@ def main() -> int:
             vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}
             log(f"VibeVoice-ASR installation failed: {exc}")
     else:
-        vibevoice_asr_status = {"available": False, "reason": "not_requested"}
-        log("VibeVoice-ASR not requested, skipping")
+        vibevoice_selected = (main_model or "").strip().lower() == "microsoft/vibevoice-asr"
+        reason = "selected_but_not_requested" if vibevoice_selected else "not_requested"
+        vibevoice_asr_status = {"available": False, "reason": reason}
+        if vibevoice_selected:
+            log(
+                "VibeVoice-ASR selected but INSTALL_VIBEVOICE_ASR is not enabled, "
+                "skipping optional install"
+            )
+        else:
+            log("VibeVoice-ASR not requested, skipping")
     log_timing("VibeVoice-ASR feature check complete", vibevoice_start)
 
     status_write_start = time.perf_counter()

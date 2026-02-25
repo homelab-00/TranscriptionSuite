@@ -42,7 +42,7 @@ from server.core.token_store import get_token_store  # noqa: E402
 
 _log_time("token_store imported")
 
-from server.api.routes import (
+from server.api.routes import (  # noqa: E402
     admin,
     auth,
     health,
@@ -52,11 +52,11 @@ from server.api.routes import (
     search,
     transcription,
     websocket,
-)  # noqa: E402
+)
 
 _log_time("routes imported")
 
-from server.config import get_config  # noqa: E402
+from server.config import get_config, resolve_main_transcriber_model  # noqa: E402
 
 _log_time("config imported")
 
@@ -96,9 +96,49 @@ PUBLIC_PREFIXES = (
     "/redoc",
 )
 
-NOTEBOOK_QUERY_TOKEN_ROUTES = re.compile(
-    r"^/api/notebook/recordings/\d+/(audio|export)$"
+NOTEBOOK_QUERY_TOKEN_ROUTES = re.compile(r"^/api/notebook/recordings/\d+/(audio|export)$")
+
+_VIBEVOICE_MISSING_INSTALL_ERROR_TEXT = (
+    "VibeVoice-ASR backend selected but VibeVoice is not installed."
 )
+
+
+def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    stack = [exc]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        obj_id = id(current)
+        if obj_id in seen:
+            continue
+        seen.add(obj_id)
+        chain.append(current)
+        cause = getattr(current, "__cause__", None)
+        context = getattr(current, "__context__", None)
+        if cause is not None:
+            stack.append(cause)
+        if context is not None:
+            stack.append(context)
+    return chain
+
+
+def _is_recoverable_vibevoice_preload_error(model_name: str, exc: BaseException) -> bool:
+    """Return True only for the known optional VibeVoice missing-package preload failure."""
+    try:
+        from server.core.stt.backends.factory import detect_backend_type
+    except Exception:
+        return False
+
+    if detect_backend_type(model_name) != "vibevoice_asr":
+        return False
+
+    for current in _iter_exception_chain(exc):
+        if isinstance(current, ImportError) and _VIBEVOICE_MISSING_INSTALL_ERROR_TEXT in str(
+            current
+        ):
+            return True
+    return False
 
 
 class OriginValidationMiddleware(BaseHTTPMiddleware):
@@ -207,7 +247,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan handler for startup/shutdown."""
     # Lazy import to avoid loading torch/faster_whisper at module load time
     from server.core.model_manager import cleanup_models, get_model_manager
@@ -250,9 +290,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
         )
         _log_time("backup check scheduled (async)")
-        logger.info(
-            f"Backup check scheduled (max_age={max_age_hours}h, max_backups={max_backups})"
-        )
+        logger.info(f"Backup check scheduled (max_age={max_age_hours}h, max_backups={max_backups})")
 
     # Initialize token store (generates admin token on first run)
     get_token_store()
@@ -265,10 +303,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
 
     # Preload transcription model at startup
+    selected_main_model = resolve_main_transcriber_model(config)
     logger.info("Preloading transcription model...")
     _log_time("starting model preload (GPU VRAM should spike now)...")
-    manager.load_transcription_model()
-    _log_time("model preload complete")
+    try:
+        manager.load_transcription_model()
+    except Exception as e:
+        if _is_recoverable_vibevoice_preload_error(selected_main_model, e):
+            logger.warning(
+                "Transcription preload skipped for optional VibeVoice-ASR backend "
+                "(model=%s). Enable INSTALL_VIBEVOICE_ASR=true and restart to load "
+                "the model. Continuing startup without a loaded transcription model.",
+                selected_main_model,
+                exc_info=True,
+            )
+            _log_time("model preload skipped (VibeVoice-ASR optional dependency missing)")
+        else:
+            raise
+    else:
+        _log_time("model preload complete")
 
     # Store config in app state
     app.state.config = config
@@ -328,9 +381,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     # Include API routers
     app.include_router(health.router, tags=["Health"])
     app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-    app.include_router(
-        transcription.router, prefix="/api/transcribe", tags=["Transcription"]
-    )
+    app.include_router(transcription.router, prefix="/api/transcribe", tags=["Transcription"])
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
@@ -340,9 +391,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
 
     # Exception handler
     @app.exception_handler(Exception)
-    async def global_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
         return JSONResponse(
             status_code=500,
@@ -487,7 +536,7 @@ AUTH_PAGE_HTML = """
             <div class="header">
                 <div class="icon">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                     </svg>
                 </div>
@@ -510,29 +559,29 @@ AUTH_PAGE_HTML = """
         const tokenInput = document.getElementById('token');
         const errorDiv = document.getElementById('error');
         const submitBtn = document.getElementById('submitBtn');
-        
+
         // Get redirect URL from query params
         const urlParams = new URLSearchParams(window.location.search);
         const redirectUrl = urlParams.get('redirect') || '/notebook/calendar';
-        
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const token = tokenInput.value.trim();
             if (!token) return;
-            
+
             submitBtn.disabled = true;
             submitBtn.textContent = 'Authenticating...';
             errorDiv.classList.remove('show');
-            
+
             try {
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ token })
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {
                     // Set auth cookie
                     document.cookie = `auth_token=${token}; path=/; max-age=${30*24*60*60}; SameSite=Strict; Secure`;

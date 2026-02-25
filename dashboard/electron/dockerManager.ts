@@ -130,6 +130,7 @@ export interface StartContainerOptions {
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
   installNemo?: boolean;
+  installVibeVoiceAsr?: boolean;
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
@@ -520,6 +521,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     hfToken,
     hfTokenDecision,
     installNemo,
+    installVibeVoiceAsr,
     mainTranscriberModel,
     liveTranscriberModel,
     diarizationModel,
@@ -573,6 +575,13 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     const nemoValue = installNemo ? 'true' : 'false';
     composeEnv['INSTALL_NEMO'] = nemoValue;
     envUpdates['INSTALL_NEMO'] = nemoValue;
+  }
+
+  // Pass VibeVoice-ASR install preference to the container (optional backend dependency)
+  if (installVibeVoiceAsr !== undefined) {
+    const vibevoiceValue = installVibeVoiceAsr ? 'true' : 'false';
+    composeEnv['INSTALL_VIBEVOICE_ASR'] = vibevoiceValue;
+    envUpdates['INSTALL_VIBEVOICE_ASR'] = vibevoiceValue;
   }
 
   // Pass ASR model selections to the container (empty string = use config.yaml default)
