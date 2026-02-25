@@ -8,8 +8,10 @@ timestamps via forced alignment and optional single-pass diarization.
 from __future__ import annotations
 
 import gc
+import inspect
 import logging
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,8 @@ class WhisperXBackend(STTBackend):
         self._align_model: Any | None = None
         self._align_metadata: Any | None = None
         self._align_language: str | None = None
+        self._transcribe_param_names: set[str] | None = None
+        self._compat_mode_logged: bool = False
 
     # ------------------------------------------------------------------
     # STTBackend interface
@@ -60,6 +64,8 @@ class WhisperXBackend(STTBackend):
         )
         self._model_name = model_name
         self._device = device
+        self._transcribe_param_names = None
+        self._compat_mode_logged = False
         logger.info("WhisperX model loaded")
 
     def unload(self) -> None:
@@ -68,6 +74,8 @@ class WhisperXBackend(STTBackend):
         self._align_model = None
         self._align_metadata = None
         self._align_language = None
+        self._transcribe_param_names = None
+        self._compat_mode_logged = False
         try:
             gc.collect()
             if torch.cuda.is_available():
@@ -114,12 +122,13 @@ class WhisperXBackend(STTBackend):
             raise RuntimeError("WhisperX model is not loaded")
 
         # WhisperX transcribe returns a dict with "segments" and "language"
-        wx_result = self._model.transcribe(
+        wx_result = self._whisperx_transcribe(
             audio,
             language=language,
             task=task,
             beam_size=beam_size,
             initial_prompt=initial_prompt,
+            suppress_tokens=suppress_tokens,
         )
 
         detected_language = wx_result.get("language", language)
@@ -188,11 +197,13 @@ class WhisperXBackend(STTBackend):
 
         # 1. Transcribe
         logger.info("WhisperX: transcribing audio")
-        wx_result = self._model.transcribe(
+        wx_result = self._whisperx_transcribe(
             audio,
             language=language,
             task=task,
             beam_size=beam_size,
+            initial_prompt=None,
+            suppress_tokens=None,
         )
         detected_language = wx_result.get("language", language)
 
@@ -278,6 +289,124 @@ class WhisperXBackend(STTBackend):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _get_transcribe_param_names(self) -> set[str]:
+        if self._model is None:
+            raise RuntimeError("WhisperX model is not loaded")
+
+        if self._transcribe_param_names is None:
+            try:
+                self._transcribe_param_names = set(
+                    inspect.signature(self._model.transcribe).parameters
+                )
+            except (TypeError, ValueError) as e:
+                logger.debug(
+                    "Could not inspect WhisperX transcribe signature, using fallback: %s", e
+                )
+                # Conservative fallback matching WhisperX 3.8.x public kwargs.
+                self._transcribe_param_names = {
+                    "audio",
+                    "batch_size",
+                    "num_workers",
+                    "language",
+                    "task",
+                    "chunk_size",
+                    "print_progress",
+                    "combined_progress",
+                    "verbose",
+                }
+        return self._transcribe_param_names
+
+    def _whisperx_transcribe(
+        self,
+        audio: np.ndarray,
+        *,
+        language: str | None,
+        task: str,
+        beam_size: int,
+        initial_prompt: str | None,
+        suppress_tokens: list[int] | None,
+    ) -> dict[str, Any]:
+        """Call WhisperX transcribe across old/new signatures.
+
+        WhisperX 3.8.x moved decode params like beam size and initial prompt off
+        ``FasterWhisperPipeline.transcribe()`` and into ``pipeline.options``.
+        """
+        if self._model is None:
+            raise RuntimeError("WhisperX model is not loaded")
+
+        param_names = self._get_transcribe_param_names()
+        kwargs: dict[str, Any] = {
+            "language": language,
+            "task": task,
+        }
+
+        patch_fields: dict[str, Any] = {}
+        compat_fields: set[str] = set()
+
+        if "beam_size" in param_names:
+            kwargs["beam_size"] = beam_size
+        else:
+            patch_fields["beam_size"] = beam_size
+            compat_fields.add("beam_size")
+
+        if "initial_prompt" in param_names:
+            kwargs["initial_prompt"] = initial_prompt
+        else:
+            patch_fields["initial_prompt"] = initial_prompt
+            compat_fields.add("initial_prompt")
+
+        if suppress_tokens is not None:
+            if "suppress_tokens" in param_names:
+                kwargs["suppress_tokens"] = suppress_tokens
+            else:
+                patch_fields["suppress_tokens"] = suppress_tokens
+                compat_fields.add("suppress_tokens")
+
+        previous_options: Any | None = None
+        options_patched = False
+        if compat_fields:
+            if not self._compat_mode_logged:
+                logger.info(
+                    "WhisperX compatibility mode enabled: patching decode options via "
+                    "pipeline.options (%s)",
+                    ", ".join(sorted(compat_fields)),
+                )
+                self._compat_mode_logged = True
+
+            options_obj = getattr(self._model, "options", None)
+            if options_obj is not None and patch_fields:
+                available_fields = getattr(options_obj, "__dataclass_fields__", None)
+                if isinstance(available_fields, dict):
+                    patch_fields = {
+                        key: value for key, value in patch_fields.items() if key in available_fields
+                    }
+
+                if patch_fields:
+                    try:
+                        previous_options = options_obj
+                        self._model.options = replace(options_obj, **patch_fields)
+                        options_patched = True
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to patch WhisperX decode options for compatibility: %s", e
+                        )
+                else:
+                    logger.debug(
+                        "WhisperX compatibility mode active but pipeline.options is missing "
+                        "expected fields"
+                    )
+            elif patch_fields:
+                logger.debug(
+                    "WhisperX compatibility mode active but model has no pipeline.options; "
+                    "decode option patch skipped"
+                )
+
+        try:
+            return self._model.transcribe(audio, **kwargs)
+        finally:
+            if options_patched:
+                self._model.options = previous_options
 
     def _align(
         self,
