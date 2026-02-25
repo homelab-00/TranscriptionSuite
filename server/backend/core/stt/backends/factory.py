@@ -10,15 +10,18 @@ if TYPE_CHECKING:
 
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
+_VIBEVOICE_ASR_PATTERN = re.compile(r"^microsoft/vibevoice-asr$", re.IGNORECASE)
 
 
 def detect_backend_type(model_name: str) -> str:
-    """Return ``"parakeet"``, ``"canary"``, or ``"whisper"`` based on the model name."""
+    """Return backend type based on the model name."""
     name = model_name.strip()
     if _PARAKEET_PATTERN.match(name):
         return "parakeet"
     if _CANARY_PATTERN.match(name):
         return "canary"
+    if _VIBEVOICE_ASR_PATTERN.match(name):
+        return "vibevoice_asr"
     return "whisper"
 
 
@@ -37,6 +40,11 @@ def is_nemo_model(model_name: str) -> bool:
     return detect_backend_type(model_name) in ("parakeet", "canary")
 
 
+def is_vibevoice_asr_model(model_name: str) -> bool:
+    """Return True if *model_name* selects Microsoft's VibeVoice-ASR backend."""
+    return detect_backend_type(model_name) == "vibevoice_asr"
+
+
 def create_backend(model_name: str) -> STTBackend:
     """Instantiate the appropriate STTBackend for *model_name*."""
     backend_type = detect_backend_type(model_name)
@@ -49,6 +57,11 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.canary_backend import CanaryBackend
 
         return CanaryBackend()
+
+    if backend_type == "vibevoice_asr":
+        from server.core.stt.backends.vibevoice_asr_backend import VibeVoiceASRBackend
+
+        return VibeVoiceASRBackend()
 
     from server.core.stt.backends.whisperx_backend import WhisperXBackend
 

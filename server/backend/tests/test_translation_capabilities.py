@@ -1,7 +1,6 @@
 """Tests for translation capability guards."""
 
 import pytest
-
 from server.core.stt.capabilities import (
     supports_english_translation,
     validate_translation_request,
@@ -18,6 +17,7 @@ def test_supports_translation_for_multilingual_model() -> None:
         "openai/whisper-small.en",
         "openai/whisper-large-v3-turbo",
         "distil-whisper/distil-large-v3",
+        "microsoft/VibeVoice-ASR",
     ],
 )
 def test_rejects_known_unsupported_models(model_name: str) -> None:

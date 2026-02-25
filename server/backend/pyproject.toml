@@ -61,6 +61,10 @@ dependencies = [
 nemo = [
     "nemo_toolkit[asr]>=2.2.0",
 ]
+vibevoice_asr = [
+    # NOTE: Pin to a tested commit after the compatibility spike is run in a networked env.
+    "vibevoice @ git+https://github.com/microsoft/VibeVoice.git",
+]
 
 ## OVERRIDE DEPENDENCIES
 [tool.uv]
@@ -74,6 +78,9 @@ transcription-server = "server.api.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["server"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

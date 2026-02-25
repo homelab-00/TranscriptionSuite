@@ -54,6 +54,7 @@ const WHISPER_SMALL = 'Systran/faster-whisper-small';
 // NeMo model presets
 const PARAKEET_TDT_0_6B = 'nvidia/parakeet-tdt-0.6b-v3';
 const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
+const VIBEVOICE_ASR = 'microsoft/VibeVoice-ASR';
 
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
@@ -247,6 +248,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
         : liveModelSelection;
+  const liveUsesSameAsMainVibeVoice =
+    liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION &&
+    normalizeModelName(activeTranscriber) === normalizeModelName(VIBEVOICE_ASR);
 
   // Active diarization model name
   const activeDiarizationModel =
@@ -683,7 +687,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           diarizationModel: sanitizeModelName(activeDiarizationModel),
                         })
                       }
-                      disabled={docker.operating || isRunning || startupFlowPending}
+                      disabled={
+                        docker.operating ||
+                        isRunning ||
+                        startupFlowPending ||
+                        liveUsesSameAsMainVibeVoice
+                      }
                     >
                       {docker.operating || startupFlowPending ? (
                         <Loader2 size={14} className="animate-spin" />
@@ -701,7 +710,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           diarizationModel: sanitizeModelName(activeDiarizationModel),
                         })
                       }
-                      disabled={docker.operating || isRunning || startupFlowPending}
+                      disabled={
+                        docker.operating ||
+                        isRunning ||
+                        startupFlowPending ||
+                        liveUsesSameAsMainVibeVoice
+                      }
                     >
                       Start Remote
                     </Button>
@@ -823,6 +837,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       WHISPER_SMALL,
                       PARAKEET_TDT_0_6B,
                       CANARY_1B_V2,
+                      VIBEVOICE_ASR,
                       MAIN_MODEL_CUSTOM_OPTION,
                     ]}
                     accentColor="magenta"
@@ -890,6 +905,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       disabled={isRunning}
                       className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                     />
+                  )}
+                  {liveUsesSameAsMainVibeVoice && (
+                    <p className="text-accent-orange text-xs">
+                      VibeVoice-ASR is not supported for Live Mode in v1. Choose a Whisper or NeMo
+                      model for the Live Mode Model before starting the server.
+                    </p>
                   )}
                 </div>
               </div>

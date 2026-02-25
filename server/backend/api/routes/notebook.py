@@ -474,7 +474,12 @@ async def upload_and_transcribe(
         if use_integrated_diarization:
             # --- WhisperX single-pass path: transcribe + align + diarize ---
             try:
-                logger.info(f"Using WhisperX single-pass diarization for: {file.filename}")
+                backend_label = getattr(backend, "backend_name", "integrated")
+                logger.info(
+                    "Using %s single-pass diarization for: %s",
+                    backend_label,
+                    file.filename,
+                )
                 audio_data, _ = load_audio(str(tmp_path), target_sample_rate=16000)
 
                 diar_result = backend.transcribe_with_diarization(
@@ -501,7 +506,9 @@ async def upload_and_transcribe(
                 diarization_outcome["performed"] = True
                 diarization_outcome["reason"] = "ready"
                 logger.info(
-                    f"WhisperX diarization complete: {diar_result.num_speakers} speakers found"
+                    "%s diarization complete: %s speakers found",
+                    backend_label,
+                    diar_result.num_speakers,
                 )
 
             except ValueError as e:
@@ -513,7 +520,7 @@ async def upload_and_transcribe(
                 # Fall back to transcription without diarization
                 use_integrated_diarization = False
             except Exception as e:
-                logger.error(f"WhisperX diarization failed (continuing without): {e}")
+                logger.error("Integrated backend diarization failed (continuing without): %s", e)
                 diarization_outcome["reason"] = "unavailable"
                 # Fall back to transcription without diarization
                 use_integrated_diarization = False

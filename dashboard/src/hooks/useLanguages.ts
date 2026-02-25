@@ -2,7 +2,7 @@
  * useLanguages — fetches the supported transcription languages from the server.
  *
  * The server returns different language sets depending on the active model
- * backend (whisper / parakeet / canary). Accepts the current model name so
+ * backend (whisper / parakeet / canary / vibevoice_asr). Accepts the current model name so
  * it can re-fetch when the model changes.
  */
 
@@ -23,6 +23,7 @@ function cacheKey(model: string | null | undefined): string {
   const m = (model ?? '').trim().toLowerCase();
   if (/^nvidia\/(parakeet|nemotron-speech)/.test(m)) return 'parakeet';
   if (/^nvidia\/canary/.test(m)) return 'canary';
+  if (/^microsoft\/vibevoice-asr$/.test(m)) return 'vibevoice_asr';
   return 'whisper';
 }
 

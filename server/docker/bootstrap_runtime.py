@@ -794,6 +794,41 @@ def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
     status_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def check_vibevoice_asr_import(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    checker = r"""
+import json
+
+try:
+    from vibevoice.modeling_vibevoice_asr import VibeVoiceASRForConditionalGeneration  # noqa: F401
+    from vibevoice.processor.vibevoice_asr_processing import VibeVoiceASRProcessor  # noqa: F401
+    print(json.dumps({"available": True, "reason": "ready"}))
+except Exception as exc:
+    print(json.dumps({"available": False, "reason": "import_failed", "error": str(exc)}))
+"""
+
+    result = subprocess.run(
+        [str(venv_python), "-c", checker],
+        text=True,
+        capture_output=True,
+        timeout=max(30, min(timeout_seconds, 300)),
+        check=False,
+    )
+    output = (result.stdout or "").strip().splitlines()
+    if not output:
+        return {"available": False, "reason": "import_failed"}
+    try:
+        payload = json.loads(output[-1])
+    except json.JSONDecodeError:
+        return {"available": False, "reason": "import_failed"}
+    return {
+        "available": bool(payload.get("available", False)),
+        "reason": str(payload.get("reason", "import_failed") or "import_failed"),
+    }
+
+
 def main() -> int:
     log_timing("bootstrap main() started")
     runtime_dir = Path(os.environ.get("BOOTSTRAP_RUNTIME_DIR", "/runtime"))
@@ -924,6 +959,55 @@ def main() -> int:
         log("NeMo not requested, skipping")
     log_timing("NeMo feature check complete", nemo_start)
 
+    # ── VibeVoice-ASR (optional, experimental in-process backend) ───────────
+    vibevoice_start = time.perf_counter()
+    install_vibevoice_asr = parse_bool_env("INSTALL_VIBEVOICE_ASR", False)
+    vibevoice_asr_status: dict[str, Any]
+    vibevoice_asr_package_spec = (
+        os.environ.get(
+            "VIBEVOICE_ASR_PACKAGE_SPEC",
+            "git+https://github.com/microsoft/VibeVoice.git",
+        ).strip()
+        or "git+https://github.com/microsoft/VibeVoice.git"
+    )
+
+    if install_vibevoice_asr:
+        log("Installing VibeVoice-ASR (experimental) support...")
+        try:
+            run_command(
+                [
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    str(venv_python),
+                    vibevoice_asr_package_spec,
+                ],
+                timeout_seconds=timeout_seconds,
+                env=build_uv_sync_env(
+                    venv_dir=venv_dir,
+                    cache_dir=cache_dir,
+                ),
+            )
+            vibevoice_asr_status = check_vibevoice_asr_import(
+                venv_python=venv_python,
+                timeout_seconds=timeout_seconds,
+            )
+            if vibevoice_asr_status.get("available"):
+                log("VibeVoice-ASR support installed")
+            else:
+                log(
+                    "VibeVoice-ASR installation completed but import check failed "
+                    f"({vibevoice_asr_status.get('reason', 'import_failed')})"
+                )
+        except Exception as exc:
+            vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}
+            log(f"VibeVoice-ASR installation failed: {exc}")
+    else:
+        vibevoice_asr_status = {"available": False, "reason": "not_requested"}
+        log("VibeVoice-ASR not requested, skipping")
+    log_timing("VibeVoice-ASR feature check complete", vibevoice_start)
+
     status_write_start = time.perf_counter()
     write_status_file(
         status_file,
@@ -942,6 +1026,7 @@ def main() -> int:
             "features": {
                 "diarization": diarization_status,
                 "nemo": nemo_status,
+                "vibevoice_asr": vibevoice_asr_status,
             },
         },
     )

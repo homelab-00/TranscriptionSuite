@@ -34,7 +34,7 @@ import numpy as np
 import torch
 from scipy.signal import resample
 from server.config import get_config, resolve_main_transcriber_model
-from server.core.stt.backends.factory import create_backend
+from server.core.stt.backends.factory import create_backend, detect_backend_type
 from server.core.stt.capabilities import validate_translation_request
 from server.core.stt.vad import VoiceActivityDetector
 
@@ -355,6 +355,14 @@ class AudioToTextRecorder:
         logger.info(f"Loading STT model: {self.model_name}")
 
         try:
+            if self.instance_name.startswith("realtime") and (
+                detect_backend_type(self.model_name) == "vibevoice_asr"
+            ):
+                raise ValueError(
+                    "VibeVoice-ASR is not supported for real-time/live mode in v1. "
+                    "Select a Whisper or NeMo model for Live Mode."
+                )
+
             backend = create_backend(self.model_name)
             backend.load(
                 model_name=self.model_name,

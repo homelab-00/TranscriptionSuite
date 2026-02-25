@@ -5,6 +5,7 @@
 
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
+const VIBEVOICE_ASR_PATTERN = /^microsoft\/vibevoice-asr$/i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -93,6 +94,14 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
 }
 
 /**
+ * Returns true if the model is Microsoft's VibeVoice-ASR backend.
+ */
+export function isVibeVoiceASRModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return VIBEVOICE_ASR_PATTERN.test(name);
+}
+
+/**
  * Filter a language list to only those supported by the given model.
  * Whisper models support everything; NeMo models (Parakeet, Canary) support 25 languages.
  * The "Auto Detect" entry is always preserved.
@@ -119,6 +128,8 @@ export function supportsTranslation(modelName: string | null | undefined): boole
   if (isParakeetModel(modelName)) return false;
   // Canary models support translation (X↔English)
   if (isCanaryModel(modelName)) return true;
+  // VibeVoice-ASR (v1 integration) is ASR+diarization only.
+  if (isVibeVoiceASRModel(modelName)) return false;
   if (name.includes('turbo')) return false;
   if (name.endsWith('.en')) return false;
   if (name.includes('distil-large-v3')) return false;

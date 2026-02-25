@@ -143,7 +143,8 @@ async def transcribe_audio(
             try:
                 from server.core.audio_utils import load_audio
 
-                logger.info("Using WhisperX single-pass diarization")
+                backend_label = getattr(backend, "backend_name", "integrated")
+                logger.info("Using %s single-pass diarization", backend_label)
                 audio_data, _ = load_audio(tmp_path, target_sample_rate=16000)
 
                 diar_result = backend.transcribe_with_diarization(
@@ -170,7 +171,7 @@ async def transcribe_audio(
 
             except Exception:
                 logger.warning(
-                    "WhisperX diarization failed (returning transcript without speakers)",
+                    "Integrated backend diarization failed (returning transcript without speakers)",
                     exc_info=True,
                 )
                 # Fall through to standard transcription without diarization
@@ -511,6 +512,12 @@ _WHISPER_LANGUAGES: dict[str, str] = _sorted_languages(
     }
 )
 
+_VIBEVOICE_ASR_LANGUAGES: dict[str, str] = _sorted_languages(
+    {
+        "en": "English",
+    }
+)
+
 
 @router.get("/languages")
 async def get_supported_languages(request: Request) -> dict[str, Any]:
@@ -520,6 +527,7 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
     - **whisper**: All 90 Whisper languages, translation to English.
     - **parakeet**: 25 European languages, no translation.
     - **canary**: 25 European languages, bidirectional English ↔ EU translation.
+    - **vibevoice_asr**: Conservative v1 list (English only until validated in-app).
     """
     from server.config import resolve_main_transcriber_model
     from server.core.stt.backends.factory import detect_backend_type
@@ -533,6 +541,8 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
 
     if backend_type in ("parakeet", "canary"):
         languages = _NEMO_LANGUAGES
+    elif backend_type == "vibevoice_asr":
+        languages = _VIBEVOICE_ASR_LANGUAGES
     else:
         languages = _WHISPER_LANGUAGES
 

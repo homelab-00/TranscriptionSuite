@@ -10,8 +10,9 @@ and the STT engine. Handles:
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -26,10 +27,10 @@ class RealtimeTranscriptionResult:
     """Result from real-time transcription."""
 
     text: str
-    language: Optional[str] = None
+    language: str | None = None
     duration: float = 0.0
-    words: List[Dict[str, Any]] = field(default_factory=list)
-    segments: List[Dict[str, Any]] = field(default_factory=list)
+    words: list[dict[str, Any]] = field(default_factory=list)
+    segments: list[dict[str, Any]] = field(default_factory=list)
     is_live_transcription: bool = False
 
 
@@ -46,11 +47,11 @@ class RealtimeTranscriptionEngine:
 
     def __init__(
         self,
-        config: Dict[str, Any],
-        on_recording_start: Optional[Callable[[], None]] = None,
-        on_recording_stop: Optional[Callable[[], None]] = None,
-        on_vad_start: Optional[Callable[[], None]] = None,
-        on_vad_stop: Optional[Callable[[], None]] = None,
+        config: dict[str, Any],
+        on_recording_start: Callable[[], None] | None = None,
+        on_recording_stop: Callable[[], None] | None = None,
+        on_vad_start: Callable[[], None] | None = None,
+        on_vad_stop: Callable[[], None] | None = None,
     ):
         """
         Initialize the real-time transcription engine.
@@ -68,12 +69,12 @@ class RealtimeTranscriptionEngine:
         self.on_vad_start = on_vad_start
         self.on_vad_stop = on_vad_stop
 
-        self._engine: Optional[Any] = None
+        self._engine: Any | None = None
         self._initialized = False
         self._is_recording = False
-        self._language: Optional[str] = None
+        self._language: str | None = None
 
-    def initialize(self, language: Optional[str] = None) -> None:
+    def initialize(self, language: str | None = None) -> None:
         """
         Initialize the underlying STT engine.
 
@@ -83,15 +84,20 @@ class RealtimeTranscriptionEngine:
         if self._initialized:
             return
 
+        from server.core.stt.backends.factory import detect_backend_type
         from server.core.stt.engine import AudioToTextRecorder
 
         self._language = language
 
         # Get transcription config from passed dict or global config
         trans_config = self.config.get("transcription", {})
-        main_config = self.config.get(
-            "main_transcriber", trans_config.get("main_transcriber", {})
-        )
+        main_config = self.config.get("main_transcriber", trans_config.get("main_transcriber", {}))
+        configured_model = str(main_config.get("model") or "").strip()
+        if configured_model and detect_backend_type(configured_model) == "vibevoice_asr":
+            raise ValueError(
+                "VibeVoice-ASR is not supported for real-time/live mode in v1. "
+                "Choose a Whisper or NeMo model for the live transcriber."
+            )
         # AudioToTextRecorder resolves defaults from config internally,
         # so we only pass values if they're explicitly configured
         self._engine = AudioToTextRecorder(
@@ -104,12 +110,8 @@ class RealtimeTranscriptionEngine:
             beam_size=main_config.get("beam_size"),
             silero_sensitivity=main_config.get("silero_sensitivity"),
             webrtc_sensitivity=main_config.get("webrtc_sensitivity"),
-            post_speech_silence_duration=main_config.get(
-                "post_speech_silence_duration"
-            ),
-            pre_recording_buffer_duration=main_config.get(
-                "pre_recording_buffer_duration"
-            ),
+            post_speech_silence_duration=main_config.get("post_speech_silence_duration"),
+            pre_recording_buffer_duration=main_config.get("pre_recording_buffer_duration"),
             faster_whisper_vad_filter=main_config.get("faster_whisper_vad_filter"),
             normalize_audio=main_config.get("normalize_audio"),
             on_recording_start=self._handle_recording_start,
@@ -145,7 +147,7 @@ class RealtimeTranscriptionEngine:
 
     def feed_audio(
         self,
-        audio_data: Union[bytes, bytearray, np.ndarray],
+        audio_data: bytes | bytearray | np.ndarray,
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
         """
@@ -163,7 +165,7 @@ class RealtimeTranscriptionEngine:
 
         self._engine.feed_audio(audio_data, sample_rate)
 
-    def start_recording(self, language: Optional[str] = None) -> None:
+    def start_recording(self, language: str | None = None) -> None:
         """
         Start recording session.
 
@@ -239,7 +241,7 @@ class RealtimeTranscriptionEngine:
 
 
 def create_realtime_engine(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     **callbacks: Any,
 ) -> RealtimeTranscriptionEngine:
     """

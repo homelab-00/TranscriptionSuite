@@ -16,6 +16,7 @@ from server.core.stt.backends.factory import (
     is_canary_model,
     is_nemo_model,
     is_parakeet_model,
+    is_vibevoice_asr_model,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "is_canary_model",
     "is_nemo_model",
     "is_parakeet_model",
+    "is_vibevoice_asr_model",
 ]

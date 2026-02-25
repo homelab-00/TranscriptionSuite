@@ -51,7 +51,8 @@ main_transcriber:
     # Model from HuggingFace to use for transcription.
     # Whisper examples: "Systran/faster-whisper-large-v3", "Systran/faster-whisper-medium"
     # Parakeet examples: "nvidia/parakeet-tdt-0.6b-v3" (25 European languages, requires INSTALL_NEMO=true)
-    # Backend is auto-detected from the model name (nvidia/* → Parakeet, else → Whisper).
+    # VibeVoice-ASR example: "microsoft/VibeVoice-ASR" (experimental, file/notebook only)
+    # Backend is auto-detected from the model name (nvidia/* → NeMo, microsoft/VibeVoice-ASR → VibeVoice-ASR, else → Whisper).
     model: "Systran/faster-whisper-large-v3"
 
     # Compute type for the model. "default" is recommended.
@@ -79,6 +80,21 @@ main_transcriber:
 
     # Prevent the library from creating its own log file.
     no_log_file: true
+
+# ----------------------------------------------------------------------------
+# VibeVoice-ASR (Experimental, In-Process Backend)
+# ----------------------------------------------------------------------------
+vibevoice_asr:
+    # Expected audio sample rate for VibeVoice-ASR inputs.
+    # The backend will resample TranscriptionSuite's 16kHz audio to this rate.
+    target_sample_rate_hz: 24000
+
+    # Upstream docs currently use Qwen 2.5 7B as the language model companion.
+    language_model_pretrained_name: "Qwen/Qwen2.5-7B"
+
+    # Generation settings (conservative defaults).
+    attn_implementation: "eager"
+    max_new_tokens: 4096
 
 # ----------------------------------------------------------------------------
 # Live Mode (RealtimeSTT) Configuration

@@ -8,6 +8,7 @@ import re
 
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
+_VIBEVOICE_ASR_PATTERN = re.compile(r"^microsoft/vibevoice-asr$", re.IGNORECASE)
 
 
 def normalize_model_name(model_name: str | None) -> str:
@@ -32,6 +33,10 @@ def supports_english_translation(model_name: str | None) -> bool:
     # NVIDIA Canary models support X↔English translation.
     if _CANARY_PATTERN.match(name):
         return True
+
+    # VibeVoice-ASR is ASR + diarization only (no translation support in v1 integration).
+    if _VIBEVOICE_ASR_PATTERN.match(name):
+        return False
 
     # Whisper turbo is not intended for translation.
     if "turbo" in name:

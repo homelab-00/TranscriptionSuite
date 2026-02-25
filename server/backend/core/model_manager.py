@@ -181,6 +181,8 @@ class ModelManager:
         self._nemo_feature_available: bool = False
         self._nemo_feature_reason: str = "not_requested"
         self._nemo_import_thread: threading.Thread | None = None
+        self._vibevoice_asr_feature_available: bool = False
+        self._vibevoice_asr_feature_reason: str = "not_requested"
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -196,6 +198,7 @@ class ModelManager:
         # Initialize feature status from bootstrap output if available.
         self._initialize_diarization_feature_status()
         self._initialize_nemo_feature_status()
+        self._initialize_vibevoice_asr_feature_status()
 
         # Fix 3: Start background NeMo import if NeMo models will be used
         self._start_background_nemo_import()
@@ -257,6 +260,38 @@ class ModelManager:
 
         self._nemo_feature_available = False
         self._nemo_feature_reason = "not_requested"
+
+    def _initialize_vibevoice_asr_feature_status(self) -> None:
+        """Initialize VibeVoice-ASR feature availability from bootstrap state/env."""
+        status_file = os.environ.get("BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json")
+        try:
+            import json
+            from pathlib import Path
+
+            path = Path(status_file)
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                vibevoice = payload.get("features", {}).get("vibevoice_asr", {})
+                available = bool(vibevoice.get("available", False))
+                reason = str(vibevoice.get("reason", "not_requested") or "not_requested")
+                self._vibevoice_asr_feature_available = available
+                self._vibevoice_asr_feature_reason = reason
+                logger.info(
+                    "Loaded VibeVoice-ASR feature status from bootstrap: "
+                    f"available={available}, reason={reason}"
+                )
+                return
+        except Exception as e:
+            logger.debug(f"Could not load VibeVoice-ASR feature status from bootstrap: {e}")
+
+        install_requested = os.environ.get("INSTALL_VIBEVOICE_ASR", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self._vibevoice_asr_feature_available = False
+        self._vibevoice_asr_feature_reason = "requested" if install_requested else "not_requested"
 
     def _start_background_nemo_import(self) -> None:
         """Fix 3: Start background NeMo import to reduce startup latency.
@@ -349,7 +384,13 @@ class ModelManager:
         def normalize(name: str) -> str:
             name = name.lower().strip()
             # Remove common prefixes
-            for prefix in ["systran/", "faster-whisper-", "openai/whisper-", "nvidia/"]:
+            for prefix in [
+                "systran/",
+                "faster-whisper-",
+                "openai/whisper-",
+                "nvidia/",
+                "microsoft/",
+            ]:
                 if name.startswith(prefix):
                     name = name[len(prefix) :]
             return name
@@ -621,6 +662,10 @@ class ModelManager:
                 "nemo": {
                     "available": self._nemo_feature_available,
                     "reason": self._nemo_feature_reason,
+                },
+                "vibevoice_asr": {
+                    "available": self._vibevoice_asr_feature_available,
+                    "reason": self._vibevoice_asr_feature_reason,
                 },
             },
         }
