@@ -16,6 +16,7 @@ import logging
 import os
 import threading
 import uuid
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,19 @@ if TYPE_CHECKING:
     from server.core.stt.engine import AudioToTextRecorder
 
 logger = logging.getLogger(__name__)
+
+# Process-global filter: PyAnnote 4.x emits a noisy warning when TorchCodec is
+# present but incompatible with the current Torch/FFmpeg runtime. We pass
+# in-memory audio arrays everywhere, so the decoder warning is non-fatal.
+# Install early at model_manager level to catch the warning during model init.
+_PYANNOTE_TORCHCODEC_WARNING_RE = (
+    r"torchcodec is not installed correctly so built-in audio decoding will fail\..*"
+)
+warnings.filterwarnings(
+    "ignore",
+    message=_PYANNOTE_TORCHCODEC_WARNING_RE,
+    category=UserWarning,
+)
 
 
 class TranscriptionCancelledError(Exception):
