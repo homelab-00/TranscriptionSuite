@@ -35,6 +35,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
   - [6.3 CPU Mode](#63-cpu-mode)
   - [6.4 Tailscale HTTPS Setup](#64-tailscale-https-setup)
+    - [6.4.1 LAN HTTPS Setup (No Tailscale)](#641-lan-https-setup-no-tailscale)
   - [6.5 Docker Volume Structure](#65-docker-volume-structure)
   - [6.6 Docker Image Selection](#66-docker-image-selection)
   - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
@@ -636,6 +637,10 @@ docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-
 The Electron dashboard selects the correct compose file stack automatically based on the detected platform and the user's runtime profile setting.
 
 The `start-local.sh` / `start-remote.sh` convenience scripts default to Linux + GPU mode.
+For script-based remote starts, `REMOTE_TLS_PROFILE` selects which TLS cert paths are read from `server/config.yaml`:
+
+- `tailscale` (default) -> `remote_server.tls.host_cert_path` / `host_key_path`
+- `lan` -> `remote_server.tls.lan_host_cert_path` / `lan_host_key_path`
 
 ### 6.2 Local vs Remote Mode
 
@@ -643,10 +648,16 @@ The `start-local.sh` / `start-remote.sh` convenience scripts default to Linux + 
 # Local mode (Linux + GPU, default)
 docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 
-# Remote mode with HTTPS (Linux + GPU)
+# Remote mode with HTTPS (Linux + GPU, Tailscale cert profile)
 TLS_ENABLED=true \
 TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
 TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+
+# Remote mode with HTTPS (Linux + GPU, LAN cert profile)
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/.config/TranscriptionSuite/lan-server.crt \
+TLS_KEY_PATH=~/.config/TranscriptionSuite/lan-server.key \
 docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 ```
 
@@ -703,6 +714,36 @@ to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
    TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
    docker compose up -d
    ```
+
+### 6.4.1 LAN HTTPS Setup (No Tailscale)
+
+For LAN-only deployments, use a locally trusted TLS certificate and keep `TLS_ENABLED=true`
+so the existing token-authenticated remote mode remains enabled.
+
+**Default LAN certificate paths in `server/config.yaml`:**
+- `remote_server.tls.lan_host_cert_path`
+- `remote_server.tls.lan_host_key_path`
+
+**Convenience scripts**
+
+Linux/macOS shell:
+```bash
+REMOTE_TLS_PROFILE=lan ./start-remote.sh
+```
+
+Windows PowerShell:
+```powershell
+$env:REMOTE_TLS_PROFILE = "lan"
+.\start-remote.ps1
+```
+
+**Dashboard (Client tab)**
+- Enable `Use remote server instead of local`
+- Set `Remote Profile` to `LAN`
+- Enter `LAN Host / IP`
+- Keep port `8443`
+- HTTPS is required (enforced by the UI)
+- Provide auth token
 
 ### 6.5 Docker Volume Structure
 
@@ -1318,11 +1359,13 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `connection.localHost` | `localhost` | Local server hostname |
-| `connection.remoteHost` | `""` | Remote server hostname (no protocol/port) |
+| `connection.remoteHost` | `""` | Tailscale remote hostname (no protocol/port) |
+| `connection.lanHost` | `""` | LAN remote hostname/IP (no protocol/port) |
+| `connection.remoteProfile` | `tailscale` | Remote profile selector: `tailscale` or `lan` |
 | `connection.useRemote` | `false` | Use remote host instead of local |
 | `connection.authToken` | `""` | Authentication token |
 | `connection.port` | `8000` | Server port |
-| `connection.useHttps` | `false` | Enable HTTPS (required for remote/Tailscale) |
+| `connection.useHttps` | `false` | Enable HTTPS (required for remote profiles; UI enforces this in remote mode) |
 | `audio.gracePeriod` | `0.5` | Seconds of silence before finalising a recording chunk |
 | `diarization.constrainSpeakers` | `false` | Constrain speaker count for diarization |
 | `diarization.numSpeakers` | `2` | Number of speakers when constrained |

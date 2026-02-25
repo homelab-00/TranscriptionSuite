@@ -313,7 +313,7 @@ local_llm:
 # ----------------------------------------------------------------------------
 # Settings for the web-based remote transcription server.
 # This allows clients on other devices to transcribe audio via a web browser
-# interface over a Tailscale VPN.
+# interface (for example Tailscale or a trusted local network).
 # These paths are Docker container paths by default.
 remote_server:
     # Enable the remote server mode
@@ -344,9 +344,17 @@ remote_server:
         # These are paths on YOUR machine, not inside the Docker container.
         # The docker server startup scripts read these and mount them into
         # the container.
+        #
+        # Tailscale profile defaults (REMOTE_TLS_PROFILE=tailscale or unset)
         # Windows: ~/Documents/Tailscale/my-machine.crt
         host_cert_path: "~/.config/Tailscale/my-machine.crt"
         host_key_path: "~/.config/Tailscale/my-machine.key"
+
+        # LAN profile defaults (REMOTE_TLS_PROFILE=lan)
+        # Use a locally trusted certificate (internal CA, self-managed cert, etc.)
+        # Windows example: ~/Documents/TranscriptionSuite/lan-server.crt
+        lan_host_cert_path: "~/.config/TranscriptionSuite/lan-server.crt"
+        lan_host_key_path: "~/.config/TranscriptionSuite/lan-server.key"
 
 # ----------------------------------------------------------------------------
 # Logging Configuration

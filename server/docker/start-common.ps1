@@ -19,6 +19,11 @@ if (-not $env:TAG) { throw 'TAG environment variable must be set' }
 $ContainerName = "transcriptionsuite-container"
 $HfDiarizationTermsUrl = "https://huggingface.co/pyannote/speaker-diarization-community-1"
 $script:PromptTimeOffsetSeconds = 0
+$RemoteTlsProfile = if ([string]::IsNullOrWhiteSpace($env:REMOTE_TLS_PROFILE)) {
+    "tailscale"
+} else {
+    $env:REMOTE_TLS_PROFILE.Trim().ToLowerInvariant()
+}
 
 # ============================================================================
 # Helper Functions
@@ -327,15 +332,45 @@ $EnvFileArg = @("--env-file", $EnvFile)
 
 $HostCertPath = ""
 $HostKeyPath = ""
+$RemoteTlsProfileReadable = "remote/TLS mode"
 
 # ============================================================================
 # Remote-mode TLS setup
 # ============================================================================
 if ($Mode -eq "remote") {
+    if ($RemoteTlsProfile -ne "tailscale" -and $RemoteTlsProfile -ne "lan") {
+        Write-ErrorMsg "Invalid REMOTE_TLS_PROFILE: $RemoteTlsProfile (expected: tailscale or lan)"
+        exit 1
+    }
+
     $configContent = Get-Content $ConfigFile -Raw
 
-    $certMatch = [regex]::Match($configContent, 'host_cert_path:\s*[''\"]?([^''"#\r\n]+)[''\"]?')
-    $keyMatch = [regex]::Match($configContent, 'host_key_path:\s*[''\"]?([^''"#\r\n]+)[''\"]?')
+    $certKeyName = "host_cert_path"
+    $keyKeyName = "host_key_path"
+    $profileLabel = "Tailscale"
+    $RemoteTlsProfileReadable = "remote/TLS mode (Tailscale profile)"
+    $certPathHint = "~/Documents/Tailscale/my-machine.crt"
+    $keyPathHint = "~/Documents/Tailscale/my-machine.key"
+    $guidanceLine1 = "See README_DEV.md for Tailscale certificate generation instructions."
+    $guidanceLine2 = "For Tailscale, generate certificates with:"
+    $guidanceLine3 = "  tailscale cert <your-machine>.tail<xxxx>.ts.net"
+
+    if ($RemoteTlsProfile -eq "lan") {
+        $certKeyName = "lan_host_cert_path"
+        $keyKeyName = "lan_host_key_path"
+        $profileLabel = "LAN"
+        $RemoteTlsProfileReadable = "remote/TLS mode (LAN profile)"
+        $certPathHint = "~/Documents/TranscriptionSuite/lan-server.crt"
+        $keyPathHint = "~/Documents/TranscriptionSuite/lan-server.key"
+        $guidanceLine1 = "Configure a locally trusted TLS certificate for your LAN hostname/IP."
+        $guidanceLine2 = "Update config.yaml with remote_server.tls.lan_host_cert_path and lan_host_key_path."
+        $guidanceLine3 = ""
+    }
+
+    $certPattern = "(?m)^\s*$([regex]::Escape($certKeyName)):\s*['""]?([^'""]+?)['""]?\s*(?:#.*)?$"
+    $keyPattern = "(?m)^\s*$([regex]::Escape($keyKeyName)):\s*['""]?([^'""]+?)['""]?\s*(?:#.*)?$"
+    $certMatch = [regex]::Match($configContent, $certPattern)
+    $keyMatch = [regex]::Match($configContent, $keyPattern)
 
     $HostCertPath = if ($certMatch.Success) { $certMatch.Groups[1].Value.Trim() } else { "" }
     $HostKeyPath = if ($keyMatch.Success) { $keyMatch.Groups[1].Value.Trim() } else { "" }
@@ -347,21 +382,21 @@ if ($Mode -eq "remote") {
     $HostKeyPath = $HostKeyPath -replace '/', '\\'
 
     if ([string]::IsNullOrWhiteSpace($HostCertPath)) {
-        Write-ErrorMsg "remote_server.tls.host_cert_path is not set in config.yaml"
+        Write-ErrorMsg "remote_server.tls.$certKeyName is not set in config.yaml"
         Write-Host ""
-        Write-Host "Please edit $ConfigFile and set the TLS certificate paths:"
+        Write-Host "Please edit $ConfigFile and set the TLS certificate paths for the $profileLabel profile:"
         Write-Host ""
         Write-Host "  remote_server:"
         Write-Host "    tls:"
-        Write-Host "      host_cert_path: `"~/Documents/Tailscale/my-machine.crt`""
-        Write-Host "      host_key_path: `"~/Documents/Tailscale/my-machine.key`""
+        Write-Host "      ${certKeyName}: `"$certPathHint`""
+        Write-Host "      ${keyKeyName}: `"$keyPathHint`""
         Write-Host ""
-        Write-Host "See README_DEV.md for Tailscale certificate generation instructions."
+        Write-Host $guidanceLine1
         exit 1
     }
 
     if ([string]::IsNullOrWhiteSpace($HostKeyPath)) {
-        Write-ErrorMsg "remote_server.tls.host_key_path is not set in config.yaml"
+        Write-ErrorMsg "remote_server.tls.$keyKeyName is not set in config.yaml"
         Write-Host ""
         Write-Host "Please edit $ConfigFile and set the TLS key path."
         exit 1
@@ -371,8 +406,10 @@ if ($Mode -eq "remote") {
         Write-ErrorMsg "Certificate file not found: $HostCertPath"
         Write-Host ""
         Write-Host "Please ensure the certificate file exists."
-        Write-Host "For Tailscale, generate certificates with:"
-        Write-Host "  tailscale cert <your-machine>.tail<xxxx>.ts.net"
+        Write-Host $guidanceLine2
+        if (-not [string]::IsNullOrWhiteSpace($guidanceLine3)) {
+            Write-Host $guidanceLine3
+        }
         exit 1
     }
 
@@ -385,6 +422,7 @@ if ($Mode -eq "remote") {
 
     Write-Info "Certificate: $HostCertPath"
     Write-Info "Key: $HostKeyPath"
+    Write-Info "Remote TLS profile: $RemoteTlsProfile"
 }
 
 # ============================================================================
@@ -430,7 +468,7 @@ if ($imageExists) {
 # Start Container
 # ============================================================================
 if ($Mode -eq "remote") {
-    Write-Status "Starting TranscriptionSuite server (remote/TLS mode)..."
+    Write-Status "Starting TranscriptionSuite server ($RemoteTlsProfileReadable)..."
     $env:TLS_ENABLED = "true"
     $env:TLS_CERT_PATH = $HostCertPath
     $env:TLS_KEY_PATH = $HostKeyPath
@@ -454,7 +492,7 @@ $composeOutput | Where-Object { $_ -notmatch "WARN\[0000\] No services to build"
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
 if ($Mode -eq "remote") {
-    Write-Host "  TranscriptionSuite Server Started (Remote/TLS Mode)" -ForegroundColor Cyan
+    Write-Host "  TranscriptionSuite Server Started ($RemoteTlsProfileReadable)" -ForegroundColor Cyan
 } else {
     Write-Host "  TranscriptionSuite Server Started (Local Mode)" -ForegroundColor Cyan
 }

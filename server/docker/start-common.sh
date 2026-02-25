@@ -19,6 +19,7 @@ DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server:${TAG:?TAG must be se
 CONTAINER_NAME="transcriptionsuite-container"
 HF_DIARIZATION_TERMS_URL="https://huggingface.co/pyannote/speaker-diarization-community-1"
 PROMPT_TIME_OFFSET_SECONDS=0
+REMOTE_TLS_PROFILE="${REMOTE_TLS_PROFILE:-tailscale}"
 
 # ============================================================================
 # Helper Functions
@@ -293,28 +294,56 @@ export USER_CONFIG_DIR="$CONFIG_DIR_TO_MOUNT"
 # Remote-mode TLS setup
 # ============================================================================
 if [[ "$MODE" == "remote" ]]; then
-    HOST_CERT_PATH="$(grep -E '^\s+host_cert_path:' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*host_cert_path:[[:space:]]*//' | tr -d '"' | tr -d "'" | tr -d ' ')"
-    HOST_KEY_PATH="$(grep -E '^\s+host_key_path:' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*host_key_path:[[:space:]]*//' | tr -d '"' | tr -d "'" | tr -d ' ')"
+    REMOTE_TLS_PROFILE="$(printf '%s' "$REMOTE_TLS_PROFILE" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$REMOTE_TLS_PROFILE" != "tailscale" && "$REMOTE_TLS_PROFILE" != "lan" ]]; then
+        print_error "Invalid REMOTE_TLS_PROFILE: $REMOTE_TLS_PROFILE (expected: tailscale or lan)"
+        exit 1
+    fi
+
+    local_cert_key_name="host_cert_path"
+    local_key_key_name="host_key_path"
+    profile_label="Tailscale"
+    profile_readable="remote/TLS mode (Tailscale profile)"
+    cert_path_hint="~/.config/Tailscale/my-machine.crt"
+    key_path_hint="~/.config/Tailscale/my-machine.key"
+    guidance_line_1="See README_DEV.md for Tailscale certificate generation instructions."
+    guidance_line_2="For Tailscale, generate certificates with:"
+    guidance_line_3="  sudo tailscale cert <your-machine>.tail<xxxx>.ts.net"
+
+    if [[ "$REMOTE_TLS_PROFILE" == "lan" ]]; then
+        local_cert_key_name="lan_host_cert_path"
+        local_key_key_name="lan_host_key_path"
+        profile_label="LAN"
+        profile_readable="remote/TLS mode (LAN profile)"
+        cert_path_hint="~/.config/TranscriptionSuite/lan-server.crt"
+        key_path_hint="~/.config/TranscriptionSuite/lan-server.key"
+        guidance_line_1="Configure a locally trusted TLS certificate for your LAN hostname/IP."
+        guidance_line_2="Update config.yaml with remote_server.tls.lan_host_cert_path and lan_host_key_path."
+        guidance_line_3=""
+    fi
+
+    HOST_CERT_PATH="$(grep -E "^[[:space:]]+${local_cert_key_name}:" "$CONFIG_FILE" 2>/dev/null | head -1 | sed "s/.*${local_cert_key_name}:[[:space:]]*//" | tr -d '"' | tr -d "'" | tr -d ' ')"
+    HOST_KEY_PATH="$(grep -E "^[[:space:]]+${local_key_key_name}:" "$CONFIG_FILE" 2>/dev/null | head -1 | sed "s/.*${local_key_key_name}:[[:space:]]*//" | tr -d '"' | tr -d "'" | tr -d ' ')"
 
     HOST_CERT_PATH="${HOST_CERT_PATH/#\~/$HOME}"
     HOST_KEY_PATH="${HOST_KEY_PATH/#\~/$HOME}"
 
     if [[ -z "$HOST_CERT_PATH" ]]; then
-        print_error "remote_server.tls.host_cert_path is not set in config.yaml"
+        print_error "remote_server.tls.${local_cert_key_name} is not set in config.yaml"
         echo ""
-        echo "Please edit $CONFIG_FILE and set the TLS certificate paths:"
+        echo "Please edit $CONFIG_FILE and set the TLS certificate paths for the ${profile_label} profile:"
         echo ""
         echo "  remote_server:"
         echo "    tls:"
-        echo "      host_cert_path: \"~/.config/Tailscale/my-machine.crt\""
-        echo "      host_key_path: \"~/.config/Tailscale/my-machine.key\""
+        echo "      ${local_cert_key_name}: \"${cert_path_hint}\""
+        echo "      ${local_key_key_name}: \"${key_path_hint}\""
         echo ""
-        echo "See README_DEV.md for Tailscale certificate generation instructions."
+        echo "$guidance_line_1"
         exit 1
     fi
 
     if [[ -z "$HOST_KEY_PATH" ]]; then
-        print_error "remote_server.tls.host_key_path is not set in config.yaml"
+        print_error "remote_server.tls.${local_key_key_name} is not set in config.yaml"
         echo ""
         echo "Please edit $CONFIG_FILE and set the TLS key path."
         exit 1
@@ -324,8 +353,10 @@ if [[ "$MODE" == "remote" ]]; then
         print_error "Certificate file not found: $HOST_CERT_PATH"
         echo ""
         echo "Please ensure the certificate file exists."
-        echo "For Tailscale, generate certificates with:"
-        echo "  sudo tailscale cert <your-machine>.tail<xxxx>.ts.net"
+        echo "$guidance_line_2"
+        if [[ -n "$guidance_line_3" ]]; then
+            echo "$guidance_line_3"
+        fi
         exit 1
     fi
 
@@ -338,6 +369,7 @@ if [[ "$MODE" == "remote" ]]; then
 
     print_info "Certificate: $HOST_CERT_PATH"
     print_info "Key: $HOST_KEY_PATH"
+    print_info "Remote TLS profile: $REMOTE_TLS_PROFILE"
 fi
 
 # ============================================================================
@@ -355,7 +387,7 @@ fi
 # Start Container
 # ============================================================================
 if [[ "$MODE" == "remote" ]]; then
-    print_status "Starting TranscriptionSuite server (remote/TLS mode)..."
+    print_status "Starting TranscriptionSuite server (${profile_readable:-remote/TLS mode})..."
     export TLS_ENABLED=true
     export TLS_CERT_PATH="$HOST_CERT_PATH"
     export TLS_KEY_PATH="$HOST_KEY_PATH"
@@ -381,7 +413,7 @@ echo "$compose_output" | grep -v "WARN\[0000\] No services to build" || true
 if [[ "$MODE" == "remote" ]]; then
     echo ""
     echo "=========================================================="
-    echo "  TranscriptionSuite Server Started (Remote/TLS Mode)"
+    echo "  TranscriptionSuite Server Started (${profile_readable:-Remote/TLS Mode})"
     echo "=========================================================="
     echo ""
     echo "  HTTPS URL:   https://localhost:8443"

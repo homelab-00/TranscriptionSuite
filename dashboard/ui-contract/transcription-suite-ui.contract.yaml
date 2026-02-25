@@ -617,6 +617,7 @@ utility_allowlist:
     - mb-8
     - md:grid-cols-2
     - md:grid-cols-4
+    - md:items-end
     - min-h-0
     - min-h-32
     - min-h-50
@@ -786,6 +787,7 @@ utility_allowlist:
     - text-accent-cyan
     - text-accent-magenta
     - text-accent-orange
+    - text-amber-300/80
     - text-amber-400
     - text-base
     - text-black
@@ -891,6 +893,7 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
+    - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[calc(100vh-30rem)]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]

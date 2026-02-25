@@ -42,6 +42,7 @@ const DEFAULT_SHORTCUTS = {
   startRecording: 'Alt+Ctrl+R',
   stopTranscribe: 'Alt+Ctrl+S',
 } as const;
+const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('App');
@@ -142,7 +143,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     runtimeProfile: 'gpu' as 'gpu' | 'cpu',
     pasteAtCursor: false,
   });
-  const [shortcutSettings, setShortcutSettings] = useState({
+  const [shortcutSettings, setShortcutSettings] = useState<{
+    startRecording: string;
+    stopTranscribe: string;
+  }>({
     startRecording: DEFAULT_SHORTCUTS.startRecording,
     stopTranscribe: DEFAULT_SHORTCUTS.stopTranscribe,
   });
@@ -158,6 +162,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     autoAddNotebook: true,
     localHost: 'http://localhost',
     remoteHost: '',
+    lanHost: '',
+    remoteProfile: 'tailscale',
     useRemote: false,
     authToken: 'sk-1234567890abcdef',
     port: 9000,
@@ -188,14 +194,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           .getAll()
           .then((cfg: Record<string, unknown>) => {
             if (cfg) {
+              const useRemote = (cfg['connection.useRemote'] as boolean) ?? false;
+              const useHttps = (cfg['connection.useHttps'] as boolean) ?? false;
               setClientSettings((prev) => ({
                 ...prev,
                 localHost: (cfg['connection.localHost'] as string) ?? prev.localHost,
                 remoteHost: (cfg['connection.remoteHost'] as string) ?? prev.remoteHost,
-                useRemote: (cfg['connection.useRemote'] as boolean) ?? prev.useRemote,
+                lanHost: (cfg['connection.lanHost'] as string) ?? prev.lanHost,
+                remoteProfile:
+                  (cfg['connection.remoteProfile'] as string) === 'lan' ? 'lan' : 'tailscale',
+                useRemote,
                 authToken: (cfg['connection.authToken'] as string) ?? prev.authToken,
                 port: (cfg['connection.port'] as number) ?? prev.port,
-                useHttps: (cfg['connection.useHttps'] as boolean) ?? prev.useHttps,
+                useHttps: useRemote ? true : useHttps,
                 gracePeriod: (cfg['audio.gracePeriod'] as number) ?? prev.gracePeriod,
                 constrainSpeakers:
                   (cfg['diarization.constrainSpeakers'] as boolean) ?? prev.constrainSpeakers,
@@ -253,14 +264,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleSave = useCallback(async () => {
     const api = (window as any).electronAPI;
+    const normalizedRemoteProfile = clientSettings.remoteProfile === 'lan' ? 'lan' : 'tailscale';
+    const normalizedLocalHost = clientSettings.localHost.trim();
+    const normalizedRemoteHost = clientSettings.remoteHost.trim();
+    const normalizedLanHost = clientSettings.lanHost.trim();
+    const normalizedUseHttps = clientSettings.useRemote ? true : clientSettings.useHttps;
+
+    if (clientSettings.useRemote && normalizedRemoteProfile === 'lan' && !normalizedLanHost) {
+      toast.error('LAN remote mode requires a host or IP address.');
+      return;
+    }
+
     if (api?.config) {
       const entries: [string, unknown][] = [
-        ['connection.localHost', clientSettings.localHost],
-        ['connection.remoteHost', clientSettings.remoteHost],
+        ['connection.localHost', normalizedLocalHost || clientSettings.localHost],
+        ['connection.remoteHost', normalizedRemoteHost],
+        ['connection.lanHost', normalizedLanHost],
+        ['connection.remoteProfile', normalizedRemoteProfile],
         ['connection.useRemote', clientSettings.useRemote],
         ['connection.authToken', clientSettings.authToken],
         ['connection.port', clientSettings.port],
-        ['connection.useHttps', clientSettings.useHttps],
+        ['connection.useHttps', normalizedUseHttps],
         ['audio.gracePeriod', clientSettings.gracePeriod],
         ['diarization.constrainSpeakers', clientSettings.constrainSpeakers],
         ['diarization.numSpeakers', clientSettings.numSpeakers],
@@ -684,14 +708,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
             <div className={!clientSettings.useRemote ? 'opacity-50' : ''}>
               <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                Remote Host
+                {clientSettings.remoteProfile === 'lan' ? 'LAN Host / IP' : 'Tailscale Host'}
               </label>
               <input
                 type="text"
-                placeholder="e.g. my-server.tail123.ts.net"
-                value={clientSettings.remoteHost}
+                placeholder={
+                  clientSettings.remoteProfile === 'lan'
+                    ? 'e.g. 192.168.1.50 or k8s-gpu.local'
+                    : 'e.g. my-server.tail123.ts.net'
+                }
+                value={
+                  clientSettings.remoteProfile === 'lan'
+                    ? clientSettings.lanHost
+                    : clientSettings.remoteHost
+                }
                 onChange={(e) =>
-                  setClientSettings((prev) => ({ ...prev, remoteHost: e.target.value }))
+                  setClientSettings((prev) =>
+                    prev.remoteProfile === 'lan'
+                      ? { ...prev, lanHost: e.target.value }
+                      : { ...prev, remoteHost: e.target.value },
+                  )
                 }
                 disabled={!clientSettings.useRemote}
                 className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
@@ -701,9 +737,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           <AppleSwitch
             checked={clientSettings.useRemote}
-            onChange={(v) => setClientSettings((prev) => ({ ...prev, useRemote: v }))}
+            onChange={(v) =>
+              setClientSettings((prev) => ({
+                ...prev,
+                useRemote: v,
+                useHttps: v ? true : prev.useHttps,
+              }))
+            }
             label="Use remote server instead of local"
           />
+
+          {clientSettings.useRemote && (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:items-end">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+                    Remote Profile
+                  </label>
+                  <CustomSelect
+                    value={clientSettings.remoteProfile === 'lan' ? 'LAN' : 'Tailscale'}
+                    onChange={(value) =>
+                      setClientSettings((prev) => ({
+                        ...prev,
+                        remoteProfile: value === 'LAN' ? 'lan' : 'tailscale',
+                        useHttps: true,
+                      }))
+                    }
+                    options={[...REMOTE_PROFILE_OPTIONS]}
+                    className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white"
+                  />
+                </div>
+                <p className="text-xs text-slate-400">
+                  {clientSettings.remoteProfile === 'lan'
+                    ? 'LAN mode uses the same HTTPS + token auth as remote mode, but targets a local-network host/IP instead of a Tailnet DNS name.'
+                    : 'Tailscale mode uses your Tailnet hostname and the existing HTTPS + token auth flow.'}
+                </p>
+              </div>
+              {clientSettings.remoteProfile === 'lan' && !clientSettings.lanHost.trim() && (
+                <p className="mt-2 text-xs text-amber-300/80">
+                  Enter a LAN host or IP before saving this profile.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="my-2 h-px bg-white/5"></div>
 
@@ -935,12 +1011,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
             <div className="pb-1">
               <AppleSwitch
-                checked={clientSettings.useHttps}
+                checked={clientSettings.useRemote ? true : clientSettings.useHttps}
                 onChange={(v) => setClientSettings((prev) => ({ ...prev, useHttps: v }))}
+                disabled={clientSettings.useRemote}
                 label="Use HTTPS"
               />
             </div>
           </div>
+          {clientSettings.useRemote && (
+            <p className="text-xs text-slate-500">
+              HTTPS is required for remote profiles (Tailscale and LAN) to keep token auth enabled.
+            </p>
+          )}
         </div>
       </Section>
     </div>

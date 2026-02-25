@@ -17,6 +17,8 @@ export interface ClientConfig {
   connection: {
     localHost: string;
     remoteHost: string;
+    lanHost: string;
+    remoteProfile: 'tailscale' | 'lan';
     useRemote: boolean;
     authToken: string;
     port: number;
@@ -74,6 +76,8 @@ const DEFAULT_CONFIG: ClientConfig = {
   connection: {
     localHost: 'localhost',
     remoteHost: '',
+    lanHost: '',
+    remoteProfile: 'tailscale',
     useRemote: false,
     authToken: '',
     port: 8000,
@@ -155,11 +159,21 @@ export async function setConfig(key: string, value: unknown): Promise<void> {
  */
 export async function getServerBaseUrl(): Promise<string> {
   const useRemote = (await getConfig<boolean>('connection.useRemote')) ?? false;
+  const remoteProfile =
+    (await getConfig<'tailscale' | 'lan'>('connection.remoteProfile')) ??
+    DEFAULT_CONFIG.connection.remoteProfile;
+  const remoteHost = ((await getConfig<string>('connection.remoteHost')) ?? '').trim();
+  const lanHost = ((await getConfig<string>('connection.lanHost')) ?? '').trim();
+  const localHost =
+    (await getConfig<string>('connection.localHost')) ??
+    (await getConfig<string>('server.host')) ??
+    DEFAULT_CONFIG.server.host;
+
   const host = useRemote
-    ? (await getConfig<string>('connection.remoteHost')) || DEFAULT_CONFIG.connection.localHost
-    : ((await getConfig<string>('connection.localHost')) ??
-      (await getConfig<string>('server.host')) ??
-      DEFAULT_CONFIG.server.host);
+    ? remoteProfile === 'lan'
+      ? lanHost
+      : remoteHost || DEFAULT_CONFIG.connection.localHost
+    : localHost;
   const port =
     (await getConfig<number>('connection.port')) ??
     (await getConfig<number>('server.port')) ??

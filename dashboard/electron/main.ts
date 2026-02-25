@@ -84,6 +84,8 @@ const store = new Store({
   defaults: {
     'connection.localHost': 'localhost',
     'connection.remoteHost': '',
+    'connection.lanHost': '',
+    'connection.remoteProfile': 'tailscale',
     'connection.useRemote': false,
     'connection.authToken': '',
     'connection.port': 8000,

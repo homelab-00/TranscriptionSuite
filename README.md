@@ -63,8 +63,10 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
   - [5.1 Quick Start](#51-quick-start)
   - [5.2 Dashboard Views](#52-dashboard-views)
 - [6. Remote Access](#6-remote-access)
+  - [6.0 Choose a Remote Profile in the App](#60-choose-a-remote-profile-in-the-app)
   - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
   - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
+  - [6.3 LAN Remote Mode (No Tailscale)](#63-lan-remote-mode-no-tailscale)
 - [7. Database & Backups](#7-database--backups)
 - [8. Troubleshooting](#8-troubleshooting)
   - [8.1 Server Won't Start](#81-server-wont-start)
@@ -89,7 +91,7 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 - **Speaker Diarization**: PyAnnote-based speaker identification
 - **Static File Transcription**: Transcribe existing audio/video files with multi-file import queue, retry, and progress tracking
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
-  (utilizing Tailscale)
+  (via Tailscale or a trusted local network with HTTPS + token auth)
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
 - **LM Studio compatibility note**: The app uses a mix of OpenAI-style LM Studio endpoints (for normal chat completions) and LM Studio-specific endpoints (for model load/unload and saved chat sessions). In short: basic generation is OpenAI-compatible, but some LM Studio features require LM Studio itself.
@@ -205,12 +207,15 @@ modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
   - Restore from any backup (creates safety backup first)
 * **Client tab**: Configure connection mode:
   * **Local**: Use default settings (localhost:8000)
-  * **Remote**: See [Section 6: Remote Access](#6-remote-access) to set up Tailscale first.
+  * **Remote**: See [Section 6: Remote Access](#6-remote-access) to choose **Tailscale** or **LAN** mode.
     Then configure:
-    - Enter your Tailscale hostname in 'Remote Host' (e.g., `my-machine.tail1234.ts.net`)
     - Enable 'Use remote server instead of local'
+    - Choose **Remote Profile**: `Tailscale` or `LAN`
+    - Enter the matching host:
+      - `Tailscale`: Tailnet hostname (e.g., `my-machine.tail1234.ts.net`)
+      - `LAN`: Local hostname/IP (e.g., `k8s-gpu.local` or `192.168.1.50`)
     - Set port to 8443
-    - Enable 'Use HTTPS'
+    - HTTPS is required for remote profiles (automatically enforced in the UI)
     - Enter auth token (obtained after first server start)
 
 *Settings are saved to:*
@@ -298,16 +303,32 @@ image updates (GHCR). Configurable interval in Settings.
 
 ## 6. Remote Access
 
-As previously mentioned, TranscriptionSuite gives you the ability to remote connect from
-one machine running the app to another, via Tailscale.
+TranscriptionSuite supports remote connection from one machine running the app to another
+using either:
+
+- **Tailscale** (Tailnet hostname + Tailscale-issued TLS certs)
+- **LAN** (local hostname/IP + your own trusted TLS certificate)
 
 It uses a **layered security model** for remote access:
 
 | Layer | Protection |
 |-------|------------|
-| **Tailscale Network** | Only devices on your Tailnet can reach the server |
-| **TLS/HTTPS** | All traffic encrypted with Tailscale certificates |
+| **Network Reachability** | Tailscale Tailnet or your trusted local network |
+| **TLS/HTTPS** | All traffic encrypted (Tailscale certs or your own trusted cert) |
 | **Token Authentication** | Required for all API requests in remote mode |
+
+### 6.0 Choose a Remote Profile in the App
+
+In **Settings → Client → Connection**:
+
+1. Enable **Use remote server instead of local**
+2. Choose **Remote Profile**:
+   - **Tailscale**: Enter a `.ts.net` hostname in the host field
+   - **LAN**: Enter a LAN hostname/IP (for example `192.168.1.50`)
+3. Set port to `8443`
+4. Enter the auth token from the server
+
+The app will use HTTPS + token auth for both profiles.
 
 ### 6.1 Step 1: Set Up Tailscale
 
@@ -355,6 +376,31 @@ For Windows, you also need to edit a couple of lines in `config.yaml`:
 
 **Note:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, so MagicDNS
 must be enabled in your Tailnet.
+
+### 6.3 LAN Remote Mode (No Tailscale)
+
+Use this when your laptop and server are on the same trusted local network and you do not
+want to use Tailscale.
+
+Requirements:
+
+1. A **trusted TLS certificate** for the server hostname/IP you will use
+2. The server started in **TLS mode** (`HTTPS` on port `8443`)
+3. An auth token from the server (generated on first startup)
+
+Dashboard setup (Client tab):
+
+- Enable **Use remote server instead of local**
+- Set **Remote Profile** to **LAN**
+- Enter your LAN hostname/IP (e.g. `k8s-gpu.local` or `192.168.1.50`)
+- Set port to `8443`
+- Paste the auth token
+
+Notes:
+
+- LAN mode still uses the same HTTPS + token authentication flow as Tailscale mode.
+- Your load balancer / ingress must support WebSocket upgrades for `/ws` and `/ws/live`.
+- The TLS certificate must be trusted by the laptop running the app.
 
 ---
 

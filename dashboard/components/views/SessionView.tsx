@@ -405,10 +405,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
   }, [serverConnection]);
 
   const handleStartClientRemote = useCallback(async () => {
+    const remoteProfile =
+      (await getConfig<'tailscale' | 'lan'>('connection.remoteProfile')) ?? 'tailscale';
     await setConfig('connection.useRemote', true);
+    await setConfig('connection.useHttps', true);
     await apiClient.syncFromConfig();
     setClientRunning(true);
-    logClientEvent('Client', 'Configured remote connection');
+    logClientEvent(
+      'Client',
+      `Configured remote connection (${remoteProfile === 'lan' ? 'LAN' : 'Tailscale'})`,
+    );
     serverConnection.refresh();
   }, [serverConnection]);
 
