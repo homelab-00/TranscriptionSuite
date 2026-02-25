@@ -32,7 +32,7 @@ import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
 import { useImportQueue } from '../../src/hooks/useImportQueue';
-import type { ImportJob } from '../../src/hooks/useImportQueue';
+import type { ImportJob, UseImportQueueReturn } from '../../src/hooks/useImportQueue';
 import { apiClient } from '../../src/api/client';
 import type { Recording } from '../../src/api/types';
 import { toast } from 'sonner';
@@ -70,6 +70,20 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
     setCalendarRefreshNonce((prev) => prev + 1);
   }, []);
 
+  const importQueue = useImportQueue({
+    onJobSuccess: () => {
+      bumpCalendarRefresh();
+    },
+    onJobError: (job, error) => {
+      toast.error(`Import failed for ${job.file.name}: ${error}`);
+    },
+  });
+
+  useEffect(() => {
+    onUploadingChange?.(importQueue.isProcessing || importQueue.pendingCount > 0);
+    return () => onUploadingChange?.(false);
+  }, [importQueue.isProcessing, importQueue.pendingCount, onUploadingChange]);
+
   const renderContent = () => {
     switch (activeTab) {
       case NotebookTab.CALENDAR:
@@ -83,7 +97,7 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
       case NotebookTab.SEARCH:
         return <SearchTab onNoteClick={handleNoteClick} />;
       case NotebookTab.IMPORT:
-        return <ImportTab onUploadingChange={onUploadingChange} />;
+        return <ImportTab queue={importQueue} />;
     }
   };
 
@@ -131,7 +145,7 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
         onClose={() => setIsAddModalOpen(false)}
         initialTime={selectedTimeSlot}
         initialDate={selectedDateSlot}
-        onCreated={bumpCalendarRefresh}
+        queue={importQueue}
       />
     </div>
   );
@@ -1208,18 +1222,11 @@ const SearchTab: React.FC<{ onNoteClick: (note: any) => void }> = ({ onNoteClick
   );
 };
 
-const ImportTab = ({ onUploadingChange }: { onUploadingChange?: (uploading: boolean) => void }) => {
+const ImportTab = ({ queue }: { queue: UseImportQueueReturn }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diarization, setDiarization] = useState(true);
   const [wordTimestamps, setWordTimestamps] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const queue = useImportQueue();
-
-  // Report upload/import activity to parent for tray icon sync
-  useEffect(() => {
-    onUploadingChange?.(queue.isProcessing || queue.pendingCount > 0);
-    return () => onUploadingChange?.(false);
-  }, [queue.isProcessing, queue.pendingCount, onUploadingChange]);
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {

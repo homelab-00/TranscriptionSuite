@@ -16,6 +16,8 @@ export interface ImportJob {
   id: string;
   /** Original file */
   file: File;
+  /** Upload/transcription options captured when the job was queued */
+  options?: TranscriptionUploadOptions;
   /** Current status */
   status: ImportJobStatus;
   /** Result on success */
@@ -47,16 +49,24 @@ export interface UseImportQueueReturn {
   errorCount: number;
 }
 
+interface UseImportQueueConfig {
+  /** Called when a queued upload completes successfully */
+  onJobSuccess?: (job: ImportJob, result: UploadResponse) => void;
+  /** Called when a queued upload fails */
+  onJobError?: (job: ImportJob, error: string) => void;
+}
+
 let jobIdCounter = 0;
 function nextJobId(): string {
   return `import-${Date.now()}-${++jobIdCounter}`;
 }
 
-export function useImportQueue(): UseImportQueueReturn {
+export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueReturn {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const processingRef = useRef(false);
-  const optionsRef = useRef<TranscriptionUploadOptions | undefined>(undefined);
   const abortRef = useRef(false);
+  const callbacksRef = useRef<UseImportQueueConfig | undefined>(config);
+  callbacksRef.current = config;
 
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
@@ -80,12 +90,14 @@ export function useImportQueue(): UseImportQueueReturn {
       if (!nextJob) break;
       const jobId = nextJob.id;
       const file = nextJob.file;
+      const jobOptions = nextJob.options;
 
       try {
-        const result = await apiClient.uploadAndTranscribe(file, optionsRef.current);
+        const result = await apiClient.uploadAndTranscribe(file, jobOptions);
         setJobs((prev) =>
           prev.map((j) => (j.id === jobId ? { ...j, status: 'success' as const, result } : j)),
         );
+        callbacksRef.current?.onJobSuccess?.(nextJob, result);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Upload failed';
         setJobs((prev) =>
@@ -93,6 +105,7 @@ export function useImportQueue(): UseImportQueueReturn {
             j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
           ),
         );
+        callbacksRef.current?.onJobError?.(nextJob, errorMsg);
       }
 
       // Small delay between jobs to let the server breathe
@@ -104,10 +117,11 @@ export function useImportQueue(): UseImportQueueReturn {
 
   const addFiles = useCallback(
     (files: File[], options?: TranscriptionUploadOptions) => {
-      optionsRef.current = options;
+      const capturedOptions = options ? { ...options } : undefined;
       const newJobs: ImportJob[] = files.map((file) => ({
         id: nextJobId(),
         file,
+        options: capturedOptions,
         status: 'pending' as const,
       }));
       setJobs((prev) => [...prev, ...newJobs]);

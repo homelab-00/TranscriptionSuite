@@ -4,14 +4,15 @@ import { X, Upload, FileAudio, Calendar, Trash2, Info } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { GlassCard } from '../ui/GlassCard';
-import { apiClient } from '../../src/api/client';
+import type { UseImportQueueReturn } from '../../src/hooks/useImportQueue';
+import { toast } from 'sonner';
 
 interface AddNoteModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTime?: number; // e.g. 10 for 10:00
   initialDate?: string; // e.g. 2026-02-17
-  onCreated?: () => void;
+  queue: Pick<UseImportQueueReturn, 'addFiles'>;
 }
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -27,7 +28,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   onClose,
   initialTime,
   initialDate,
-  onCreated,
+  queue,
 }) => {
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -101,17 +102,20 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
         fileCreatedAt = buildLocalSlotTimestamp(selectedDateKey, initialTime);
       }
 
-      for (const file of selectedFiles) {
-        await apiClient.uploadAndTranscribe(file, {
-          enable_diarization: isDiarizationEnabled,
-          enable_word_timestamps: isTimestampsEnabled,
-          file_created_at: fileCreatedAt,
-          title: title.trim() || undefined,
-        });
-      }
-      // Success — reset and close
+      queue.addFiles(selectedFiles, {
+        enable_diarization: isDiarizationEnabled,
+        enable_word_timestamps: isTimestampsEnabled,
+        file_created_at: fileCreatedAt,
+        title: title.trim() || undefined,
+      });
+
+      toast.success(
+        `Queued ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} for import`,
+      );
+
+      // Queueing is immediate; close the modal and let the shared import queue
+      // process uploads in the background.
       setSelectedFiles([]);
-      onCreated?.();
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Upload failed. Is the server running?');
@@ -123,8 +127,8 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     isDiarizationEnabled,
     isTimestampsEnabled,
     initialTime,
-    onCreated,
     onClose,
+    queue,
     selectedDateKey,
     title,
   ]);
@@ -325,7 +329,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
             disabled={isSubmitting || selectedFiles.length === 0}
             icon={<FileAudio size={16} />}
           >
-            {isSubmitting ? 'Uploading...' : 'Create Note'}
+            {isSubmitting ? 'Queueing...' : 'Create Note'}
           </Button>
         </div>
       </div>
