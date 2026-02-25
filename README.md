@@ -92,6 +92,7 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
   (utilizing Tailscale)
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
   full-text search, and LM Studio integration (chat about your notes with the AI)
+- **LM Studio compatibility note**: The app uses a mix of OpenAI-style LM Studio endpoints (for normal chat completions) and LM Studio-specific endpoints (for model load/unload and saved chat sessions). In short: basic generation is OpenAI-compatible, but some LM Studio features require LM Studio itself.
 - **System Tray Control**: Quickly start/stop a recording, plus a lot of other controls, available via the system tray.
 
 📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*

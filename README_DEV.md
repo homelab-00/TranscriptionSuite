@@ -209,6 +209,8 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM
 - **LM Studio Integration**: Native v1 REST API support for LM Studio 0.4.0+ with stateful chat sessions and Docker-compatible model management
 
+  Compatibility note: this integration is only partially OpenAI API compatible. The transcription summarization paths use OpenAI-style endpoints (`/v1/chat/completions` and `/v1/models`), but model state and lifecycle management use LM Studio-specific endpoints (`/api/v0/models`, `/api/v1/models/load`, `/api/v1/models/unload`). The notebook chat flow also uses LM Studio's stateful `POST /api/v1/chat` with `response_id` tracking (`input`/`store` payload fields and `output`/`stats` response parsing), so that path will not work against a generic OpenAI-compatible server unless an adapter translates the request/response shape.
+
 ### 2.2 Platform Architectures
 
 | Platform | Architecture | UI Stack | Runtime Profile | Notes |
