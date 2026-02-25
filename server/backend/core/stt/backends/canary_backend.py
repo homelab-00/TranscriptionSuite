@@ -107,6 +107,12 @@ class CanaryBackend(ParakeetBackend):
         if task == "translate":
             # Use caller-specified target, defaulting to English.
             target_lang = (translation_target_language or "en").strip().lower()
+            if word_timestamps:
+                logger.info(
+                    "Canary translation (AST) only provides segment-level timestamps; "
+                    "word-level timestamps may be unavailable. Diarization speaker "
+                    "attribution will fall back to segment-level alignment."
+                )
         else:
             # Same source and target = pure transcription.
             target_lang = source_lang

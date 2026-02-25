@@ -1437,10 +1437,18 @@ def _insert_diarization_segments_with_words(
             int(seg["segment_id"]): [] for seg in inserted_segments
         }
 
+        # Jitter tolerance: inflate word intervals by ±40ms for overlap matching.
+        # Compensates for small ASR/diarization boundary mismatch.
+        _WORD_PADDING_S = 0.040
+
         for w in word_map:
             w_start = float(w.get("start", w.get("start_time", 0.0)) or 0.0)
             w_end = float(w.get("end", w.get("end_time", w_start)) or w_start)
             w_mid = (w_start + w_end) / 2.0
+
+            # Padded interval for overlap computation only
+            padded_start = w_start - _WORD_PADDING_S
+            padded_end = w_end + _WORD_PADDING_S
 
             best_segment_id: int | None = None
             best_overlap: float = 0.0
@@ -1450,7 +1458,7 @@ def _insert_diarization_segments_with_words(
                 seg_start = float(seg.get("start", 0.0))
                 seg_end = float(seg.get("end", 0.0))
 
-                overlap = max(0.0, min(w_end, seg_end) - max(w_start, seg_start))
+                overlap = max(0.0, min(padded_end, seg_end) - max(padded_start, seg_start))
                 if overlap > 0.0:
                     if overlap > best_overlap:
                         best_overlap = overlap
