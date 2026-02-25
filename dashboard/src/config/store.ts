@@ -107,8 +107,8 @@ const DEFAULT_CONFIG: ClientConfig = {
     pasteAtCursor: false,
   },
   shortcuts: {
-    startRecording: 'Alt+Shift+R',
-    stopTranscribe: 'Alt+Shift+S',
+    startRecording: 'Alt+Ctrl+R',
+    stopTranscribe: 'Alt+Ctrl+S',
   },
   ui: {
     sidebarCollapsed: false,

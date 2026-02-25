@@ -47,8 +47,8 @@ export function registerShortcuts(
     return;
   }
 
-  const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Shift+R';
-  const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Shift+S';
+  const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+R';
+  const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+S';
 
   const bindings: Array<{ accelerator: string; action: string }> = [
     { accelerator: startAccelerator, action: 'start-recording' },

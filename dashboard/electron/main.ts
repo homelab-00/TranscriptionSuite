@@ -114,8 +114,8 @@ const store = new Store({
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
     'server.runtimeProfile': 'gpu',
-    'shortcuts.startRecording': 'Alt+Shift+R',
-    'shortcuts.stopTranscribe': 'Alt+Shift+S',
+    'shortcuts.startRecording': 'Alt+Ctrl+R',
+    'shortcuts.stopTranscribe': 'Alt+Ctrl+S',
     'app.pasteAtCursor': false,
   },
 });
