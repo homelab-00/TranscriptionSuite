@@ -518,6 +518,11 @@ def test_main_reuses_cached_diarization_status_when_preload_key_matches(
         lambda **_: "cache-key-match",
     )
     monkeypatch.setattr(module, "check_diarization_access", fail_diarization_check)
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": False, "reason": "import_failed"},
+    )
     monkeypatch.setattr(module, "write_status_file", fake_write_status_file)
 
     monkeypatch.setenv("HF_TOKEN", "hf_test_token")
@@ -618,6 +623,11 @@ def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
         "check_diarization_access",
         lambda **_: {"available": True, "reason": "ready"},
     )
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": False, "reason": "import_failed"},
+    )
     monkeypatch.setattr(module, "run_command", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         module,
@@ -650,3 +660,87 @@ def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
     assert vibevoice["available"] is False  # type: ignore[index]
     assert vibevoice["reason"] == "import_failed"  # type: ignore[index]
     assert vibevoice["error"] == "legacy missing | modular missing"  # type: ignore[index]
+
+
+def test_main_reports_existing_optional_dependency_installs_without_install_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
+        diagnostics = {
+            "selection_reason": "marker_match_integrity_ok",
+            "escalated_to_rebuild": False,
+            "integrity": {"status": "pass"},
+        }
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    captured_status: dict[str, object] = {}
+
+    def fake_write_status_file(path: Path, payload: dict[str, object]) -> None:
+        captured_status["path"] = path
+        captured_status["payload"] = payload
+
+    install_calls: list[tuple[object, ...]] = []
+
+    def fake_run_command(*args: object, **kwargs: object) -> None:
+        del kwargs
+        install_calls.append(args)
+
+    monkeypatch.setattr(module, "ensure_runtime_dependencies", fake_ensure_runtime_dependencies)
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: ("Systran/faster-whisper-large-v3", module.DEFAULT_DIARIZATION_MODEL),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_diarization_preload_cache_key",
+        lambda **_: "existing-optional-feature-diar-key",
+    )
+    monkeypatch.setattr(
+        module,
+        "check_diarization_access",
+        lambda **_: {"available": True, "reason": "ready"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": True, "reason": "ready"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_vibevoice_asr_import",
+        lambda **_: {"available": True, "reason": "ready", "variant": "legacy"},
+    )
+    monkeypatch.setattr(module, "run_command", fake_run_command)
+    monkeypatch.setattr(module, "write_status_file", fake_write_status_file)
+
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.setenv("INSTALL_NEMO", "false")
+    monkeypatch.setenv("INSTALL_VIBEVOICE_ASR", "false")
+
+    rc = module.main()
+
+    assert rc == 0
+    assert install_calls == []
+    payload = captured_status.get("payload")
+    assert isinstance(payload, dict)
+    features = payload["features"]  # type: ignore[index]
+    nemo = features["nemo"]  # type: ignore[index]
+    vibevoice = features["vibevoice_asr"]  # type: ignore[index]
+    assert nemo["available"] is True  # type: ignore[index]
+    assert nemo["reason"] == "ready"  # type: ignore[index]
+    assert vibevoice["available"] is True  # type: ignore[index]
+    assert vibevoice["reason"] == "ready"  # type: ignore[index]
+    assert vibevoice["variant"] == "legacy"  # type: ignore[index]

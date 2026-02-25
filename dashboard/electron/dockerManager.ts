@@ -117,6 +117,17 @@ export interface VolumeInfo {
   size?: string;
 }
 
+export interface OptionalDependencyBootstrapFeatureStatus {
+  available: boolean;
+  reason?: string;
+}
+
+export interface OptionalDependencyBootstrapStatus {
+  source: 'runtime-volume-bootstrap-status';
+  nemo?: OptionalDependencyBootstrapFeatureStatus;
+  vibevoiceAsr?: OptionalDependencyBootstrapFeatureStatus;
+}
+
 interface DockerDfVolumeRow {
   Name?: string;
   Size?: string;
@@ -843,6 +854,68 @@ async function volumeExists(name: string): Promise<boolean> {
   }
 }
 
+function parseOptionalDependencyBootstrapFeature(
+  value: unknown,
+): OptionalDependencyBootstrapFeatureStatus | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.available !== 'boolean') return undefined;
+
+  const parsed: OptionalDependencyBootstrapFeatureStatus = {
+    available: record.available,
+  };
+  if (typeof record.reason === 'string') {
+    const reason = record.reason.trim();
+    if (reason) {
+      parsed.reason = reason;
+    }
+  }
+  return parsed;
+}
+
+/**
+ * Read persisted bootstrap feature status from the runtime volume when the host
+ * mountpoint is directly accessible (Linux Docker Engine / rootless Docker).
+ *
+ * On Docker Desktop (macOS/Windows) Docker may report a VM-internal mountpoint
+ * that is not host-readable; in that case this returns null and callers should
+ * fall back to prompt/config heuristics.
+ */
+async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependencyBootstrapStatus | null> {
+  try {
+    const mountpoint = await exec('docker', [
+      'volume',
+      'inspect',
+      '--format',
+      '{{.Mountpoint}}',
+      VOLUME_NAMES.runtime,
+    ]);
+    if (!mountpoint) return null;
+
+    const statusPath = path.join(mountpoint, 'bootstrap-status.json');
+    const parsed = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as {
+      features?: {
+        nemo?: unknown;
+        vibevoice_asr?: unknown;
+      };
+    };
+
+    const nemo = parseOptionalDependencyBootstrapFeature(parsed.features?.nemo);
+    const vibevoiceAsr = parseOptionalDependencyBootstrapFeature(parsed.features?.vibevoice_asr);
+    if (!nemo && !vibevoiceAsr) {
+      return null;
+    }
+
+    return {
+      source: 'runtime-volume-bootstrap-status',
+      ...(nemo ? { nemo } : {}),
+      ...(vibevoiceAsr ? { vibevoiceAsr } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ─── Log Streaming ──────────────────────────────────────────────────────────
 
 let logProcess: ChildProcess | null = null;
@@ -1043,6 +1116,7 @@ export const dockerManager = {
   removeVolume,
   readComposeEnvValue,
   volumeExists,
+  readOptionalDependencyBootstrapStatus,
   startLogStream,
   stopLogStream,
   getLogs,

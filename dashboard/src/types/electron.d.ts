@@ -87,6 +87,11 @@ interface ElectronAPI {
     removeVolume: (name: string) => Promise<string>;
     readComposeEnvValue: (key: string) => Promise<string | null>;
     volumeExists: (name: string) => Promise<boolean>;
+    readOptionalDependencyBootstrapStatus: () => Promise<{
+      source: 'runtime-volume-bootstrap-status';
+      nemo?: { available: boolean; reason?: string };
+      vibevoiceAsr?: { available: boolean; reason?: string };
+    } | null>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;

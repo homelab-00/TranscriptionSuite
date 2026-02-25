@@ -25,6 +25,11 @@ type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type OptionalInstallDecision = 'unset' | 'enabled' | 'skipped';
 type OptionalDependencyPromptMode = 'optional' | 'required';
+type OptionalDependencyBootstrapStatus = {
+  source: 'runtime-volume-bootstrap-status';
+  nemo?: { available: boolean; reason?: string };
+  vibevoiceAsr?: { available: boolean; reason?: string };
+} | null;
 
 const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
 const VIBEVOICE_ASR_MODEL = 'microsoft/VibeVoice-ASR';
@@ -252,6 +257,21 @@ const AppInner: React.FC = () => {
       try {
         const shouldRunPrompts = !docker.container.exists;
         const dockerApi = (window as any).electronAPI?.docker;
+        let optionalDependencyBootstrapStatusPromise: Promise<OptionalDependencyBootstrapStatus> | null =
+          null;
+
+        const getOptionalDependencyBootstrapStatus =
+          async (): Promise<OptionalDependencyBootstrapStatus> => {
+            if (!optionalDependencyBootstrapStatusPromise) {
+              optionalDependencyBootstrapStatusPromise =
+                dockerApi?.readOptionalDependencyBootstrapStatus
+                  ? (dockerApi
+                      .readOptionalDependencyBootstrapStatus()
+                      .catch(() => null) as Promise<OptionalDependencyBootstrapStatus>)
+                  : Promise.resolve(null);
+            }
+            return optionalDependencyBootstrapStatusPromise;
+          };
 
         const storedTokenRaw = await getConfig<string>('server.hfToken');
         let hfToken = typeof storedTokenRaw === 'string' ? storedTokenRaw.trim() : '';
@@ -288,6 +308,12 @@ const AppInner: React.FC = () => {
               await setConfig('server.nemoDecision', 'enabled');
             }
             return true;
+          }
+
+          // If the runtime deps volume already reports NeMo as available, skip prompting
+          // and avoid forcing INSTALL_NEMO=true again.
+          if ((await getOptionalDependencyBootstrapStatus())?.nemo?.available === true) {
+            return undefined;
           }
 
           const promptMode: OptionalDependencyPromptMode | null = requiredBySelectedModel
@@ -332,6 +358,11 @@ const AppInner: React.FC = () => {
               await setConfig('server.vibevoiceAsrDecision', 'enabled');
             }
             return true;
+          }
+
+          // Same as NeMo: treat persisted runtime bootstrap availability as installed.
+          if ((await getOptionalDependencyBootstrapStatus())?.vibevoiceAsr?.available === true) {
+            return undefined;
           }
 
           const promptMode: OptionalDependencyPromptMode | null = requiredBySelectedModel

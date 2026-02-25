@@ -810,6 +810,62 @@ def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
     status_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def check_nemo_asr_import(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    checker = """
+import importlib
+import json
+
+try:
+    importlib.import_module("nemo.collections.asr")
+    print(json.dumps({"available": True, "reason": "ready"}))
+except Exception as exc:
+    print(
+        json.dumps(
+            {
+                "available": False,
+                "reason": "import_failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+    )
+"""
+
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker],
+            text=True,
+            capture_output=True,
+            timeout=max(30, min(timeout_seconds, 300)),
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": "import_failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    output = (result.stdout or "").strip().splitlines()
+    if not output:
+        return {"available": False, "reason": "import_failed"}
+    try:
+        payload = json.loads(output[-1])
+    except json.JSONDecodeError:
+        return {"available": False, "reason": "import_failed"}
+
+    result_payload = {
+        "available": bool(payload.get("available", False)),
+        "reason": str(payload.get("reason", "import_failed") or "import_failed"),
+    }
+    error = payload.get("error")
+    if error:
+        result_payload["error"] = str(error)
+    return result_payload
+
+
 def check_vibevoice_asr_import(
     venv_python: Path,
     timeout_seconds: int,
@@ -871,13 +927,20 @@ else:
     print(json.dumps(payload))
 """
 
-    result = subprocess.run(
-        [str(venv_python), "-c", checker],
-        text=True,
-        capture_output=True,
-        timeout=max(30, min(timeout_seconds, 300)),
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker],
+            text=True,
+            capture_output=True,
+            timeout=max(30, min(timeout_seconds, 300)),
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": "import_failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     output = (result.stdout or "").strip().splitlines()
     if not output:
         return {"available": False, "reason": "import_failed"}
@@ -1005,8 +1068,18 @@ def main() -> int:
     nemo_start = time.perf_counter()
     install_nemo = parse_bool_env("INSTALL_NEMO", False)
     nemo_status: dict[str, Any]
+    existing_nemo_status = check_nemo_asr_import(
+        venv_python=venv_python,
+        timeout_seconds=timeout_seconds,
+    )
 
-    if install_nemo:
+    if existing_nemo_status.get("available"):
+        nemo_status = existing_nemo_status
+        if install_nemo:
+            log("NeMo toolkit already installed, skipping reinstall")
+        else:
+            log("NeMo toolkit already available, skipping optional install")
+    elif install_nemo:
         log("Installing NeMo toolkit for NVIDIA Parakeet support...")
         try:
             run_command(
@@ -1024,8 +1097,20 @@ def main() -> int:
                     cache_dir=cache_dir,
                 ),
             )
-            nemo_status = {"available": True, "reason": "ready"}
-            log("NeMo toolkit installed")
+            nemo_status = check_nemo_asr_import(
+                venv_python=venv_python,
+                timeout_seconds=timeout_seconds,
+            )
+            if nemo_status.get("available"):
+                log("NeMo toolkit installed")
+            else:
+                failure_error = str(nemo_status.get("error", "")).strip()
+                log(
+                    "NeMo toolkit installation completed but import check failed "
+                    f"({nemo_status.get('reason', 'import_failed')}"
+                    + (f": {failure_error}" if failure_error else "")
+                    + ")"
+                )
         except Exception as exc:
             nemo_status = {"available": False, "reason": f"install_failed: {exc}"}
             log(f"NeMo toolkit installation failed: {exc}")
@@ -1045,8 +1130,19 @@ def main() -> int:
         ).strip()
         or "git+https://github.com/microsoft/VibeVoice.git"
     )
+    existing_vibevoice_asr_status = check_vibevoice_asr_import(
+        venv_python=venv_python,
+        timeout_seconds=timeout_seconds,
+    )
 
-    if install_vibevoice_asr:
+    if existing_vibevoice_asr_status.get("available"):
+        vibevoice_asr_status = existing_vibevoice_asr_status
+        variant = vibevoice_asr_status.get("variant")
+        if variant:
+            log(f"VibeVoice-ASR support already installed (import layout={variant})")
+        else:
+            log("VibeVoice-ASR support already installed")
+    elif install_vibevoice_asr:
         log("Installing VibeVoice-ASR (experimental) support...")
         try:
             run_command(

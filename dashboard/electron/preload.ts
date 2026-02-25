@@ -91,6 +91,11 @@ export interface ElectronAPI {
     removeVolume: (name: string) => Promise<string>;
     readComposeEnvValue: (key: string) => Promise<string | null>;
     volumeExists: (name: string) => Promise<boolean>;
+    readOptionalDependencyBootstrapStatus: () => Promise<{
+      source: 'runtime-volume-bootstrap-status';
+      nemo?: { available: boolean; reason?: string };
+      vibevoiceAsr?: { available: boolean; reason?: string };
+    } | null>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;
@@ -172,6 +177,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:readComposeEnvValue', key) as Promise<string | null>,
     volumeExists: (name: string) =>
       ipcRenderer.invoke('docker:volumeExists', name) as Promise<boolean>,
+    readOptionalDependencyBootstrapStatus: () =>
+      ipcRenderer.invoke('docker:readOptionalDependencyBootstrapStatus') as Promise<{
+        source: 'runtime-volume-bootstrap-status';
+        nemo?: { available: boolean; reason?: string };
+        vibevoiceAsr?: { available: boolean; reason?: string };
+      } | null>,
     getLogs: (tail?: number) => ipcRenderer.invoke('docker:getLogs', tail),
     startLogStream: (tail?: number) => ipcRenderer.invoke('docker:startLogStream', tail),
     stopLogStream: () => ipcRenderer.invoke('docker:stopLogStream'),

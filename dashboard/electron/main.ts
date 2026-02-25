@@ -410,6 +410,10 @@ ipcMain.handle('docker:volumeExists', async (_event, name: string) => {
   return dockerManager.volumeExists(name);
 });
 
+ipcMain.handle('docker:readOptionalDependencyBootstrapStatus', async () => {
+  return dockerManager.readOptionalDependencyBootstrapStatus();
+});
+
 ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
   return dockerManager.getLogs(tail);
 });
