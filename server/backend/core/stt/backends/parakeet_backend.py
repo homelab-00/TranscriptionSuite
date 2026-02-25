@@ -212,27 +212,8 @@ class ParakeetBackend(STTBackend):
     # ------------------------------------------------------------------
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
-        progress_callback = kwargs.get("progress_callback")
-        load_start = time.perf_counter()
-
-        def report(msg: str, elapsed: float | None = None) -> None:
-            if elapsed is not None:
-                logger.info(f"[TIMING] {msg} ({elapsed:.2f}s)")
-            else:
-                logger.info(msg)
-            if progress_callback:
-                progress_callback(msg)
-
-        # B1: NeMo Import
-        step_start = time.perf_counter()
-        report("Importing NeMo toolkit...")
         nemo_asr = _import_nemo_asr()
-        import_time = time.perf_counter() - step_start
-        report("NeMo import complete", import_time)
-
-        # B2: Load model - use restore_from() for cached models (Fix 5)
-        step_start = time.perf_counter()
-        report(f"Loading Parakeet model: {model_name}")
+        logger.info(f"Loading Parakeet model: {model_name}")
 
         # Fix 5: Check if model is cached locally and use restore_from()
         import tempfile
@@ -323,29 +304,13 @@ class ParakeetBackend(STTBackend):
                         exc_info=True,
                     )
 
-        pretrained_time = time.perf_counter() - step_start
-        report("Model loading complete", pretrained_time)
-
-        # B3: model.to(device)
-        step_start = time.perf_counter()
-        report("Transferring model to GPU...")
         model = model.to(device)
         model.eval()
-        to_device_time = time.perf_counter() - step_start
-        report("GPU transfer complete", to_device_time)
-
-        # B4: CUDA graph verification (should be pre-patched by Fix 2)
-        step_start = time.perf_counter()
-        report("Verifying CUDA graph config...")
-        # Verify the config was applied, apply runtime patch if needed
         self._disable_cuda_graphs(model)
-        cuda_graph_time = time.perf_counter() - step_start
-        report("CUDA graph config verified", cuda_graph_time)
 
         self._model = model
         self._model_name = model_name
-        total_time = time.perf_counter() - load_start
-        report(f"Parakeet model loaded (total: {total_time:.2f}s)")
+        logger.info("Parakeet model loaded")
 
     def unload(self) -> None:
         self._model = None

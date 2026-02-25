@@ -27,7 +27,6 @@ import { AudioVisualizer } from '../AudioVisualizer';
 import { LogTerminal } from '../ui/LogTerminal';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
-import { ProgressModal } from '../ui/ProgressModal';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
@@ -46,7 +45,6 @@ import {
   isCanaryModel,
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
-import { estimateLoadingPhase } from '../../src/utils/modelLoadingProgress';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -250,13 +248,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   );
   const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
-  // Progress modal state for model loading
-  const [loadingProgress, setLoadingProgress] = useState<{
-    open: boolean;
-    message: string;
-    phase: number;
-  }>({ open: false, message: '', phase: 0 });
-
   // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);
   const canTranslateLive = supportsTranslation(activeLiveModel);
@@ -443,7 +434,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const handleReloadModels = useCallback(() => {
     setModelsOperationPending(true);
     setModelsOperationType('loading');
-    setLoadingProgress({ open: true, message: 'Initializing...', phase: 0 });
 
     // Clean up any previous load stream
     if (modelsLoadCleanupRef.current) modelsLoadCleanupRef.current();
@@ -451,23 +441,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const cleanup = apiClient.loadModelsStream({
       onProgress: (msg) => {
         logClientEvent('Client', `Model load: ${msg}`);
-        const phase = estimateLoadingPhase(msg);
-        setLoadingProgress({ open: true, message: msg, phase });
       },
       onComplete: () => {
         logClientEvent('Client', 'Models reloaded successfully');
-        setLoadingProgress({ open: true, message: 'Complete!', phase: 100 });
-        setTimeout(() => {
-          setLoadingProgress({ open: false, message: '', phase: 0 });
-          setModelsOperationPending(false);
-          setModelsOperationType(null);
-        }, 1500);
+        setModelsOperationPending(false);
+        setModelsOperationType(null);
         admin.refresh();
         serverConnection.refresh();
       },
       onError: (msg) => {
         logClientEvent('Client', `Model load failed: ${msg}`, 'error');
-        setLoadingProgress({ open: true, message: `Error: ${msg}`, phase: -1 });
         setModelsOperationPending(false);
         setModelsOperationType(null);
       },
@@ -1780,29 +1763,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
         isOpen={isFullscreenVisualizerOpen}
         onClose={() => setIsFullscreenVisualizerOpen(false)}
         analyserNode={activeAnalyser}
-      />
-
-      {/* Model Loading Progress Modal */}
-      <ProgressModal
-        isOpen={loadingProgress.open}
-        title="Loading Model"
-        message={loadingProgress.message}
-        phase={loadingProgress.phase}
-        onClose={
-          loadingProgress.phase === -1
-            ? () => setLoadingProgress({ open: false, message: '', phase: 0 })
-            : undefined
-        }
-        allowClose={loadingProgress.phase === -1}
-      />
-
-      {/* Live Mode Model Loading Progress Modal */}
-      <ProgressModal
-        isOpen={live.status === 'starting' && !!live.statusMessage}
-        title="Loading Live Mode Model"
-        message={live.statusMessage || 'Starting Live Mode...'}
-        phase={estimateLoadingPhase(live.statusMessage || '')}
-        allowClose={false}
       />
     </div>
   );

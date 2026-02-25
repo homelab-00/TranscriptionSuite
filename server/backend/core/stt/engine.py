@@ -350,15 +350,9 @@ class AudioToTextRecorder:
 
         logger.info(f"AudioToTextRecorder '{instance_name}' initialized")
 
-    def _load_model(self, progress_callback: Callable[[str], None] | None = None) -> None:
+    def _load_model(self) -> None:
         """Load the STT model via the appropriate backend."""
-
-        def report(msg: str) -> None:
-            logger.info(msg)
-            if progress_callback:
-                progress_callback(msg)
-
-        report(f"Loading STT model: {self.model_name}")
+        logger.info(f"Loading STT model: {self.model_name}")
 
         try:
             backend = create_backend(self.model_name)
@@ -369,7 +363,6 @@ class AudioToTextRecorder:
                 gpu_device_index=self.gpu_device_index,
                 download_root=self.download_root,
                 batch_size=self.batch_size,
-                progress_callback=progress_callback,
             )
 
             # Fix 4: Use background warmup for NeMo models to reduce startup blocking
@@ -377,16 +370,13 @@ class AudioToTextRecorder:
             use_background_warmup = backend_name in ("parakeet", "canary")
 
             if use_background_warmup:
-                report("Starting background warmup...")
                 backend.warmup(background=True)
-                report(f"STT model ready (backend={backend_name}, warmup running in background)")
             else:
-                report("Warming up model...")
                 backend.warmup()
-                report(f"STT model ready (backend={backend_name})")
 
             self._backend = backend
             self._model_loaded = True
+            logger.info(f"STT model loaded and ready (backend={backend_name})")
 
         except Exception as e:
             logger.exception(f"Error loading STT model: {e}")
@@ -1021,12 +1011,12 @@ class AudioToTextRecorder:
 
         logger.info("AudioToTextRecorder shutdown complete")
 
-    def load_model(self, progress_callback: Callable[[str], None] | None = None) -> None:
+    def load_model(self) -> None:
         """Load the Whisper model (if not already loaded)."""
         if self._model_loaded:
             logger.debug("Model already loaded")
             return
-        self._load_model(progress_callback=progress_callback)
+        self._load_model()
 
     def unload_model(self) -> None:
         """Unload the model to free GPU memory."""

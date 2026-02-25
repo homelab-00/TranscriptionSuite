@@ -150,20 +150,6 @@ body {
   background: transparent;
 }
 
-/* Indeterminate progress bar animation */
-@keyframes progress-indeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(400%);
-  }
-}
-
-.animate-progress-indeterminate {
-  animation: progress-indeterminate 1.5s ease-in-out infinite;
-}
-
 /* Dropdown fade-in animation.
  * Keeps the element invisible during the initial ~20ms delay so that
  * Floating UI (headlessui anchor positioning, async Promise chain) can

@@ -23,12 +23,10 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
-import { ProgressModal } from '../ui/ProgressModal';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
-import { estimateLoadingPhase } from '../../src/utils/modelLoadingProgress';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
@@ -106,14 +104,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
-
-  // Progress modal state for model loading
-  const [loadingProgress, setLoadingProgress] = useState<{
-    open: boolean;
-    message: string;
-    phase: number;
-  }>({ open: false, message: '', phase: 0 });
-  const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
 
   // Model download cache state (checks Docker volume for HF model dirs)
   const [modelCacheStatus, setModelCacheStatus] = useState<Record<string, { exists: boolean }>>({});
@@ -385,33 +375,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   }, []);
 
   // Model load/unload handlers
-  const handleLoadModels = useCallback(() => {
+  const handleLoadModels = useCallback(async () => {
     setModelsLoading(true);
-    setLoadingProgress({ open: true, message: 'Initializing...', phase: 0 });
-
-    // Clean up any previous load stream
-    if (modelsLoadCleanupRef.current) modelsLoadCleanupRef.current();
-
-    const cleanup = apiClient.loadModelsStream({
-      onProgress: (msg) => {
-        const phase = estimateLoadingPhase(msg);
-        setLoadingProgress({ open: true, message: msg, phase });
-      },
-      onComplete: () => {
-        setLoadingProgress({ open: true, message: 'Complete!', phase: 100 });
-        setTimeout(() => {
-          setLoadingProgress({ open: false, message: '', phase: 0 });
-          setModelsLoading(false);
-        }, 1500);
-        refreshAdminStatus();
-      },
-      onError: (msg) => {
-        setLoadingProgress({ open: true, message: `Error: ${msg}`, phase: -1 });
-        setModelsLoading(false);
-      },
-    });
-
-    modelsLoadCleanupRef.current = cleanup;
+    try {
+      await apiClient.loadModels();
+    } catch {
+      /* errors shown via admin status */
+    }
+    setModelsLoading(false);
+    refreshAdminStatus();
   }, [refreshAdminStatus]);
 
   const handleUnloadModels = useCallback(async () => {
@@ -1066,20 +1038,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           </GlassCard>
         </div>
       </div>
-
-      {/* Model Loading Progress Modal */}
-      <ProgressModal
-        isOpen={loadingProgress.open}
-        title="Loading Model"
-        message={loadingProgress.message}
-        phase={loadingProgress.phase}
-        onClose={
-          loadingProgress.phase === -1
-            ? () => setLoadingProgress({ open: false, message: '', phase: 0 })
-            : undefined
-        }
-        allowClose={loadingProgress.phase === -1}
-      />
     </div>
   );
 };
