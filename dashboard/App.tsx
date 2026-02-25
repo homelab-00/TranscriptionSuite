@@ -275,6 +275,12 @@ const AppInner: React.FC = () => {
             }
             return true;
           }
+          if (storedDecision === 'enabled') {
+            return true;
+          }
+          if (storedDecision === 'skipped') {
+            return false;
+          }
 
           const vibeVoiceResult = await requestVibeVoicePrompt();
           if (vibeVoiceResult === null) return null;
@@ -340,6 +346,7 @@ const AppInner: React.FC = () => {
             installNemo = storedNemoDecision === 'enabled';
           }
 
+          // Keep VibeVoice prompt immediately after NeMo in the first-start onboarding flow.
           const installVibeVoiceAsr = await resolveVibeVoiceInstallPreference();
           if (installVibeVoiceAsr === null) return; // cancelled
 
@@ -570,14 +577,26 @@ const AppInner: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 whitespace-nowrap select-none">
-              <Button variant="ghost" onClick={() => resolveNemoPrompt(null)}>
+            <div className="flex flex-none flex-wrap justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+              <Button
+                variant="ghost"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => resolveNemoPrompt(null)}
+              >
                 Cancel
               </Button>
-              <Button variant="danger" onClick={() => resolveNemoPrompt(false)}>
+              <Button
+                variant="danger"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => resolveNemoPrompt(false)}
+              >
                 Skip for now
               </Button>
-              <Button variant="primary" onClick={() => resolveNemoPrompt(true)}>
+              <Button
+                variant="primary"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => resolveNemoPrompt(true)}
+              >
                 Install NeMo
               </Button>
             </div>
@@ -618,14 +637,26 @@ const AppInner: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 whitespace-nowrap select-none">
-              <Button variant="ghost" onClick={() => resolveVibeVoicePrompt(null)}>
+            <div className="flex flex-none flex-wrap justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+              <Button
+                variant="ghost"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => resolveVibeVoicePrompt(null)}
+              >
                 Cancel
               </Button>
-              <Button variant="danger" onClick={() => resolveVibeVoicePrompt(false)}>
+              <Button
+                variant="danger"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => resolveVibeVoicePrompt(false)}
+              >
                 Skip for now
               </Button>
-              <Button variant="primary" onClick={() => resolveVibeVoicePrompt(true)}>
+              <Button
+                variant="primary"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => resolveVibeVoicePrompt(true)}
+              >
                 Install VibeVoice-ASR
               </Button>
             </div>
