@@ -52,6 +52,12 @@ export interface ClientConfig {
     updateChecksEnabled: boolean;
     updateCheckIntervalMode: '24h' | '7d' | '28d' | 'custom';
     updateCheckCustomHours: number;
+    pasteAtCursor: boolean;
+  };
+  /** Global keyboard shortcuts (Electron accelerator strings) */
+  shortcuts: {
+    startRecording: string;
+    stopTranscribe: string;
   };
   /** UI preferences */
   ui: {
@@ -98,6 +104,11 @@ const DEFAULT_CONFIG: ClientConfig = {
     updateChecksEnabled: false,
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
+    pasteAtCursor: false,
+  },
+  shortcuts: {
+    startRecording: 'Alt+Shift+R',
+    stopTranscribe: 'Alt+Shift+S',
   },
   ui: {
     sidebarCollapsed: false,

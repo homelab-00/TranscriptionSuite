@@ -10,6 +10,8 @@ import {
 } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
+import { registerShortcuts, unregisterShortcuts, handleCliAction } from './shortcutManager.js';
+import { pasteAtCursor } from './pasteAtCursor.js';
 
 // When launched via a wrapper (e.g. AppImage through GearLevel), the stdout/stderr
 // pipes may already be closed.  Any console.log/warn/error call will then raise
@@ -112,6 +114,9 @@ const store = new Store({
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
     'server.runtimeProfile': 'gpu',
+    'shortcuts.startRecording': 'Alt+Shift+R',
+    'shortcuts.stopTranscribe': 'Alt+Shift+S',
+    'app.pasteAtCursor': false,
   },
 });
 
@@ -277,6 +282,10 @@ ipcMain.handle('config:set', async (_event, key: string, value: unknown) => {
   // Reconfigure update manager when update-related settings change
   if (key.startsWith('app.updateCheck')) {
     updateManager.reconfigure();
+  }
+  // Re-register shortcuts when accelerators change
+  if (key.startsWith('shortcuts.')) {
+    registerShortcuts(store, () => mainWindow);
   }
 });
 
@@ -447,6 +456,15 @@ ipcMain.handle('clipboard:writeText', (_event, text: string) => {
   clipboard.writeText(text);
 });
 
+ipcMain.handle('clipboard:pasteAtCursor', async (_event, text: string) => {
+  try {
+    await pasteAtCursor(text);
+  } catch (err) {
+    // Non-fatal — text is already in the clipboard for manual paste
+    console.warn('[PasteAtCursor] Failed:', err);
+  }
+});
+
 // ─── Update Check IPC ───────────────────────────────────────────────────────
 
 ipcMain.handle('updates:getStatus', async () => {
@@ -543,6 +561,7 @@ function gracefulShutdown(): Promise<void> {
       shutdownLog('[Shutdown] Skipping container stop.');
     }
 
+    unregisterShortcuts();
     trayManager.destroy();
     updateManager.destroy();
     shutdownLog('[Shutdown] Cleanup complete.');
@@ -561,10 +580,44 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   });
 }
 
+// SIGUSR1 → start recording, SIGUSR2 → stop recording (Wayland / CLI fallback)
+if (process.platform !== 'win32') {
+  process.on('SIGUSR1', () => {
+    console.log('[Shortcuts] Received SIGUSR1 → start-recording');
+    mainWindow?.webContents.send('tray:action', 'start-recording');
+  });
+  process.on('SIGUSR2', () => {
+    console.log('[Shortcuts] Received SIGUSR2 → stop-recording');
+    mainWindow?.webContents.send('tray:action', 'stop-recording');
+  });
+}
+
+// ─── Single-Instance Lock ────────────────────────────────────────────────────
+// Second instance forwards argv to the first via the 'second-instance' event,
+// then exits.  This enables CLI-arg shortcut forwarding on Wayland.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+}
+
 app.whenReady().then(() => {
   trayManager.create();
   updateManager.start();
   createWindow();
+
+  // Register global keyboard shortcuts (skipped on Wayland — see shortcutManager.ts)
+  registerShortcuts(store, () => mainWindow);
+
+  // Forward CLI args from second instance to first instance
+  app.on('second-instance', (_event, argv) => {
+    handleCliAction(argv, () => mainWindow);
+    // Bring window to front when second instance launched
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 
   // Handle close-to-tray: hide window instead of quitting
   if (mainWindow) {

@@ -104,6 +104,10 @@ interface ElectronAPI {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
   };
+  clipboard: {
+    writeText: (text: string) => Promise<void>;
+    pasteAtCursor: (text: string) => Promise<void>;
+  };
 }
 
 interface ComponentUpdateStatus {

@@ -779,6 +779,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (wasProcessing && transcription.status === 'complete' && transcription.result?.text) {
       // Auto-copy to clipboard
       writeToClipboard(transcription.result.text).catch(() => {});
+      // Paste at cursor (if enabled)
+      if (window.electronAPI?.clipboard?.pasteAtCursor) {
+        getConfig<boolean>('app.pasteAtCursor').then((enabled) => {
+          if (enabled) {
+            window.electronAPI!.clipboard.pasteAtCursor(transcription.result!.text).catch((err) => {
+              console.warn('Paste at cursor failed:', err);
+            });
+          }
+        });
+      }
       // Desktop notification (if permission granted)
       if (Notification.permission === 'granted') {
         new Notification('Transcription Complete', {

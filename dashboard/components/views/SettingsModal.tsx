@@ -136,6 +136,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
     runtimeProfile: 'gpu' as 'gpu' | 'cpu',
+    pasteAtCursor: false,
   });
 
   // Update check status (loaded from main process)
@@ -209,6 +210,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   (cfg['app.updateCheckCustomHours'] as number) ?? prev.updateCheckCustomHours,
                 runtimeProfile:
                   (cfg['server.runtimeProfile'] as 'gpu' | 'cpu') ?? prev.runtimeProfile,
+                pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
               }));
             }
           })
@@ -259,6 +261,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.updateCheckIntervalMode', appSettings.updateCheckIntervalMode],
         ['app.updateCheckCustomHours', appSettings.updateCheckCustomHours],
         ['server.runtimeProfile', appSettings.runtimeProfile],
+        ['app.pasteAtCursor', appSettings.pasteAtCursor],
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
     }
@@ -284,6 +287,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           }}
           label="Automatically copy transcription to clipboard"
         />
+      </Section>
+      <Section title="Paste at Cursor">
+        <AppleSwitch
+          checked={appSettings.pasteAtCursor}
+          onChange={(v) => {
+            setAppSettings((prev) => ({ ...prev, pasteAtCursor: v }));
+            setIsDirty(true);
+          }}
+          label="Auto-paste transcription at cursor"
+        />
+        <p className="text-xs text-slate-500">
+          After transcription, paste the text into the focused application. On Linux: requires
+          wtype, xdotool, dotool, or ydotool.
+        </p>
       </Section>
       <Section title="Notifications">
         <AppleSwitch

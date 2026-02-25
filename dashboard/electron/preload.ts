@@ -110,6 +110,7 @@ export interface ElectronAPI {
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
+    pasteAtCursor: (text: string) => Promise<void>;
   };
 }
 
@@ -201,5 +202,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
+    pasteAtCursor: (text: string) => ipcRenderer.invoke('clipboard:pasteAtCursor', text),
   },
 } satisfies ElectronAPI);
