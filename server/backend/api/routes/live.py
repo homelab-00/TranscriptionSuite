@@ -2,7 +2,7 @@
 WebSocket endpoint for Live Mode real-time transcription.
 
 Provides a dedicated endpoint for continuous sentence-by-sentence
-transcription using RealtimeSTT. Unlike the main /ws endpoint which
+transcription using the RealtimeSTT-compatible whisper path. Unlike the main /ws endpoint which
 handles file-based transcription, Live Mode runs continuously and
 streams completed sentences as they are detected.
 
@@ -24,6 +24,7 @@ from server.core.live_engine import (
     LiveModeState,
 )
 from server.core.model_manager import get_model_manager
+from server.core.stt.backends.factory import detect_backend_type
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
 
@@ -39,6 +40,11 @@ _session_lock = asyncio.Lock()
 def is_live_mode_active() -> bool:
     """Check if a Live Mode session is currently active."""
     return _live_mode_state["active_session"] is not None
+
+
+def is_live_mode_model_supported(model_name: str) -> bool:
+    """Live Mode only supports faster-whisper (whisper backend) in v1."""
+    return detect_backend_type(model_name) == "whisper"
 
 
 class LiveModeSession:
@@ -160,6 +166,20 @@ class LiveModeSession:
                     config.post_speech_silence_duration = float(
                         config_data["post_speech_silence_duration"]
                     )
+
+            if not is_live_mode_model_supported(config.model):
+                backend_type = detect_backend_type(config.model)
+                await self.send_message(
+                    "error",
+                    {
+                        "message": (
+                            "Live Mode only supports faster-whisper models "
+                            "(RealtimeSTT path) in v1. "
+                            f"Selected backend '{backend_type}' is not supported."
+                        )
+                    },
+                )
+                return False
 
             if config.translation_enabled:
                 from server.core.stt.capabilities import supports_english_translation

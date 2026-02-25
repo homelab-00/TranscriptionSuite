@@ -84,7 +84,7 @@ const DEFAULT_CONFIG: ClientConfig = {
     useHttps: false,
   },
   audio: {
-    gracePeriod: 0.5,
+    gracePeriod: 1.0,
   },
   session: {
     audioSource: 'mic',
@@ -94,11 +94,11 @@ const DEFAULT_CONFIG: ClientConfig = {
     liveLanguage: 'Auto Detect',
   },
   diarization: {
-    constrainSpeakers: false,
+    constrainSpeakers: true,
     numSpeakers: 2,
   },
   notebook: {
-    autoAdd: true,
+    autoAdd: false,
   },
   app: {
     autoCopy: true,

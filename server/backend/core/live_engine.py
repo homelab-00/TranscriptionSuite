@@ -39,7 +39,7 @@ class LiveModeState(Enum):
 class LiveModeConfig:
     """Configuration for Live Mode."""
 
-    # Whisper model settings
+    # Whisper model settings (Live Mode is whisper-only in v1)
     # Empty string defers to server config default resolution.
     model: str = ""
     language: str = ""
@@ -52,7 +52,7 @@ class LiveModeConfig:
     # VAD settings
     silero_sensitivity: float = 0.6
     webrtc_sensitivity: int = 3
-    post_speech_silence_duration: float = 0.4
+    post_speech_silence_duration: float = 1.0
     min_length_of_recording: float = 0.5
     min_gap_between_recordings: float = 0.3
 

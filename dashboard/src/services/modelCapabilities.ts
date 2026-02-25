@@ -94,6 +94,14 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
 }
 
 /**
+ * Returns true if the model should run on the faster-whisper/Whisper backend.
+ * Unknown or empty values are treated as Whisper-compatible defaults.
+ */
+export function isWhisperModel(modelName: string | null | undefined): boolean {
+  return !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName);
+}
+
+/**
  * Returns true if the model is Microsoft's VibeVoice-ASR backend.
  */
 export function isVibeVoiceASRModel(modelName: string | null | undefined): boolean {

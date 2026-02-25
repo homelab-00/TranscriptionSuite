@@ -43,6 +43,7 @@ import {
   supportsTranslation,
   filterLanguagesForModel,
   isCanaryModel,
+  isWhisperModel,
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
 
@@ -251,6 +252,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);
   const canTranslateLive = supportsTranslation(activeLiveModel);
+  const liveModeWhisperOnlyCompatible = isWhisperModel(activeLiveModel);
+  const liveModeUnsupportedMessage =
+    'Live Mode only supports faster-whisper models (RealtimeSTT path) in v1. Change the Live Mode model in Server settings.';
 
   // Filter language options per model — Parakeet models only support 25 languages
   const mainLanguageOptions = useMemo(
@@ -594,19 +598,29 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const handleLiveToggle = useCallback(
     (checked: boolean) => {
       if (checked) {
+        if (!liveModeWhisperOnlyCompatible) return;
         const isSystemAudio = audioSource === 'system';
         const liveTranslateActive = isCanaryLiveBidi ? liveBidiTarget !== 'Off' : liveTranslate;
         const liveTranslateTarget = isCanaryLiveBidi
           ? (resolveLanguage(liveBidiTarget) ?? 'en')
           : 'en';
-        live.start({
-          language: resolveLanguage(liveLanguage),
-          deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
-          translate: liveTranslateActive,
-          translationTarget: liveTranslateTarget,
-          systemAudio: isSystemAudio,
-          desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
-        });
+        void (async () => {
+          const rawGracePeriod = await getConfig<number>('audio.gracePeriod');
+          const gracePeriodSeconds =
+            typeof rawGracePeriod === 'number' && Number.isFinite(rawGracePeriod)
+              ? rawGracePeriod
+              : 1.0;
+
+          live.start({
+            language: resolveLanguage(liveLanguage),
+            deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
+            translate: liveTranslateActive,
+            translationTarget: liveTranslateTarget,
+            gracePeriodSeconds,
+            systemAudio: isSystemAudio,
+            desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
+          });
+        })();
       } else {
         live.stop();
       }
@@ -617,6 +631,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       liveTranslate,
       liveBidiTarget,
       isCanaryLiveBidi,
+      liveModeWhisperOnlyCompatible,
       audioSource,
       micDevice,
       micDeviceIds,
@@ -1614,7 +1629,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       checked={isLive}
                       onChange={handleLiveToggle}
                       size="sm"
-                      disabled={!clientRunning || !serverConnection.ready}
+                      disabled={
+                        !isLive &&
+                        (!clientRunning ||
+                          !serverConnection.ready ||
+                          !liveModeWhisperOnlyCompatible)
+                      }
                     />
                   </div>
                   <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
@@ -1674,6 +1694,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                 {/* Transcript Area */}
                 <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
+                  {!liveModeWhisperOnlyCompatible && (
+                    <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
+                  )}
                   {isLive || live.sentences.length > 0 || live.partial ? (
                     <>
                       {live.statusMessage && (

@@ -27,6 +27,7 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
+import { isWhisperModel } from '../../src/services/modelCapabilities';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
@@ -129,7 +130,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         })
         .catch(() => {});
       api.config
-        .get('client.authToken')
+        .get('connection.authToken')
         .then((val: unknown) => {
           if (typeof val === 'string') setAuthToken(val);
         })
@@ -204,12 +205,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     } else if (normalizedLive === normalizeModelName(WHISPER_SMALL)) {
       setLiveModelSelection(WHISPER_SMALL);
       setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(PARAKEET_TDT_0_6B)) {
-      setLiveModelSelection(PARAKEET_TDT_0_6B);
-      setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(CANARY_1B_V2)) {
-      setLiveModelSelection(CANARY_1B_V2);
-      setLiveCustomModel('');
+    } else if (
+      normalizedLive === normalizeModelName(PARAKEET_TDT_0_6B) ||
+      normalizedLive === normalizeModelName(CANARY_1B_V2)
+    ) {
+      setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
+      setLiveCustomModel(configuredLiveModel);
     } else {
       setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
       setLiveCustomModel(configuredLiveModel);
@@ -248,9 +249,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
         ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
         : liveModelSelection;
-  const liveUsesSameAsMainVibeVoice =
-    liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION &&
-    normalizeModelName(activeTranscriber) === normalizeModelName(VIBEVOICE_ASR);
+  const liveModelWhisperOnlyCompatible = isWhisperModel(activeLiveModel);
+  const liveModeModelConstraintMessage =
+    'Live Mode only supports faster-whisper models (RealtimeSTT path) in v1. Choose a faster-whisper model for Live Mode.';
 
   // Active diarization model name
   const activeDiarizationModel =
@@ -691,7 +692,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         docker.operating ||
                         isRunning ||
                         startupFlowPending ||
-                        liveUsesSameAsMainVibeVoice
+                        !liveModelWhisperOnlyCompatible
                       }
                     >
                       {docker.operating || startupFlowPending ? (
@@ -714,7 +715,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         docker.operating ||
                         isRunning ||
                         startupFlowPending ||
-                        liveUsesSameAsMainVibeVoice
+                        !liveModelWhisperOnlyCompatible
                       }
                     >
                       Start Remote
@@ -889,8 +890,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       WHISPER_LARGE_V3,
                       WHISPER_MEDIUM,
                       WHISPER_SMALL,
-                      PARAKEET_TDT_0_6B,
-                      CANARY_1B_V2,
                       LIVE_MODEL_CUSTOM_OPTION,
                     ]}
                     className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
@@ -906,11 +905,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                     />
                   )}
-                  {liveUsesSameAsMainVibeVoice && (
-                    <p className="text-accent-orange text-xs">
-                      VibeVoice-ASR is not supported for Live Mode in v1. Choose a Whisper or NeMo
-                      model for the Live Mode Model before starting the server.
-                    </p>
+                  {!liveModelWhisperOnlyCompatible && (
+                    <p className="text-accent-orange text-xs">{liveModeModelConstraintMessage}</p>
                   )}
                 </div>
               </div>

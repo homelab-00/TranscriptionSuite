@@ -156,17 +156,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 
   const [clientSettings, setClientSettings] = useState({
-    gracePeriod: 0.5,
-    constrainSpeakers: false,
+    gracePeriod: 1.0,
+    constrainSpeakers: true,
     numSpeakers: 2,
-    autoAddNotebook: true,
-    localHost: 'http://localhost',
+    autoAddNotebook: false,
+    localHost: 'localhost',
     remoteHost: '',
     lanHost: '',
     remoteProfile: 'tailscale',
     useRemote: false,
-    authToken: 'sk-1234567890abcdef',
-    port: 9000,
+    authToken: '',
+    port: 8000,
     useHttps: false,
     hfToken: '',
   });
