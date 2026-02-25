@@ -18,10 +18,11 @@ Technical documentation for developing and building TranscriptionSuite.
   - [3.2 Version Management](#32-version-management)
 - [4. Development Workflow](#4-development-workflow)
   - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
-  - [4.2 Step 2: Build Docker Image](#42-step-2-build-docker-image)
-  - [4.3 Step 3: Run Dashboard Locally](#43-step-3-run-dashboard-locally)
-  - [4.4 Step 4: Run Dashboard Remotely (Tailscale)](#44-step-4-run-dashboard-remotely-tailscale)
-  - [4.5 Publishing Docker Images](#45-publishing-docker-images)
+  - [4.2 Running Server Manually (Without Docker)](#42-running-server-manually-without-docker)
+  - [4.3 Step 2: Build Docker Image](#43-step-2-build-docker-image)
+  - [4.4 Step 3: Run Dashboard Locally](#44-step-3-run-dashboard-locally)
+  - [4.5 Step 4: Run Dashboard Remotely (Tailscale)](#45-step-4-run-dashboard-remotely-tailscale)
+  - [4.6 Publishing Docker Images](#46-publishing-docker-images)
 - [5. Build Workflow](#5-build-workflow)
   - [5.1 Prerequisites](#51-prerequisites)
   - [5.2 Build Matrix](#52-build-matrix)
@@ -361,6 +362,12 @@ uv venv --python 3.13
 uv sync
 cd ..
 
+# Server backend
+cd server/backend
+uv venv --python 3.13
+uv sync
+cd ../..
+
 # Install pre-commit hooks (one-time, see §12.4)
 ./build/.venv/bin/pre-commit install
 ```
@@ -371,7 +378,107 @@ sudo usermod -aG docker $USER
 ```
 Then log out and back in (or reboot) for the change to take effect. Without this, Docker commands will fail with a permissions error.
 
-### 4.2 Step 2: Build Docker Image
+### 4.2 Running Server Manually (Without Docker)
+
+For development or testing purposes, you can run the server directly on your host machine without building or running a Docker container. This is useful for:
+- Rapid backend development with live code changes
+- Testing server changes without rebuilding Docker images
+- Debugging server code with local Python tools
+- Running on systems where Docker is not available or desired
+
+**Prerequisites:**
+- Python 3.13 (same version used in Docker for consistency)
+- uv package manager
+- CUDA toolkit (optional, for GPU acceleration)
+- Sufficient disk space for ML models (~10-50 GB depending on models)
+
+**Step-by-step:**
+
+1. **Set up the Python environment:**
+   ```bash
+   cd server/backend
+   uv venv --python 3.13
+   uv sync
+   ```
+
+2. **Configure data directories:**
+   
+   The server expects certain directories to exist. Create them manually:
+   ```bash
+   mkdir -p ~/.local/share/TranscriptionSuite/{database,audio,logs,tokens}
+   mkdir -p ~/.cache/huggingface
+   ```
+
+3. **Set environment variables (optional):**
+   
+   You can customize paths and settings via environment variables:
+   ```bash
+   # Data directory (default: ~/.local/share/TranscriptionSuite)
+   export DATA_DIR="$HOME/.local/share/TranscriptionSuite"
+   
+   # HuggingFace cache (default: ~/.cache/huggingface)
+   export HF_HOME="$HOME/.cache/huggingface"
+   
+   # Log level (default: INFO)
+   export LOG_LEVEL="DEBUG"
+   
+   # CUDA device (optional, for multi-GPU systems)
+   export CUDA_VISIBLE_DEVICES="0"
+   ```
+
+4. **Run the server:**
+   ```bash
+   # Development mode with auto-reload (recommended for development)
+   uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
+   
+   # Or production mode (no auto-reload)
+   uv run uvicorn server.api.main:app --host 0.0.0.0 --port 8000
+   ```
+
+   The server will be available at `http://localhost:8000`
+
+5. **Verify server is running:**
+   ```bash
+   curl http://localhost:8000/health
+   # Expected: {"status":"healthy"}
+   ```
+
+**Key Differences from Docker Deployment:**
+
+| Aspect | Docker Container | Native/Manual |
+|--------|------------------|---------------|
+| Data location | Docker volumes (`/data`, `/models`, `/runtime`) | `~/.local/share/TranscriptionSuite`, `~/.cache/huggingface` |
+| Configuration | `/user-config/config.yaml` or `/app/config.yaml` | `~/.config/TranscriptionSuite/config.yaml` or `server/config.yaml` |
+| Dependencies | Managed by bootstrap script at container start | Manual via `uv sync` |
+| Updates | Pull new image + restart container | `git pull` + `uv sync` |
+| Isolation | Full process isolation | Runs as your user, shares system resources |
+| GPU access | Docker GPU passthrough required | Direct CUDA access (if installed) |
+
+**Notes:**
+- Models will be downloaded to `~/.cache/huggingface` on first use (requires HuggingFace token for gated models like PyAnnote)
+- Server configuration priority when running natively: `~/.config/TranscriptionSuite/config.yaml` → `server/config.yaml`
+- Authentication tokens are stored in `~/.local/share/TranscriptionSuite/tokens/`
+- The `--reload` flag enables hot-reloading: server automatically restarts when code changes are detected
+- For GPU support, ensure CUDA toolkit is installed and `torch` can detect your GPU (`python -c "import torch; print(torch.cuda.is_available())"`)
+- The Dashboard can connect to a manually-running server by setting Server settings to use `localhost:8000` (HTTP mode)
+
+**Typical Development Workflow:**
+
+```bash
+# Terminal 1: Run backend server
+cd server/backend
+uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2: Run dashboard (in a separate terminal)
+cd dashboard
+npm run dev           # Browser at http://localhost:3000
+# or
+npm run dev:electron  # Electron window with hot-reload
+```
+
+This setup provides the fastest iteration cycle for backend development since code changes take effect immediately without rebuilding Docker images.
+
+### 4.3 Step 2: Build Docker Image
 
 ```bash
 cd server/docker
@@ -429,7 +536,7 @@ docker image prune -f
 
 **Note:** The `docker-build-push.sh` script automatically creates and pushes a `latest` tag when pushing release versions (v*.*.* format).
 
-### 4.3 Step 3: Run Dashboard Locally
+### 4.4 Step 3: Run Dashboard Locally
 
 ```bash
 # Start the server
@@ -443,7 +550,7 @@ cd dashboard && npm run dev
 cd dashboard && npm run dev:electron
 ```
 
-### 4.4 Step 4: Run Dashboard Remotely (Tailscale)
+### 4.5 Step 4: Run Dashboard Remotely (Tailscale)
 
 ```bash
 # Server side: Enable HTTPS
@@ -457,7 +564,7 @@ docker compose up -d
 # Set host to <your-machine>.tail1234.ts.net, port 8443, HTTPS enabled
 ```
 
-### 4.5 Publishing Docker Images
+### 4.6 Publishing Docker Images
 
 Prerequisite: You must have built the image first (see Step 2).
 
