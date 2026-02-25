@@ -152,6 +152,7 @@
     }
   },
   "overrides": {
+    "js-yaml": "4.1.1",
     "minimatch": "^10.2.1",
     "@develar/schema-utils": {
       "ajv": "6.12.6",

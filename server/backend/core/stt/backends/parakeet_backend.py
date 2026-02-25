@@ -52,7 +52,7 @@ def _patch_sampler_for_python313() -> None:
 
             Sampler.__init__ = _sampler_init  # type: ignore[assignment]
     except (ImportError, AttributeError):
-        pass
+        logger.debug("Skipping Python 3.13 Sampler compatibility patch", exc_info=True)
 
 
 def _import_nemo_asr() -> Any:
@@ -287,8 +287,12 @@ class ParakeetBackend(STTBackend):
             if config_override_path and Path(config_override_path).exists():
                 try:
                     Path(config_override_path).unlink()
-                except Exception:
-                    pass
+                except OSError:
+                    logger.debug(
+                        "Failed to delete temporary NeMo override config %s",
+                        config_override_path,
+                        exc_info=True,
+                    )
 
         pretrained_time = time.perf_counter() - step_start
         report("Model loading complete", pretrained_time)

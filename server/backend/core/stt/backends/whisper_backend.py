@@ -156,10 +156,6 @@ class WhisperBackend(STTBackend):
                     words=words,
                 )
             )
-
-            # Yield control so callers can check cancellation between segments
-            yield_segment = result_segments  # noqa: F841 — kept for clarity
-
         backend_info = BackendTranscriptionInfo(
             language=info.language,
             language_probability=info.language_probability,

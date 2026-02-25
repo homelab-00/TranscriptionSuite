@@ -109,9 +109,7 @@ async def transcribe_audio(
             word_timestamps = False
         if diarization is None:
             diarization = False
-        logger.debug(
-            f"Standalone client: word_timestamps={word_timestamps}, diarization={diarization}"
-        )
+        logger.debug("Standalone client defaults applied")
     else:
         # Recorder web UI: always disable word_timestamps and diarization
         if word_timestamps is None:
@@ -135,7 +133,7 @@ async def transcribe_audio(
         need_word_timestamps = word_timestamps or diarization
 
         # Transcribe with cancellation support
-        logger.info(f"Transcribing uploaded file: {file.filename}")
+        logger.info("Transcribing uploaded file")
         result = engine.transcribe_file(
             tmp_path,
             language=language,
@@ -162,7 +160,10 @@ async def transcribe_audio(
                     audio_data, sample_rate, num_speakers=expected_speakers
                 )
 
-                logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
+                logger.info(
+                    "Diarization complete: %s speakers found",
+                    diar_result.num_speakers,
+                )
 
                 # Merge speaker labels into transcription results
                 from server.core.speaker_merge import build_speaker_segments
@@ -177,12 +178,16 @@ async def transcribe_audio(
                     result.words = merged_words
                     result.num_speakers = num_speakers
                     logger.info(
-                        f"Speaker merge complete: {num_speakers} speakers, "
-                        f"{len(merged_segments)} segments"
+                        "Speaker merge complete: %s speakers, %s segments",
+                        num_speakers,
+                        len(merged_segments),
                     )
 
-            except Exception as e:
-                logger.warning(f"Diarization failed (returning transcript without speakers): {e}")
+            except Exception:
+                logger.warning(
+                    "Diarization failed (returning transcript without speakers)",
+                    exc_info=True,
+                )
 
         return result.to_dict()
 
@@ -190,11 +195,11 @@ async def transcribe_audio(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     except TranscriptionCancelledError:
-        logger.info(f"Transcription cancelled for file: {file.filename}")
+        logger.info("Transcription cancelled by user")
         raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
 
     except Exception as e:
-        logger.error(f"Transcription failed: {e}", exc_info=True)
+        logger.error("Transcription failed", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     finally:
@@ -204,8 +209,8 @@ async def transcribe_audio(
         # Cleanup temp file
         try:
             Path(tmp_path).unlink()
-        except Exception as e:
-            logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
+        except OSError:
+            logger.warning("Failed to cleanup temp file %s", tmp_path, exc_info=True)
 
 
 @router.post("/quick", response_model=TranscriptionResponse)
@@ -250,7 +255,7 @@ async def transcribe_quick(
         engine = model_manager.transcription_engine
 
         # Transcribe without word timestamps for speed, with cancellation support
-        logger.info(f"Quick transcription for: {file.filename}")
+        logger.info("Quick transcription started")
         result = engine.transcribe_file(
             tmp_path,
             language=language,
@@ -268,11 +273,11 @@ async def transcribe_quick(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     except TranscriptionCancelledError:
-        logger.info(f"Quick transcription cancelled for file: {file.filename}")
+        logger.info("Quick transcription cancelled by user")
         raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
 
     except Exception as e:
-        logger.error(f"Quick transcription failed: {e}", exc_info=True)
+        logger.error("Quick transcription failed", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     finally:
@@ -282,8 +287,8 @@ async def transcribe_quick(
         # Cleanup temp file
         try:
             Path(tmp_path).unlink()
-        except Exception as e:
-            logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
+        except OSError:
+            logger.warning("Failed to cleanup temp file %s", tmp_path, exc_info=True)
 
 
 @router.post("/cancel")

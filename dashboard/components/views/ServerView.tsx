@@ -165,7 +165,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
-  const showUnloadModelsState = !isRunning || isAsrModelsLoaded;
   const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)

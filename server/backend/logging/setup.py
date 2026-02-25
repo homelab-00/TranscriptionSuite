@@ -15,7 +15,7 @@ from typing import Any
 
 import structlog
 
-_logging_configured = False
+_ROOT_LOGGER_CONFIGURED_ATTR = "_transcriptionsuite_logging_configured"
 
 
 def setup_logging(
@@ -38,10 +38,8 @@ def setup_logging(
     Returns:
         Root logger instance
     """
-    global _logging_configured
-
     root_logger = logging.getLogger()
-    if _logging_configured:
+    if getattr(root_logger, _ROOT_LOGGER_CONFIGURED_ATTR, False):
         return root_logger
 
     # Default configuration
@@ -129,7 +127,7 @@ def setup_logging(
         cache_logger_on_first_use=True,
     )
 
-    _logging_configured = True
+    setattr(root_logger, _ROOT_LOGGER_CONFIGURED_ATTR, True)
 
     structlog.get_logger("main").info(
         "Logging initialized", log_path=str(log_path), level=level_name
