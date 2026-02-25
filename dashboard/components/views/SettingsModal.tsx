@@ -44,12 +44,23 @@ const DEFAULT_SHORTCUTS = {
 } as const;
 const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
 
+function extractAdminTokenFromDockerLogLine(line: string): string | null {
+  if (!line) return null;
+  const cleanLine = line.replace(/\u001b\[[0-9;]*m/g, '');
+  const match = /Admin Token:\s*([^\s]+)/i.exec(cleanLine);
+  if (!match) return null;
+  const token = match[1].trim();
+  return token.length > 0 ? token : null;
+}
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('App');
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [serverSearch, setServerSearch] = useState('');
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
+  const [showServerAdminToken, setShowServerAdminToken] = useState(false);
+  const [serverAdminTokenCopied, setServerAdminTokenCopied] = useState(false);
   const [showHfToken, setShowHfToken] = useState(false);
 
   // Animation State
@@ -170,6 +181,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     useHttps: false,
     hfToken: '',
   });
+  const knownServerAdminTokenRef = React.useRef('');
+
+  useEffect(() => {
+    knownServerAdminTokenRef.current = clientSettings.authToken.trim();
+  }, [clientSettings.authToken]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'Server') return;
+
+    const api = (window as any).electronAPI;
+    const docker = api?.docker;
+    if (!docker) return;
+
+    let cancelled = false;
+
+    const applyDetectedToken = (token: string) => {
+      const normalized = token.trim();
+      if (!normalized || normalized === knownServerAdminTokenRef.current) return;
+
+      knownServerAdminTokenRef.current = normalized;
+      setClientSettings((prev) =>
+        prev.authToken === normalized ? prev : { ...prev, authToken: normalized },
+      );
+      api?.config?.set?.('connection.authToken', normalized).catch(() => {});
+      apiClient.setAuthToken(normalized);
+    };
+
+    const scanRecentLogs = async () => {
+      try {
+        const lines = await docker.getLogs?.(300);
+        if (cancelled || !Array.isArray(lines)) return;
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          const token = extractAdminTokenFromDockerLogLine(lines[i]);
+          if (token) {
+            applyDetectedToken(token);
+            break;
+          }
+        }
+      } catch {
+        // Server/container may not exist yet.
+      }
+    };
+
+    void scanRecentLogs();
+
+    const unsubscribe =
+      typeof docker.onLogLine === 'function'
+        ? docker.onLogLine((line: string) => {
+            const token = extractAdminTokenFromDockerLogLine(line);
+            if (token) {
+              applyDetectedToken(token);
+            }
+          })
+        : undefined;
+
+    const pollId = window.setInterval(() => {
+      if (!knownServerAdminTokenRef.current) {
+        void scanRecentLogs();
+      }
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+      unsubscribe?.();
+    };
+  }, [activeTab, isOpen]);
 
   // Animation Lifecycle + Load Settings from Config Store
   useEffect(() => {
@@ -1070,6 +1148,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </span>
             . Changes here are for reference — edit the config file directly for persistent changes.
           </p>
+          <div className="mb-4">
+            <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+              Server Admin Token
+            </label>
+            <div className="relative">
+              <input
+                type={showServerAdminToken ? 'text' : 'password'}
+                value={clientSettings.authToken}
+                readOnly
+                placeholder="Waiting for token in Docker logs..."
+                className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 pr-20 font-mono text-sm text-white placeholder:text-slate-600 focus:outline-none"
+              />
+              <div className="absolute top-2 right-2 flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    if (!clientSettings.authToken) return;
+                    writeToClipboard(clientSettings.authToken).catch(() => {});
+                    setServerAdminTokenCopied(true);
+                    setTimeout(() => setServerAdminTokenCopied(false), 2000);
+                  }}
+                  disabled={!clientSettings.authToken}
+                  className="p-1 text-slate-500 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Copy admin token"
+                >
+                  {serverAdminTokenCopied ? (
+                    <Check size={14} className="text-green-400" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowServerAdminToken(!showServerAdminToken)}
+                  className="p-1 text-slate-500 transition-colors hover:text-white"
+                  title={showServerAdminToken ? 'Hide token' : 'Show token'}
+                >
+                  {showServerAdminToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+            {!clientSettings.authToken && (
+              <p className="mt-2 text-xs text-slate-500">
+                This fills automatically when the server logs print the initial admin token.
+              </p>
+            )}
+          </div>
           <div className="relative">
             <Search className="absolute top-2.5 left-3 text-slate-500" size={16} />
             <input
