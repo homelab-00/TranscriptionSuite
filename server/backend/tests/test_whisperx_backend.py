@@ -279,6 +279,8 @@ def test_whisperx_backend_forwards_batch_size_modern_signature() -> None:
 
     assert len(fake_model.calls) == 1
     assert fake_model.calls[0]["batch_size"] == 32
+    assert segments[0].text == "hello"
+    assert info.language == "en"
 
 
 def test_whisperx_backend_forwards_batch_size_legacy_signature() -> None:
@@ -294,6 +296,8 @@ def test_whisperx_backend_forwards_batch_size_legacy_signature() -> None:
 
     assert len(fake_model.calls) == 1
     assert fake_model.calls[0]["batch_size"] == 24
+    assert segments[0].text == "legacy"
+    assert info.language == "en"
 
 
 def test_whisperx_backend_default_batch_size_from_load(monkeypatch) -> None:

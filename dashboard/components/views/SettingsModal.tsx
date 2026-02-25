@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   X,
-  Search,
   ChevronDown,
   FileText,
   RefreshCw,
@@ -27,7 +26,6 @@ import { CustomSelect } from '../ui/CustomSelect';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
-import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import type { AuthToken } from '../../src/api/types';
@@ -56,7 +54,6 @@ function extractAdminTokenFromDockerLogLine(line: string): string | null {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('App');
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const [serverSearch, setServerSearch] = useState('');
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [showServerAdminToken, setShowServerAdminToken] = useState(false);
@@ -80,11 +77,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   } = useBackups();
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
-  // Admin status for Server tab (read-only config display)
-  const { status: adminStatus, loading: adminLoading } = useAdminStatus();
-
-  // Edited server config values (key → value; only populated when user edits)
-  const [serverConfigEdits, setServerConfigEdits] = useState<Record<string, string>>({});
   const [configDir, setConfigDir] = useState<string>('~/.config/TranscriptionSuite');
 
   // Token management state
@@ -95,52 +87,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [newTokenAdmin, setNewTokenAdmin] = useState(false);
   const [createdTokenPlaintext, setCreatedTokenPlaintext] = useState<string | null>(null);
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
-
-  // Derive server config sections from admin status
-  const serverConfig = React.useMemo(() => {
-    if (!adminStatus?.config) return [];
-    const cfg = adminStatus.config as Record<string, unknown>;
-    const sections: Array<{
-      category: string;
-      description: string;
-      settings: Array<{ key: string; value: string; type: string; description: string }>;
-    }> = [];
-
-    const flatten = (
-      obj: Record<string, unknown>,
-      prefix = '',
-    ): Array<{ key: string; value: string }> => {
-      const entries: Array<{ key: string; value: string }> = [];
-      for (const [k, v] of Object.entries(obj)) {
-        const fullKey = prefix ? `${prefix}.${k}` : k;
-        if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-          entries.push(...flatten(v as Record<string, unknown>, fullKey));
-        } else {
-          entries.push({ key: fullKey, value: String(v ?? '') });
-        }
-      }
-      return entries;
-    };
-
-    // Group by top-level key
-    for (const [topKey, topVal] of Object.entries(cfg)) {
-      if (topVal !== null && typeof topVal === 'object' && !Array.isArray(topVal)) {
-        const settings = flatten(topVal as Record<string, unknown>).map((s) => ({
-          ...s,
-          type: typeof s.value === 'number' ? 'number' : 'string',
-          description: '',
-        }));
-        if (settings.length > 0) {
-          sections.push({
-            category: topKey.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
-            description: `${topKey} configuration`,
-            settings,
-          });
-        }
-      }
-    }
-    return sections;
-  }, [adminStatus]);
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -266,8 +212,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             if (dir) setConfigDir(dir);
           })
           .catch(() => {});
-        // Reset server config edits on open
-        setServerConfigEdits({});
         api.config
           .getAll()
           .then((cfg: Record<string, unknown>) => {
@@ -1118,25 +1062,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         }
       }
     };
-
-    const handleServerConfigEdit = (
-      sectionCategory: string,
-      settingKey: string,
-      newValue: string,
-    ) => {
-      const fullKey = `${sectionCategory}.${settingKey}`;
-      setServerConfigEdits((prev) => ({ ...prev, [fullKey]: newValue }));
-      setIsDirty(true);
-    };
-
-    const getServerConfigValue = (
-      sectionCategory: string,
-      settingKey: string,
-      originalValue: string,
-    ): string => {
-      const fullKey = `${sectionCategory}.${settingKey}`;
-      return fullKey in serverConfigEdits ? serverConfigEdits[fullKey] : originalValue;
-    };
+    const configPath = `${configDir}/config.yaml`;
 
     return (
       <div className="space-y-6">
@@ -1146,7 +1072,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <span className="text-accent-cyan bg-accent-cyan/10 rounded px-1 font-mono">
               config.yaml
             </span>
-            . Changes here are for reference — edit the config file directly for persistent changes.
+            . Open it in your system's default editor to review or change server settings.
           </p>
           <div className="mb-4">
             <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
@@ -1193,106 +1119,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </p>
             )}
           </div>
-          <div className="relative">
-            <Search className="absolute top-2.5 left-3 text-slate-500" size={16} />
-            <input
-              type="text"
-              placeholder="Search server settings..."
-              value={serverSearch}
-              onChange={(e) => setServerSearch(e.target.value)}
-              className="focus:ring-accent-magenta w-full rounded-lg border border-white/10 bg-black/30 py-2 pr-4 pl-10 text-sm text-white transition-all focus:ring-1 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {adminLoading ? (
-            <div className="flex items-center justify-center py-8 text-slate-500">
-              <Loader2 size={16} className="mr-2 animate-spin" /> Loading server configuration…
-            </div>
-          ) : serverConfig.length === 0 ? (
-            <div className="py-8 text-center text-sm text-slate-500">
-              Could not retrieve server configuration. Is the server running?
-            </div>
-          ) : (
-            serverConfig.map((section) => (
-              <CollapsibleSection
-                key={section.category}
-                title={section.category}
-                description={section.description}
-              >
-                <div className="space-y-3 pt-2">
-                  {section.settings
-                    .filter((s) => s.key.toLowerCase().includes(serverSearch.toLowerCase()))
-                    .map((setting) => {
-                      const currentVal = getServerConfigValue(
-                        section.category,
-                        setting.key,
-                        setting.value,
-                      );
-                      const isBoolean = setting.value === 'true' || setting.value === 'false';
-                      return (
-                        <div
-                          key={setting.key}
-                          className="group flex items-center justify-between py-1"
-                        >
-                          <div>
-                            <div className="text-sm font-medium text-slate-300 transition-colors group-hover:text-white">
-                              {setting.key
-                                .replace(/_/g, ' ')
-                                .replace(/\b\w/g, (l) => l.toUpperCase())}
-                            </div>
-                            <div className="text-xs text-slate-500">{setting.description}</div>
-                          </div>
-                          <div className="w-32">
-                            {isBoolean ? (
-                              <AppleSwitch
-                                checked={currentVal === 'true'}
-                                onChange={(v) =>
-                                  handleServerConfigEdit(section.category, setting.key, String(v))
-                                }
-                                label=""
-                              />
-                            ) : (
-                              <input
-                                type="text"
-                                value={currentVal}
-                                onChange={(e) =>
-                                  handleServerConfigEdit(
-                                    section.category,
-                                    setting.key,
-                                    e.target.value,
-                                  )
-                                }
-                                className="focus:ring-accent-cyan/50 focus:border-accent-cyan/30 w-full rounded border border-white/10 bg-black/20 px-2 py-1 text-right font-mono text-xs text-white/80 transition-all hover:border-white/20 focus:ring-1 focus:outline-none"
-                              />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  {section.settings.filter((s) =>
-                    s.key.toLowerCase().includes(serverSearch.toLowerCase()),
-                  ).length === 0 && (
-                    <div className="py-2 text-center text-xs text-slate-600 italic">
-                      No matches in this section
-                    </div>
-                  )}
-                </div>
-              </CollapsibleSection>
-            ))
-          )}
-        </div>
-
-        <Section title="Config File">
-          <div className="flex items-center justify-between">
-            <div>
-              <label className="mb-1 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                File Location
-              </label>
-              <div className="rounded border border-white/5 bg-black/30 px-2 py-1 font-mono text-xs text-slate-300 select-all">
-                {configDir}/config.yaml
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 p-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium tracking-wider text-slate-500 uppercase">
+                Config File
               </div>
+              <div className="mt-1 truncate font-mono text-xs text-slate-300">{configPath}</div>
             </div>
             <Button
               variant="secondary"
@@ -1300,10 +1132,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               icon={<FileText size={14} />}
               onClick={handleOpenConfigInEditor}
             >
-              Open in Editor
+              Open config.yaml
             </Button>
           </div>
-        </Section>
+        </div>
       </div>
     );
   };
@@ -1494,38 +1326,3 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
     <div className="space-y-4">{children}</div>
   </div>
 );
-
-const CollapsibleSection: React.FC<{
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}> = ({ title, description, children }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  return (
-    <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5 transition-all duration-200">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between p-4 text-left transition-colors select-none hover:bg-white/5"
-      >
-        <div>
-          <h3
-            className={`text-sm font-semibold transition-colors ${isOpen ? 'text-accent-magenta' : 'text-slate-200'}`}
-          >
-            {title}
-          </h3>
-          {description && <p className="mt-0.5 text-xs text-slate-500">{description}</p>}
-        </div>
-        <div
-          className={`rounded-full p-1 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180 bg-white/10 text-white' : ''}`}
-        >
-          <ChevronDown size={16} />
-        </div>
-      </button>
-      <div
-        className={`overflow-hidden transition-all duration-300 ease-in-out ${isOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}
-      >
-        <div className="border-t border-white/5 p-4 pt-0">{children}</div>
-      </div>
-    </div>
-  );
-};

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.21
+  spec_version: 1.0.22
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -12,6 +12,7 @@ meta:
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
       - components/ui/CustomSelect.tsx
+      - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
       - components/ui/LogTerminal.tsx
       - components/ui/StatusLight.tsx
@@ -27,7 +28,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-19T12:44:53.023Z
+    generated_at: 2026-02-25T19:50:04.659Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -681,7 +682,6 @@ utility_allowlist:
     - pb-4
     - pb-8
     - pl-0
-    - pl-10
     - pl-12
     - pl-2
     - pl-4
@@ -798,8 +798,6 @@ utility_allowlist:
     - text-indigo-400
     - text-left
     - text-lg
-    - text-orange-200
-    - text-orange-400
     - text-orange-500
     - text-red-400
     - text-right
@@ -812,7 +810,6 @@ utility_allowlist:
     - text-slate-900
     - text-sm
     - text-white
-    - text-white/80
     - text-white/90
     - text-xl
     - text-xs
@@ -827,7 +824,6 @@ utility_allowlist:
     - top-1/2
     - top-10
     - top-2
-    - top-2.5
     - top-3.5
     - top-4
     - tracking-tight
@@ -1213,25 +1209,6 @@ component_contracts:
     state_rules:
       - id: jan-highlight
         rule: Highlighted January event count and selected-day treatment remain explicit in current mock data states.
-  CollapsibleSection:
-    file: components/views/SettingsModal.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-    allowed_variants:
-      isOpen:
-        - "true"
-        - "false"
-    structural_invariants:
-      - id: collapsible-header-body
-        rule: CollapsibleSection keeps clickable header row and overflow-hidden content body container.
-    behavior_rules:
-      - id: collapsible-motion
-        rule: Open/close height/opacity/rotation transitions remain tied to approved 200/300ms tokens.
-    state_rules:
-      - id: open-accent
-        rule: Open state title accent remains magenta and chevron rotates with white highlighted background.
   CustomSelect:
     file: components/ui/CustomSelect.tsx
     required_tokens:
