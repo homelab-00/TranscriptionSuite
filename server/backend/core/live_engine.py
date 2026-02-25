@@ -45,7 +45,7 @@ class LiveModeConfig:
     language: str = ""
     translation_enabled: bool = False
     translation_target_language: str = "en"
-    compute_type: str = "float16"
+    compute_type: str = "default"
     device: str = "cuda"
     gpu_device_index: int = 0
 
