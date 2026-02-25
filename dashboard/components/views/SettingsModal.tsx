@@ -38,6 +38,10 @@ interface SettingsModalProps {
 }
 
 const tabs = ['App', 'Client', 'Server', 'Notebook'];
+const DEFAULT_SHORTCUTS = {
+  startRecording: 'Alt+Ctrl+R',
+  stopTranscribe: 'Alt+Ctrl+S',
+} as const;
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState('App');
@@ -138,6 +142,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     runtimeProfile: 'gpu' as 'gpu' | 'cpu',
     pasteAtCursor: false,
   });
+  const [shortcutSettings, setShortcutSettings] = useState({
+    startRecording: DEFAULT_SHORTCUTS.startRecording,
+    stopTranscribe: DEFAULT_SHORTCUTS.stopTranscribe,
+  });
 
   // Update check status (loaded from main process)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -212,6 +220,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   (cfg['server.runtimeProfile'] as 'gpu' | 'cpu') ?? prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
               }));
+              setShortcutSettings((prev) => ({
+                ...prev,
+                startRecording: (cfg['shortcuts.startRecording'] as string) ?? prev.startRecording,
+                stopTranscribe: (cfg['shortcuts.stopTranscribe'] as string) ?? prev.stopTranscribe,
+              }));
             }
           })
           .catch(() => {});
@@ -262,6 +275,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.updateCheckCustomHours', appSettings.updateCheckCustomHours],
         ['server.runtimeProfile', appSettings.runtimeProfile],
         ['app.pasteAtCursor', appSettings.pasteAtCursor],
+        ['shortcuts.startRecording', shortcutSettings.startRecording.trim()],
+        ['shortcuts.stopTranscribe', shortcutSettings.stopTranscribe.trim()],
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
     }
@@ -272,7 +287,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
     setIsDirty(false);
     onClose();
-  }, [clientSettings, appSettings, onClose]);
+  }, [clientSettings, appSettings, shortcutSettings, onClose]);
 
   if (!isRendered) return null;
 
@@ -373,6 +388,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           }}
           label="Start minimized to system tray"
         />
+      </Section>
+      <Section title="Keyboard Shortcuts">
+        <div className="space-y-4">
+          <p className="text-xs text-slate-400">
+            Set global start/stop shortcuts using Electron accelerator strings (example:{' '}
+            <span className="font-mono text-slate-300">Alt+Ctrl+R</span>). Leave blank to use the
+            default shortcut.
+          </p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+                Start Recording
+              </label>
+              <input
+                type="text"
+                value={shortcutSettings.startRecording}
+                placeholder={DEFAULT_SHORTCUTS.startRecording}
+                onChange={(e) => {
+                  setShortcutSettings((prev) => ({
+                    ...prev,
+                    startRecording: e.target.value,
+                  }));
+                  setIsDirty(true);
+                }}
+                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-sm text-white focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+                Stop &amp; Transcribe
+              </label>
+              <input
+                type="text"
+                value={shortcutSettings.stopTranscribe}
+                placeholder={DEFAULT_SHORTCUTS.stopTranscribe}
+                onChange={(e) => {
+                  setShortcutSettings((prev) => ({
+                    ...prev,
+                    stopTranscribe: e.target.value,
+                  }));
+                  setIsDirty(true);
+                }}
+                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-sm text-white focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">
+              Defaults: {DEFAULT_SHORTCUTS.startRecording} (start),{' '}
+              {DEFAULT_SHORTCUTS.stopTranscribe} (stop)
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setShortcutSettings({
+                  startRecording: DEFAULT_SHORTCUTS.startRecording,
+                  stopTranscribe: DEFAULT_SHORTCUTS.stopTranscribe,
+                });
+                setIsDirty(true);
+              }}
+            >
+              Reset Defaults
+            </Button>
+          </div>
+        </div>
       </Section>
       <Section title="Update Checks">
         <AppleSwitch
