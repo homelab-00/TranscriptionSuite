@@ -253,30 +253,35 @@ class ParakeetBackend(STTBackend):
                 yaml.dump(override_dict, tmp)
                 config_override_path = tmp.name
 
+            # Use concrete EncDecRNNTBPEModel instead of abstract ASRModel
+            # to avoid "Can't instantiate abstract class ASRModel" errors
+            # when NeMo fails to resolve the target class from config.
+            model_cls = nemo_asr.models.EncDecRNNTBPEModel
+
             if local_nemo_path:
                 # Fix 5: Use restore_from() for cached models (faster, skips registry)
                 logger.info(f"Found cached model at {local_nemo_path}, using restore_from()")
                 try:
-                    model = nemo_asr.models.ASRModel.restore_from(
+                    model = model_cls.restore_from(
                         restore_path=local_nemo_path, override_config_path=config_override_path
                     )
                     logger.info("Loaded from local cache using restore_from()")
                 except Exception as e:
                     logger.warning(f"restore_from() failed: {e}, falling back to from_pretrained()")
-                    model = nemo_asr.models.ASRModel.from_pretrained(
+                    model = model_cls.from_pretrained(
                         model_name=model_name, override_config_path=config_override_path
                     )
             else:
                 # No local cache, use from_pretrained()
                 logger.info("No cached model found, using from_pretrained()")
                 try:
-                    model = nemo_asr.models.ASRModel.from_pretrained(
+                    model = model_cls.from_pretrained(
                         model_name=model_name, override_config_path=config_override_path
                     )
                 except TypeError:
                     # Fallback: override_config_path not supported in this NeMo version
                     logger.warning("override_config_path not supported, loading without pre-patch")
-                    model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_name)
+                    model = model_cls.from_pretrained(model_name=model_name)
         finally:
             # Clean up temporary config file
             if config_override_path and Path(config_override_path).exists():
