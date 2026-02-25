@@ -557,7 +557,7 @@ const AppInner: React.FC = () => {
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
             onClick={() => resolveNemoPrompt(null)}
           />
-          <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
               <h2 className="text-lg font-semibold text-white">Optional NVIDIA NeMo Setup</h2>
             </div>
@@ -577,7 +577,7 @@ const AppInner: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex flex-none flex-wrap justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+            <div className="flex flex-none flex-nowrap items-center justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
               <Button
                 variant="ghost"
                 className="shrink-0 whitespace-nowrap"
@@ -610,7 +610,7 @@ const AppInner: React.FC = () => {
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
             onClick={() => resolveVibeVoicePrompt(null)}
           />
-          <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
               <h2 className="text-lg font-semibold text-white">Optional VibeVoice-ASR Setup</h2>
             </div>
@@ -637,7 +637,7 @@ const AppInner: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="flex flex-none flex-wrap justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+            <div className="flex flex-none flex-nowrap items-center justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
               <Button
                 variant="ghost"
                 className="shrink-0 whitespace-nowrap"

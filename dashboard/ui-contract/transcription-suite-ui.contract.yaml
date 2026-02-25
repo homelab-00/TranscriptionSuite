@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.22
+  spec_version: 1.0.23
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -28,7 +28,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-25T19:50:04.659Z
+    generated_at: 2026-02-25T21:09:02.221Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -604,6 +604,7 @@ utility_allowlist:
     - max-w-4xl
     - max-w-6xl
     - max-w-7xl
+    - max-w-lg
     - max-w-md
     - max-w-sm
     - max-w-xl
