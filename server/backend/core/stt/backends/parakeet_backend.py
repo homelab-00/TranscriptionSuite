@@ -258,30 +258,59 @@ class ParakeetBackend(STTBackend):
             # when NeMo fails to resolve the target class from config.
             model_cls = nemo_asr.models.EncDecRNNTBPEModel
 
+            def _load_with_optional_override(
+                load_fn: Any, load_name: str, **load_kwargs: Any
+            ) -> Any:
+                if not config_override_path:
+                    return load_fn(**load_kwargs)
+
+                try:
+                    return load_fn(**load_kwargs, override_config_path=config_override_path)
+                except TypeError:
+                    # Older NeMo versions do not support override_config_path.
+                    logger.warning(
+                        "%s() does not support override_config_path; retrying without pre-patch",
+                        load_name,
+                    )
+                    return load_fn(**load_kwargs)
+                except ValueError as exc:
+                    # Some newer NeMo builds appear to treat the override YAML as a full
+                    # config during restore/from_pretrained, which drops required sections
+                    # like tokenizer. Retry without the override and patch after load.
+                    if "tokenizer" in str(exc) and "cfg" in str(exc):
+                        logger.warning(
+                            "%s() rejected minimal override config (%s); retrying without pre-patch",
+                            load_name,
+                            exc,
+                        )
+                        return load_fn(**load_kwargs)
+                    raise
+
             if local_nemo_path:
                 # Fix 5: Use restore_from() for cached models (faster, skips registry)
                 logger.info(f"Found cached model at {local_nemo_path}, using restore_from()")
                 try:
-                    model = model_cls.restore_from(
-                        restore_path=local_nemo_path, override_config_path=config_override_path
+                    model = _load_with_optional_override(
+                        model_cls.restore_from,
+                        "restore_from",
+                        restore_path=local_nemo_path,
                     )
                     logger.info("Loaded from local cache using restore_from()")
                 except Exception as e:
                     logger.warning(f"restore_from() failed: {e}, falling back to from_pretrained()")
-                    model = model_cls.from_pretrained(
-                        model_name=model_name, override_config_path=config_override_path
+                    model = _load_with_optional_override(
+                        model_cls.from_pretrained,
+                        "from_pretrained",
+                        model_name=model_name,
                     )
             else:
                 # No local cache, use from_pretrained()
                 logger.info("No cached model found, using from_pretrained()")
-                try:
-                    model = model_cls.from_pretrained(
-                        model_name=model_name, override_config_path=config_override_path
-                    )
-                except TypeError:
-                    # Fallback: override_config_path not supported in this NeMo version
-                    logger.warning("override_config_path not supported, loading without pre-patch")
-                    model = model_cls.from_pretrained(model_name=model_name)
+                model = _load_with_optional_override(
+                    model_cls.from_pretrained,
+                    "from_pretrained",
+                    model_name=model_name,
+                )
         finally:
             # Clean up temporary config file
             if config_override_path and Path(config_override_path).exists():
