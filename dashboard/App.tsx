@@ -19,10 +19,12 @@ import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
+import { isNemoModel, isVibeVoiceASRModel } from './src/services/modelCapabilities';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type OptionalInstallDecision = 'unset' | 'enabled' | 'skipped';
+type OptionalDependencyPromptMode = 'optional' | 'required';
 
 const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
 const VIBEVOICE_ASR_MODEL = 'microsoft/VibeVoice-ASR';
@@ -39,10 +41,6 @@ function normalizeOptionalInstallDecision(value: unknown): OptionalInstallDecisi
     return value;
   }
   return 'unset';
-}
-
-function isVibeVoiceASRModel(value: string | null | undefined): boolean {
-  return (value ?? '').trim().toLowerCase() === VIBEVOICE_ASR_MODEL.toLowerCase();
 }
 
 function isComposeEnvFlagEnabled(value: string | null | undefined): boolean {
@@ -79,8 +77,11 @@ const AppInner: React.FC = () => {
   const firstRunInfoResolverRef = useRef<(() => void) | null>(null);
 
   const [nemoPromptOpen, setNemoPromptOpen] = useState(false);
+  const [nemoPromptMode, setNemoPromptMode] = useState<OptionalDependencyPromptMode>('optional');
   const nemoResolverRef = useRef<((install: boolean | null) => void) | null>(null);
   const [vibevoicePromptOpen, setVibevoicePromptOpen] = useState(false);
+  const [vibevoicePromptMode, setVibevoicePromptMode] =
+    useState<OptionalDependencyPromptMode>('optional');
   const vibevoiceResolverRef = useRef<((install: boolean | null) => void) | null>(null);
 
   const containerLastSeenRef = useRef<boolean | null>(null);
@@ -127,29 +128,39 @@ const AppInner: React.FC = () => {
     resolver?.();
   }, []);
 
-  const requestNemoPrompt = useCallback(async (): Promise<boolean | null> => {
-    return new Promise((resolve) => {
-      nemoResolverRef.current = resolve;
-      setNemoPromptOpen(true);
-    });
-  }, []);
+  const requestNemoPrompt = useCallback(
+    async (mode: OptionalDependencyPromptMode): Promise<boolean | null> => {
+      return new Promise((resolve) => {
+        nemoResolverRef.current = resolve;
+        setNemoPromptMode(mode);
+        setNemoPromptOpen(true);
+      });
+    },
+    [],
+  );
 
   const resolveNemoPrompt = useCallback((install: boolean | null) => {
     setNemoPromptOpen(false);
+    setNemoPromptMode('optional');
     const resolver = nemoResolverRef.current;
     nemoResolverRef.current = null;
     resolver?.(install);
   }, []);
 
-  const requestVibeVoicePrompt = useCallback(async (): Promise<boolean | null> => {
-    return new Promise((resolve) => {
-      vibevoiceResolverRef.current = resolve;
-      setVibevoicePromptOpen(true);
-    });
-  }, []);
+  const requestVibeVoicePrompt = useCallback(
+    async (mode: OptionalDependencyPromptMode): Promise<boolean | null> => {
+      return new Promise((resolve) => {
+        vibevoiceResolverRef.current = resolve;
+        setVibevoicePromptMode(mode);
+        setVibevoicePromptOpen(true);
+      });
+    },
+    [],
+  );
 
   const resolveVibeVoicePrompt = useCallback((install: boolean | null) => {
     setVibevoicePromptOpen(false);
+    setVibevoicePromptMode('optional');
     const resolver = vibevoiceResolverRef.current;
     vibevoiceResolverRef.current = null;
     resolver?.(install);
@@ -245,7 +256,6 @@ const AppInner: React.FC = () => {
         const storedTokenRaw = await getConfig<string>('server.hfToken');
         let hfToken = typeof storedTokenRaw === 'string' ? storedTokenRaw.trim() : '';
         let hfDecision = normalizeHfDecision(await getConfig('server.hfTokenDecision'));
-        let installNemo: boolean | undefined;
 
         const envMainModel = (await dockerApi
           ?.readComposeEnvValue('MAIN_TRANSCRIBER_MODEL')
@@ -256,12 +266,60 @@ const AppInner: React.FC = () => {
             : undefined;
         const selectedMainModel =
           explicitMainModel !== undefined ? explicitMainModel : (envMainModel ?? '').trim();
+        const selectedRequiresNemo = isNemoModel(selectedMainModel);
+        const selectedRequiresVibeVoice = isVibeVoiceASRModel(selectedMainModel);
 
-        const resolveVibeVoiceInstallPreference = async (): Promise<boolean | undefined | null> => {
-          if (!isVibeVoiceASRModel(selectedMainModel)) {
+        const resolveNemoInstallPreference = async ({
+          firstStart,
+          requiredBySelectedModel,
+        }: {
+          firstStart: boolean;
+          requiredBySelectedModel: boolean;
+        }): Promise<boolean | undefined | null> => {
+          const envNemo = (await dockerApi
+            ?.readComposeEnvValue('INSTALL_NEMO')
+            .catch(() => null)) as string | null | undefined;
+          const storedDecision = normalizeOptionalInstallDecision(
+            await getConfig('server.nemoDecision'),
+          );
+
+          if (isComposeEnvFlagEnabled(envNemo)) {
+            if (storedDecision !== 'enabled') {
+              await setConfig('server.nemoDecision', 'enabled');
+            }
+            return true;
+          }
+
+          const promptMode: OptionalDependencyPromptMode | null = requiredBySelectedModel
+            ? 'required'
+            : firstStart
+              ? 'optional'
+              : null;
+          if (!promptMode) {
             return undefined;
           }
 
+          if (storedDecision === 'enabled') {
+            return true;
+          }
+          if (promptMode === 'optional' && storedDecision === 'skipped') {
+            return false;
+          }
+
+          const nemoResult = await requestNemoPrompt(promptMode);
+          if (nemoResult === null) return null;
+
+          await setConfig('server.nemoDecision', nemoResult ? 'enabled' : 'skipped');
+          return nemoResult;
+        };
+
+        const resolveVibeVoiceInstallPreference = async ({
+          firstStart,
+          requiredBySelectedModel,
+        }: {
+          firstStart: boolean;
+          requiredBySelectedModel: boolean;
+        }): Promise<boolean | undefined | null> => {
           const envVibeVoice = (await dockerApi
             ?.readComposeEnvValue('INSTALL_VIBEVOICE_ASR')
             .catch(() => null)) as string | null | undefined;
@@ -275,14 +333,24 @@ const AppInner: React.FC = () => {
             }
             return true;
           }
+
+          const promptMode: OptionalDependencyPromptMode | null = requiredBySelectedModel
+            ? 'required'
+            : firstStart
+              ? 'optional'
+              : null;
+          if (!promptMode) {
+            return undefined;
+          }
+
           if (storedDecision === 'enabled') {
             return true;
           }
-          if (storedDecision === 'skipped') {
+          if (promptMode === 'optional' && storedDecision === 'skipped') {
             return false;
           }
 
-          const vibeVoiceResult = await requestVibeVoicePrompt();
+          const vibeVoiceResult = await requestVibeVoicePrompt(promptMode);
           if (vibeVoiceResult === null) return null;
 
           await setConfig('server.vibevoiceAsrDecision', vibeVoiceResult ? 'enabled' : 'skipped');
@@ -326,28 +394,17 @@ const AppInner: React.FC = () => {
             }
           }
 
-          // NeMo / Parakeet+Canary prompt — only on first container creation
-          const storedNemoDecision = await getConfig<string>('server.nemoDecision');
-          if (!storedNemoDecision || storedNemoDecision === 'unset') {
-            // Check if .env already has INSTALL_NEMO set
-            const envNemo = (await dockerApi
-              ?.readComposeEnvValue('INSTALL_NEMO')
-              .catch(() => null)) as string | null | undefined;
-            if (isComposeEnvFlagEnabled(envNemo)) {
-              installNemo = true;
-              await setConfig('server.nemoDecision', 'enabled');
-            } else {
-              const nemoResult = await requestNemoPrompt();
-              if (nemoResult === null) return; // cancelled
-              installNemo = nemoResult;
-              await setConfig('server.nemoDecision', installNemo ? 'enabled' : 'skipped');
-            }
-          } else {
-            installNemo = storedNemoDecision === 'enabled';
-          }
+          const installNemo = await resolveNemoInstallPreference({
+            firstStart: true,
+            requiredBySelectedModel: selectedRequiresNemo,
+          });
+          if (installNemo === null) return; // cancelled
 
           // Keep VibeVoice prompt immediately after NeMo in the first-start onboarding flow.
-          const installVibeVoiceAsr = await resolveVibeVoiceInstallPreference();
+          const installVibeVoiceAsr = await resolveVibeVoiceInstallPreference({
+            firstStart: true,
+            requiredBySelectedModel: selectedRequiresVibeVoice,
+          });
           if (installVibeVoiceAsr === null) return; // cancelled
 
           // Check if both data and models volumes are absent — first-ever startup
@@ -365,14 +422,23 @@ const AppInner: React.FC = () => {
 
           await docker.startContainer(mode, runtimeProfile, undefined, imageTag, hfToken, {
             hfTokenDecision: hfDecision,
-            installNemo,
+            installNemo: installNemo ?? undefined,
             installVibeVoiceAsr: installVibeVoiceAsr ?? undefined,
             ...models,
           });
           return;
         }
 
-        const installVibeVoiceAsr = await resolveVibeVoiceInstallPreference();
+        const installNemo = await resolveNemoInstallPreference({
+          firstStart: false,
+          requiredBySelectedModel: selectedRequiresNemo,
+        });
+        if (installNemo === null) return; // cancelled
+
+        const installVibeVoiceAsr = await resolveVibeVoiceInstallPreference({
+          firstStart: false,
+          requiredBySelectedModel: selectedRequiresVibeVoice,
+        });
         if (installVibeVoiceAsr === null) return; // cancelled
 
         await docker.startContainer(
@@ -383,6 +449,7 @@ const AppInner: React.FC = () => {
           hfToken || undefined,
           {
             ...(models ?? {}),
+            installNemo: installNemo ?? undefined,
             installVibeVoiceAsr: installVibeVoiceAsr ?? undefined,
           },
         );
@@ -559,22 +626,41 @@ const AppInner: React.FC = () => {
           />
           <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
-              <h2 className="text-lg font-semibold text-white">Optional NVIDIA NeMo Setup</h2>
+              <h2 className="text-lg font-semibold text-white">
+                {nemoPromptMode === 'required'
+                  ? 'NVIDIA NeMo Required'
+                  : 'Optional NVIDIA NeMo Setup'}
+              </h2>
             </div>
             <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
               <div className="space-y-3 text-sm text-slate-300">
-                <p>Install NVIDIA NeMo toolkit for Parakeet and Canary models?</p>
+                {nemoPromptMode === 'required' ? (
+                  <p>
+                    The selected main transcriber model requires NVIDIA NeMo support (Parakeet /
+                    Canary). Install NeMo to continue starting the server.
+                  </p>
+                ) : (
+                  <p>Install NVIDIA NeMo toolkit for Parakeet and Canary models?</p>
+                )}
                 <p className="text-slate-400">
                   Parakeet and Canary models offer high-accuracy multilingual transcription and
                   translation as an alternative to Whisper. This is a large optional dependency (~2
                   GB+).
                 </p>
-                <p className="text-slate-400">
-                  If skipped, Whisper models will still work normally. You can enable this later by
-                  setting{' '}
-                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">INSTALL_NEMO=true</code>{' '}
-                  in your Docker environment.
-                </p>
+                {nemoPromptMode === 'required' ? (
+                  <p className="text-slate-400">
+                    Cancel stops startup. Install NeMo to continue with the selected model.
+                  </p>
+                ) : (
+                  <p className="text-slate-400">
+                    If skipped, Whisper models will still work normally. You can enable this later
+                    by setting{' '}
+                    <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                      INSTALL_NEMO=true
+                    </code>{' '}
+                    in your Docker environment.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex flex-none flex-nowrap items-center justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
@@ -585,13 +671,15 @@ const AppInner: React.FC = () => {
               >
                 Cancel
               </Button>
-              <Button
-                variant="danger"
-                className="shrink-0 whitespace-nowrap"
-                onClick={() => resolveNemoPrompt(false)}
-              >
-                Skip for now
-              </Button>
+              {nemoPromptMode === 'optional' && (
+                <Button
+                  variant="danger"
+                  className="shrink-0 whitespace-nowrap"
+                  onClick={() => resolveNemoPrompt(false)}
+                >
+                  Skip for now
+                </Button>
+              )}
               <Button
                 variant="primary"
                 className="shrink-0 whitespace-nowrap"
@@ -612,29 +700,50 @@ const AppInner: React.FC = () => {
           />
           <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
-              <h2 className="text-lg font-semibold text-white">Optional VibeVoice-ASR Setup</h2>
+              <h2 className="text-lg font-semibold text-white">
+                {vibevoicePromptMode === 'required'
+                  ? 'VibeVoice-ASR Support Required'
+                  : 'Optional VibeVoice-ASR Setup'}
+              </h2>
             </div>
             <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
               <div className="space-y-3 text-sm text-slate-300">
-                <p>
-                  Install the optional VibeVoice-ASR dependency for{' '}
-                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
-                    {VIBEVOICE_ASR_MODEL}
-                  </code>
-                  ?
-                </p>
+                {vibevoicePromptMode === 'required' ? (
+                  <p>
+                    The selected main transcriber model is{' '}
+                    <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                      {VIBEVOICE_ASR_MODEL}
+                    </code>{' '}
+                    and requires VibeVoice-ASR support. Install it to continue starting the server.
+                  </p>
+                ) : (
+                  <p>
+                    Install the optional VibeVoice-ASR dependency for{' '}
+                    <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                      {VIBEVOICE_ASR_MODEL}
+                    </code>
+                    ?
+                  </p>
+                )}
                 <p className="text-slate-400">
                   This is required to use the VibeVoice-ASR transcription backend. It installs an
                   additional optional dependency into the server runtime.
                 </p>
-                <p className="text-slate-400">
-                  If skipped, the server can still start, but VibeVoice-ASR will not load until you
-                  enable{' '}
-                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
-                    INSTALL_VIBEVOICE_ASR=true
-                  </code>{' '}
-                  and restart.
-                </p>
+                {vibevoicePromptMode === 'required' ? (
+                  <p className="text-slate-400">
+                    Cancel stops startup. Install VibeVoice-ASR support to continue with the
+                    selected model.
+                  </p>
+                ) : (
+                  <p className="text-slate-400">
+                    If skipped, the server can still start, but VibeVoice-ASR will not load until
+                    you enable{' '}
+                    <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                      INSTALL_VIBEVOICE_ASR=true
+                    </code>{' '}
+                    and restart.
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex flex-none flex-nowrap items-center justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
@@ -645,13 +754,15 @@ const AppInner: React.FC = () => {
               >
                 Cancel
               </Button>
-              <Button
-                variant="danger"
-                className="shrink-0 whitespace-nowrap"
-                onClick={() => resolveVibeVoicePrompt(false)}
-              >
-                Skip for now
-              </Button>
+              {vibevoicePromptMode === 'optional' && (
+                <Button
+                  variant="danger"
+                  className="shrink-0 whitespace-nowrap"
+                  onClick={() => resolveVibeVoicePrompt(false)}
+                >
+                  Skip for now
+                </Button>
+              )}
               <Button
                 variant="primary"
                 className="shrink-0 whitespace-nowrap"
