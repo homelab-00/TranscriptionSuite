@@ -32,7 +32,8 @@ dependencies = [
     "ctranslate2>=4.6.2",
     "torch>=2.8.0",          # Required by PyAnnote 4.0.3
     "torchaudio>=2.8.0",     # Required by PyAnnote 4.0.3
-    "pyannote.audio>=4.0.3", # Diarization
+    "whisperx>=3.1.0",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
+    "pyannote.audio>=4.0.3", # Diarization (still needed for NeMo backends and realtimestt)
     "realtimestt>=0.3.104",  # Live transcription mode
 
     # Audio Processing

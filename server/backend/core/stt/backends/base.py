@@ -27,6 +27,17 @@ class BackendTranscriptionInfo:
     language_probability: float = 0.0
 
 
+@dataclass
+class DiarizedTranscriptionResult:
+    """Result from a backend that performs integrated diarization."""
+
+    segments: list[dict[str, Any]]
+    words: list[dict[str, Any]]
+    num_speakers: int
+    language: str | None = None
+    language_probability: float = 0.0
+
+
 class STTBackend(abc.ABC):
     """Abstract base class for speech-to-text backends."""
 
@@ -88,6 +99,24 @@ class STTBackend(abc.ABC):
     @abc.abstractmethod
     def supports_translation(self) -> bool:
         """Return True if this backend supports the ``translate`` task."""
+
+    def transcribe_with_diarization(
+        self,
+        audio: np.ndarray,
+        *,
+        language: str | None = None,
+        task: str = "transcribe",
+        beam_size: int = 5,
+        num_speakers: int | None = None,
+        hf_token: str | None = None,
+    ) -> DiarizedTranscriptionResult | None:
+        """Transcribe with integrated diarization (single-pass).
+
+        Backends that support integrated diarization (e.g. WhisperX) should
+        override this.  The default implementation returns ``None``, signalling
+        that the caller should fall back to the legacy two-step pipeline.
+        """
+        return None
 
     @property
     @abc.abstractmethod

@@ -7,6 +7,7 @@ Provides a unified interface for different speech-to-text engines
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
+    DiarizedTranscriptionResult,
     STTBackend,
 )
 from server.core.stt.backends.factory import (
@@ -20,6 +21,7 @@ from server.core.stt.backends.factory import (
 __all__ = [
     "BackendSegment",
     "BackendTranscriptionInfo",
+    "DiarizedTranscriptionResult",
     "STTBackend",
     "create_backend",
     "detect_backend_type",

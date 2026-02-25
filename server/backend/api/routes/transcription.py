@@ -16,6 +16,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
 from server.core.model_manager import TranscriptionCancelledError
+from server.core.stt.backends.base import STTBackend
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,53 @@ async def transcribe_audio(
         # Get transcription engine
         engine = model_manager.transcription_engine
 
+        # Check if the backend supports single-pass diarization (WhisperX)
+        backend = engine._backend
+        use_integrated_diarization = (
+            diarization
+            and backend is not None
+            and type(backend).transcribe_with_diarization
+            is not STTBackend.transcribe_with_diarization
+        )
+
+        if use_integrated_diarization:
+            # --- WhisperX single-pass path: transcribe + align + diarize ---
+            try:
+                from server.core.audio_utils import load_audio
+
+                logger.info("Using WhisperX single-pass diarization")
+                audio_data, _ = load_audio(tmp_path, target_sample_rate=16000)
+
+                diar_result = backend.transcribe_with_diarization(
+                    audio_data,
+                    language=language,
+                    task="translate" if translation_enabled else "transcribe",
+                    beam_size=engine.beam_size,
+                    num_speakers=expected_speakers,
+                )
+
+                from server.core.stt.engine import TranscriptionResult
+
+                result = TranscriptionResult(
+                    text=" ".join(seg.get("text", "") for seg in diar_result.segments).strip(),
+                    segments=diar_result.segments,
+                    words=diar_result.words,
+                    language=diar_result.language,
+                    language_probability=diar_result.language_probability,
+                    duration=len(audio_data) / 16000,
+                    num_speakers=diar_result.num_speakers,
+                )
+
+                return result.to_dict()
+
+            except Exception:
+                logger.warning(
+                    "WhisperX diarization failed (returning transcript without speakers)",
+                    exc_info=True,
+                )
+                # Fall through to standard transcription without diarization
+                diarization = False
+
         # Force word timestamps when diarization is requested
         # (needed for proper text-to-speaker alignment)
         need_word_timestamps = word_timestamps or diarization
@@ -145,7 +193,7 @@ async def transcribe_audio(
             cancellation_check=model_manager.job_tracker.is_cancelled,
         )
 
-        # Handle diarization if requested
+        # Handle diarization if requested (NeMo / legacy path)
         if diarization:
             try:
                 logger.info("Running diarization on transcribed audio")

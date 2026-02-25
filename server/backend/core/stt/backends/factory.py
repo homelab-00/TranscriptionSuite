@@ -50,6 +50,6 @@ def create_backend(model_name: str) -> STTBackend:
 
         return CanaryBackend()
 
-    from server.core.stt.backends.whisper_backend import WhisperBackend
+    from server.core.stt.backends.whisperx_backend import WhisperXBackend
 
-    return WhisperBackend()
+    return WhisperXBackend()

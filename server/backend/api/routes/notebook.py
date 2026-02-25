@@ -452,20 +452,15 @@ async def upload_and_transcribe(
         # Get transcription engine
         engine = model_manager.transcription_engine
 
-        # Force word timestamps if diarization is enabled
-        # (needed for proper text-to-speaker alignment, even if user doesn't want to save words)
-        need_word_timestamps = enable_word_timestamps or enable_diarization
+        # Check if the backend supports single-pass diarization (WhisperX)
+        from server.core.stt.backends.base import STTBackend
 
-        # Transcribe
-        logger.info(f"Transcribing uploaded file for notebook: {file.filename}")
-        result = engine.transcribe_file(
-            str(tmp_path),
-            language=language,
-            task="translate" if translation_enabled else "transcribe",
-            translation_target_language=(
-                translation_target_language if translation_enabled else None
-            ),
-            word_timestamps=need_word_timestamps,
+        backend = engine._backend
+        use_integrated_diarization = (
+            enable_diarization
+            and backend is not None
+            and type(backend).transcribe_with_diarization
+            is not STTBackend.transcribe_with_diarization
         )
 
         # Run diarization if enabled
@@ -475,36 +470,105 @@ async def upload_and_transcribe(
             "performed": False,
             "reason": None,
         }
-        if enable_diarization:
-            try:
-                logger.info(f"Running diarization for: {file.filename}")
-                model_manager.load_diarization_model()
-                diar_engine = model_manager.diarization_engine
 
-                # Load audio for diarization
-                audio_data, sample_rate = load_audio(str(tmp_path), target_sample_rate=16000)
-                diar_result = diar_engine.diarize_audio(
-                    audio_data, sample_rate, num_speakers=expected_speakers
+        if use_integrated_diarization:
+            # --- WhisperX single-pass path: transcribe + align + diarize ---
+            try:
+                logger.info(f"Using WhisperX single-pass diarization for: {file.filename}")
+                audio_data, _ = load_audio(str(tmp_path), target_sample_rate=16000)
+
+                diar_result = backend.transcribe_with_diarization(
+                    audio_data,
+                    language=language,
+                    task="translate" if translation_enabled else "transcribe",
+                    beam_size=engine.beam_size,
+                    num_speakers=expected_speakers,
                 )
 
-                # Convert to list of dicts for database
-                diarization_segments = [seg.to_dict() for seg in diar_result.segments]
+                from server.core.stt.engine import TranscriptionResult
+
+                result = TranscriptionResult(
+                    text=" ".join(seg.get("text", "") for seg in diar_result.segments).strip(),
+                    segments=diar_result.segments,
+                    words=diar_result.words,
+                    language=diar_result.language,
+                    language_probability=diar_result.language_probability,
+                    duration=len(audio_data) / 16000,
+                    num_speakers=diar_result.num_speakers,
+                )
+
+                diarization_segments = diar_result.segments
                 diarization_outcome["performed"] = True
                 diarization_outcome["reason"] = "ready"
-                logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
+                logger.info(
+                    f"WhisperX diarization complete: {diar_result.num_speakers} speakers found"
+                )
+
             except ValueError as e:
-                # HF_TOKEN missing - log helpful message
                 logger.error(f"Diarization requires HuggingFace token: {e}")
                 logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
                 diarization_outcome["reason"] = model_manager.get_diarization_feature_status().get(
                     "reason", "token_missing"
                 )
+                # Fall back to transcription without diarization
+                use_integrated_diarization = False
             except Exception as e:
-                logger.error(f"Diarization failed (continuing without): {e}")
-                # Don't fail the whole upload if diarization fails
-                diarization_outcome["reason"] = model_manager.get_diarization_feature_status().get(
-                    "reason", "unavailable"
-                )
+                logger.error(f"WhisperX diarization failed (continuing without): {e}")
+                diarization_outcome["reason"] = "unavailable"
+                # Fall back to transcription without diarization
+                use_integrated_diarization = False
+
+        if not use_integrated_diarization:
+            # --- Standard path (NeMo backends or WhisperX fallback) ---
+            # Force word timestamps if diarization is enabled
+            # (needed for proper text-to-speaker alignment, even if user doesn't want to save words)
+            need_word_timestamps = enable_word_timestamps or enable_diarization
+
+            # Transcribe
+            logger.info(f"Transcribing uploaded file for notebook: {file.filename}")
+            result = engine.transcribe_file(
+                str(tmp_path),
+                language=language,
+                task="translate" if translation_enabled else "transcribe",
+                translation_target_language=(
+                    translation_target_language if translation_enabled else None
+                ),
+                word_timestamps=need_word_timestamps,
+            )
+
+            # Run diarization if enabled (NeMo / legacy path)
+            if enable_diarization and not diarization_outcome["performed"]:
+                try:
+                    logger.info(f"Running diarization for: {file.filename}")
+                    model_manager.load_diarization_model()
+                    diar_engine = model_manager.diarization_engine
+
+                    # Load audio for diarization
+                    audio_data, sample_rate = load_audio(str(tmp_path), target_sample_rate=16000)
+                    diar_result = diar_engine.diarize_audio(
+                        audio_data, sample_rate, num_speakers=expected_speakers
+                    )
+
+                    # Convert to list of dicts for database
+                    diarization_segments = [seg.to_dict() for seg in diar_result.segments]
+                    diarization_outcome["performed"] = True
+                    diarization_outcome["reason"] = "ready"
+                    logger.info(f"Diarization complete: {diar_result.num_speakers} speakers found")
+                except ValueError as e:
+                    # HF_TOKEN missing - log helpful message
+                    logger.error(f"Diarization requires HuggingFace token: {e}")
+                    logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
+                    diarization_outcome["reason"] = (
+                        model_manager.get_diarization_feature_status().get(
+                            "reason", "token_missing"
+                        )
+                    )
+                except Exception as e:
+                    logger.error(f"Diarization failed (continuing without): {e}")
+                    # Don't fail the whole upload if diarization fails
+                    diarization_outcome["reason"] = (
+                        model_manager.get_diarization_feature_status().get("reason", "unavailable")
+                    )
 
         # Determine recorded_at timestamp
         recorded_at = None
