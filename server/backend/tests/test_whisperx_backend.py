@@ -71,8 +71,10 @@ class _ModernFakeModel:
         self.calls: list[dict[str, object]] = []
         self.options_seen: list[_FakeOptions] = []
 
-    def transcribe(self, audio, language=None, task=None):
-        self.calls.append({"language": language, "task": task, "audio": audio})
+    def transcribe(self, audio, language=None, task=None, batch_size=None):
+        self.calls.append(
+            {"language": language, "task": task, "audio": audio, "batch_size": batch_size}
+        )
         self.options_seen.append(self.options)
         return {
             "segments": [{"text": "hello", "start": 0.0, "end": 1.0}],
@@ -92,6 +94,7 @@ class _LegacyFakeModel:
         audio,
         language=None,
         task=None,
+        batch_size=None,
         beam_size=None,
         initial_prompt=None,
         suppress_tokens=None,
@@ -100,6 +103,7 @@ class _LegacyFakeModel:
             {
                 "language": language,
                 "task": task,
+                "batch_size": batch_size,
                 "beam_size": beam_size,
                 "initial_prompt": initial_prompt,
                 "suppress_tokens": suppress_tokens,
@@ -260,3 +264,59 @@ def test_whisperx_diarization_path_uses_compat_transcribe(monkeypatch) -> None:
     assert fake_model.calls[0]["audio"] is audio
     assert fake_model.options_seen[0].beam_size == 3
     assert fake_model.options is original_options
+
+
+def test_whisperx_backend_forwards_batch_size_modern_signature() -> None:
+    """batch_size stored during load() must be forwarded to model.transcribe()."""
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+    fake_model = _ModernFakeModel()
+    backend._model = fake_model
+    backend._batch_size = 32
+
+    audio = np.zeros(16000, dtype=np.float32)
+    segments, info = backend.transcribe(audio, word_timestamps=False)
+
+    assert len(fake_model.calls) == 1
+    assert fake_model.calls[0]["batch_size"] == 32
+
+
+def test_whisperx_backend_forwards_batch_size_legacy_signature() -> None:
+    """batch_size must also be forwarded when the model accepts it as a direct kwarg."""
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+    fake_model = _LegacyFakeModel()
+    backend._model = fake_model
+    backend._batch_size = 24
+
+    audio = np.zeros(16000, dtype=np.float32)
+    segments, info = backend.transcribe(audio, word_timestamps=False)
+
+    assert len(fake_model.calls) == 1
+    assert fake_model.calls[0]["batch_size"] == 24
+
+
+def test_whisperx_backend_default_batch_size_from_load(monkeypatch) -> None:
+    """load() should store batch_size from kwargs (defaulting to 16)."""
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+
+    whisperx_mod = types.ModuleType("whisperx")
+    whisperx_mod.load_model = lambda *args, **kwargs: _ModernFakeModel()
+
+    real_import_module = module.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "whisperx":
+            return whisperx_mod
+        return real_import_module(name)
+
+    monkeypatch.setattr(module.importlib, "import_module", fake_import_module)
+
+    # Without explicit batch_size → defaults to 16
+    backend.load("Systran/faster-whisper-large-v3", "cpu")
+    assert backend._batch_size == 16
+
+    # With explicit batch_size
+    backend.load("Systran/faster-whisper-large-v3", "cpu", batch_size=4)
+    assert backend._batch_size == 4

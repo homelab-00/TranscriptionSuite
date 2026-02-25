@@ -700,8 +700,11 @@ class AudioToTextRecorder:
         audio_data, _ = load_audio(str(path), target_sample_rate=SAMPLE_RATE)
 
         # Apply Silero VAD preprocessing (Stage 1 of two-stage VAD)
-        # Silero VAD is used for static transcription to maintain timestamp consistency
-        if apply_vad_preprocessing:
+        # Silero VAD is used for static transcription to maintain timestamp consistency.
+        # Skip when using WhisperX backend — it runs its own Pyannote VAD internally,
+        # so pre-stripping silence is redundant and wastes GPU time.
+        backend_name = self._backend.backend_name if self._backend else None
+        if apply_vad_preprocessing and backend_name != "whisperx":
             cfg = get_config()
             static_cfg = cfg.get("static_transcription", default={})
             vad_enabled = static_cfg.get("silero_vad_preprocessing", True)

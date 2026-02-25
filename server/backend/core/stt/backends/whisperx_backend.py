@@ -67,6 +67,7 @@ class WhisperXBackend(STTBackend):
         self._model: Any | None = None
         self._model_name: str | None = None
         self._device: str = "cuda"
+        self._batch_size: int = 16
         self._align_model: Any | None = None
         self._align_metadata: Any | None = None
         self._align_language: str | None = None
@@ -82,15 +83,23 @@ class WhisperXBackend(STTBackend):
 
         compute_type: str = kwargs.get("compute_type", "default")
         download_root: str | None = kwargs.get("download_root")
+        self._batch_size: int = kwargs.get("batch_size", 16)
 
         logger.info(f"Loading WhisperX model: {model_name}")
 
-        self._model = whisperx.load_model(
-            model_name,
-            device=device,
-            compute_type=compute_type,
-            download_root=download_root,
-        )
+        # Suppress pyannote's torchcodec warning during model loading
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=_PYANNOTE_TORCHCODEC_WARNING_RE,
+                category=UserWarning,
+            )
+            self._model = whisperx.load_model(
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=download_root,
+            )
         self._model_name = model_name
         self._device = device
         self._transcribe_param_names = None
@@ -133,6 +142,20 @@ class WhisperXBackend(STTBackend):
 
         except Exception as e:
             logger.warning(f"WhisperX model warmup failed (non-critical): {e}")
+
+        # Pre-load wav2vec2 alignment model so the first real transcription
+        # doesn't pay the download/load cost.
+        try:
+            whisperx, _ = _import_whisperx_modules()
+            align_lang = "en"
+            self._align_model, self._align_metadata = whisperx.load_align_model(
+                language_code=align_lang,
+                device=self._device,
+            )
+            self._align_language = align_lang
+            logger.debug("WhisperX alignment model pre-loaded (lang=%s)", align_lang)
+        except Exception as e:
+            logger.warning(f"WhisperX alignment model pre-load failed (non-critical): {e}")
 
     def transcribe(
         self,
@@ -371,6 +394,10 @@ class WhisperXBackend(STTBackend):
             "language": language,
             "task": task,
         }
+
+        # batch_size is a top-level WhisperX transcribe kwarg (not a decode option)
+        if "batch_size" in param_names:
+            kwargs["batch_size"] = self._batch_size
 
         patch_fields: dict[str, Any] = {}
         compat_fields: set[str] = set()
