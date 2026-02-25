@@ -36,6 +36,22 @@ BOOTSTRAP_SCHEMA_VERSION = 2
 FINGERPRINT_SOURCES = {"lockfile", "legacy"}
 REBUILD_POLICIES = {"abi_only", "always", "never"}
 _BOOTSTRAP_START = time.perf_counter()
+_VIBEVOICE_ASR_IMPORT_CANDIDATES: tuple[tuple[str, str, str, str, str], ...] = (
+    (
+        "legacy",
+        "vibevoice.modeling_vibevoice_asr",
+        "VibeVoiceASRForConditionalGeneration",
+        "vibevoice.processor.vibevoice_asr_processing",
+        "VibeVoiceASRProcessor",
+    ),
+    (
+        "modular",
+        "vibevoice.modular.modeling_vibevoice_asr",
+        "VibeVoiceASRForConditionalGeneration",
+        "vibevoice.processor.vibevoice_asr_processor",
+        "VibeVoiceASRProcessor",
+    ),
+)
 
 
 def log(message: str) -> None:
@@ -798,15 +814,61 @@ def check_vibevoice_asr_import(
     venv_python: Path,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    checker = r"""
+    candidates_json = json.dumps(_VIBEVOICE_ASR_IMPORT_CANDIDATES)
+    checker = f"""
+import importlib
 import json
 
-try:
-    from vibevoice.modeling_vibevoice_asr import VibeVoiceASRForConditionalGeneration  # noqa: F401
-    from vibevoice.processor.vibevoice_asr_processing import VibeVoiceASRProcessor  # noqa: F401
-    print(json.dumps({"available": True, "reason": "ready"}))
-except Exception as exc:
-    print(json.dumps({"available": False, "reason": "import_failed", "error": str(exc)}))
+candidates = json.loads({candidates_json!r})
+attempted = []
+errors = []
+
+for (
+    variant,
+    model_module,
+    model_symbol,
+    processor_module,
+    processor_symbol,
+) in candidates:
+    attempted.append(
+        f"{{model_module}}:{{model_symbol}} + {{processor_module}}:{{processor_symbol}}"
+    )
+    try:
+        model_mod = importlib.import_module(model_module)
+        processor_mod = importlib.import_module(processor_module)
+        getattr(model_mod, model_symbol)
+        getattr(processor_mod, processor_symbol)
+        print(
+            json.dumps(
+                {{
+                    "available": True,
+                    "reason": "ready",
+                    "variant": variant,
+                    "attempted_imports": attempted,
+                }}
+            )
+        )
+        break
+    except Exception as exc:
+        errors.append(
+            f"{{variant}}: {{type(exc).__name__}}: {{exc}}"
+        )
+else:
+    top_level_error = None
+    try:
+        importlib.import_module("vibevoice")
+    except Exception as exc:
+        top_level_error = f"{{type(exc).__name__}}: {{exc}}"
+
+    payload = {{
+        "available": False,
+        "reason": "import_failed",
+        "error": " | ".join(errors) if errors else "No import candidates attempted",
+        "attempted_imports": attempted,
+    }}
+    if top_level_error:
+        payload["top_level_error"] = top_level_error
+    print(json.dumps(payload))
 """
 
     result = subprocess.run(
@@ -823,10 +885,23 @@ except Exception as exc:
         payload = json.loads(output[-1])
     except json.JSONDecodeError:
         return {"available": False, "reason": "import_failed"}
-    return {
+    result_payload = {
         "available": bool(payload.get("available", False)),
         "reason": str(payload.get("reason", "import_failed") or "import_failed"),
     }
+    error = payload.get("error")
+    if error:
+        result_payload["error"] = str(error)
+    attempted_imports = payload.get("attempted_imports")
+    if isinstance(attempted_imports, list):
+        result_payload["attempted_imports"] = [str(item) for item in attempted_imports]
+    variant = payload.get("variant")
+    if variant:
+        result_payload["variant"] = str(variant)
+    top_level_error = payload.get("top_level_error")
+    if top_level_error:
+        result_payload["top_level_error"] = str(top_level_error)
+    return result_payload
 
 
 def main() -> int:
@@ -994,11 +1069,18 @@ def main() -> int:
                 timeout_seconds=timeout_seconds,
             )
             if vibevoice_asr_status.get("available"):
-                log("VibeVoice-ASR support installed")
+                variant = vibevoice_asr_status.get("variant")
+                if variant:
+                    log(f"VibeVoice-ASR support installed (import layout={variant})")
+                else:
+                    log("VibeVoice-ASR support installed")
             else:
+                failure_error = str(vibevoice_asr_status.get("error", "")).strip()
                 log(
                     "VibeVoice-ASR installation completed but import check failed "
-                    f"({vibevoice_asr_status.get('reason', 'import_failed')})"
+                    f"({vibevoice_asr_status.get('reason', 'import_failed')}"
+                    + (f": {failure_error}" if failure_error else "")
+                    + ")"
                 )
         except Exception as exc:
             vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}

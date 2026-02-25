@@ -1760,6 +1760,36 @@ These are current repo behaviors, not typos in this document.
 6. **Dashboard image start behavior prefers local images**
 - `dockerManager.startContainer()` selects newest local tag and errors when no local image exists (no implicit pull in that method)
 
+### 13.7 VibeVoice-ASR Import Probe Failures (Docker Runtime)
+
+VibeVoice-ASR is an optional experimental backend. Enable runtime installation with:
+
+```bash
+INSTALL_VIBEVOICE_ASR=true
+```
+
+Bootstrap installs VibeVoice into `/runtime/.venv` and then runs an import probe. If logs show
+that VibeVoice-ASR installation completed but the import check failed, the install itself may
+have succeeded but the upstream package layout changed (import-path drift) relative to the
+TranscriptionSuite integration.
+
+Useful diagnostics/workarounds:
+
+- Pin the VibeVoice install source to a known-good revision:
+
+```bash
+VIBEVOICE_ASR_PACKAGE_SPEC=git+https://github.com/microsoft/VibeVoice.git@<commit>
+```
+
+- Inspect bootstrap feature status:
+
+```bash
+docker exec -it transcriptionsuite cat /runtime/bootstrap-status.json
+```
+
+Check `features.vibevoice_asr` for `available`, `reason`, and `error`. A common symptom is
+`reason=import_failed` even when the VibeVoice install step itself completed successfully.
+
 ---
 
 ## 14. Dependency and Version Snapshot
@@ -1856,4 +1886,3 @@ When updating this guide, prefer these files over old prose:
 - Dashboard socket protocol behavior: `dashboard/src/services/websocket.ts`, `dashboard/src/hooks/useTranscription.ts`, `dashboard/src/hooks/useLiveMode.ts`
 - UI contract system: `dashboard/ui-contract/*`, `dashboard/scripts/ui-contract/*`
 - CI/pre-commit: `.github/workflows/*.yml`, `.github/codeql/codeql-config.yml`, `.pre-commit-config.yaml`
-

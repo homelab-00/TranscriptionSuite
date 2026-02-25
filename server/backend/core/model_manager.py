@@ -197,6 +197,7 @@ class ModelManager:
         self._nemo_import_thread: threading.Thread | None = None
         self._vibevoice_asr_feature_available: bool = False
         self._vibevoice_asr_feature_reason: str = "not_requested"
+        self._vibevoice_asr_feature_error: str | None = None
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -288,8 +289,11 @@ class ModelManager:
                 vibevoice = payload.get("features", {}).get("vibevoice_asr", {})
                 available = bool(vibevoice.get("available", False))
                 reason = str(vibevoice.get("reason", "not_requested") or "not_requested")
+                error_value = vibevoice.get("error")
+                error = str(error_value).strip() if error_value else None
                 self._vibevoice_asr_feature_available = available
                 self._vibevoice_asr_feature_reason = reason
+                self._vibevoice_asr_feature_error = error or None
                 logger.info(
                     "Loaded VibeVoice-ASR feature status from bootstrap: "
                     f"available={available}, reason={reason}"
@@ -306,6 +310,7 @@ class ModelManager:
         }
         self._vibevoice_asr_feature_available = False
         self._vibevoice_asr_feature_reason = "requested" if install_requested else "not_requested"
+        self._vibevoice_asr_feature_error = None
 
     def _start_background_nemo_import(self) -> None:
         """Fix 3: Start background NeMo import to reduce startup latency.
@@ -373,6 +378,16 @@ class ModelManager:
             "available": self._diarization_feature_available,
             "reason": self._diarization_feature_reason,
         }
+
+    def get_vibevoice_asr_feature_status(self) -> dict[str, Any]:
+        """Return VibeVoice-ASR capability metadata for API clients."""
+        status: dict[str, Any] = {
+            "available": self._vibevoice_asr_feature_available,
+            "reason": self._vibevoice_asr_feature_reason,
+        }
+        if self._vibevoice_asr_feature_error:
+            status["error"] = self._vibevoice_asr_feature_error
+        return status
 
     @property
     def main_model_name(self) -> str:
@@ -677,10 +692,7 @@ class ModelManager:
                     "available": self._nemo_feature_available,
                     "reason": self._nemo_feature_reason,
                 },
-                "vibevoice_asr": {
-                    "available": self._vibevoice_asr_feature_available,
-                    "reason": self._vibevoice_asr_feature_reason,
-                },
+                "vibevoice_asr": self.get_vibevoice_asr_feature_status(),
             },
         }
         return status

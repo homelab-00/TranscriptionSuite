@@ -86,6 +86,11 @@ allow-direct-references = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
 # The section below is needed to specifically get CUDA 12.9 (and not the default 12.8)
 [[tool.uv.index]]
 name = "pytorch-cu129"

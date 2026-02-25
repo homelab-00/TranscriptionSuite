@@ -82,6 +82,7 @@ services:
       - INSTALL_NEMO=${INSTALL_NEMO:-false}
       # VibeVoice-ASR backend support (optional, experimental in-process backend)
       - INSTALL_VIBEVOICE_ASR=${INSTALL_VIBEVOICE_ASR:-false}
+      - VIBEVOICE_ASR_PACKAGE_SPEC=${VIBEVOICE_ASR_PACKAGE_SPEC:-git+https://github.com/microsoft/VibeVoice.git}
       # LM Studio URL — overridden in platform overlay (host.docker.internal for VM platforms)
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
       # TLS settings for remote access (optional)

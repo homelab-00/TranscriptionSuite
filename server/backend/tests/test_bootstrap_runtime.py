@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -535,3 +536,117 @@ def test_main_reuses_cached_diarization_status_when_preload_key_matches(
     assert diarization["reason"] == "ready"  # type: ignore[index]
     assert diarization["preload_mode"] == "cached"  # type: ignore[index]
     assert diarization["preload_cache_key"] == "cache-key-match"  # type: ignore[index]
+
+
+def test_check_vibevoice_asr_import_parses_extended_probe_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+
+    payload = {
+        "available": False,
+        "reason": "import_failed",
+        "error": "legacy: ModuleNotFoundError: no module named x",
+        "attempted_imports": [
+            "vibevoice.modeling_vibevoice_asr:VibeVoiceASRForConditionalGeneration + "
+            "vibevoice.processor.vibevoice_asr_processing:VibeVoiceASRProcessor",
+            "vibevoice.modular.modeling_vibevoice_asr:VibeVoiceASRForConditionalGeneration + "
+            "vibevoice.processor.vibevoice_asr_processor:VibeVoiceASRProcessor",
+        ],
+        "top_level_error": "ModuleNotFoundError: No module named 'vibevoice'",
+    }
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        return subprocess.CompletedProcess(
+            args=["python", "-c", "probe"],
+            returncode=0,
+            stdout=json.dumps(payload) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    result = module.check_vibevoice_asr_import(Path("/tmp/fake-python"), timeout_seconds=30)
+
+    assert result["available"] is False
+    assert result["reason"] == "import_failed"
+    assert result["error"] == payload["error"]
+    assert result["attempted_imports"] == payload["attempted_imports"]
+    assert result["top_level_error"] == payload["top_level_error"]
+
+
+def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
+        diagnostics = {
+            "selection_reason": "marker_match_integrity_ok",
+            "escalated_to_rebuild": False,
+            "integrity": {"status": "pass"},
+        }
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    captured_status: dict[str, object] = {}
+
+    def fake_write_status_file(path: Path, payload: dict[str, object]) -> None:
+        captured_status["path"] = path
+        captured_status["payload"] = payload
+
+    monkeypatch.setattr(module, "ensure_runtime_dependencies", fake_ensure_runtime_dependencies)
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: ("microsoft/VibeVoice-ASR", module.DEFAULT_DIARIZATION_MODEL),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_diarization_preload_cache_key",
+        lambda **_: "vv-test-diar-key",
+    )
+    monkeypatch.setattr(
+        module,
+        "check_diarization_access",
+        lambda **_: {"available": True, "reason": "ready"},
+    )
+    monkeypatch.setattr(module, "run_command", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "check_vibevoice_asr_import",
+        lambda **_: {
+            "available": False,
+            "reason": "import_failed",
+            "error": "legacy missing | modular missing",
+            "attempted_imports": [
+                "legacy-path",
+                "modular-path",
+            ],
+        },
+    )
+    monkeypatch.setattr(module, "write_status_file", fake_write_status_file)
+
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.setenv("INSTALL_VIBEVOICE_ASR", "true")
+
+    rc = module.main()
+
+    assert rc == 0
+    payload = captured_status.get("payload")
+    assert isinstance(payload, dict)
+    features = payload["features"]  # type: ignore[index]
+    vibevoice = features["vibevoice_asr"]  # type: ignore[index]
+    assert vibevoice["available"] is False  # type: ignore[index]
+    assert vibevoice["reason"] == "import_failed"  # type: ignore[index]
+    assert vibevoice["error"] == "legacy missing | modular missing"  # type: ignore[index]

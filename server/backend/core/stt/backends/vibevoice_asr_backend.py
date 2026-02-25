@@ -9,6 +9,7 @@ word-level timestamps empty.
 from __future__ import annotations
 
 import gc
+import importlib
 import logging
 import math
 from typing import Any
@@ -30,6 +31,104 @@ DEFAULT_MAX_NEW_TOKENS = 4096
 
 logger = logging.getLogger(__name__)
 
+_VIBEVOICE_ASR_IMPORT_CANDIDATES: tuple[
+    tuple[str, str, str, str, str],
+    ...,
+] = (
+    (
+        "legacy",
+        "vibevoice.modeling_vibevoice_asr",
+        "VibeVoiceASRForConditionalGeneration",
+        "vibevoice.processor.vibevoice_asr_processing",
+        "VibeVoiceASRProcessor",
+    ),
+    (
+        "modular",
+        "vibevoice.modular.modeling_vibevoice_asr",
+        "VibeVoiceASRForConditionalGeneration",
+        "vibevoice.processor.vibevoice_asr_processor",
+        "VibeVoiceASRProcessor",
+    ),
+)
+
+
+def _attempted_vibevoice_import_paths() -> list[str]:
+    return [
+        f"{model_module}:{model_symbol} + {processor_module}:{processor_symbol}"
+        for (
+            _variant,
+            model_module,
+            model_symbol,
+            processor_module,
+            processor_symbol,
+        ) in _VIBEVOICE_ASR_IMPORT_CANDIDATES
+    ]
+
+
+def _import_vibevoice_asr_classes() -> tuple[type[Any], type[Any]]:
+    errors: list[str] = []
+    last_error: Exception | None = None
+    top_level_vibevoice_importable = False
+    top_level_error: str | None = None
+
+    try:
+        importlib.import_module("vibevoice")
+        top_level_vibevoice_importable = True
+    except Exception as exc:
+        top_level_error = f"{type(exc).__name__}: {exc}"
+
+    for (
+        variant,
+        model_module,
+        model_symbol,
+        processor_module,
+        processor_symbol,
+    ) in _VIBEVOICE_ASR_IMPORT_CANDIDATES:
+        try:
+            model_mod = importlib.import_module(model_module)
+            processor_mod = importlib.import_module(processor_module)
+            model_cls = getattr(model_mod, model_symbol)
+            processor_cls = getattr(processor_mod, processor_symbol)
+            logger.info(
+                "Resolved VibeVoice-ASR imports via %s layout (%s / %s)",
+                variant,
+                model_module,
+                processor_module,
+            )
+            return model_cls, processor_cls
+        except Exception as exc:
+            last_error = exc
+            errors.append(
+                f"{variant}: {model_module}:{model_symbol} + "
+                f"{processor_module}:{processor_symbol} -> "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    attempted = "; ".join(_attempted_vibevoice_import_paths())
+    details = " | ".join(errors) if errors else "no import candidates attempted"
+
+    if not top_level_vibevoice_importable:
+        message = (
+            "VibeVoice-ASR backend selected but VibeVoice is not installed in the backend runtime. "
+            "Enable INSTALL_VIBEVOICE_ASR=true for the server container (experimental), "
+            "or install the VibeVoice package in the backend runtime. "
+            f"Top-level import error: {top_level_error or 'unknown'}. "
+            f"Attempted ASR imports: {attempted}. "
+            "If upstream packaging changed, set VIBEVOICE_ASR_PACKAGE_SPEC to a known-good revision."
+        )
+    else:
+        message = (
+            "VibeVoice-ASR backend selected but compatible VibeVoice-ASR modules could not be "
+            "imported from the installed `vibevoice` package (possible upstream package layout drift). "
+            f"Attempted ASR imports: {attempted}. "
+            "Set VIBEVOICE_ASR_PACKAGE_SPEC to a known-good revision/commit if needed. "
+            f"Import errors: {details}"
+        )
+
+    if last_error is not None:
+        raise ImportError(message) from last_error
+    raise ImportError(message)
+
 
 class VibeVoiceASRBackend(STTBackend):
     """In-process VibeVoice-ASR backend (experimental)."""
@@ -48,19 +147,9 @@ class VibeVoiceASRBackend(STTBackend):
         if not isinstance(vv_cfg, dict):
             vv_cfg = {}
 
-        try:
-            from vibevoice.modeling_vibevoice_asr import (  # type: ignore[import-not-found]
-                VibeVoiceASRForConditionalGeneration,
-            )
-            from vibevoice.processor.vibevoice_asr_processing import (  # type: ignore[import-not-found]
-                VibeVoiceASRProcessor,
-            )
-        except ImportError as e:
-            raise ImportError(
-                "VibeVoice-ASR backend selected but VibeVoice is not installed. "
-                "Enable INSTALL_VIBEVOICE_ASR=true for the server container (experimental), "
-                "or install the VibeVoice package in the backend runtime."
-            ) from e
+        VibeVoiceASRForConditionalGeneration, VibeVoiceASRProcessor = (
+            _import_vibevoice_asr_classes()
+        )
 
         gpu_device_index = int(kwargs.get("gpu_device_index", 0) or 0)
         self._device = f"cuda:{gpu_device_index}" if device == "cuda" else "cpu"

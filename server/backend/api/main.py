@@ -98,8 +98,9 @@ PUBLIC_PREFIXES = (
 
 NOTEBOOK_QUERY_TOKEN_ROUTES = re.compile(r"^/api/notebook/recordings/\d+/(audio|export)$")
 
-_VIBEVOICE_MISSING_INSTALL_ERROR_TEXT = (
-    "VibeVoice-ASR backend selected but VibeVoice is not installed."
+_VIBEVOICE_RECOVERABLE_PRELOAD_ERROR_TEXTS = (
+    "VibeVoice-ASR backend selected but VibeVoice is not installed.",
+    "VibeVoice-ASR backend selected but compatible VibeVoice-ASR modules could not be imported",
 )
 
 
@@ -134,11 +135,54 @@ def _is_recoverable_vibevoice_preload_error(model_name: str, exc: BaseException)
         return False
 
     for current in _iter_exception_chain(exc):
-        if isinstance(current, ImportError) and _VIBEVOICE_MISSING_INSTALL_ERROR_TEXT in str(
-            current
+        if isinstance(current, ImportError) and any(
+            text in str(current) for text in _VIBEVOICE_RECOVERABLE_PRELOAD_ERROR_TEXTS
         ):
             return True
     return False
+
+
+def _build_vibevoice_preload_skip_warning(
+    model_name: str,
+    feature_status: dict[str, object] | None,
+) -> tuple[str, str]:
+    """Return (message, timing_label) for recoverable VibeVoice preload failures."""
+    feature_status = feature_status or {}
+    reason = str(feature_status.get("reason", "unknown") or "unknown")
+    error = str(feature_status.get("error", "") or "").strip()
+
+    if reason == "import_failed":
+        return (
+            (
+                "Transcription preload skipped for optional VibeVoice-ASR backend "
+                f"(model={model_name}). INSTALL_VIBEVOICE_ASR was enabled, but the bootstrap "
+                f"VibeVoice import probe failed (reason={reason}, error={error or 'n/a'}). "
+                "Continuing startup without a loaded transcription model. The installed "
+                "VibeVoice package may be incompatible with this integration; set "
+                "VIBEVOICE_ASR_PACKAGE_SPEC to a known-good revision/commit if needed."
+            ),
+            "model preload skipped (VibeVoice-ASR import probe failed)",
+        )
+
+    if reason.startswith("install_failed"):
+        return (
+            (
+                "Transcription preload skipped for optional VibeVoice-ASR backend "
+                f"(model={model_name}). VibeVoice optional dependency installation failed during "
+                f"bootstrap (reason={reason}, error={error or 'n/a'}). Continuing startup "
+                "without a loaded transcription model."
+            ),
+            "model preload skipped (VibeVoice-ASR optional dependency install failed)",
+        )
+
+    return (
+        (
+            "Transcription preload skipped for optional VibeVoice-ASR backend "
+            f"(model={model_name}). Enable INSTALL_VIBEVOICE_ASR=true and restart to load "
+            "the model. Continuing startup without a loaded transcription model."
+        ),
+        "model preload skipped (VibeVoice-ASR optional dependency missing)",
+    )
 
 
 class OriginValidationMiddleware(BaseHTTPMiddleware):
@@ -310,14 +354,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         manager.load_transcription_model()
     except Exception as e:
         if _is_recoverable_vibevoice_preload_error(selected_main_model, e):
-            logger.warning(
-                "Transcription preload skipped for optional VibeVoice-ASR backend "
-                "(model=%s). Enable INSTALL_VIBEVOICE_ASR=true and restart to load "
-                "the model. Continuing startup without a loaded transcription model.",
+            vibevoice_feature_status = None
+            try:
+                vibevoice_feature_status = manager.get_vibevoice_asr_feature_status()
+            except Exception:
+                vibevoice_feature_status = None
+
+            warning_message, timing_label = _build_vibevoice_preload_skip_warning(
                 selected_main_model,
+                vibevoice_feature_status,
+            )
+            logger.warning(
+                warning_message,
                 exc_info=True,
             )
-            _log_time("model preload skipped (VibeVoice-ASR optional dependency missing)")
+            _log_time(timing_label)
         else:
             raise
     else:
