@@ -94,12 +94,6 @@ function normalizeModelName(value: string): string {
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
   const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatus();
   const docker = useDockerContext();
-  const isAsrModelsLoaded =
-    adminStatus?.models_loaded ??
-    Boolean(
-      (adminStatus?.models as { transcription?: { loaded?: boolean } } | undefined)?.transcription
-        ?.loaded,
-    );
 
   // Model selection state
   const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
