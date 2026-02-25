@@ -8,9 +8,11 @@ timestamps via forced alignment and optional single-pass diarization.
 from __future__ import annotations
 
 import gc
+import importlib
 import inspect
 import logging
 import os
+import warnings
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -29,6 +31,33 @@ from server.core.stt.backends.base import (
 SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
+
+_PYANNOTE_TORCHCODEC_WARNING_RE = (
+    r"torchcodec is not installed correctly so built-in audio decoding will fail\..*"
+)
+
+
+def _import_whisperx_modules(
+    *,
+    include_diarize: bool = False,
+) -> tuple[Any, Any | None]:
+    """Import WhisperX while silencing pyannote's optional torchcodec warning.
+
+    PyAnnote 4.x emits a noisy import-time warning when TorchCodec is present but
+    incompatible with the current Torch/FFmpeg runtime. Our WhisperX paths pass
+    in-memory audio arrays to diarization, so this decoder warning is non-fatal
+    during backend import/model load.
+    """
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=_PYANNOTE_TORCHCODEC_WARNING_RE,
+            category=UserWarning,
+        )
+        whisperx = importlib.import_module("whisperx")
+        diarize_module = importlib.import_module("whisperx.diarize") if include_diarize else None
+    return whisperx, diarize_module
 
 
 class WhisperXBackend(STTBackend):
@@ -49,7 +78,7 @@ class WhisperXBackend(STTBackend):
     # ------------------------------------------------------------------
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
-        import whisperx
+        whisperx, _ = _import_whisperx_modules()
 
         compute_type: str = kwargs.get("compute_type", "default")
         download_root: str | None = kwargs.get("download_root")
@@ -181,8 +210,10 @@ class WhisperXBackend(STTBackend):
         hf_token: str | None = None,
     ) -> DiarizedTranscriptionResult | None:
         """Full single-pass pipeline: transcribe → align → diarize → assign speakers."""
-        import whisperx
-        from whisperx.diarize import DiarizationPipeline
+        whisperx, diarize_module = _import_whisperx_modules(include_diarize=True)
+        if diarize_module is None:
+            raise RuntimeError("WhisperX diarization module failed to import")
+        DiarizationPipeline = diarize_module.DiarizationPipeline
 
         if self._model is None:
             raise RuntimeError("WhisperX model is not loaded")
@@ -415,7 +446,7 @@ class WhisperXBackend(STTBackend):
         language: str | None,
     ) -> dict[str, Any]:
         """Run wav2vec2 forced alignment, caching the alignment model per-language."""
-        import whisperx
+        whisperx, _ = _import_whisperx_modules()
 
         lang = language or "en"
 

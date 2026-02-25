@@ -8,6 +8,7 @@ import importlib.util
 import logging
 import sys
 import types
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -141,6 +142,42 @@ def test_whisperx_backend_patches_decode_options_for_modern_signature(caplog) ->
     assert segments[0].text == "hello"
     assert info.language == "en"
     assert "WhisperX compatibility mode enabled" in caplog.text
+
+
+def test_whisperx_import_suppresses_pyannote_torchcodec_warning(monkeypatch) -> None:
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+
+    whisperx_mod = types.ModuleType("whisperx")
+    load_calls: list[tuple[object, ...]] = []
+
+    def load_model(*args, **kwargs):
+        load_calls.append(args)
+        return object()
+
+    whisperx_mod.load_model = load_model
+
+    real_import_module = module.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "whisperx":
+            warnings.warn(
+                "torchcodec is not installed correctly so built-in audio decoding will fail. "
+                "Solutions are:",
+                UserWarning,
+                stacklevel=1,
+            )
+            return whisperx_mod
+        return real_import_module(name)
+
+    monkeypatch.setattr(module.importlib, "import_module", fake_import_module)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        backend.load("Systran/faster-whisper-large-v3", "cpu")
+
+    assert backend.is_loaded()
+    assert len(load_calls) == 1
 
 
 def test_whisperx_backend_uses_legacy_kwargs_when_supported() -> None:

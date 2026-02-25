@@ -9,18 +9,27 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
-
 from server.config import get_config
 from server.core.audio_utils import clear_gpu_cache
 
 logger = logging.getLogger(__name__)
 
+_PYANNOTE_TORCHCODEC_WARNING_RE = (
+    r"torchcodec is not installed correctly so built-in audio decoding will fail\..*"
+)
+
 # Optional imports
 try:
-    from pyannote.audio import Pipeline
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=_PYANNOTE_TORCHCODEC_WARNING_RE,
+            category=UserWarning,
+        )
+        from pyannote.audio import Pipeline
 
     HAS_PYANNOTE = True
 except ImportError:
@@ -48,7 +57,7 @@ class DiarizationSegment:
     def duration(self) -> float:
         return self.end - self.start
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "start": round(self.start, 3),
             "end": round(self.end, 3),
@@ -60,18 +69,18 @@ class DiarizationSegment:
 class DiarizationResult:
     """Complete diarization result."""
 
-    def __init__(self, segments: List[DiarizationSegment], num_speakers: int):
+    def __init__(self, segments: list[DiarizationSegment], num_speakers: int):
         self.segments = segments
         self.num_speakers = num_speakers
 
-    def get_speaker_at(self, time: float) -> Optional[str]:
+    def get_speaker_at(self, time: float) -> str | None:
         """Get the speaker at a specific time."""
         for seg in self.segments:
             if seg.start <= time <= seg.end:
                 return seg.speaker
         return None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "segments": [s.to_dict() for s in self.segments],
             "num_speakers": self.num_speakers,
@@ -88,14 +97,14 @@ class DiarizationEngine:
 
     def __init__(
         self,
-        model: Optional[str] = None,
-        hf_token: Optional[str] = None,
-        device: Optional[str] = None,
-        num_speakers: Optional[int] = None,
-        min_speakers: Optional[int] = None,
-        max_speakers: Optional[int] = None,
-        min_duration_on: Optional[float] = None,
-        min_duration_off: Optional[float] = None,
+        model: str | None = None,
+        hf_token: str | None = None,
+        device: str | None = None,
+        num_speakers: int | None = None,
+        min_speakers: int | None = None,
+        max_speakers: int | None = None,
+        min_duration_on: float | None = None,
+        min_duration_off: float | None = None,
     ):
         """
         Initialize the diarization engine.
@@ -122,12 +131,8 @@ class DiarizationEngine:
         cfg = get_config()
         diar_cfg = cfg.config.get("diarization", {})
 
-        self.model = model or diar_cfg.get(
-            "model", "pyannote/speaker-diarization-community-1"
-        )
-        self.hf_token = (
-            hf_token or diar_cfg.get("hf_token") or os.environ.get("HF_TOKEN")
-        )
+        self.model = model or diar_cfg.get("model", "pyannote/speaker-diarization-community-1")
+        self.hf_token = hf_token or diar_cfg.get("hf_token") or os.environ.get("HF_TOKEN")
         self.device = device or diar_cfg.get("device", "cuda")
         self.num_speakers = (
             num_speakers if num_speakers is not None else diar_cfg.get("num_speakers")
@@ -139,9 +144,7 @@ class DiarizationEngine:
             max_speakers if max_speakers is not None else diar_cfg.get("max_speakers")
         )
         self.min_duration_on = (
-            min_duration_on
-            if min_duration_on is not None
-            else diar_cfg.get("min_duration_on", 0.0)
+            min_duration_on if min_duration_on is not None else diar_cfg.get("min_duration_on", 0.0)
         )
         self.min_duration_off = (
             min_duration_off
@@ -149,7 +152,7 @@ class DiarizationEngine:
             else diar_cfg.get("min_duration_off", 0.0)
         )
 
-        self._pipeline: Optional[Any] = None
+        self._pipeline: Any | None = None
         self._loaded = False
 
         logger.info(f"DiarizationEngine initialized: model={model}, device={device}")
@@ -212,7 +215,7 @@ class DiarizationEngine:
         self,
         audio_data: np.ndarray,
         sample_rate: int = 16000,
-        num_speakers: Optional[int] = None,
+        num_speakers: int | None = None,
     ) -> DiarizationResult:
         """
         Perform speaker diarization on audio data.
@@ -265,7 +268,7 @@ class DiarizationEngine:
                 )
 
             # Convert to segments
-            segments: List[DiarizationSegment] = []
+            segments: list[DiarizationSegment] = []
             speakers = set()
 
             annotation = diarization
@@ -273,9 +276,7 @@ class DiarizationEngine:
                 annotation = diarization.speaker_diarization
 
             if not hasattr(annotation, "itertracks"):
-                raise RuntimeError(
-                    f"Unexpected diarization output type: {type(diarization)!r}"
-                )
+                raise RuntimeError(f"Unexpected diarization output type: {type(diarization)!r}")
 
             for turn, _, speaker in annotation.itertracks(yield_label=True):
                 segments.append(
@@ -302,7 +303,7 @@ class DiarizationEngine:
     def diarize_file(
         self,
         file_path: str,
-        num_speakers: Optional[int] = None,
+        num_speakers: int | None = None,
     ) -> DiarizationResult:
         """
         Perform speaker diarization on an audio file.
@@ -326,7 +327,7 @@ class DiarizationEngine:
         return self.diarize_audio(audio_data, sample_rate, num_speakers)
 
 
-def create_diarization_engine(config: Dict[str, Any]) -> DiarizationEngine:
+def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine:
     """
     Create a DiarizationEngine from configuration.
 
