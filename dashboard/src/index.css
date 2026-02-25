@@ -163,3 +163,22 @@ body {
 .animate-progress-indeterminate {
   animation: progress-indeterminate 1.5s ease-in-out infinite;
 }
+
+/* Dropdown fade-in animation.
+ * Keeps the element invisible during the initial ~20ms delay so that
+ * Floating UI (headlessui anchor positioning, async Promise chain) can
+ * place the element at the correct position before it becomes visible.
+ * animation-fill-mode:both = apply `from` state during delay (opacity:0)
+ *                          + retain `to` state after completion (opacity:1).
+ */
+@keyframes dropdown-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.dropdown-appear {
+  animation: dropdown-appear 100ms ease-out 20ms both;
+}

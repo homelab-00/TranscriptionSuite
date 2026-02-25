@@ -60,7 +60,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
         <ListboxOptions
           anchor="bottom start"
-          className="animate-in fade-in zoom-in-95 z-9999 mt-1 w-[var(--button-width)] overflow-hidden rounded-xl border border-white/10 bg-slate-900 shadow-2xl ring-1 ring-white/5 duration-100 focus:outline-none"
+          className="dropdown-appear z-9999 mt-1 w-[var(--button-width)] overflow-hidden rounded-xl border border-white/10 bg-slate-900 shadow-2xl ring-1 ring-white/5 focus:outline-none"
         >
           <div className="custom-scrollbar max-h-60 overflow-y-auto py-1">
             {options.map((option) => (

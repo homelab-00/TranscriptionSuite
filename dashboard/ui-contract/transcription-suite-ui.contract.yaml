@@ -220,6 +220,7 @@ foundation:
         - ease-in-out
         - ease-out
       keyframes:
+        - dropdown-appear
         - progress-indeterminate
         - slideInLeft
         - slideInRight
@@ -975,6 +976,7 @@ inline_style_allowlist:
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
   keyframes:
+    - dropdown-appear
     - progress-indeterminate
     - slideInLeft
     - slideInRight
