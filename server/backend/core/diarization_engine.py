@@ -20,16 +20,15 @@ logger = logging.getLogger(__name__)
 _PYANNOTE_TORCHCODEC_WARNING_RE = (
     r"torchcodec is not installed correctly so built-in audio decoding will fail\..*"
 )
+warnings.filterwarnings(
+    "ignore",
+    message=_PYANNOTE_TORCHCODEC_WARNING_RE,
+    category=UserWarning,
+)
 
 # Optional imports
 try:
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=_PYANNOTE_TORCHCODEC_WARNING_RE,
-            category=UserWarning,
-        )
-        from pyannote.audio import Pipeline
+    from pyannote.audio import Pipeline
 
     HAS_PYANNOTE = True
 except ImportError:

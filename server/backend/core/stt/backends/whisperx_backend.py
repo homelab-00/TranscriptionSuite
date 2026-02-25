@@ -12,6 +12,7 @@ import importlib
 import inspect
 import logging
 import os
+import time
 import warnings
 from dataclasses import replace
 from pathlib import Path
@@ -32,8 +33,18 @@ SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
+# Process-global filter: PyAnnote 4.x emits a noisy warning when TorchCodec is
+# present but incompatible with the current Torch/FFmpeg runtime.  We pass
+# in-memory audio arrays everywhere, so the decoder warning is non-fatal.
+# Installing at module level catches it regardless of import path (WhisperX
+# import, NeMo background thread, model loading, etc.).
 _PYANNOTE_TORCHCODEC_WARNING_RE = (
     r"torchcodec is not installed correctly so built-in audio decoding will fail\..*"
+)
+warnings.filterwarnings(
+    "ignore",
+    message=_PYANNOTE_TORCHCODEC_WARNING_RE,
+    category=UserWarning,
 )
 
 
@@ -41,22 +52,9 @@ def _import_whisperx_modules(
     *,
     include_diarize: bool = False,
 ) -> tuple[Any, Any | None]:
-    """Import WhisperX while silencing pyannote's optional torchcodec warning.
-
-    PyAnnote 4.x emits a noisy import-time warning when TorchCodec is present but
-    incompatible with the current Torch/FFmpeg runtime. Our WhisperX paths pass
-    in-memory audio arrays to diarization, so this decoder warning is non-fatal
-    during backend import/model load.
-    """
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=_PYANNOTE_TORCHCODEC_WARNING_RE,
-            category=UserWarning,
-        )
-        whisperx = importlib.import_module("whisperx")
-        diarize_module = importlib.import_module("whisperx.diarize") if include_diarize else None
+    """Import WhisperX (and optionally whisperx.diarize)."""
+    whisperx = importlib.import_module("whisperx")
+    diarize_module = importlib.import_module("whisperx.diarize") if include_diarize else None
     return whisperx, diarize_module
 
 
@@ -87,19 +85,12 @@ class WhisperXBackend(STTBackend):
 
         logger.info(f"Loading WhisperX model: {model_name}")
 
-        # Suppress pyannote's torchcodec warning during model loading
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message=_PYANNOTE_TORCHCODEC_WARNING_RE,
-                category=UserWarning,
-            )
-            self._model = whisperx.load_model(
-                model_name,
-                device=device,
-                compute_type=compute_type,
-                download_root=download_root,
-            )
+        self._model = whisperx.load_model(
+            model_name,
+            device=device,
+            compute_type=compute_type,
+            download_root=download_root,
+        )
         self._model_name = model_name
         self._device = device
         self._transcribe_param_names = None
@@ -126,36 +117,71 @@ class WhisperXBackend(STTBackend):
         return self._model is not None
 
     def warmup(self) -> None:
+        """Run full end-to-end warmup: transcribe → load alignment model → run alignment.
+
+        This ensures CUDA kernels are compiled for both the transcription and
+        alignment pipelines at startup, rather than on the first user request.
+        CUDA kernel compilation is per-architecture, so warming up with an English
+        wav2vec2 model also helps Greek/French/etc. (same architecture, different weights).
+        """
         if self._model is None:
             return
+
+        whisperx, _ = _import_whisperx_modules()
+        warmup_path = Path(__file__).parent.parent / "warmup_audio.wav"
+
+        if not warmup_path.exists():
+            logger.warning("Warmup audio not found, using silent audio")
+            warmup_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
+        else:
+            warmup_audio, _ = sf.read(str(warmup_path), dtype="float32")
+
+        # Step 1: Transcribe warmup audio (warms faster-whisper + Pyannote VAD kernels)
+        wx_result: dict[str, Any] = {}
         try:
-            warmup_path = Path(__file__).parent.parent / "warmup_audio.wav"
-
-            if not warmup_path.exists():
-                logger.warning("Warmup audio not found, using silent audio")
-                warmup_audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
-            else:
-                warmup_audio, _ = sf.read(str(warmup_path), dtype="float32")
-
-            self._model.transcribe(warmup_audio, batch_size=1)
-            logger.debug("WhisperX model warmup complete")
-
+            t0 = time.perf_counter()
+            wx_result = self._model.transcribe(warmup_audio, batch_size=1, language="en")
+            logger.info("Warmup transcribe complete (%.2fs)", time.perf_counter() - t0)
         except Exception as e:
-            logger.warning(f"WhisperX model warmup failed (non-critical): {e}")
+            logger.warning(f"Warmup transcribe failed (non-critical): {e}")
 
-        # Pre-load wav2vec2 alignment model so the first real transcription
-        # doesn't pay the download/load cost.
+        # Step 2: Load alignment model (downloads wav2vec2 weights on first run)
+        align_lang = "en"
         try:
-            whisperx, _ = _import_whisperx_modules()
-            align_lang = "en"
+            t0 = time.perf_counter()
             self._align_model, self._align_metadata = whisperx.load_align_model(
                 language_code=align_lang,
                 device=self._device,
             )
             self._align_language = align_lang
-            logger.debug("WhisperX alignment model pre-loaded (lang=%s)", align_lang)
+            logger.info(
+                "Warmup alignment model loaded (lang=%s, %.2fs)",
+                align_lang,
+                time.perf_counter() - t0,
+            )
         except Exception as e:
-            logger.warning(f"WhisperX alignment model pre-load failed (non-critical): {e}")
+            logger.warning(f"Warmup alignment model load failed (non-critical): {e}")
+            return
+
+        # Step 3: Run alignment inference (compiles CUDA kernels for wav2vec2)
+        segments = wx_result.get("segments", [])
+        if not segments:
+            # Synthesize a minimal dummy segment so alignment still runs
+            duration = len(warmup_audio) / SAMPLE_RATE
+            segments = [{"text": "warmup", "start": 0.0, "end": duration}]
+        try:
+            t0 = time.perf_counter()
+            whisperx.align(
+                segments,
+                self._align_model,
+                self._align_metadata,
+                warmup_audio,
+                self._device,
+                return_char_alignments=False,
+            )
+            logger.info("Warmup alignment inference complete (%.2fs)", time.perf_counter() - t0)
+        except Exception as e:
+            logger.warning(f"Warmup alignment inference failed (non-critical): {e}")
 
     def transcribe(
         self,
@@ -174,6 +200,7 @@ class WhisperXBackend(STTBackend):
             raise RuntimeError("WhisperX model is not loaded")
 
         # WhisperX transcribe returns a dict with "segments" and "language"
+        t0 = time.perf_counter()
         wx_result = self._whisperx_transcribe(
             audio,
             language=language,
@@ -182,13 +209,16 @@ class WhisperXBackend(STTBackend):
             initial_prompt=initial_prompt,
             suppress_tokens=suppress_tokens,
         )
+        logger.info("WhisperX transcribe took %.2fs", time.perf_counter() - t0)
 
         detected_language = wx_result.get("language", language)
 
         # Run wav2vec2 alignment for precise word timestamps (longform only)
         if word_timestamps and wx_result.get("segments"):
             try:
+                t0 = time.perf_counter()
                 wx_result = self._align(wx_result, audio, detected_language)
+                logger.info("WhisperX alignment took %.2fs", time.perf_counter() - t0)
             except Exception as e:
                 logger.warning(f"WhisperX alignment failed, using raw timestamps: {e}")
 
@@ -355,7 +385,8 @@ class WhisperXBackend(STTBackend):
                 )
             except (TypeError, ValueError) as e:
                 logger.debug(
-                    "Could not inspect WhisperX transcribe signature, using fallback: %s", e
+                    "Could not inspect WhisperX transcribe signature, using fallback: %s",
+                    e,
                 )
                 # Conservative fallback matching WhisperX 3.8.x public kwargs.
                 self._transcribe_param_names = {
@@ -447,7 +478,8 @@ class WhisperXBackend(STTBackend):
                         options_patched = True
                     except Exception as e:
                         logger.warning(
-                            "Failed to patch WhisperX decode options for compatibility: %s", e
+                            "Failed to patch WhisperX decode options for compatibility: %s",
+                            e,
                         )
                 else:
                     logger.debug(
@@ -479,7 +511,13 @@ class WhisperXBackend(STTBackend):
 
         # Load or reuse alignment model for this language
         if self._align_model is None or self._align_language != lang:
+            t0 = time.perf_counter()
             if self._align_model is not None:
+                logger.info(
+                    "Switching alignment model from '%s' to '%s'",
+                    self._align_language,
+                    lang,
+                )
                 del self._align_model
                 del self._align_metadata
                 gc.collect()
@@ -488,7 +526,9 @@ class WhisperXBackend(STTBackend):
                 device=self._device,
             )
             self._align_language = lang
+            logger.info("Alignment model loaded (lang=%s, %.2fs)", lang, time.perf_counter() - t0)
 
+        t0 = time.perf_counter()
         result = whisperx.align(
             wx_result["segments"],
             self._align_model,
@@ -497,4 +537,5 @@ class WhisperXBackend(STTBackend):
             self._device,
             return_char_alignments=False,
         )
+        logger.info("Alignment inference took %.2fs", time.perf_counter() - t0)
         return result
