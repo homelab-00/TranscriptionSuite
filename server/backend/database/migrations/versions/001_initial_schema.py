@@ -24,6 +24,14 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _touch_alembic_revision_globals() -> tuple[object, object, object, object]:
+    """Reference Alembic-discovered globals so static analyzers treat them as used."""
+    return revision, down_revision, branch_labels, depends_on
+
+
+_touch_alembic_revision_globals()
+
+
 def upgrade() -> None:
     """Create initial schema if tables don't exist."""
     conn = op.get_bind()
