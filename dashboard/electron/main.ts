@@ -42,17 +42,19 @@ const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
 const CLIENT_LOG_FILE = 'client-debug.log';
 const STOP_SERVER_ON_QUIT_TIMEOUT_MS = 30_000;
+let clientLogFileSessionInitialized = false;
 
 function ensureClientLogFilePath(): string {
   const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
   fs.mkdirSync(logDir, { recursive: true });
   const logFilePath = path.join(logDir, CLIENT_LOG_FILE);
-  // Use atomic create-if-not-exists to avoid TOCTOU race between existsSync and writeFileSync
-  try {
-    fs.writeFileSync(logFilePath, '', { flag: 'wx' });
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+
+  // Start each dashboard session with a fresh client debug log file.
+  if (!clientLogFileSessionInitialized) {
+    fs.writeFileSync(logFilePath, '', { flag: 'w' });
+    clientLogFileSessionInitialized = true;
   }
+
   return logFilePath;
 }
 

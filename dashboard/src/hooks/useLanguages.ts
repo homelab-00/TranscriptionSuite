@@ -8,23 +8,36 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
+import {
+  detectTranscriptionBackendType,
+  type TranscriptionBackendType,
+} from '../utils/transcriptionBackend';
 
 export interface LanguagesState {
   /** Array of {code, name} pairs, with "auto" prepended */
   languages: Array<{ code: string; name: string }>;
+  /** Active backend family reported by the server (if available) */
+  backendType: TranscriptionBackendType | null;
   loading: boolean;
   error: string | null;
 }
 
-const PLACEHOLDER: Array<{ code: string; name: string }> = [{ code: 'auto', name: 'Auto Detect' }];
+interface LanguagesQueryData {
+  languages: Array<{ code: string; name: string }>;
+  backendType: TranscriptionBackendType | null;
+}
+
+const PLACEHOLDER_LANGUAGES: Array<{ code: string; name: string }> = [
+  { code: 'auto', name: 'Auto Detect' },
+];
+const PLACEHOLDER: LanguagesQueryData = {
+  languages: PLACEHOLDER_LANGUAGES,
+  backendType: null,
+};
 
 /** Derive a stable cache key from the model name (backend type). */
 function cacheKey(model: string | null | undefined): string {
-  const m = (model ?? '').trim().toLowerCase();
-  if (/^nvidia\/(parakeet|nemotron-speech)/.test(m)) return 'parakeet';
-  if (/^nvidia\/canary/.test(m)) return 'canary';
-  if (/^[^/]+\/vibevoice-asr(?:-[^/]+)?$/.test(m)) return 'vibevoice_asr';
-  return 'whisper';
+  return detectTranscriptionBackendType(model);
 }
 
 /**
@@ -49,14 +62,18 @@ export function useLanguages(modelName?: string | null): LanguagesState {
     queryKey: ['languages', key],
     queryFn: async () => {
       const data = await apiClient.getLanguages();
-      return buildList(data.languages);
+      return {
+        languages: buildList(data.languages),
+        backendType: data.backend_type ?? null,
+      } satisfies LanguagesQueryData;
     },
     staleTime: Infinity,
     placeholderData: PLACEHOLDER,
   });
 
   return {
-    languages: data ?? PLACEHOLDER,
+    languages: data?.languages ?? PLACEHOLDER_LANGUAGES,
+    backendType: data?.backendType ?? null,
     loading: isLoading,
     error: error instanceof Error ? error.message : error ? 'Failed to load languages' : null,
   };

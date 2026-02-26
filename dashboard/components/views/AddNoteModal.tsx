@@ -13,6 +13,7 @@ interface AddNoteModalProps {
   initialTime?: number; // e.g. 10 for 10:00
   initialDate?: string; // e.g. 2026-02-17
   queue: Pick<UseImportQueueReturn, 'addFiles'>;
+  supportsExplicitWordTimestampToggle?: boolean;
 }
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,6 +30,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   initialTime,
   initialDate,
   queue,
+  supportsExplicitWordTimestampToggle = true,
 }) => {
   const [isRendered, setIsRendered] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -57,10 +59,23 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   }, []);
 
   // Constraint: timestamps OFF → force diarization OFF
-  const handleTimestampsChange = useCallback((enabled: boolean) => {
-    setIsTimestampsEnabled(enabled);
-    if (!enabled) setIsDiarizationEnabled(false);
-  }, []);
+  const handleTimestampsChange = useCallback(
+    (enabled: boolean) => {
+      if (!supportsExplicitWordTimestampToggle) {
+        setIsTimestampsEnabled(true);
+        return;
+      }
+      setIsTimestampsEnabled(enabled);
+      if (!enabled) setIsDiarizationEnabled(false);
+    },
+    [supportsExplicitWordTimestampToggle],
+  );
+
+  useEffect(() => {
+    if (!supportsExplicitWordTimestampToggle) {
+      setIsTimestampsEnabled(true);
+    }
+  }, [supportsExplicitWordTimestampToggle]);
 
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -101,10 +116,11 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       if (initialTime !== undefined) {
         fileCreatedAt = buildLocalSlotTimestamp(selectedDateKey, initialTime);
       }
+      const enableWordTimestamps = supportsExplicitWordTimestampToggle ? isTimestampsEnabled : true;
 
       queue.addFiles(selectedFiles, {
         enable_diarization: isDiarizationEnabled,
-        enable_word_timestamps: isTimestampsEnabled,
+        enable_word_timestamps: enableWordTimestamps,
         file_created_at: fileCreatedAt,
         title: title.trim() || undefined,
       });
@@ -130,6 +146,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     onClose,
     queue,
     selectedDateKey,
+    supportsExplicitWordTimestampToggle,
     title,
   ]);
 
@@ -305,7 +322,12 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
                 checked={isTimestampsEnabled}
                 onChange={handleTimestampsChange}
                 label="Word-level Timestamps"
-                description="Generate precise timing for every word"
+                description={
+                  supportsExplicitWordTimestampToggle
+                    ? 'Generate precise timing for every word'
+                    : 'Required by the current model and managed automatically'
+                }
+                disabled={!supportsExplicitWordTimestampToggle}
               />
             </div>
           </GlassCard>

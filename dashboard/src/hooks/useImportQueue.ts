@@ -63,57 +63,65 @@ function nextJobId(): string {
 
 export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueReturn {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
+  const jobsRef = useRef<ImportJob[]>([]);
   const processingRef = useRef(false);
   const abortRef = useRef(false);
   const callbacksRef = useRef<UseImportQueueConfig | undefined>(config);
   callbacksRef.current = config;
+
+  const updateJobs = useCallback((updater: (prev: ImportJob[]) => ImportJob[]) => {
+    const next = updater(jobsRef.current);
+    jobsRef.current = next;
+    setJobs(next);
+    return next;
+  }, []);
 
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
     processingRef.current = true;
     abortRef.current = false;
 
-    // Keep processing until all jobs are done or aborted
-    while (!abortRef.current) {
-      // Find next pending job
-      let nextJob: ImportJob | undefined;
-      setJobs((prev) => {
-        nextJob = prev.find((j) => j.status === 'pending');
-        if (nextJob) {
-          return prev.map((j) =>
-            j.id === nextJob!.id ? { ...j, status: 'processing' as const } : j,
-          );
-        }
-        return prev;
-      });
+    try {
+      // Keep processing until all jobs are done or aborted
+      while (!abortRef.current) {
+        const nextJob = jobsRef.current.find((j) => j.status === 'pending');
+        if (!nextJob) break;
 
-      if (!nextJob) break;
-      const jobId = nextJob.id;
-      const file = nextJob.file;
-      const jobOptions = nextJob.options;
+        const jobId = nextJob.id;
+        const file = nextJob.file;
+        const jobOptions = nextJob.options;
 
-      try {
-        const result = await apiClient.uploadAndTranscribe(file, jobOptions);
-        setJobs((prev) =>
-          prev.map((j) => (j.id === jobId ? { ...j, status: 'success' as const, result } : j)),
-        );
-        callbacksRef.current?.onJobSuccess?.(nextJob, result);
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Upload failed';
-        setJobs((prev) =>
+        updateJobs((prev) =>
           prev.map((j) =>
-            j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
+            j.id === jobId ? { ...j, status: 'processing' as const, error: undefined } : j,
           ),
         );
-        callbacksRef.current?.onJobError?.(nextJob, errorMsg);
+
+        try {
+          const result = await apiClient.uploadAndTranscribe(file, jobOptions);
+          updateJobs((prev) =>
+            prev.map((j) => (j.id === jobId ? { ...j, status: 'success' as const, result } : j)),
+          );
+          callbacksRef.current?.onJobSuccess?.(nextJob, result);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : 'Upload failed';
+          updateJobs((prev) =>
+            prev.map((j) =>
+              j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
+            ),
+          );
+          callbacksRef.current?.onJobError?.(nextJob, errorMsg);
+        }
+
+        if (abortRef.current) break;
+
+        // Small delay between jobs to let the server breathe
+        await new Promise((r) => setTimeout(r, 500));
       }
-
-      // Small delay between jobs to let the server breathe
-      await new Promise((r) => setTimeout(r, 500));
+    } finally {
+      processingRef.current = false;
     }
-
-    processingRef.current = false;
-  }, []);
+  }, [updateJobs]);
 
   const addFiles = useCallback(
     (files: File[], options?: TranscriptionUploadOptions) => {
@@ -124,29 +132,32 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
         options: capturedOptions,
         status: 'pending' as const,
       }));
-      setJobs((prev) => [...prev, ...newJobs]);
+      updateJobs((prev) => [...prev, ...newJobs]);
       // Kick off processing (will no-op if already running)
       setTimeout(() => processQueue(), 0);
     },
-    [processQueue],
+    [processQueue, updateJobs],
   );
 
-  const removeJob = useCallback((id: string) => {
-    setJobs((prev) => prev.filter((j) => j.id !== id || j.status === 'processing'));
-  }, []);
+  const removeJob = useCallback(
+    (id: string) => {
+      updateJobs((prev) => prev.filter((j) => j.id !== id || j.status === 'processing'));
+    },
+    [updateJobs],
+  );
 
   const clearFinished = useCallback(() => {
-    setJobs((prev) => prev.filter((j) => j.status === 'pending' || j.status === 'processing'));
-  }, []);
+    updateJobs((prev) => prev.filter((j) => j.status === 'pending' || j.status === 'processing'));
+  }, [updateJobs]);
 
   const clearAll = useCallback(() => {
     abortRef.current = true;
-    setJobs([]);
-  }, []);
+    updateJobs(() => []);
+  }, [updateJobs]);
 
   const retryJob = useCallback(
     (id: string) => {
-      setJobs((prev) =>
+      updateJobs((prev) =>
         prev.map((j) =>
           j.id === id && j.status === 'error'
             ? { ...j, status: 'pending' as const, error: undefined }
@@ -155,7 +166,7 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
       );
       setTimeout(() => processQueue(), 0);
     },
-    [processQueue],
+    [processQueue, updateJobs],
   );
 
   const pendingCount = jobs.filter((j) => j.status === 'pending').length;

@@ -31,10 +31,13 @@ import { AudioNoteModal } from './AudioNoteModal';
 import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
+import { useLanguages } from '../../src/hooks/useLanguages';
 import { useImportQueue } from '../../src/hooks/useImportQueue';
 import type { ImportJob, UseImportQueueReturn } from '../../src/hooks/useImportQueue';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
 import type { Recording } from '../../src/api/types';
+import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 
@@ -45,6 +48,8 @@ interface NotebookViewProps {
 export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange }) => {
   const [activeTab, setActiveTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
   const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
+  const [adminStatusPollingEnabled, setAdminStatusPollingEnabled] = useState(true);
+  const admin = useAdminStatus(10_000, adminStatusPollingEnabled);
 
   // Audio Modal State (Existing Note)
   const [selectedNote, setSelectedNote] = useState<any>(null);
@@ -80,6 +85,21 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
   });
 
   useEffect(() => {
+    if (adminStatusPollingEnabled && admin.error?.includes('API 403')) {
+      setAdminStatusPollingEnabled(false);
+    }
+  }, [admin.error, adminStatusPollingEnabled]);
+
+  const activeModel =
+    admin.status?.config?.main_transcriber?.model ??
+    admin.status?.config?.transcription?.model ??
+    null;
+  const { backendType: notebookBackendType } = useLanguages(activeModel);
+  const supportsExplicitWordTimestampToggle = activeModel
+    ? supportsExplicitWordTimestampToggleForModel(activeModel)
+    : notebookBackendType !== 'vibevoice_asr';
+
+  useEffect(() => {
     onUploadingChange?.(importQueue.isProcessing || importQueue.pendingCount > 0);
     return () => onUploadingChange?.(false);
   }, [importQueue.isProcessing, importQueue.pendingCount, onUploadingChange]);
@@ -97,7 +117,12 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
       case NotebookTab.SEARCH:
         return <SearchTab onNoteClick={handleNoteClick} />;
       case NotebookTab.IMPORT:
-        return <ImportTab queue={importQueue} />;
+        return (
+          <ImportTab
+            queue={importQueue}
+            supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
+          />
+        );
     }
   };
 
@@ -146,6 +171,7 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
         initialTime={selectedTimeSlot}
         initialDate={selectedDateSlot}
         queue={importQueue}
+        supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
       />
     </div>
   );
@@ -1222,11 +1248,23 @@ const SearchTab: React.FC<{ onNoteClick: (note: any) => void }> = ({ onNoteClick
   );
 };
 
-const ImportTab = ({ queue }: { queue: UseImportQueueReturn }) => {
+const ImportTab = ({
+  queue,
+  supportsExplicitWordTimestampToggle,
+}: {
+  queue: UseImportQueueReturn;
+  supportsExplicitWordTimestampToggle: boolean;
+}) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diarization, setDiarization] = useState(true);
-  const [wordTimestamps, setWordTimestamps] = useState(false);
+  const [wordTimestamps, setWordTimestamps] = useState(true);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  useEffect(() => {
+    if (!supportsExplicitWordTimestampToggle) {
+      setWordTimestamps(true);
+    }
+  }, [supportsExplicitWordTimestampToggle]);
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {
@@ -1235,20 +1273,27 @@ const ImportTab = ({ queue }: { queue: UseImportQueueReturn }) => {
   }, []);
 
   // Constraint: timestamps OFF → force diarization OFF
-  const handleTimestampsChange = useCallback((enabled: boolean) => {
-    setWordTimestamps(enabled);
-    if (!enabled) setDiarization(false);
-  }, []);
+  const handleTimestampsChange = useCallback(
+    (enabled: boolean) => {
+      if (!supportsExplicitWordTimestampToggle) {
+        setWordTimestamps(true);
+        return;
+      }
+      setWordTimestamps(enabled);
+      if (!enabled) setDiarization(false);
+    },
+    [supportsExplicitWordTimestampToggle],
+  );
 
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
       queue.addFiles(Array.from(files), {
         enable_diarization: diarization,
-        enable_word_timestamps: wordTimestamps,
+        enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
       });
     },
-    [diarization, wordTimestamps, queue],
+    [diarization, queue, supportsExplicitWordTimestampToggle, wordTimestamps],
   );
 
   const handleDrop = useCallback(
@@ -1405,7 +1450,12 @@ const ImportTab = ({ queue }: { queue: UseImportQueueReturn }) => {
             checked={wordTimestamps}
             onChange={handleTimestampsChange}
             label="Word-level Timestamps"
-            description="Generate precise timestamps for every word"
+            description={
+              supportsExplicitWordTimestampToggle
+                ? 'Generate precise timestamps for every word'
+                : 'Required by the current model and managed automatically'
+            }
+            disabled={!supportsExplicitWordTimestampToggle}
           />
         </div>
       </GlassCard>
