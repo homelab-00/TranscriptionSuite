@@ -174,6 +174,9 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
               >
                 homelab-00
               </button>
+              <span aria-label="Greek flag" role="img">
+                🇬🇷
+              </span>
             </div>
           </div>
         </div>
