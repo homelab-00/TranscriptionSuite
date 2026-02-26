@@ -1118,9 +1118,15 @@ async function removeModelCache(modelId: string): Promise<void> {
  * server container image.  The download timeout is extended to 10 minutes.
  */
 async function downloadModelToCache(modelId: string): Promise<void> {
-  const safeId = modelId.trim().replace(/'/g, "\\'");
-  const pyCmd = `from huggingface_hub import snapshot_download; snapshot_download('${safeId}', cache_dir='/models/hub')`;
-  await execFileAsync('docker', ['exec', CONTAINER_NAME, 'python', '-c', pyCmd], {
+  const trimmedModelId = modelId.trim();
+  if (!trimmedModelId) {
+    throw new Error('Model ID is required');
+  }
+
+  // Pass the model ID as an argv value instead of interpolating it into code.
+  const pyCmd =
+    "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
+  await execFileAsync('docker', ['exec', CONTAINER_NAME, 'python', '-c', pyCmd, trimmedModelId], {
     maxBuffer: 10 * 1024 * 1024,
     timeout: 600_000, // 10 minutes for large models
   });
