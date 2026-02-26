@@ -10,6 +10,12 @@ build/assets/logo.ico
 ## Video files
 build/assets/videos/
 
+## Dashboard UI build outputs
+dashboard/dist/
+dashboard/dist-ssr/
+dashboard/dist-electron/
+dashboard/release/
+
 
 
 # MISC
@@ -30,8 +36,18 @@ __pycache__/
 *.tmp
 *.logW
 *.log
+*.local
 *.mp3
 .directory
 .gitnexus
 CLAUDE.md
 AGENTS.md
+
+## Dashboard UI / Node
+dashboard/logs/
+dashboard/node_modules/
+dashboard/*.suo
+dashboard/*.ntvs*
+dashboard/*.njsproj
+dashboard/*.sln
+dashboard/*.sw?

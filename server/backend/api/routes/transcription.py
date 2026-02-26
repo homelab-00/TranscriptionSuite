@@ -187,62 +187,60 @@ async def transcribe_audio(
         # (needed for proper text-to-speaker alignment)
         need_word_timestamps = word_timestamps or diarization
 
-        # Transcribe with cancellation support
-        logger.info("Transcribing uploaded file")
-        result = engine.transcribe_file(
-            tmp_path,
-            language=language,
-            task="translate" if translation_enabled else "transcribe",
-            translation_target_language=(
-                translation_target_language if translation_enabled else None
-            ),
-            word_timestamps=need_word_timestamps,
-            cancellation_check=model_manager.job_tracker.is_cancelled,
-        )
-
-        # Handle diarization if requested (NeMo / legacy path)
         if diarization:
-            try:
-                logger.info("Running diarization on transcribed audio")
-                model_manager.load_diarization_model()
-                diar_engine = model_manager.diarization_engine
+            # Run transcription and diarization in parallel
+            from server.core.parallel_diarize import transcribe_and_diarize
 
-                from server.core.audio_utils import load_audio
+            result, diar_result = transcribe_and_diarize(
+                engine=engine,
+                model_manager=model_manager,
+                file_path=tmp_path,
+                language=language,
+                task="translate" if translation_enabled else "transcribe",
+                translation_target_language=(
+                    translation_target_language if translation_enabled else None
+                ),
+                word_timestamps=need_word_timestamps,
+                expected_speakers=expected_speakers,
+                cancellation_check=model_manager.job_tracker.is_cancelled,
+            )
 
-                audio_data, sample_rate = load_audio(tmp_path, target_sample_rate=16000)
+            if diar_result is not None:
+                try:
+                    from server.core.speaker_merge import build_speaker_segments
 
-                diar_result = diar_engine.diarize_audio(
-                    audio_data, sample_rate, num_speakers=expected_speakers
-                )
-
-                logger.info(
-                    "Diarization complete: %s speakers found",
-                    diar_result.num_speakers,
-                )
-
-                # Merge speaker labels into transcription results
-                from server.core.speaker_merge import build_speaker_segments
-
-                diar_dicts = [seg.to_dict() for seg in diar_result.segments]
-                merged_segments, merged_words, num_speakers = build_speaker_segments(
-                    result.words, diar_dicts
-                )
-
-                if merged_segments:
-                    result.segments = merged_segments
-                    result.words = merged_words
-                    result.num_speakers = num_speakers
-                    logger.info(
-                        "Speaker merge complete: %s speakers, %s segments",
-                        num_speakers,
-                        len(merged_segments),
+                    diar_dicts = [seg.to_dict() for seg in diar_result.segments]
+                    merged_segments, merged_words, num_speakers = build_speaker_segments(
+                        result.words, diar_dicts
                     )
 
-            except Exception:
-                logger.warning(
-                    "Diarization failed (returning transcript without speakers)",
-                    exc_info=True,
-                )
+                    if merged_segments:
+                        result.segments = merged_segments
+                        result.words = merged_words
+                        result.num_speakers = num_speakers
+                        logger.info(
+                            "Speaker merge complete: %s speakers, %s segments",
+                            num_speakers,
+                            len(merged_segments),
+                        )
+                except Exception:
+                    logger.warning(
+                        "Speaker merge failed (returning transcript without speakers)",
+                        exc_info=True,
+                    )
+        else:
+            # Transcribe without diarization
+            logger.info("Transcribing uploaded file")
+            result = engine.transcribe_file(
+                tmp_path,
+                language=language,
+                task="translate" if translation_enabled else "transcribe",
+                translation_target_language=(
+                    translation_target_language if translation_enabled else None
+                ),
+                word_timestamps=need_word_timestamps,
+                cancellation_check=model_manager.job_tracker.is_cancelled,
+            )
 
         return result.to_dict()
 
