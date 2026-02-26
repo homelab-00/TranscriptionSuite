@@ -95,9 +95,14 @@ vibevoice_asr:
 
     # Generation settings.
     attn_implementation: "eager"
-    # 0 (or null) = do not pass an explicit max_new_tokens cap to generate().
-    # Set a positive integer only if you want to enforce a hard cap.
-    max_new_tokens: 0
+    # VibeVoice structured JSON output is sensitive to generation settings.
+    # Use VibeVoice-specific defaults (aligned with upstream demo) instead of
+    # inheriting the global main_transcriber.beam_size.
+    num_beams: 1
+    temperature: 0.0
+    # Explicitly cap generation to reduce malformed/truncated structured JSON.
+    # Set 0 (or null) only if you intentionally want to omit max_new_tokens.
+    max_new_tokens: 32768
 
 # ----------------------------------------------------------------------------
 # Live Mode (RealtimeSTT) Configuration

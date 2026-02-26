@@ -17,6 +17,7 @@ def _install_minimal_torch_stub() -> None:
         return
 
     torch_stub = types.ModuleType("torch")
+    torch_stub.Tensor = type("Tensor", (), {})
     torch_stub.float16 = "float16"
     torch_stub.float32 = "float32"
     torch_stub.bfloat16 = "bfloat16"
@@ -312,6 +313,34 @@ def test_parse_vibevoice_structured_output_handles_assistant_prefixed_json() -> 
     ]
 
 
+def test_parse_vibevoice_structured_output_repairs_missing_closers() -> None:
+    module = _import_vibevoice_backend_module()
+    text = '[{"Start":0,"End":1.2,"Speaker":0,"Content":"hello"}'
+
+    segments, mode, stats = module._parse_vibevoice_structured_output_detailed(text)
+
+    assert mode in {"embedded_json", "repaired_json"}
+    assert stats["unbalanced"] is True
+    assert segments == [
+        {"text": "hello", "start": 0.0, "end": 1.2, "speaker": "SPEAKER_00"},
+    ]
+
+
+def test_parse_vibevoice_structured_output_salvages_complete_objects_from_truncated_array() -> None:
+    module = _import_vibevoice_backend_module()
+    text = (
+        '[{"Start":0,"End":1.0,"Speaker":0,"Content":"alpha"},'
+        '{"Start":1.0,"End":2.0,"Speaker":1,"Content.'
+    )
+
+    segments, mode, _stats = module._parse_vibevoice_structured_output_detailed(text)
+
+    assert mode in {"embedded_json", "segment_salvage", "repaired_json"}
+    assert segments
+    assert segments[0]["text"] == "alpha"
+    assert segments[0]["speaker"] == "SPEAKER_00"
+
+
 def test_normalize_vibevoice_segments_accepts_single_segment_title_case_dict() -> None:
     module = _import_vibevoice_backend_module()
     payload = {"Start": 1.25, "End": 2.5, "Speaker": "2", "Content": "Hi"}
@@ -326,3 +355,130 @@ def test_normalize_vibevoice_segments_accepts_single_segment_title_case_dict() -
             "speaker": "SPEAKER_02",
         }
     ]
+
+
+def test_extract_plaintext_from_jsonish_output_uses_content_field() -> None:
+    module = _import_vibevoice_backend_module()
+
+    text = '[{"Start":0,"End":1,"Speaker":0,"Content":"hello world"}'
+
+    assert module._extract_plaintext_from_jsonish_output(text) == "hello world"
+
+
+def test_extract_plaintext_from_jsonish_output_handles_partial_content_string() -> None:
+    module = _import_vibevoice_backend_module()
+
+    text = '[{"Start":0,"End":1,"Speaker":0,"Content":"hello partial'
+
+    assert module._extract_plaintext_from_jsonish_output(text) == "hello partial"
+
+
+def test_decode_generated_text_prefers_batch_decode() -> None:
+    module = _import_vibevoice_backend_module()
+
+    class _TokenIds:
+        def detach(self):  # type: ignore[no-untyped-def]
+            return self
+
+        def cpu(self):  # type: ignore[no-untyped-def]
+            return self
+
+        def unsqueeze(self, dim: int):  # type: ignore[no-untyped-def]
+            assert dim == 0
+            return ["batched"]
+
+    class _Processor:
+        def batch_decode(self, ids, skip_special_tokens=True):  # type: ignore[no-untyped-def]
+            assert ids == ["batched"]
+            assert skip_special_tokens is True
+            return ["decoded-via-batch"]
+
+        def decode(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("decode() should not be called when batch_decode is available")
+
+    assert module._decode_generated_text(_Processor(), _TokenIds()) == "decoded-via-batch"
+
+
+def test_vibevoice_generate_uses_backend_specific_defaults_and_config_overrides(
+    monkeypatch,
+) -> None:
+    module = _import_vibevoice_backend_module()
+    backend = module.VibeVoiceASRBackend()
+    backend._model = types.SimpleNamespace()
+    backend._device = "cpu"
+    backend._target_sample_rate = 24000
+    backend._num_beams = 1
+    backend._temperature = 0.0
+    backend._max_new_tokens = 1234
+
+    class _Tokenizer:
+        eos_token_id = 42
+        pad_token_id = 42
+
+    class _Processor:
+        tokenizer = _Tokenizer()
+
+    backend._processor = _Processor()
+
+    class _FakeTensor(module.torch.Tensor):  # type: ignore[misc]
+        def __init__(self, data):  # type: ignore[no-untyped-def]
+            self._data = np.asarray(data)
+
+        @property
+        def ndim(self):  # type: ignore[no-untyped-def]
+            return self._data.ndim
+
+        @property
+        def shape(self):  # type: ignore[no-untyped-def]
+            return self._data.shape
+
+        def __getitem__(self, item):  # type: ignore[no-untyped-def]
+            result = self._data[item]
+            if isinstance(result, np.ndarray):
+                return _FakeTensor(result)
+            return result
+
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_generate(**kwargs):  # type: ignore[no-untyped-def]
+        captured_kwargs.update(kwargs)
+        return _FakeTensor([[1, 2, 3]])
+
+    backend._model.generate = fake_generate  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(module, "_resample_audio", lambda audio, **_kwargs: audio)
+    monkeypatch.setattr(
+        module,
+        "_call_vibevoice_processor",
+        lambda *_args, **_kwargs: ({"input_ids": _FakeTensor([[1, 2]])}, "raw-array"),
+    )
+    monkeypatch.setattr(module, "_move_inputs_to_device", lambda inputs, _device: inputs)
+    monkeypatch.setattr(module, "_decode_generated_text", lambda *_args, **_kwargs: "[]")
+    monkeypatch.setattr(
+        module,
+        "_parse_vibevoice_structured_output_detailed",
+        lambda *_args, **_kwargs: (
+            [{"text": "ok", "start": 0.0, "end": 1.0, "speaker": None}],
+            "direct_json",
+            {
+                "has_json_start": True,
+                "unbalanced": False,
+                "in_string": False,
+                "bracket_depth": 0,
+                "brace_depth": 0,
+            },
+        ),
+    )
+
+    segments = backend._generate_segments(
+        np.zeros(16, dtype=np.float32),
+        audio_sample_rate=24000,
+        language=None,
+        beam_size=7,  # ignored in favor of VibeVoice-specific config
+    )
+
+    assert segments[0]["text"] == "ok"
+    assert captured_kwargs["num_beams"] == 1
+    assert captured_kwargs["temperature"] == 0.0
+    assert captured_kwargs["max_new_tokens"] == 1234
+    assert captured_kwargs["do_sample"] is False

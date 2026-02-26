@@ -129,7 +129,8 @@ class TranscriptionSession:
 
             logger.info(
                 f"Processing {len(audio_float) / self.sample_rate:.2f}s of audio "
-                f"for {self.client_name}"
+                f"for {self.client_name} (sample_rate={self.sample_rate}Hz, "
+                f"samples={len(audio_float)})"
             )
 
             # Get transcription engine (lazy import to avoid startup delay)
@@ -203,6 +204,22 @@ class TranscriptionSession:
         self._sample_rate_mismatch_reported = False
         self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
         self.sample_rate = self._determine_capture_sample_rate_hz()
+        backend_name = "realtime_vad"
+        if not self._use_realtime_engine:
+            try:
+                from server.core.model_manager import get_model_manager
+
+                engine = get_model_manager().transcription_engine
+                backend_name = getattr(getattr(engine, "_backend", None), "backend_name", "unknown")
+            except Exception:
+                backend_name = "unknown"
+        logger.info(
+            "Session capture configured for %s: backend=%s sample_rate=%sHz vad=%s",
+            self.client_name,
+            backend_name,
+            self.sample_rate,
+            self._use_realtime_engine,
+        )
 
         if self._use_realtime_engine:
             # Initialize realtime engine for VAD-based recording

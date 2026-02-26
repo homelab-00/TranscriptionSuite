@@ -13,6 +13,7 @@ import importlib
 import json
 import logging
 import math
+import re
 from typing import Any
 
 import numpy as np
@@ -28,7 +29,9 @@ from server.core.stt.backends.base import (
 INPUT_SAMPLE_RATE = 16000
 DEFAULT_TARGET_SAMPLE_RATE = 24000
 DEFAULT_LANGUAGE_MODEL = "Qwen/Qwen2.5-7B"
-DEFAULT_MAX_NEW_TOKENS = 0
+DEFAULT_MAX_NEW_TOKENS = 32768
+DEFAULT_NUM_BEAMS = 1
+DEFAULT_TEMPERATURE = 0.0
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +144,8 @@ class VibeVoiceASRBackend(STTBackend):
         self._device: str = "cpu"
         self._target_sample_rate: int = DEFAULT_TARGET_SAMPLE_RATE
         self._max_new_tokens: int | None = None
+        self._num_beams: int = DEFAULT_NUM_BEAMS
+        self._temperature: float = DEFAULT_TEMPERATURE
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         cfg = get_config()
@@ -158,6 +163,18 @@ class VibeVoiceASRBackend(STTBackend):
             vv_cfg.get("target_sample_rate_hz", DEFAULT_TARGET_SAMPLE_RATE)
             or DEFAULT_TARGET_SAMPLE_RATE
         )
+        try:
+            self._num_beams = max(
+                1, int(vv_cfg.get("num_beams", DEFAULT_NUM_BEAMS) or DEFAULT_NUM_BEAMS)
+            )
+        except (TypeError, ValueError):
+            self._num_beams = DEFAULT_NUM_BEAMS
+        try:
+            self._temperature = float(vv_cfg.get("temperature", DEFAULT_TEMPERATURE))
+        except (TypeError, ValueError):
+            self._temperature = DEFAULT_TEMPERATURE
+        if not math.isfinite(self._temperature):
+            self._temperature = DEFAULT_TEMPERATURE
         raw_max_new_tokens = vv_cfg.get("max_new_tokens", DEFAULT_MAX_NEW_TOKENS)
         try:
             parsed_max_new_tokens = int(raw_max_new_tokens or 0)
@@ -360,8 +377,12 @@ class VibeVoiceASRBackend(STTBackend):
 
         generate_kwargs: dict[str, Any] = {
             "do_sample": False,
-            "num_beams": max(1, int(beam_size or 1)),
+            "num_beams": self._num_beams,
+            "temperature": self._temperature,
         }
+        # VibeVoice's structured JSON output is sensitive to generation settings.
+        # Prefer backend-specific defaults instead of inheriting the global Whisper beam size.
+        del beam_size
         if self._max_new_tokens is not None:
             generate_kwargs["max_new_tokens"] = self._max_new_tokens
 
@@ -375,6 +396,12 @@ class VibeVoiceASRBackend(STTBackend):
         elif eos_token_id is not None:
             generate_kwargs["pad_token_id"] = eos_token_id
 
+        logger.debug(
+            "VibeVoice-ASR generation settings: num_beams=%s temperature=%s max_new_tokens=%s",
+            generate_kwargs.get("num_beams"),
+            generate_kwargs.get("temperature"),
+            generate_kwargs.get("max_new_tokens", "<omitted>"),
+        )
         output = self._model.generate(**inputs, **generate_kwargs)
         sequences = getattr(output, "sequences", output)
 
@@ -393,14 +420,42 @@ class VibeVoiceASRBackend(STTBackend):
                 generated_ids = generated_ids[prefix_len:]
 
         decoded_text = _decode_generated_text(self._processor, generated_ids)
-        normalized = _parse_vibevoice_structured_output(decoded_text)
+        normalized, parse_mode, parse_stats = _parse_vibevoice_structured_output_detailed(
+            decoded_text
+        )
         if not normalized:
-            structured = self._processor.post_process_transcription(decoded_text)
-            normalized = _normalize_vibevoice_segments(structured)
+            # Upstream parser emits a noisy warning when the JSON is clearly malformed.
+            if not parse_stats.get("unbalanced", False):
+                structured = self._processor.post_process_transcription(decoded_text)
+                normalized = _normalize_vibevoice_segments(structured)
+                if normalized:
+                    parse_mode = "upstream_parser"
         if not normalized and decoded_text.strip():
-            # Fallback if upstream output formatting changes.
-            fallback_text = _strip_chat_role_prefix(decoded_text).strip() or decoded_text.strip()
-            normalized = [{"text": fallback_text, "start": 0.0, "end": 0.0, "speaker": None}]
+            text_fallback = _extract_plaintext_from_jsonish_output(decoded_text)
+            if text_fallback:
+                parse_mode = "text_fallback"
+                normalized = [{"text": text_fallback, "start": 0.0, "end": 0.0, "speaker": None}]
+            else:
+                # Last-resort fallback if upstream output formatting changes.
+                parse_mode = "raw_fallback"
+                fallback_text = (
+                    _strip_chat_role_prefix(decoded_text).strip() or decoded_text.strip()
+                )
+                normalized = [{"text": fallback_text, "start": 0.0, "end": 0.0, "speaker": None}]
+
+        log_fn = logger.debug if parse_mode in {"direct_json", "embedded_json"} else logger.info
+        log_fn(
+            "VibeVoice-ASR parse mode=%s decoded_chars=%d segments=%d json_start=%s unbalanced=%s in_string=%s "
+            "bracket_depth=%s brace_depth=%s",
+            parse_mode,
+            len(decoded_text),
+            len(normalized),
+            parse_stats.get("has_json_start"),
+            parse_stats.get("unbalanced"),
+            parse_stats.get("in_string"),
+            parse_stats.get("bracket_depth"),
+            parse_stats.get("brace_depth"),
+        )
         return normalized
 
 
@@ -474,6 +529,18 @@ def _move_inputs_to_device(inputs: Any, device: str) -> Any:
 
 def _decode_generated_text(processor: Any, token_ids: torch.Tensor) -> str:
     token_ids = token_ids.detach().cpu()
+    if hasattr(processor, "batch_decode"):
+        batched = token_ids.unsqueeze(0) if hasattr(token_ids, "unsqueeze") else [token_ids]
+        try:
+            decoded = processor.batch_decode(batched, skip_special_tokens=True)
+        except TypeError:
+            decoded = processor.batch_decode(batched)
+        if isinstance(decoded, list) and decoded:
+            return str(decoded[0])
+        if isinstance(decoded, tuple) and decoded:
+            return str(decoded[0])
+        if isinstance(decoded, str):
+            return decoded
     if hasattr(processor, "decode"):
         try:
             return str(processor.decode(token_ids, skip_special_tokens=True))
@@ -488,43 +555,177 @@ def _decode_generated_text(processor: Any, token_ids: torch.Tensor) -> str:
 
 def _parse_vibevoice_structured_output(text: str) -> list[dict[str, Any]]:
     """Parse model-emitted structured transcription text without relying on upstream formatting."""
-    payload = _try_load_json_from_generated_text(text)
-    if payload is None:
-        return []
-    return _normalize_vibevoice_segments(payload)
+    normalized, _mode, _stats = _parse_vibevoice_structured_output_detailed(text)
+    return normalized
 
 
-def _try_load_json_from_generated_text(text: str) -> Any | None:
-    """Extract and parse JSON payloads from chat-styled model output.
+def _parse_vibevoice_structured_output_detailed(
+    text: str,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    cleaned = _sanitize_generated_structured_text(text)
+    stats = _json_structure_stats(cleaned)
+
+    payload, mode = _try_load_json_from_generated_text(cleaned)
+    if payload is not None:
+        normalized = _normalize_vibevoice_segments(payload)
+        if normalized:
+            return normalized, mode, stats
+
+    repaired_payload = _repair_and_parse_json_payload(cleaned)
+    if repaired_payload is not None:
+        normalized = _normalize_vibevoice_segments(repaired_payload)
+        if normalized:
+            return normalized, "repaired_json", stats
+
+    salvaged = _salvage_segments_from_jsonish_output(cleaned)
+    if salvaged:
+        return salvaged, "segment_salvage", stats
+
+    return [], "none", stats
+
+
+def _try_load_json_from_generated_text(text: str) -> tuple[Any | None, str]:
+    """Extract and parse JSON payloads from model output.
 
     VibeVoice can emit JSON with a leading role prefix such as ``Assistant ``.
     ``json.JSONDecoder.raw_decode`` lets us scan for the first valid JSON object/array
     without requiring it to start at column 1.
     """
     if not text:
-        return None
-
-    cleaned = _strip_chat_role_prefix(text).strip()
-    if not cleaned:
-        return None
+        return None, "none"
 
     decoder = json.JSONDecoder()
 
     # Fast path when the payload is already clean JSON.
     try:
-        return json.loads(cleaned)
+        return json.loads(text), "direct_json"
     except json.JSONDecodeError:
         pass
 
-    for idx, ch in enumerate(cleaned):
+    for idx, ch in enumerate(text):
         if ch not in "[{":
             continue
         try:
-            value, _end = decoder.raw_decode(cleaned[idx:])
-            return value
+            value, _end = decoder.raw_decode(text[idx:])
+            return value, "embedded_json"
         except json.JSONDecodeError:
             continue
+    return None, "none"
+
+
+def _repair_and_parse_json_payload(text: str) -> Any | None:
+    """Attempt to repair incomplete/truncated JSON-ish output."""
+    if not text:
+        return None
+    start = _find_first_json_start(text)
+    if start < 0:
+        return None
+
+    candidate = text[start:].strip()
+    if not candidate:
+        return None
+
+    for _ in range(32):
+        fixed = _close_unbalanced_json(candidate)
+        payload, _mode = _try_load_json_from_generated_text(fixed)
+        if payload is not None:
+            return payload
+        trimmed = _trim_jsonish_tail(candidate)
+        if not trimmed or trimmed == candidate:
+            break
+        candidate = trimmed
     return None
+
+
+def _close_unbalanced_json(text: str) -> str:
+    stats = _scan_json_structure(text)
+    fixed = text.rstrip()
+    if stats["in_string"]:
+        fixed += '"'
+    fixed += "".join(reversed(stats["closers_needed"]))
+    # Remove trailing commas before closers after we append synthetic delimiters.
+    fixed = re.sub(r",(\s*[}\]])", r"\1", fixed)
+    return fixed
+
+
+def _trim_jsonish_tail(text: str) -> str:
+    value = text.rstrip()
+    if not value:
+        return ""
+    delimiter_positions = [value.rfind(ch) for ch in (",", "}", "]", '"')]
+    cut = max(delimiter_positions)
+    if cut < 0:
+        return value[:-1].rstrip()
+    if value[cut] == ",":
+        return value[:cut].rstrip()
+    return value[: cut + 1].rstrip()
+
+
+def _salvage_segments_from_jsonish_output(text: str) -> list[dict[str, Any]]:
+    """Salvage any fully-formed segment objects from truncated JSON output."""
+    normalized: list[dict[str, Any]] = []
+    for obj_text in _iter_balanced_json_objects(text):
+        try:
+            payload = json.loads(obj_text)
+        except json.JSONDecodeError:
+            continue
+        normalized.extend(_normalize_vibevoice_segments(payload))
+    return normalized
+
+
+def _iter_balanced_json_objects(text: str) -> list[str]:
+    results: list[str] = []
+    in_string = False
+    escape = False
+    depth = 0
+    start_idx: int | None = None
+    for idx, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start_idx = idx
+            depth += 1
+            continue
+        if ch == "}":
+            if depth <= 0:
+                continue
+            depth -= 1
+            if depth == 0 and start_idx is not None:
+                results.append(text[start_idx : idx + 1])
+                start_idx = None
+    return results
+
+
+def _sanitize_generated_structured_text(text: str) -> str:
+    value = _strip_chat_role_prefix(text or "")
+    value = _strip_code_fence_wrappers(value)
+    return value.strip()
+
+
+def _strip_code_fence_wrappers(text: str) -> str:
+    value = text.strip()
+    if not value.startswith("```"):
+        return value
+    # Drop opening fence (and optional language label) and trailing fence if present.
+    first_newline = value.find("\n")
+    if first_newline == -1:
+        return value.strip("`").strip()
+    body = value[first_newline + 1 :]
+    if body.rstrip().endswith("```"):
+        body = body.rstrip()
+        body = body[:-3]
+    return body.strip()
 
 
 def _strip_chat_role_prefix(text: str) -> str:
@@ -536,6 +737,105 @@ def _strip_chat_role_prefix(text: str) -> str:
         if lowered.startswith(prefix):
             return value[len(prefix) :].lstrip()
     return value
+
+
+def _extract_plaintext_from_jsonish_output(text: str) -> str | None:
+    """Extract transcript text from malformed JSON-like output as a final fallback."""
+    cleaned = _sanitize_generated_structured_text(text)
+    if not cleaned:
+        return None
+
+    values: list[str] = []
+    complete_pattern = re.compile(
+        r'"(?:Content|content|Text|text)"\s*:\s*"((?:\\.|[^"\\])*)"',
+        flags=re.DOTALL,
+    )
+    for match in complete_pattern.finditer(cleaned):
+        values.append(_decode_json_string_fragment(match.group(1)))
+
+    if values:
+        return " ".join(v.strip() for v in values if v.strip()).strip() or None
+
+    partial_match = re.search(
+        r'"(?:Content|content|Text|text)"\s*:\s*"(?P<value>.*)$',
+        cleaned,
+        flags=re.DOTALL,
+    )
+    if partial_match:
+        raw = partial_match.group("value").strip()
+        raw = re.sub(r"[}\],`\s]+$", "", raw)
+        raw = raw.replace('\\"', '"').replace("\\n", " ").replace("\\t", " ")
+        raw = raw.strip()
+        return raw or None
+    return None
+
+
+def _decode_json_string_fragment(value: str) -> str:
+    try:
+        return str(json.loads(f'"{value}"'))
+    except Exception:
+        return value
+
+
+def _find_first_json_start(text: str) -> int:
+    for idx, ch in enumerate(text):
+        if ch in "[{":
+            return idx
+    return -1
+
+
+def _json_structure_stats(text: str) -> dict[str, Any]:
+    stats = _scan_json_structure(text)
+    stats["has_json_start"] = _find_first_json_start(text) >= 0
+    stats["unbalanced"] = bool(stats["in_string"] or stats["bracket_depth"] or stats["brace_depth"])
+    return stats
+
+
+def _scan_json_structure(text: str) -> dict[str, Any]:
+    in_string = False
+    escape = False
+    bracket_depth = 0
+    brace_depth = 0
+    closers_needed: list[str] = []
+
+    for ch in text:
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            closers_needed.append("]")
+            continue
+        if ch == "{":
+            brace_depth += 1
+            closers_needed.append("}")
+            continue
+        if ch == "]":
+            if closers_needed and closers_needed[-1] == "]":
+                closers_needed.pop()
+                bracket_depth = max(0, bracket_depth - 1)
+            continue
+        if ch == "}":
+            if closers_needed and closers_needed[-1] == "}":
+                closers_needed.pop()
+                brace_depth = max(0, brace_depth - 1)
+            continue
+
+    return {
+        "in_string": in_string,
+        "bracket_depth": bracket_depth,
+        "brace_depth": brace_depth,
+        "closers_needed": closers_needed,
+    }
 
 
 def _normalize_vibevoice_segments(payload: Any) -> list[dict[str, Any]]:
