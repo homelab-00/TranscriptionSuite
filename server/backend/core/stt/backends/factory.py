@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
-_VIBEVOICE_ASR_PATTERN = re.compile(r"^microsoft/vibevoice-asr$", re.IGNORECASE)
+_VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
 
 
 def detect_backend_type(model_name: str) -> str:
@@ -41,7 +41,7 @@ def is_nemo_model(model_name: str) -> bool:
 
 
 def is_vibevoice_asr_model(model_name: str) -> bool:
-    """Return True if *model_name* selects Microsoft's VibeVoice-ASR backend."""
+    """Return True if *model_name* selects a VibeVoice-ASR backend variant."""
     return detect_backend_type(model_name) == "vibevoice_asr"
 
 

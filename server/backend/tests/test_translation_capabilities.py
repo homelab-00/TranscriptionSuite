@@ -18,6 +18,7 @@ def test_supports_translation_for_multilingual_model() -> None:
         "openai/whisper-large-v3-turbo",
         "distil-whisper/distil-large-v3",
         "microsoft/VibeVoice-ASR",
+        "scerz/VibeVoice-ASR-4bit",
     ],
 )
 def test_rejects_known_unsupported_models(model_name: str) -> None:

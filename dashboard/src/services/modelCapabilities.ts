@@ -5,7 +5,7 @@
 
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
-const VIBEVOICE_ASR_PATTERN = /^microsoft\/vibevoice-asr$/i;
+const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -102,7 +102,7 @@ export function isWhisperModel(modelName: string | null | undefined): boolean {
 }
 
 /**
- * Returns true if the model is Microsoft's VibeVoice-ASR backend.
+ * Returns true if the model is a VibeVoice-ASR backend variant.
  */
 export function isVibeVoiceASRModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();

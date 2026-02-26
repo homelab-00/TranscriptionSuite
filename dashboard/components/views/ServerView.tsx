@@ -56,6 +56,7 @@ const WHISPER_SMALL = 'Systran/faster-whisper-small';
 const PARAKEET_TDT_0_6B = 'nvidia/parakeet-tdt-0.6b-v3';
 const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
 const VIBEVOICE_ASR = 'microsoft/VibeVoice-ASR';
+const VIBEVOICE_ASR_4BIT = 'scerz/VibeVoice-ASR-4bit';
 
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
@@ -839,6 +840,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       PARAKEET_TDT_0_6B,
                       CANARY_1B_V2,
                       VIBEVOICE_ASR,
+                      VIBEVOICE_ASR_4BIT,
                       MAIN_MODEL_CUSTOM_OPTION,
                     ]}
                     accentColor="magenta"

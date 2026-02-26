@@ -32,8 +32,6 @@ type OptionalDependencyBootstrapStatus = {
 } | null;
 
 const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
-const VIBEVOICE_ASR_MODEL = 'microsoft/VibeVoice-ASR';
-
 function normalizeHfDecision(value: unknown): HfTokenDecision {
   if (value === 'provided' || value === 'skipped' || value === 'unset') {
     return value;
@@ -741,19 +739,13 @@ const AppInner: React.FC = () => {
               <div className="space-y-3 text-sm text-slate-300">
                 {vibevoicePromptMode === 'required' ? (
                   <p>
-                    The selected main transcriber model is{' '}
-                    <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
-                      {VIBEVOICE_ASR_MODEL}
-                    </code>{' '}
-                    and requires VibeVoice-ASR support. Install it to continue starting the server.
+                    The selected main transcriber model uses the VibeVoice-ASR backend and requires
+                    VibeVoice-ASR support. Install it to continue starting the server.
                   </p>
                 ) : (
                   <p>
-                    Install the optional VibeVoice-ASR dependency for{' '}
-                    <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
-                      {VIBEVOICE_ASR_MODEL}
-                    </code>
-                    ?
+                    Install the optional VibeVoice-ASR dependency for the selected VibeVoice-ASR
+                    model?
                   </p>
                 )}
                 <p className="text-slate-400">

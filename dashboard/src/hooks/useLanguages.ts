@@ -23,7 +23,7 @@ function cacheKey(model: string | null | undefined): string {
   const m = (model ?? '').trim().toLowerCase();
   if (/^nvidia\/(parakeet|nemotron-speech)/.test(m)) return 'parakeet';
   if (/^nvidia\/canary/.test(m)) return 'canary';
-  if (/^microsoft\/vibevoice-asr$/.test(m)) return 'vibevoice_asr';
+  if (/^[^/]+\/vibevoice-asr(?:-[^/]+)?$/.test(m)) return 'vibevoice_asr';
   return 'whisper';
 }
 

@@ -12,6 +12,8 @@ from server.core.stt.backends.factory import (
 def test_detects_vibevoice_asr_backend() -> None:
     assert detect_backend_type("microsoft/VibeVoice-ASR") == "vibevoice_asr"
     assert is_vibevoice_asr_model("microsoft/VibeVoice-ASR")
+    assert detect_backend_type("scerz/VibeVoice-ASR-4bit") == "vibevoice_asr"
+    assert is_vibevoice_asr_model("scerz/VibeVoice-ASR-4bit")
 
 
 def test_existing_backend_detection_unchanged() -> None:

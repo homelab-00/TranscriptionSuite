@@ -7,10 +7,11 @@ from server.api.routes.transcription import get_supported_languages
 
 
 @pytest.mark.asyncio
-async def test_languages_route_reports_vibevoice_asr_capabilities() -> None:
+@pytest.mark.parametrize("model_name", ["microsoft/VibeVoice-ASR", "scerz/VibeVoice-ASR-4bit"])
+async def test_languages_route_reports_vibevoice_asr_capabilities(model_name: str) -> None:
     request = SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(config={"main_transcriber": {"model": "microsoft/VibeVoice-ASR"}})
+            state=SimpleNamespace(config={"main_transcriber": {"model": model_name}})
         )
     )
 
