@@ -294,3 +294,35 @@ def test_resample_audio_noop_when_sample_rate_matches() -> None:
 
     assert out.dtype == np.float32
     np.testing.assert_allclose(out, audio)
+
+
+def test_parse_vibevoice_structured_output_handles_assistant_prefixed_json() -> None:
+    module = _import_vibevoice_backend_module()
+    text = 'Assistant [{"Start":0,"End":9.8,"Speaker":0,"Content":"hello from vibevoice"}]'
+
+    segments = module._parse_vibevoice_structured_output(text)
+
+    assert segments == [
+        {
+            "text": "hello from vibevoice",
+            "start": 0.0,
+            "end": 9.8,
+            "speaker": "SPEAKER_00",
+        }
+    ]
+
+
+def test_normalize_vibevoice_segments_accepts_single_segment_title_case_dict() -> None:
+    module = _import_vibevoice_backend_module()
+    payload = {"Start": 1.25, "End": 2.5, "Speaker": "2", "Content": "Hi"}
+
+    segments = module._normalize_vibevoice_segments(payload)
+
+    assert segments == [
+        {
+            "text": "Hi",
+            "start": 1.25,
+            "end": 2.5,
+            "speaker": "SPEAKER_02",
+        }
+    ]

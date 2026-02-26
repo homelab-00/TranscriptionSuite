@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 import importlib
+import json
 import logging
 import math
 from typing import Any
@@ -392,11 +393,14 @@ class VibeVoiceASRBackend(STTBackend):
                 generated_ids = generated_ids[prefix_len:]
 
         decoded_text = _decode_generated_text(self._processor, generated_ids)
-        structured = self._processor.post_process_transcription(decoded_text)
-        normalized = _normalize_vibevoice_segments(structured)
+        normalized = _parse_vibevoice_structured_output(decoded_text)
+        if not normalized:
+            structured = self._processor.post_process_transcription(decoded_text)
+            normalized = _normalize_vibevoice_segments(structured)
         if not normalized and decoded_text.strip():
             # Fallback if upstream output formatting changes.
-            normalized = [{"text": decoded_text.strip(), "start": 0.0, "end": 0.0, "speaker": None}]
+            fallback_text = _strip_chat_role_prefix(decoded_text).strip() or decoded_text.strip()
+            normalized = [{"text": fallback_text, "start": 0.0, "end": 0.0, "speaker": None}]
         return normalized
 
 
@@ -482,6 +486,58 @@ def _decode_generated_text(processor: Any, token_ids: torch.Tensor) -> str:
     return str(tokenizer.decode(token_ids, skip_special_tokens=True))
 
 
+def _parse_vibevoice_structured_output(text: str) -> list[dict[str, Any]]:
+    """Parse model-emitted structured transcription text without relying on upstream formatting."""
+    payload = _try_load_json_from_generated_text(text)
+    if payload is None:
+        return []
+    return _normalize_vibevoice_segments(payload)
+
+
+def _try_load_json_from_generated_text(text: str) -> Any | None:
+    """Extract and parse JSON payloads from chat-styled model output.
+
+    VibeVoice can emit JSON with a leading role prefix such as ``Assistant ``.
+    ``json.JSONDecoder.raw_decode`` lets us scan for the first valid JSON object/array
+    without requiring it to start at column 1.
+    """
+    if not text:
+        return None
+
+    cleaned = _strip_chat_role_prefix(text).strip()
+    if not cleaned:
+        return None
+
+    decoder = json.JSONDecoder()
+
+    # Fast path when the payload is already clean JSON.
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    for idx, ch in enumerate(cleaned):
+        if ch not in "[{":
+            continue
+        try:
+            value, _end = decoder.raw_decode(cleaned[idx:])
+            return value
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _strip_chat_role_prefix(text: str) -> str:
+    """Strip common chat-style prefixes that can precede structured JSON."""
+    value = text.lstrip()
+    lowered = value.lower()
+    prefixes = ("assistant:", "assistant", "response:", "output:")
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            return value[len(prefix) :].lstrip()
+    return value
+
+
 def _normalize_vibevoice_segments(payload: Any) -> list[dict[str, Any]]:
     """Normalize VibeVoice structured output into API-compatible diarized segments."""
     if payload is None:
@@ -489,13 +545,22 @@ def _normalize_vibevoice_segments(payload: Any) -> list[dict[str, Any]]:
 
     # Upstream can return either a list of segments or an object wrapper.
     if isinstance(payload, dict):
-        candidates = (
-            payload.get("segments")
-            or payload.get("transcription")
-            or payload.get("transcriptions")
-            or payload.get("items")
-            or []
-        )
+        # Some VibeVoice outputs emit a top-level list wrapper, others emit a single
+        # segment object. Accept both lowercase and title-case keys.
+        if _looks_like_segment_item(payload):
+            candidates = [payload]
+        else:
+            candidates = (
+                payload.get("segments")
+                or payload.get("Segments")
+                or payload.get("transcription")
+                or payload.get("Transcription")
+                or payload.get("transcriptions")
+                or payload.get("Transcriptions")
+                or payload.get("items")
+                or payload.get("Items")
+                or []
+            )
     else:
         candidates = payload
 
@@ -507,15 +572,43 @@ def _normalize_vibevoice_segments(payload: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
 
-        text = str(item.get("text", "") or "").strip()
-        start = _to_float(item.get("start", item.get("start_time", 0.0)))
-        end = _to_float(item.get("end", item.get("end_time", start)))
+        text = str(
+            item.get("text") or item.get("Text") or item.get("content") or item.get("Content") or ""
+        ).strip()
+        start = _to_float(
+            item.get("start")
+            or item.get("Start")
+            or item.get("start_time")
+            or item.get("startTime")
+            or item.get("StartTime")
+            or 0.0
+        )
+        end = _to_float(
+            item.get("end")
+            or item.get("End")
+            or item.get("end_time")
+            or item.get("endTime")
+            or item.get("EndTime")
+            or start
+        )
         if end < start:
             end = start
 
-        speaker = item.get("speaker")
-        if speaker is None:
-            speaker = item.get("speaker_id")
+        speaker = (
+            item.get("speaker")
+            if "speaker" in item
+            else item.get("Speaker")
+            if "Speaker" in item
+            else item.get("speaker_id")
+            if "speaker_id" in item
+            else item.get("speakerId")
+            if "speakerId" in item
+            else item.get("SpeakerId")
+            if "SpeakerId" in item
+            else item.get("speakerID")
+            if "speakerID" in item
+            else item.get("SpeakerID")
+        )
         speaker_label = _normalize_speaker_label(speaker)
 
         normalized.append(
@@ -528,6 +621,26 @@ def _normalize_vibevoice_segments(payload: Any) -> list[dict[str, Any]]:
         )
 
     return normalized
+
+
+def _looks_like_segment_item(value: dict[str, Any]) -> bool:
+    return any(
+        key in value
+        for key in (
+            "text",
+            "Text",
+            "content",
+            "Content",
+            "start",
+            "Start",
+            "start_time",
+            "StartTime",
+            "end",
+            "End",
+            "speaker",
+            "Speaker",
+        )
+    )
 
 
 def _normalize_speaker_label(value: Any) -> str | None:
