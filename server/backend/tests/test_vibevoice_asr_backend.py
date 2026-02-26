@@ -108,7 +108,7 @@ def _module_with_symbol(symbol_name: str, symbol: object) -> types.ModuleType:
 def test_vibevoice_backend_load_supports_legacy_import_layout(monkeypatch) -> None:
     module = _import_vibevoice_backend_module()
     _reset_fake_classes()
-    monkeypatch.setattr(module, "get_config", lambda: _FakeConfig())
+    monkeypatch.setattr(module, "get_config", _FakeConfig)
 
     import_calls: list[str] = []
 
@@ -140,7 +140,7 @@ def test_vibevoice_backend_load_supports_legacy_import_layout(monkeypatch) -> No
 def test_vibevoice_backend_load_falls_back_to_modular_import_layout(monkeypatch) -> None:
     module = _import_vibevoice_backend_module()
     _reset_fake_classes()
-    monkeypatch.setattr(module, "get_config", lambda: _FakeConfig())
+    monkeypatch.setattr(module, "get_config", _FakeConfig)
 
     import_calls: list[str] = []
 

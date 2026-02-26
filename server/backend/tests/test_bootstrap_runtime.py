@@ -553,10 +553,14 @@ def test_check_vibevoice_asr_import_parses_extended_probe_details(
         "reason": "import_failed",
         "error": "legacy: ModuleNotFoundError: no module named x",
         "attempted_imports": [
-            "vibevoice.modeling_vibevoice_asr:VibeVoiceASRForConditionalGeneration + "
-            "vibevoice.processor.vibevoice_asr_processing:VibeVoiceASRProcessor",
-            "vibevoice.modular.modeling_vibevoice_asr:VibeVoiceASRForConditionalGeneration + "
-            "vibevoice.processor.vibevoice_asr_processor:VibeVoiceASRProcessor",
+            (
+                "vibevoice.modeling_vibevoice_asr:VibeVoiceASRForConditionalGeneration + "
+                + "vibevoice.processor.vibevoice_asr_processing:VibeVoiceASRProcessor"
+            ),
+            (
+                "vibevoice.modular.modeling_vibevoice_asr:VibeVoiceASRForConditionalGeneration + "
+                + "vibevoice.processor.vibevoice_asr_processor:VibeVoiceASRProcessor"
+            ),
         ],
         "top_level_error": "ModuleNotFoundError: No module named 'vibevoice'",
     }
