@@ -255,6 +255,17 @@ const AppInner: React.FC = () => {
       try {
         const shouldRunPrompts = !docker.container.exists;
         const dockerApi = (window as any).electronAPI?.docker;
+
+        // Check if the runtime volume exists. If missing (e.g. wiped volumes, fresh install),
+        // treat as first-start so optional install prompts are shown even when the container
+        // already exists.
+        const runtimeVolumeExists: boolean = dockerApi?.volumeExists
+          ? await (dockerApi.volumeExists('transcriptionsuite-runtime') as Promise<boolean>).catch(
+              () => true,
+            )
+          : true;
+        const runtimeVolumeMissing = !runtimeVolumeExists;
+
         let optionalDependencyBootstrapStatusPromise: Promise<OptionalDependencyBootstrapStatus> | null =
           null;
 
@@ -459,13 +470,13 @@ const AppInner: React.FC = () => {
         }
 
         const installNemo = await resolveNemoInstallPreference({
-          firstStart: false,
+          firstStart: runtimeVolumeMissing,
           requiredBySelectedModel: selectedRequiresNemo,
         });
         if (installNemo === null) return; // cancelled
 
         const installVibeVoiceAsr = await resolveVibeVoiceInstallPreference({
-          firstStart: false,
+          firstStart: runtimeVolumeMissing,
           requiredBySelectedModel: selectedRequiresVibeVoice,
         });
         if (installVibeVoiceAsr === null) return; // cancelled
