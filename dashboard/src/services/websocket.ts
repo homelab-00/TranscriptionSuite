@@ -375,7 +375,7 @@ export class TranscriptionSocket {
         break;
       case 'auth_fail':
         this.setState('error');
-        this.callbacks.onError?.((msg.data?.message as string) ?? 'Authentication failed');
+        this.callbacks.onError?.(this.getAuthFailureMessage(msg));
         this.disconnect();
         return;
       case 'error':
@@ -387,6 +387,28 @@ export class TranscriptionSocket {
     }
     // Forward all messages (including auth_ok) to consumer
     this.callbacks.onMessage?.(msg);
+  }
+
+  private getAuthFailureMessage(msg: ServerMessage): string {
+    const raw = String(msg.data?.message ?? '').trim();
+    const storedToken = apiClient.getAuthToken?.();
+    const hasToken = typeof storedToken === 'string' && storedToken.trim().length > 0;
+
+    if (!hasToken) {
+      if (!raw || /invalid or expired token/i.test(raw) || /token required/i.test(raw)) {
+        return 'Authentication token required. Open Settings > Client and enter a valid token, then reconnect.';
+      }
+    }
+
+    if (/invalid or expired token/i.test(raw)) {
+      return 'Authentication token rejected (invalid or expired). Open Settings > Client and sign in again.';
+    }
+
+    if (/token required|no token provided/i.test(raw)) {
+      return 'Authentication token required. Open Settings > Client and enter a valid token, then reconnect.';
+    }
+
+    return raw || 'Authentication failed';
   }
 
   private setState(s: ConnectionState): void {

@@ -442,7 +442,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
             return
 
         if auth.is_localhost_bypass:
-            logger.info("Live Mode connection from localhost - bypassing authentication")
+            logger.info("Live Mode connection from trusted local host - bypassing authentication")
 
         client_name = auth.client_name
 

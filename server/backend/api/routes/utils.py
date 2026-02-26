@@ -3,21 +3,32 @@ Shared utilities for API routes.
 """
 
 import asyncio
+import ipaddress
 import logging
 import os
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
+from pathlib import Path
 from typing import Any
 
 from fastapi import Request, WebSocket
-from starlette.websockets import WebSocketState
-
 from server.core.token_store import get_token_store
+from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
 
 # Check if TLS mode is enabled
 TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
+RUNNING_IN_DOCKER = Path("/.dockerenv").exists()
+
+# Common Docker host-gateway subnets seen by Linux Docker and Docker Desktop.
+# We intentionally keep this allowlist narrow instead of treating all RFC1918
+# addresses as local to avoid broadening local-mode admin bypass.
+_DOCKER_HOST_GATEWAY_NETWORKS = (
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.65.0/24"),
+    ipaddress.ip_network("10.0.75.0/24"),
+)
 
 
 @dataclass
@@ -33,6 +44,43 @@ class WebSocketAuthResult:
 def is_localhost(client_host: str | None) -> bool:
     """Return True if the provided host is localhost."""
     return client_host in ("127.0.0.1", "::1", "localhost")
+
+
+def _parse_ip_address(
+    client_host: str | None,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    if not client_host:
+        return None
+    try:
+        return ipaddress.ip_address(client_host)
+    except ValueError:
+        return None
+
+
+def is_docker_host_gateway(client_host: str | None) -> bool:
+    """Return True for common Docker host-gateway IPs seen from containers."""
+    if not RUNNING_IN_DOCKER:
+        return False
+
+    parsed_ip = _parse_ip_address(client_host)
+    if not isinstance(parsed_ip, ipaddress.IPv4Address):
+        return False
+
+    # Docker host gateways are typically the first address in the bridge subnet.
+    if parsed_ip.packed[-1] != 1:
+        return False
+
+    return any(parsed_ip in network for network in _DOCKER_HOST_GATEWAY_NETWORKS)
+
+
+def is_local_auth_bypass_host(client_host: str | None) -> bool:
+    """
+    Return True when local-mode auth bypass should apply.
+
+    Supports true loopback plus common Docker host-gateway addresses when the
+    server is running in a container.
+    """
+    return is_localhost(client_host) or is_docker_host_gateway(client_host)
 
 
 def extract_bearer_token(auth_header: str | None) -> str | None:
@@ -96,17 +144,13 @@ async def send_websocket_auth_failure(
         try:
             await websocket.send_json(payload)
         except Exception as send_error:
-            logger.debug(
-                "Failed to send websocket auth failure payload: %s", send_error
-            )
+            logger.debug("Failed to send websocket auth failure payload: %s", send_error)
 
     if close:
         try:
             await websocket.close()
         except Exception as close_error:
-            logger.debug(
-                "Failed to close websocket after auth failure: %s", close_error
-            )
+            logger.debug("Failed to close websocket after auth failure: %s", close_error)
 
 
 async def authenticate_websocket_from_message(
@@ -123,10 +167,8 @@ async def authenticate_websocket_from_message(
     Expects payload: {"type":"auth","data":{"token":"..."}}.
     """
     try:
-        auth_msg = await asyncio.wait_for(
-            websocket.receive_json(), timeout=timeout_seconds
-        )
-    except asyncio.TimeoutError:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=timeout_seconds)
+    except TimeoutError:
         await send_websocket_auth_failure(
             websocket,
             "Authentication timeout",
@@ -150,7 +192,7 @@ async def authenticate_websocket_from_message(
         return None
 
     client_host = websocket.client.host if websocket.client else None
-    if allow_localhost_bypass and not TLS_MODE and is_localhost(client_host):
+    if allow_localhost_bypass and not TLS_MODE and is_local_auth_bypass_host(client_host):
         return WebSocketAuthResult(
             client_name="localhost-user",
             is_admin=True,
@@ -159,11 +201,20 @@ async def authenticate_websocket_from_message(
         )
 
     token = auth_msg.get("data", {}).get("token")
+    token = token.strip() if isinstance(token, str) else None
+    if not token:
+        await send_websocket_auth_failure(
+            websocket,
+            "Authentication token required for this connection",
+            failure_type=failure_type,
+        )
+        return None
+
     stored_token = validate_auth_token(token)
     if stored_token is None:
         await send_websocket_auth_failure(
             websocket,
-            "Invalid or expired token",
+            "Invalid or expired token. Sign in again with a valid token",
             failure_type=failure_type,
         )
         return None
@@ -193,7 +244,7 @@ async def authenticate_websocket_from_headers(
 ) -> WebSocketAuthResult | None:
     """Authenticate websocket using Authorization/Cookie headers."""
     client_host = websocket.client.host if websocket.client else None
-    if allow_localhost_bypass and not TLS_MODE and is_localhost(client_host):
+    if allow_localhost_bypass and not TLS_MODE and is_local_auth_bypass_host(client_host):
         return WebSocketAuthResult(
             client_name="localhost-user",
             is_admin=True,
@@ -205,7 +256,7 @@ async def authenticate_websocket_from_headers(
     if not token:
         await send_websocket_auth_failure(
             websocket,
-            "No token provided",
+            "Authentication token required for this connection",
             failure_type=failure_type,
         )
         return None
@@ -214,7 +265,7 @@ async def authenticate_websocket_from_headers(
     if stored_token is None:
         await send_websocket_auth_failure(
             websocket,
-            "Invalid or expired token",
+            "Invalid or expired token. Sign in again with a valid token",
             failure_type=failure_type,
         )
         return None
@@ -261,15 +312,16 @@ def require_admin(request: Request) -> bool:
     """
     Check if the request is from an admin user.
 
-    In local mode (TLS disabled), localhost requests are treated as admin.
+    In local mode (TLS disabled), trusted local requests (loopback or Docker
+    host-gateway traffic) are treated as admin.
     In TLS mode, a valid admin token is required.
 
     Returns True if authenticated as admin, False otherwise.
     """
-    # In local mode, allow localhost requests as admin
+    # In local mode, allow trusted local requests as admin
     if not TLS_MODE:
         client_host = request.client.host if request.client else None
-        if is_localhost(client_host):
+        if is_local_auth_bypass_host(client_host):
             return True
 
     # Check for valid admin token

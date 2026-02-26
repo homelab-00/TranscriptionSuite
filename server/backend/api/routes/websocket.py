@@ -474,7 +474,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if auth is None:
             return
         if auth.is_localhost_bypass:
-            logger.info("WebSocket connection from localhost - bypassing authentication")
+            logger.info("WebSocket connection from trusted local host - bypassing authentication")
 
         # Generate unique session ID
         session_id = str(uuid.uuid4())
