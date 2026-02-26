@@ -88,6 +88,8 @@ export interface ElectronAPI {
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
     checkModelsCached: (modelIds: string[]) => Promise<Record<string, { exists: boolean }>>;
+    removeModelCache: (modelId: string) => Promise<void>;
+    downloadModelToCache: (modelId: string) => Promise<void>;
     removeVolume: (name: string) => Promise<string>;
     readComposeEnvValue: (key: string) => Promise<string | null>;
     volumeExists: (name: string) => Promise<boolean>;
@@ -172,6 +174,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:checkModelsCached', modelIds) as Promise<
         Record<string, { exists: boolean }>
       >,
+    removeModelCache: (modelId: string) =>
+      ipcRenderer.invoke('docker:removeModelCache', modelId) as Promise<void>,
+    downloadModelToCache: (modelId: string) =>
+      ipcRenderer.invoke('docker:downloadModelToCache', modelId) as Promise<void>,
     removeVolume: (name: string) => ipcRenderer.invoke('docker:removeVolume', name),
     readComposeEnvValue: (key: string) =>
       ipcRenderer.invoke('docker:readComposeEnvValue', key) as Promise<string | null>,

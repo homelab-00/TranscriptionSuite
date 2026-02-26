@@ -4,6 +4,11 @@ export enum View {
   SERVER = 'SERVER',
 }
 
+export enum ServerTab {
+  CONFIGURATION = 'CONFIGURATION',
+  MODEL_MANAGER = 'MODEL_MANAGER',
+}
+
 export enum NotebookTab {
   CALENDAR = 'CALENDAR',
   SEARCH = 'SEARCH',

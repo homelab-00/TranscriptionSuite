@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.24
+  spec_version: 1.0.25
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -134,6 +134,7 @@ foundation:
         - rgba(34,211,238,0.4)
         - rgba(34,211,238,0.5)
         - rgba(34,211,238,0.6)
+        - "rgba(96,165,250,0.6)"
       accent_scale: *a1
       glass_scale: *a2
       semantic_status_palette: &a3
@@ -258,6 +259,7 @@ foundation:
         - h-[85vh]
         - max-h-[80vh]
         - min-h-[calc(100vh-30rem)]
+        - min-w-[170px]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
@@ -376,6 +378,7 @@ utility_allowlist:
     - backdrop-blur-xs
     - bg-accent-cyan
     - bg-accent-cyan/10
+    - bg-accent-cyan/15
     - bg-accent-cyan/20
     - bg-accent-cyan/5
     - bg-accent-magenta
@@ -410,6 +413,7 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/5
     - bg-slate-500
+    - bg-slate-500/10
     - bg-slate-700
     - bg-slate-800
     - bg-slate-900
@@ -442,6 +446,11 @@ utility_allowlist:
     - border-green-500/30
     - border-l
     - border-l-2
+    - border-l-accent-magenta
+    - border-l-blue-400
+    - border-l-green-400
+    - border-l-slate-300
+    - border-l-slate-500
     - border-orange-500/20
     - border-r
     - border-red-400/20
@@ -636,6 +645,7 @@ utility_allowlist:
     - ml-3
     - ml-auto
     - mr-1
+    - mr-1.5
     - mr-2
     - mr-4
     - mt-0.5
@@ -687,6 +697,7 @@ utility_allowlist:
     - pl-12
     - pl-2
     - pl-4
+    - pl-5
     - pl-6
     - pl-8
     - pointer-events-none
@@ -766,6 +777,7 @@ utility_allowlist:
     - slide-in-from-bottom-2
     - slide-in-from-bottom-4
     - slide-in-from-right-8
+    - slide-in-from-top-2
     - slide-in-from-top-4
     - sm:block
     - snap-mandatory
@@ -893,6 +905,7 @@ utility_allowlist:
     - max-h-[80vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[calc(100vh-30rem)]
+    - min-w-[170px]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
     - shadow-[0_0_15px_rgba(251,146,60,0.5)]
@@ -1661,6 +1674,70 @@ component_contracts:
     state_rules:
       - id: compact-density-mode
         rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
+  CapBadge:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - spacing_and_size_constraints
+    allowed_variants: {}
+    structural_invariants:
+      - id: cap-badge-layout
+        rule: "CapBadge maintains its defined layout structure."
+    behavior_rules:
+      - id: cap-badge-transitions
+        rule: "CapBadge transitions use approved duration and easing tokens."
+    state_rules:
+      - id: cap-badge-states
+        rule: "CapBadge visual states use approved color and opacity tokens."
+  CustomModelRow:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - spacing_and_size_constraints
+    allowed_variants: {}
+    structural_invariants:
+      - id: custom-model-row-layout
+        rule: "CustomModelRow maintains its defined layout structure."
+    behavior_rules:
+      - id: custom-model-row-transitions
+        rule: "CustomModelRow transitions use approved duration and easing tokens."
+    state_rules:
+      - id: custom-model-row-states
+        rule: "CustomModelRow visual states use approved color and opacity tokens."
+  ModelManagerTab:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - spacing_and_size_constraints
+    allowed_variants: {}
+    structural_invariants:
+      - id: model-manager-tab-layout
+        rule: "ModelManagerTab maintains its defined layout structure."
+    behavior_rules:
+      - id: model-manager-tab-transitions
+        rule: "ModelManagerTab transitions use approved duration and easing tokens."
+    state_rules:
+      - id: model-manager-tab-states
+        rule: "ModelManagerTab visual states use approved color and opacity tokens."
+  ModelRow:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - spacing_and_size_constraints
+    allowed_variants: {}
+    structural_invariants:
+      - id: model-row-layout
+        rule: "ModelRow maintains its defined layout structure."
+    behavior_rules:
+      - id: model-row-transitions
+        rule: "ModelRow transitions use approved duration and easing tokens."
+    state_rules:
+      - id: model-row-states
+        rule: "ModelRow visual states use approved color and opacity tokens."
 validation_policy:
   unknown_utility_class: error
   missing_required_field: error

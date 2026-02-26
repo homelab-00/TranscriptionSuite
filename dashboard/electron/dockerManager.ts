@@ -1097,6 +1097,35 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, { e
   return result;
 }
 
+// ─── Model Cache Operations ─────────────────────────────────────────────────
+
+/**
+ * Remove a model's cache directory from the Docker volume.
+ *
+ * Deletes the HuggingFace hub directory `models--{org}--{name}` inside
+ * the running container at `/models/hub/`.
+ */
+async function removeModelCache(modelId: string): Promise<void> {
+  const cacheName = `models--${modelId.trim().replace(/\//g, '--')}`;
+  await exec('docker', ['exec', CONTAINER_NAME, 'rm', '-rf', `/models/hub/${cacheName}`]);
+}
+
+/**
+ * Download a model's weights to the HuggingFace cache inside the container
+ * (without GPU-loading it).
+ *
+ * Uses `huggingface_hub.snapshot_download` which is available in the
+ * server container image.  The download timeout is extended to 10 minutes.
+ */
+async function downloadModelToCache(modelId: string): Promise<void> {
+  const safeId = modelId.trim().replace(/'/g, "\\'");
+  const pyCmd = `from huggingface_hub import snapshot_download; snapshot_download('${safeId}', cache_dir='/models/hub')`;
+  await execFileAsync('docker', ['exec', CONTAINER_NAME, 'python', '-c', pyCmd], {
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 600_000, // 10 minutes for large models
+  });
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export const dockerManager = {
@@ -1121,6 +1150,8 @@ export const dockerManager = {
   stopLogStream,
   getLogs,
   checkModelsCached,
+  removeModelCache,
+  downloadModelToCache,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,
