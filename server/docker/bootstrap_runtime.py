@@ -52,6 +52,14 @@ _VIBEVOICE_ASR_IMPORT_CANDIDATES: tuple[tuple[str, str, str, str, str], ...] = (
         "VibeVoiceASRProcessor",
     ),
 )
+_VIBEVOICE_ASR_MODEL_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
+_VIBEVOICE_ASR_4BIT_MODEL_PATTERN = re.compile(
+    r"^[^/]+/vibevoice-asr(?:-[^/]+)?-4bit$", re.IGNORECASE
+)
+_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS: tuple[str, ...] = (
+    "accelerate>=0.26.0",
+    "bitsandbytes>=0.43.1",
+)
 
 
 def log(message: str) -> None:
@@ -95,6 +103,18 @@ def parse_choice_env(name: str, default: str, choices: set[str]) -> str:
         f"Allowed values: {', '.join(sorted(choices))}"
     )
     return default
+
+
+def is_vibevoice_asr_model_name(model_name: str | None) -> bool:
+    """Return True when *model_name* selects a VibeVoice-ASR family variant."""
+    name = (model_name or "").strip()
+    return bool(_VIBEVOICE_ASR_MODEL_PATTERN.match(name))
+
+
+def is_vibevoice_asr_quantized_model_name(model_name: str | None) -> bool:
+    """Return True for known quantized VibeVoice-ASR variants that need extra runtime deps."""
+    name = (model_name or "").strip()
+    return bool(_VIBEVOICE_ASR_4BIT_MODEL_PATTERN.match(name))
 
 
 def python_abi_tag() -> str:
@@ -967,6 +987,79 @@ else:
     return result_payload
 
 
+def check_vibevoice_asr_quant_runtime(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    """Check quantized VibeVoice runtime dependencies in the runtime venv."""
+    required_json = json.dumps(
+        [spec.split(">=", 1)[0] for spec in _VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS]
+    )
+    checker = f"""
+import importlib.metadata
+import json
+
+required = json.loads({required_json!r})
+missing = []
+versions = {{}}
+errors = {{}}
+
+for name in required:
+    try:
+        versions[name] = importlib.metadata.version(name)
+    except Exception as exc:
+        missing.append(name)
+        errors[name] = f"{{type(exc).__name__}}: {{exc}}"
+
+payload = {{
+    "available": len(missing) == 0,
+    "reason": "ready" if len(missing) == 0 else "missing_packages",
+    "missing_packages": missing,
+    "versions": versions,
+}}
+if errors:
+    payload["error"] = " | ".join(f"{{name}}={{msg}}" for name, msg in errors.items())
+print(json.dumps(payload))
+"""
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker],
+            text=True,
+            capture_output=True,
+            timeout=max(30, min(timeout_seconds, 300)),
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": "probe_failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    output = (result.stdout or "").strip().splitlines()
+    if not output:
+        return {"available": False, "reason": "probe_failed"}
+    try:
+        payload = json.loads(output[-1])
+    except json.JSONDecodeError:
+        return {"available": False, "reason": "probe_failed"}
+
+    result_payload: dict[str, Any] = {
+        "available": bool(payload.get("available", False)),
+        "reason": str(payload.get("reason", "probe_failed") or "probe_failed"),
+    }
+    missing = payload.get("missing_packages")
+    if isinstance(missing, list):
+        result_payload["missing_packages"] = [str(item) for item in missing]
+    versions = payload.get("versions")
+    if isinstance(versions, dict):
+        result_payload["versions"] = {str(k): str(v) for k, v in versions.items()}
+    error = payload.get("error")
+    if error:
+        result_payload["error"] = str(error)
+    return result_payload
+
+
 def main() -> int:
     log_timing("bootstrap main() started")
     runtime_dir = Path(os.environ.get("BOOTSTRAP_RUNTIME_DIR", "/runtime"))
@@ -1130,21 +1223,111 @@ def main() -> int:
         ).strip()
         or "git+https://github.com/microsoft/VibeVoice.git"
     )
+    vibevoice_quantized_selected = is_vibevoice_asr_quantized_model_name(main_model)
     existing_vibevoice_asr_status = check_vibevoice_asr_import(
         venv_python=venv_python,
         timeout_seconds=timeout_seconds,
     )
+    vibevoice_quant_runtime_status: dict[str, Any] | None = None
+    if install_vibevoice_asr and vibevoice_quantized_selected:
+        vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
+            venv_python=venv_python,
+            timeout_seconds=timeout_seconds,
+        )
 
     if existing_vibevoice_asr_status.get("available"):
-        vibevoice_asr_status = existing_vibevoice_asr_status
-        variant = vibevoice_asr_status.get("variant")
-        if variant:
-            log(f"VibeVoice-ASR support already installed (import layout={variant})")
+        need_quant_runtime_install = (
+            install_vibevoice_asr
+            and vibevoice_quantized_selected
+            and not bool((vibevoice_quant_runtime_status or {}).get("available", False))
+        )
+        if need_quant_runtime_install:
+            missing_quant_runtime = (
+                vibevoice_quant_runtime_status.get("missing_packages")
+                if isinstance(vibevoice_quant_runtime_status, dict)
+                else None
+            )
+            missing_list = (
+                [str(item) for item in missing_quant_runtime]
+                if isinstance(missing_quant_runtime, list)
+                else []
+            )
+            log(
+                "VibeVoice-ASR core already installed; installing quantization runtime "
+                "dependencies for selected quantized model"
+                + (f" (missing={', '.join(missing_list)})" if missing_list else "")
+                + "..."
+            )
+            try:
+                run_command(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        str(venv_python),
+                        *_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS,
+                    ],
+                    timeout_seconds=timeout_seconds,
+                    env=build_uv_sync_env(
+                        venv_dir=venv_dir,
+                        cache_dir=cache_dir,
+                    ),
+                )
+                vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
+                    venv_python=venv_python,
+                    timeout_seconds=timeout_seconds,
+                )
+                if vibevoice_quant_runtime_status.get("available"):
+                    log("VibeVoice-ASR quantization runtime dependencies ready")
+                else:
+                    failure_error = str(vibevoice_quant_runtime_status.get("error", "")).strip()
+                    log(
+                        "VibeVoice-ASR quantization runtime dependency installation completed "
+                        "but verification failed "
+                        f"({vibevoice_quant_runtime_status.get('reason', 'missing_packages')}"
+                        + (f": {failure_error}" if failure_error else "")
+                        + ")"
+                    )
+            except Exception as exc:
+                vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}
+                log(f"VibeVoice-ASR quantization runtime dependency installation failed: {exc}")
+            else:
+                if vibevoice_quant_runtime_status.get("available"):
+                    vibevoice_asr_status = existing_vibevoice_asr_status
+                    variant = vibevoice_asr_status.get("variant")
+                    if variant:
+                        log(f"VibeVoice-ASR support already installed (import layout={variant})")
+                    else:
+                        log("VibeVoice-ASR support already installed")
+                else:
+                    vibevoice_asr_status = {
+                        "available": False,
+                        "reason": str(
+                            vibevoice_quant_runtime_status.get("reason", "quant_runtime_missing")
+                            or "quant_runtime_missing"
+                        ),
+                    }
+                    error = vibevoice_quant_runtime_status.get("error")
+                    if error:
+                        vibevoice_asr_status["error"] = str(error)
         else:
-            log("VibeVoice-ASR support already installed")
+            vibevoice_asr_status = existing_vibevoice_asr_status
+            variant = vibevoice_asr_status.get("variant")
+            if variant:
+                log(f"VibeVoice-ASR support already installed (import layout={variant})")
+            else:
+                log("VibeVoice-ASR support already installed")
     elif install_vibevoice_asr:
         log("Installing VibeVoice-ASR (experimental) support...")
         try:
+            vibevoice_install_specs = [vibevoice_asr_package_spec]
+            if vibevoice_quantized_selected:
+                log(
+                    "Selected VibeVoice-ASR model appears quantized; installing quantization runtime "
+                    f"dependencies: {', '.join(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)}"
+                )
+                vibevoice_install_specs.extend(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)
             run_command(
                 [
                     "uv",
@@ -1152,7 +1335,7 @@ def main() -> int:
                     "install",
                     "--python",
                     str(venv_python),
-                    vibevoice_asr_package_spec,
+                    *vibevoice_install_specs,
                 ],
                 timeout_seconds=timeout_seconds,
                 env=build_uv_sync_env(
@@ -1182,7 +1365,7 @@ def main() -> int:
             vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}
             log(f"VibeVoice-ASR installation failed: {exc}")
     else:
-        vibevoice_selected = (main_model or "").strip().lower() == "microsoft/vibevoice-asr"
+        vibevoice_selected = is_vibevoice_asr_model_name(main_model)
         reason = "selected_but_not_requested" if vibevoice_selected else "not_requested"
         vibevoice_asr_status = {"available": False, "reason": reason}
         if vibevoice_selected:

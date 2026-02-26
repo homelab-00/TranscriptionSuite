@@ -585,6 +585,20 @@ def test_check_vibevoice_asr_import_parses_extended_probe_details(
     assert result["top_level_error"] == payload["top_level_error"]
 
 
+def test_vibevoice_model_family_detection_helpers() -> None:
+    module = _load_bootstrap_module()
+
+    assert module.is_vibevoice_asr_model_name("microsoft/VibeVoice-ASR") is True
+    assert module.is_vibevoice_asr_model_name("scerz/VibeVoice-ASR-4bit") is True
+    assert module.is_vibevoice_asr_model_name("Systran/faster-whisper-large-v3") is False
+
+    assert module.is_vibevoice_asr_quantized_model_name("microsoft/VibeVoice-ASR") is False
+    assert module.is_vibevoice_asr_quantized_model_name("scerz/VibeVoice-ASR-4bit") is True
+    assert (
+        module.is_vibevoice_asr_quantized_model_name("someone/VibeVoice-ASR-nf4") is False
+    )  # unknown suffix; no quant extras
+
+
 def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -664,6 +678,215 @@ def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
     assert vibevoice["available"] is False  # type: ignore[index]
     assert vibevoice["reason"] == "import_failed"  # type: ignore[index]
     assert vibevoice["error"] == "legacy missing | modular missing"  # type: ignore[index]
+
+
+def test_main_installs_vibevoice_quant_runtime_deps_for_4bit_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
+        diagnostics = {
+            "selection_reason": "marker_match_integrity_ok",
+            "escalated_to_rebuild": False,
+            "integrity": {"status": "pass"},
+        }
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    captured_status: dict[str, object] = {}
+
+    def fake_write_status_file(path: Path, payload: dict[str, object]) -> None:
+        captured_status["path"] = path
+        captured_status["payload"] = payload
+
+    install_calls: list[list[str]] = []
+
+    def fake_run_command(cmd: list[str], **kwargs: object) -> None:
+        del kwargs
+        install_calls.append(cmd)
+
+    vibevoice_probe_results = iter(
+        [
+            {"available": False, "reason": "not_installed"},
+            {"available": True, "reason": "ready", "variant": "modular"},
+        ]
+    )
+
+    monkeypatch.setattr(module, "ensure_runtime_dependencies", fake_ensure_runtime_dependencies)
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: ("scerz/VibeVoice-ASR-4bit", module.DEFAULT_DIARIZATION_MODEL),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_diarization_preload_cache_key",
+        lambda **_: "vv-4bit-diar-key",
+    )
+    monkeypatch.setattr(
+        module,
+        "check_diarization_access",
+        lambda **_: {"available": False, "reason": "token_missing"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": False, "reason": "not_requested"},
+    )
+    monkeypatch.setattr(module, "run_command", fake_run_command)
+    monkeypatch.setattr(
+        module,
+        "check_vibevoice_asr_import",
+        lambda **_: next(vibevoice_probe_results),
+    )
+    monkeypatch.setattr(module, "write_status_file", fake_write_status_file)
+
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.setenv("INSTALL_VIBEVOICE_ASR", "true")
+
+    rc = module.main()
+
+    assert rc == 0
+    assert len(install_calls) == 1
+    cmd = install_calls[0]
+    assert cmd[:5] == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(runtime_dir / ".venv/bin/python"),
+    ]
+    assert "git+https://github.com/microsoft/VibeVoice.git" in cmd
+    assert "accelerate>=0.26.0" in cmd
+    assert "bitsandbytes>=0.43.1" in cmd
+
+    payload = captured_status.get("payload")
+    assert isinstance(payload, dict)
+    vibevoice = payload["features"]["vibevoice_asr"]  # type: ignore[index]
+    assert vibevoice["available"] is True  # type: ignore[index]
+    assert vibevoice["reason"] == "ready"  # type: ignore[index]
+    assert vibevoice["variant"] == "modular"  # type: ignore[index]
+
+
+def test_main_installs_missing_quant_runtime_deps_when_vibevoice_core_already_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
+        diagnostics = {
+            "selection_reason": "marker_match_integrity_ok",
+            "escalated_to_rebuild": False,
+            "integrity": {"status": "pass"},
+        }
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    captured_status: dict[str, object] = {}
+
+    def fake_write_status_file(path: Path, payload: dict[str, object]) -> None:
+        captured_status["path"] = path
+        captured_status["payload"] = payload
+
+    install_calls: list[list[str]] = []
+
+    def fake_run_command(cmd: list[str], **kwargs: object) -> None:
+        del kwargs
+        install_calls.append(cmd)
+
+    quant_runtime_probe_results = iter(
+        [
+            {
+                "available": False,
+                "reason": "missing_packages",
+                "missing_packages": ["accelerate", "bitsandbytes"],
+            },
+            {
+                "available": True,
+                "reason": "ready",
+                "versions": {"accelerate": "1.0.0", "bitsandbytes": "0.45.0"},
+            },
+        ]
+    )
+
+    monkeypatch.setattr(module, "ensure_runtime_dependencies", fake_ensure_runtime_dependencies)
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: ("scerz/VibeVoice-ASR-4bit", module.DEFAULT_DIARIZATION_MODEL),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_diarization_preload_cache_key",
+        lambda **_: "vv-core-present-diar-key",
+    )
+    monkeypatch.setattr(
+        module,
+        "check_diarization_access",
+        lambda **_: {"available": False, "reason": "token_missing"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": False, "reason": "not_requested"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_vibevoice_asr_import",
+        lambda **_: {"available": True, "reason": "ready", "variant": "modular"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_vibevoice_asr_quant_runtime",
+        lambda **_: next(quant_runtime_probe_results),
+    )
+    monkeypatch.setattr(module, "run_command", fake_run_command)
+    monkeypatch.setattr(module, "write_status_file", fake_write_status_file)
+
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.setenv("INSTALL_VIBEVOICE_ASR", "true")
+
+    rc = module.main()
+
+    assert rc == 0
+    assert len(install_calls) == 1
+    cmd = install_calls[0]
+    assert cmd[:5] == [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        str(runtime_dir / ".venv/bin/python"),
+    ]
+    assert "accelerate>=0.26.0" in cmd
+    assert "bitsandbytes>=0.43.1" in cmd
+    assert "git+https://github.com/microsoft/VibeVoice.git" not in cmd
+
+    payload = captured_status.get("payload")
+    assert isinstance(payload, dict)
+    vibevoice = payload["features"]["vibevoice_asr"]  # type: ignore[index]
+    assert vibevoice["available"] is True  # type: ignore[index]
+    assert vibevoice["reason"] == "ready"  # type: ignore[index]
+    assert vibevoice["variant"] == "modular"  # type: ignore[index]
 
 
 def test_main_reports_existing_optional_dependency_installs_without_install_flags(
