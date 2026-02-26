@@ -105,8 +105,8 @@ services:
       - ${TLS_CERT_PATH:-./.empty}:/certs/cert.crt:ro
       - ${TLS_KEY_PATH:-./.empty}:/certs/cert.key:ro
     
-    # Restart policy
-    restart: unless-stopped
+    # Disable automatic restart so failures surface immediately
+    restart: "no"
     
     # Health check - works with both HTTP and HTTPS modes
     healthcheck:
