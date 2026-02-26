@@ -188,29 +188,32 @@ interface MenuTrigger {
 interface MenuProps {
   trigger: MenuTrigger;
   onClose: () => void;
-  noteId: string;
+  noteEventId: string;
+  recordingId: number | null;
   noteTitle: string;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
   onPlay: (id: string) => void;
 }
 
 const NoteActionMenu: React.FC<MenuProps> = ({
   trigger,
   onClose,
-  noteId,
+  noteEventId,
+  recordingId,
   noteTitle,
   onRefresh,
   onPlay,
 }) => {
-  const recordingId = parseInt(noteId, 10);
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(noteTitle);
   const [renameLoading, setRenameLoading] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const getValidRecordingId = (): number | null =>
+    typeof recordingId === 'number' && Number.isFinite(recordingId) ? recordingId : null;
 
   const handlePlay = () => {
-    onPlay(noteId);
+    onPlay(noteEventId);
     onClose();
   };
 
@@ -221,6 +224,12 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   };
 
   const commitRename = async () => {
+    const targetId = getValidRecordingId();
+    if (targetId === null) {
+      toast.error('Invalid recording ID.');
+      onClose();
+      return;
+    }
     const trimmed = renameValue.trim();
     if (!trimmed || trimmed === noteTitle) {
       onClose();
@@ -228,8 +237,8 @@ const NoteActionMenu: React.FC<MenuProps> = ({
     }
     setRenameLoading(true);
     try {
-      await apiClient.updateRecordingTitle(recordingId, trimmed);
-      onRefresh();
+      await apiClient.updateRecordingTitle(targetId, trimmed);
+      await Promise.resolve(onRefresh());
     } catch {
       /* swallow – menu will close */
     }
@@ -237,12 +246,24 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   };
 
   const handleExport = (format: 'txt' | 'srt' | 'ass') => {
-    const url = apiClient.getExportUrl(recordingId, format);
+    const targetId = getValidRecordingId();
+    if (targetId === null) {
+      toast.error('Invalid recording ID.');
+      onClose();
+      return;
+    }
+    const url = apiClient.getExportUrl(targetId, format);
     window.open(url, '_blank');
     onClose();
   };
 
   const handleDelete = async () => {
+    const targetId = getValidRecordingId();
+    if (targetId === null) {
+      toast.error('Invalid recording ID.');
+      onClose();
+      return;
+    }
     if (
       !(await confirm('Delete this recording? This cannot be undone.', {
         danger: true,
@@ -251,10 +272,12 @@ const NoteActionMenu: React.FC<MenuProps> = ({
     )
       return;
     try {
-      await apiClient.deleteRecording(recordingId);
-      onRefresh();
-    } catch {
-      toast.error('Failed to delete recording.');
+      await apiClient.deleteRecording(targetId);
+      await Promise.resolve(onRefresh());
+      toast.success('Recording deleted.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete recording.';
+      toast.error(message);
     }
     onClose();
   };
@@ -307,10 +330,10 @@ const NoteActionMenu: React.FC<MenuProps> = ({
 
   return (
     <>
-      {confirmDialog}
+      {confirmDialog && createPortal(confirmDialog, document.body)}
       {createPortal(
         <div
-          className="fixed inset-0 z-9999"
+          className="fixed inset-0 z-50"
           onClick={(e) => {
             e.stopPropagation();
             onClose();
@@ -585,6 +608,7 @@ const TimeSection: React.FC<{
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
   const [activeMenu, setActiveMenu] = useState<{
     id: string;
+    recordingId: number | null;
     title: string;
     trigger: MenuTrigger;
   } | null>(null);
@@ -668,6 +692,7 @@ const TimeSection: React.FC<{
     e.preventDefault();
     setActiveMenu({
       id: evt.id,
+      recordingId: evt.recordingId ?? null,
       title: evt.title,
       trigger: { type: 'point', x: e.clientX, y: e.clientY },
     });
@@ -754,6 +779,7 @@ const TimeSection: React.FC<{
                                   const rect = e.currentTarget.getBoundingClientRect();
                                   setActiveMenu({
                                     id: evt.id,
+                                    recordingId: evt.recordingId ?? null,
                                     title: evt.title,
                                     trigger: { type: 'rect', rect },
                                   });
@@ -807,7 +833,8 @@ const TimeSection: React.FC<{
         <NoteActionMenu
           trigger={activeMenu.trigger}
           onClose={() => setActiveMenu(null)}
-          noteId={activeMenu.id}
+          noteEventId={activeMenu.id}
+          recordingId={activeMenu.recordingId}
           noteTitle={activeMenu.title}
           onRefresh={onRefresh}
           onPlay={(id) => {
