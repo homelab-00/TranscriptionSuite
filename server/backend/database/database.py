@@ -156,6 +156,7 @@ def _assert_schema_sanity(conn: sqlite3.Connection) -> None:
             "has_diarization",
             "summary",
             "summary_model",
+            "transcription_backend",
         },
         "segments": {
             "id",
@@ -276,6 +277,7 @@ class Recording:
         self.has_diarization = bool(data.get("has_diarization", 0))
         self.summary = data.get("summary")
         self.summary_model = data.get("summary_model")
+        self.transcription_backend = data.get("transcription_backend")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -290,6 +292,7 @@ class Recording:
             "has_diarization": self.has_diarization,
             "summary": self.summary,
             "summary_model": self.summary_model,
+            "transcription_backend": self.transcription_backend,
         }
 
 
@@ -1542,6 +1545,7 @@ def save_longform_to_database(
     diarization_segments: list[dict[str, Any]] | None = None,
     recorded_at: datetime | None = None,
     title: str | None = None,
+    transcription_backend: str | None = None,
 ) -> int | None:
     """
     Save a longform recording to the database atomically.
@@ -1558,6 +1562,7 @@ def save_longform_to_database(
         diarization_segments: Optional list of speaker segments
         recorded_at: Optional timestamp (defaults to now)
         title: Optional title (defaults to audio filename stem)
+        transcription_backend: Optional normalized backend family used for transcription
 
     Returns:
         Recording ID on success, None on error
@@ -1591,8 +1596,16 @@ def save_longform_to_database(
             cursor.execute(
                 """
                 INSERT INTO recordings
-                (filename, filepath, title, duration_seconds, recorded_at, has_diarization)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (
+                    filename,
+                    filepath,
+                    title,
+                    duration_seconds,
+                    recorded_at,
+                    has_diarization,
+                    transcription_backend
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     audio_path.name,
@@ -1601,6 +1614,7 @@ def save_longform_to_database(
                     duration_seconds,
                     recorded_at.isoformat(),
                     int(has_diarization),
+                    transcription_backend,
                 ),
             )
             recording_id: int = cursor.lastrowid or 0
@@ -1672,6 +1686,7 @@ def save_longform_recording(
     sample_rate: int = 16000,
     word_timestamps: list[dict[str, Any]] | None = None,
     diarization_segments: list[dict[str, Any]] | None = None,
+    transcription_backend: str | None = None,
 ) -> int | None:
     """
     High-level function to save a longform recording.
@@ -1682,6 +1697,7 @@ def save_longform_recording(
         sample_rate: Sample rate of the audio (default 16000)
         word_timestamps: Optional list of word timing dicts
         diarization_segments: Optional list of speaker segments
+        transcription_backend: Optional normalized backend family used for transcription
 
     Returns:
         Recording ID on success, None on error
@@ -1702,6 +1718,7 @@ def save_longform_recording(
         transcription_text=transcription_text,
         word_timestamps=word_timestamps,
         diarization_segments=diarization_segments,
+        transcription_backend=transcription_backend,
     )
 
 

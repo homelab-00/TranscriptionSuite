@@ -12,17 +12,16 @@ Running this on an existing database will:
 3. Create any missing indexes (no-op if they exist)
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 from sqlalchemy import text
 
-
 # revision identifiers, used by Alembic.
 revision: str = "001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -43,7 +42,8 @@ def upgrade() -> None:
             word_count INTEGER DEFAULT 0,
             has_diarization INTEGER DEFAULT 0,
             summary TEXT,
-            summary_model TEXT
+            summary_model TEXT,
+            transcription_backend TEXT
         )
     """)
     )
@@ -151,19 +151,11 @@ def upgrade() -> None:
     )
 
     # Indexes for common queries
-    conn.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings(recorded_at)"
-        )
-    )
-    conn.execute(
-        text("CREATE INDEX IF NOT EXISTS idx_words_recording ON words(recording_id)")
-    )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings(recorded_at)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_words_recording ON words(recording_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_words_time ON words(start_time)"))
     conn.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS idx_segments_recording ON segments(recording_id)"
-        )
+        text("CREATE INDEX IF NOT EXISTS idx_segments_recording ON segments(recording_id)")
     )
     conn.execute(
         text(
@@ -171,9 +163,7 @@ def upgrade() -> None:
         )
     )
     conn.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)"
-        )
+        text("CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)")
     )
 
 

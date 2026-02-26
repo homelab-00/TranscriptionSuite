@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
+from server.core.stt.backends.factory import detect_backend_type
 from server.core.subtitle_export import build_subtitle_cues, render_ass, render_srt
 from server.database.backup import DatabaseBackupManager
 
@@ -69,6 +70,7 @@ class RecordingResponse(BaseModel):
     has_diarization: bool = False
     summary: str | None = None
     summary_model: str | None = None
+    transcription_backend: str | None = None
 
 
 class RecordingDetailResponse(RecordingResponse):
@@ -643,6 +645,7 @@ async def upload_and_transcribe(
         # Save to database
         # Use provided title if given, otherwise database falls back to filename stem
         clean_title = title.strip() if title else None
+        transcription_backend = detect_backend_type(getattr(engine, "model_name", "") or "")
         recording_id = save_longform_to_database(
             audio_path=dest_path,
             duration_seconds=result.duration,
@@ -651,6 +654,7 @@ async def upload_and_transcribe(
             diarization_segments=diarization_segments,
             recorded_at=recorded_at,
             title=clean_title or None,
+            transcription_backend=transcription_backend,
         )
 
         if not recording_id:

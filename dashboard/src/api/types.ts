@@ -129,6 +129,7 @@ export interface Recording {
   has_diarization: boolean;
   summary: string | null;
   summary_model: string | null;
+  transcription_backend?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr' | null;
 }
 
 export interface RecordingDetail extends Recording {

@@ -25,7 +25,6 @@ from typing import Any
 APP_ROOT = Path("/app")
 PROJECT_DIR = APP_ROOT / "server"
 LOCK_FILE = PROJECT_DIR / "uv.lock"
-PYPROJECT_FILE = PROJECT_DIR / "pyproject.toml"
 DEFAULT_CONFIG_FILE = APP_ROOT / "config.yaml"
 USER_CONFIG_FILE = Path("/user-config/config.yaml")
 
@@ -33,8 +32,6 @@ DEFAULT_MAIN_MODEL = "Systran/faster-whisper-large-v3"
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 
 BOOTSTRAP_SCHEMA_VERSION = 2
-FINGERPRINT_SOURCES = {"lockfile", "legacy"}
-REBUILD_POLICIES = {"abi_only", "always", "never"}
 _BOOTSTRAP_START = time.perf_counter()
 _VIBEVOICE_ASR_IMPORT_CANDIDATES: tuple[tuple[str, str, str, str, str], ...] = (
     (
@@ -91,20 +88,6 @@ def parse_int_env(name: str, default: int) -> int:
         return default
 
 
-def parse_choice_env(name: str, default: str, choices: set[str]) -> str:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    value = raw.strip().lower()
-    if value in choices:
-        return value
-    log(
-        f"Invalid value for {name}: {raw!r}. Using default {default!r}. "
-        f"Allowed values: {', '.join(sorted(choices))}"
-    )
-    return default
-
-
 def is_vibevoice_asr_model_name(model_name: str | None) -> bool:
     """Return True when *model_name* selects a VibeVoice-ASR family variant."""
     name = (model_name or "").strip()
@@ -137,22 +120,15 @@ def update_hash_with_file(hasher: Any, label: str, path: Path) -> None:
 
 
 def compute_dependency_fingerprint(
-    fingerprint_source: str,
     python_abi: str,
     arch: str,
 ) -> str:
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
-    hasher.update(f"source={fingerprint_source}".encode())
     hasher.update(f"abi={python_abi}".encode())
     hasher.update(f"arch={arch}".encode())
 
-    # Recommended mode: lockfile-only (dependency-resolving source of truth).
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
-
-    # Backward-compatible mode for legacy behavior.
-    if fingerprint_source == "legacy":
-        update_hash_with_file(hasher, "pyproject", PYPROJECT_FILE)
 
     return hasher.hexdigest()
 
@@ -241,25 +217,6 @@ print(json.dumps(packages, sort_keys=True))
     return {}
 
 
-def summarize_failure_snippet(
-    stdout: str | None,
-    stderr: str | None,
-    returncode: int,
-) -> str:
-    """Create a short, stable one-line failure summary from command output."""
-    merged = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
-    lines = [line.strip() for line in merged.splitlines() if line.strip()]
-
-    if lines:
-        snippet = lines[-1]
-    else:
-        snippet = f"command failed with exit code {returncode}"
-
-    if len(snippet) > 240:
-        return f"{snippet[:237]}..."
-    return snippet
-
-
 def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     """Build environment variables used by runtime uv commands."""
     env = os.environ.copy()
@@ -267,48 +224,6 @@ def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     env["UV_CACHE_DIR"] = str(cache_dir)
     env["UV_PYTHON"] = "/usr/bin/python3.13"
     return env
-
-
-def check_runtime_environment_integrity(
-    venv_dir: Path,
-    cache_dir: Path,
-    timeout_seconds: int,
-) -> tuple[bool, str]:
-    """
-    Validate runtime venv against uv.lock for all packages.
-
-    This is intentionally lock-level integrity checking, not package-specific probing.
-    """
-    check_timeout = max(30, min(timeout_seconds, 600))
-    cmd = [
-        "uv",
-        "sync",
-        "--check",
-        "--frozen",
-        "--no-dev",
-        "--project",
-        str(PROJECT_DIR),
-    ]
-    try:
-        result = subprocess.run(
-            cmd,
-            env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
-            text=True,
-            capture_output=True,
-            timeout=check_timeout,
-            check=False,
-        )
-    except Exception as exc:
-        return False, f"integrity check command failed: {exc}"
-
-    if result.returncode == 0:
-        return True, "ok"
-
-    return False, summarize_failure_snippet(
-        stdout=result.stdout,
-        stderr=result.stderr,
-        returncode=result.returncode,
-    )
 
 
 def run_dependency_sync(
@@ -365,8 +280,6 @@ def ensure_runtime_dependencies(
     runtime_dir: Path,
     cache_dir: Path,
     timeout_seconds: int,
-    fingerprint_source: str,
-    rebuild_policy: str,
     log_changes: bool,
 ) -> tuple[Path, str, dict[str, int], dict[str, Any]]:
     ensure_start = time.perf_counter()
@@ -380,7 +293,6 @@ def ensure_runtime_dependencies(
     python_abi = python_abi_tag()
     arch = platform.machine()
     fingerprint = compute_dependency_fingerprint(
-        fingerprint_source=fingerprint_source,
         python_abi=python_abi,
         arch=arch,
     )
@@ -394,13 +306,6 @@ def ensure_runtime_dependencies(
     }
     diagnostics: dict[str, Any] = {
         "selection_reason": "unknown",
-        "escalated_to_rebuild": False,
-        "integrity": {
-            "check_command": "uv sync --check --frozen --no-dev --project /app/server",
-            "status": "unknown",
-            "failure_snippet": None,
-            "checks": [],
-        },
     }
 
     with lock_file.open("w", encoding="utf-8") as lock:
@@ -410,158 +315,55 @@ def ensure_runtime_dependencies(
         venv_python = venv_dir / "bin/python"
         venv_exists = venv_python.exists()
 
-        marker_abi = str(marker_data.get("python_abi", ""))
-        marker_arch = str(marker_data.get("arch", ""))
-        marker_has_abi_info = bool(marker_abi and marker_arch)
-        abi_compatible = bool(
-            venv_exists and marker_has_abi_info and marker_abi == python_abi and marker_arch == arch
-        )
-
-        if rebuild_policy == "always":
-            rebuild_required = True
-        elif rebuild_policy == "never":
-            rebuild_required = False
-        else:  # abi_only
-            rebuild_required = bool(venv_exists and marker_has_abi_info and not abi_compatible)
-
         marker_matches = bool(
             venv_exists
             and marker_data.get("schema_version") == BOOTSTRAP_SCHEMA_VERSION
-            and marker_data.get("fingerprint_source") == fingerprint_source
             and marker_data.get("fingerprint") == fingerprint
-            and not rebuild_required
+            and marker_data.get("python_abi") == python_abi
+            and marker_data.get("arch") == arch
         )
 
-        integrity_checks: list[dict[str, Any]] = diagnostics["integrity"]["checks"]
+        if marker_matches:
+            diagnostics["selection_reason"] = "hash_match_skip"
+            log("Bootstrap path selected: mode=skip reason=hash_match_skip")
+            log("Runtime dependencies already up-to-date (mode=skip)")
+            log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
+            return venv_dir, "skip", package_delta, diagnostics
 
-        def record_integrity_check(stage: str, ok: bool, message: str) -> None:
-            integrity_checks.append(
-                {
-                    "stage": stage,
-                    "ok": ok,
-                    "message": message,
-                }
-            )
-            if not ok and diagnostics["integrity"]["failure_snippet"] is None:
-                diagnostics["integrity"]["failure_snippet"] = message
-
-        selected_mode = "delta-sync"
-        if not venv_exists:
-            selected_mode = "rebuild-sync"
-            diagnostics["selection_reason"] = "venv_missing"
-        elif rebuild_required:
-            selected_mode = "rebuild-sync"
-            diagnostics["selection_reason"] = "abi_incompatible"
-        elif marker_matches:
-            pre_check_start = time.perf_counter()
-            pre_ok, pre_msg = check_runtime_environment_integrity(
-                venv_dir=venv_dir,
-                cache_dir=cache_dir,
-                timeout_seconds=timeout_seconds,
-            )
-            log_timing("pre-skip integrity check complete", pre_check_start)
-            record_integrity_check("pre_skip_gate", pre_ok, pre_msg)
-            if pre_ok:
-                diagnostics["selection_reason"] = "marker_match_integrity_ok"
-                diagnostics["integrity"]["status"] = "pass"
-                log("Bootstrap path selected: mode=skip reason=marker_match_integrity_ok")
-                log("Runtime dependencies already up-to-date (mode=skip)")
-                log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
-                return venv_dir, "skip", package_delta, diagnostics
-            diagnostics["selection_reason"] = "marker_match_integrity_failed"
-            log("Bootstrap path selected: mode=delta-sync reason=marker_match_integrity_failed")
-            log(f"Runtime integrity check failed (pre-sync): {pre_msg}")
-        else:
-            diagnostics["selection_reason"] = "fingerprint_drift"
-
-        if diagnostics["selection_reason"] in {"venv_missing", "abi_incompatible"}:
-            log(
-                "Bootstrap path selected: "
-                f"mode={selected_mode} reason={diagnostics['selection_reason']}"
-            )
-        elif diagnostics["selection_reason"] == "fingerprint_drift":
-            log("Bootstrap path selected: mode=delta-sync reason=fingerprint_drift")
+        diagnostics["selection_reason"] = "venv_missing" if not venv_exists else "hash_mismatch"
+        log(f"Bootstrap path selected: mode=rebuild-sync reason={diagnostics['selection_reason']}")
 
         before_packages: dict[str, str] = {}
         if log_changes and venv_exists:
             before_packages = collect_installed_packages(venv_python, timeout_seconds)
+        if venv_dir.exists():
+            log("Rebuilding runtime virtual environment (hash mismatch or missing marker)")
+            shutil.rmtree(venv_dir, ignore_errors=True)
 
-        attempt_modes: list[str]
-        if selected_mode == "delta-sync":
-            attempt_modes = ["delta-sync", "rebuild-sync"]
-        else:
-            attempt_modes = [selected_mode]
-
-        final_sync_mode: str | None = None
-        for idx, attempt_mode in enumerate(attempt_modes):
-            if idx > 0 and attempt_mode == "rebuild-sync":
-                diagnostics["escalated_to_rebuild"] = True
-
-            if attempt_mode == "rebuild-sync" and venv_dir.exists():
-                log(
-                    "Rebuilding runtime virtual environment "
-                    f"(policy={rebuild_policy}, abi_compatible={abi_compatible})"
-                )
-                shutil.rmtree(venv_dir, ignore_errors=True)
-
-            log(f"Installing Python runtime dependencies (mode={attempt_mode})...")
-            sync_start = time.perf_counter()
-            try:
-                run_dependency_sync(
-                    venv_dir=venv_dir,
-                    cache_dir=cache_dir,
-                    timeout_seconds=timeout_seconds,
-                )
-                log_timing(
-                    f"dependency sync complete (mode={attempt_mode})",
-                    sync_start,
-                )
-            except Exception as exc:
-                log_timing(
-                    f"dependency sync failed (mode={attempt_mode})",
-                    sync_start,
-                )
-                failure_snippet = str(exc).strip()
-                if len(failure_snippet) > 240:
-                    failure_snippet = f"{failure_snippet[:237]}..."
-
-                if diagnostics["integrity"]["failure_snippet"] is None:
-                    diagnostics["integrity"]["failure_snippet"] = failure_snippet
-
-                if attempt_mode == "delta-sync" and idx + 1 < len(attempt_modes):
-                    log("Dependency sync failed for mode=delta-sync; escalating to rebuild-sync")
-                    log(f"Delta-sync failure snippet: {failure_snippet}")
-                    continue
-
-                raise RuntimeError(
-                    f"Dependency sync failed for mode={attempt_mode}: {failure_snippet}"
-                ) from exc
-
-            post_check_start = time.perf_counter()
-            post_ok, post_msg = check_runtime_environment_integrity(
+        final_sync_mode = "rebuild-sync"
+        log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
+        sync_start = time.perf_counter()
+        try:
+            run_dependency_sync(
                 venv_dir=venv_dir,
                 cache_dir=cache_dir,
                 timeout_seconds=timeout_seconds,
             )
             log_timing(
-                f"post-sync integrity check complete (mode={attempt_mode})",
-                post_check_start,
+                f"dependency sync complete (mode={final_sync_mode})",
+                sync_start,
             )
-            record_integrity_check(f"post_{attempt_mode}", post_ok, post_msg)
-            if post_ok:
-                final_sync_mode = attempt_mode
-                diagnostics["integrity"]["status"] = "pass"
-                break
-
-            log(f"Runtime integrity check failed after {attempt_mode}: {post_msg}")
-            if attempt_mode == "delta-sync" and idx + 1 < len(attempt_modes):
-                log("Bootstrap escalation: mode=rebuild-sync reason=post_delta_integrity_failed")
-                continue
-
-            raise RuntimeError(f"Runtime integrity check failed after {attempt_mode}: {post_msg}")
-
-        if final_sync_mode is None:
-            raise RuntimeError("Runtime dependency sync did not converge")
+        except Exception as exc:
+            log_timing(
+                f"dependency sync failed (mode={final_sync_mode})",
+                sync_start,
+            )
+            failure_snippet = str(exc).strip()
+            if len(failure_snippet) > 240:
+                failure_snippet = f"{failure_snippet[:237]}..."
+            raise RuntimeError(
+                f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
+            ) from exc
 
         venv_python = venv_dir / "bin/python"
         if not venv_python.exists():
@@ -589,13 +391,10 @@ def ensure_runtime_dependencies(
             {
                 "schema_version": BOOTSTRAP_SCHEMA_VERSION,
                 "fingerprint": fingerprint,
-                "fingerprint_source": fingerprint_source,
                 "python_abi": python_abi,
                 "arch": arch,
-                "rebuild_policy": rebuild_policy,
                 "sync_mode": final_sync_mode,
                 "selection_reason": diagnostics["selection_reason"],
-                "integrity_status": diagnostics["integrity"]["status"],
                 "package_delta": package_delta,
                 "updated_at": datetime.now(UTC).isoformat(),
             },
@@ -1072,16 +871,6 @@ def main() -> int:
     )
     timeout_seconds = parse_int_env("BOOTSTRAP_TIMEOUT_SECONDS", 1800)
     require_hf_token = parse_bool_env("BOOTSTRAP_REQUIRE_HF_TOKEN", False)
-    fingerprint_source = parse_choice_env(
-        "BOOTSTRAP_FINGERPRINT_SOURCE",
-        "lockfile",
-        FINGERPRINT_SOURCES,
-    )
-    rebuild_policy = parse_choice_env(
-        "BOOTSTRAP_REBUILD_POLICY",
-        "abi_only",
-        REBUILD_POLICIES,
-    )
     log_changes = parse_bool_env("BOOTSTRAP_LOG_CHANGES", True)
 
     hf_token = (os.environ.get("HF_TOKEN") or "").strip() or None
@@ -1097,8 +886,6 @@ def main() -> int:
         runtime_dir=runtime_dir,
         cache_dir=cache_dir,
         timeout_seconds=timeout_seconds,
-        fingerprint_source=fingerprint_source,
-        rebuild_policy=rebuild_policy,
         log_changes=log_changes,
     )
     log_timing("runtime dependency bootstrap phase complete", deps_start)
@@ -1386,11 +1173,7 @@ def main() -> int:
                 "schema_version": BOOTSTRAP_SCHEMA_VERSION,
                 "sync_mode": sync_mode,
                 "package_delta": package_delta,
-                "fingerprint_source": fingerprint_source,
-                "rebuild_policy": rebuild_policy,
                 "selection_reason": diagnostics.get("selection_reason"),
-                "escalated_to_rebuild": diagnostics.get("escalated_to_rebuild", False),
-                "integrity": diagnostics.get("integrity", {}),
             },
             "features": {
                 "diarization": diarization_status,

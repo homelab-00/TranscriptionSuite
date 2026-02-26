@@ -481,6 +481,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
         .filter(Boolean)
         .join(' ')
         .trim();
+  const isVibeVoiceRecording = recording?.transcription_backend === 'vibevoice_asr';
+  const allowWordPlaybackHighlight = !isVibeVoiceRecording;
 
   // Initialize Portal Target on Mount
   useEffect(() => {
@@ -1394,7 +1396,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                             </div>
                           </div>
                           <div className="selectable-text min-w-0 flex-1 leading-relaxed text-slate-300 transition-colors group-hover:text-white">
-                            {seg.words && seg.words.length > 0 ? (
+                            {allowWordPlaybackHighlight && seg.words && seg.words.length > 0 ? (
                               <p>
                                 {seg.words.map((w, wi) => (
                                   <span
@@ -1436,7 +1438,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                         </div>
                       ))
                     ) : (
-                      <div className="selectable-text min-w-0 leading-relaxed break-words whitespace-pre-wrap text-slate-300">
+                      <div className="selectable-text min-w-0 leading-relaxed wrap-break-word whitespace-pre-wrap text-slate-300">
                         {plainTranscriptText}
                       </div>
                     )

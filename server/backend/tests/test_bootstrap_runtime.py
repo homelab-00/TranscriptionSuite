@@ -1,4 +1,4 @@
-"""Tests for runtime bootstrap dependency integrity decision flow."""
+"""Tests for runtime bootstrap dependency bootstrap decision flow."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def _patch_fingerprint_context(module: ModuleType, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(module.platform, "machine", lambda: "arch")
 
 
-def test_marker_match_integrity_pass_uses_skip(
+def test_hash_match_uses_skip(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -55,18 +55,12 @@ def test_marker_match_integrity_pass_uses_skip(
         runtime_dir,
         {
             "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
-            "fingerprint_source": "lockfile",
             "fingerprint": "fp",
             "python_abi": "abi",
             "arch": "arch",
         },
     )
     _patch_fingerprint_context(module, monkeypatch)
-    monkeypatch.setattr(
-        module,
-        "check_runtime_environment_integrity",
-        lambda **_: (True, "ok"),
-    )
     monkeypatch.setattr(
         module,
         "run_dependency_sync",
@@ -77,17 +71,14 @@ def test_marker_match_integrity_pass_uses_skip(
         runtime_dir=runtime_dir,
         cache_dir=cache_dir,
         timeout_seconds=300,
-        fingerprint_source="lockfile",
-        rebuild_policy="abi_only",
         log_changes=False,
     )
 
     assert sync_mode == "skip"
-    assert diagnostics["selection_reason"] == "marker_match_integrity_ok"
-    assert diagnostics["integrity"]["status"] == "pass"
+    assert diagnostics["selection_reason"] == "hash_match_skip"
 
 
-def test_marker_match_integrity_fail_repairs_with_delta_sync(
+def test_venv_missing_uses_rebuild_sync(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -96,30 +87,7 @@ def test_marker_match_integrity_fail_repairs_with_delta_sync(
     cache_dir = tmp_path / "runtime-cache"
     runtime_dir.mkdir()
     cache_dir.mkdir()
-    _touch_runtime_python(runtime_dir)
-    _write_marker(
-        runtime_dir,
-        {
-            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
-            "fingerprint_source": "lockfile",
-            "fingerprint": "fp",
-            "python_abi": "abi",
-            "arch": "arch",
-        },
-    )
     _patch_fingerprint_context(module, monkeypatch)
-
-    results = iter(
-        [
-            (False, "precheck failed"),
-            (True, "post delta ok"),
-        ]
-    )
-    monkeypatch.setattr(
-        module,
-        "check_runtime_environment_integrity",
-        lambda **_: next(results),
-    )
 
     sync_calls: list[str] = []
 
@@ -133,76 +101,71 @@ def test_marker_match_integrity_fail_repairs_with_delta_sync(
         runtime_dir=runtime_dir,
         cache_dir=cache_dir,
         timeout_seconds=300,
-        fingerprint_source="lockfile",
-        rebuild_policy="abi_only",
-        log_changes=False,
-    )
-
-    assert sync_mode == "delta-sync"
-    assert len(sync_calls) == 1
-    assert diagnostics["selection_reason"] == "marker_match_integrity_failed"
-    assert diagnostics["integrity"]["failure_snippet"] == "precheck failed"
-
-
-def test_post_delta_integrity_fail_escalates_to_rebuild_sync(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_bootstrap_module()
-    runtime_dir = tmp_path / "runtime"
-    cache_dir = tmp_path / "runtime-cache"
-    runtime_dir.mkdir()
-    cache_dir.mkdir()
-    _touch_runtime_python(runtime_dir)
-    _write_marker(
-        runtime_dir,
-        {
-            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
-            "fingerprint_source": "lockfile",
-            "fingerprint": "fp",
-            "python_abi": "abi",
-            "arch": "arch",
-        },
-    )
-    _patch_fingerprint_context(module, monkeypatch)
-
-    results = iter(
-        [
-            (False, "precheck failed"),
-            (False, "post delta failed"),
-            (True, "post rebuild ok"),
-        ]
-    )
-    monkeypatch.setattr(
-        module,
-        "check_runtime_environment_integrity",
-        lambda **_: next(results),
-    )
-
-    sync_calls: list[str] = []
-
-    def fake_sync(**_: object) -> None:
-        sync_calls.append("sync")
-        _touch_runtime_python(runtime_dir)
-
-    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
-
-    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
-        runtime_dir=runtime_dir,
-        cache_dir=cache_dir,
-        timeout_seconds=300,
-        fingerprint_source="lockfile",
-        rebuild_policy="abi_only",
         log_changes=False,
     )
 
     assert sync_mode == "rebuild-sync"
-    assert len(sync_calls) == 2
-    assert diagnostics["escalated_to_rebuild"] is True
-    assert diagnostics["integrity"]["status"] == "pass"
+    assert len(sync_calls) == 1
+    assert diagnostics["selection_reason"] == "venv_missing"
+    persisted = json.loads(
+        (runtime_dir / ".runtime-bootstrap-marker.json").read_text(encoding="utf-8")
+    )
+    assert persisted["sync_mode"] == "rebuild-sync"
+    assert persisted["selection_reason"] == "venv_missing"
 
 
-def test_post_rebuild_integrity_fail_raises_and_keeps_marker(
+def test_hash_mismatch_rebuilds_sync_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "old-abi",
+            "arch": "arch",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+
+    sync_calls: list[str] = []
+    rmtree_calls: list[Path] = []
+    original_rmtree = module.shutil.rmtree
+
+    def fake_rmtree(path: Path, ignore_errors: bool = False) -> None:
+        assert ignore_errors is True
+        rmtree_calls.append(path)
+        if Path(path) == runtime_dir / ".venv" and (runtime_dir / ".venv").exists():
+            original_rmtree(path, ignore_errors=ignore_errors)
+
+    def fake_sync(**_: object) -> None:
+        sync_calls.append("sync")
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module.shutil, "rmtree", fake_rmtree)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    assert sync_mode == "rebuild-sync"
+    assert len(sync_calls) == 1
+    assert diagnostics["selection_reason"] == "hash_mismatch"
+    assert rmtree_calls[0] == runtime_dir / ".venv"
+
+
+def test_rebuild_sync_failure_raises_and_keeps_marker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -214,8 +177,7 @@ def test_post_rebuild_integrity_fail_raises_and_keeps_marker(
     _touch_runtime_python(runtime_dir)
     original_marker = {
         "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
-        "fingerprint_source": "lockfile",
-        "fingerprint": "fp",
+        "fingerprint": "old-fingerprint",
         "python_abi": "abi",
         "arch": "arch",
         "sync_mode": "original",
@@ -223,43 +185,28 @@ def test_post_rebuild_integrity_fail_raises_and_keeps_marker(
     _write_marker(runtime_dir, original_marker)
     _patch_fingerprint_context(module, monkeypatch)
 
-    results = iter(
-        [
-            (False, "precheck failed"),
-            (False, "post delta failed"),
-            (False, "post rebuild failed"),
-        ]
-    )
-    monkeypatch.setattr(
-        module,
-        "check_runtime_environment_integrity",
-        lambda **_: next(results),
-    )
-
-    def fake_sync(**_: object) -> None:
-        _touch_runtime_python(runtime_dir)
-
-    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
-
     with pytest.raises(
         RuntimeError,
-        match="Runtime integrity check failed after rebuild-sync",
+        match="Dependency sync failed for mode=rebuild-sync",
     ):
+        monkeypatch.setattr(
+            module,
+            "run_dependency_sync",
+            lambda **_: (_ for _ in ()).throw(RuntimeError("sync exploded")),
+        )
         module.ensure_runtime_dependencies(
             runtime_dir=runtime_dir,
             cache_dir=cache_dir,
             timeout_seconds=300,
-            fingerprint_source="lockfile",
-            rebuild_policy="abi_only",
             log_changes=False,
         )
 
     marker_file = runtime_dir / ".runtime-bootstrap-marker.json"
     persisted = json.loads(marker_file.read_text(encoding="utf-8"))
-    assert persisted.get("sync_mode") == "original"
+    assert persisted == original_marker
 
 
-def test_marker_mismatch_and_abi_incompatible_selects_rebuild_sync(
+def test_hash_mismatch_selects_rebuild_sync_without_integrity_checks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -273,21 +220,12 @@ def test_marker_mismatch_and_abi_incompatible_selects_rebuild_sync(
         runtime_dir,
         {
             "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
-            "fingerprint_source": "lockfile",
             "fingerprint": "old-fingerprint",
             "python_abi": "old-abi",
             "arch": "arch",
         },
     )
     _patch_fingerprint_context(module, monkeypatch)
-
-    checks_called: list[str] = []
-
-    def fake_check(**_: object) -> tuple[bool, str]:
-        checks_called.append("check")
-        return True, "ok"
-
-    monkeypatch.setattr(module, "check_runtime_environment_integrity", fake_check)
 
     sync_calls: list[str] = []
 
@@ -301,15 +239,12 @@ def test_marker_mismatch_and_abi_incompatible_selects_rebuild_sync(
         runtime_dir=runtime_dir,
         cache_dir=cache_dir,
         timeout_seconds=300,
-        fingerprint_source="lockfile",
-        rebuild_policy="abi_only",
         log_changes=False,
     )
 
     assert sync_mode == "rebuild-sync"
-    assert diagnostics["selection_reason"] == "abi_incompatible"
+    assert diagnostics["selection_reason"] == "hash_mismatch"
     assert len(sync_calls) == 1
-    assert len(checks_called) == 1
 
 
 def test_check_diarization_access_without_token_skips_subprocess(
@@ -487,7 +422,7 @@ def test_main_reuses_cached_diarization_status_when_preload_key_matches(
 
     def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
         diagnostics = {
-            "selection_reason": "marker_match_integrity_ok",
+            "selection_reason": "hash_match_skip",
             "escalated_to_rebuild": False,
             "integrity": {},
         }
@@ -613,7 +548,7 @@ def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
 
     def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
         diagnostics = {
-            "selection_reason": "marker_match_integrity_ok",
+            "selection_reason": "hash_match_skip",
             "escalated_to_rebuild": False,
             "integrity": {"status": "pass"},
         }
@@ -694,7 +629,7 @@ def test_main_installs_vibevoice_quant_runtime_deps_for_4bit_model(
 
     def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
         diagnostics = {
-            "selection_reason": "marker_match_integrity_ok",
+            "selection_reason": "hash_match_skip",
             "escalated_to_rebuild": False,
             "integrity": {"status": "pass"},
         }
@@ -792,7 +727,7 @@ def test_main_installs_missing_quant_runtime_deps_when_vibevoice_core_already_pr
 
     def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
         diagnostics = {
-            "selection_reason": "marker_match_integrity_ok",
+            "selection_reason": "hash_match_skip",
             "escalated_to_rebuild": False,
             "integrity": {"status": "pass"},
         }
@@ -903,7 +838,7 @@ def test_main_reports_existing_optional_dependency_installs_without_install_flag
 
     def fake_ensure_runtime_dependencies(**_: object):  # type: ignore[no-untyped-def]
         diagnostics = {
-            "selection_reason": "marker_match_integrity_ok",
+            "selection_reason": "hash_match_skip",
             "escalated_to_rebuild": False,
             "integrity": {"status": "pass"},
         }

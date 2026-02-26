@@ -640,20 +640,17 @@ At container startup (`server/docker/docker-entrypoint.sh`):
 - Python ABI
 - architecture
 - bootstrap schema version (`BOOTSTRAP_SCHEMA_VERSION = 2`)
-- runtime marker/integrity checks
+- runtime marker hash match/mismatch
 
 Practical bootstrap modes (from current code/docs/logging):
-- `skip` -> marker matches and `uv sync --check` integrity passes
-- `delta-sync` -> marker mismatch or integrity mismatch but existing runtime can be healed
-- `rebuild-sync` -> missing/incompatible runtime venv or failed delta repair
+- `skip` -> runtime venv exists and marker hash matches current lockfile+ABI+arch
+- `rebuild-sync` -> runtime venv missing or marker hash mismatch (bootstrap rebuilds the venv, then runs one `uv sync`)
 
 Important runtime bootstrap env vars (Compose + Dockerfile):
 - `BOOTSTRAP_RUNTIME_DIR` (default `/runtime`)
 - `BOOTSTRAP_CACHE_DIR` (default `/runtime/cache`)
 - `BOOTSTRAP_STATUS_FILE` (default `/runtime/bootstrap-status.json`)
 - `BOOTSTRAP_TIMEOUT_SECONDS` (default `1800`)
-- `BOOTSTRAP_FINGERPRINT_SOURCE` (`lockfile` default)
-- `BOOTSTRAP_REBUILD_POLICY` (`abi_only` default)
 - `BOOTSTRAP_LOG_CHANGES` (`true` default)
 
 ### 5.6 Startup Scripts and Caveats
