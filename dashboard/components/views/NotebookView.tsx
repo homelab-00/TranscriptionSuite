@@ -914,7 +914,7 @@ const CalendarTab: React.FC<{
   };
   const calendarHeader = (
     <div className="flex items-center gap-3">
-      <span>{monthTitle}</span>
+      <span className="inline-block min-w-36">{monthTitle}</span>
       <div className="ml-1 flex items-center rounded-full border border-white/10 bg-white/5 p-0.5">
         <button
           onClick={handlePrevMonth}

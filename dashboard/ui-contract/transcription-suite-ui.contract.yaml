@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.23
+  spec_version: 1.0.24
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -628,6 +628,7 @@ utility_allowlist:
     - min-w-100
     - min-w-25
     - min-w-32.5
+    - min-w-36
     - min-w-6
     - ml-0.5
     - ml-1
