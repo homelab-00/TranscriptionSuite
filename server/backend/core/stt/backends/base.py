@@ -68,6 +68,7 @@ class STTBackend(abc.ABC):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = 16000,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -80,7 +81,8 @@ class STTBackend(abc.ABC):
         """Transcribe audio and return normalised segments + info.
 
         Args:
-            audio: Float32 numpy array at 16 kHz, mono.
+            audio: Float32 numpy array, mono.
+            audio_sample_rate: Sample rate of ``audio`` in Hz.
             language: Language code or None for auto-detect.
             task: "transcribe" or "translate".
             beam_size: Beam size for decoding.
@@ -100,10 +102,16 @@ class STTBackend(abc.ABC):
     def supports_translation(self) -> bool:
         """Return True if this backend supports the ``translate`` task."""
 
+    @property
+    def preferred_input_sample_rate_hz(self) -> int:
+        """Preferred audio sample rate for this backend's input pipeline."""
+        return 16000
+
     def transcribe_with_diarization(
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = 16000,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -116,6 +124,7 @@ class STTBackend(abc.ABC):
         override this.  The default implementation returns ``None``, signalling
         that the caller should fall back to the legacy two-step pipeline.
         """
+        del audio_sample_rate
         return None
 
     @property

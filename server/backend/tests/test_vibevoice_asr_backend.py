@@ -8,6 +8,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 
@@ -190,3 +191,106 @@ def test_vibevoice_import_error_includes_layout_drift_diagnostics(monkeypatch) -
     assert "VIBEVOICE_ASR_PACKAGE_SPEC" in message
     assert "vibevoice.modeling_vibevoice_asr" in message
     assert "vibevoice.modular.modeling_vibevoice_asr" in message
+
+
+def test_call_vibevoice_processor_prefers_raw_array_format() -> None:
+    module = _import_vibevoice_backend_module()
+
+    class _Processor:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def __call__(self, **kwargs: object):  # type: ignore[no-untyped-def]
+            self.calls.append(kwargs)
+            return {"ok": True}
+
+    processor = _Processor()
+    audio = np.zeros(16, dtype=np.float32)
+
+    result, mode = module._call_vibevoice_processor(processor, audio=audio, sample_rate=24000)
+
+    assert result == {"ok": True}
+    assert mode == "raw-array"
+    assert len(processor.calls) == 1
+    assert processor.calls[0]["sampling_rate"] == 24000
+    audio_arg = processor.calls[0]["audio"]
+    assert isinstance(audio_arg, list) and len(audio_arg) == 1
+    np.testing.assert_allclose(audio_arg[0], audio)
+
+
+def test_call_vibevoice_processor_falls_back_to_tuple_format() -> None:
+    module = _import_vibevoice_backend_module()
+
+    class _Processor:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def __call__(self, **kwargs: object):  # type: ignore[no-untyped-def]
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise ValueError("setting an array element with a sequence")
+            return {"ok": True}
+
+    processor = _Processor()
+    audio = np.zeros(8, dtype=np.float32)
+
+    result, mode = module._call_vibevoice_processor(processor, audio=audio, sample_rate=24000)
+
+    assert result == {"ok": True}
+    assert mode == "tuple+sr"
+    assert len(processor.calls) == 2
+    assert processor.calls[0]["sampling_rate"] == 24000
+    assert processor.calls[1]["sampling_rate"] is None
+    audio_arg = processor.calls[1]["audio"]
+    assert isinstance(audio_arg, list) and len(audio_arg) == 1
+    item = audio_arg[0]
+    assert isinstance(item, tuple) and len(item) == 2
+    np.testing.assert_allclose(item[0], audio)
+    assert item[1] == 24000
+
+
+def test_vibevoice_backend_reports_preferred_input_sample_rate() -> None:
+    module = _import_vibevoice_backend_module()
+    backend = module.VibeVoiceASRBackend()
+
+    assert backend.preferred_input_sample_rate_hz == 24000
+
+    backend._target_sample_rate = 32000
+    assert backend.preferred_input_sample_rate_hz == 32000
+
+
+def test_vibevoice_transcribe_with_diarization_accepts_audio_sample_rate_kwarg() -> None:
+    module = _import_vibevoice_backend_module()
+    backend = module.VibeVoiceASRBackend()
+
+    calls: list[dict[str, object]] = []
+
+    backend._generate_segments = lambda *args, **kwargs: (  # type: ignore[method-assign]
+        calls.append(kwargs)
+        or [
+            {"text": "hello", "start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"},
+            {"text": "world", "start": 1.0, "end": 2.0, "speaker": "SPEAKER_01"},
+        ]
+    )
+
+    result = backend.transcribe_with_diarization(
+        np.zeros(32, dtype=np.float32),
+        audio_sample_rate=24000,
+        beam_size=3,
+    )
+
+    assert result is not None
+    assert result.num_speakers == 2
+    assert len(result.segments) == 2
+    assert calls[0]["audio_sample_rate"] == 24000
+    assert calls[0]["beam_size"] == 3
+
+
+def test_resample_audio_noop_when_sample_rate_matches() -> None:
+    module = _import_vibevoice_backend_module()
+    audio = np.array([0.0, 0.25, -0.5], dtype=np.float32)
+
+    out = module._resample_audio(audio, src_rate=24000, dst_rate=24000)
+
+    assert out.dtype == np.float32
+    np.testing.assert_allclose(out, audio)

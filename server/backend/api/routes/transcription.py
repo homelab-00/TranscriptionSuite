@@ -139,16 +139,22 @@ async def transcribe_audio(
         )
 
         if use_integrated_diarization:
-            # --- WhisperX single-pass path: transcribe + align + diarize ---
+            # --- Integrated backend single-pass path (e.g. WhisperX, VibeVoice) ---
             try:
                 from server.core.audio_utils import load_audio
 
                 backend_label = getattr(backend, "backend_name", "integrated")
                 logger.info("Using %s single-pass diarization", backend_label)
-                audio_data, _ = load_audio(tmp_path, target_sample_rate=16000)
+                preferred_rate = int(
+                    getattr(backend, "preferred_input_sample_rate_hz", 16000) or 16000
+                )
+                audio_data, audio_sample_rate = load_audio(
+                    tmp_path, target_sample_rate=preferred_rate
+                )
 
                 diar_result = backend.transcribe_with_diarization(
                     audio_data,
+                    audio_sample_rate=audio_sample_rate,
                     language=language,
                     task="translate" if translation_enabled else "transcribe",
                     beam_size=engine.beam_size,
@@ -163,7 +169,7 @@ async def transcribe_audio(
                     words=diar_result.words,
                     language=diar_result.language,
                     language_probability=diar_result.language_probability,
-                    duration=len(audio_data) / 16000,
+                    duration=len(audio_data) / audio_sample_rate,
                     num_speakers=diar_result.num_speakers,
                 )
 
@@ -512,11 +518,7 @@ _WHISPER_LANGUAGES: dict[str, str] = _sorted_languages(
     }
 )
 
-_VIBEVOICE_ASR_LANGUAGES: dict[str, str] = _sorted_languages(
-    {
-        "en": "English",
-    }
-)
+_VIBEVOICE_ASR_LANGUAGES: dict[str, str] = {}
 
 
 @router.get("/languages")
@@ -527,7 +529,7 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
     - **whisper**: All 90 Whisper languages, translation to English.
     - **parakeet**: 25 European languages, no translation.
     - **canary**: 25 European languages, bidirectional English ↔ EU translation.
-    - **vibevoice_asr**: Conservative v1 list (English only until validated in-app).
+    - **vibevoice_asr**: Auto-detect only (no explicit language selection in v1 UI).
     """
     from server.config import resolve_main_transcriber_model
     from server.core.stt.backends.factory import detect_backend_type

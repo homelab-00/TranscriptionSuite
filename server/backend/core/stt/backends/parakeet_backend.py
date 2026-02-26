@@ -387,6 +387,7 @@ class ParakeetBackend(STTBackend):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = SAMPLE_RATE,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -396,6 +397,7 @@ class ParakeetBackend(STTBackend):
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
+        del audio_sample_rate
         if self._model is None:
             raise RuntimeError("Parakeet model is not loaded")
 

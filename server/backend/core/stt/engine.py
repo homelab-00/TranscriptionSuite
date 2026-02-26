@@ -696,15 +696,22 @@ class AudioToTextRecorder:
 
         logger.info(f"Transcribing file: {file_path}")
 
-        # Load and convert audio to 16kHz float32
-        audio_data, _ = load_audio(str(path), target_sample_rate=SAMPLE_RATE)
+        backend = self._backend
+        backend_name = backend.backend_name if backend else None
+        preferred_rate = int(
+            getattr(backend, "preferred_input_sample_rate_hz", SAMPLE_RATE) or SAMPLE_RATE
+        )
+
+        # Load and convert audio to the active backend's preferred sample rate.
+        audio_data, loaded_sample_rate = load_audio(str(path), target_sample_rate=preferred_rate)
 
         # Apply Silero VAD preprocessing (Stage 1 of two-stage VAD)
         # Silero VAD is used for static transcription to maintain timestamp consistency.
         # Skip when using WhisperX backend — it runs its own Pyannote VAD internally,
         # so pre-stripping silence is redundant and wastes GPU time.
-        backend_name = self._backend.backend_name if self._backend else None
-        if apply_vad_preprocessing and backend_name != "whisperx":
+        # Skip for VibeVoice-ASR too: it produces structured timestamps, so
+        # physically removing silence before inference can shift timings.
+        if apply_vad_preprocessing and backend_name not in {"whisperx", "vibevoice_asr"}:
             cfg = get_config()
             static_cfg = cfg.get("static_transcription", default={})
             vad_enabled = static_cfg.get("silero_vad_preprocessing", True)
@@ -713,12 +720,13 @@ class AudioToTextRecorder:
             if vad_enabled:
                 audio_data = apply_silero_vad(
                     audio_data,
-                    sample_rate=SAMPLE_RATE,
+                    sample_rate=loaded_sample_rate,
                     sensitivity=vad_sensitivity,
                 )
 
         return self.transcribe_audio(
             audio_data,
+            sample_rate=loaded_sample_rate,
             language=language,
             task=task,
             translation_target_language=translation_target_language,
@@ -729,6 +737,7 @@ class AudioToTextRecorder:
     def transcribe_audio(
         self,
         audio_data: np.ndarray,
+        sample_rate: int = SAMPLE_RATE,
         language: str | None = None,
         task: str | None = None,
         translation_target_language: str | None = None,
@@ -741,11 +750,12 @@ class AudioToTextRecorder:
 
         This is the unified entry point for direct audio transcription,
         replacing the separate TranscriptionEngine. Assumes audio is already
-        preprocessed (16kHz, mono, float32). Applies faster_whisper VAD filter
-        (Stage 2) during transcription.
+        preprocessed (mono float32 at the provided sample rate). Applies
+        faster_whisper VAD filter (Stage 2) during transcription.
 
         Args:
-            audio_data: Audio samples as float32 numpy array (16kHz, mono)
+            audio_data: Audio samples as float32 numpy array (mono)
+            sample_rate: Sample rate of ``audio_data`` in Hz
             language: Language code (overrides instance language if provided)
             task: Whisper task ("transcribe" or "translate")
             translation_target_language: Translation output target language (v1: "en")
@@ -799,6 +809,7 @@ class AudioToTextRecorder:
                 # Transcribe via backend
                 backend_segments, backend_info = self._backend.transcribe(
                     audio_data,
+                    audio_sample_rate=sample_rate,
                     language=lang,
                     task=effective_task,
                     beam_size=self.beam_size,
@@ -861,7 +872,7 @@ class AudioToTextRecorder:
                     words=all_words,
                     language=backend_info.language,
                     language_probability=backend_info.language_probability,
-                    duration=len(audio_data) / SAMPLE_RATE,
+                    duration=len(audio_data) / sample_rate,
                 )
 
             except Exception as e:

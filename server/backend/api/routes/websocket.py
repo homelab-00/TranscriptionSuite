@@ -3,7 +3,7 @@ WebSocket endpoint for real-time audio transcription.
 
 Handles:
 - Token-based authentication
-- Audio streaming (16kHz PCM Int16)
+- Audio streaming (PCM Int16 with server-selected sample rate)
 - Long-form transcription with VAD
 - Client type detection (standalone vs web)
 - Preview transcription for standalone clients
@@ -16,23 +16,23 @@ import struct
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 import soundfile as sf
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
 
 # NOTE: model_manager is imported lazily inside functions to avoid
 # loading heavy ML libraries (torch, faster_whisper) at module import time.
 # This reduces server startup time by ~10 seconds.
 from server.api.routes.utils import authenticate_websocket_from_message
 from server.core.client_detector import (
-    ClientType,
     ClientDetector,
+    ClientType,
     get_client_capabilities,
 )
 from server.logging import get_logger
+from starlette.websockets import WebSocketState
 
 logger = get_logger(__name__)
 
@@ -40,7 +40,7 @@ router = APIRouter()
 
 # Global session state - tracks all connected sessions for cleanup
 # (Multiple connections allowed, but only one can be recording at a time)
-_connected_sessions: Dict[str, "TranscriptionSession"] = {}
+_connected_sessions: dict[str, "TranscriptionSession"] = {}
 _sessions_lock = asyncio.Lock()
 
 
@@ -67,26 +67,23 @@ class TranscriptionSession:
         self.session_id = session_id
 
         self.is_recording = False
-        self.language: Optional[str] = None
+        self.language: str | None = None
         self.audio_chunks: list[bytes] = []
         self.sample_rate = 16000
-        self.temp_file: Optional[Path] = None
+        self._sample_rate_mismatch_reported = False
+        self.temp_file: Path | None = None
 
         # Real-time engine (for standalone clients with VAD)
-        self._realtime_engine: Optional[Any] = None
+        self._realtime_engine: Any | None = None
         self._use_realtime_engine = False
 
         # Job tracking for transcription
-        self._current_job_id: Optional[str] = None
+        self._current_job_id: str | None = None
 
         # Get client capabilities
-        self.capabilities = get_client_capabilities(
-            {"x-client-type": client_type.value}, {}
-        )
+        self.capabilities = get_client_capabilities({"x-client-type": client_type.value}, {})
 
-    async def send_message(
-        self, msg_type: str, data: Optional[Dict[str, Any]] = None
-    ) -> None:
+    async def send_message(self, msg_type: str, data: dict[str, Any] | None = None) -> None:
         """Send a JSON message to the client."""
         if self.websocket.client_state != WebSocketState.CONNECTED:
             return
@@ -142,15 +139,9 @@ class TranscriptionSession:
             engine = model_manager.transcription_engine
 
             # Transcribe
-            task = (
-                "translate"
-                if getattr(self, "translation_enabled", False)
-                else "transcribe"
-            )
+            task = "translate" if getattr(self, "translation_enabled", False) else "transcribe"
             translation_target = (
-                getattr(self, "translation_target_language", "en")
-                if task == "translate"
-                else None
+                getattr(self, "translation_target_language", "en") if task == "translate" else None
             )
             result = engine.transcribe_file(
                 file_path=str(self.temp_file),
@@ -190,7 +181,7 @@ class TranscriptionSession:
 
     async def start_recording(
         self,
-        language: Optional[str] = None,
+        language: str | None = None,
         use_vad: bool = False,
         translation_enabled: bool = False,
         translation_target_language: str = "en",
@@ -209,7 +200,9 @@ class TranscriptionSession:
         self.translation_enabled = translation_enabled
         self.translation_target_language = translation_target_language
         self.audio_chunks = []
+        self._sample_rate_mismatch_reported = False
         self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
+        self.sample_rate = self._determine_capture_sample_rate_hz()
 
         if self._use_realtime_engine:
             # Initialize realtime engine for VAD-based recording
@@ -230,9 +223,7 @@ class TranscriptionSession:
                 session_id=self.session_id,
                 client_type=self.client_type,
                 language=language,
-                on_recording_start=lambda: schedule_coro(
-                    self._on_vad_recording_start()
-                ),
+                on_recording_start=lambda: schedule_coro(self._on_vad_recording_start()),
                 on_recording_stop=lambda: schedule_coro(self._on_vad_recording_stop()),
                 on_vad_start=lambda: schedule_coro(self._on_vad_start()),
                 on_vad_stop=lambda: schedule_coro(self._on_vad_stop()),
@@ -248,8 +239,28 @@ class TranscriptionSession:
             {
                 "vad_enabled": self._use_realtime_engine,
                 "preview_enabled": False,
+                "capture_sample_rate_hz": self.sample_rate,
             },
         )
+
+    def _determine_capture_sample_rate_hz(self) -> int:
+        """Select the capture sample rate for this /ws session."""
+        if self._use_realtime_engine:
+            # RealtimeSTT live-style path is fixed to 16 kHz.
+            return 16000
+
+        try:
+            from server.core.model_manager import get_model_manager
+
+            engine = get_model_manager().transcription_engine
+            backend = getattr(engine, "_backend", None)
+            preferred = int(getattr(backend, "preferred_input_sample_rate_hz", 16000) or 16000)
+            if preferred <= 0:
+                return 16000
+            return preferred
+        except Exception as e:
+            logger.warning("Falling back to 16kHz capture rate (could not inspect backend): %s", e)
+            return 16000
 
     async def _on_vad_recording_start(self) -> None:
         """Called when VAD detects speech start."""
@@ -315,9 +326,7 @@ class TranscriptionSession:
             # No special per-client model handling required
 
 
-async def handle_client_message(
-    session: TranscriptionSession, message: Dict[str, Any]
-) -> None:
+async def handle_client_message(session: TranscriptionSession, message: dict[str, Any]) -> None:
     """Handle a JSON message from the client."""
     from server.core.model_manager import get_model_manager
 
@@ -326,9 +335,7 @@ async def handle_client_message(
     if msg_type == "start":
         # Check job tracker before starting recording
         model_manager = get_model_manager()
-        success, job_id, active_user = model_manager.job_tracker.try_start_job(
-            session.client_name
-        )
+        success, job_id, active_user = model_manager.job_tracker.try_start_job(session.client_name)
 
         if not success:
             # Another transcription is running - send session_busy but keep connection open
@@ -388,11 +395,19 @@ async def handle_binary_message(session: TranscriptionSession, data: bytes) -> N
         metadata_bytes = data[4 : 4 + metadata_len]
         try:
             metadata = json.loads(metadata_bytes.decode("utf-8"))
-            sample_rate = metadata.get("sample_rate", 16000)
+            sample_rate = int(
+                metadata.get("sample_rate", session.sample_rate) or session.sample_rate
+            )
             if sample_rate != session.sample_rate:
-                logger.warning(
-                    f"Sample rate mismatch: expected {session.sample_rate}, got {sample_rate}"
+                message = (
+                    f"Audio sample rate mismatch: expected {session.sample_rate}, "
+                    f"got {sample_rate}. Dropping chunk."
                 )
+                logger.warning(message)
+                if not session._sample_rate_mismatch_reported:
+                    session._sample_rate_mismatch_reported = True
+                    await session.send_message("error", {"message": message})
+                return
         except Exception as e:
             logger.warning(f"Failed to parse metadata: {e}")
 
@@ -404,7 +419,7 @@ async def handle_binary_message(session: TranscriptionSession, data: bytes) -> N
         logger.error(f"Error processing binary message: {e}")
 
 
-def _get_websocket_headers(websocket: WebSocket) -> Dict[str, str]:
+def _get_websocket_headers(websocket: WebSocket) -> dict[str, str]:
     """Extract headers from WebSocket connection."""
     headers = {}
     for key, value in websocket.headers.items():
@@ -412,7 +427,7 @@ def _get_websocket_headers(websocket: WebSocket) -> Dict[str, str]:
     return headers
 
 
-def _get_websocket_query_params(websocket: WebSocket) -> Dict[str, str]:
+def _get_websocket_query_params(websocket: WebSocket) -> dict[str, str]:
     """Extract query parameters from WebSocket connection."""
     return dict(websocket.query_params)
 
@@ -421,7 +436,7 @@ def _get_websocket_query_params(websocket: WebSocket) -> Dict[str, str]:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time transcription."""
     await websocket.accept()
-    session: Optional[TranscriptionSession] = None
+    session: TranscriptionSession | None = None
 
     # Detect client type from headers/query params
     headers = _get_websocket_headers(websocket)
@@ -431,9 +446,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     # Check source host for logging
     client_host = websocket.client.host if websocket.client else None
 
-    logger.debug(
-        f"WebSocket connection from client type: {client_type.value}, host: {client_host}"
-    )
+    logger.debug(f"WebSocket connection from client type: {client_type.value}, host: {client_host}")
 
     try:
         auth = await authenticate_websocket_from_message(
@@ -444,9 +457,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if auth is None:
             return
         if auth.is_localhost_bypass:
-            logger.info(
-                "WebSocket connection from localhost - bypassing authentication"
-            )
+            logger.info("WebSocket connection from localhost - bypassing authentication")
 
         # Generate unique session ID
         session_id = str(uuid.uuid4())
@@ -511,7 +522,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("WebSocket authentication timeout")
         await websocket.close()
 

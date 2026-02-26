@@ -19,4 +19,6 @@ async def test_languages_route_reports_vibevoice_asr_capabilities(model_name: st
 
     assert payload["backend_type"] == "vibevoice_asr"
     assert payload["supports_translation"] is False
-    assert payload["languages"] == {"en": "English"}
+    assert payload["languages"] == {}
+    assert payload["count"] == 0
+    assert payload["auto_detect"] is True

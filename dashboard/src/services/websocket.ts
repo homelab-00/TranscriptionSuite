@@ -80,14 +80,17 @@ export interface SocketCallbacks {
 
 // ─── Binary framing ──────────────────────────────────────────────────────────
 
-const SAMPLE_RATE = 16_000;
+const DEFAULT_AUDIO_SAMPLE_RATE = 16_000;
 
 /**
  * Frame raw PCM Int16 audio into the server's binary format:
  *   [uint32 LE metadata length] [JSON metadata] [raw PCM bytes]
  */
-export function frameAudioChunk(pcmInt16: Int16Array): ArrayBuffer {
-  const metadata = JSON.stringify({ sample_rate: SAMPLE_RATE });
+export function frameAudioChunk(
+  pcmInt16: Int16Array,
+  sampleRate: number = DEFAULT_AUDIO_SAMPLE_RATE,
+): ArrayBuffer {
+  const metadata = JSON.stringify({ sample_rate: sampleRate });
   const metaBytes = new TextEncoder().encode(metadata);
   const metaLen = metaBytes.byteLength;
 
@@ -117,6 +120,7 @@ export class TranscriptionSocket {
   private reconnectConfig: ReconnectConfig;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private audioSampleRateHz = DEFAULT_AUDIO_SAMPLE_RATE;
   /** When true, disconnect was initiated by the user — don't auto-reconnect */
   private intentionalDisconnect = false;
 
@@ -243,8 +247,18 @@ export class TranscriptionSocket {
   /** Send a framed binary audio chunk. */
   sendAudio(pcmInt16: Int16Array): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(frameAudioChunk(pcmInt16));
+      this.ws.send(frameAudioChunk(pcmInt16, this.audioSampleRateHz));
     }
+  }
+
+  /** Set the sample rate metadata used when framing outgoing PCM audio. */
+  setAudioSampleRate(sampleRateHz: number): void {
+    const rounded = Math.round(sampleRateHz);
+    if (!Number.isFinite(rounded) || rounded <= 0) {
+      this.audioSampleRateHz = DEFAULT_AUDIO_SAMPLE_RATE;
+      return;
+    }
+    this.audioSampleRateHz = rounded;
   }
   // ── Reconnection ────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
  *
  * Creates an AudioContext + AudioWorklet pipeline that:
  * 1. Captures audio from a selected input device
- * 2. Resamples to 16kHz PCM Int16 via the AudioWorklet processor
+ * 2. Resamples to a target PCM rate (16kHz/24kHz) via the AudioWorklet processor
  * 3. Provides an AnalyserNode for real-time frequency visualization
  * 4. Delivers PCM chunks via a callback for WebSocket streaming
  *
@@ -24,6 +24,8 @@ export interface AudioCaptureOptions {
   systemAudio?: boolean;
   /** Desktop source ID from desktopCapturer (required when systemAudio=true) */
   desktopSourceId?: string;
+  /** Target PCM sample rate emitted by the worklet (e.g. 16000 or 24000) */
+  targetSampleRateHz?: number;
 }
 
 export class AudioCapture {
@@ -76,7 +78,7 @@ export class AudioCapture {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-          sampleRate: 16000, // Hint — browser may ignore
+          sampleRate: options.targetSampleRateHz ?? 16000, // Hint — browser may ignore
           channelCount: 1,
         },
       };
@@ -106,7 +108,11 @@ export class AudioCapture {
     this.analyserNode.fftSize = 2048;
     this.analyserNode.smoothingTimeConstant = 0.8;
 
-    this.workletNode = new AudioWorkletNode(this.ctx, 'pcm-processor');
+    this.workletNode = new AudioWorkletNode(this.ctx, 'pcm-processor', {
+      processorOptions: {
+        targetSampleRateHz: options.targetSampleRateHz ?? 16000,
+      },
+    });
 
     // 5. Handle PCM chunks from the worklet
     this.workletNode.port.onmessage = (ev: MessageEvent) => {

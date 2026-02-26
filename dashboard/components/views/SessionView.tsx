@@ -370,10 +370,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
   useEffect(() => {
     if (languagesLoading) return;
     if (!mainLanguageOptions.includes(mainLanguage)) {
-      setMainLanguage('Auto Detect');
+      setMainLanguage(mainLanguageOptions[0] ?? 'Auto Detect');
     }
     if (!liveLanguageOptions.includes(liveLanguage)) {
-      setLiveLanguage('English');
+      setLiveLanguage(liveLanguageOptions[0] ?? 'Auto Detect');
     }
   }, [languagesLoading, mainLanguageOptions, liveLanguageOptions, mainLanguage, liveLanguage]);
 

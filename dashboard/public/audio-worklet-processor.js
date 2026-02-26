@@ -1,27 +1,30 @@
 /**
  * AudioWorklet processor — runs in the audio rendering thread.
  *
- * Collects Float32 samples from the microphone, resamples from the browser's
- * native sample rate (typically 48kHz) to 16kHz, converts to Int16 PCM,
+ * Collects Float32 samples from the microphone/system source, resamples from
+ * the browser's native sample rate (typically 48kHz) to a target rate
+ * (16kHz/24kHz), converts to Int16 PCM,
  * and posts chunks to the main thread at ~100ms intervals.
  *
  * Registered as 'pcm-processor'.
  */
 
 class PCMProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
+  constructor(options) {
+    super(options);
     /** @type {Float32Array[]} */
     this._buffer = [];
     this._bufferLength = 0;
 
-    // Receive target sample rate from main thread
-    this._targetRate = 16000;
+    // Receive target sample rate from main thread (default 16kHz)
+    const targetRate = Number(options?.processorOptions?.targetSampleRateHz);
+    this._targetRate =
+      Number.isFinite(targetRate) && targetRate > 0 ? Math.round(targetRate) : 16000;
     this._sourceRate = sampleRate; // AudioWorklet global `sampleRate`
     this._ratio = this._sourceRate / this._targetRate;
 
-    // Emit chunks of ~100ms at 16kHz = 1600 samples
-    this._chunkSize = 1600;
+    // Emit chunks of ~100ms at the target output rate.
+    this._chunkSize = Math.max(1, Math.round(this._targetRate / 10));
   }
 
   /**
@@ -46,7 +49,7 @@ class PCMProcessor extends AudioWorkletProcessor {
       const full = this._concatenate(this._buffer, this._bufferLength);
       const consumeCount = Math.ceil(this._chunkSize * this._ratio);
 
-      // Downsample the consumed portion
+      // Resample the consumed portion to the target output rate
       const sourceSlice = full.subarray(0, consumeCount);
       const downsampled = this._downsample(sourceSlice, this._ratio);
 
@@ -66,7 +69,7 @@ class PCMProcessor extends AudioWorkletProcessor {
   }
 
   /**
-   * Simple linear interpolation downsample.
+   * Simple linear interpolation resample.
    * @param {Float32Array} samples
    * @param {number} ratio - source/target sample rate ratio
    * @returns {Float32Array}

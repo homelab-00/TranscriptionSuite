@@ -472,7 +472,7 @@ async def upload_and_transcribe(
         }
 
         if use_integrated_diarization:
-            # --- WhisperX single-pass path: transcribe + align + diarize ---
+            # --- Integrated backend single-pass path (e.g. WhisperX, VibeVoice) ---
             try:
                 backend_label = getattr(backend, "backend_name", "integrated")
                 logger.info(
@@ -480,10 +480,16 @@ async def upload_and_transcribe(
                     backend_label,
                     file.filename,
                 )
-                audio_data, _ = load_audio(str(tmp_path), target_sample_rate=16000)
+                preferred_rate = int(
+                    getattr(backend, "preferred_input_sample_rate_hz", 16000) or 16000
+                )
+                audio_data, audio_sample_rate = load_audio(
+                    str(tmp_path), target_sample_rate=preferred_rate
+                )
 
                 diar_result = backend.transcribe_with_diarization(
                     audio_data,
+                    audio_sample_rate=audio_sample_rate,
                     language=language,
                     task="translate" if translation_enabled else "transcribe",
                     beam_size=engine.beam_size,
@@ -498,7 +504,7 @@ async def upload_and_transcribe(
                     words=diar_result.words,
                     language=diar_result.language,
                     language_probability=diar_result.language_probability,
-                    duration=len(audio_data) / 16000,
+                    duration=len(audio_data) / audio_sample_rate,
                     num_speakers=diar_result.num_speakers,
                 )
 

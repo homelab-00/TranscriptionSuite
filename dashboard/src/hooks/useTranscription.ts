@@ -95,24 +95,35 @@ export function useTranscription(): TranscriptionState {
 
       case 'session_started':
         setStatus('recording');
-        // Begin audio capture
-        captureRef.current = new AudioCapture((chunk) => {
-          socketRef.current?.sendAudio(chunk);
-        });
-        captureRef.current
-          .start({
-            deviceId: startOptsRef.current.deviceId,
-            systemAudio: startOptsRef.current.systemAudio,
-            desktopSourceId: startOptsRef.current.desktopSourceId,
-          })
-          .then(() => {
-            setAnalyser(captureRef.current?.analyser ?? null);
-          })
-          .catch((err) => {
-            setError(err instanceof Error ? err.message : 'Failed to start audio capture');
-            setStatus('error');
-            socketRef.current?.disconnect();
+        {
+          const rawCaptureRate = msg.data?.capture_sample_rate_hz;
+          const captureSampleRateHz =
+            typeof rawCaptureRate === 'number' &&
+            Number.isFinite(rawCaptureRate) &&
+            rawCaptureRate > 0
+              ? Math.round(rawCaptureRate)
+              : 16000;
+          socketRef.current?.setAudioSampleRate(captureSampleRateHz);
+          // Begin audio capture
+          captureRef.current = new AudioCapture((chunk) => {
+            socketRef.current?.sendAudio(chunk);
           });
+          captureRef.current
+            .start({
+              deviceId: startOptsRef.current.deviceId,
+              systemAudio: startOptsRef.current.systemAudio,
+              desktopSourceId: startOptsRef.current.desktopSourceId,
+              targetSampleRateHz: captureSampleRateHz,
+            })
+            .then(() => {
+              setAnalyser(captureRef.current?.analyser ?? null);
+            })
+            .catch((err) => {
+              setError(err instanceof Error ? err.message : 'Failed to start audio capture');
+              setStatus('error');
+              socketRef.current?.disconnect();
+            });
+        }
         break;
 
       case 'session_busy':

@@ -118,6 +118,9 @@ export function filterLanguagesForModel(
   languages: string[],
   modelName: string | null | undefined,
 ): string[] {
+  if (isVibeVoiceASRModel(modelName)) {
+    return languages.filter((l) => l === 'Auto Detect');
+  }
   if (!isNemoModel(modelName)) return languages;
   return languages.filter((l) => l === 'Auto Detect' || NEMO_LANGUAGES.has(l));
 }

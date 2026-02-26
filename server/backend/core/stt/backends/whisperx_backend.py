@@ -187,6 +187,7 @@ class WhisperXBackend(STTBackend):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = SAMPLE_RATE,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -196,6 +197,7 @@ class WhisperXBackend(STTBackend):
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
+        del audio_sample_rate
         if self._model is None:
             raise RuntimeError("WhisperX model is not loaded")
 
@@ -256,6 +258,7 @@ class WhisperXBackend(STTBackend):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = SAMPLE_RATE,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -263,6 +266,7 @@ class WhisperXBackend(STTBackend):
         hf_token: str | None = None,
     ) -> DiarizedTranscriptionResult | None:
         """Full single-pass pipeline: transcribe → align → diarize → assign speakers."""
+        del audio_sample_rate
         whisperx, diarize_module = _import_whisperx_modules(include_diarize=True)
         if diarize_module is None:
             raise RuntimeError("WhisperX diarization module failed to import")

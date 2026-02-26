@@ -1,4 +1,4 @@
-"""Microsoft VibeVoice-ASR backend (experimental).
+"""VibeVoice-ASR backend family (experimental).
 
 This backend wraps the VibeVoice-ASR model behind the shared ``STTBackend``
 interface. VibeVoice-ASR produces sentence-level transcription with integrated
@@ -27,7 +27,7 @@ from server.core.stt.backends.base import (
 INPUT_SAMPLE_RATE = 16000
 DEFAULT_TARGET_SAMPLE_RATE = 24000
 DEFAULT_LANGUAGE_MODEL = "Qwen/Qwen2.5-7B"
-DEFAULT_MAX_NEW_TOKENS = 4096
+DEFAULT_MAX_NEW_TOKENS = 0
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ class VibeVoiceASRBackend(STTBackend):
         self._model_name: str | None = None
         self._device: str = "cpu"
         self._target_sample_rate: int = DEFAULT_TARGET_SAMPLE_RATE
-        self._max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS
+        self._max_new_tokens: int | None = None
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         cfg = get_config()
@@ -157,9 +157,12 @@ class VibeVoiceASRBackend(STTBackend):
             vv_cfg.get("target_sample_rate_hz", DEFAULT_TARGET_SAMPLE_RATE)
             or DEFAULT_TARGET_SAMPLE_RATE
         )
-        self._max_new_tokens = int(
-            vv_cfg.get("max_new_tokens", DEFAULT_MAX_NEW_TOKENS) or DEFAULT_MAX_NEW_TOKENS
-        )
+        raw_max_new_tokens = vv_cfg.get("max_new_tokens", DEFAULT_MAX_NEW_TOKENS)
+        try:
+            parsed_max_new_tokens = int(raw_max_new_tokens or 0)
+        except (TypeError, ValueError):
+            parsed_max_new_tokens = 0
+        self._max_new_tokens = parsed_max_new_tokens if parsed_max_new_tokens > 0 else None
         attn_impl = str(vv_cfg.get("attn_implementation", "eager") or "eager")
         lm_model = str(
             vv_cfg.get("language_model_pretrained_name", DEFAULT_LANGUAGE_MODEL)
@@ -237,6 +240,7 @@ class VibeVoiceASRBackend(STTBackend):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = INPUT_SAMPLE_RATE,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -258,7 +262,12 @@ class VibeVoiceASRBackend(STTBackend):
                 "VibeVoice-ASR translation is not supported in TranscriptionSuite v1 integration."
             )
 
-        raw_segments = self._generate_segments(audio, language=language, beam_size=beam_size)
+        raw_segments = self._generate_segments(
+            audio,
+            audio_sample_rate=audio_sample_rate,
+            language=language,
+            beam_size=beam_size,
+        )
         backend_segments = [
             BackendSegment(
                 text=str(seg.get("text", "")).strip(),
@@ -276,6 +285,7 @@ class VibeVoiceASRBackend(STTBackend):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int = INPUT_SAMPLE_RATE,
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
@@ -288,7 +298,12 @@ class VibeVoiceASRBackend(STTBackend):
                 "VibeVoice-ASR translation is not supported in TranscriptionSuite v1 integration."
             )
 
-        segments = self._generate_segments(audio, language=language, beam_size=beam_size)
+        segments = self._generate_segments(
+            audio,
+            audio_sample_rate=audio_sample_rate,
+            language=language,
+            beam_size=beam_size,
+        )
         speakers = {
             str(seg.get("speaker", "")).strip()
             for seg in segments
@@ -307,6 +322,10 @@ class VibeVoiceASRBackend(STTBackend):
         return False
 
     @property
+    def preferred_input_sample_rate_hz(self) -> int:
+        return self._target_sample_rate
+
+    @property
     def backend_name(self) -> str:
         return "vibevoice_asr"
 
@@ -318,31 +337,32 @@ class VibeVoiceASRBackend(STTBackend):
         self,
         audio: np.ndarray,
         *,
+        audio_sample_rate: int,
         language: str | None,
         beam_size: int,
     ) -> list[dict[str, Any]]:
         if self._model is None or self._processor is None:
             raise RuntimeError("VibeVoice-ASR model is not loaded")
 
-        audio_24k = _resample_audio(
-            audio, src_rate=INPUT_SAMPLE_RATE, dst_rate=self._target_sample_rate
+        audio_target = _resample_audio(
+            audio, src_rate=audio_sample_rate, dst_rate=self._target_sample_rate
         )
-        audio_24k = np.asarray(audio_24k, dtype=np.float32)
+        audio_target = np.asarray(audio_target, dtype=np.float32)
 
-        inputs = self._processor(
-            audio=[(audio_24k, self._target_sample_rate)],
-            sampling_rate=None,
-            return_tensors="pt",
-            padding=True,
-            add_generation_prompt=True,
+        inputs, processor_input_mode = _call_vibevoice_processor(
+            self._processor,
+            audio=audio_target,
+            sample_rate=self._target_sample_rate,
         )
+        logger.debug("VibeVoice-ASR processor input mode: %s", processor_input_mode)
         inputs = _move_inputs_to_device(inputs, self._device)
 
         generate_kwargs: dict[str, Any] = {
             "do_sample": False,
             "num_beams": max(1, int(beam_size or 1)),
-            "max_new_tokens": self._max_new_tokens,
         }
+        if self._max_new_tokens is not None:
+            generate_kwargs["max_new_tokens"] = self._max_new_tokens
 
         tokenizer = getattr(self._processor, "tokenizer", None)
         eos_token_id = getattr(tokenizer, "eos_token_id", None)
@@ -378,6 +398,43 @@ class VibeVoiceASRBackend(STTBackend):
             # Fallback if upstream output formatting changes.
             normalized = [{"text": decoded_text.strip(), "start": 0.0, "end": 0.0, "speaker": None}]
         return normalized
+
+
+def _call_vibevoice_processor(
+    processor: Any,
+    *,
+    audio: np.ndarray,
+    sample_rate: int,
+) -> tuple[Any, str]:
+    kwargs = {
+        "return_tensors": "pt",
+        "padding": True,
+        "add_generation_prompt": True,
+    }
+
+    try:
+        return (
+            processor(
+                audio=[audio],
+                sampling_rate=sample_rate,
+                **kwargs,
+            ),
+            "raw-array",
+        )
+    except (TypeError, ValueError) as exc:
+        logger.debug(
+            "VibeVoice processor rejected raw-array audio input, retrying tuple format: %s",
+            exc,
+        )
+
+    return (
+        processor(
+            audio=[(audio, sample_rate)],
+            sampling_rate=None,
+            **kwargs,
+        ),
+        "tuple+sr",
+    )
 
 
 def _resample_audio(audio: np.ndarray, *, src_rate: int, dst_rate: int) -> np.ndarray:
