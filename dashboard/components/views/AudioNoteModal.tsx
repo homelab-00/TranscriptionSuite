@@ -472,6 +472,15 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     audioUrl,
   } = useRecording(note?.recordingId ?? null);
   const segments = transcription?.segments ?? [];
+  const hasDiarizationTranscript =
+    Boolean(recording?.has_diarization) || segments.some((seg) => Boolean(seg.speaker));
+  const plainTranscriptText = hasDiarizationTranscript
+    ? ''
+    : segments
+        .map((seg) => seg.text.trim())
+        .filter(Boolean)
+        .join(' ')
+        .trim();
 
   // Initialize Portal Target on Mount
   useEffect(() => {
@@ -1369,60 +1378,68 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     </span>
                   </div>
                   {segments.length > 0 ? (
-                    segments.map((seg, i) => (
-                      <div key={i} className="group flex gap-6">
-                        <div className="w-16 flex-none pt-1 text-right select-none">
-                          {seg.speaker && (
-                            <div className={`mb-1 text-xs font-bold ${speakerColor(seg.speaker)}`}>
-                              {seg.speaker}
+                    hasDiarizationTranscript ? (
+                      segments.map((seg, i) => (
+                        <div key={i} className="group flex gap-6">
+                          <div className="w-16 flex-none pt-1 text-right select-none">
+                            {seg.speaker && (
+                              <div
+                                className={`mb-1 text-xs font-bold ${speakerColor(seg.speaker)}`}
+                              >
+                                {seg.speaker}
+                              </div>
+                            )}
+                            <div className="font-mono text-[10px] text-slate-500">
+                              {formatRecSecs(seg.start)}
                             </div>
-                          )}
-                          <div className="font-mono text-[10px] text-slate-500">
-                            {formatRecSecs(seg.start)}
+                          </div>
+                          <div className="selectable-text min-w-0 flex-1 leading-relaxed text-slate-300 transition-colors group-hover:text-white">
+                            {seg.words && seg.words.length > 0 ? (
+                              <p>
+                                {seg.words.map((w, wi) => (
+                                  <span
+                                    key={wi}
+                                    onClick={() => {
+                                      if (audioRef.current) {
+                                        audioRef.current.currentTime = w.start;
+                                        audioRef.current.play().catch(() => {});
+                                      }
+                                    }}
+                                    className={`hover:bg-accent-cyan/20 hover:text-accent-cyan cursor-pointer rounded px-px transition-colors duration-150 ${
+                                      audioRef.current &&
+                                      currentTime >= w.start &&
+                                      currentTime < w.end
+                                        ? 'bg-accent-cyan/30 text-accent-cyan font-medium'
+                                        : ''
+                                    }`}
+                                    title={`${formatRecSecs(w.start)} → ${formatRecSecs(w.end)}`}
+                                  >
+                                    {w.word}
+                                  </span>
+                                ))}
+                              </p>
+                            ) : (
+                              <p
+                                className="hover:text-accent-cyan/80 cursor-pointer transition-colors"
+                                onClick={() => {
+                                  if (audioRef.current) {
+                                    audioRef.current.currentTime = seg.start;
+                                    audioRef.current.play().catch(() => {});
+                                  }
+                                }}
+                                title={`Seek to ${formatRecSecs(seg.start)}`}
+                              >
+                                {seg.text}
+                              </p>
+                            )}
                           </div>
                         </div>
-                        <div className="selectable-text flex-1 leading-relaxed text-slate-300 transition-colors group-hover:text-white">
-                          {seg.words && seg.words.length > 0 ? (
-                            <p>
-                              {seg.words.map((w, wi) => (
-                                <span
-                                  key={wi}
-                                  onClick={() => {
-                                    if (audioRef.current) {
-                                      audioRef.current.currentTime = w.start;
-                                      audioRef.current.play().catch(() => {});
-                                    }
-                                  }}
-                                  className={`hover:bg-accent-cyan/20 hover:text-accent-cyan cursor-pointer rounded px-px transition-colors duration-150 ${
-                                    audioRef.current &&
-                                    currentTime >= w.start &&
-                                    currentTime < w.end
-                                      ? 'bg-accent-cyan/30 text-accent-cyan font-medium'
-                                      : ''
-                                  }`}
-                                  title={`${formatRecSecs(w.start)} → ${formatRecSecs(w.end)}`}
-                                >
-                                  {w.word}
-                                </span>
-                              ))}
-                            </p>
-                          ) : (
-                            <p
-                              className="hover:text-accent-cyan/80 cursor-pointer transition-colors"
-                              onClick={() => {
-                                if (audioRef.current) {
-                                  audioRef.current.currentTime = seg.start;
-                                  audioRef.current.play().catch(() => {});
-                                }
-                              }}
-                              title={`Seek to ${formatRecSecs(seg.start)}`}
-                            >
-                              {seg.text}
-                            </p>
-                          )}
-                        </div>
+                      ))
+                    ) : (
+                      <div className="selectable-text min-w-0 leading-relaxed break-words whitespace-pre-wrap text-slate-300">
+                        {plainTranscriptText}
                       </div>
-                    ))
+                    )
                   ) : recordingLoading ? (
                     <div className="flex items-center justify-center py-12 text-slate-500">
                       <Loader2 size={20} className="mr-2 animate-spin" /> Loading transcript…
