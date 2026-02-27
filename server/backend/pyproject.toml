@@ -29,12 +29,12 @@ dependencies = [
     "websockets>=15.0.1",
 
     # Core ML / Transcription
+    "faster-whisper>=1.2.1",
     "ctranslate2>=4.6.2",
     "torch>=2.8.0",          # Required by PyAnnote 4.0.3
     "torchaudio>=2.8.0",     # Required by PyAnnote 4.0.3
     "whisperx>=3.1.0",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
-    "pyannote.audio>=4.0.3", # Diarization (still needed for NeMo backends and realtimestt)
-    "realtimestt>=0.3.104",  # Live transcription mode
+    "pyannote.audio>=4.0.3", # Diarization (still needed for NeMo backends)
 
     # Audio Processing
     "numpy>=2.4.0",
@@ -42,6 +42,7 @@ dependencies = [
     "webrtcvad>=2.0.10",
     "silero-vad>=6.2.0",
     "ffmpeg-python>=0.2.0",
+    "scipy>=1.17.0",
 
     # Database
     "aiosqlite>=0.22.1",
@@ -65,14 +66,6 @@ vibevoice_asr = [
     # NOTE: Pin to a tested commit after the compatibility spike is run in a networked env.
     "vibevoice @ git+https://github.com/microsoft/VibeVoice.git",
 ]
-
-## OVERRIDE DEPENDENCIES
-[tool.uv]
-override-dependencies = [
-    "scipy>=1.17.0",         # Moved here due to realtimestt's outdated requirements
-    "faster-whisper>=1.2.1", # Moved here due to realtimestt's outdated requirements
-]
-
 [project.scripts]
 transcription-server = "server.api.main:main"
 
