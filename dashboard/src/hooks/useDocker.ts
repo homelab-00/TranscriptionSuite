@@ -46,6 +46,12 @@ export interface StartContainerOnboardingOptions {
   diarizationModel?: string;
 }
 
+export interface CleanAllOptions {
+  keepDataVolume: boolean;
+  keepModelsVolume: boolean;
+  keepConfigDirectory: boolean;
+}
+
 export interface UseDockerReturn {
   available: boolean;
   loading: boolean;
@@ -75,6 +81,7 @@ export interface UseDockerReturn {
   volumes: VolumeInfo[];
   refreshVolumes: () => Promise<void>;
   removeVolume: (name: string) => Promise<void>;
+  cleanAll: (options: CleanAllOptions) => Promise<void>;
 
   // Log streaming
   logLines: string[];
@@ -94,6 +101,7 @@ export interface UseDockerReturn {
 type RuntimeProfile = 'gpu' | 'cpu';
 
 const api = () => (window as any).electronAPI?.docker as ElectronAPI['docker'] | undefined;
+const appApi = () => (window as any).electronAPI?.app as ElectronAPI['app'] | undefined;
 
 const EMPTY_CONTAINER: ContainerStatus = { exists: false, running: false, status: 'unknown' };
 
@@ -322,6 +330,52 @@ export function useDocker(): UseDockerReturn {
     [withOperation, refreshVolumes],
   );
 
+  const cleanAll = useCallback(
+    async (options: CleanAllOptions) => {
+      const docker = api();
+      const app = appApi();
+      if (!docker) return;
+
+      await withOperation(async () => {
+        const [localImages, localVolumes] = await Promise.all([
+          docker.listImages(),
+          docker.getVolumes(),
+        ]);
+
+        await docker.stopContainer();
+        await docker.removeContainer();
+
+        for (const image of localImages) {
+          await docker.removeImage(image.tag);
+        }
+
+        const targetVolumes = new Set<string>(['transcriptionsuite-runtime']);
+        if (!options.keepDataVolume) targetVolumes.add('transcriptionsuite-data');
+        if (!options.keepModelsVolume) targetVolumes.add('transcriptionsuite-models');
+
+        for (const volume of localVolumes) {
+          if (!targetVolumes.has(volume.name)) continue;
+          if (!volume.mountpoint) continue;
+          await docker.removeVolume(volume.name);
+        }
+
+        if (!options.keepConfigDirectory && app?.removeConfigAndCache) {
+          await app.removeConfigAndCache();
+        }
+
+        const [status, imagesAfterCleanup, volumesAfterCleanup] = await Promise.all([
+          docker.getContainerStatus(),
+          docker.listImages(),
+          docker.getVolumes(),
+        ]);
+        setContainer(status);
+        setImages(imagesAfterCleanup);
+        setVolumes(volumesAfterCleanup);
+      });
+    },
+    [withOperation],
+  );
+
   // ─── Log Streaming ─────────────────────────────────────────────────────────
 
   const [logLines, setLogLines] = useState<string[]>([]);
@@ -386,6 +440,7 @@ export function useDocker(): UseDockerReturn {
     volumes,
     refreshVolumes,
     removeVolume,
+    cleanAll,
     logLines,
     logStreaming,
     startLogStream,

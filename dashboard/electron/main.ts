@@ -333,10 +333,30 @@ ipcMain.handle('app:openPath', async (_event, filePath: string) => {
 });
 
 ipcMain.handle('app:getConfigDir', () => {
-  // TranscriptionSuite stores config in ~/.config/TranscriptionSuite
-  const homeDir = app.getPath('home');
-  const configDir = path.join(homeDir, '.config', 'TranscriptionSuite');
-  return configDir;
+  return app.getPath('userData');
+});
+
+ipcMain.handle('app:removeConfigAndCache', async () => {
+  const userDataDir = app.getPath('userData');
+  let cacheBaseDir = process.env.XDG_CACHE_HOME || path.join(app.getPath('home'), '.cache');
+  try {
+    cacheBaseDir = (app as unknown as { getPath: (name: string) => string }).getPath('cache');
+  } catch {
+    if (process.platform === 'win32') {
+      cacheBaseDir = path.join(app.getPath('appData'), 'TranscriptionSuite', 'Cache');
+    } else if (process.platform === 'darwin') {
+      cacheBaseDir = path.join(app.getPath('home'), 'Library', 'Caches');
+    }
+  }
+  const externalCacheDir = path.join(cacheBaseDir, 'TranscriptionSuite');
+
+  await Promise.all([
+    fs.promises.rm(userDataDir, { recursive: true, force: true }),
+    fs.promises.rm(externalCacheDir, { recursive: true, force: true }),
+  ]);
+
+  await fs.promises.mkdir(userDataDir, { recursive: true });
+  clientLogFileSessionInitialized = false;
 });
 
 ipcMain.handle('app:getClientLogPath', () => {

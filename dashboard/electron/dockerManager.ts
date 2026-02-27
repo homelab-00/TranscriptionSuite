@@ -71,8 +71,12 @@ function resolveComposeDir(): string {
 
 let composeDir: string | null = null;
 
+function hasComposeFiles(dir: string): boolean {
+  return fs.existsSync(path.join(dir, 'docker-compose.yml'));
+}
+
 function getComposeDir(): string {
-  if (composeDir) {
+  if (composeDir && hasComposeFiles(composeDir)) {
     return composeDir;
   }
 

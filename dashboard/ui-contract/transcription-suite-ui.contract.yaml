@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.28
+  spec_version: 1.0.29
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -21,6 +21,7 @@ meta:
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/FullscreenVisualizer.tsx
+      - components/views/ModelManagerTab.tsx
       - components/views/NotebookView.tsx
       - components/views/ServerView.tsx
       - components/views/SessionView.tsx
@@ -29,7 +30,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-25T21:09:02.221Z
+    generated_at: 2026-02-27T15:21:27.432Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -118,6 +119,7 @@ foundation:
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
         - rgba(239,22,238,0.5)
+        - rgba(239,68,68,0.35)
         - rgba(239,68,68,0.6)
         - rgba(251, 146, 60, 0.3)
         - rgba(251,146,60,0.5)
@@ -135,7 +137,7 @@ foundation:
         - rgba(34,211,238,0.4)
         - rgba(34,211,238,0.5)
         - rgba(34,211,238,0.6)
-        - "rgba(96,165,250,0.6)"
+        - rgba(96,165,250,0.6)
       accent_scale: *a1
       glass_scale: *a2
       semantic_status_palette: &a3
@@ -187,6 +189,7 @@ foundation:
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
         - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
@@ -268,6 +271,7 @@ foundation:
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
         - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
@@ -393,6 +397,8 @@ utility_allowlist:
     - bg-black/40
     - bg-black/50
     - bg-black/60
+    - bg-black/70
+    - bg-black/75
     - bg-blue-400
     - bg-blue-500
     - bg-blue-500/10
@@ -413,6 +419,7 @@ utility_allowlist:
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
+    - bg-red-500/25
     - bg-red-500/5
     - bg-slate-500
     - bg-slate-500/10
@@ -456,7 +463,9 @@ utility_allowlist:
     - border-orange-500/20
     - border-r
     - border-red-400/20
+    - border-red-400/40
     - border-red-500/20
+    - border-red-500/25
     - border-slate-900
     - border-t
     - border-transparent
@@ -538,7 +547,7 @@ utility_allowlist:
     - h-3.5
     - h-32
     - h-4
-    - h-4.13 # Added specifically for the [flag + pole] svg file
+    - h-4.13
     - h-4.5
     - h-48
     - h-5
@@ -560,6 +569,7 @@ utility_allowlist:
     - hover:bg-glass-300
     - hover:bg-red-500/10
     - hover:bg-red-500/20
+    - hover:bg-red-500/35
     - hover:bg-white/10
     - hover:bg-white/2
     - hover:bg-white/5
@@ -629,9 +639,13 @@ utility_allowlist:
     - mb-4
     - mb-6
     - mb-8
+    - md:flex-row
     - md:grid-cols-2
     - md:grid-cols-4
+    - md:items-center
     - md:items-end
+    - md:justify-between
+    - md:w-auto
     - min-h-0
     - min-h-32
     - min-h-50
@@ -737,6 +751,7 @@ utility_allowlist:
     - py-3
     - py-3.5
     - py-4
+    - py-5
     - py-6
     - py-8
     - relative
@@ -818,6 +833,9 @@ utility_allowlist:
     - text-left
     - text-lg
     - text-orange-500
+    - text-red-100
+    - text-red-200/90
+    - text-red-300
     - text-red-400
     - text-right
     - text-slate-200
@@ -918,6 +936,7 @@ utility_allowlist:
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
     - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+    - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
@@ -1230,6 +1249,40 @@ component_contracts:
     state_rules:
       - id: jan-highlight
         rule: Highlighted January event count and selected-day treatment remain explicit in current mock data states.
+  CapBadge:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  CustomModelRow:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CustomSelect:
     file: components/ui/CustomSelect.tsx
     required_tokens:
@@ -1407,6 +1460,40 @@ component_contracts:
     state_rules:
       - id: log-type-colors
         rule: Info/success/warning/error message coloring remains bound to approved text tokens.
+  ModelManagerTab:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ModelRow:
+    file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   NoteActionMenu:
     file: components/views/NotebookView.tsx
     required_tokens:
@@ -1600,6 +1687,23 @@ component_contracts:
     state_rules:
       - id: tab-closed-set
         rule: Settings tab set is fixed to App/Client/Server/Notebook labels.
+  ShortcutCapture:
+    file: components/ui/ShortcutCapture.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   Sidebar:
     file: components/Sidebar.tsx
     required_tokens:
@@ -1680,92 +1784,6 @@ component_contracts:
     state_rules:
       - id: compact-density-mode
         rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
-  CapBadge:
-    file: components/views/ModelManagerTab.tsx
-    required_tokens:
-      - colors
-      - motion
-      - spacing_and_size_constraints
-    allowed_variants: {}
-    structural_invariants:
-      - id: cap-badge-layout
-        rule: "CapBadge maintains its defined layout structure."
-    behavior_rules:
-      - id: cap-badge-transitions
-        rule: "CapBadge transitions use approved duration and easing tokens."
-    state_rules:
-      - id: cap-badge-states
-        rule: "CapBadge visual states use approved color and opacity tokens."
-  CustomModelRow:
-    file: components/views/ModelManagerTab.tsx
-    required_tokens:
-      - colors
-      - motion
-      - spacing_and_size_constraints
-    allowed_variants: {}
-    structural_invariants:
-      - id: custom-model-row-layout
-        rule: "CustomModelRow maintains its defined layout structure."
-    behavior_rules:
-      - id: custom-model-row-transitions
-        rule: "CustomModelRow transitions use approved duration and easing tokens."
-    state_rules:
-      - id: custom-model-row-states
-        rule: "CustomModelRow visual states use approved color and opacity tokens."
-  ModelManagerTab:
-    file: components/views/ModelManagerTab.tsx
-    required_tokens:
-      - colors
-      - motion
-      - spacing_and_size_constraints
-    allowed_variants: {}
-    structural_invariants:
-      - id: model-manager-tab-layout
-        rule: "ModelManagerTab maintains its defined layout structure."
-    behavior_rules:
-      - id: model-manager-tab-transitions
-        rule: "ModelManagerTab transitions use approved duration and easing tokens."
-    state_rules:
-      - id: model-manager-tab-states
-        rule: "ModelManagerTab visual states use approved color and opacity tokens."
-  ShortcutCapture:
-    file: components/ui/ShortcutCapture.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-    allowed_variants:
-      isWaylandPortal:
-        - "true"
-        - "false"
-      capturing:
-        - "true"
-        - "false"
-    structural_invariants:
-      - id: shortcut-capture-shell
-        rule: ShortcutCapture keeps a single interactive div for keyboard capture or a read-only display with Change button in portal mode.
-    behavior_rules:
-      - id: capture-mode-motion
-        rule: Capture mode uses animate-pulse on prompt text and accent ring feedback within approved duration tokens.
-    state_rules:
-      - id: portal-readonly
-        rule: When isWaylandPortal is true, the field is read-only and shows a Change button that triggers portal rebind.
-  ModelRow:
-    file: components/views/ModelManagerTab.tsx
-    required_tokens:
-      - colors
-      - motion
-      - spacing_and_size_constraints
-    allowed_variants: {}
-    structural_invariants:
-      - id: model-row-layout
-        rule: "ModelRow maintains its defined layout structure."
-    behavior_rules:
-      - id: model-row-transitions
-        rule: "ModelRow transitions use approved duration and easing tokens."
-    state_rules:
-      - id: model-row-states
-        rule: "ModelRow visual states use approved color and opacity tokens."
 validation_policy:
   unknown_utility_class: error
   missing_required_field: error

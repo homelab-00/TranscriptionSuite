@@ -56,6 +56,7 @@ interface ElectronAPI {
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
     getConfigDir: () => Promise<string>;
+    removeConfigAndCache: () => Promise<void>;
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
     readLocalFile: (

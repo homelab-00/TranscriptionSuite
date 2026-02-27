@@ -59,6 +59,7 @@ export interface ElectronAPI {
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
     getConfigDir: () => Promise<string>;
+    removeConfigAndCache: () => Promise<void>;
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
     readLocalFile: (
@@ -160,6 +161,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
     openPath: (filePath: string) => ipcRenderer.invoke('app:openPath', filePath),
     getConfigDir: () => ipcRenderer.invoke('app:getConfigDir'),
+    removeConfigAndCache: () => ipcRenderer.invoke('app:removeConfigAndCache'),
     getClientLogPath: () => ipcRenderer.invoke('app:getClientLogPath'),
     appendClientLogLine: (line: string) => ipcRenderer.invoke('app:appendClientLogLine', line),
     readLocalFile: (filePath: string) =>
