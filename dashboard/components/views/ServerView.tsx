@@ -68,6 +68,32 @@ const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
+const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_LARGE_V3;
+
+const MAIN_MODEL_PRESETS = [
+  WHISPER_LARGE_V3,
+  WHISPER_MEDIUM,
+  WHISPER_SMALL,
+  PARAKEET_TDT_0_6B,
+  CANARY_1B_V2,
+  VIBEVOICE_ASR,
+  VIBEVOICE_ASR_4BIT,
+];
+const LIVE_MODEL_PRESETS = [WHISPER_LARGE_V3, WHISPER_MEDIUM, WHISPER_SMALL];
+const MAIN_MODEL_SELECTION_OPTIONS = new Set([
+  MODEL_DEFAULT_LOADING_PLACEHOLDER,
+  ...MAIN_MODEL_PRESETS,
+  MAIN_MODEL_CUSTOM_OPTION,
+]);
+const LIVE_MODEL_SELECTION_OPTIONS = new Set([
+  LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  ...LIVE_MODEL_PRESETS,
+  LIVE_MODEL_CUSTOM_OPTION,
+]);
+const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
+  DIARIZATION_DEFAULT_MODEL,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
+]);
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -96,6 +122,81 @@ function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function findCaseInsensitivePreset(value: string, options: string[]): string | null {
+  const normalizedValue = normalizeModelName(value);
+  if (!normalizedValue) return null;
+  const match = options.find((option) => normalizeModelName(option) === normalizedValue);
+  return match ?? null;
+}
+
+function resolveMainModelSelectionValue(
+  mainSelection: string,
+  mainCustomModel: string,
+  configuredMainModel: string,
+): string {
+  if (mainSelection === MAIN_MODEL_CUSTOM_OPTION) {
+    return mainCustomModel.trim() || configuredMainModel;
+  }
+  if (mainSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+    return configuredMainModel || mainSelection;
+  }
+  return mainSelection;
+}
+
+function resolveLiveModelSelectionValue(
+  liveSelection: string,
+  liveCustomModel: string,
+  resolvedMainModel: string,
+  configuredLiveModel: string,
+): string {
+  if (liveSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION) {
+    return resolvedMainModel;
+  }
+  if (liveSelection === LIVE_MODEL_CUSTOM_OPTION) {
+    return liveCustomModel.trim() || configuredLiveModel || resolvedMainModel;
+  }
+  return liveSelection;
+}
+
+function normalizeLiveModelToWhisper(modelName: string): string {
+  return isWhisperModel(modelName) ? modelName : FALLBACK_LIVE_WHISPER_MODEL;
+}
+
+function mapMainModelToSelection(modelName: string): { selection: string; custom: string } {
+  const preset = findCaseInsensitivePreset(modelName, MAIN_MODEL_PRESETS);
+  if (preset) {
+    return { selection: preset, custom: '' };
+  }
+  return { selection: MAIN_MODEL_CUSTOM_OPTION, custom: modelName };
+}
+
+function mapLiveModelToSelection(
+  modelName: string,
+  mainModelName: string,
+): { selection: string; custom: string } {
+  const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
+  if (
+    isWhisperModel(mainModelName) &&
+    normalizeModelName(normalizedLiveModel) === normalizeModelName(mainModelName)
+  ) {
+    return { selection: LIVE_MODEL_SAME_AS_MAIN_OPTION, custom: '' };
+  }
+
+  const preset = findCaseInsensitivePreset(normalizedLiveModel, LIVE_MODEL_PRESETS);
+  if (preset) {
+    return { selection: preset, custom: '' };
+  }
+  return { selection: LIVE_MODEL_CUSTOM_OPTION, custom: normalizedLiveModel };
+}
+
+function mapDiarizationModelToSelection(modelName: string): { selection: string; custom: string } {
+  const normalizedModel = normalizeModelName(modelName);
+  if (!normalizedModel || normalizedModel === normalizeModelName(DIARIZATION_DEFAULT_MODEL)) {
+    return { selection: DIARIZATION_DEFAULT_MODEL, custom: '' };
+  }
+  return { selection: DIARIZATION_MODEL_CUSTOM_OPTION, custom: modelName };
+}
+
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
   const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatus();
   const docker = useDockerContext();
@@ -108,6 +209,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [mainCustomModel, setMainCustomModel] = useState('');
   const [liveModelSelection, setLiveModelSelection] = useState(LIVE_MODEL_SAME_AS_MAIN_OPTION);
   const [liveCustomModel, setLiveCustomModel] = useState('');
+  const [localSelectionsHydrated, setLocalSelectionsHydrated] = useState(false);
   const [modelsHydrated, setModelsHydrated] = useState(false);
   const [diarizationModelSelection, setDiarizationModelSelection] =
     useState(DIARIZATION_DEFAULT_MODEL);
@@ -144,6 +246,128 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         })
         .catch(() => {});
     }
+  }, []);
+
+  // Load persisted model selection UI state once per mount.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.config) {
+      setLocalSelectionsHydrated(true);
+      return;
+    }
+
+    let active = true;
+    Promise.all([
+      api.config.get('server.mainModelSelection'),
+      api.config.get('server.mainCustomModel'),
+      api.config.get('server.liveModelSelection'),
+      api.config.get('server.liveCustomModel'),
+      api.config.get('server.diarizationModelSelection'),
+      api.config.get('server.diarizationCustomModel'),
+    ])
+      .then(
+        ([
+          storedMainSelection,
+          storedMainCustom,
+          storedLiveSelection,
+          storedLiveCustom,
+          storedDiarizationSelection,
+          storedDiarizationCustom,
+        ]: unknown[]) => {
+          if (!active) return;
+
+          let nextMainSelection =
+            getString(storedMainSelection) ?? MODEL_DEFAULT_LOADING_PLACEHOLDER;
+          let nextMainCustom = getString(storedMainCustom) ?? '';
+
+          if (!MAIN_MODEL_SELECTION_OPTIONS.has(nextMainSelection)) {
+            const preset = findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS);
+            if (preset) {
+              nextMainSelection = preset;
+            } else if (nextMainSelection) {
+              nextMainCustom = nextMainSelection;
+              nextMainSelection = MAIN_MODEL_CUSTOM_OPTION;
+            } else {
+              nextMainSelection = MODEL_DEFAULT_LOADING_PLACEHOLDER;
+            }
+          }
+          if (nextMainSelection !== MAIN_MODEL_CUSTOM_OPTION) {
+            nextMainCustom = '';
+          }
+
+          let nextLiveSelection = getString(storedLiveSelection) ?? LIVE_MODEL_SAME_AS_MAIN_OPTION;
+          let nextLiveCustom = getString(storedLiveCustom) ?? '';
+
+          if (!LIVE_MODEL_SELECTION_OPTIONS.has(nextLiveSelection)) {
+            const preset = findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS);
+            if (preset) {
+              nextLiveSelection = preset;
+            } else if (nextLiveSelection) {
+              nextLiveCustom = nextLiveSelection;
+              nextLiveSelection = LIVE_MODEL_CUSTOM_OPTION;
+            } else {
+              nextLiveSelection = LIVE_MODEL_SAME_AS_MAIN_OPTION;
+            }
+          }
+          if (nextLiveSelection !== LIVE_MODEL_CUSTOM_OPTION) {
+            nextLiveCustom = '';
+          }
+
+          const resolvedMainModel = resolveMainModelSelectionValue(
+            nextMainSelection,
+            nextMainCustom,
+            '',
+          );
+          const resolvedLiveModel = resolveLiveModelSelectionValue(
+            nextLiveSelection,
+            nextLiveCustom,
+            resolvedMainModel,
+            '',
+          );
+          if (!isWhisperModel(resolvedLiveModel)) {
+            nextLiveSelection = FALLBACK_LIVE_WHISPER_MODEL;
+            nextLiveCustom = '';
+          }
+
+          let nextDiarizationSelection =
+            getString(storedDiarizationSelection) ?? DIARIZATION_DEFAULT_MODEL;
+          let nextDiarizationCustom = getString(storedDiarizationCustom) ?? '';
+
+          if (!DIARIZATION_MODEL_SELECTION_OPTIONS.has(nextDiarizationSelection)) {
+            if (
+              normalizeModelName(nextDiarizationSelection) ===
+              normalizeModelName(DIARIZATION_DEFAULT_MODEL)
+            ) {
+              nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
+            } else if (nextDiarizationSelection) {
+              nextDiarizationCustom = nextDiarizationSelection;
+              nextDiarizationSelection = DIARIZATION_MODEL_CUSTOM_OPTION;
+            } else {
+              nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
+            }
+          }
+          if (nextDiarizationSelection !== DIARIZATION_MODEL_CUSTOM_OPTION) {
+            nextDiarizationCustom = '';
+          }
+
+          setMainModelSelection(nextMainSelection);
+          setMainCustomModel(nextMainCustom);
+          setLiveModelSelection(nextLiveSelection);
+          setLiveCustomModel(nextLiveCustom);
+          setDiarizationModelSelection(nextDiarizationSelection);
+          setDiarizationCustomModel(nextDiarizationCustom);
+        },
+      )
+      .catch(() => {})
+      .finally(() => {
+        if (active) {
+          setLocalSelectionsHydrated(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Persist runtime profile changes
@@ -194,69 +418,47 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     '';
 
   useEffect(() => {
-    if (modelsHydrated || !adminStatus || !configuredMainModel) return;
+    if (!localSelectionsHydrated || modelsHydrated || !adminStatus || !configuredMainModel) return;
 
-    const normalizedMain = normalizeModelName(configuredMainModel);
-    setMainModelSelection(configuredMainModel);
-    setMainCustomModel('');
+    const mappedMain = mapMainModelToSelection(configuredMainModel);
+    const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
 
-    const normalizedLive = normalizeModelName(configuredLiveModel);
-    if (normalizedLive === normalizedMain) {
-      setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
-      setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(WHISPER_LARGE_V3)) {
-      setLiveModelSelection(WHISPER_LARGE_V3);
-      setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(WHISPER_MEDIUM)) {
-      setLiveModelSelection(WHISPER_MEDIUM);
-      setLiveCustomModel('');
-    } else if (normalizedLive === normalizeModelName(WHISPER_SMALL)) {
-      setLiveModelSelection(WHISPER_SMALL);
-      setLiveCustomModel('');
-    } else if (
-      normalizedLive === normalizeModelName(PARAKEET_TDT_0_6B) ||
-      normalizedLive === normalizeModelName(CANARY_1B_V2)
-    ) {
-      setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
-      setLiveCustomModel(configuredLiveModel);
-    } else {
-      setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
-      setLiveCustomModel(configuredLiveModel);
-    }
+    setMainModelSelection(mappedMain.selection);
+    setMainCustomModel(mappedMain.custom);
+    setLiveModelSelection(mappedLive.selection);
+    setLiveCustomModel(mappedLive.custom);
 
     setModelsHydrated(true);
-  }, [adminStatus, configuredMainModel, configuredLiveModel, modelsHydrated]);
+  }, [
+    adminStatus,
+    configuredMainModel,
+    configuredLiveModel,
+    localSelectionsHydrated,
+    modelsHydrated,
+  ]);
 
   useEffect(() => {
-    if (diarizationHydrated || !adminStatus) return;
+    if (!localSelectionsHydrated || diarizationHydrated || !adminStatus) return;
 
-    if (
-      configuredDiarizationModel &&
-      normalizeModelName(configuredDiarizationModel) !==
-        normalizeModelName(DIARIZATION_DEFAULT_MODEL)
-    ) {
-      setDiarizationModelSelection(DIARIZATION_MODEL_CUSTOM_OPTION);
-      setDiarizationCustomModel(configuredDiarizationModel);
-    } else {
-      setDiarizationModelSelection(DIARIZATION_DEFAULT_MODEL);
-      setDiarizationCustomModel('');
-    }
+    const mappedDiarization = mapDiarizationModelToSelection(configuredDiarizationModel);
+    setDiarizationModelSelection(mappedDiarization.selection);
+    setDiarizationCustomModel(mappedDiarization.custom);
 
     setDiarizationHydrated(true);
-  }, [adminStatus, configuredDiarizationModel, diarizationHydrated]);
+  }, [adminStatus, configuredDiarizationModel, diarizationHydrated, localSelectionsHydrated]);
 
-  const activeTranscriber =
-    mainModelSelection === MAIN_MODEL_CUSTOM_OPTION
-      ? mainCustomModel.trim() || configuredMainModel
-      : mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER
-        ? configuredMainModel || mainModelSelection
-        : mainModelSelection;
-  const activeLiveModel =
-    liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
-      ? activeTranscriber
-      : liveModelSelection === LIVE_MODEL_CUSTOM_OPTION
-        ? liveCustomModel.trim() || configuredLiveModel || activeTranscriber
-        : liveModelSelection;
+  const activeTranscriber = resolveMainModelSelectionValue(
+    mainModelSelection,
+    mainCustomModel,
+    configuredMainModel,
+  );
+  const activeLiveModel = resolveLiveModelSelectionValue(
+    liveModelSelection,
+    liveCustomModel,
+    activeTranscriber,
+    configuredLiveModel,
+  );
+  const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
   const liveModelWhisperOnlyCompatible = isWhisperModel(activeLiveModel);
   const liveModeModelConstraintMessage =
     'Live Mode only supports faster-whisper models (RealtimeSTT path) in v1. Choose a faster-whisper model for Live Mode.';
@@ -267,6 +469,58 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
       : DIARIZATION_DEFAULT_MODEL;
 
+  // Hard-reset any non-whisper live model selection to the default whisper model.
+  useEffect(() => {
+    if (!localSelectionsHydrated || isWhisperModel(activeLiveModel)) return;
+    setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
+    setLiveCustomModel('');
+  }, [activeLiveModel, localSelectionsHydrated]);
+
+  // Persist model selection UI state.
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.mainModelSelection', mainModelSelection).catch(() => {});
+  }, [localSelectionsHydrated, mainModelSelection]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.mainCustomModel', mainCustomModel).catch(() => {});
+  }, [localSelectionsHydrated, mainCustomModel]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.liveModelSelection', liveModelSelection).catch(() => {});
+  }, [localSelectionsHydrated, liveModelSelection]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.liveCustomModel', liveCustomModel).catch(() => {});
+  }, [localSelectionsHydrated, liveCustomModel]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config
+      .set('server.diarizationModelSelection', diarizationModelSelection)
+      .catch(() => {});
+  }, [localSelectionsHydrated, diarizationModelSelection]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
+  }, [localSelectionsHydrated, diarizationCustomModel]);
+
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -274,7 +528,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
     // Collect unique model IDs to check
     const modelIds = [
-      ...new Set([activeTranscriber, activeLiveModel, activeDiarizationModel]),
+      ...new Set([activeTranscriber, normalizedLiveModel, activeDiarizationModel]),
     ].filter((id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER);
     if (modelIds.length === 0) return;
 
@@ -292,7 +546,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     return () => {
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
-  }, [activeTranscriber, activeLiveModel, activeDiarizationModel, isRunning]);
+  }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel, isRunning]);
 
   // Image selection state — "Most Recent (auto)" always picks the newest available tag
   const MOST_RECENT = 'Most Recent (auto)';
@@ -392,7 +646,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     const api = (window as any).electronAPI;
     if (!api?.docker?.checkModelsCached || !isRunning) return;
     const modelIds = [
-      ...new Set([activeTranscriber, activeLiveModel, activeDiarizationModel]),
+      ...new Set([activeTranscriber, normalizedLiveModel, activeDiarizationModel]),
     ].filter((id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER);
     if (modelIds.length === 0) return;
     api.docker
@@ -401,7 +655,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         setModelCacheStatus(result);
       })
       .catch(() => {});
-  }, [activeTranscriber, activeLiveModel, activeDiarizationModel, isRunning]);
+  }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel, isRunning]);
 
   // Model load/unload handlers
   const handleLoadModels = useCallback(async () => {
@@ -753,7 +1007,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           onClick={() =>
                             onStartServer('local', runtimeProfile, selectedTagForStart, {
                               mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                              liveTranscriberModel: sanitizeModelName(activeLiveModel),
+                              liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                               diarizationModel: sanitizeModelName(activeDiarizationModel),
                             })
                           }
@@ -776,7 +1030,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           onClick={() =>
                             onStartServer('remote', runtimeProfile, selectedTagForStart, {
                               mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                              liveTranscriberModel: sanitizeModelName(activeLiveModel),
+                              liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                               diarizationModel: sanitizeModelName(activeDiarizationModel),
                             })
                           }

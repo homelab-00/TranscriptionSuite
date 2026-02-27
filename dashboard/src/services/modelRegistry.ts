@@ -75,8 +75,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: 'NVIDIA NeMo ASR-only model. Fast inference, 25 EU languages.',
     parameterCount: '600M',
     huggingfaceUrl: 'https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3',
-    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 25 },
-    roles: ['main', 'live'],
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 25 },
+    roles: ['main'],
   },
   {
     id: 'nvidia/canary-1b-v2',
@@ -85,8 +85,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: 'NVIDIA NeMo multitask model with ASR + translation across 25 EU languages.',
     parameterCount: '1B',
     huggingfaceUrl: 'https://huggingface.co/nvidia/canary-1b-v2',
-    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 25 },
-    roles: ['main', 'live'],
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 25 },
+    roles: ['main'],
   },
 
   // ── VibeVoice ────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import {
   type ModelFamily,
   type ModelRole,
 } from '../../src/services/modelRegistry';
+import { isWhisperModel } from '../../src/services/modelCapabilities';
 
 // ─── Sentinel constants (must match ServerView) ─────────────────────────────
 
@@ -337,7 +338,7 @@ function CustomModelRow({
 
   const roleOptions: { role: ModelRole; label: string }[] = [
     { role: 'main', label: 'Main Transcriber' },
-    { role: 'live', label: 'Live Model' },
+    ...(isWhisperModel(modelId) ? [{ role: 'live' as ModelRole, label: 'Live Model' }] : []),
     { role: 'diarization', label: 'Diarization Model' },
   ];
 
@@ -566,6 +567,10 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
           showToast(`Set ${modelId} as Main Transcriber`);
           break;
         case 'live':
+          if (!isWhisperModel(modelId)) {
+            showToast('Live Mode only supports faster-whisper models in v1.');
+            break;
+          }
           if (isPreset && registryModel?.family === 'whisper') {
             // Whisper models are in the live preset dropdown
             setLiveModelSelection(modelId);

@@ -127,7 +127,7 @@ live_transcriber:
 
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.
-    # Supports both Whisper and Parakeet models (e.g. "nvidia/parakeet-tdt-0.6b-v3").
+    # Live Mode v1 supports only faster-whisper/Whisper backend models.
     # model: "Systran/faster-whisper-large-v3"
     compute_type: "default"
     device: "cuda"
