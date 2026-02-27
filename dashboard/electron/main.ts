@@ -35,6 +35,13 @@ if (process.platform === 'linux' && process.env.APPIMAGE) {
   app.commandLine.appendSwitch('no-sandbox');
 }
 
+// Enable the GlobalShortcutsPortal Chromium feature so that Electron's
+// globalShortcut API works on Wayland via the XDG Desktop Portal D-Bus
+// interface (supported by KDE Plasma, Hyprland; not yet GNOME/Sway).
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
+}
+
 // Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
 

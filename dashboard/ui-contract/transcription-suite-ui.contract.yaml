@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.25
+  spec_version: 1.0.26
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -803,6 +803,7 @@ utility_allowlist:
     - text-accent-orange
     - text-amber-300/80
     - text-amber-400
+    - text-amber-400/80
     - text-base
     - text-black
     - text-blue-400

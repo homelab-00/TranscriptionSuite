@@ -55,6 +55,7 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
+    getSessionType: () => string;
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
     getConfigDir: () => Promise<string>;
@@ -146,6 +147,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
+    getSessionType: () =>
+      process.env.XDG_SESSION_TYPE ?? (process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
     openPath: (filePath: string) => ipcRenderer.invoke('app:openPath', filePath),
     getConfigDir: () => ipcRenderer.invoke('app:getConfigDir'),

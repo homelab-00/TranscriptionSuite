@@ -29,7 +29,9 @@ const registeredAccelerators: string[] = [];
 
 /**
  * Register global keyboard shortcuts from config.
- * On Wayland: skip registration and log guidance about CLI/signal alternatives.
+ * On Wayland: attempts registration via the GlobalShortcutsPortal feature
+ * (works on KDE Plasma, Hyprland).  Falls back to CLI/signal guidance if
+ * the compositor doesn't support the portal.
  * On failure (key already taken by another app): log warning, don't crash.
  */
 export function registerShortcuts(
@@ -38,14 +40,7 @@ export function registerShortcuts(
 ): void {
   unregisterShortcuts();
 
-  if (process.platform === 'linux' && isWayland()) {
-    console.log(
-      '[Shortcuts] Wayland detected — globalShortcut API not supported. ' +
-        'Use CLI args (--start-recording / --stop-recording) or Unix signals ' +
-        '(SIGUSR1 / SIGUSR2) instead.',
-    );
-    return;
-  }
+  const onWayland = process.platform === 'linux' && isWayland();
 
   const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+R';
   const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+S';
@@ -74,6 +69,15 @@ export function registerShortcuts(
     } catch (err) {
       console.warn(`[Shortcuts] Error registering ${accelerator}:`, err);
     }
+  }
+
+  if (onWayland && registeredAccelerators.length === 0) {
+    console.log(
+      '[Shortcuts] No shortcuts registered on Wayland. ' +
+        'Your compositor may not support the XDG GlobalShortcuts portal ' +
+        '(KDE Plasma and Hyprland are supported). Fallback: use CLI args ' +
+        '(--start-recording / --stop-recording) or Unix signals (SIGUSR1 / SIGUSR2).',
+    );
   }
 }
 

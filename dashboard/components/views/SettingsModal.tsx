@@ -78,6 +78,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
   const [configDir, setConfigDir] = useState<string>('~/.config/TranscriptionSuite');
+  const [platform, setPlatform] = useState('');
+  const [sessionType, setSessionType] = useState('');
 
   // Token management state
   const [tokens, setTokens] = useState<AuthToken[]>([]);
@@ -205,6 +207,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       // Load settings from config store
       const api = (window as any).electronAPI;
       if (api?.config) {
+        // Detect platform and session type for conditional UI hints
+        setPlatform(api.app?.getPlatform?.() ?? '');
+        setSessionType(api.app?.getSessionType?.() ?? '');
+
         // Load config directory path
         api.app
           ?.getConfigDir?.()
@@ -442,6 +448,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <span className="font-mono text-slate-300">Alt+Ctrl+R</span>). Leave blank to use the
             default shortcut.
           </p>
+          {platform === 'linux' && sessionType === 'wayland' && (
+            <p className="text-xs text-amber-400/80">
+              Wayland note: Global shortcuts require a compositor that supports the XDG
+              GlobalShortcuts portal (KDE Plasma, Hyprland). On GNOME or Sway, use your
+              desktop&apos;s own shortcut settings to run{' '}
+              <span className="font-mono">TranscriptionSuite --start-recording</span> /{' '}
+              <span className="font-mono">--stop-recording</span> instead.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
