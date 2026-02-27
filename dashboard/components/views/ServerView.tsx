@@ -33,6 +33,24 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { isWhisperModel } from '../../src/services/modelCapabilities';
+import {
+  MODEL_DEFAULT_LOADING_PLACEHOLDER,
+  MAIN_MODEL_CUSTOM_OPTION,
+  LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
+  MODEL_DISABLED_OPTION,
+  DISABLED_MODEL_SENTINEL,
+  MAIN_RECOMMENDED_MODEL,
+  WHISPER_LARGE_V3,
+  WHISPER_MEDIUM,
+  WHISPER_SMALL,
+  CANARY_1B_V2,
+  VIBEVOICE_ASR,
+  VIBEVOICE_ASR_4BIT,
+  resolveMainModelSelectionValue,
+  resolveLiveModelSelectionValue,
+  toBackendModelEnvValue,
+} from '../../src/services/modelSelection';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
@@ -50,29 +68,13 @@ interface ServerViewProps {
   startupFlowPending: boolean;
 }
 
-const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
-
-// Whisper model presets
-const WHISPER_LARGE_V3 = 'Systran/faster-whisper-large-v3';
-const WHISPER_MEDIUM = 'Systran/faster-whisper-medium';
-const WHISPER_SMALL = 'Systran/faster-whisper-small';
-
-// NeMo model presets
-const PARAKEET_TDT_0_6B = 'nvidia/parakeet-tdt-0.6b-v3';
-const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
-const VIBEVOICE_ASR = 'microsoft/VibeVoice-ASR';
-const VIBEVOICE_ASR_4BIT = 'scerz/VibeVoice-ASR-4bit';
-
-const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
-const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
-const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
 const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
 const MAIN_MODEL_PRESETS = [
-  PARAKEET_TDT_0_6B,
+  MAIN_RECOMMENDED_MODEL,
   CANARY_1B_V2,
   WHISPER_LARGE_V3,
   WHISPER_MEDIUM,
@@ -84,11 +86,13 @@ const LIVE_MODEL_PRESETS = [WHISPER_LARGE_V3, WHISPER_MEDIUM, WHISPER_SMALL];
 const MAIN_MODEL_SELECTION_OPTIONS = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   ...MAIN_MODEL_PRESETS,
+  MODEL_DISABLED_OPTION,
   MAIN_MODEL_CUSTOM_OPTION,
 ]);
 const LIVE_MODEL_SELECTION_OPTIONS = new Set([
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   ...LIVE_MODEL_PRESETS,
+  MODEL_DISABLED_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
 ]);
 const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
@@ -105,9 +109,12 @@ const UI_SENTINEL_VALUES = new Set([
 ]);
 
 function sanitizeModelName(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || UI_SENTINEL_VALUES.has(trimmed)) return '';
-  return trimmed;
+  if (value === MODEL_DISABLED_OPTION || value === DISABLED_MODEL_SENTINEL) {
+    return DISABLED_MODEL_SENTINEL;
+  }
+  const normalized = toBackendModelEnvValue(value);
+  if (!normalized || UI_SENTINEL_VALUES.has(normalized)) return '';
+  return normalized;
 }
 
 function getString(value: unknown): string | null {
@@ -130,40 +137,16 @@ function findCaseInsensitivePreset(value: string, options: string[]): string | n
   return match ?? null;
 }
 
-function resolveMainModelSelectionValue(
-  mainSelection: string,
-  mainCustomModel: string,
-  configuredMainModel: string,
-): string {
-  if (mainSelection === MAIN_MODEL_CUSTOM_OPTION) {
-    return mainCustomModel.trim() || configuredMainModel;
-  }
-  if (mainSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
-    return configuredMainModel || mainSelection;
-  }
-  return mainSelection;
-}
-
-function resolveLiveModelSelectionValue(
-  liveSelection: string,
-  liveCustomModel: string,
-  resolvedMainModel: string,
-  configuredLiveModel: string,
-): string {
-  if (liveSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION) {
-    return resolvedMainModel;
-  }
-  if (liveSelection === LIVE_MODEL_CUSTOM_OPTION) {
-    return liveCustomModel.trim() || configuredLiveModel || resolvedMainModel;
-  }
-  return liveSelection;
-}
-
 function normalizeLiveModelToWhisper(modelName: string): string {
+  if (modelName === DISABLED_MODEL_SENTINEL) return modelName;
   return isWhisperModel(modelName) ? modelName : FALLBACK_LIVE_WHISPER_MODEL;
 }
 
 function mapMainModelToSelection(modelName: string): { selection: string; custom: string } {
+  const normalizedModel = normalizeModelName(modelName);
+  if (!normalizedModel || normalizedModel === normalizeModelName(DISABLED_MODEL_SENTINEL)) {
+    return { selection: MODEL_DISABLED_OPTION, custom: '' };
+  }
   const preset = findCaseInsensitivePreset(modelName, MAIN_MODEL_PRESETS);
   if (preset) {
     return { selection: preset, custom: '' };
@@ -175,6 +158,11 @@ function mapLiveModelToSelection(
   modelName: string,
   mainModelName: string,
 ): { selection: string; custom: string } {
+  const normalizedModel = normalizeModelName(modelName);
+  if (!normalizedModel || normalizedModel === normalizeModelName(DISABLED_MODEL_SENTINEL)) {
+    return { selection: MODEL_DISABLED_OPTION, custom: '' };
+  }
+
   const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
   if (
     isWhisperModel(mainModelName) &&
@@ -290,14 +278,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           let nextMainCustom = getString(storedMainCustom) ?? '';
 
           if (!MAIN_MODEL_SELECTION_OPTIONS.has(nextMainSelection)) {
-            const preset = findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS);
-            if (preset) {
-              nextMainSelection = preset;
-            } else if (nextMainSelection) {
-              nextMainCustom = nextMainSelection;
-              nextMainSelection = MAIN_MODEL_CUSTOM_OPTION;
+            if (
+              normalizeModelName(nextMainSelection) === normalizeModelName(DISABLED_MODEL_SENTINEL)
+            ) {
+              nextMainSelection = MODEL_DISABLED_OPTION;
             } else {
-              nextMainSelection = MODEL_DEFAULT_LOADING_PLACEHOLDER;
+              const preset = findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS);
+              if (preset) {
+                nextMainSelection = preset;
+              } else if (nextMainSelection) {
+                nextMainCustom = nextMainSelection;
+                nextMainSelection = MAIN_MODEL_CUSTOM_OPTION;
+              } else {
+                nextMainSelection = MODEL_DEFAULT_LOADING_PLACEHOLDER;
+              }
             }
           }
           if (nextMainSelection !== MAIN_MODEL_CUSTOM_OPTION) {
@@ -308,14 +302,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           let nextLiveCustom = getString(storedLiveCustom) ?? '';
 
           if (!LIVE_MODEL_SELECTION_OPTIONS.has(nextLiveSelection)) {
-            const preset = findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS);
-            if (preset) {
-              nextLiveSelection = preset;
-            } else if (nextLiveSelection) {
-              nextLiveCustom = nextLiveSelection;
-              nextLiveSelection = LIVE_MODEL_CUSTOM_OPTION;
+            if (
+              normalizeModelName(nextLiveSelection) === normalizeModelName(DISABLED_MODEL_SENTINEL)
+            ) {
+              nextLiveSelection = MODEL_DISABLED_OPTION;
             } else {
-              nextLiveSelection = LIVE_MODEL_SAME_AS_MAIN_OPTION;
+              const preset = findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS);
+              if (preset) {
+                nextLiveSelection = preset;
+              } else if (nextLiveSelection) {
+                nextLiveCustom = nextLiveSelection;
+                nextLiveSelection = LIVE_MODEL_CUSTOM_OPTION;
+              } else {
+                nextLiveSelection = LIVE_MODEL_SAME_AS_MAIN_OPTION;
+              }
             }
           }
           if (nextLiveSelection !== LIVE_MODEL_CUSTOM_OPTION) {
@@ -333,7 +333,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             resolvedMainModel,
             '',
           );
-          if (!isWhisperModel(resolvedLiveModel)) {
+          if (resolvedLiveModel !== DISABLED_MODEL_SENTINEL && !isWhisperModel(resolvedLiveModel)) {
             nextLiveSelection = FALLBACK_LIVE_WHISPER_MODEL;
             nextLiveCustom = '';
           }
@@ -418,7 +418,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     getString(adminMainCfg.model) ??
     getString(adminLegacyTranscriptionCfg.model) ??
     getString(adminModelTranscriptionCfg.model) ??
-    '';
+    DISABLED_MODEL_SENTINEL;
   const configuredLiveModel = getString(adminLiveCfg.model) ?? configuredMainModel;
   const configuredDiarizationModel =
     getString(adminDiarizationCfg.model) ??
@@ -427,7 +427,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     '';
 
   useEffect(() => {
-    if (!localSelectionsHydrated || modelsHydrated || !adminStatus || !configuredMainModel) return;
+    if (!localSelectionsHydrated || modelsHydrated || !adminStatus) return;
 
     const mappedMain = mapMainModelToSelection(configuredMainModel);
     const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
@@ -468,7 +468,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     configuredLiveModel,
   );
   const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
-  const liveModelWhisperOnlyCompatible = isWhisperModel(activeLiveModel);
+  const liveModelWhisperOnlyCompatible =
+    activeLiveModel === DISABLED_MODEL_SENTINEL || isWhisperModel(activeLiveModel);
   const liveModeModelConstraintMessage = 'Live Mode only supports faster-whisper models.';
 
   // Active diarization model name
@@ -479,7 +480,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Hard-reset any non-whisper live model selection to the default whisper model.
   useEffect(() => {
-    if (!localSelectionsHydrated || isWhisperModel(activeLiveModel)) return;
+    if (
+      !localSelectionsHydrated ||
+      activeLiveModel === DISABLED_MODEL_SENTINEL ||
+      isWhisperModel(activeLiveModel)
+    )
+      return;
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
     setLiveCustomModel('');
   }, [activeLiveModel, localSelectionsHydrated]);
@@ -537,7 +543,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // Collect unique model IDs to check
     const modelIds = [
       ...new Set([activeTranscriber, normalizedLiveModel, activeDiarizationModel]),
-    ].filter((id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER);
+    ].filter(
+      (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
+    );
     if (modelIds.length === 0) return;
 
     // Debounce the check
@@ -655,7 +663,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!api?.docker?.checkModelsCached || !isRunning) return;
     const modelIds = [
       ...new Set([activeTranscriber, normalizedLiveModel, activeDiarizationModel]),
-    ].filter((id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER);
+    ].filter(
+      (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
+    );
     if (modelIds.length === 0) return;
     api.docker
       .checkModelsCached(modelIds)
@@ -1199,7 +1209,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           </label>
                           {isRunning &&
                             activeTranscriber &&
-                            activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER && (
+                            activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
+                            activeTranscriber !== DISABLED_MODEL_SENTINEL && (
                               <div className="flex items-center gap-1.5">
                                 <span
                                   className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
@@ -1218,13 +1229,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           value={mainModelSelection}
                           onChange={setMainModelSelection}
                           options={[
-                            PARAKEET_TDT_0_6B,
+                            MAIN_RECOMMENDED_MODEL,
                             CANARY_1B_V2,
                             WHISPER_LARGE_V3,
                             WHISPER_MEDIUM,
                             WHISPER_SMALL,
                             VIBEVOICE_ASR,
                             VIBEVOICE_ASR_4BIT,
+                            MODEL_DISABLED_OPTION,
                             MAIN_MODEL_CUSTOM_OPTION,
                           ]}
                           accentColor="magenta"
@@ -1250,6 +1262,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           {isRunning &&
                             activeLiveModel &&
                             activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
+                            activeLiveModel !== DISABLED_MODEL_SENTINEL &&
                             (() => {
                               const liveKey =
                                 liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
@@ -1278,6 +1291,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             WHISPER_LARGE_V3,
                             WHISPER_MEDIUM,
                             WHISPER_SMALL,
+                            MODEL_DISABLED_OPTION,
                             LIVE_MODEL_CUSTOM_OPTION,
                           ]}
                           className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"

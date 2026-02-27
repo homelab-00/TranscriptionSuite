@@ -348,31 +348,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Preload transcription model at startup
     selected_main_model = resolve_main_transcriber_model(config)
-    logger.info("Preloading transcription model...")
-    _log_time("starting model preload (GPU VRAM should spike now)...")
-    try:
-        manager.load_transcription_model()
-    except Exception as e:
-        if _is_recoverable_vibevoice_preload_error(selected_main_model, e):
-            vibevoice_feature_status = None
-            try:
-                vibevoice_feature_status = manager.get_vibevoice_asr_feature_status()
-            except Exception:
-                vibevoice_feature_status = None
-
-            warning_message, timing_label = _build_vibevoice_preload_skip_warning(
-                selected_main_model,
-                vibevoice_feature_status,
-            )
-            logger.warning(
-                warning_message,
-                exc_info=True,
-            )
-            _log_time(timing_label)
-        else:
-            raise
+    if not selected_main_model.strip():
+        logger.info("No main model selected; preload skipped (intentional disabled slot mode)")
+        _log_time("model preload skipped (main model disabled)")
     else:
-        _log_time("model preload complete")
+        logger.info("Preloading transcription model...")
+        _log_time("starting model preload (GPU VRAM should spike now)...")
+        try:
+            manager.load_transcription_model()
+        except Exception as e:
+            if _is_recoverable_vibevoice_preload_error(selected_main_model, e):
+                vibevoice_feature_status = None
+                try:
+                    vibevoice_feature_status = manager.get_vibevoice_asr_feature_status()
+                except Exception:
+                    vibevoice_feature_status = None
+
+                warning_message, timing_label = _build_vibevoice_preload_skip_warning(
+                    selected_main_model,
+                    vibevoice_feature_status,
+                )
+                logger.warning(
+                    warning_message,
+                    exc_info=True,
+                )
+                _log_time(timing_label)
+            else:
+                raise
+        else:
+            _log_time("model preload complete")
 
     # Store config in app state
     app.state.config = config

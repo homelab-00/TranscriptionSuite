@@ -29,6 +29,7 @@ DEFAULT_CONFIG_FILE = APP_ROOT / "config.yaml"
 USER_CONFIG_FILE = Path("/user-config/config.yaml")
 
 DEFAULT_MAIN_MODEL = "Systran/faster-whisper-large-v3"
+DISABLED_MODEL_SENTINEL = "__none__"
 DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 
 BOOTSTRAP_SCHEMA_VERSION = 2
@@ -90,14 +91,38 @@ def parse_int_env(name: str, default: int) -> int:
 
 def is_vibevoice_asr_model_name(model_name: str | None) -> bool:
     """Return True when *model_name* selects a VibeVoice-ASR family variant."""
-    name = (model_name or "").strip()
+    name = normalize_selected_model_name(model_name)
     return bool(_VIBEVOICE_ASR_MODEL_PATTERN.match(name))
 
 
 def is_vibevoice_asr_quantized_model_name(model_name: str | None) -> bool:
     """Return True for known quantized VibeVoice-ASR variants that need extra runtime deps."""
-    name = (model_name or "").strip()
+    name = normalize_selected_model_name(model_name)
     return bool(_VIBEVOICE_ASR_4BIT_MODEL_PATTERN.match(name))
+
+
+def normalize_selected_model_name(model_name: str | None) -> str:
+    """Return an empty string when model is unset/disabled, otherwise stripped name."""
+    name = (model_name or "").strip()
+    if not name or name == DISABLED_MODEL_SENTINEL:
+        return ""
+    return name
+
+
+def is_nemo_model_name(model_name: str | None) -> bool:
+    """Return True when *model_name* belongs to NeMo families."""
+    name = normalize_selected_model_name(model_name).lower()
+    if not name:
+        return False
+    return name.startswith("nvidia/parakeet") or name.startswith("nvidia/canary")
+
+
+def is_whisper_model_name(model_name: str | None) -> bool:
+    """Return True when *model_name* belongs to the faster-whisper family."""
+    name = normalize_selected_model_name(model_name)
+    if not name:
+        return False
+    return not is_nemo_model_name(name) and not is_vibevoice_asr_model_name(name)
 
 
 def python_abi_tag() -> str:
@@ -431,15 +456,18 @@ def extract_config_value(content: str, section: str, key: str, default: str) -> 
     return key_match.group(1).strip() or default
 
 
-def load_config_models() -> tuple[str, str]:
+def load_config_models() -> tuple[str, str, str]:
     # Environment variables take precedence (set by dashboard via docker-compose)
     env_main = os.environ.get("MAIN_TRANSCRIBER_MODEL", "").strip()
+    env_live = os.environ.get("LIVE_TRANSCRIBER_MODEL", "").strip()
     env_diar = os.environ.get("DIARIZATION_MODEL", "").strip()
 
     config_file = USER_CONFIG_FILE if USER_CONFIG_FILE.exists() else DEFAULT_CONFIG_FILE
     if not config_file.exists():
+        default_main = env_main or DEFAULT_MAIN_MODEL
         return (
-            env_main or DEFAULT_MAIN_MODEL,
+            default_main,
+            env_live or default_main,
             env_diar or DEFAULT_DIARIZATION_MODEL,
         )
 
@@ -450,13 +478,19 @@ def load_config_models() -> tuple[str, str]:
         key="model",
         default=DEFAULT_MAIN_MODEL,
     )
+    live_model = env_live or extract_config_value(
+        content,
+        section="live_transcriber",
+        key="model",
+        default=main_model,
+    )
     diar_model = env_diar or extract_config_value(
         content,
         section="diarization",
         key="model",
         default=DEFAULT_DIARIZATION_MODEL,
     )
-    return (main_model, diar_model)
+    return (main_model, live_model, diar_model)
 
 
 def collect_hf_model_cache_state(
@@ -627,6 +661,71 @@ except Exception as exc:
 def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
     status_file.parent.mkdir(parents=True, exist_ok=True)
     status_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def check_whisper_import(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    checker = """
+import importlib
+import json
+
+modules = ("faster_whisper", "ctranslate2", "whisperx")
+errors = []
+
+for module_name in modules:
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:
+        errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
+
+if errors:
+    print(
+        json.dumps(
+            {
+                "available": False,
+                "reason": "import_failed",
+                "error": " | ".join(errors),
+            }
+        )
+    )
+else:
+    print(json.dumps({"available": True, "reason": "ready"}))
+"""
+
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker],
+            text=True,
+            capture_output=True,
+            timeout=max(30, min(timeout_seconds, 300)),
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": "import_failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    output = (result.stdout or "").strip().splitlines()
+    if not output:
+        return {"available": False, "reason": "import_failed"}
+
+    try:
+        payload = json.loads(output[-1])
+    except json.JSONDecodeError:
+        return {"available": False, "reason": "import_failed"}
+
+    result_payload = {
+        "available": bool(payload.get("available", False)),
+        "reason": str(payload.get("reason", "import_failed") or "import_failed"),
+    }
+    error = payload.get("error")
+    if error:
+        result_payload["error"] = str(error)
+    return result_payload
 
 
 def check_nemo_asr_import(
@@ -897,9 +996,10 @@ def main() -> int:
         return 1
 
     model_config_start = time.perf_counter()
-    main_model, diarization_model = load_config_models()
+    main_model, live_model, diarization_model = load_config_models()
     log_timing("model config load complete", model_config_start)
     log(f"Configured main model: {main_model}")
+    log(f"Configured live model: {live_model}")
     log(f"Configured diarization model: {diarization_model}")
 
     diarization_start = time.perf_counter()
@@ -943,6 +1043,76 @@ def main() -> int:
             "Diarization capability check: unavailable "
             f"({diarization_status.get('reason', 'unavailable')})"
         )
+
+    whisper_selected = is_whisper_model_name(main_model) or is_whisper_model_name(live_model)
+    nemo_selected = is_nemo_model_name(main_model) or is_nemo_model_name(live_model)
+    vibevoice_selected = is_vibevoice_asr_model_name(main_model) or is_vibevoice_asr_model_name(
+        live_model
+    )
+
+    # ── faster-whisper family (optional) ───────────────────────────────────
+    whisper_start = time.perf_counter()
+    install_whisper = parse_bool_env("INSTALL_WHISPER", False)
+    whisper_status: dict[str, Any]
+    existing_whisper_status = check_whisper_import(
+        venv_python=venv_python,
+        timeout_seconds=timeout_seconds,
+    )
+
+    if existing_whisper_status.get("available"):
+        whisper_status = existing_whisper_status
+        if install_whisper:
+            log("faster-whisper family already installed, skipping reinstall")
+        else:
+            log("faster-whisper family already available, skipping optional install")
+    elif install_whisper:
+        log("Installing faster-whisper family dependencies...")
+        try:
+            run_command(
+                [
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    str(venv_python),
+                    "faster-whisper>=1.2.1",
+                    "ctranslate2>=4.6.2",
+                    "whisperx>=3.1.0",
+                ],
+                timeout_seconds=timeout_seconds,
+                env=build_uv_sync_env(
+                    venv_dir=venv_dir,
+                    cache_dir=cache_dir,
+                ),
+            )
+            whisper_status = check_whisper_import(
+                venv_python=venv_python,
+                timeout_seconds=timeout_seconds,
+            )
+            if whisper_status.get("available"):
+                log("faster-whisper family dependencies installed")
+            else:
+                failure_error = str(whisper_status.get("error", "")).strip()
+                log(
+                    "faster-whisper dependency installation completed but import check failed "
+                    f"({whisper_status.get('reason', 'import_failed')}"
+                    + (f": {failure_error}" if failure_error else "")
+                    + ")"
+                )
+        except Exception as exc:
+            whisper_status = {"available": False, "reason": "install_failed", "error": str(exc)}
+            log(f"faster-whisper dependency installation failed: {exc}")
+    else:
+        reason = "selected_but_not_requested" if whisper_selected else "not_requested"
+        whisper_status = {"available": False, "reason": reason}
+        if whisper_selected:
+            log(
+                "faster-whisper selected but INSTALL_WHISPER is not enabled, "
+                "skipping optional install"
+            )
+        else:
+            log("faster-whisper not requested, skipping")
+    log_timing("faster-whisper feature check complete", whisper_start)
 
     # ── NeMo toolkit (optional, for NVIDIA Parakeet ASR models) ──────────
     nemo_start = time.perf_counter()
@@ -992,11 +1162,15 @@ def main() -> int:
                     + ")"
                 )
         except Exception as exc:
-            nemo_status = {"available": False, "reason": f"install_failed: {exc}"}
+            nemo_status = {"available": False, "reason": "install_failed", "error": str(exc)}
             log(f"NeMo toolkit installation failed: {exc}")
     else:
-        nemo_status = {"available": False, "reason": "not_requested"}
-        log("NeMo not requested, skipping")
+        reason = "selected_but_not_requested" if nemo_selected else "not_requested"
+        nemo_status = {"available": False, "reason": reason}
+        if nemo_selected:
+            log("NeMo model selected but INSTALL_NEMO is not enabled, skipping optional install")
+        else:
+            log("NeMo not requested, skipping")
     log_timing("NeMo feature check complete", nemo_start)
 
     # ── VibeVoice-ASR (optional, experimental in-process backend) ───────────
@@ -1077,7 +1251,11 @@ def main() -> int:
                         + ")"
                     )
             except Exception as exc:
-                vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}
+                vibevoice_asr_status = {
+                    "available": False,
+                    "reason": "install_failed",
+                    "error": str(exc),
+                }
                 log(f"VibeVoice-ASR quantization runtime dependency installation failed: {exc}")
             else:
                 if vibevoice_quant_runtime_status.get("available"):
@@ -1149,10 +1327,13 @@ def main() -> int:
                     + ")"
                 )
         except Exception as exc:
-            vibevoice_asr_status = {"available": False, "reason": f"install_failed: {exc}"}
+            vibevoice_asr_status = {
+                "available": False,
+                "reason": "install_failed",
+                "error": str(exc),
+            }
             log(f"VibeVoice-ASR installation failed: {exc}")
     else:
-        vibevoice_selected = is_vibevoice_asr_model_name(main_model)
         reason = "selected_but_not_requested" if vibevoice_selected else "not_requested"
         vibevoice_asr_status = {"available": False, "reason": reason}
         if vibevoice_selected:
@@ -1177,6 +1358,7 @@ def main() -> int:
             },
             "features": {
                 "diarization": diarization_status,
+                "whisper": whisper_status,
                 "nemo": nemo_status,
                 "vibevoice_asr": vibevoice_asr_status,
             },

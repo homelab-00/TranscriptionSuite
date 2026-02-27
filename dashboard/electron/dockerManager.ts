@@ -128,6 +128,7 @@ export interface OptionalDependencyBootstrapFeatureStatus {
 
 export interface OptionalDependencyBootstrapStatus {
   source: 'runtime-volume-bootstrap-status';
+  whisper?: OptionalDependencyBootstrapFeatureStatus;
   nemo?: OptionalDependencyBootstrapFeatureStatus;
   vibevoiceAsr?: OptionalDependencyBootstrapFeatureStatus;
 }
@@ -144,6 +145,7 @@ export interface StartContainerOptions {
   tlsEnv?: Record<string, string>;
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
+  installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
   mainTranscriberModel?: string;
@@ -535,6 +537,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     tlsEnv,
     hfToken,
     hfTokenDecision,
+    installWhisper,
     installNemo,
     installVibeVoiceAsr,
     mainTranscriberModel,
@@ -583,6 +586,12 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
   if (normalizedHfDecision) {
     envUpdates['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
+  }
+
+  if (installWhisper !== undefined) {
+    const whisperValue = installWhisper ? 'true' : 'false';
+    composeEnv['INSTALL_WHISPER'] = whisperValue;
+    envUpdates['INSTALL_WHISPER'] = whisperValue;
   }
 
   // Pass NeMo install preference to the container for Parakeet ASR support
@@ -899,19 +908,22 @@ async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependen
     const statusPath = path.join(mountpoint, 'bootstrap-status.json');
     const parsed = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as {
       features?: {
+        whisper?: unknown;
         nemo?: unknown;
         vibevoice_asr?: unknown;
       };
     };
 
+    const whisper = parseOptionalDependencyBootstrapFeature(parsed.features?.whisper);
     const nemo = parseOptionalDependencyBootstrapFeature(parsed.features?.nemo);
     const vibevoiceAsr = parseOptionalDependencyBootstrapFeature(parsed.features?.vibevoice_asr);
-    if (!nemo && !vibevoiceAsr) {
+    if (!whisper && !nemo && !vibevoiceAsr) {
       return null;
     }
 
     return {
       source: 'runtime-volume-bootstrap-status',
+      ...(whisper ? { whisper } : {}),
       ...(nemo ? { nemo } : {}),
       ...(vibevoiceAsr ? { vibevoiceAsr } : {}),
     };

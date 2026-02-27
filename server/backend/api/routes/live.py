@@ -44,7 +44,10 @@ def is_live_mode_active() -> bool:
 
 def is_live_mode_model_supported(model_name: str) -> bool:
     """Live Mode only supports faster-whisper (whisper backend) in v1."""
-    return detect_backend_type(model_name) == "whisper"
+    name = (model_name or "").strip()
+    if not name or name == "__none__":
+        return False
+    return detect_backend_type(name) == "whisper"
 
 
 class LiveModeSession:
@@ -166,6 +169,19 @@ class LiveModeSession:
                     config.post_speech_silence_duration = float(
                         config_data["post_speech_silence_duration"]
                     )
+
+            if not config.model.strip():
+                await self.send_message(
+                    "error",
+                    {
+                        "status_code": 409,
+                        "message": (
+                            "Live model not selected. Choose a Live Mode model in Server settings "
+                            "before starting Live Mode."
+                        ),
+                    },
+                )
+                return False
 
             if not is_live_mode_model_supported(config.model):
                 backend_type = detect_backend_type(config.model)

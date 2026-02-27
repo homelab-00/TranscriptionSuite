@@ -46,6 +46,7 @@ import {
   isWhisperModel,
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
+import { isModelDisabled } from '../../src/services/modelSelection';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -252,7 +253,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);
   const canTranslateLive = supportsTranslation(activeLiveModel);
-  const liveModeWhisperOnlyCompatible = isWhisperModel(activeLiveModel);
+  const mainModelDisabled = isModelDisabled(activeModel);
+  const liveModelDisabled = isModelDisabled(activeLiveModel);
+  const liveModeWhisperOnlyCompatible = !liveModelDisabled && isWhisperModel(activeLiveModel);
   const liveModeUnsupportedMessage =
     'Live Mode only supports faster-whisper models (RealtimeSTT path) in v1. Change the Live Mode model in Server settings.';
 
@@ -535,7 +538,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription.status === 'error';
 
   const handleStartRecording = useCallback(() => {
-    if (!canStartRecording) return;
+    if (!canStartRecording || mainModelDisabled) return;
     transcription.reset();
     const isSystemAudio = audioSource === 'system';
     const mainTranslateActive = isCanaryMainBidi ? mainBidiTarget !== 'Off' : mainTranslate;
@@ -561,6 +564,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     sysDevice,
     desktopSourceIds,
     resolveLanguage,
+    mainModelDisabled,
   ]);
 
   const handleStopRecording = useCallback(() => {
@@ -598,7 +602,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const handleLiveToggle = useCallback(
     (checked: boolean) => {
       if (checked) {
-        if (!liveModeWhisperOnlyCompatible) return;
+        if (liveModelDisabled || !liveModeWhisperOnlyCompatible) return;
         const isSystemAudio = audioSource === 'system';
         const liveTranslateActive = isCanaryLiveBidi ? liveBidiTarget !== 'Off' : liveTranslate;
         const liveTranslateTarget = isCanaryLiveBidi
@@ -638,6 +642,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       sysDevice,
       desktopSourceIds,
       resolveLanguage,
+      liveModelDisabled,
     ],
   );
 
@@ -1244,6 +1249,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                   {/* Record / Stop Button */}
                   <div className="flex items-center gap-3 pt-1">
+                    {mainModelDisabled && (
+                      <div className="w-full rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                        Main model not selected.
+                      </div>
+                    )}
                     {canStartRecording ? (
                       <Button
                         variant="primary"
@@ -1256,7 +1266,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           )
                         }
                         onClick={handleStartRecording}
-                        disabled={isLive || !clientRunning || !serverConnection.ready}
+                        disabled={
+                          isLive || !clientRunning || !serverConnection.ready || mainModelDisabled
+                        }
                       >
                         {isConnecting ? 'Connecting...' : 'Start Recording'}
                       </Button>
@@ -1633,6 +1645,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         !isLive &&
                         (!clientRunning ||
                           !serverConnection.ready ||
+                          liveModelDisabled ||
                           !liveModeWhisperOnlyCompatible)
                       }
                     />
@@ -1694,7 +1707,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                 {/* Transcript Area */}
                 <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
-                  {!liveModeWhisperOnlyCompatible && (
+                  {liveModelDisabled && (
+                    <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
+                  )}
+                  {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
                     <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
                   )}
                   {isLive || live.sentences.length > 0 || live.partial ? (

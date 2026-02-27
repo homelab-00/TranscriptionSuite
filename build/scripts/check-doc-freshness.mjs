@@ -15,7 +15,7 @@
 
 import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
-import { resolve, relative } from "node:path";
+import { resolve} from "node:path";
 
 // ---------------------------------------------------------------------------
 // Minimal YAML parser (handles the flat structure of .doc-freshness.yaml

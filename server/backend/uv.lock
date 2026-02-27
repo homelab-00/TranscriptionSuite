@@ -3826,9 +3826,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "alembic" },
-    { name = "ctranslate2" },
     { name = "fastapi" },
-    { name = "faster-whisper" },
     { name = "ffmpeg-python" },
     { name = "filelock" },
     { name = "httpx" },
@@ -3850,7 +3848,6 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
     { name = "webrtcvad" },
     { name = "websockets" },
-    { name = "whisperx" },
 ]
 
 [package.optional-dependencies]
@@ -3859,6 +3856,11 @@ nemo = [
 ]
 vibevoice-asr = [
     { name = "vibevoice" },
+]
+whisper = [
+    { name = "ctranslate2" },
+    { name = "faster-whisper" },
+    { name = "whisperx" },
 ]
 
 [package.dev-dependencies]
@@ -3872,9 +3874,9 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.3" },
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "alembic", specifier = ">=1.17.1" },
-    { name = "ctranslate2", specifier = ">=4.6.2" },
+    { name = "ctranslate2", marker = "extra == 'whisper'", specifier = ">=4.6.2" },
     { name = "fastapi", specifier = ">=0.128.0" },
-    { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "faster-whisper", marker = "extra == 'whisper'", specifier = ">=1.2.1" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "filelock", specifier = ">=3.20.1" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -3897,9 +3899,9 @@ requires-dist = [
     { name = "vibevoice", marker = "extra == 'vibevoice-asr'", git = "https://github.com/microsoft/VibeVoice.git?rev=1807b858d4f7dffdd286249a01616c243e488c9e" },
     { name = "webrtcvad", specifier = ">=2.0.10" },
     { name = "websockets", specifier = ">=15.0.1" },
-    { name = "whisperx", specifier = ">=3.1.0" },
+    { name = "whisperx", marker = "extra == 'whisper'", specifier = ">=3.1.0" },
 ]
-provides-extras = ["nemo", "vibevoice-asr"]
+provides-extras = ["whisper", "nemo", "vibevoice-asr"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.2" }]

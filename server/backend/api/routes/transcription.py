@@ -15,12 +15,24 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
+from server.config import resolve_main_transcriber_model
 from server.core.model_manager import TranscriptionCancelledError
 from server.core.stt.backends.base import STTBackend
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _assert_main_model_selected(request: Request) -> None:
+    config = request.app.state.config
+    model_name = resolve_main_transcriber_model(config)
+    if model_name.strip():
+        return
+    raise HTTPException(
+        status_code=409,
+        detail="Main model not selected. Choose a main model in Server settings before transcription.",
+    )
 
 
 class TranscriptionRequest(BaseModel):
@@ -77,6 +89,8 @@ async def transcribe_audio(
 
     Returns 409 Conflict if another transcription job is already running.
     """
+    _assert_main_model_selected(request)
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -281,6 +295,8 @@ async def transcribe_quick(
 
     Returns 409 Conflict if another transcription job is already running.
     """
+    _assert_main_model_selected(request)
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 

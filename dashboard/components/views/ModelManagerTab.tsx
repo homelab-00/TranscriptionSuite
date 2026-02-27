@@ -20,12 +20,15 @@ import {
   type ModelRole,
 } from '../../src/services/modelRegistry';
 import { isWhisperModel } from '../../src/services/modelCapabilities';
+import {
+  MAIN_MODEL_CUSTOM_OPTION,
+  LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
+  MODEL_DISABLED_OPTION,
+} from '../../src/services/modelSelection';
 
 // ─── Sentinel constants (must match ServerView) ─────────────────────────────
 
-const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
-const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
-const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 
@@ -502,11 +505,13 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
 
   // Resolve which model IDs are currently selected for each role
   const resolveActiveMain = (): string => {
+    if (mainModelSelection === MODEL_DISABLED_OPTION) return '';
     if (mainModelSelection === MAIN_MODEL_CUSTOM_OPTION) return mainCustomModel.trim();
     return mainModelSelection;
   };
 
   const resolveActiveLive = (): string => {
+    if (liveModelSelection === MODEL_DISABLED_OPTION) return '';
     if (liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION) return resolveActiveMain();
     if (liveModelSelection === LIVE_MODEL_CUSTOM_OPTION) return liveCustomModel.trim();
     return liveModelSelection;

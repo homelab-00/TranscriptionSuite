@@ -81,12 +81,36 @@ def test_get_type_error_message_quality():
     """Test that TypeError messages are helpful for debugging."""
     cfg = config.ServerConfig()
 
-    try:
+    with pytest.raises(TypeError) as exc_info:
         cfg.get("audio_processing", {})
-        assert False, "Should have raised TypeError"
-    except TypeError as e:
-        error_msg = str(e)
-        # Check that error message contains helpful information
-        assert "must be strings" in error_msg
-        assert "default=" in error_msg
-        assert "dict" in error_msg
+
+    error_msg = str(exc_info.value)
+    # Check that error message contains helpful information
+    assert "must be strings" in error_msg
+    assert "default=" in error_msg
+    assert "dict" in error_msg
+
+
+def test_resolve_main_transcriber_model_supports_disabled_sentinel():
+    payload = {
+        "main_transcriber": {"model": config.DISABLED_MODEL_SENTINEL},
+        "transcription": {"model": "Systran/faster-whisper-large-v3"},
+    }
+    assert config.resolve_main_transcriber_model(payload) == ""
+
+
+def test_resolve_live_transcriber_model_supports_disabled_sentinel():
+    payload = {
+        "main_transcriber": {"model": "nvidia/parakeet-tdt-0.6b-v3"},
+        "live_transcriber": {"model": config.DISABLED_MODEL_SENTINEL},
+    }
+    assert config.resolve_live_transcriber_model(payload) == ""
+
+
+def test_resolve_live_transcriber_model_uses_disabled_main_fallback():
+    payload = {
+        "main_transcriber": {"model": config.DISABLED_MODEL_SENTINEL},
+        "live_transcriber": {},
+    }
+    assert config.resolve_main_transcriber_model(payload) == ""
+    assert config.resolve_live_transcriber_model(payload) == ""

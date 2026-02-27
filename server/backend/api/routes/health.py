@@ -34,14 +34,19 @@ async def readiness_check(request: Request) -> JSONResponse:
         status = model_manager.get_status()
 
         # Check if transcription model is loaded
-        is_ready = status.get("transcription", {}).get("loaded", False)
+        transcription_status = status.get("transcription", {}) if isinstance(status, dict) else {}
+        is_loaded = bool(transcription_status.get("loaded", False))
+        main_model_disabled = bool(transcription_status.get("disabled", False))
+        is_ready = is_loaded or main_model_disabled
 
         # Server is also considered ready when Live Mode is active (main
         # model is intentionally unloaded to free VRAM for the live engine).
         if is_ready or is_live_mode_active():
             return JSONResponse(
                 content={
-                    "status": "ready_live_mode" if not is_ready else "ready",
+                    "status": "ready_live_mode"
+                    if (not is_ready and is_live_mode_active())
+                    else "ready",
                     "models": status,
                 },
                 status_code=200,
@@ -69,7 +74,10 @@ async def get_status(request: Request) -> dict[str, Any]:
     try:
         model_manager = request.app.state.model_manager
         status = model_manager.get_status()
-        is_ready = status.get("transcription", {}).get("loaded", False)
+        transcription_status = status.get("transcription", {}) if isinstance(status, dict) else {}
+        is_loaded = bool(transcription_status.get("loaded", False))
+        main_model_disabled = bool(transcription_status.get("disabled", False))
+        is_ready = is_loaded or main_model_disabled
     except AttributeError:
         status = {"error": "Model manager not initialized"}
         is_ready = False

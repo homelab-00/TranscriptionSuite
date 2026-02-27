@@ -257,7 +257,7 @@ TranscriptionSuite/
 │   │   ├── shortcutManager.ts    # Global keyboard shortcuts (system-wide)
 │   │   ├── waylandShortcuts.ts   # Wayland portal integration for global shortcuts
 │   │   ├── pasteAtCursor.ts      # Paste-at-cursor feature (xdotool/wtype/platform)
-│   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons
+│   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons (recording/live/model controls; no server start/stop)
 │   │   ├── updateManager.ts      # Opt-in update checker (app via GitHub, image via GHCR)
 │   │   └── tsconfig.json         # TypeScript config for main process
 │   ├── src/                      # Shared source (API, config, hooks, services)
@@ -271,6 +271,7 @@ TranscriptionSuite/
 │   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
 │   │   │   ├── modelCapabilities.ts # Multi-backend capability detection (translation, live mode)
 │   │   │   ├── modelRegistry.ts  # Model family registry (Whisper, NeMo, VibeVoice-ASR)
+│   │   │   ├── modelSelection.ts # Main/live model selection + family/dependency gating helpers
 │   │   │   └── clientDebugLog.ts # Client-side debug logging service
 │   │   ├── index.css             # Tailwind CSS + global styles
 │   │   └── types/
@@ -946,7 +947,7 @@ server/backend/
 │   └── routes/                   # API endpoint modules
 ├── core/
 │   ├── diarization_engine.py     # PyAnnote wrapper
-│   ├── model_manager.py          # Model lifecycle, job tracking
+│   ├── model_manager.py          # Model lifecycle, job tracking, feature availability + disabled-slot state
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
 │   ├── live_engine.py            # Live Mode engine (Whisper-only in v1)
 │   └── stt/                      # Speech-to-text subsystem
@@ -1023,13 +1024,13 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle |
-| `preload.ts` | Context bridge (safe IPC between renderer and main) |
-| `dockerManager.ts` | Docker CLI wrapper for container/image management |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow |
+| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing |
+| `dockerManager.ts` | Docker CLI wrapper for container/image management and additive optional-family install env updates |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
 | `pasteAtCursor.ts` | Paste-at-cursor feature (xdotool/wtype/platform dispatch) |
-| `trayManager.ts` | System tray with 11 state-aware icons, context menu, and runtime icon tinting |
+| `trayManager.ts` | System tray with 11 state-aware icons and recording/live/model controls (server start/stop removed) |
 | `updateManager.ts` | Opt-in update checker for app releases (GitHub) and server image (GHCR) |
 
 **Services (`src/services/`):**
@@ -1040,6 +1041,7 @@ npm run dev:electron
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
 | `modelCapabilities.ts` | Multi-backend capability detection (translation, live mode support) |
 | `modelRegistry.ts` | Model family registry (Whisper, NeMo Parakeet/Canary, VibeVoice-ASR) |
+| `modelSelection.ts` | Shared model-selection constants, disabled sentinel mapping, and family/dependency resolution |
 | `clientDebugLog.ts` | Client-side debug logging with structured log capture |
 
 **React Hooks (`src/hooks/`):**
@@ -1047,7 +1049,7 @@ npm run dev:electron
 | Hook | Purpose |
 |------|---------|
 | `useServerStatus.ts` | Poll server health/status, connection state |
-| `useDocker.ts` | Docker container control via IPC (start/stop/status) |
+| `useDocker.ts` | Docker container control via IPC (start/stop/status) with onboarding install flags (`installWhisper`, `installNemo`, `installVibeVoiceAsr`) |
 | `useTranscription.ts` | Real-time WebSocket transcription session |
 | `useLiveMode.ts` | Live Mode continuous transcription |
 | `useRecording.ts` | Fetch/manage individual recordings |
@@ -1092,10 +1094,10 @@ npm run dev:electron
 
 | View | Purpose |
 |------|---------|
-| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications. Layout order: Main Transcription card first, Audio Configuration below |
-| `ModelManagerTab.tsx` | Model Manager: browse by family, view capabilities, download/delete, cache status |
+| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications. Disables Start Recording when main model is disabled and Live Mode when live model is disabled |
+| `ModelManagerTab.tsx` | Model Manager: browse by family, view capabilities, download/delete, cache status; treats `None (Disabled)` slot selections as intentionally empty |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
-| `ServerView.tsx` | Docker server management: image selection, container control |
+| `ServerView.tsx` | Docker server management: image selection, container control, persisted main/live model selection including `None (Disabled)` |
 | `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
 | `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
@@ -1190,10 +1192,12 @@ The dashboard handles server busy conditions automatically:
 
 ### 9.6 Model Management
 
-The dashboard provides controls for managing GPU memory:
-- Automatically disabled when server is stopped or becomes unhealthy
-- Checks server for active transcriptions before unloading
-- Returns HTTP 409 if server is busy
+The dashboard now uses model-first startup and additive dependency installs:
+- First container startup opens onboarding to select Main and Live models before install/start work begins
+- Recommended defaults are `nvidia/parakeet-tdt-0.6b-v3` (Main) and `Systran/faster-whisper-medium` (Live)
+- Both slots support intentional disable via `None (Disabled)` (`__none__` in backend env)
+- Dependency families are resolved from selected models: `whisper`, `nemo`, `vibevoice`
+- If selected families are missing, one combined Install/Cancel dialog appears; install flags are only set to `true` for missing families (additive-only, no auto-remove)
 
 **Model Manager Tab (`ModelManagerTab.tsx`):**
 - Browse STT models grouped by family (Whisper, NeMo Parakeet, NeMo Canary, VibeVoice-ASR)
@@ -1201,10 +1205,11 @@ The dashboard provides controls for managing GPU memory:
 - Check HuggingFace cache status for each model (downloaded / not downloaded)
 - Download or delete models directly from the UI
 - Model family registry powered by `modelRegistry.ts`
+- Disabled slot selections are excluded from active role resolution
 
 **Live Mode Model Swapping:**
 - When Live Mode starts, main transcription model is automatically unloaded to free VRAM
-- Live Mode defaults to `Systran/faster-whisper-medium` (hardcoded in `config.yaml`), not inherited from main_transcriber
+- Live Mode defaults to `Systran/faster-whisper-medium` for onboarding defaults and remains whisper-only in v1
 - Live Mode v1 supports only Whisper backend models
 - When Live Mode stops, main model is reloaded for normal transcription
 - This ensures efficient VRAM usage on consumer GPUs (e.g., RTX 3060 12GB)
@@ -1700,10 +1705,9 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 
 - Python 3.13
 - FastAPI + Uvicorn
-- faster-whisper (CTranslate2 backend)
-- WhisperX 3.1.0+ (faster-whisper + wav2vec2 alignment + diarization)
-- NVIDIA NeMo Toolkit (optional; Parakeet/Canary ASR backends)
-- VibeVoice-ASR (optional, experimental; Microsoft multimodal ASR)
+- Optional Whisper family (`[project.optional-dependencies].whisper`): faster-whisper + CTranslate2 + WhisperX
+- NVIDIA NeMo Toolkit (optional extra; Parakeet/Canary ASR backends)
+- VibeVoice-ASR (optional extra, experimental; Microsoft multimodal ASR)
 - PyAnnote Audio 4.0.3+ (speaker diarization)
 - PyTorch 2.8.0 + TorchAudio 2.8.0
 - SQLite with FTS5

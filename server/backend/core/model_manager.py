@@ -192,6 +192,8 @@ class ModelManager:
         self._realtime_engines: dict[str, RealtimeTranscriptionEngine] = {}
         self._diarization_feature_available: bool = False
         self._diarization_feature_reason: str = "token_missing"
+        self._whisper_feature_available: bool = False
+        self._whisper_feature_reason: str = "not_requested"
         self._nemo_feature_available: bool = False
         self._nemo_feature_reason: str = "not_requested"
         self._nemo_import_thread: threading.Thread | None = None
@@ -212,6 +214,7 @@ class ModelManager:
 
         # Initialize feature status from bootstrap output if available.
         self._initialize_diarization_feature_status()
+        self._initialize_whisper_feature_status()
         self._initialize_nemo_feature_status()
         self._initialize_vibevoice_asr_feature_status()
 
@@ -275,6 +278,38 @@ class ModelManager:
 
         self._nemo_feature_available = False
         self._nemo_feature_reason = "not_requested"
+
+    def _initialize_whisper_feature_status(self) -> None:
+        """Initialize faster-whisper feature availability from bootstrap state/env."""
+        status_file = os.environ.get("BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json")
+        try:
+            import json
+            from pathlib import Path
+
+            path = Path(status_file)
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                whisper = payload.get("features", {}).get("whisper", {})
+                available = bool(whisper.get("available", False))
+                reason = str(whisper.get("reason", "not_requested") or "not_requested")
+                self._whisper_feature_available = available
+                self._whisper_feature_reason = reason
+                logger.info(
+                    "Loaded faster-whisper feature status from bootstrap: "
+                    f"available={available}, reason={reason}"
+                )
+                return
+        except Exception as e:
+            logger.debug(f"Could not load faster-whisper feature status from bootstrap: {e}")
+
+        install_requested = os.environ.get("INSTALL_WHISPER", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self._whisper_feature_available = False
+        self._whisper_feature_reason = "requested" if install_requested else "not_requested"
 
     def _initialize_vibevoice_asr_feature_status(self) -> None:
         """Initialize VibeVoice-ASR feature availability from bootstrap state/env."""
@@ -389,6 +424,17 @@ class ModelManager:
             status["error"] = self._vibevoice_asr_feature_error
         return status
 
+    def get_whisper_feature_status(self) -> dict[str, Any]:
+        """Return faster-whisper capability metadata for API clients."""
+        return {
+            "available": self._whisper_feature_available,
+            "reason": self._whisper_feature_reason,
+        }
+
+    def is_main_model_disabled(self) -> bool:
+        """Return True when main transcription slot is intentionally disabled."""
+        return not self.main_model_name.strip()
+
     @property
     def main_model_name(self) -> str:
         """Get the configured main transcription model name."""
@@ -446,10 +492,15 @@ class ModelManager:
 
         main_cfg = self.config.get("main_transcriber", {})
         trans_opts = self.config.get("longform_recording", {})
+        resolved_main_model = resolve_main_transcriber_model(self.config)
+        if not resolved_main_model.strip():
+            raise RuntimeError(
+                "Main transcriber model is disabled; select a model before recording."
+            )
 
         return AudioToTextRecorder(
             instance_name="file_transcriber",
-            model=main_cfg.get("model") or resolve_main_transcriber_model(self.config),
+            model=resolved_main_model,
             device=main_cfg.get("device", "cuda"),
             compute_type=main_cfg.get("compute_type", "default"),
             beam_size=main_cfg.get("beam_size", 5),
@@ -672,6 +723,8 @@ class ModelManager:
             "gpu_available": self.gpu_available,
             "gpu_memory": get_gpu_memory_info() if self.gpu_available else None,
             "transcription": {
+                "selected_model": self.main_model_name,
+                "disabled": self.is_main_model_disabled(),
                 "loaded": self._transcription_engine is not None
                 and self._transcription_engine.is_loaded(),
                 "config": self._transcription_engine.get_status()
@@ -688,6 +741,7 @@ class ModelManager:
             "job_tracker": self.job_tracker.get_status(),
             "features": {
                 "diarization": self.get_diarization_feature_status(),
+                "whisper": self.get_whisper_feature_status(),
                 "nemo": {
                     "available": self._nemo_feature_available,
                     "reason": self._nemo_feature_reason,

@@ -39,6 +39,7 @@ export interface StartContainerOptions {
   tlsEnv?: Record<string, string>;
   hfToken?: string;
   hfTokenDecision?: HfTokenDecision;
+  installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
   mainTranscriberModel?: string;
@@ -99,6 +100,7 @@ export interface ElectronAPI {
     volumeExists: (name: string) => Promise<boolean>;
     readOptionalDependencyBootstrapStatus: () => Promise<{
       source: 'runtime-volume-bootstrap-status';
+      whisper?: { available: boolean; reason?: string };
       nemo?: { available: boolean; reason?: string };
       vibevoiceAsr?: { available: boolean; reason?: string };
     } | null>;
@@ -201,6 +203,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readOptionalDependencyBootstrapStatus: () =>
       ipcRenderer.invoke('docker:readOptionalDependencyBootstrapStatus') as Promise<{
         source: 'runtime-volume-bootstrap-status';
+        whisper?: { available: boolean; reason?: string };
         nemo?: { available: boolean; reason?: string };
         vibevoiceAsr?: { available: boolean; reason?: string };
       } | null>,

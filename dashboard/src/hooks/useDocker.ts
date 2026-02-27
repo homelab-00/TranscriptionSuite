@@ -39,6 +39,7 @@ export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
 export interface StartContainerOnboardingOptions {
   hfTokenDecision?: HfTokenDecision;
+  installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
   mainTranscriberModel?: string;

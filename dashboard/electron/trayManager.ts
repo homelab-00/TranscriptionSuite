@@ -121,8 +121,6 @@ export class TrayManager {
 
   /** IPC callbacks — set via setActions() so main.ts controls Docker / renderer */
   private actions: {
-    startServer?: () => Promise<void>;
-    stopServer?: () => Promise<void>;
     startRecording?: () => void;
     stopRecording?: () => void;
     cancelRecording?: () => void;
@@ -397,16 +395,8 @@ export class TrayManager {
       this.tray.setContextMenu(null as unknown as Electron.Menu);
     }
 
-    const {
-      serverRunning,
-      isRecording,
-      isLive,
-      isMuted,
-      modelsLoaded,
-      isLocalConnection,
-      canCancel,
-      isStandby,
-    } = this.menuState;
+    const { isRecording, isLive, isMuted, modelsLoaded, isLocalConnection, canCancel, isStandby } =
+      this.menuState;
 
     const win = this.getWindow();
     const windowVisible = win?.isVisible() ?? false;
@@ -505,22 +495,6 @@ export class TrayManager {
         this.rebuildMenu();
       },
     });
-
-    template.push({ type: 'separator' });
-
-    // ── Server control ──────────────────────────────────────────────────
-
-    template.push(
-      serverRunning
-        ? {
-            label: 'Stop Server',
-            click: () => this.actions.stopServer?.(),
-          }
-        : {
-            label: 'Start Server',
-            click: () => this.actions.startServer?.(),
-          },
-    );
 
     template.push({ type: 'separator' });
 

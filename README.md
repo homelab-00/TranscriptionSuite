@@ -274,25 +274,29 @@ The Dashboard features **sidebar navigation** with these main views:
   - Main Transcription controls (language, translate, record/stop) and Audio Configuration below
   - Audio visualizer with amplitude zoom (+/− buttons, hover to reveal)
   - Live Mode toggle and real-time transcript display
+  - Explicit disabled-slot messaging when Main and/or Live model is set to `None (Disabled)`
   - Transcription output with copy/download buttons
   - Processing logs
 - **Model Manager**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
-- **Server**: Docker server management (container, images, volumes)
+- **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live
 - **Settings**: Connection, audio, diarization, notebook, app behaviour, and HuggingFace token management
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
 recording state (11 distinct states), and the context menu provides quick controls
-(start/stop server, open dashboard, transcribe file, quit). Left-click the tray icon to
-toggle recording: starts a recording when idle/standby, or stops and transcribes if already
-recording. On Windows/macOS, middle-click also stops and transcribes.
+(recording controls, Live Mode, model reload/unload, open dashboard, transcribe file, quit).
+Server start/stop is intentionally handled in the dashboard UI flow so model/dependency gating
+always runs first. Left-click the tray icon toggles recording: starts a recording when
+idle/standby, or stops and transcribes if already recording. On Windows/macOS, middle-click
+also stops and transcribes.
 
 > **Note:** "Transcribe File" from the system tray always uses pure transcription (no diarization), regardless of main transcriber settings.
 
 > **GNOME note:** GNOME desktop requires the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension for system tray support.
 
-**Setup Checklist**: On first launch a setup checklist guides you through Docker verification,
-GPU detection, and HuggingFace token entry.
+**Setup Checklist**: On first launch a setup checklist guides you through Docker verification and
+GPU detection. Server startup now begins with model-first onboarding (Main + Live selection with
+recommended defaults), then prompts for HuggingFace token/dependency installs only when needed.
 
 **Update Checker**: Opt-in background checks for new app releases (GitHub) and server Docker
 image updates (GHCR). Configurable interval in Settings.
@@ -474,5 +478,6 @@ GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](LICENSE).
 - [WhisperX](https://github.com/m-bain/whisperX)
 - [NVIDIA NeMo](https://github.com/NVIDIA/NeMo)
 - [VibeVoice-ASR](https://github.com/microsoft/VibeVoice)
+- [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [Tailscale](https://tailscale.com/)

@@ -445,7 +445,11 @@ def test_main_reuses_cached_diarization_status_when_preload_key_matches(
     monkeypatch.setattr(
         module,
         "load_config_models",
-        lambda: ("Systran/faster-whisper-large-v3", module.DEFAULT_DIARIZATION_MODEL),
+        lambda: (
+            "Systran/faster-whisper-large-v3",
+            "Systran/faster-whisper-large-v3",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -534,6 +538,36 @@ def test_vibevoice_model_family_detection_helpers() -> None:
     )  # unknown suffix; no quant extras
 
 
+def test_whisper_model_family_detection_helpers() -> None:
+    module = _load_bootstrap_module()
+
+    assert module.is_whisper_model_name("Systran/faster-whisper-large-v3") is True
+    assert module.is_whisper_model_name("nvidia/parakeet-tdt-0.6b-v3") is False
+    assert module.is_whisper_model_name("microsoft/VibeVoice-ASR") is False
+    assert module.is_whisper_model_name("__none__") is False
+    assert module.is_whisper_model_name("") is False
+
+
+def test_check_whisper_import_returns_ready_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        return subprocess.CompletedProcess(
+            args=["python", "-c", "probe"],
+            returncode=0,
+            stdout='{"available": true, "reason": "ready"}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    status = module.check_whisper_import(Path("/tmp/fake-python"), timeout_seconds=30)
+    assert status == {"available": True, "reason": "ready"}
+
+
 def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -564,7 +598,11 @@ def test_main_persists_vibevoice_import_failure_details_in_bootstrap_status(
     monkeypatch.setattr(
         module,
         "load_config_models",
-        lambda: ("microsoft/VibeVoice-ASR", module.DEFAULT_DIARIZATION_MODEL),
+        lambda: (
+            "microsoft/VibeVoice-ASR",
+            "microsoft/VibeVoice-ASR",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -658,7 +696,11 @@ def test_main_installs_vibevoice_quant_runtime_deps_for_4bit_model(
     monkeypatch.setattr(
         module,
         "load_config_models",
-        lambda: ("scerz/VibeVoice-ASR-4bit", module.DEFAULT_DIARIZATION_MODEL),
+        lambda: (
+            "scerz/VibeVoice-ASR-4bit",
+            "scerz/VibeVoice-ASR-4bit",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -767,7 +809,11 @@ def test_main_installs_missing_quant_runtime_deps_when_vibevoice_core_already_pr
     monkeypatch.setattr(
         module,
         "load_config_models",
-        lambda: ("scerz/VibeVoice-ASR-4bit", module.DEFAULT_DIARIZATION_MODEL),
+        lambda: (
+            "scerz/VibeVoice-ASR-4bit",
+            "scerz/VibeVoice-ASR-4bit",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -863,7 +909,11 @@ def test_main_reports_existing_optional_dependency_installs_without_install_flag
     monkeypatch.setattr(
         module,
         "load_config_models",
-        lambda: ("Systran/faster-whisper-large-v3", module.DEFAULT_DIARIZATION_MODEL),
+        lambda: (
+            "Systran/faster-whisper-large-v3",
+            "Systran/faster-whisper-large-v3",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -878,6 +928,11 @@ def test_main_reports_existing_optional_dependency_installs_without_install_flag
     monkeypatch.setattr(
         module,
         "check_nemo_asr_import",
+        lambda **_: {"available": True, "reason": "ready"},
+    )
+    monkeypatch.setattr(
+        module,
+        "check_whisper_import",
         lambda **_: {"available": True, "reason": "ready"},
     )
     monkeypatch.setattr(
@@ -902,8 +957,11 @@ def test_main_reports_existing_optional_dependency_installs_without_install_flag
     payload = captured_status.get("payload")
     assert isinstance(payload, dict)
     features = payload["features"]  # type: ignore[index]
+    whisper = features["whisper"]  # type: ignore[index]
     nemo = features["nemo"]  # type: ignore[index]
     vibevoice = features["vibevoice_asr"]  # type: ignore[index]
+    assert whisper["available"] is True  # type: ignore[index]
+    assert whisper["reason"] == "ready"  # type: ignore[index]
     assert nemo["available"] is True  # type: ignore[index]
     assert nemo["reason"] == "ready"  # type: ignore[index]
     assert vibevoice["available"] is True  # type: ignore[index]

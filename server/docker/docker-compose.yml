@@ -76,6 +76,8 @@ services:
       - MAIN_TRANSCRIBER_MODEL=${MAIN_TRANSCRIBER_MODEL:-}
       - LIVE_TRANSCRIBER_MODEL=${LIVE_TRANSCRIBER_MODEL:-}
       - DIARIZATION_MODEL=${DIARIZATION_MODEL:-}
+      # faster-whisper backend support (optional family install, additive only)
+      - INSTALL_WHISPER=${INSTALL_WHISPER:-false}
       # NeMo toolkit for NVIDIA Parakeet ASR models (optional, large dependency)
       - INSTALL_NEMO=${INSTALL_NEMO:-false}
       # VibeVoice-ASR backend support (optional, experimental in-process backend)

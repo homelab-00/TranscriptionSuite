@@ -29,11 +29,8 @@ dependencies = [
     "websockets>=15.0.1",
 
     # Core ML / Transcription
-    "faster-whisper>=1.2.1",
-    "ctranslate2>=4.6.2",
     "torch>=2.8.0",          # Required by PyAnnote 4.0.3
     "torchaudio>=2.8.0",     # Required by PyAnnote 4.0.3
-    "whisperx>=3.1.0",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
     "pyannote.audio>=4.0.3", # Diarization (still needed for NeMo backends)
 
     # Audio Processing
@@ -59,6 +56,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+whisper = [
+    "faster-whisper>=1.2.1",
+    "ctranslate2>=4.6.2",
+    "whisperx>=3.1.0",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
+]
 nemo = [
     "nemo_toolkit[asr]>=2.2.0",
 ]

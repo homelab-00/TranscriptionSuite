@@ -3,11 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { app, BrowserWindow, clipboard, ipcMain, shell, dialog } from 'electron';
 import Store from 'electron-store';
-import {
-  dockerManager,
-  type HfTokenDecision,
-  type StartContainerOptions,
-} from './dockerManager.js';
+import { dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import {
@@ -153,42 +149,6 @@ const updateManager = new UpdateManager(store);
 
 // Wire tray context-menu actions → IPC messages to the renderer
 trayManager.setActions({
-  startServer: async () => {
-    try {
-      const runtimeProfile = (store.get('server.runtimeProfile') as string) || 'gpu';
-      const hfToken = ((store.get('server.hfToken') as string) || '').trim();
-      const rawHfDecision = store.get('server.hfTokenDecision');
-      const hfDecision: HfTokenDecision =
-        rawHfDecision === 'provided' || rawHfDecision === 'skipped' || rawHfDecision === 'unset'
-          ? rawHfDecision
-          : hfToken
-            ? 'provided'
-            : 'unset';
-
-      await dockerManager.startContainer({
-        mode: 'local',
-        runtimeProfile: runtimeProfile as 'gpu' | 'cpu',
-        hfToken,
-        hfTokenDecision: hfDecision,
-      });
-      trayManager.setMenuState({ serverRunning: true, isStandby: true });
-    } catch (err) {
-      console.error('Tray: failed to start server', err);
-    }
-  },
-  stopServer: async () => {
-    try {
-      await dockerManager.stopContainer();
-      trayManager.setMenuState({
-        serverRunning: false,
-        isRecording: false,
-        isLive: false,
-        isStandby: false,
-      });
-    } catch (err) {
-      console.error('Tray: failed to stop server', err);
-    }
-  },
   startRecording: () => {
     mainWindow?.webContents.send('tray:action', 'start-recording');
   },

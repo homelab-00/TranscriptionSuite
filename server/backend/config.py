@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 
 FALLBACK_MAIN_TRANSCRIBER_MODEL = "Systran/faster-whisper-large-v3"
+DISABLED_MODEL_SENTINEL = "__none__"
 
 
 def get_user_config_dir() -> Path:
@@ -293,6 +294,13 @@ def _non_empty_string(value: Any) -> str | None:
     return trimmed if trimmed else None
 
 
+def is_disabled_model_value(value: Any) -> bool:
+    """Return True when *value* intentionally disables a model slot."""
+    if not isinstance(value, str):
+        return False
+    return value.strip() == DISABLED_MODEL_SENTINEL
+
+
 def _dict_get(payload: dict[str, Any], *keys: str) -> Any:
     """Safely fetch a nested value from a plain dict."""
     current: Any = payload
@@ -317,6 +325,9 @@ def resolve_main_transcriber_model(config: ServerConfig | dict[str, Any]) -> str
         main_model = _non_empty_string(_dict_get(config, "main_transcriber", "model"))
         legacy_model = _non_empty_string(_dict_get(config, "transcription", "model"))
 
+    if is_disabled_model_value(main_model) or is_disabled_model_value(legacy_model):
+        return ""
+
     return main_model or legacy_model or FALLBACK_MAIN_TRANSCRIBER_MODEL
 
 
@@ -333,6 +344,9 @@ def resolve_live_transcriber_model(config: ServerConfig | dict[str, Any]) -> str
     else:
         live_model = _non_empty_string(_dict_get(config, "live_transcriber", "model"))
         legacy_live_model = _non_empty_string(_dict_get(config, "live_transcription", "model"))
+
+    if is_disabled_model_value(live_model) or is_disabled_model_value(legacy_live_model):
+        return ""
 
     return live_model or legacy_live_model or resolve_main_transcriber_model(config)
 

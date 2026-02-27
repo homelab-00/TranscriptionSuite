@@ -11,7 +11,7 @@ export interface HealthResponse {
 }
 
 export interface ReadyResponse {
-  status: 'ready' | 'loading' | 'initializing';
+  status: 'ready' | 'ready_live_mode' | 'loading' | 'initializing';
   models?: Record<string, unknown>;
 }
 
@@ -251,6 +251,7 @@ export interface AdminStatus {
   };
   features?: {
     diarization?: { available: boolean; reason: string };
+    whisper?: { available: boolean; reason: string };
     nemo?: { available: boolean; reason: string };
     [key: string]: unknown;
   };
