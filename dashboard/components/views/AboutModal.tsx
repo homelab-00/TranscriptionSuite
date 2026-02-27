@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Github } from 'lucide-react';
 import profileImage from '../../../build/assets/profile.png';
+import greeceFlagImage from '../../../build/assets/flag-greece-flat.svg';
 
 interface AboutModalProps {
   isOpen: boolean;
@@ -80,11 +81,11 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
 
       {/* Modal Content */}
       <div
-        className={`relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/20 bg-linear-to-b from-white/5 to-black/20 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'} `}
+        className={`relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/20 bg-black/40 bg-linear-to-b from-white/5 to-black/20 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'} `}
       >
         <div className="bg-accent-cyan/20 pointer-events-none absolute top-0 left-0 h-32 w-32 rounded-full blur-2xl" />
         <div className="bg-accent-magenta/10 pointer-events-none absolute right-0 bottom-0 h-32 w-32 rounded-full blur-2xl" />
-        <div className="pointer-events-none absolute inset-0 bg-white/1" />
+        <div className="pointer-events-none absolute inset-0 bg-black/20" />
 
         {/* Banner with Close Button */}
         <div className="from-accent-cyan/20 to-accent-magenta/20 relative h-32 bg-linear-to-br via-blue-600/10">
@@ -174,9 +175,12 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
               >
                 homelab-00
               </button>
-              <span aria-label="Greek flag" role="img">
-                🇬🇷
-              </span>
+              <span>in Athens</span>
+              <img
+                src={greeceFlagImage}
+                alt="Greek flag"
+                className="h-4.13 w-4.5 border-white/20"
+              />
             </div>
           </div>
         </div>

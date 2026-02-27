@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.27
+  spec_version: 1.0.28
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -538,6 +538,7 @@ utility_allowlist:
     - h-3.5
     - h-32
     - h-4
+    - h-4.13 # Added specifically for the [flag + pole] svg file
     - h-4.5
     - h-48
     - h-5
