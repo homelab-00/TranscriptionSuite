@@ -1059,16 +1059,22 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
 
 // ─── Model Cache Inspection ─────────────────────────────────────────────────
 
+export interface ModelCacheEntry {
+  exists: boolean;
+  size?: string;
+}
+
 /**
  * Check whether HuggingFace model repos exist in the models volume.
  *
  * Runs `docker exec ls /models/hub/` inside the running container and
  * checks for `models--{org}--{name}` directories.
  *
- * Returns a record mapping each model ID to `{ exists: boolean }`.
+ * Returns a record mapping each model ID to `{ exists, size? }`.
+ * `size` is a human-readable `du -sh` value for cached models.
  */
-async function checkModelsCached(modelIds: string[]): Promise<Record<string, { exists: boolean }>> {
-  const result: Record<string, { exists: boolean }> = {};
+async function checkModelsCached(modelIds: string[]): Promise<Record<string, ModelCacheEntry>> {
+  const result: Record<string, ModelCacheEntry> = {};
 
   // Default all to missing
   for (const id of modelIds) {
@@ -1088,7 +1094,27 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, { e
     for (const id of modelIds) {
       // HuggingFace convention: "Systran/faster-whisper-large-v3" → "models--Systran--faster-whisper-large-v3"
       const cacheName = `models--${id.trim().replace(/\//g, '--')}`;
-      result[id] = { exists: entries.has(cacheName) };
+      const exists = entries.has(cacheName);
+      if (!exists) {
+        result[id] = { exists: false };
+        continue;
+      }
+
+      let size: string | undefined;
+      try {
+        const duOutput = await exec('docker', [
+          'exec',
+          CONTAINER_NAME,
+          'du',
+          '-sh',
+          `/models/hub/${cacheName}`,
+        ]);
+        const parsedSize = duOutput.split(/\s+/)[0]?.trim();
+        if (parsedSize) size = parsedSize;
+      } catch {
+        // Keep exists=true even when size lookup fails.
+      }
+      result[id] = size ? { exists: true, size } : { exists: true };
     }
   } catch {
     // Container not running or volume empty — all remain { exists: false }

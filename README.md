@@ -527,11 +527,11 @@ GNU General Public License v3.0 or later (GPLv3+) — see [LICENSE](LICENSE).
 
 ## 10. Acknowledgments
 
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
-- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) (Parakeet and Canary ASR models)
+- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
+- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo)
+- [Microsoft VibeVoice](https://github.com/microsoft/VibeVoice)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)
 - [Tailscale](https://tailscale.com/)
 - [LM Studio](https://lmstudio.ai/)
-

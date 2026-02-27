@@ -53,7 +53,7 @@ main_transcriber:
     # Parakeet examples: "nvidia/parakeet-tdt-0.6b-v3" (25 European languages, requires INSTALL_NEMO=true)
     # VibeVoice-ASR examples: "microsoft/VibeVoice-ASR", "scerz/VibeVoice-ASR-4bit" (experimental, file/notebook only)
     # Backend is auto-detected from the model name (nvidia/* → NeMo, */VibeVoice-ASR* → VibeVoice-ASR, else → Whisper).
-    model: "Systran/faster-whisper-large-v3"
+    model: "nvidia/parakeet-tdt-0.6b-v3"
 
     # Compute type for the model. "default" is recommended.
     # Options: "default", "auto", "int8", "int8_float16", "int16", "float16", "float32"
@@ -128,7 +128,7 @@ live_transcriber:
     # Model for live transcription. Defaults to main_transcriber.model if not set.
     # Using the same model as main_transcriber is recommended for consistency.
     # Live Mode v1 supports only faster-whisper/Whisper backend models.
-    # model: "Systran/faster-whisper-large-v3"
+    model: "Systran/faster-whisper-medium"
     compute_type: "default"
     device: "cuda"
     gpu_device_index: 0

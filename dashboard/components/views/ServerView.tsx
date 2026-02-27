@@ -68,7 +68,7 @@ const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
-const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_LARGE_V3;
+const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
 const MAIN_MODEL_PRESETS = [
   WHISPER_LARGE_V3,
@@ -218,7 +218,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [modelsLoading, setModelsLoading] = useState(false);
 
   // Model download cache state (checks Docker volume for HF model dirs)
-  const [modelCacheStatus, setModelCacheStatus] = useState<Record<string, { exists: boolean }>>({});
+  const [modelCacheStatus, setModelCacheStatus] = useState<
+    Record<string, { exists: boolean; size?: string }>
+  >({});
   const modelCacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Runtime profile (persisted in electron-store)
@@ -460,8 +462,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   );
   const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
   const liveModelWhisperOnlyCompatible = isWhisperModel(activeLiveModel);
-  const liveModeModelConstraintMessage =
-    'Live Mode only supports faster-whisper models (RealtimeSTT path) in v1. Choose a faster-whisper model for Live Mode.';
+  const liveModeModelConstraintMessage = 'Live Mode only supports faster-whisper models.';
 
   // Active diarization model name
   const activeDiarizationModel =
@@ -537,7 +538,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     modelCacheCheckRef.current = setTimeout(() => {
       api.docker
         .checkModelsCached(modelIds)
-        .then((result: Record<string, { exists: boolean }>) => {
+        .then((result: Record<string, { exists: boolean; size?: string }>) => {
           setModelCacheStatus(result);
         })
         .catch(() => {});
@@ -651,7 +652,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (modelIds.length === 0) return;
     api.docker
       .checkModelsCached(modelIds)
-      .then((result: Record<string, { exists: boolean }>) => {
+      .then((result: Record<string, { exists: boolean; size?: string }>) => {
         setModelCacheStatus(result);
       })
       .catch(() => {});

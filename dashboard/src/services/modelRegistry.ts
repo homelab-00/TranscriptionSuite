@@ -35,38 +35,6 @@ export interface ModelInfo {
 }
 
 export const MODEL_REGISTRY: ModelInfo[] = [
-  // ── Whisper ──────────────────────────────────────────────────────────────
-  {
-    id: 'Systran/faster-whisper-large-v3',
-    displayName: 'Whisper Large V3',
-    family: 'whisper',
-    description: 'State-of-the-art multilingual ASR. Best accuracy, higher VRAM usage.',
-    parameterCount: '1.5B',
-    huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-large-v3',
-    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
-    roles: ['main', 'live'],
-  },
-  {
-    id: 'Systran/faster-whisper-medium',
-    displayName: 'Whisper Medium',
-    family: 'whisper',
-    description: 'Good balance of accuracy and speed. Lower VRAM than Large V3.',
-    parameterCount: '769M',
-    huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-medium',
-    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
-    roles: ['main', 'live'],
-  },
-  {
-    id: 'Systran/faster-whisper-small',
-    displayName: 'Whisper Small',
-    family: 'whisper',
-    description: 'Lightweight model suitable for real-time use on modest hardware.',
-    parameterCount: '244M',
-    huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-small',
-    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
-    roles: ['main', 'live'],
-  },
-
   // ── NeMo ─────────────────────────────────────────────────────────────────
   {
     id: 'nvidia/parakeet-tdt-0.6b-v3',
@@ -89,23 +57,58 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     roles: ['main'],
   },
 
+  // ── Faster Whisper ──────────────────────────────────────────────────────────────
+  {
+    id: 'Systran/faster-whisper-large-v3',
+    displayName: 'Faster Whisper Large V3',
+    family: 'whisper',
+    description: 'State-of-the-art multilingual ASR. Best accuracy, higher VRAM usage.',
+    parameterCount: '1.5B',
+    huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-large-v3',
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
+  },
+  {
+    id: 'Systran/faster-whisper-medium',
+    displayName: 'Faster Whisper Medium',
+    family: 'whisper',
+    description: 'Good balance of accuracy and speed. Lower VRAM than Large V3.',
+    parameterCount: '769M',
+    huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-medium',
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
+  },
+  {
+    id: 'Systran/faster-whisper-small',
+    displayName: 'Faster Whisper Small',
+    family: 'whisper',
+    description: 'Lightweight model suitable for real-time use on modest hardware.',
+    parameterCount: '244M',
+    huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-small',
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
+  },
+
   // ── VibeVoice ────────────────────────────────────────────────────────────
   {
     id: 'microsoft/VibeVoice-ASR',
     displayName: 'VibeVoice ASR',
     family: 'vibevoice',
-    description: 'Microsoft ASR + diarization model. Handles speaker attribution natively.',
+    description:
+      'Microsoft ASR + diarization model. Handles speaker attribution natively. Very large (~16 GB).',
+    parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/microsoft/VibeVoice-ASR',
-    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 1 },
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
     roles: ['main'],
   },
   {
     id: 'scerz/VibeVoice-ASR-4bit',
     displayName: 'VibeVoice ASR 4-bit',
     family: 'vibevoice',
-    description: 'Quantized VibeVoice variant. Lower VRAM requirement (~4 GB).',
+    description: 'Quantized VibeVoice variant. Lower VRAM requirement (~7 GB).',
+    parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/scerz/VibeVoice-ASR-4bit',
-    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 1 },
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
     roles: ['main'],
   },
 

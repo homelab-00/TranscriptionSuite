@@ -44,7 +44,7 @@ export interface ModelManagerTabProps {
   setDiarizationModelSelection: (value: string) => void;
   diarizationCustomModel: string;
   setDiarizationCustomModel: (value: string) => void;
-  modelCacheStatus: Record<string, { exists: boolean }>;
+  modelCacheStatus: Record<string, { exists: boolean; size?: string }>;
   isRunning: boolean;
   refreshCacheStatus: () => void;
 }
@@ -106,6 +106,7 @@ function CapBadge({ label, active }: { label: string; active: boolean }) {
 interface ModelRowProps {
   model: ModelInfo;
   cached: boolean;
+  cacheSize?: string;
   downloading: boolean;
   isRunning: boolean;
   isActiveMain: boolean;
@@ -119,6 +120,7 @@ interface ModelRowProps {
 function ModelRow({
   model,
   cached,
+  cacheSize,
   downloading,
   isRunning,
   isActiveMain,
@@ -264,6 +266,12 @@ function ModelRow({
       {/* Detail line */}
       <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-5 text-xs text-slate-500">
         <span className="font-mono">{model.id}</span>
+        {cached && cacheSize && (
+          <>
+            <span className="text-slate-600">&middot;</span>
+            <span className="text-green-400">Downloaded {cacheSize}</span>
+          </>
+        )}
         {model.parameterCount && (
           <>
             <span className="text-slate-600">&middot;</span>
@@ -293,6 +301,7 @@ function ModelRow({
 interface CustomModelRowProps {
   modelId: string;
   cached: boolean;
+  cacheSize?: string;
   downloading: boolean;
   isRunning: boolean;
   isActiveMain: boolean;
@@ -307,6 +316,7 @@ interface CustomModelRowProps {
 function CustomModelRow({
   modelId,
   cached,
+  cacheSize,
   downloading,
   isRunning,
   isActiveMain,
@@ -433,6 +443,9 @@ function CustomModelRow({
           </button>
         </div>
       </div>
+      {cached && cacheSize && (
+        <p className="mt-1 pl-5 text-xs text-green-400">Downloaded {cacheSize}</p>
+      )}
     </div>
   );
 }
@@ -697,6 +710,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
                   key={model.id}
                   model={model}
                   cached={modelCacheStatus[model.id]?.exists ?? false}
+                  cacheSize={modelCacheStatus[model.id]?.size}
                   downloading={downloadingModels.has(model.id)}
                   isRunning={isRunning}
                   isActiveMain={activeMain.toLowerCase() === model.id.toLowerCase()}
@@ -761,6 +775,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
                     key={id}
                     modelId={id}
                     cached={modelCacheStatus[id]?.exists ?? false}
+                    cacheSize={modelCacheStatus[id]?.size}
                     downloading={downloadingModels.has(id)}
                     isRunning={isRunning}
                     isActiveMain={activeMain.toLowerCase() === id.toLowerCase()}
