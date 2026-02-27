@@ -23,6 +23,7 @@ import {
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
+import { ShortcutCapture } from '../ui/ShortcutCapture';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -126,6 +127,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     startRecording: DEFAULT_SHORTCUTS.startRecording,
     stopTranscribe: DEFAULT_SHORTCUTS.stopTranscribe,
   });
+
+  // Wayland portal state
+  const [isWaylandPortal, setIsWaylandPortal] = useState(false);
+  const [portalBindings, setPortalBindings] = useState<Record<string, string>>({});
 
   // Update check status (loaded from main process)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -292,6 +297,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             if (status) setUpdateStatus(status);
           })
           .catch(() => {});
+        // Load Wayland portal state
+        api.shortcuts
+          ?.isWaylandPortal?.()
+          .then((active: boolean) => {
+            setIsWaylandPortal(active);
+            if (active) {
+              api.shortcuts
+                ?.getPortalBindings?.()
+                .then((bindings: Array<{ id: string; trigger: string }> | null) => {
+                  if (bindings) {
+                    const map: Record<string, string> = {};
+                    for (const b of bindings) map[b.id] = b.trigger;
+                    setPortalBindings(map);
+                  }
+                })
+                .catch(() => {});
+            }
+          })
+          .catch(() => {});
       }
       rafId = requestAnimationFrame(() => {
         rafId = requestAnimationFrame(() => {
@@ -302,9 +326,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setIsVisible(false);
       timer = setTimeout(() => setIsRendered(false), 300);
     }
+    // Subscribe to portal shortcut changes
+    let unsubPortal: (() => void) | undefined;
+    if (isOpen) {
+      const portalApi = (window as any).electronAPI?.shortcuts;
+      if (portalApi?.onPortalChanged) {
+        unsubPortal = portalApi.onPortalChanged(
+          (bindings: Array<{ id: string; trigger: string }>) => {
+            const map: Record<string, string> = {};
+            for (const b of bindings) map[b.id] = b.trigger;
+            setPortalBindings(map);
+          },
+        );
+      }
+    }
     return () => {
       clearTimeout(timer);
       cancelAnimationFrame(rafId);
+      unsubPortal?.();
     };
   }, [isOpen]);
 
@@ -466,12 +505,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       </Section>
       <Section title="Keyboard Shortcuts">
         <div className="space-y-4">
-          <p className="text-xs text-slate-400">
-            Set global start/stop shortcuts using Electron accelerator strings (example:{' '}
-            <span className="font-mono text-slate-300">Alt+Ctrl+R</span>). Leave blank to use the
-            default shortcut.
-          </p>
-          {platform === 'linux' && sessionType === 'wayland' && (
+          {isWaylandPortal ? (
+            <p className="text-accent-cyan/80 text-xs">
+              Shortcuts are managed by your desktop&apos;s Global Shortcuts portal. Click Change to
+              reassign.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-400">
+              Set global start/stop shortcuts using the capture fields below (click, then press your
+              shortcut combo). Leave blank to use the default shortcut.
+            </p>
+          )}
+          {!isWaylandPortal && platform === 'linux' && sessionType === 'wayland' && (
             <p className="text-xs text-amber-400/80">
               Wayland note: Global shortcuts require a compositor that supports the XDG
               GlobalShortcuts portal (KDE Plasma, Hyprland). On GNOME or Sway, use your
@@ -485,36 +530,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
                 Start Recording
               </label>
-              <input
-                type="text"
+              <ShortcutCapture
                 value={shortcutSettings.startRecording}
                 placeholder={DEFAULT_SHORTCUTS.startRecording}
-                onChange={(e) => {
+                onChange={(acc) => {
                   setShortcutSettings((prev) => ({
                     ...prev,
-                    startRecording: e.target.value,
+                    startRecording: acc,
                   }));
                   setIsDirty(true);
                 }}
-                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-sm text-white focus:outline-none"
+                isWaylandPortal={isWaylandPortal}
+                portalTrigger={portalBindings['start-recording']}
+                onPortalRebind={() => {
+                  (window as any).electronAPI?.shortcuts?.rebind?.();
+                }}
               />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
                 Stop &amp; Transcribe
               </label>
-              <input
-                type="text"
+              <ShortcutCapture
                 value={shortcutSettings.stopTranscribe}
                 placeholder={DEFAULT_SHORTCUTS.stopTranscribe}
-                onChange={(e) => {
+                onChange={(acc) => {
                   setShortcutSettings((prev) => ({
                     ...prev,
-                    stopTranscribe: e.target.value,
+                    stopTranscribe: acc,
                   }));
                   setIsDirty(true);
                 }}
-                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-sm text-white focus:outline-none"
+                isWaylandPortal={isWaylandPortal}
+                portalTrigger={portalBindings['stop-transcribe']}
+                onPortalRebind={() => {
+                  (window as any).electronAPI?.shortcuts?.rebind?.();
+                }}
               />
             </div>
           </div>

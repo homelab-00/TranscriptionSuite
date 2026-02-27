@@ -6,6 +6,14 @@
  */
 
 import { globalShortcut, type BrowserWindow } from 'electron';
+import {
+  initWaylandShortcuts,
+  destroyWaylandShortcuts,
+  rebindShortcuts,
+  listShortcuts,
+  isPortalConnected,
+  type PortalShortcutInfo,
+} from './waylandShortcuts.js';
 
 /** Minimal store interface — accepts any electron-store instance. */
 interface ReadableStore {
@@ -26,6 +34,7 @@ export function isKdePlasma(): boolean {
 // ─── Shortcut Registration ──────────────────────────────────────────────────
 
 const registeredAccelerators: string[] = [];
+let waylandMode = false;
 
 /**
  * Register global keyboard shortcuts from config.
@@ -34,14 +43,28 @@ const registeredAccelerators: string[] = [];
  * the compositor doesn't support the portal.
  * On failure (key already taken by another app): log warning, don't crash.
  */
-export function registerShortcuts(
+export async function registerShortcuts(
   store: ReadableStore,
   getWindow: () => BrowserWindow | null,
-): void {
+): Promise<void> {
   unregisterShortcuts();
 
   const onWayland = process.platform === 'linux' && isWayland();
 
+  // On Wayland: try D-Bus portal first for proper descriptions and readback
+  if (onWayland) {
+    try {
+      const portalOk = await initWaylandShortcuts(store, getWindow);
+      if (portalOk) {
+        waylandMode = true;
+        return;
+      }
+    } catch (err) {
+      console.warn('[Shortcuts] Wayland portal init failed, falling back to globalShortcut:', err);
+    }
+  }
+
+  // Standard Electron globalShortcut path (X11, macOS, Windows, or portal fallback)
   const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+R';
   const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+S';
 
@@ -85,6 +108,11 @@ export function registerShortcuts(
  * Unregister all global shortcuts previously registered by this module.
  */
 export function unregisterShortcuts(): void {
+  if (waylandMode) {
+    destroyWaylandShortcuts();
+    waylandMode = false;
+    return;
+  }
   for (const acc of registeredAccelerators) {
     try {
       globalShortcut.unregister(acc);
@@ -93,6 +121,31 @@ export function unregisterShortcuts(): void {
     }
   }
   registeredAccelerators.length = 0;
+}
+
+/**
+ * Get portal-assigned shortcut bindings (Wayland portal mode only).
+ * Returns null when not in portal mode.
+ */
+export async function getPortalShortcuts(): Promise<PortalShortcutInfo[] | null> {
+  if (!waylandMode) return null;
+  return listShortcuts();
+}
+
+/**
+ * Rebind shortcuts through the portal (Wayland portal mode only).
+ * Triggers the compositor's shortcut assignment dialog.
+ */
+export async function rebindPortalShortcuts(store: ReadableStore): Promise<boolean> {
+  if (!waylandMode) return false;
+  return rebindShortcuts(store);
+}
+
+/**
+ * Whether the Wayland portal mode is currently active.
+ */
+export function isWaylandPortalActive(): boolean {
+  return waylandMode && isPortalConnected();
 }
 
 // ─── CLI Arg Forwarding ─────────────────────────────────────────────────────

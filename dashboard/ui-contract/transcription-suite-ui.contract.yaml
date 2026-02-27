@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.26
+  spec_version: 1.0.27
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -15,6 +15,7 @@ meta:
       - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
       - components/ui/LogTerminal.tsx
+      - components/ui/ShortcutCapture.tsx
       - components/ui/StatusLight.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
@@ -258,6 +259,7 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
+        - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
         - min-w-[170px]
         - p-[3px]
@@ -799,6 +801,7 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
+    - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
     - text-amber-300/80
@@ -905,6 +908,7 @@ utility_allowlist:
     - h-[85vh]
     - max-h-[80vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
+    - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
     - min-w-[170px]
     - p-[3px]
@@ -1723,6 +1727,28 @@ component_contracts:
     state_rules:
       - id: model-manager-tab-states
         rule: "ModelManagerTab visual states use approved color and opacity tokens."
+  ShortcutCapture:
+    file: components/ui/ShortcutCapture.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+    allowed_variants:
+      isWaylandPortal:
+        - "true"
+        - "false"
+      capturing:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: shortcut-capture-shell
+        rule: ShortcutCapture keeps a single interactive div for keyboard capture or a read-only display with Change button in portal mode.
+    behavior_rules:
+      - id: capture-mode-motion
+        rule: Capture mode uses animate-pulse on prompt text and accent ring feedback within approved duration tokens.
+    state_rules:
+      - id: portal-readonly
+        rule: When isWaylandPortal is true, the field is read-only and shows a Change button that triggers portal rebind.
   ModelRow:
     file: components/views/ModelManagerTab.tsx
     required_tokens:

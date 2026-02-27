@@ -10,7 +10,14 @@ import {
 } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
-import { registerShortcuts, unregisterShortcuts, handleCliAction } from './shortcutManager.js';
+import {
+  registerShortcuts,
+  unregisterShortcuts,
+  handleCliAction,
+  getPortalShortcuts,
+  rebindPortalShortcuts,
+  isWaylandPortalActive,
+} from './shortcutManager.js';
 import { pasteAtCursor } from './pasteAtCursor.js';
 
 // When launched via a wrapper (e.g. AppImage through GearLevel), the stdout/stderr
@@ -35,12 +42,9 @@ if (process.platform === 'linux' && process.env.APPIMAGE) {
   app.commandLine.appendSwitch('no-sandbox');
 }
 
-// Enable the GlobalShortcutsPortal Chromium feature so that Electron's
-// globalShortcut API works on Wayland via the XDG Desktop Portal D-Bus
-// interface (supported by KDE Plasma, Hyprland; not yet GNOME/Sway).
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
-}
+// GlobalShortcutsPortal Chromium feature flag removed — our D-Bus module
+// (waylandShortcuts.ts) handles portal communication directly, which avoids
+// duplicate portal sessions and lets us set human-readable descriptions.
 
 // Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
@@ -302,7 +306,9 @@ ipcMain.handle('config:set', async (_event, key: string, value: unknown) => {
   }
   // Re-register shortcuts when accelerators change
   if (key.startsWith('shortcuts.')) {
-    registerShortcuts(store, () => mainWindow);
+    registerShortcuts(store, () => mainWindow).catch((err) =>
+      console.warn('[Shortcuts] Re-registration failed:', err),
+    );
   }
 });
 
@@ -634,8 +640,10 @@ app.whenReady().then(() => {
   updateManager.start();
   createWindow();
 
-  // Register global keyboard shortcuts (skipped on Wayland — see shortcutManager.ts)
-  registerShortcuts(store, () => mainWindow);
+  // Register global keyboard shortcuts (async — uses D-Bus portal on Wayland)
+  registerShortcuts(store, () => mainWindow).catch((err) =>
+    console.warn('[Shortcuts] Initial registration failed:', err),
+  );
 
   // Forward CLI args from second instance to first instance
   app.on('second-instance', (_event, argv) => {
@@ -669,6 +677,20 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+// ─── Shortcuts IPC Handlers ─────────────────────────────────────────────────
+
+ipcMain.handle('shortcuts:getPortalBindings', async () => {
+  return getPortalShortcuts();
+});
+
+ipcMain.handle('shortcuts:rebind', async () => {
+  await rebindPortalShortcuts(store);
+});
+
+ipcMain.handle('shortcuts:isWaylandPortal', () => {
+  return isWaylandPortalActive();
 });
 
 app.on('before-quit', (event) => {

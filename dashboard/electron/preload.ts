@@ -123,6 +123,14 @@ export interface ElectronAPI {
     writeText: (text: string) => Promise<void>;
     pasteAtCursor: (text: string) => Promise<void>;
   };
+  shortcuts: {
+    getPortalBindings: () => Promise<Array<{ id: string; trigger: string }> | null>;
+    rebind: () => Promise<void>;
+    isWaylandPortal: () => Promise<boolean>;
+    onPortalChanged: (
+      callback: (bindings: Array<{ id: string; trigger: string }>) => void,
+    ) => () => void;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -226,5 +234,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
     pasteAtCursor: (text: string) => ipcRenderer.invoke('clipboard:pasteAtCursor', text),
+  },
+  shortcuts: {
+    getPortalBindings: () => ipcRenderer.invoke('shortcuts:getPortalBindings'),
+    rebind: () => ipcRenderer.invoke('shortcuts:rebind'),
+    isWaylandPortal: () => ipcRenderer.invoke('shortcuts:isWaylandPortal'),
+    onPortalChanged: (callback: (bindings: Array<{ id: string; trigger: string }>) => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        bindings: Array<{ id: string; trigger: string }>,
+      ) => callback(bindings);
+      ipcRenderer.on('shortcuts:portalChanged', handler);
+      return () => ipcRenderer.removeListener('shortcuts:portalChanged', handler);
+    },
   },
 } satisfies ElectronAPI);

@@ -120,6 +120,14 @@ interface ElectronAPI {
     writeText: (text: string) => Promise<void>;
     pasteAtCursor: (text: string) => Promise<void>;
   };
+  shortcuts: {
+    getPortalBindings: () => Promise<Array<{ id: string; trigger: string }> | null>;
+    rebind: () => Promise<void>;
+    isWaylandPortal: () => Promise<boolean>;
+    onPortalChanged: (
+      callback: (bindings: Array<{ id: string; trigger: string }>) => void,
+    ) => () => void;
+  };
 }
 
 interface ComponentUpdateStatus {
