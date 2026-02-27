@@ -14,10 +14,10 @@ app with cross-platform support, speaker
 diarization, Audio Notebook mode,
 LM Studio integration, and both longform
 and live transcription. Electron
-dashboard + Python backend powered by
-faster-whisper, NVIDIA Parakeet & Canary with
-GPU acceleration or CPU mode. The server
-is Dockerized for fast setup.
+dashboard + Python backend with
+multi-backend STT (Whisper, NVIDIA NeMo,
+VibeVoice-ASR), NVIDIA GPU acceleration
+or CPU mode. Dockerized for fast setup.
 </pre>
           </td>
         </tr>
@@ -54,28 +54,19 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 - [1. Introduction](#1-introduction)
   - [1.1 Features](#11-features)
   - [1.2 Screenshots](#12-screenshots)
-  - [1.3 Important Compatibility Notes](#13-important-compatibility-notes)
 - [2. Prerequisites](#2-prerequisites)
   - [2.1 Docker](#21-docker)
 - [3. Installation](#3-installation)
-  - [3.1 Linux AppImage Prerequisites](#31-linux-appimage-prerequisites)
-  - [3.2 Verify Download (Kleopatra)](#32-verify-download-kleopatra)
-- [4. First-Time Setup](#4-first-time-setup)
-  - [4.1 Settings Overview](#41-settings-overview)
-  - [4.2 Starting the Server and Client](#42-starting-the-server-and-client)
+  - [3.1 Verify Download (Kleopatra)](#31-verify-download-kleopatra)
+- [4. First time setup](#4-first-time-setup)
+  - [4.1 Starting the Server & Client](#41-starting-the-server--client)
 - [5. Usage](#5-usage)
   - [5.1 Quick Start](#51-quick-start)
   - [5.2 Dashboard Views](#52-dashboard-views)
-  - [5.3 Model and Feature Compatibility](#53-model-and-feature-compatibility)
 - [6. Remote Access](#6-remote-access)
-  - [6.1 Choose a Remote Profile in the App](#61-choose-a-remote-profile-in-the-app)
-  - [6.2 Tailscale Setup (MagicDNS + HTTPS Certificates)](#62-tailscale-setup-magicdns--https-certificates)
-  - [6.3 Generate and Place Certificates](#63-generate-and-place-certificates)
-  - [6.4 LAN Remote Mode (No Tailscale)](#64-lan-remote-mode-no-tailscale)
+  - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
+  - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
 - [7. Database & Backups](#7-database--backups)
-  - [7.1 Automatic Backups](#71-automatic-backups)
-  - [7.2 Manual Backup/Restore in the Dashboard](#72-manual-backuprestore-in-the-dashboard)
-  - [7.3 Export Individual Recordings](#73-export-individual-recordings)
 - [8. Troubleshooting](#8-troubleshooting)
   - [8.1 Server Won't Start](#81-server-wont-start)
   - [8.2 GPU Not Detected](#82-gpu-not-detected)
@@ -89,20 +80,24 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 
 ### 1.1 Features
 
-- **100% Local & Private**: Audio processing and transcription run on your own machine (internet is only needed for initial installs/model downloads when applicable)
-- **Cross-Platform Dashboard**: Electron desktop app for Linux, Windows, and macOS (macOS support is currently marked experimental)
-- **GPU + CPU Modes**: NVIDIA CUDA acceleration (recommended) or CPU-only mode for all platforms (including macOS)
-- **Multiple ASR Backends (Longform/Static)**: Whisper (faster-whisper), NVIDIA Parakeet, and NVIDIA Canary (NeMo)
-- **Longform Transcription**: Record audio and transcribe after stopping the recording
-- **Live Mode**: Real-time sentence-by-sentence transcription in the Session view (current v1 implementation uses the whisper/faster-whisper live path)
-- **Speaker Diarization**: PyAnnote-based speaker labeling for supported workflows
-- **Static File Transcription**: Import audio/video files into a queue with per-file progress and retry support
-- **Audio Notebook**: Calendar/search/import workflow with transcript storage, export, and LLM-assisted note workflows
-- **LM Studio Integration**: Local LLM chat/summarization with LM Studio support (some features rely on LM Studio-specific endpoints)
-- **System Tray Controls**: Quick actions for server, recording, and common dashboard controls
-- **Remote Access**: HTTPS + token-authenticated remote usage via Tailscale or a trusted LAN
+- **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup
+- **Multi-Backend STT**: Whisper, NVIDIA NeMo Parakeet/Canary, and VibeVoice-ASR — backend auto-detected from the model name
+- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet supports 25 European languages
+- **Model Manager**: Browse models by family, view capabilities, and manage downloads/cache
+- **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS
+- **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
+- **Longform Transcription**: Record as long as you want and have it transcribed in seconds
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only in v1)
+- **Speaker Diarization**: PyAnnote-based speaker identification
+- **Static File Transcription**: Transcribe existing audio/video files with multi-file import queue, retry, and progress tracking
+- **Global Keyboard Shortcuts**: System-wide shortcuts with Wayland portal support and paste-at-cursor
+- **Remote Access**: Securely access your desktop at home running the model from anywhere
+  (utilizing Tailscale)
+- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
+  full-text search, and LM Studio integration (chat about your notes with the AI)
+- **System Tray Control**: Quickly start/stop a recording, plus a lot of other controls, available via the system tray.
 
-📌*Half an hour of audio transcribed in under a minute (RTX 3060)!*
+📌*Half an hour of audio transcribed in under a minute with Whisper (RTX 3060)!*
 
 ### 1.2 Screenshots
 
@@ -122,13 +117,6 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 
 </div>
 
-### 1.3 Important Compatibility Notes
-
-- **Live Mode backend support (current v1)**: Live Mode (`/ws/live`) uses the whisper/faster-whisper live path. Do not assume Parakeet/Canary support for Live Mode in the current version.
-- **Translation support**: Whisper and Canary support translation flows; Parakeet does not support translation.
-- **Remote mode security**: Remote profiles (`Tailscale`, `LAN`) use HTTPS + token authentication.
-- **Docker-first server runtime**: The supported server runtime workflow is Docker/Docker Desktop; advanced native-backend runs are documented in `README_DEV.md`.
-
 ---
 
 ## 2. Prerequisites
@@ -138,48 +126,45 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 **Linux:**
 
 1. Install Docker Engine
-   - Arch: `sudo pacman -S --needed docker`
-   - Other distros: see the [Docker Engine install docs](https://docs.docker.com/engine/install/)
-2. Add your user to the `docker` group so the app can access Docker without `sudo`:
-   ```bash
-   sudo usermod -aG docker $USER
-   ```
-   Then **log out and back in** (or reboot) for the change to take effect.
-3. Install NVIDIA Container Toolkit (GPU mode only)
-   - See the [NVIDIA Container Toolkit install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-   - Not required for CPU mode
+    * For Arch run `sudo pacman -S --needed docker`
+    * For other distros refer to the [Docker documentation](https://docs.docker.com/engine/install/)
+2. Add your user to the `docker` group so the app can talk to Docker without `sudo`:
+    ```bash
+    sudo usermod -aG docker $USER
+    ```
+    Then **log out and back in** (or reboot) for the change to take effect.
+3. Install NVIDIA Container Toolkit (for GPU mode)
+    * Refer to the [NVIDIA documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+    * Not required if using CPU mode
 
 **Windows:**
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (during installation make sure the
+  *'Use WSL 2 instead of Hyper-V'* checkbox is enabled)
+2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
+    * Not required if using CPU mode
 
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend
-2. Install NVIDIA GPU drivers with WSL support if you want GPU mode
-   - Not required for CPU mode
-
-**macOS:**
-
+**macOS (Apple Silicon):**
 1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
-2. GPU mode is not available on macOS; the server runs in CPU mode
+2. GPU mode is not available on macOS — the server runs in CPU mode automatically
 
 ---
 
 ## 3. Installation
 
-Download the dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page:
+Download the Dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page:
 
 | Platform | Download | Notes |
 |----------|----------|-------|
-| **Linux** | `TranscriptionSuite-*-x86_64.AppImage` | May require FUSE 2 (see below) |
-| **Windows** | `TranscriptionSuite Setup *.exe` | NSIS installer |
-| **macOS** | `TranscriptionSuite-*-arm64.dmg` | Unsigned Apple Silicon build |
+| **Linux** | `TranscriptionSuite-x86_64.AppImage` | May require FUSE 2 (see below) |
+| **Windows** | `TranscriptionSuite Setup.exe` | Standalone installer |
+| **macOS** | `TranscriptionSuite-arm64.dmg` | Unsigned build for Apple Silicon |
 
-Notes:
-- Linux and Windows builds are x64
-- macOS builds are Apple Silicon (`arm64`)
-- Release artifacts include armored detached signatures (`.asc`)
+>* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
+>* *Each release artifact includes an armored detached signature (`.asc`)*
 
-### 3.1 Linux AppImage Prerequisites
+#### Linux AppImage Prerequisites
 
-AppImages require **FUSE 2** (`libfuse.so.2`). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
+AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
 
 | Distribution | Package | Install Command |
 |---|---|---|
@@ -188,54 +173,64 @@ AppImages require **FUSE 2** (`libfuse.so.2`). If you see `dlopen(): error loadi
 | Fedora | `fuse-libs` | `sudo dnf install fuse-libs` |
 | Arch Linux | `fuse2` | `sudo pacman -S fuse2` |
 
-> **Sandbox note:** The AppImage disables Chromium's SUID sandbox (`--no-sandbox`) because AppImage mounts cannot satisfy the required permissions. This is standard for Electron AppImages.
+> **Sandbox note:** The AppImage automatically disables Chromium's SUID sandbox
+> (`--no-sandbox`) since the AppImage squashfs mount cannot satisfy its permission
+> requirements. This is the standard approach for Electron-based AppImages and does
+> not affect application security.
 
-### 3.2 Verify Download (Kleopatra)
+### 3.1 Verify Download (Kleopatra)
 
 1. Download both files from the same release:
-   - the app artifact (`.AppImage`, `.exe`, or `.dmg`)
-   - the matching detached signature (`.asc`)
+   - installer/app (`.AppImage`, `.exe` or `.dmg`)
+   - matching signature file (`.sig`)
 2. Install Kleopatra: https://apps.kde.org/kleopatra/
-3. Import the public key from this repository:
+3. Import the public key in Kleopatra from this repository:
    - [`build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](./build/assets/homelab-00_0xBFE4CC5D72020691_public.asc)
 4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
 5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
 
 ---
 
-## 4. First-Time Setup
+## 4. First time setup
 
-Before starting the server and using transcription features, open the **Settings** modal from the sidebar (gear icon).
+**Before starting either Client or Server, you need to configure a few settings.**
 
-### 4.1 Settings Overview
+To access settings, click the Settings button in the sidebar (gear icon). The Settings
+modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
 
-The Settings modal has four tabs:
+* **App tab**: General application settings (notifications, auto-copy, etc.)
+* **Server tab**: Opens  the full `config.yaml` for advanced server parameters.
+  Refer to [README_DEV.md](README_DEV.md) for more information.
+* **Notebook tab**: Database backup and restore functionality:
+  - Create manual backups of your Audio Notebook database
+  - View list of available backups with timestamps and sizes
+  - Restore from any backup (creates safety backup first)
+* **Client tab**: Configure connection mode:
+  * **Local**: Use default settings (localhost:8000)
+  * **Remote**: See [Section 6: Remote Access](#6-remote-access) to set up Tailscale first.
+    Then configure:
+    - Enter your Tailscale hostname in 'Remote Host' (e.g., `my-machine.tail1234.ts.net`)
+    - Enable 'Use remote server instead of local'
+    - Set port to 8443
+    - Enable 'Use HTTPS'
+    - Enter auth token (obtained after first server start)
 
-- **App**: General app behavior (notifications, auto-copy, startup/minimize behavior, update checks, etc.)
-- **Client**: Connection mode and remote profile settings (`Local`, `Tailscale`, `LAN`) plus auth token
-- **Server**: Advanced server settings and config access (including server-side configuration editing flows)
-- **Notebook**: Backup and restore actions for the Audio Notebook database
+*Settings are saved to:*
+*- Linux: `~/.config/TranscriptionSuite/`*
+*- Windows: `%APPDATA%\TranscriptionSuite\`*
+*- macOS: `~/Library/Application Support/TranscriptionSuite/`*
 
-Notebook tab capabilities include:
-- Create manual backups
-- View available backups with timestamps and sizes
-- Restore from a selected backup (with safety backup behavior in the server)
+### 4.1 Starting the Server & Client
 
-**Dashboard settings are stored in:**
-- Linux: `~/.config/TranscriptionSuite/`
-- Windows: `%APPDATA%\TranscriptionSuite\`
-- macOS: `~/Library/Application Support/TranscriptionSuite/`
+You're now ready to start both Server & Client. Navigate to the **Server** view
+in the sidebar:
 
-### 4.2 Starting the Server and Client
+1. Click 'Pull Image' to download the Docker server image (first time only)
+2. Wait for the download to complete
+3. Click 'Start Container' to launch the server
+4. Wait for the container health status to turn green
 
-1. Open the **Server** view in the sidebar
-2. Click **Pull Image** (first time only, or when updating)
-3. Wait for the Docker image download to finish
-4. Click **Start Container**
-5. Wait for the container health indicator to turn green
-6. Switch to the **Session** view to begin recording/transcribing
-
-If the container fails to start, see [Section 8: Troubleshooting](#8-troubleshooting).
+Once the server is running, navigate to the **Session** view to start transcribing.
 
 ---
 
@@ -243,134 +238,105 @@ If the container fails to start, see [Section 8: Troubleshooting](#8-troubleshoo
 
 ### 5.1 Quick Start
 
-**Longform transcription (Session view):**
+* Run the AppImage (Linux) or installer (Windows)
+* The Dashboard window opens with sidebar navigation
+* Navigate to **Session** view for transcription
 
-1. Select language (or leave on auto detect)
-2. Click **Record**
-3. Speak / capture audio
-4. Click **Stop**
-5. Wait for transcription to finish
-6. Review/copy/export the result
+**Longform Transcription:**
+* Click the Record button to start capturing audio
+* Click Stop to end recording and begin transcription
+* Result appears in the transcription display and is auto-copied to clipboard
 
-**Live Mode (Session view):**
+**Live Mode:**
+* In the Session view, enable the Live Mode toggle
+* Speak naturally with pauses — sentences appear in real-time
+* Use Mute/Unmute to control audio capture
+* Completed sentences accumulate in the display
 
-1. Enable the **Live Mode** toggle
-2. Speak naturally with pauses
-3. Watch completed sentences appear in real time
-4. Use **Mute/Unmute** to control audio capture
-5. Stop Live Mode when finished
+**Static File Transcription:**
+* Navigate to **Notebook** → **Import** tab
+* Drag and drop audio/video files or click to browse
+* Queue multiple files at once — each is transcribed with individual progress and retry on failure
+* Completed files are automatically added to the Audio Notebook using the file name as the note title
 
-**Static file transcription (Notebook -> Import):**
-
-1. Open **Notebook** -> **Import** tab
-2. Drag-and-drop or browse for audio/video files
-3. Queue one or many files
-4. Monitor progress per file (including retry on failure)
-5. Completed items are added to the Audio Notebook
+**Translation (optional):**
+* Enable `Translation` toggle in the Session controls
+* **Whisper**: Translates source language → English (longform, file, Live Mode, Notebook)
+* **Canary (NeMo)**: Bidirectional translation with 24 European target languages
+* **Parakeet / VibeVoice-ASR**: No translation support (toggle auto-disabled)
+* **Live Mode note**: Live Mode v1 supports Whisper backends only
 
 ### 5.2 Dashboard Views
 
-The dashboard uses sidebar navigation with these main views:
+The Dashboard features **sidebar navigation** with these main views:
 
-- **Session**
-  - Main transcription controls (record/stop, language, translation)
-  - Live Mode controls and real-time sentence display
-  - Audio visualizer
-  - Transcription output and logs
-- **Notebook**
-  - Calendar view of recordings
-  - Search
-  - Import queue for files
-- **Server**
-  - Docker image management
-  - Container start/stop/status
-  - Runtime mode (GPU/CPU) selection and related server controls
-- **Settings**
-  - App / Client / Server / Notebook configuration
+- **Session**: Main transcription interface with:
+  - Main Transcription controls (language, translate, record/stop) and Audio Configuration below
+  - Audio visualizer with amplitude zoom (+/− buttons, hover to reveal)
+  - Live Mode toggle and real-time transcript display
+  - Transcription output with copy/download buttons
+  - Processing logs
+- **Model Manager**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
+- **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
+- **Server**: Docker server management (container, images, volumes)
+- **Settings**: Connection, audio, diarization, notebook, app behaviour, and HuggingFace token management
 
-**System Tray (when supported by your desktop environment):**
-- Quick server start/stop
-- Quick recording controls
-- Open dashboard
-- Transcribe file shortcut
-- Tray icon reflects server/recording state
+**System Tray**: The app can minimise to the system tray. The tray icon reflects server and
+recording state (11 distinct states), and the context menu provides quick controls
+(start/stop server, open dashboard, transcribe file, quit). Left-click the tray icon to
+toggle recording: starts a recording when idle/standby, or stops and transcribes if already
+recording. On Windows/macOS, middle-click also stops and transcribes.
 
-Notes:
-- Some Linux desktops (for example GNOME) may require an AppIndicator extension for tray support.
-- The tray "Transcribe File" flow uses a simplified/pure transcription path (no diarization).
+> **Note:** "Transcribe File" from the system tray always uses pure transcription (no diarization), regardless of main transcriber settings.
 
-### 5.3 Model and Feature Compatibility
+> **GNOME note:** GNOME desktop requires the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension for system tray support.
 
-This is the user-facing compatibility summary for the current version.
+**Setup Checklist**: On first launch a setup checklist guides you through Docker verification,
+GPU detection, and HuggingFace token entry.
 
-| Feature | Whisper (faster-whisper) | NVIDIA Parakeet | NVIDIA Canary |
-|---------|---------------------------|-----------------|---------------|
-| Longform transcription | Yes | Yes | Yes |
-| Static file / Notebook upload transcription | Yes | Yes | Yes |
-| Speaker diarization (where enabled) | Yes (workflow-dependent) | Yes (workflow-dependent) | Yes (workflow-dependent) |
-| Translation (longform/static/notebook) | Yes | No | Yes |
-| Live Mode (`/ws/live`, current v1) | **Yes** | **No** | **No** |
-
-Additional notes:
-- Parakeet models are ASR-only (no translation).
-- Canary supports translation in server-side capabilities, but the current Live Mode path is whisper/faster-whisper only.
-- In the UI, some translation toggles may be disabled automatically depending on selected model capabilities.
+**Update Checker**: Opt-in background checks for new app releases (GitHub) and server Docker
+image updates (GHCR). Configurable interval in Settings.
 
 ---
 
 ## 6. Remote Access
 
-TranscriptionSuite supports remote use from a client machine to a server machine using either:
+As previously mentioned, TranscriptionSuite gives you the ability to remote connect from
+one machine running the app to another, via Tailscale.
 
-- **Tailscale** (Tailnet hostname + Tailscale-issued TLS certificates)
-- **LAN** (local hostname/IP + your own trusted TLS certificate)
-
-Remote mode uses layered protections:
+It uses a **layered security model** for remote access:
 
 | Layer | Protection |
 |-------|------------|
-| **Network reachability** | Tailscale Tailnet or your trusted local network |
-| **TLS/HTTPS** | Encrypted traffic |
-| **Token authentication** | Required for API access in remote mode |
+| **Tailscale Network** | Only devices on your Tailnet can reach the server |
+| **TLS/HTTPS** | All traffic encrypted with Tailscale certificates |
+| **Token Authentication** | Required for all API requests in remote mode |
 
-### 6.1 Choose a Remote Profile in the App
-
-In **Settings -> Client**:
-
-1. Enable **Use remote server instead of local**
-2. Choose **Remote Profile**:
-   - **Tailscale**
-   - **LAN**
-3. Enter the host for that profile
-4. Set port to `8443`
-5. Enable HTTPS (the UI enforces HTTPS for remote profiles)
-6. Paste the auth token from the server
-
-### 6.2 Tailscale Setup (MagicDNS + HTTPS Certificates)
+### 6.1 Step 1: Set Up Tailscale
 
 1. Install Tailscale: [tailscale.com/download](https://tailscale.com/download)
-2. Sign in / connect the machine to your Tailnet
-3. In the [Tailscale Admin Console](https://login.tailscale.com/admin), enable:
-   - **MagicDNS**
-   - **HTTPS Certificates**
+2. Authenticate: `sudo tailscale up` (Linux) or via the app (Windows)
+3. Go to [Tailscale Admin Console](https://login.tailscale.com/admin) → DNS tab
+4. Enable **MagicDNS** and **HTTPS Certificates**
 
-Your DNS settings should look similar to this:
+Your DNS settings should look like this:
 
 ![Tailscale DNS Settings](./build/assets/tailscale-dns-settings.png)
 
-### 6.3 Generate and Place Certificates
+### 6.2 Step 2: Generate Certificates
 
-Run this on the machine that will host the TranscriptionSuite server.
-
-Generate certificates:
+Note: You only need to do this on the machine you'll be using as the *server*.
 
 ```bash
+# Generate certificate for your machine
 sudo tailscale cert your-machine.your-tailnet.ts.net
 ```
 
-You can change the default certificate paths in `config.yaml` (`remote_server.tls.*`), but the app/scripts look for standard locations by default.
+Move the certificates to the standard location:
+*(Note: To change the default location and name of the certs the app is looking for,*
+*edit the `remote_server` section in `config.yaml`.)*
 
-**Linux (default path examples):**
+**Linux:**
 ```bash
 mkdir -p ~/.config/Tailscale
 mv your-machine.your-tailnet.ts.net.crt ~/.config/Tailscale/my-machine.crt
@@ -379,88 +345,72 @@ sudo chown $USER:$USER ~/.config/Tailscale/my-machine.*
 chmod 600 ~/.config/Tailscale/my-machine.key
 ```
 
-**Windows (PowerShell default path examples):**
+**Windows (PowerShell):**
 ```powershell
 mkdir "$env:USERPROFILE\Documents\Tailscale" -Force
 mv your-machine.your-tailnet.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my-machine.crt"
 mv your-machine.your-tailnet.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
 ```
 
-If needed, update `config.yaml` paths to match your certificate location:
-- `remote_server.tls.host_cert_path`
-- `remote_server.tls.host_key_path`
+For Windows, you also need to edit a couple of lines in `config.yaml`:
+* Change `~/.config/Tailscale/my-machine.crt` to `~/Documents/Tailscale/my-machine.crt`
+* Change `~/.config/Tailscale/my-machine.key` to `~/Documents/Tailscale/my-machine.key`
 
-### 6.4 LAN Remote Mode (No Tailscale)
-
-Use LAN mode when both machines are on the same trusted local network and you prefer not to use Tailscale.
-
-Requirements:
-
-1. A **trusted TLS certificate** for the hostname/IP you will use
-2. The server running in **HTTPS/TLS mode** on port `8443`
-3. An auth token from the server
-
-Dashboard setup (Client tab):
-
-- Enable **Use remote server instead of local**
-- Set **Remote Profile** to **LAN**
-- Enter the LAN hostname/IP (for example `192.168.1.50`)
-- Set port to `8443`
-- Paste the auth token
-
-Notes:
-- LAN mode still uses the same HTTPS + token-auth flow as Tailscale mode.
-- If you use a proxy/load balancer, it must support WebSocket upgrades for transcription endpoints.
-- The client machine must trust the certificate used by the server.
+**Note:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, so MagicDNS
+must be enabled in your Tailnet.
 
 ---
 
 ## 7. Database & Backups
 
-### 7.1 Automatic Backups
+TranscriptionSuite automatically backs up the SQLite database on server startup:
 
-TranscriptionSuite automatically backs up the SQLite database on server startup.
+- Backups are stored in the Docker volume (`/data/database/backups/`)
+- A new backup is created if the latest is more than 1 hour old
+- Up to 3 backups are kept (oldest automatically deleted)
+- Uses SQLite's built-in backup API (safe with concurrent access)
 
-Default behavior (from the shipped server config):
-- New backup if the latest backup is older than **1 hour**
-- Keep up to **3 backups**
-- Store backups under the server data volume (typically `/data/database/backups/` in Docker)
-
-Default config section (`config.yaml`):
-
+**Configuration** (in `config.yaml`):
 ```yaml
 backup:
-    enabled: true
-    max_age_hours: 1
-    max_backups: 3
+    enabled: true        # Enable/disable automatic backups
+    max_age_hours: 1     # Backup if latest is older than this
+    max_backups: 3       # Number of backups to keep
 ```
 
-### 7.2 Manual Backup/Restore in the Dashboard
+**Manual Backup via Dashboard:**
 
-Open **Settings -> Notebook** to manage backups:
+The Dashboard provides a graphical interface for backup management:
+1. Open Settings → Notebook tab
+2. Click "Create Backup" to create a new backup
+3. View list of available backups with timestamps and sizes
+4. Select a backup and click "Restore Selected Backup" to restore
 
-1. Click **Create Backup** to create a manual backup
-2. Review the backup list (timestamps and sizes)
-3. Select a backup and choose **Restore** when needed
+**Manual Backup via Command Line:**
+```bash
+# Stop the server first
+docker compose down
 
-The server performs validation and safety steps during restore (including integrity checks and safety backup behavior).
+# Copy the database file
+docker run --rm -v transcriptionsuite-data:/data -v $(pwd):/backup \
+    alpine cp /data/database/notebook.db /backup/notebook_backup.db
 
-### 7.3 Export Individual Recordings
+# Restart the server
+docker compose up -d
+```
 
-You can export individual transcriptions from the Audio Notebook.
+**Export Individual Recordings:**
 
-Typical flow:
+You can export individual transcriptions from the Audio Notebook:
+1. Right-click on any recording in the Calendar view
+2. Select "Export transcription"
+3. Choose format based on note data:
+   - `Text (.txt)` for pure transcription notes
+   - `SubRip (.srt)` or `Advanced SubStation Alpha (.ass)` for timestamp-capable notes
+4. Select save location
 
-1. Open a recording in the Notebook workflow
-2. Choose the export action
-3. Select a supported format
-
-Common formats:
-- `Text (.txt)` for plain transcript exports
-- `SubRip (.srt)` for subtitle-style exports
-- `Advanced SubStation Alpha (.ass)` for richer subtitle exports
-
-When diarization is available, exports may include normalized speaker labels (for example `Speaker 1`, `Speaker 2`).
+When diarization is present, subtitle exports include normalized speaker labels
+(`Speaker 1`, `Speaker 2`, ...).
 
 ---
 
@@ -468,70 +418,61 @@ When diarization is available, exports may include normalized speaker labels (fo
 
 ### 8.1 Server Won't Start
 
-Check Docker logs first:
-
+Check Docker logs:
 ```bash
 docker compose logs -f
 ```
 
-Also check:
-- Docker Desktop / Docker daemon is running
-- You have Docker permissions (Linux `docker` group)
-- The image pull completed before starting the container
-- TLS certificate paths are valid if using remote HTTPS mode
-
-Optional helper:
-- `lazydocker` can make container/log inspection easier if you use Docker frequently.
+Alternatively install `lazydocker`, it's an excellent cli tool to manage docker.
+*(Then simply run it by running `lazydocker` in your terminal. Select your container on*
+*the left and you'll see its logs on the right.)*
 
 ### 8.2 GPU Not Detected
 
-Verify Docker GPU access:
-
+Verify NVIDIA Container Toolkit is installed:
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 ```
 
-If GPU mode is not available:
-- Switch to **CPU mode** in the dashboard (Server view / runtime mode controls)
-- CPU mode works on Linux, Windows, and macOS, but will be slower than GPU mode
-
-Linux-specific checks:
-- NVIDIA driver installed
-- NVIDIA Container Toolkit installed
-- Docker restarted after toolkit install (if needed)
+If you don't have an NVIDIA GPU or prefer not to use GPU acceleration, switch to
+**CPU mode** in Settings → App → Runtime Mode, or in the Server view before starting
+the container. CPU mode works on all platforms (Linux, Windows, macOS) but transcription
+will be significantly slower.
 
 ### 8.3 Connection Issues (Remote Mode)
 
-Checklist:
+1. Verify Tailscale is connected: `tailscale status`
+2. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
+3. Check certificate paths in `config.yaml`
+4. Ensure port 8443 is used for HTTPS
 
-1. Verify Tailscale is connected (if using Tailscale): `tailscale status`
-2. Confirm MagicDNS + HTTPS certificates are enabled in Tailscale admin settings
-3. Check certificate paths in `config.yaml` (`remote_server.tls.*`)
-4. Make sure the dashboard remote profile is correct (`Tailscale` vs `LAN`)
-5. Ensure the port is `8443` and HTTPS is enabled in the client settings
-6. Confirm the server auth token is correct
+**DNS Resolution Errors:**
 
-If you are using LAN mode:
-- Verify the certificate is trusted on the client machine
-- Verify any reverse proxy/load balancer supports WebSocket upgrades
+If you see errors like `Name or service not known` for `.ts.net` hostnames:
 
-For advanced troubleshooting (Docker runtime, deeper DNS/TLS diagnostics, developer workflows), see [README_DEV.md](README_DEV.md).
+- **Automatic fallback:** The client automatically detects DNS failures and falls back
+  to Tailscale IP addresses with intelligent retry logic. It attempts multiple IPs
+  (both IPv4 and IPv6) when available. Check the logs for "Tailscale IP fallback" messages.
+- **Check for DNS fight:** Run `tailscale status` and look for DNS warnings. If you see
+  `/etc/resolv.conf overwritten`, your system's DNS isn't forwarding to
+  Tailscale's MagicDNS.
+
+See [README_DEV.md](README_DEV.md#133-tailscale-dns-resolution) for detailed troubleshooting.
 
 ---
 
 ## 9. License
 
-GNU General Public License v3.0 or later (GPLv3+) — see [LICENSE](LICENSE).
+GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](LICENSE).
 
 ---
 
 ## 10. Acknowledgments
 
-- [OpenAI Whisper](https://github.com/openai/whisper)
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
+- [OpenAI Whisper](https://github.com/openai/whisper)
+- [WhisperX](https://github.com/m-bain/whisperX)
 - [NVIDIA NeMo](https://github.com/NVIDIA/NeMo)
-- [Microsoft VibeVoice](https://github.com/microsoft/VibeVoice)
+- [VibeVoice-ASR](https://github.com/microsoft/VibeVoice)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT)
 - [Tailscale](https://tailscale.com/)
-- [LM Studio](https://lmstudio.ai/)

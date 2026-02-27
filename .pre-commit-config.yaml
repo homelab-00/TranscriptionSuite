@@ -67,3 +67,14 @@ repos:
         language: system
         files: ^dashboard/
         pass_filenames: false
+
+  # ── Documentation freshness warning ────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: doc-freshness
+        name: doc freshness (README drift warning)
+        entry: node build/scripts/check-doc-freshness.mjs
+        language: system
+        always_run: true
+        pass_filenames: false
+        verbose: true

@@ -1,1885 +1,1721 @@
 # TranscriptionSuite - Developer Guide
 
-Technical documentation for developing, testing, packaging, and operating TranscriptionSuite from source.
-
-This guide is intentionally code-accurate to the current repository state. When code and docs diverge, this file documents the current behavior and calls out caveats explicitly.
+Technical documentation for developing and building TranscriptionSuite.
 
 ## Table of Contents
 
-- [1. Developer Quick Start](#1-developer-quick-start)
-  - [1.1 Quick Command Matrix](#11-quick-command-matrix)
-  - [1.2 Fast Local Iteration Setups](#12-fast-local-iteration-setups)
-- [2. Toolchain and Environment Requirements](#2-toolchain-and-environment-requirements)
-  - [2.1 Core Requirements](#21-core-requirements)
-  - [2.2 Platform Notes](#22-platform-notes)
-  - [2.3 Packaging Host Requirements](#23-packaging-host-requirements)
-- [3. Repository Structure (Code-Accurate)](#3-repository-structure-code-accurate)
-  - [3.1 Key Manifests and Locks](#31-key-manifests-and-locks)
-  - [3.2 Version Alignment](#32-version-alignment)
-- [4. Development Workflows](#4-development-workflows)
-  - [4.1 Environment Setup](#41-environment-setup)
-  - [4.2 Dashboard-Only Iteration](#42-dashboard-only-iteration)
-  - [4.3 Full Local Stack (Docker Server + Dashboard)](#43-full-local-stack-docker-server--dashboard)
-  - [4.4 Backend Native Run (Advanced / Caveat-Heavy)](#44-backend-native-run-advanced--caveat-heavy)
-  - [4.5 Remote TLS Workflow (Tailscale or LAN)](#45-remote-tls-workflow-tailscale-or-lan)
-  - [4.6 Docker Image Build and Publish](#46-docker-image-build-and-publish)
-  - [4.7 Packaging Workflows](#47-packaging-workflows)
-- [5. Docker Runtime and Deployment Reference](#5-docker-runtime-and-deployment-reference)
-  - [5.1 Compose Layering](#51-compose-layering)
-  - [5.2 Dashboard Compose Selection Behavior](#52-dashboard-compose-selection-behavior)
-  - [5.3 Runtime Profiles (GPU / CPU)](#53-runtime-profiles-gpu--cpu)
-  - [5.4 Volumes and Persistent Data](#54-volumes-and-persistent-data)
-  - [5.5 Runtime Bootstrap Lifecycle](#55-runtime-bootstrap-lifecycle)
-  - [5.6 Startup Scripts and Caveats](#56-startup-scripts-and-caveats)
-  - [5.7 Update Lifecycle (Image vs Runtime Volume)](#57-update-lifecycle-image-vs-runtime-volume)
-- [6. Backend Architecture and Development](#6-backend-architecture-and-development)
-  - [6.1 Application Startup and Lifespan](#61-application-startup-and-lifespan)
-  - [6.2 Route Modules](#62-route-modules)
-  - [6.3 Core Modules](#63-core-modules)
-  - [6.4 Logging System](#64-logging-system)
-  - [6.5 Backend Testing](#65-backend-testing)
-  - [6.6 Native Run Caveats (Current Code State)](#66-native-run-caveats-current-code-state)
-- [7. Dashboard Architecture and Development](#7-dashboard-architecture-and-development)
-  - [7.1 Electron Main / Preload / Renderer Split](#71-electron-main--preload--renderer-split)
-  - [7.2 Renderer Services and Hooks](#72-renderer-services-and-hooks)
-  - [7.3 View and UI Components](#73-view-and-ui-components)
-  - [7.4 UI Contract System](#74-ui-contract-system)
-  - [7.5 Dashboard Config Source of Truth](#75-dashboard-config-source-of-truth)
-- [8. API and WebSocket Reference](#8-api-and-websocket-reference)
-  - [8.1 HTTP Route Inventory (Grouped by Prefix)](#81-http-route-inventory-grouped-by-prefix)
-  - [8.2 WebSocket `/ws` Protocol (One-Shot Transcription)](#82-websocket-ws-protocol-one-shot-transcription)
-  - [8.3 WebSocket `/ws/live` Protocol (Live Mode)](#83-websocket-wslive-protocol-live-mode)
-  - [8.4 WebSocket `/api/admin/models/load/stream` Protocol](#84-websocket-apiadminmodelsloadstream-protocol)
-  - [8.5 Binary Audio Framing](#85-binary-audio-framing)
-- [9. Configuration Reference (Server + Dashboard)](#9-configuration-reference-server--dashboard)
-  - [9.1 Server Config Discovery and Override Rules](#91-server-config-discovery-and-override-rules)
-  - [9.2 Server Config Top-Level Sections (`server/config.yaml`)](#92-server-config-top-level-sections-serverconfigyaml)
-  - [9.3 Server Config Caveats and Legacy Consumers](#93-server-config-caveats-and-legacy-consumers)
-  - [9.4 Dashboard Persisted Config Keys (`electron/main.ts`)](#94-dashboard-persisted-config-keys-electronmaints)
-- [10. Data Storage, Database, Migrations, and Backups](#10-data-storage-database-migrations-and-backups)
-  - [10.1 Database Schema (Current Required Tables)](#101-database-schema-current-required-tables)
-  - [10.2 Migrations (Alembic + SQLite Batch Mode)](#102-migrations-alembic--sqlite-batch-mode)
-  - [10.3 Backup Behavior and Endpoints](#103-backup-behavior-and-endpoints)
-  - [10.4 Recording Export Formats](#104-recording-export-formats)
-- [11. Code Quality, CI, and Pre-Commit](#11-code-quality-ci-and-pre-commit)
-  - [11.1 Python Tooling (Build Venv)](#111-python-tooling-build-venv)
-  - [11.2 Backend Tests (Backend Venv)](#112-backend-tests-backend-venv)
-  - [11.3 Dashboard Checks](#113-dashboard-checks)
-  - [11.4 Pre-Commit Hooks](#114-pre-commit-hooks)
-  - [11.5 CI Workflows](#115-ci-workflows)
-- [12. Build and Release Packaging](#12-build-and-release-packaging)
-  - [12.1 Build Matrix](#121-build-matrix)
-  - [12.2 Linux AppImage](#122-linux-appimage)
-  - [12.3 Windows Installer](#123-windows-installer)
-  - [12.4 macOS DMG + ZIP (arm64, unsigned)](#124-macos-dmg--zip-arm64-unsigned)
-  - [12.5 Signing Artifacts](#125-signing-artifacts)
-  - [12.6 Build Asset Generation](#126-build-asset-generation)
-  - [12.7 End-User Verification Docs](#127-end-user-verification-docs)
-- [13. Troubleshooting and Current Caveats](#13-troubleshooting-and-current-caveats)
+- [1. Quick Reference](#1-quick-reference)
+  - [1.1 Development Commands](#11-development-commands)
+  - [1.2 Running from Source (Development)](#12-running-from-source-development)
+  - [1.3 Build Commands](#13-build-commands)
+  - [1.4 Common Tasks](#14-common-tasks)
+- [2. Architecture Overview](#2-architecture-overview)
+  - [2.1 Design Principles](#21-design-principles)
+  - [2.2 Platform Architectures](#22-platform-architectures)
+  - [2.3 Security Model](#23-security-model)
+- [3. Project Structure](#3-project-structure)
+  - [3.1 Configuration Files](#31-configuration-files)
+  - [3.2 Version Management](#32-version-management)
+- [4. Development Workflow](#4-development-workflow)
+  - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
+  - [4.2 Step 2: Build Docker Image](#42-step-2-build-docker-image)
+  - [4.3 Step 3: Run Dashboard Locally](#43-step-3-run-dashboard-locally)
+  - [4.4 Step 4: Run Dashboard Remotely (Tailscale)](#44-step-4-run-dashboard-remotely-tailscale)
+  - [4.5 Publishing Docker Images](#45-publishing-docker-images)
+- [5. Build Workflow](#5-build-workflow)
+  - [5.1 Prerequisites](#51-prerequisites)
+  - [5.2 Build Matrix](#52-build-matrix)
+  - [5.3 Linux AppImage](#53-linux-appimage)
+  - [5.4 Windows Installer](#54-windows-installer)
+  - [5.5 macOS DMG + ZIP (Unsigned)](#55-macos-dmg--zip-unsigned)
+  - [5.6 Build Assets](#56-build-assets)
+  - [5.7 End-User Verification Docs](#57-end-user-verification-docs)
+- [6. Docker Reference](#6-docker-reference)
+  - [6.1 Compose File Layering](#61-compose-file-layering)
+  - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
+  - [6.3 CPU Mode](#63-cpu-mode)
+  - [6.4 Tailscale HTTPS Setup](#64-tailscale-https-setup)
+  - [6.5 Docker Volume Structure](#65-docker-volume-structure)
+  - [6.6 Docker Image Selection](#66-docker-image-selection)
+  - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
+- [7. API Reference](#7-api-reference)
+  - [7.1 API Endpoints](#71-api-endpoints)
+  - [7.2 WebSocket Protocol](#72-websocket-protocol)
+  - [7.3 Live Mode WebSocket Protocol](#73-live-mode-websocket-protocol)
+- [8. Backend Development](#8-backend-development)
+  - [8.1 Backend Structure](#81-backend-structure)
+  - [8.2 Running the Server Locally](#82-running-the-server-locally)
+  - [8.3 Configuration System](#83-configuration-system)
+  - [8.4 Testing](#84-testing)
+- [9. Dashboard Development](#9-dashboard-development)
+  - [9.1 Running from Source](#91-running-from-source)
+  - [9.2 Tech Stack](#92-tech-stack)
+  - [9.3 Key Modules](#93-key-modules)
+  - [9.4 UI Contract System](#94-ui-contract-system)
+  - [9.5 Server Busy Handling](#95-server-busy-handling)
+  - [9.6 Model Management](#96-model-management)
+  - [9.7 Package Management](#97-package-management)
+- [10. Configuration Reference](#10-configuration-reference)
+  - [10.1 Server Configuration](#101-server-configuration)
+  - [10.2 Dashboard Configuration](#102-dashboard-configuration)
+- [11. Data Storage](#11-data-storage)
+  - [11.1 Database Schema](#111-database-schema)
+  - [11.2 Database Migrations](#112-database-migrations)
+  - [11.3 Automatic Backups](#113-automatic-backups)
+- [12. Code Quality Checks](#12-code-quality-checks)
+  - [12.1 Python Code Quality](#121-python-code-quality)
+  - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
+  - [12.3 GitHub CodeQL Layout](#123-github-codeql-layout)
+  - [12.4 Pre-Commit Hooks](#124-pre-commit-hooks)
+- [13. Troubleshooting](#13-troubleshooting)
   - [13.1 Docker GPU Access](#131-docker-gpu-access)
-  - [13.2 Docker Desktop Networking (Windows/macOS)](#132-docker-desktop-networking-windowsmacos)
-  - [13.3 Tailscale DNS and TLS Checks](#133-tailscale-dns-and-tls-checks)
-  - [13.4 AppImage Startup Issues (FUSE / Sandbox)](#134-appimage-startup-issues-fuse--sandbox)
-  - [13.5 macOS DMG Build Failure (`dmgbuild`)](#135-macos-dmg-build-failure-dmgbuild)
-  - [13.6 Current Code/Script Caveats (Documented On Purpose)](#136-current-codescript-caveats-documented-on-purpose)
-- [14. Dependency and Version Snapshot](#14-dependency-and-version-snapshot)
-  - [14.1 Backend (`server/backend/pyproject.toml`)](#141-backend-serverbackendpyprojecttoml)
-  - [14.2 Build Tooling (`build/pyproject.toml`)](#142-build-tooling-buildpyprojecttoml)
-  - [14.3 Dashboard (`dashboard/package.json`)](#143-dashboard-dashboardpackagejson)
-  - [14.4 Release Version Alignment Fields](#144-release-version-alignment-fields)
+  - [13.2 Health Check Issues](#132-health-check-issues)
+  - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
+  - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
+  - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
+  - [13.6 Checking Installed Packages](#136-checking-installed-packages)
+  - [13.7 macOS DMG Build Failure (dmgbuild binary)](#137-macos-dmg-build-failure-dmgbuild-binary)
+- [14. Dependencies](#14-dependencies)
+  - [14.1 Server (Docker)](#141-server-docker)
+  - [14.2 Dashboard](#142-dashboard)
 
 ---
 
-## 1. Developer Quick Start
+## 1. Quick Reference
 
-### 1.1 Quick Command Matrix
+### 1.1 Development Commands
 
-| Task | Command |
-|------|---------|
-| Install dashboard deps | `cd dashboard && npm install` |
-| Install build tooling venv (ruff/pyright/pre-commit) | `cd build && uv venv --python 3.13 && uv sync` |
-| Install backend venv | `cd server/backend && uv venv --python 3.13 && uv sync` |
-| Run dashboard (browser/Vite) | `cd dashboard && npm run dev` |
-| Run dashboard (Electron dev) | `cd dashboard && npm run dev:electron` |
-| Run backend directly (advanced) | `cd server/backend && uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000` |
-| Start Docker server (Linux + GPU manual) | `cd server/docker && TAG=latest docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d` |
-| Stop Docker server (manual compose) | `cd server/docker && docker compose stop` |
-| Python lint | `./build/.venv/bin/ruff check .` |
-| Python format | `./build/.venv/bin/ruff format .` |
-| Python type check | `./build/.venv/bin/pyright` |
-| Backend tests | `cd server/backend && uv run pytest` |
-| Dashboard type check | `cd dashboard && npm run typecheck` |
-| Dashboard format check | `cd dashboard && npm run format:check` |
-| Dashboard UI contract checks | `cd dashboard && npm run ui:contract:check` |
-| Dashboard composite checks | `cd dashboard && npm run check` |
-| Fetch OpenAPI spec -> dashboard | `cd dashboard && npm run types:spec` |
-| Generate TS types from spec | `cd dashboard && npm run types:generate` |
-
-Notes:
-- `npm run check` runs `typecheck`, `format:check`, and `ui:contract:check`.
-- The Docker convenience scripts (`start-local.sh`, `start-remote.sh`, PowerShell equivalents) currently require `TAG` to be set. See Section 5.6.
-
-### 1.2 Fast Local Iteration Setups
-
-**Frontend-only (no Docker required):**
 ```bash
-cd dashboard
-npm install
-npm run dev
+# 1. Install dashboard dependencies
+cd dashboard && npm install && cd ..
+
+# 2. Build tools (for linting/testing server Python)
+cd build && uv venv --python 3.13 && uv sync && cd ..
+
+# 3. Build and run Docker server
+cd server/docker && docker compose build && docker compose up -d
+
+# 4. Run dashboard (browser dev mode)
+cd dashboard && npm run dev
+
+# 5. Run dashboard (Electron dev mode)
+cd dashboard && npm run dev:electron
 ```
 
-**Full app local dev (Docker server + Electron dashboard):**
-```bash
-# Terminal 1
-cd server/docker
-TAG=latest docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+### 1.2 Running from Source (Development)
 
-# Terminal 2
-cd dashboard
-npm install
-npm run dev:electron
-```
-
-**Backend API iteration (advanced):**
 ```bash
+# 1. Run backend server (native Python)
 cd server/backend
-uv venv --python 3.13
-uv sync
+uv venv --python 3.13 && uv sync
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
-```
 
-Backend-native runs are possible, but current code still assumes some Docker-style paths (`/data/...`) in a few places. See Section 6.6 before relying on this workflow.
-
----
-
-## 2. Toolchain and Environment Requirements
-
-### 2.1 Core Requirements
-
-- **Python**: `3.13` (both `build/pyproject.toml` and `server/backend/pyproject.toml` require `>=3.13,<3.14`)
-- **uv**: used for Python environments and lockfile-based installs (`build/uv.lock`, `server/backend/uv.lock`)
-- **Node.js + npm**: required for dashboard dev/build/package steps
-- **Docker** (Linux) or **Docker Desktop** (Windows/macOS): required for the supported server runtime workflow
-- **Git**: standard development workflow
-
-Optional but common:
-- **NVIDIA Container Toolkit** for GPU Docker mode on Linux
-- **Tailscale** for remote TLS workflows
-- **GPG** for release artifact signing (`.asc`)
-
-### 2.2 Platform Notes
-
-**Linux**
-- Add your user to the `docker` group so the dashboard and scripts can call Docker without `sudo`:
-  ```bash
-  sudo usermod -aG docker $USER
-  ```
-- Log out/in after changing group membership.
-- GPU mode requires NVIDIA driver + NVIDIA Container Toolkit.
-
-**Windows**
-- Use Docker Desktop (WSL2 backend recommended).
-- PowerShell startup scripts are available in `server/docker/*.ps1`.
-- The server runs in a Docker Desktop VM, so networking differs from Linux host networking (see Section 13.2).
-
-**macOS**
-- Use Docker Desktop.
-- GPU mode is not supported for the server runtime.
-- macOS packaging script targets Apple Silicon (`arm64`) and unsigned DMG/ZIP output.
-
-### 2.3 Packaging Host Requirements
-
-These are stricter than normal development requirements.
-
-- **Dashboard CI checks** currently run on **Node 20** (`.github/workflows/dashboard-quality.yml`)
-- **Packaging scripts** (`build/build-electron-linux.sh`, `build/build-electron-mac.sh`) explicitly require **Node 24+**
-- **Windows packaging** must run on Windows (`npm run package:windows`)
-- **macOS packaging** must run on macOS (`npm run package:mac` or `build/build-electron-mac.sh`)
-
-Additional packaging helpers:
-- `build/build-electron-mac.sh` may install/use `dmgbuild` via `pip3`
-- `build/generate-ico.sh` uses ImageMagick; Inkscape improves SVG raster output quality
-
----
-
-## 3. Repository Structure (Code-Accurate)
-
-```text
-TranscriptionSuite/
-├── README.md
-├── README_DEV.md
-├── build/
-│   ├── assets/                       # Logos, tray icons, signing public key, screenshots
-│   ├── pyproject.toml                # Build/dev tooling deps (ruff, pyright, pytest, pre-commit)
-│   ├── uv.lock
-│   ├── build-electron-linux.sh
-│   ├── build-electron-mac.sh
-│   ├── docker-build-push.sh          # Pushes already-built server images to GHCR
-│   ├── generate-ico.sh               # Generates logo/tray icons and copies logo.svg to dashboard/public/
-│   └── sign-electron-artifacts.sh    # Creates armored detached signatures (.asc)
-├── dashboard/
-│   ├── package.json                  # Scripts + electron-builder config + deps
-│   ├── package-lock.json
-│   ├── vite.config.ts
-│   ├── tsconfig.json
-│   ├── index.html
-│   ├── index.tsx
-│   ├── App.tsx
-│   ├── types.ts
-│   ├── public/
-│   │   ├── logo.svg
-│   │   └── audio-worklet-processor.js
-│   ├── electron/                     # Electron main process + preload code
-│   │   ├── main.ts
-│   │   ├── preload.ts
-│   │   ├── dockerManager.ts
-│   │   ├── trayManager.ts
-│   │   ├── updateManager.ts
-│   │   ├── shortcutManager.ts
-│   │   ├── pasteAtCursor.ts
-│   │   └── tsconfig.json
-│   ├── components/                   # Renderer UI components (views + primitives)
-│   │   ├── views/
-│   │   └── ui/
-│   ├── src/                          # Renderer services, hooks, config, API client, types
-│   │   ├── api/
-│   │   ├── config/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   ├── types/
-│   │   ├── index.css
-│   │   └── queryClient.ts
-│   ├── scripts/
-│   │   ├── dev-electron.mjs
-│   │   ├── afterPack.cjs
-│   │   └── ui-contract/
-│   └── ui-contract/                  # Contract YAML/schema/baseline/design language docs
-├── server/
-│   ├── config.yaml                   # Unified server config (default template)
-│   ├── backend/
-│   │   ├── pyproject.toml
-│   │   ├── uv.lock
-│   │   ├── __init__.py               # Server version discovery
-│   │   ├── api/
-│   │   │   ├── main.py               # FastAPI app factory + middleware + router wiring + lifespan
-│   │   │   └── routes/
-│   │   ├── core/                     # STT, diarization, live/realtime, token store, utilities
-│   │   ├── database/                 # SQLite, backups, Alembic migrations
-│   │   ├── logging/                  # structlog setup helpers
-│   │   └── tests/
-│   └── docker/
-│       ├── Dockerfile
-│       ├── docker-compose.yml
-│       ├── docker-compose.linux-host.yml
-│       ├── docker-compose.desktop-vm.yml
-│       ├── docker-compose.gpu.yml
-│       ├── docker-entrypoint.sh
-│       ├── bootstrap_runtime.py
-│       ├── entrypoint.py
-│       ├── start-common.sh / start-local.sh / start-remote.sh / stop.sh
-│       └── start-common.ps1 / start-local.ps1 / start-remote.ps1 / stop.ps1
-└── .github/
-    ├── workflows/
-    └── codeql/
-```
-
-### 3.1 Key Manifests and Locks
-
-| File | Purpose |
-|------|---------|
-| `dashboard/package.json` | Dashboard scripts, dependencies, Electron packaging config |
-| `dashboard/package-lock.json` | Dashboard lockfile |
-| `build/pyproject.toml` | Repo tooling environment (ruff, pyright, pytest, pre-commit, packaging helpers) |
-| `build/uv.lock` | Build tooling lockfile |
-| `server/backend/pyproject.toml` | Server runtime dependencies and optional extras |
-| `server/backend/uv.lock` | Server runtime lockfile used by Docker bootstrap |
-| `server/config.yaml` | Default server configuration shipped into Docker image |
-
-### 3.2 Version Alignment
-
-For releases, keep these version fields aligned:
-- `dashboard/package.json` (`version`)
-- `server/backend/pyproject.toml` (`project.version`)
-- `build/pyproject.toml` (`project.version`)
-
-Current repo state (at time of this rewrite): all three are `1.1.0`.
-
----
-
-## 4. Development Workflows
-
-### 4.1 Environment Setup
-
-```bash
-# Dashboard deps
+# 2. Run dashboard (in a separate terminal)
 cd dashboard
 npm install
-cd ..
-
-# Build/dev tooling venv (ruff, pyright, pytest, pre-commit, packaging helpers)
-cd build
-uv venv --python 3.13
-uv sync
-cd ..
-
-# Backend venv (for native backend runs and backend tests)
-cd server/backend
-uv venv --python 3.13
-uv sync
-cd ../..
-
-# Optional: install pre-commit hook
-./build/.venv/bin/pre-commit install
+npm run dev           # Vite dev server at http://localhost:3000
+# or
+npm run dev:electron  # Full Electron window with Vite hot-reload
 ```
 
-Recommended practice:
-- Use `build/.venv` for repo-wide tooling (`ruff`, `pyright`, `pre-commit`)
-- Use `server/backend` venv for backend tests and native backend runs (`uv run pytest`, `uv run uvicorn ...`)
+**Notes:**
+- Backend runs on port 8000
+- Dashboard Vite dev server runs on port 3000
+- Backend must be running for live API features to work
+- `npm run dev` enables hot-reload for the renderer; `npm run dev:electron` also compiles the Electron main process
 
-### 4.2 Dashboard-Only Iteration
-
-Useful when changing renderer UI or Electron-only behavior without needing live backend responses.
-
-**Browser mode (renderer only):**
-```bash
-cd dashboard
-npm run dev
-# Vite dev server at http://localhost:3000
-```
-
-**Electron dev mode (renderer + Electron main/preload):**
-```bash
-cd dashboard
-npm run dev:electron
-```
-
-`npm run dev:electron` uses `dashboard/scripts/dev-electron.mjs` to:
-1. start Vite,
-2. compile Electron TS (`electron/tsconfig.json`),
-3. launch Electron once Vite is reachable.
-
-### 4.3 Full Local Stack (Docker Server + Dashboard)
-
-This is the primary development workflow for end-to-end behavior.
-
-**Linux + GPU (manual compose example):**
-```bash
-# Terminal 1: server
-cd server/docker
-TAG=latest docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.linux-host.yml \
-  -f docker-compose.gpu.yml \
-  up -d
-
-# Terminal 2: dashboard
-cd dashboard
-npm run dev:electron
-```
-
-**Linux + CPU (omit GPU overlay):**
-```bash
-cd server/docker
-TAG=latest docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.linux-host.yml \
-  up -d
-```
-
-**Windows/macOS (Docker Desktop CPU mode):**
-```bash
-cd server/docker
-TAG=latest docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.desktop-vm.yml \
-  up -d
-```
-
-Notes:
-- The Electron dashboard uses Docker via `dashboard/electron/dockerManager.ts`, not by shelling through these exact commands.
-- The dashboard chooses compose overlays automatically; manual CLI examples are provided for reproducibility.
-
-### 4.4 Backend Native Run (Advanced / Caveat-Heavy)
-
-Native runs are useful for quick backend code iteration, but current code still contains Docker-era path assumptions. Read Section 6.6 first.
-
-**Minimal command:**
-```bash
-cd server/backend
-uv venv --python 3.13
-uv sync
-uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Recommended native-run prep (current code state):**
-- Ensure writable paths for components that still default to `/data/...`:
-  - token store: `/data/tokens/tokens.json` (hardcoded default in `server/backend/core/token_store.py`)
-  - logging: `/data/logs` unless overridden in config
-- Provide a user config override file at `~/.config/TranscriptionSuite/config.yaml` (Linux/macOS) or `~/Documents/TranscriptionSuite/config.yaml` (Windows) to avoid container-only paths where possible.
-
-Example native-run environment variables that help (but do not fix every hardcoded path):
-```bash
-export DATA_DIR="$PWD/../../.dev-data"
-export LOG_LEVEL=DEBUG
-```
-
-Caveat summary:
-- `DATA_DIR` affects database/audio directories (`server/backend/database/database.py`)
-- token store path is currently not derived from `DATA_DIR`
-- plain `uvicorn server.api.main:app` bypasses Docker entrypoint setup (`server/docker/entrypoint.py`, `docker-entrypoint.sh`)
-
-### 4.5 Remote TLS Workflow (Tailscale or LAN)
-
-Remote mode is the server-in-Docker TLS workflow used by the dashboard's remote client settings.
-
-#### 4.5.1 Tailscale profile
-
-1. Install/auth Tailscale and enable HTTPS certs in Tailscale admin DNS settings.
-2. Generate certs (example):
-   ```bash
-   sudo tailscale cert <your-machine>.tail<xxxx>.ts.net
-   ```
-3. Configure host cert paths in `server/config.yaml` under `remote_server.tls.host_cert_path` and `host_key_path`.
-4. Start remote mode (script or manual compose).
-
-**Script-based (Linux/macOS shell):**
-```bash
-cd server/docker
-TAG=latest ./start-remote.sh
-```
-
-**Manual compose (Linux + GPU):**
-```bash
-cd server/docker
-TAG=latest \
-TLS_ENABLED=true \
-TLS_CERT_PATH="$HOME/.config/Tailscale/my-machine.crt" \
-TLS_KEY_PATH="$HOME/.config/Tailscale/my-machine.key" \
-docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
-```
-
-#### 4.5.2 LAN profile (local trusted cert)
-
-Set `REMOTE_TLS_PROFILE=lan` so startup scripts read `remote_server.tls.lan_host_cert_path` and `lan_host_key_path`.
-
-**Shell:**
-```bash
-cd server/docker
-TAG=latest REMOTE_TLS_PROFILE=lan ./start-remote.sh
-```
-
-**PowerShell:**
-```powershell
-cd server/docker
-$env:TAG = "latest"
-$env:REMOTE_TLS_PROFILE = "lan"
-.\start-remote.ps1
-```
-
-#### 4.5.3 Dashboard client settings (remote mode)
-
-In the dashboard Settings modal (Client tab):
-- Enable remote mode (`connection.useRemote`)
-- Choose profile: `tailscale` or `lan`
-- Set host (`connection.remoteHost` or `connection.lanHost`)
-- Set port `8443`
-- Enable HTTPS (`connection.useHttps`)
-- Provide auth token (`connection.authToken`)
-
-### 4.6 Docker Image Build and Publish
-
-#### 4.6.1 Build a server image locally
+### 1.3 Build Commands
 
 ```bash
-cd server/docker
-TAG=v1.1.0-dev docker compose build
-```
-
-Notes:
-- The Docker image contains app code + bootstrap scripts.
-- Python runtime dependencies are installed at first container start into `/runtime/.venv` by `server/docker/bootstrap_runtime.py`.
-
-#### 4.6.2 Push an already-built image to GHCR
-
-`build/docker-build-push.sh` is a push-oriented helper (it does not build the image).
-
-```bash
-# Push most recent local image for the repo
-./build/docker-build-push.sh
-
-# Push a specific local tag
-./build/docker-build-push.sh v1.1.0
-```
-
-The script auto-tags `latest` when the pushed tag matches `vX.Y.Z`.
-
-### 4.7 Packaging Workflows
-
-#### Linux AppImage
-```bash
+# Linux AppImage (Electron)
 ./build/build-electron-linux.sh
-# or manually:
+# Output: dashboard/release/TranscriptionSuite-*-x86_64.AppImage
+
+# Or from within dashboard/
 cd dashboard && npm run package:linux
-```
 
-#### Windows NSIS installer (run on Windows)
-```bash
-cd dashboard
-npm run package:windows
-```
+# Windows (on Windows machine)
+cd dashboard && npm run package:windows
+# Output: dashboard/release/TranscriptionSuite Setup *.exe
 
-#### macOS DMG + ZIP (Apple Silicon, run on macOS)
-```bash
+# macOS (on macOS machine, Apple Silicon)
 ./build/build-electron-mac.sh
-# or manually (see dmgbuild caveat in Section 13.5):
+# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+
+# Or from within dashboard/
 cd dashboard && npm run package:mac
 ```
 
----
+### 1.4 Common Tasks
 
-## 5. Docker Runtime and Deployment Reference
-
-### 5.1 Compose Layering
-
-TranscriptionSuite uses layered Compose files in `server/docker/`:
-
-| File | Role |
-|------|------|
-| `docker-compose.yml` | Base service definition, env vars, volumes, healthcheck |
-| `docker-compose.linux-host.yml` | Linux host networking overlay |
-| `docker-compose.desktop-vm.yml` | Windows/macOS Docker Desktop networking overlay |
-| `docker-compose.gpu.yml` | NVIDIA GPU device reservation overlay |
-
-Examples:
-
-```bash
-# Linux + GPU
-TAG=latest docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
-
-# Linux + CPU
-TAG=latest docker compose -f docker-compose.yml -f docker-compose.linux-host.yml up -d
-
-# Windows/macOS + CPU
-TAG=latest docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
-
-# Windows + GPU (Docker Desktop + NVIDIA support)
-TAG=latest docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
-```
-
-### 5.2 Dashboard Compose Selection Behavior
-
-The Electron dashboard does not rely on the shell scripts. It uses `dashboard/electron/dockerManager.ts`.
-
-Current behavior (`composeFileArgs(runtimeProfile)` in `dockerManager.ts`):
-- Linux -> base + `docker-compose.linux-host.yml`
-- Windows/macOS -> base + `docker-compose.desktop-vm.yml`
-- GPU profile -> add `docker-compose.gpu.yml`
-- CPU profile -> omit GPU overlay
-
-Other notable `dockerManager.ts` behavior:
-- Picks the most recent local server image tag when no tag is explicitly selected
-- Fails start if no local image exists (it does not automatically pull in `startContainer()`)
-- Writes selected env overrides into the Compose `.env` file in the compose directory (`upsertComposeEnvValues`)
-- In packaged app mode, copies bundled compose files into a writable user data directory before running Compose
-
-### 5.3 Runtime Profiles (GPU / CPU)
-
-Dashboard runtime profiles are `gpu` or `cpu` (`server.runtimeProfile` in dashboard config).
-
-**GPU profile**
-- Includes `docker-compose.gpu.yml`
-- Requests NVIDIA device reservation
-
-**CPU profile**
-- Omits `docker-compose.gpu.yml`
-- `dockerManager.startContainer()` injects:
-  - `CUDA_VISIBLE_DEVICES=''`
-- This forces deterministic CPU-only behavior in the container runtime even on machines with GPUs
-
-### 5.4 Volumes and Persistent Data
-
-Named volumes (from `server/docker/docker-compose.yml`):
-
-| Volume | Mount | Purpose |
-|--------|-------|---------|
-| `transcriptionsuite-data` | `/data` | DB, audio, logs, tokens, cert copies |
-| `transcriptionsuite-models` | `/models` | HuggingFace model cache |
-| `transcriptionsuite-runtime` | `/runtime` | Runtime venv, bootstrap marker, uv cache, status file |
-
-Key paths inside volumes:
-
-**`/data`**
-- `/data/database/notebook.db`
-- `/data/database/backups/`
-- `/data/audio/`
-- `/data/logs/server.log`
-- `/data/tokens/tokens.json`
-- `/data/certs/` (TLS files copied by `docker-entrypoint.sh`)
-
-**`/runtime`**
-- `/runtime/.venv/`
-- `/runtime/.runtime-bootstrap-marker.json`
-- `/runtime/bootstrap-status.json`
-- `/runtime/cache/`
-
-Optional bind mounts:
-- `/user-config` from `USER_CONFIG_DIR` (custom config + logs)
-- `/certs/cert.crt`, `/certs/cert.key` from `TLS_CERT_PATH`, `TLS_KEY_PATH`
-
-### 5.5 Runtime Bootstrap Lifecycle
-
-At container startup (`server/docker/docker-entrypoint.sh`):
-
-1. If TLS is enabled, copy host-mounted cert/key into `/data/certs/` with correct ownership/permissions.
-2. Ensure `/data`, `/models`, `/runtime` directories exist and are writable by `appuser`.
-3. Run `server/docker/bootstrap_runtime.py` as `appuser`.
-4. Activate `/runtime/.venv` and launch `server/docker/entrypoint.py`.
-
-`bootstrap_runtime.py` is stdlib-only and decides one of several paths based on:
-- `server/backend/uv.lock`
-- Python ABI
-- architecture
-- bootstrap schema version (`BOOTSTRAP_SCHEMA_VERSION = 2`)
-- runtime marker hash match/mismatch
-
-Practical bootstrap modes (from current code/docs/logging):
-- `skip` -> runtime venv exists and marker hash matches current lockfile+ABI+arch
-- `rebuild-sync` -> runtime venv missing or marker hash mismatch (bootstrap rebuilds the venv, then runs one `uv sync`)
-
-Important runtime bootstrap env vars (Compose + Dockerfile):
-- `BOOTSTRAP_RUNTIME_DIR` (default `/runtime`)
-- `BOOTSTRAP_CACHE_DIR` (default `/runtime/cache`)
-- `BOOTSTRAP_STATUS_FILE` (default `/runtime/bootstrap-status.json`)
-- `BOOTSTRAP_TIMEOUT_SECONDS` (default `1800`)
-- `BOOTSTRAP_LOG_CHANGES` (`true` default)
-
-### 5.6 Startup Scripts and Caveats
-
-Convenience scripts in `server/docker/`:
-- Shell: `start-local.sh`, `start-remote.sh`, `stop.sh`
-- PowerShell: `start-local.ps1`, `start-remote.ps1`, `stop.ps1`
-
-#### Shell scripts (`start-common.sh`)
-
-- `start-local.sh` and `start-remote.sh` dispatch into `start-common.sh`
-- `start-common.sh` currently hardcodes Linux+GPU compose layering internally:
-  - base + `docker-compose.linux-host.yml` + `docker-compose.gpu.yml`
-- Supports `REMOTE_TLS_PROFILE=tailscale|lan` in remote mode
-- Reads TLS host paths from `server/config.yaml`
-- Prompts for HuggingFace token (interactive) and writes `.env` onboarding state
-
-#### PowerShell scripts (`start-common.ps1`)
-
-- `start-local.ps1` and `start-remote.ps1` dispatch into `start-common.ps1`
-- Handles token onboarding and TLS profile parsing similarly
-- Current implementation does not document explicit overlay file selection in the same way the shell script does; behavior differs from `dockerManager.ts` assumptions and should be treated as separate script behavior
-
-#### Important caveat: `TAG` is required by both script families
-
-Even though `docker-compose.yml` supports `${TAG:-latest}`, both startup script implementations currently require `TAG` to be set:
-- `server/docker/start-common.sh` -> `${TAG:?TAG must be set}`
-- `server/docker/start-common.ps1` -> throws if `$env:TAG` is missing
-
-Example:
-```bash
-cd server/docker
-TAG=latest ./start-local.sh
-```
-
-#### Important caveat: startup script printed URLs
-
-Current startup scripts print `/record` and `/notebook` URLs. The backend code in `server/backend` currently exposes:
-- `/docs` (FastAPI docs)
-- `/redoc`
-- `/openapi.json`
-- `/auth` (custom auth page)
-- `/` -> redirect to `/docs`
-
-No `/record` route was found in `server/backend` at the time of this rewrite. Treat the printed `/record` and `/notebook` URLs as stale script output unless verified elsewhere in the runtime stack.
-
-### 5.7 Update Lifecycle (Image vs Runtime Volume)
-
-This is the main operational distinction for server updates:
-
-**Docker image update changes**
-- application code (`/app/server`)
-- Docker bootstrap/entrypoint scripts
-- base OS image layers
-
-**Docker image update usually does not directly recreate**
-- `/data` volume (recordings, DB, logs, tokens)
-- `/models` volume (model cache)
-- `/runtime` venv (unless bootstrap decides sync/rebuild is needed)
-
-Recommended update flow:
-```bash
-cd server/docker
-TAG=latest docker compose pull
-TAG=latest docker compose up -d
-```
-
-Runtime volume reset (`transcriptionsuite-runtime`) is a recovery/maintenance action, not a normal upgrade step.
+| Task | Command |
+|------|---------|
+| Start server (local) | `cd server/docker && ./start-local.sh` |
+| Start server (HTTPS) | `cd server/docker && ./start-remote.sh` |
+| Stop server | `cd server/docker && ./stop.sh` |
+| Build Docker image | `cd server/docker && docker compose build` |
+| View server logs | `docker compose logs -f` |
+| Build & publish image | `./build/docker-build-push.sh` |
+| Run dashboard (dev) | `cd dashboard && npm run dev` |
+| Run dashboard (Electron) | `cd dashboard && npm run dev:electron` |
+| Lint code (Python) | `./build/.venv/bin/ruff check .` |
+| Format code (Python) | `./build/.venv/bin/ruff format .` |
+| Type check (Python) | `./build/.venv/bin/pyright` |
+| Format code (TypeScript + JavaScript) | `cd dashboard && npm run format` |
+| Format check (TypeScript + JavaScript) | `cd dashboard && npm run format:check` |
+| Type check (TypeScript + JavaScript) | `cd dashboard && npm run typecheck` |
 
 ---
 
-## 6. Backend Architecture and Development
+## 2. Architecture Overview
 
-### 6.1 Application Startup and Lifespan
+TranscriptionSuite uses a **client-server architecture**:
 
-Primary entrypoint for the API app is `server/backend/api/main.py`.
-
-Key startup behavior (current code):
-- Timing instrumentation logs import/startup timing to stdout
-- Lazy import strategy avoids loading heavy ML modules at import time
-- `create_app()` wires middleware and routers
-- `lifespan()` performs startup/shutdown lifecycle work:
-  - load config (`server/backend/config.py`)
-  - setup logging (`server/backend/logging/setup.py`)
-  - initialize DB + run migrations (`server/backend/database/database.py`)
-  - schedule background backup check (if enabled)
-  - initialize token store (generates admin token on first run)
-  - create model manager and preload main transcription model
-
-Middleware in `api/main.py`:
-- `CORSMiddleware` (permissive headers, strict validation delegated to custom middleware)
-- `OriginValidationMiddleware`
-- `AuthenticationMiddleware` (only when `TLS_MODE` is enabled)
-
-Security behavior in TLS mode:
-- all routes require auth except configured public routes/prefixes
-- browser requests redirect to `/auth`
-- API requests return `401`
-
-### 6.2 Route Modules
-
-Routers included in `server/backend/api/main.py`:
-
-| Module | Prefix | Purpose |
-|--------|--------|---------|
-| `health.py` | none (`/health`, `/ready`, `/api/status`) | Health/readiness/server status |
-| `auth.py` | `/api/auth` | Token login + token CRUD |
-| `transcription.py` | `/api/transcribe` | File/audio transcription and cancel/languages |
-| `notebook.py` | `/api/notebook` | Notebook CRUD, upload/transcribe, exports, backups |
-| `search.py` | `/api/search` | Full-text search and lookup endpoints |
-| `llm.py` | `/api/llm` | LM Studio integration and chat/conversation APIs |
-| `admin.py` | `/api/admin` | Admin status, model load/unload, logs, load-progress WS |
-| `websocket.py` | `/ws` | One-shot transcription WebSocket |
-| `live.py` | `/ws/live` | Live Mode WebSocket |
-
-### 6.3 Core Modules
-
-Selected backend core modules developers commonly touch:
-
-| File | Role |
-|------|------|
-| `server/backend/core/model_manager.py` | Model lifecycle, job tracking, load/unload, shared backend handling |
-| `server/backend/core/stt/engine.py` | Main STT engine wrapper, transcription calls, VAD settings consumption |
-| `server/backend/core/live_engine.py` | Live Mode engine orchestration |
-| `server/backend/core/realtime_engine.py` | Realtime recording/transcription wrapper |
-| `server/backend/core/diarization_engine.py` | PyAnnote diarization integration |
-| `server/backend/core/stt/backends/factory.py` | Backend detection/creation (`whisper`, `parakeet`, `canary`, `vibevoice_asr`) |
-| `server/backend/core/stt/capabilities.py` | Translation capability checks and validation |
-| `server/backend/core/token_store.py` | Persistent auth token store (JSON + file lock) |
-| `server/backend/core/audio_utils.py` / `ffmpeg_utils.py` | Audio preprocessing and conversion helpers |
-
-### 6.4 Logging System
-
-Logging is configured in `server/backend/logging/setup.py` and re-exported by `server/backend/logging/__init__.py`.
-
-Current behavior:
-- Uses `structlog` bridged to stdlib logging
-- Rotating file handler + optional console handler
-- Default file path is `/data/logs/server.log` unless overridden by config/log_dir
-- File logs are JSON by default (`structured: true`)
-- Console logs are human-readable
-- `setup_logging()` is idempotent (guards against double root logger configuration)
-
-Typical usage:
-```python
-from server.logging import get_logger
-
-logger = get_logger("api")
-logger.info("Request received", path="/api/status")
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Docker Container                    │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  TranscriptionSuite Server                        │  │
+│  │  - FastAPI REST API + WebSocket                   │  │
+│  │  - Multi-backend STT (Whisper/NeMo/VibeVoice)     │  │
+│  │  - Live Mode (Whisper-only in v1) continuous STT  │  │
+│  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
+│  │  - PyAnnote diarization                           │  │
+│  │  - SQLite + FTS5 search                           │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                           ↕
+┌─────────────────────────────────────────────────────────┐
+│              Electron Dashboard (Single Codebase)       │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  Renderer: React + TypeScript + Tailwind CSS      │  │
+│  │  Main Process: Electron (Node.js)                 │  │
+│  │  Targets: Linux (AppImage) + Windows (NSIS)       │  │
+│  │           + macOS (DMG + ZIP, arm64, unsigned)    │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 6.5 Backend Testing
+### 2.1 Design Principles
 
-Backend tests live in `server/backend/tests/`.
+- **Server in Docker**: All ML/GPU operations run in Docker for reproducibility
+- **Dashboard as command center**: Native application manages server control, client control, and configuration
+- **Single port**: Server exposes everything on port 8000 (API, WebSocket, static files)
+- **SQLite + FTS5**: Lightweight full-text search without external dependencies
+- **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
+- **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
+- **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR — auto-detected from the model name
+- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM (Whisper-only in v1)
+- **LM Studio Integration**: Native v1 REST API support for LM Studio 0.4.0+ with stateful chat sessions and Docker-compatible model management
 
-Recommended test command (backend venv):
-```bash
-cd server/backend
-uv run pytest
-```
+### 2.2 Platform Architectures
 
-Examples of covered areas in current tests:
-- config loading and env override behavior
-- CORS and auth middleware behavior
-- database migration versioning
-- translation capabilities and language routes
-- notebook export routes and subtitle export helpers
-- runtime bootstrap behavior
+| Platform | Architecture | UI Stack | Runtime Profile | Notes |
+|----------|--------------|----------|-----------------|-------|
+| **Linux** | Single-process | Electron + React | GPU (default) or CPU | Packaged as AppImage via electron-builder |
+| **Windows** | Single-process | Electron + React | GPU (default) or CPU | Packaged as NSIS installer via electron-builder |
+| **macOS** | Single-process | Electron + React | CPU only (v1) | Packaged as DMG + ZIP (arm64), unsigned |
 
-Repo-wide tooling tests/checks can still be run from `build/.venv` (see Section 11).
+**Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
+- Left sidebar with navigation buttons and real-time status lights
+- Status lights show Server and Client states with color indicators (green=running AND healthy, orange=container exists but not healthy, gray=missing, red=unhealthy/error, blue=starting)
+- Main content area on the right with views: Session, Notebook, Server
+- Notebook tab contains Calendar, Search, and Import sub-tabs
+- Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
+- App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
+- System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and left-click toggle (start recording when standby; stop & transcribe when recording). Middle-click also stops & transcribes on Windows/macOS (Linux AppIndicator does not support middle-click). "Transcribe File" from the tray always uses pure transcription (diarization disabled). Tray icon updates are forced via `setTitle` on Linux to ensure StatusNotifier/AppIndicator refreshes the icon on state changes (e.g. live mode). Connecting state is debounced 250 ms to suppress brief yellow flash before red recording state; completion state shows for 1 s before reverting
+- First-run setup checklist with GPU auto-detection, Docker verification, and HuggingFace token entry
+- Opt-in update checker for app releases (GitHub) and server Docker image (GHCR)
+- Model-aware translation toggle: Whisper translates to English; Canary supports bidirectional EU translation; auto-disables for Parakeet, VibeVoice-ASR, turbo, .en, and distil variants
+- Glassmorphism design language with dark frosted glass aesthetic
 
-### 6.6 Native Run Caveats (Current Code State)
+### 2.3 Security Model
 
-Native backend runs (`uvicorn server.api.main:app`) are supported for development, but current code still assumes Docker-like paths in some places.
+TranscriptionSuite uses layered security for remote access:
 
-Current caveats to know before debugging native runs:
+1. **Tailscale Network**: Only devices on your Tailnet can reach the server
+2. **TLS/HTTPS**: Encrypted connection with Tailscale certificates
+3. **Token Authentication**: Required for all API endpoints in TLS mode
 
-1. **Token store path is hardcoded by default**
-- `server/backend/core/token_store.py` uses `DEFAULT_TOKEN_STORE_PATH = /data/tokens/tokens.json`
-- The `remote_server.token_store` config key exists in `server/config.yaml` but is not currently used by `get_token_store()` in the common startup path
-
-2. **Logging defaults assume `/data/logs`**
-- `server/config.yaml` and logging defaults are container-oriented
-- Override via config (`logging.directory`) and/or ensure writable path exists
-
-3. **Some notebook audio path logic still references legacy config keys**
-- `server/backend/api/routes/notebook.py` still reads `audio_notebook.audio_dir` with fallback `/data/audio`
-- `server/config.yaml` documents `storage.audio_dir`, so this is a partial config migration state
-
-4. **Docker entrypoint setup is skipped**
-- No automatic TLS cert copy/permission prep
-- No `/data`, `/models`, `/runtime` ownership setup
-- No `LOG_DIR` export as performed by `server/docker/entrypoint.py`
-
-Native runs are still useful for API and logic iteration, but expect to configure more paths manually than the Docker workflow.
+| Access Method | Authentication | Trust Level |
+|---------------|----------------|-------------|
+| `localhost:8000` (HTTP) | None | Full trust (user's own machine) |
+| Tailscale + TLS | Token required | High trust (your Tailnet) |
+| Public internet | Not supported | N/A (blocked by design) |
 
 ---
 
-## 7. Dashboard Architecture and Development
+## 3. Project Structure
 
-### 7.1 Electron Main / Preload / Renderer Split
+```
+TranscriptionSuite/
+├── dashboard/                    # Electron + React dashboard application
+│   ├── electron/                 # Electron main process
+│   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
+│   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
+│   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
+│   │   ├── shortcutManager.ts    # Global keyboard shortcuts (system-wide)
+│   │   ├── waylandShortcuts.ts   # Wayland portal integration for global shortcuts
+│   │   ├── pasteAtCursor.ts      # Paste-at-cursor feature (xdotool/wtype/platform)
+│   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons
+│   │   ├── updateManager.ts      # Opt-in update checker (app via GitHub, image via GHCR)
+│   │   └── tsconfig.json         # TypeScript config for main process
+│   ├── src/                      # Shared source (API, config, hooks, services)
+│   │   ├── api/
+│   │   │   ├── client.ts         # REST API client for server communication
+│   │   │   └── types.ts          # API request/response type definitions
+│   │   ├── config/store.ts       # Client config (electron-store / localStorage)
+│   │   ├── hooks/                # React hooks (see Key Modules section)
+│   │   ├── services/             # Core services
+│   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
+│   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
+│   │   │   ├── modelCapabilities.ts # Multi-backend capability detection (translation, live mode)
+│   │   │   ├── modelRegistry.ts  # Model family registry (Whisper, NeMo, VibeVoice-ASR)
+│   │   │   └── clientDebugLog.ts # Client-side debug logging service
+│   │   ├── index.css             # Tailwind CSS + global styles
+│   │   └── types/
+│   │       ├── electron.d.ts     # TypeScript declarations for Electron IPC
+│   │       └── audio-worklet.d.ts # AudioWorklet type declarations
+│   ├── components/               # React UI components
+│   │   ├── Sidebar.tsx           # Collapsible sidebar navigation
+│   │   ├── AudioVisualizer.tsx   # Canvas-based bar visualizer with idle breathing animation
+│   │   ├── ui/                   # Primitives (Button, GlassCard, StatusLight, etc.)
+│   │   └── views/                # View components (SessionView, NotebookView, ServerView, modals)
+│   ├── public/                   # Static assets (served at /)
+│   │   ├── audio-worklet-processor.js  # AudioWorklet for mic capture
+│   │   └── logo.svg              # App logo (copied from build/assets/ by generate-ico.sh)
+│   ├── ui-contract/              # Machine-validated UI contract (design enforcement)
+│   ├── scripts/                  # Dev scripts + UI contract tooling
+│   ├── App.tsx                   # Root React component
+│   ├── index.tsx                 # React entry point
+│   ├── index.html                # HTML shell
+│   ├── types.ts                  # Shared TypeScript enums/interfaces
+│   ├── vite.config.ts            # Vite bundler config
+│   ├── tsconfig.json             # TypeScript config for renderer
+│   └── package.json              # Dependencies + build config
+│
+├── build/                        # Build and development tools
+│   ├── build-electron-linux.sh   # Build Electron AppImage
+│   ├── build-electron-mac.sh     # Build Electron DMG + ZIP (macOS arm64)
+│   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
+│   ├── generate-ico.sh           # Generate PNG/ICO/ICNS/tray-icon assets + copy logo.svg to dashboard/public/
+│   ├── docker-build-push.sh      # Build and push Docker image
+│   ├── assets/                   # Logo, icons, profile picture
+│   └── pyproject.toml            # Dev/build tools (ruff, pyright, pytest)
+│
+├── server/                       # Server source code
+│   ├── docker/                   # Docker infrastructure
+│   │   ├── Dockerfile            # Runtime-bootstrap image (small base + first-run sync)
+│   │   ├── docker-compose.yml    # Base container orchestration (service, env, volumes)
+│   │   ├── docker-compose.linux-host.yml   # Linux overlay: host networking
+│   │   ├── docker-compose.desktop-vm.yml   # macOS/Windows overlay: bridge + port mapping
+│   │   ├── docker-compose.gpu.yml          # NVIDIA GPU overlay
+│   │   └── entrypoint.py         # Container entrypoint
+│   ├── backend/                  # FastAPI backend
+│   │   ├── api/                  # FastAPI routes
+│   │   ├── core/                 # ML engines (transcription, diarization, VAD)
+│   │   │   ├── stt/              # Speech-to-text subsystem
+│   │   │   │   ├── capabilities.py      # Translation/capability validation per backend
+│   │   │   │   ├── engine.py            # AudioToTextRecorder with VAD
+│   │   │   │   ├── vad.py               # Dual VAD (Silero + WebRTC)
+│   │   │   │   └── backends/            # Pluggable STT backends
+│   │   │   │       ├── base.py          # Abstract STTBackend interface
+│   │   │   │       ├── factory.py       # Backend detection + instantiation
+│   │   │   │       ├── whisper_backend.py       # Faster-whisper backend
+│   │   │   │       ├── whisperx_backend.py      # WhisperX (alignment + diarization)
+│   │   │   │       ├── parakeet_backend.py      # NVIDIA NeMo Parakeet ASR
+│   │   │   │       ├── canary_backend.py        # NVIDIA NeMo Canary (multitask)
+│   │   │   │       └── vibevoice_asr_backend.py # VibeVoice-ASR (experimental)
+│   │   │   ├── diarization_engine.py    # PyAnnote wrapper
+│   │   │   ├── model_manager.py         # Model lifecycle, job tracking
+│   │   │   ├── realtime_engine.py       # Async wrapper for real-time STT
+│   │   │   └── live_engine.py           # Live Mode engine (Whisper-only in v1)
+│   │   ├── database/             # SQLite + FTS5 + migrations
+│   │   └── pyproject.toml        # Server dependencies (pinned versions)
+│   └── config.yaml               # Server configuration template
+```
 
-**Electron main process (`dashboard/electron/`)**
-
-Primary responsibilities in `main.ts`:
-- BrowserWindow creation and lifecycle
-- app single-instance lock
-- tray creation and tray action forwarding
-- global shortcut registration
-- dashboard config persistence via `electron-store`
-- Docker IPC handlers (delegating to `dockerManager.ts`)
-- app/file/clipboard/update/tray IPC handlers
-- shutdown behavior (optional Docker container stop on quit)
-
-Supporting modules:
-- `preload.ts` -> context bridge IPC surface for renderer
-- `dockerManager.ts` -> Docker CLI abstraction and compose orchestration
-- `trayManager.ts` -> system tray icons/menu/tooltip state
-- `updateManager.ts` -> opt-in app/server update checks
-- `shortcutManager.ts` -> global hotkeys / signal fallbacks
-- `pasteAtCursor.ts` -> best-effort OS paste helper
-
-**Renderer app**
-- Root: `dashboard/App.tsx`
-- Entry: `dashboard/index.tsx`
-- Vite config: `dashboard/vite.config.ts`
-- Shared renderer code split across `dashboard/components/` and `dashboard/src/`
-
-### 7.2 Renderer Services and Hooks
-
-Key services (`dashboard/src/services/`):
+### 3.1 Configuration Files
 
 | File | Purpose |
 |------|---------|
-| `websocket.ts` | `TranscriptionSocket` wrapper for `/ws` and `/ws/live`; auth handshake, pings, reconnect, binary framing |
-| `audioCapture.ts` | Audio capture and PCM chunk streaming to socket |
-| `modelCapabilities.ts` | Client-side model capability checks / translation gating |
-| `clientDebugLog.ts` | Client debug log capture and emission |
+| `dashboard/package.json` | Dashboard dependencies, Electron build config, scripts |
+| `build/pyproject.toml` | Dev/build tools (ruff, pyright, pytest) |
+| `server/backend/pyproject.toml` | Server deps with pinned versions for reproducible Docker builds |
 
-Key hooks (`dashboard/src/hooks/`):
+### 3.2 Version Management
 
-| Hook | Purpose |
-|------|---------|
-| `useTranscription.ts` | One-shot transcription workflow over `/ws` |
-| `useLiveMode.ts` | Live Mode websocket + audio capture state machine over `/ws/live` |
-| `useDocker.ts` | Docker container/image/volume interactions via Electron IPC |
-| `useServerStatus.ts` | Polls server status/health |
-| `useAdminStatus.ts` | Admin status and auth-aware admin data |
-| `useSearch.ts` | Notebook search endpoints |
-| `useBackups.ts` | Notebook backup list/create/restore endpoints |
-| `useUpload.ts` | Notebook upload/transcribe flow |
-| `useLanguages.ts` | `/api/transcribe/languages` queries |
-| `useTraySync.ts` | Syncs renderer state to tray UI state |
-| `useClientDebugLogs.ts` | Reads/appends client-side debug logs |
-| `DockerContext.tsx` | Shared docker state/context provider |
+Keep these version fields aligned for a release:
 
-### 7.3 View and UI Components
+- `build/pyproject.toml`
+- `server/backend/pyproject.toml`
+- `dashboard/package.json`
 
-Main views (`dashboard/components/views/`):
-- `SessionView.tsx` -> recording/transcription/live mode UI
-- `ServerView.tsx` -> Docker image/container/runtime controls
-- `NotebookView.tsx` -> calendar/search/import flows
-- `SettingsModal.tsx` -> App/Client/Server/Notebook settings tabs
-- `AudioNoteModal.tsx` -> note detail + transcript + LLM chat
-- `AboutModal.tsx`, `AddNoteModal.tsx`, `FullscreenVisualizer.tsx`
+**Manual version bump process:**
+1. Update the `version` field in all three files above
+2. Run `uv lock --upgrade && uv sync` in `build/`
+3. Run `uv lock --upgrade && uv sync` in `server/backend/`
+4. Run `npm update` in `dashboard/`
 
-UI primitives (`dashboard/components/ui/`):
-- `Button`, `GlassCard`, `StatusLight`, `LogTerminal`, `CustomSelect`, `AppleSwitch`, `ErrorFallback`
+*Note: Release tags should continue to match the Dashboard `package.json` version.*
 
-### 7.4 UI Contract System
+---
 
-The dashboard uses a machine-validated UI contract under `dashboard/ui-contract/`.
+## 4. Development Workflow
 
-Core files:
-- `dashboard/ui-contract/transcription-suite-ui.contract.yaml`
-- `dashboard/ui-contract/transcription-suite-ui.contract.schema.json`
-- `dashboard/ui-contract/contract-baseline.json`
-- `dashboard/ui-contract/design-language.md`
+### 4.1 Step 1: Environment Setup
 
-Tooling scripts (`dashboard/scripts/ui-contract/`):
-- `extract-facts.mjs`
-- `build-contract.mjs`
-- `validate-contract.mjs`
-- `diff-contract.mjs`
-- `test-contract.mjs`
-- `shared.mjs`
-
-Common commands:
 ```bash
+# Dashboard (Node.js)
 cd dashboard
-npm run ui:contract:extract
-npm run ui:contract:build
-npm run ui:contract:validate
-npm run ui:contract:diff
-npm run ui:contract:test
-npm run ui:contract:check
-```
-
-Current enforcement model:
-- closed-set contract
-- schema validation + semantic drift checks + baseline/hash versioning rules
-- CI gate in `.github/workflows/dashboard-quality.yml`
-- pre-commit local hook (`ui-contract-check`)
-
-### 7.5 Dashboard Config Source of Truth
-
-There are two important config sources in the dashboard code:
-
-- `dashboard/electron/main.ts`
-  - actual persisted defaults and internal keys (source of truth for `electron-store` values)
-- `dashboard/src/config/store.ts`
-  - renderer-facing typed config interface and helpers (subset + browser fallback support)
-
-When documenting default values or adding new persisted keys, use `dashboard/electron/main.ts` as the canonical source.
-
----
-
-## 8. API and WebSocket Reference
-
-This section is an inventory and protocol guide. For request/response schema details and current examples, use the running server's FastAPI docs (`/docs`) and source files under `server/backend/api/routes/`.
-
-### 8.1 HTTP Route Inventory (Grouped by Prefix)
-
-#### 8.1.1 Core and docs routes
-
-| Path | Method | Notes |
-|------|--------|-------|
-| `/` | GET | Redirects to `/docs` |
-| `/docs` | GET | FastAPI Swagger UI (default FastAPI route) |
-| `/redoc` | GET | FastAPI ReDoc (default FastAPI route) |
-| `/openapi.json` | GET | OpenAPI schema |
-| `/auth` | GET | Custom auth page |
-| `/auth/{path:path}` | GET | Auth page catch-all |
-| `/health` | GET | Basic health check |
-| `/ready` | GET | Readiness (503 while startup/model load in progress) |
-| `/api/status` | GET | Consolidated server status and readiness |
-
-#### 8.1.2 Authentication (`/api/auth`)
-
-| Path | Method | Purpose |
-|------|--------|---------|
-| `/api/auth/login` | POST | Validate token and establish browser auth flow |
-| `/api/auth/tokens` | GET | List tokens (admin) |
-| `/api/auth/tokens` | POST | Create token (admin) |
-| `/api/auth/tokens/{token_id}` | DELETE | Revoke token by non-secret ID (admin) |
-
-#### 8.1.3 Transcription (`/api/transcribe`)
-
-| Path | Method | Purpose |
-|------|--------|---------|
-| `/api/transcribe/audio` | POST | Main audio/file transcription upload endpoint |
-| `/api/transcribe/file` | POST | Legacy alias (hidden from schema) |
-| `/api/transcribe/quick` | POST | Quick transcription path |
-| `/api/transcribe/cancel` | POST | Cancel active transcription |
-| `/api/transcribe/languages` | GET | Available languages / capabilities |
-
-#### 8.1.4 Notebook (`/api/notebook`)
-
-| Path | Method | Purpose |
-|------|--------|---------|
-| `/api/notebook/recordings` | GET | List recordings |
-| `/api/notebook/recordings/{recording_id}` | GET | Recording details |
-| `/api/notebook/recordings/{recording_id}` | DELETE | Delete recording |
-| `/api/notebook/recordings/{recording_id}/summary` | PUT | Replace summary |
-| `/api/notebook/recordings/{recording_id}/summary` | PATCH | Patch/update summary |
-| `/api/notebook/recordings/{recording_id}/title` | PATCH | Rename recording |
-| `/api/notebook/recordings/{recording_id}/date` | PATCH | Change recording date |
-| `/api/notebook/recordings/{recording_id}/audio` | GET | Download/stream audio |
-| `/api/notebook/recordings/{recording_id}/transcription` | GET | Transcript details |
-| `/api/notebook/transcribe/upload` | POST | Upload and transcribe into notebook |
-| `/api/notebook/calendar` | GET | Calendar data |
-| `/api/notebook/timeslot` | GET | Timeslot lookup for add-note flows |
-| `/api/notebook/recordings/{recording_id}/export` | GET | Export transcript (`txt`, `srt`, `ass`) |
-| `/api/notebook/backups` | GET | List DB backups |
-| `/api/notebook/backup` | POST | Create manual backup |
-| `/api/notebook/restore` | POST | Restore DB from backup |
-
-Important correction: backup endpoints are prefixed with `/api/notebook/*`, not bare `/backups`, `/backup`, `/restore`.
-
-#### 8.1.5 Search (`/api/search`)
-
-| Path | Method | Purpose |
-|------|--------|---------|
-| `/api/search/words` | GET | Word-level search/lookup |
-| `/api/search/recordings` | GET | Recording-level search |
-| `/api/search/` | GET | Top-level search endpoint |
-
-#### 8.1.6 LLM (`/api/llm`)
-
-| Path | Method | Purpose |
-|------|--------|---------|
-| `/api/llm/status` | GET | LM Studio availability + model state |
-| `/api/llm/process` | POST | Non-streaming LLM processing |
-| `/api/llm/process/stream` | POST | Streaming LLM processing |
-| `/api/llm/summarize/{recording_id}` | POST | Non-streaming summary for notebook recording |
-| `/api/llm/summarize/{recording_id}/stream` | POST | Streaming summary |
-| `/api/llm/server/start` | POST | Start LM Studio server process (integration helper) |
-| `/api/llm/server/stop` | POST | Stop LM Studio server process |
-| `/api/llm/models/available` | GET | Discover available LM Studio models |
-| `/api/llm/model/load` | POST | Load a model in LM Studio |
-| `/api/llm/model/unload` | POST | Unload model |
-| `/api/llm/models/loaded` | GET | List loaded models |
-| `/api/llm/conversations/{recording_id}` | GET | List conversations for a recording |
-| `/api/llm/conversations` | POST | Create conversation |
-| `/api/llm/conversation/{conversation_id}` | GET | Get conversation |
-| `/api/llm/conversation/{conversation_id}` | PATCH | Update conversation |
-| `/api/llm/conversation/{conversation_id}` | DELETE | Delete conversation |
-| `/api/llm/conversation/{conversation_id}/message` | POST | Append/send message |
-| `/api/llm/chat` | POST | LM Studio chat endpoint wrapper |
-
-LM Studio integration notes (current code behavior):
-- Uses both OpenAI-style and LM Studio-specific endpoints internally
-- `local_llm.base_url` defaults to `LM_STUDIO_URL` env or `http://127.0.0.1:1234`
-- Docker Desktop overlay sets `LM_STUDIO_URL` to `http://host.docker.internal:1234` by default
-
-#### 8.1.7 Admin (`/api/admin`)
-
-| Path | Method | Purpose |
-|------|--------|---------|
-| `/api/admin/status` | GET | Admin status + model/config summary |
-| `/api/admin/models/load` | POST | Load transcription models |
-| `/api/admin/models/unload` | POST | Unload models (fails with `409` if busy) |
-| `/api/admin/logs` | GET | Tail/query parsed JSON logs |
-| `/api/admin/models/load/stream` | WebSocket | Model loading progress stream |
-
-### 8.2 WebSocket `/ws` Protocol (One-Shot Transcription)
-
-Path: `/ws`
-
-Used by dashboard `useTranscription.ts` for connect -> record -> stop -> final result workflows.
-
-#### 8.2.1 Auth and session flow (typical)
-
-1. Connect WebSocket to `/ws`
-2. Client sends auth message:
-   ```json
-   {"type":"auth","data":{"token":"<token-or-empty>"}}
-   ```
-3. Server responds with `auth_ok` (or `auth_fail`)
-4. Client sends `start`
-5. Client streams binary framed PCM audio chunks
-6. Client sends `stop`
-7. Server sends `final`
-
-Localhost auth bypass exists in current backend code for `/ws` and `/ws/live`, but clients should still follow the auth message flow.
-
-#### 8.2.2 Client -> server JSON messages (`/ws`)
-
-| Type | Data | Notes |
-|------|------|-------|
-| `auth` | `{ token }` | Initial auth handshake (handled before session loop) |
-| `start` | `{ language?, use_vad?, translation_enabled?, translation_target_language? }` | Starts recording session |
-| `stop` | `{}` | Stops recording and triggers transcription |
-| `ping` | `{}` | Keepalive |
-| `get_capabilities` | `{}` | Request client/server capability payload |
-
-`dashboard/src/hooks/useTranscription.ts` currently sends `start` with language and translation fields; `use_vad` is supported by backend but not currently sent by that hook.
-
-#### 8.2.3 Server -> client JSON messages (`/ws`)
-
-| Type | Data | Notes |
-|------|------|-------|
-| `auth_ok` | `{ client_name, client_type, capabilities }` | Auth success |
-| `auth_fail` | `{ message }` | Auth failure (from auth utility) |
-| `session_started` | `{ vad_enabled, preview_enabled }` | Recording session started |
-| `session_stopped` | `{}` | Recording stopped, processing begins |
-| `final` | `{ text, words, language, duration }` | Final transcription result |
-| `session_busy` | `{ active_user }` | Another transcription is already active |
-| `capabilities` | capability payload | Reply to `get_capabilities` |
-| `pong` | `{}` | Reply to `ping` |
-| `error` | `{ message }` | General error |
-| `vad_start` | `{}` | Voice activity detected |
-| `vad_stop` | `{}` | Voice activity ended |
-| `vad_recording_start` | `{}` | VAD-triggered recording start |
-| `vad_recording_stop` | `{}` | VAD-triggered recording stop |
-
-#### 8.2.4 Busy/serialization behavior
-
-The backend uses a job tracker in `model_manager` to allow multiple WebSocket connections while permitting only one active transcription job at a time. Rejected starts remain connected and receive `session_busy`.
-
-### 8.3 WebSocket `/ws/live` Protocol (Live Mode)
-
-Path: `/ws/live`
-
-Used by dashboard `useLiveMode.ts` for continuous sentence streaming.
-
-Important correction (current code): **Live Mode v1 supports only whisper/faster-whisper backend models** (`server/backend/api/routes/live.py` -> `is_live_mode_model_supported()` checks backend type `whisper`). Do not assume Parakeet/Canary are supported for `/ws/live` in current code.
-
-#### 8.3.1 Client -> server JSON messages (`/ws/live`)
-
-| Type | Data | Notes |
-|------|------|-------|
-| `auth` | `{ token }` | Initial auth handshake |
-| `start` | `{ config: { model?, language?, translation_enabled?, translation_target_language?, silero_sensitivity?, post_speech_silence_duration? } }` | Start live engine |
-| `stop` | `{}` | Stop live engine |
-| `get_history` | `{}` | Request sentence history |
-| `clear_history` | `{}` | Clear sentence history |
-| `ping` | `{}` | Keepalive |
-
-#### 8.3.2 Server -> client JSON messages (`/ws/live`)
-
-| Type | Data | Notes |
-|------|------|-------|
-| `auth_ok` | `{ client_name }` | Auth success |
-| `auth_fail` | `{ message }` | Auth failure |
-| `status` | `{ message, ... }` | Model load/swap progress and status text |
-| `state` | `{ state }` | Engine state transitions (`LISTENING`, `PROCESSING`, `STOPPED`, etc.) |
-| `partial` | `{ text }` | Realtime partial text |
-| `sentence` | `{ text }` | Completed sentence |
-| `history` | `{ sentences: string[] }` | Sentence history payload |
-| `history_cleared` | `{}` | History reset confirmation |
-| `pong` | `{}` | Reply to `ping` |
-| `error` | `{ message }` | Validation or runtime errors |
-
-#### 8.3.3 Live Mode runtime behavior (current code)
-
-- Only one active Live Mode session is allowed at a time (`_live_mode_state` + lock)
-- If another session is active, server sends `error` and closes the socket
-- Current code supports backend reuse optimization when:
-  - live model == main model, and
-  - load parameters are compatible
-- Otherwise, main model is unloaded and reloaded around Live Mode start/stop
-
-#### 8.3.4 Translation constraints (`/ws/live`)
-
-Current code validates:
-- selected live model must support live mode (currently whisper backend only)
-- if translation enabled for Live Mode, target must be `en` in v1 whisper path
-- non-supported model translation requests return `error`
-
-### 8.4 WebSocket `/api/admin/models/load/stream` Protocol
-
-Path: `/api/admin/models/load/stream`
-
-Purpose:
-- Stream progress messages while loading large transcription models so the UI does not block.
-
-Auth behavior:
-- Uses WebSocket header-based authentication (plus localhost bypass) via `authenticate_websocket_from_headers(...)`
-- Requires admin privileges unless localhost bypass applies
-
-Server -> client messages (from current `admin.py` docstring/implementation):
-
-| Type | Shape | Notes |
-|------|-------|-------|
-| `progress` | `{ "type": "progress", "message": "..." }` | Progress updates |
-| `complete` | `{ "type": "complete", "status": "loaded" }` | Success |
-| `error` | `{ "type": "error", "message": "..." }` | Failure |
-
-Connection behavior:
-- Backend closes the socket after completion or terminal error
-
-### 8.5 Binary Audio Framing
-
-The dashboard `TranscriptionSocket` (`dashboard/src/services/websocket.ts`) frames audio as:
-
-```text
-[4-byte uint32 LE metadata length][JSON metadata bytes][raw PCM Int16 bytes]
-```
-
-Current dashboard metadata payload includes:
-```json
-{"sample_rate":16000}
-```
-
-Audio format expectations (current dashboard/backend behavior):
-- PCM Int16
-- little-endian
-- sample rate 16 kHz
-
-Backend handlers for both `/ws` and `/ws/live` parse the same framing format.
-
----
-
-## 9. Configuration Reference (Server + Dashboard)
-
-### 9.1 Server Config Discovery and Override Rules
-
-Server config loading is implemented in `server/backend/config.py` (`ServerConfig`).
-
-Current search priority (highest first):
-1. explicit path passed to `get_config(...)`
-2. user config dir (`get_user_config_dir()/config.yaml`)
-   - Docker mounted `/user-config/config.yaml` if present
-   - Windows: `~/Documents/TranscriptionSuite/config.yaml`
-   - Linux/macOS: `~/.config/TranscriptionSuite/config.yaml` (or `$XDG_CONFIG_HOME/TranscriptionSuite`)
-3. `/app/config.yaml` (Docker image default)
-4. `server/config.yaml` (repo dev default)
-5. `./config.yaml` (cwd fallback)
-
-Environment model overrides applied in `config.py`:
-- `MAIN_TRANSCRIBER_MODEL` -> `main_transcriber.model`
-- `LIVE_TRANSCRIBER_MODEL` -> `live_transcriber.model`
-- `DIARIZATION_MODEL` -> `diarization.model`
-
-### 9.2 Server Config Top-Level Sections (`server/config.yaml`)
-
-Current top-level sections present in `server/config.yaml`:
-
-| Section | Purpose |
-|---------|---------|
-| `longform_recording` | Longform recording defaults (language, translation, auto-add notebook) |
-| `static_transcription` | Static file transcription defaults and VAD preprocessing |
-| `main_transcriber` | Primary transcription model/device/compute/beam/batch settings |
-| `vibevoice_asr` | Experimental VibeVoice-ASR backend settings |
-| `live_transcriber` | Live Mode settings (enable flag, language, translation, VAD timing) |
-| `diarization` | PyAnnote model/token/device/speaker settings |
-| `audio` | Audio input device config |
-| `audio_processing` | FFmpeg/legacy backend, resampler, normalization |
-| `storage` | Audio/database storage directories and encoding defaults |
-| `backup` | Startup backup settings (enabled, age, retention) |
-| `processing` | Temp directory, sample rate, temp file retention |
-| `local_llm` | LM Studio integration defaults |
-| `remote_server` | Remote/TLS host/ports/token store path/TLS host cert paths |
-| `logging` | Logging level, file dir/name, rotation, console output |
-| `stt` | Realtime STT/VAD timing and formatting knobs |
-
-### 9.3 Server Config Caveats and Legacy Consumers
-
-This repo is in a partial config key migration state. The following caveats are current code behavior and are documented here intentionally.
-
-#### 9.3.1 Legacy key accessors still exist in `ServerConfig`
-
-`server/backend/config.py` still exposes convenience properties for older names:
-- `transcription`
-- `audio_notebook`
-- `llm`
-- `auth`
-
-Not all are represented as top-level sections in current `server/config.yaml`.
-
-#### 9.3.2 Legacy fallback model keys are still consumed
-
-`resolve_main_transcriber_model()` and `resolve_live_transcriber_model()` still fall back to legacy keys:
-- `transcription.model`
-- `live_transcription.model`
-
-#### 9.3.3 Notebook audio import path still uses legacy key
-
-`server/backend/api/routes/notebook.py` currently reads:
-- `audio_notebook.audio_dir` (legacy)
-- fallback `/data/audio`
-
-This means `storage.audio_dir` in `server/config.yaml` is not fully adopted by that code path yet.
-
-#### 9.3.4 Token store path config is not fully wired
-
-`server/config.yaml` includes `remote_server.token_store`, but the default token store initialization path in `server/backend/core/token_store.py` remains hardcoded to `/data/tokens/tokens.json` unless a custom path is passed programmatically.
-
-### 9.4 Dashboard Persisted Config Keys (`electron/main.ts`)
-
-Canonical persisted defaults live in `dashboard/electron/main.ts` (`new Store({ defaults: ... })`).
-
-#### 9.4.1 User-facing keys (common)
-
-| Key | Default | Notes |
-|-----|---------|-------|
-| `connection.localHost` | `localhost` | Local server host |
-| `connection.remoteHost` | `""` | Tailscale remote host |
-| `connection.lanHost` | `""` | LAN remote host/IP |
-| `connection.remoteProfile` | `tailscale` | `tailscale` or `lan` |
-| `connection.useRemote` | `false` | Remote mode toggle |
-| `connection.authToken` | `""` | Auth token |
-| `connection.port` | `8000` | Server port |
-| `connection.useHttps` | `false` | HTTPS toggle |
-| `session.audioSource` | `mic` | `mic` or `system` |
-| `session.micDevice` | `Default Microphone` | Selected mic label |
-| `session.systemDevice` | `Default Output` | Selected system device label |
-| `session.mainLanguage` | `Auto Detect` | UI language selection |
-| `session.liveLanguage` | `Auto Detect` | UI live mode language selection |
-| `audio.gracePeriod` | `1.0` | Correct current default (docs previously drifted) |
-| `diarization.constrainSpeakers` | `true` | Correct current default |
-| `diarization.numSpeakers` | `2` | Speaker count when constrained |
-| `notebook.autoAdd` | `false` | Correct current default |
-| `app.autoCopy` | `true` | Auto copy transcription |
-| `app.showNotifications` | `true` | Desktop notifications |
-| `app.stopServerOnQuit` | `true` | Stop container on quit (local mode) |
-| `app.startMinimized` | `false` | Start minimized |
-| `app.updateChecksEnabled` | `false` | Opt-in update checks |
-| `app.updateCheckIntervalMode` | `24h` | `24h`, `7d`, `28d`, `custom` |
-| `app.updateCheckCustomHours` | `24` | Custom interval |
-| `app.pasteAtCursor` | `false` | Paste-at-cursor helper toggle |
-| `ui.sidebarCollapsed` | `false` | Sidebar UI state |
-| `server.runtimeProfile` | `gpu` | `gpu` or `cpu` |
-| `shortcuts.startRecording` | `Alt+Ctrl+R` | Global shortcut |
-| `shortcuts.stopTranscribe` | `Alt+Ctrl+S` | Global shortcut |
-
-#### 9.4.2 Internal/supporting persisted keys (also in `main.ts`)
-
-These are persisted but more internal/UI-state oriented:
-- `server.host`, `server.port`, `server.https`
-- `server.hfToken`, `server.hfTokenDecision`
-- `server.containerExistsLastSeen`
-- `updates.lastStatus`
-- `updates.lastNotified`
-
-#### 9.4.3 Renderer typed subset vs store defaults
-
-`dashboard/src/config/store.ts` defines a typed `ClientConfig`, but `main.ts` includes extra persisted keys not present in that renderer-facing type. When documenting defaults, use `main.ts` first.
-
----
-
-## 10. Data Storage, Database, Migrations, and Backups
-
-### 10.1 Database Schema (Current Required Tables)
-
-`server/backend/database/database.py` validates schema sanity on startup and currently requires:
-
-| Table | Purpose |
-|-------|---------|
-| `recordings` | Recording metadata, title, timestamps, summary, diarization flags |
-| `segments` | Transcript segments with speaker and timing |
-| `words` | Word-level timestamps/confidence |
-| `conversations` | Notebook conversation threads (LLM chat) |
-| `messages` | Conversation messages |
-| `words_fts` (virtual) | FTS5 word search index |
-
-Startup DB initialization (`init_db()`) also enables SQLite pragmas including WAL mode and foreign keys.
-
-### 10.2 Migrations (Alembic + SQLite Batch Mode)
-
-Migrations live under `server/backend/database/migrations/`.
-
-Current version files:
-- `001_initial_schema.py`
-- `002_add_response_id.py`
-- `003_add_message_model_and_summary_model.py`
-- `004_schema_sanity_and_segment_backfill.py`
-
-Current migration behavior:
-- runs automatically on server startup (`run_migrations()` called from `init_db()`)
-- uses Alembic programmatic config (no standalone `alembic.ini` required in runtime path)
-- `render_as_batch=True` for SQLite compatibility in Alembic env
-- migration env commits after online migrations so `alembic_version` persists reliably
-
-### 10.3 Backup Behavior and Endpoints
-
-Backup logic lives in `server/backend/database/backup.py` and notebook backup endpoints are in `server/backend/api/routes/notebook.py`.
-
-#### 10.3.1 Automatic startup backups
-
-The API lifespan startup schedules a non-blocking backup check when `backup.enabled` is true.
-
-Config section (`server/config.yaml`):
-```yaml
-backup:
-  enabled: true
-  max_age_hours: 1
-  max_backups: 3
-```
-
-Backup storage location:
-- Docker: `/data/database/backups/`
-- Native run: `<DATA_DIR>/database/backups/` (where code path uses `get_db_path()` / `DATA_DIR`)
-
-#### 10.3.2 Manual backup/restore API (Notebook router)
-
-Correct current endpoints:
-- `GET /api/notebook/backups`
-- `POST /api/notebook/backup`
-- `POST /api/notebook/restore`
-
-`/api/notebook/restore` expects a request body containing `filename`.
-
-`DatabaseBackupManager.restore_backup()` creates a safety backup before replacing the DB (best effort) and verifies integrity before restore.
-
-### 10.4 Recording Export Formats
-
-Notebook recording export endpoint:
-- `GET /api/notebook/recordings/{recording_id}/export`
-
-Current formats in `notebook.py`:
-- `txt`
-- `srt`
-- `ass`
-
-Export content is capability-dependent (for example, timestamp-rich subtitle formats rely on timing data availability).
-
----
-
-## 11. Code Quality, CI, and Pre-Commit
-
-### 11.1 Python Tooling (Build Venv)
-
-Use `build/.venv` for repo-wide Python tooling.
-
-```bash
-# Lint
-./build/.venv/bin/ruff check .
-
-# Format
-./build/.venv/bin/ruff format .
-
-# Type check
-./build/.venv/bin/pyright
-
-# Format diff preview (no writes)
-./build/.venv/bin/ruff format --diff .
-```
-
-### 11.2 Backend Tests (Backend Venv)
-
-Recommended backend test workflow:
-
-```bash
-cd server/backend
-uv run pytest
-```
-
-This uses the backend project environment and dependency set from `server/backend/pyproject.toml` / `uv.lock`.
-
-### 11.3 Dashboard Checks
-
-Dashboard scripts from `dashboard/package.json`:
-
-```bash
-cd dashboard
-
-# TS checks (renderer + Electron TS config)
-npm run typecheck
-
-# Formatting checks
-npm run format:check
-
-# UI contract validation + fixture tests
-npm run ui:contract:check
-
-# Composite dashboard checks
-npm run check
-```
-
-`npm run check` currently expands to:
-- `npm run typecheck`
-- `npm run format:check`
-- `npm run ui:contract:check`
-
-### 11.4 Pre-Commit Hooks
-
-Config file:
-- `.pre-commit-config.yaml`
-
-Current hook categories include:
-- generic file sanity checks (`check-json`, `check-yaml`, etc.)
-- `validate-pyproject`
-- `ruff-format` + `ruff` (with `build/pyproject.toml` config)
-- `codespell`
-- local `prettier` hook for dashboard files
-- local `ui-contract-check` hook (`cd dashboard && npm run ui:contract:check --silent`)
-
-Setup and usage:
-```bash
-# one-time install
+npm install
+cd ..
+
+# Build tools (Python — for server linting/testing + pre-commit)
+cd build
+uv venv --python 3.13
+uv sync
+cd ..
+
+# Install pre-commit hooks (one-time, see §12.4)
 ./build/.venv/bin/pre-commit install
-
-# staged files
-./build/.venv/bin/pre-commit run
-
-# all files
-./build/.venv/bin/pre-commit run --all-files
 ```
 
-### 11.5 CI Workflows
+**Linux — Docker group membership:** The app talks to Docker without `sudo`, so your user must be in the `docker` group. If you haven't done this already:
+```bash
+sudo usermod -aG docker $USER
+```
+Then log out and back in (or reboot) for the change to take effect. Without this, Docker commands will fail with a permissions error.
 
-Current GitHub Actions workflows in `.github/workflows/`:
+### 4.2 Step 2: Build Docker Image
 
-#### Dashboard quality (`dashboard-quality.yml`)
-- Runs on dashboard changes
-- Uses Node `20`
-- Runs:
-  - `npm ci`
-  - `npm run typecheck`
-  - `npm run ui:contract:check`
+```bash
+cd server/docker
+docker compose build
+```
 
-#### Script lint (`scripts-lint.yml`)
-- Bash syntax validation (`bash -n`) + `shellcheck`
-- PowerShell parser validation + optional `PSScriptAnalyzer`
+**What happens:**
+1. Builds a small server image with app code and bootstrap tooling
+2. Defers Python dependency install to first startup (`bootstrap_runtime.py`)
+3. Stores runtime venv and uv cache in `transcriptionsuite-runtime`
 
-#### CodeQL (`codeql-analysis.yml`)
-- Matrix languages: `python`, `javascript-typescript`
-- Uses `.github/codeql/codeql-config.yml`
-- CodeQL config scopes paths to `build/`, `dashboard/`, `server/`
+**Build with specific tag:**
+To build an image with a specific tag (instead of default `latest`):
+```bash
+TAG=v0.4.7 docker compose build
+```
+This produces `ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7`.
+
+**Note:** The `build/docker-build-push.sh` script is used to **push** the image you just built. It also supports the `TAG` environment variable:
+```bash
+TAG=v0.4.7 ./build/docker-build-push.sh
+```
+
+**Force rebuild:**
+```bash
+docker compose build --no-cache
+```
+
+**Managing Image Tags:**
+
+Tag existing local images:
+```bash
+# Create a new tag pointing to an existing image
+# e.g. make existing image 'v0.4.7' also be tagged as 'latest'
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:latest
+
+# List all tags for this repository
+docker image ls ghcr.io/homelab-00/transcriptionsuite-server
+```
+
+Remove tags:
+```bash
+# Remove a tag (only deletes the tag, not the image if other tags reference it)
+docker rmi ghcr.io/homelab-00/transcriptionsuite-server:old-tag
+
+# Remove all untagged images (clean up)
+docker image prune -f
+```
+
+**Typical tag management workflow:**
+1. Build and push a release: `TAG=v0.4.7 docker compose build && ./build/docker-build-push.sh v0.4.7`
+2. Create an alias: `docker tag ghcr.io/homelab-00/transcriptionsuite-server:v0.4.7 ghcr.io/homelab-00/transcriptionsuite-server:latest`
+3. Push the alias: `docker push ghcr.io/homelab-00/transcriptionsuite-server:latest`
+4. Remove old tags when no longer needed: `docker rmi ghcr.io/homelab-00/transcriptionsuite-server:v0.4.6`
+
+**Note:** The `docker-build-push.sh` script automatically creates and pushes a `latest` tag when pushing release versions (v*.*.* format).
+
+### 4.3 Step 3: Run Dashboard Locally
+
+```bash
+# Start the server
+cd server/docker && docker compose up -d
+
+# Run the dashboard (browser)
+cd dashboard && npm run dev
+# Opens at http://localhost:3000
+
+# Or run in Electron
+cd dashboard && npm run dev:electron
+```
+
+### 4.4 Step 4: Run Dashboard Remotely (Tailscale)
+
+```bash
+# Server side: Enable HTTPS
+cd server/docker
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
+TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
+docker compose up -d
+
+# Dashboard side: Configure server host in Settings
+# Set host to <your-machine>.tail1234.ts.net, port 8443, HTTPS enabled
+```
+
+### 4.5 Publishing Docker Images
+
+Prerequisite: You must have built the image first (see Step 2).
+
+```bash
+# Push the most recent local image as 'latest'
+./build/docker-build-push.sh
+
+# Push a specific tag (must exist locally)
+./build/docker-build-push.sh v0.4.7
+
+# Push a custom tag
+./build/docker-build-push.sh dev
+```
+
+**Prerequisites:**
+- Docker installed and running
+- GHCR authentication: `gh auth login && gh auth token | docker login ghcr.io -u YOUR_USERNAME --password-stdin`
 
 ---
 
-## 12. Build and Release Packaging
+## 5. Build Workflow
 
-### 12.1 Build Matrix
+### 5.1 Prerequisites
 
-| Platform | Command | Output | Notes |
-|----------|---------|--------|-------|
-| Linux | `./build/build-electron-linux.sh` or `npm run package:linux` | AppImage | Packaging script requires Node 24+ |
-| Windows | `cd dashboard && npm run package:windows` | NSIS installer `.exe` | Run on Windows |
-| macOS (arm64) | `./build/build-electron-mac.sh` or `npm run package:mac` | DMG + ZIP | Run on macOS; unsigned |
+```bash
+# Dashboard: Node.js 24+ and npm
+cd dashboard && npm install
 
-### 12.2 Linux AppImage
+# Server Python tools (linting, testing)
+cd build
+uv venv --python 3.13
+uv sync
+```
+
+### 5.2 Build Matrix
+
+| Platform | Method | Output | Target Requirements |
+|----------|--------|--------|---------------------|
+| **Linux** | Electron + electron-builder | AppImage | None |
+| **Windows** | Electron + electron-builder | NSIS installer | None |
+| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Python 3 + pip (for `dmgbuild`, see §13.7) |
+
+### 5.3 Linux AppImage
 
 ```bash
 ./build/build-electron-linux.sh
+# Output: dashboard/release/TranscriptionSuite-*-x86_64.AppImage
 ```
 
-Script behavior (`build/build-electron-linux.sh`):
-- checks Node/npm availability (requires Node 24+)
-- runs `npm ci`
-- runs `npm run build:electron`
-- runs `npm run package:linux`
-- optionally signs release artifacts if `GPG_KEY_ID` is set
-
-Manual path:
+Or manually:
 ```bash
 cd dashboard
-npm ci
-npm run build:electron
 npm run package:linux
 ```
 
-### 12.3 Windows Installer
+### 5.4 Windows Installer
 
-Run on Windows:
-
-```bash
+```powershell
 cd dashboard
-npm ci
-npm run build:electron
 npm run package:windows
+# Output: dashboard\release\TranscriptionSuite Setup *.exe
 ```
 
-Electron builder target in `dashboard/package.json` is NSIS (`--win nsis`).
+**Important**: Windows builds require Developer Mode to be enabled for symlink creation:
+- Go to **Settings → System → Advanced → Developer Mode** and toggle ON
+- Alternatively, run PowerShell as Administrator
+- This resolves `electron-builder` code signing extraction errors during packaging
 
-### 12.4 macOS DMG + ZIP (arm64, unsigned)
+### 5.5 macOS DMG + ZIP (Unsigned)
 
 ```bash
 ./build/build-electron-mac.sh
+# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+#         dashboard/release/TranscriptionSuite-*-arm64-mac.zip
 ```
 
-Script behavior (`build/build-electron-mac.sh`):
-- checks Node/npm
-- installs/uses `dmgbuild` if needed (see Section 13.5)
-- generates `build/assets/logo.icns` if missing
-- runs `npm ci`, `npm run build:electron`, `npm run package:mac`
-- optionally signs artifacts if `GPG_KEY_ID` is set
-
-Outputs are unsigned and target Apple Silicon (`arm64`) only in current config.
-
-### 12.5 Signing Artifacts
-
-Signing helper:
-- `build/sign-electron-artifacts.sh`
-
-Signs supported files in a release directory:
-- `*.AppImage`, `*.exe`, `*.dmg`, `*.zip`
-
-Required env:
-- `GPG_KEY_ID`
-
-Optional env:
-- `GPG_PASSPHRASE`
-- `GPG_TIMEOUT_MINUTES`
-
-Example:
+Or manually:
 ```bash
-GPG_KEY_ID=<fingerprint> ./build/sign-electron-artifacts.sh dashboard/release
+cd dashboard
+npm run package:mac
 ```
 
-### 12.6 Build Asset Generation
+> **macOS < 15.7:** The bundled `dmgbuild` binary in electron-builder ≥ 26.7 requires macOS 15.7 (Sequoia).
+> On older macOS versions, install `dmgbuild` via pip and set the env var before building:
+> ```bash
+> pip3 install dmgbuild
+> # Use the full path — pip user installs may not be on PATH
+> export CUSTOM_DMGBUILD_PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user") + "/dmgbuild")')"
+> npm run package:mac
+> ```
+> The `build-electron-mac.sh` script handles this automatically.
 
-Asset generator:
-- `build/generate-ico.sh`
+Optional armored signatures (`.asc`) for all desktop artifacts:
 
-Generates/updates:
-- `build/assets/logo.png`
-- `build/assets/logo.ico`
-- `build/assets/logo.icns` (when supported tooling exists)
-- `build/assets/logo_wide.png`
-- `build/assets/logo_wide_readme.png`
-- `build/assets/tray-icon.png`
-- `build/assets/tray-icon@1x.png`
-- `build/assets/tray-icon@2x.png`
-- copies `build/assets/logo.svg` -> `dashboard/public/logo.svg`
-
-Usage:
 ```bash
-cd build
-./generate-ico.sh
+export GPG_KEY_ID="<your-key-id-or-fingerprint>"
+export GPG_TIMEOUT_MINUTES=60
+./build/sign-electron-artifacts.sh
 ```
 
-### 12.7 End-User Verification Docs
+The signing script prompts for your key passphrase by default (or uses `GPG_PASSPHRASE` in non-interactive environments).
 
-User-facing download verification docs live in `README.md`.
+Required GitHub secrets for CI signing:
+| Variable | Description |
+|----------|-------------|
+| `GPG_PRIVATE_KEY` | Private key block (ASCII armored) or base64-encoded private key |
+| `GPG_KEY_ID` | Key id or fingerprint used to sign artifacts |
+| `GPG_PASSPHRASE` | Passphrase for `GPG_PRIVATE_KEY` |
 
-Keep these paths stable for release verification flows:
-- `build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`
-- release artifact detached signatures (`*.asc`)
+### 5.6 Build Assets
+
+**Source files (manually maintained in `build/assets/`):**
+- `logo.svg` — Master vector logo (**source of truth for all raster derivatives**)
+- `logo_wide.svg` — Wide variant for documentation/marketing
+- `profile.png` — Author profile picture for About dialog
+- `homelab-00_0xBFE4CC5D72020691_public.asc` — Public key used by users to verify release `.asc` signatures
+
+> **Important:** `build/assets/` is the single source of truth for SVG logos.
+> Never edit the copies in `dashboard/public/` directly — run `generate-ico.sh`
+> to propagate changes.
+
+**Generated files (created by `build/generate-ico.sh`):**
+- `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
+- `logo.ico` — Multi-resolution Windows icon (16, 32, 48, 256px)
+- `logo.icns` — macOS app icon (requires `iconutil` on macOS or `png2icns`/`libicns` on Linux)
+- `logo_wide.png` (440px tall, aspect-preserved) — Sharp wide logo used in packaged app assets
+- `logo_wide_readme.png` (880px tall, aspect-preserved) — Extra-sharp wide logo for README rendering
+- `tray-icon.png` (32×32) — System tray icon
+- `tray-icon@1x.png` (16×16) — 1× DPI tray icon
+- `tray-icon@2x.png` (32×32) — 2× DPI tray icon
+
+The script also copies `logo.svg` into `dashboard/public/` so the renderer can
+reference it at `/logo.svg` (e.g. sidebar brand mark, notification icon).
+
+**Regenerate derived assets:**
+```bash
+cd build && ./generate-ico.sh
+```
+
+### 5.7 End-User Verification Docs
+
+- User-facing verification steps are documented in `README.md` section `3.1 Verify Download (Kleopatra)`.
+- Keep this key path stable for docs and releases: `build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
+- Kleopatra reference page used in docs: https://apps.kde.org/kleopatra/
 
 ---
 
-## 13. Troubleshooting and Current Caveats
+## 6. Docker Reference
+
+### 6.1 Compose File Layering
+
+Docker Compose configuration is split into layered files for cross-platform and CPU/GPU support:
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Base: service definition, environment, volumes |
+| `docker-compose.linux-host.yml` | Linux: host networking (direct localhost access) |
+| `docker-compose.desktop-vm.yml` | macOS/Windows: bridge networking + port mapping + `host.docker.internal` |
+| `docker-compose.gpu.yml` | NVIDIA GPU device reservation |
+
+**Usage examples:**
+
+```bash
+# Linux + GPU (most common, equivalent to previous default)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+
+# Linux + CPU only
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml up -d
+
+# macOS or Windows + CPU (Docker Desktop)
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+
+# Windows + GPU (Docker Desktop with NVIDIA WSL support)
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
+```
+
+The Electron dashboard selects the correct compose file stack automatically based on the detected platform and the user's runtime profile setting.
+
+The `start-local.sh` / `start-remote.sh` convenience scripts default to Linux + GPU mode.
+
+### 6.2 Local vs Remote Mode
+
+```bash
+# Local mode (Linux + GPU, default)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+
+# Remote mode with HTTPS (Linux + GPU)
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
+TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+```
+
+**Ports:**
+- `8000` — HTTP API (always available)
+- `8443` — HTTPS (only when `TLS_ENABLED=true`)
+
+### 6.3 CPU Mode
+
+CPU mode runs the server without NVIDIA GPU reservation. The server automatically falls back
+to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
+
+**When to use CPU mode:**
+- macOS (no NVIDIA GPU support in Docker)
+- Systems without an NVIDIA GPU
+- Testing/development without GPU overhead
+- Running on VMs without GPU passthrough
+
+**How CPU mode works:**
+1. The GPU compose overlay (`docker-compose.gpu.yml`) is omitted from the compose stack
+2. `CUDA_VISIBLE_DEVICES` is set to empty string, ensuring deterministic CPU-only behavior
+3. The server's engine detects no CUDA availability and uses CPU for all inference
+
+**Performance expectations (CPU vs GPU):**
+- CPU mode is **5–20× slower** than GPU depending on model size and audio length
+- Recommended to use smaller models (`small`, `base`, `tiny`) in CPU mode
+- `large-v3` model in CPU mode: ~10–30× real-time (30 min audio ≈ 15–30 min transcription)
+- `small` model in CPU mode: ~2–5× real-time (much more practical)
+
+### 6.4 Tailscale HTTPS Setup
+
+1. **Install and authenticate Tailscale:**
+   ```bash
+   sudo tailscale up
+   tailscale status
+   ```
+
+2. **Enable HTTPS certificates** in [Tailscale Admin DNS settings](https://login.tailscale.com/admin/dns)
+
+3. **Generate certificates:**
+   ```bash
+   sudo tailscale cert <YOUR_DEVICE_NAME>.<YOUR_TAILNET_DNS_NAME>
+   mkdir -p ~/.config/Tailscale
+   mv <hostname>.crt ~/.config/Tailscale/my-machine.crt
+   mv <hostname>.key ~/.config/Tailscale/my-machine.key
+   sudo chown $USER:$USER ~/.config/Tailscale/my-machine.*
+   chmod 640 ~/.config/Tailscale/my-machine.key
+   ```
+
+4. **Start with TLS:**
+   ```bash
+   TLS_ENABLED=true \
+   TLS_CERT_PATH=~/.config/Tailscale/my-machine.crt \
+   TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
+   docker compose up -d
+   ```
+
+### 6.5 Docker Volume Structure
+
+**`transcriptionsuite-data`** (mounted to `/data`):
+
+| Path | Description |
+|------|-------------|
+| `/data/database/` | SQLite database and backups |
+| `/data/audio/` | Recorded audio files |
+| `/data/logs/` | Server logs |
+| `/data/tokens/` | Authentication tokens |
+
+**`transcriptionsuite-models`** (mounted to `/models`):
+
+| Path | Description |
+|------|-------------|
+| `/models/hub/` | HuggingFace models cache (Whisper, PyAnnote) |
+
+**`transcriptionsuite-runtime`** (mounted to `/runtime`):
+
+| Path | Description |
+|------|-------------|
+| `/runtime/.venv/` | Runtime Python virtualenv used by the server |
+| `/runtime/.runtime-bootstrap-marker.json` | Fingerprint + sync metadata |
+| `/runtime/bootstrap-status.json` | Bootstrap feature status (diarization availability, etc.) |
+| `/runtime/cache/` | uv package cache used for delta dependency updates |
+
+**Optional user config** (bind mount to `/user-config`):
+
+When `USER_CONFIG_DIR` is set, mounts custom config and logs.
+
+### 6.6 Docker Image Selection
+
+The application uses a hardcoded remote image (`ghcr.io/homelab-00/transcriptionsuite-server`) with flexible tag selection:
+
+**Default behavior:**
+- The Dashboard automatically selects the most recent local image by build date (not the `:latest` tag)
+- A dropdown in the Server tab allows selecting a specific image from available local images
+- Each image entry shows: tag, build date, and size
+- The "Most Recent (auto)" option (default) picks the newest image by build date
+- If no local images exist, the system falls back to pulling `:latest` from the registry
+- Runtime dependency volumes are preserved across normal image updates
+- Dependency refresh uses `uv sync` against existing runtime venv (delta update path)
+
+**Using specific versions:**
+```bash
+# Use a specific tag (must exist locally or will be pulled from ghcr.io)
+TAG=v0.4.7 docker compose up -d
+
+# Set TAG as environment variable
+export TAG=dev-branch
+docker compose up -d
+```
+
+**Building and using local images:**
+```bash
+# Build with custom tag
+TAG=my-custom docker compose build
+
+# Use the local image you just built
+TAG=my-custom docker compose up -d
+```
+
+**Note:** The `TAG` environment variable is the only way to override which image version is used. If you have multiple local images with different tags, you must explicitly specify which one via `TAG=...` or it defaults to looking for the `latest` tag.
+
+### 6.7 Server Update Lifecycle
+
+This section describes exactly what updates when the Docker image changes versus when runtime dependency volumes change.
+
+**At server start (`docker compose up -d`)**
+1. Docker starts/recreates the container from the selected image tag.
+2. `docker-entrypoint.sh` runs `bootstrap_runtime.py`.
+3. Bootstrap checks `/runtime/.runtime-bootstrap-marker.json` against current dependency fingerprint (`uv.lock` + Python ABI + arch + schema version).
+4. If marker + fingerprint match, bootstrap runs full runtime integrity validation:
+   - `uv sync --check --frozen --no-dev --project /app/server`
+   - with `UV_PROJECT_ENVIRONMENT=/runtime/.venv`
+5. Bootstrap chooses one path:
+   - `skip`: marker matches **and** integrity check passes.
+   - `delta-sync`: marker mismatch, or marker matches but integrity check fails.
+   - `rebuild-sync`: `/runtime/.venv` missing, ABI/arch incompatibility, or `delta-sync` fails/does not heal integrity.
+
+**What changes when the Docker image is updated**
+- Updated:
+  - Application code in the image (`/app/server`).
+  - Bootstrap scripts and defaults shipped in the image.
+  - Any base OS/image-layer changes included in the new tag.
+- Usually not updated:
+  - `transcriptionsuite-runtime` (`/runtime/.venv`) unless bootstrap decides sync/rebuild is needed.
+  - `transcriptionsuite-data` and `transcriptionsuite-models`.
+
+In short: an image update mainly changes code and runtime tooling; dependency downloads happen only if bootstrap detects dependency drift, runtime incompatibility, or runtime integrity failure.
+
+**When the runtime dependency volume is updated**
+- `delta-sync` (incremental update) happens when:
+  - `uv.lock` content changed between image versions.
+  - Marker fingerprint no longer matches current runtime fingerprint.
+  - Marker exists but is from an older bootstrap schema/fingerprint mode.
+  - Marker matches but lock-level runtime integrity check fails.
+- `rebuild-sync` (fresh venv + sync) happens when:
+  - `/runtime/.venv` is missing.
+  - Runtime reset is requested (Dashboard: `Remove Runtime`).
+  - ABI/arch incompatibility is detected (with `BOOTSTRAP_REBUILD_POLICY=abi_only`).
+  - `delta-sync` fails or post-sync integrity check still fails.
+
+**How runtime updates minimize download size**
+- Bootstrap runs `uv sync --frozen --no-dev` against existing `/runtime/.venv` for delta updates.
+- `UV_CACHE_DIR` is stored inside the runtime volume at `/runtime/cache`, so rebuilt venvs can reuse cached wheels.
+- Only changed packages are downloaded when possible; unchanged packages are reused.
+- Large dependency jumps (for example major torch/CUDA changes) may still require large downloads.
+
+**Operational scenarios**
+
+| Scenario | Image Pull | Runtime Venv (`/runtime`) | Expected Network Cost |
+|----------|------------|---------------------------|-----------------------|
+| App-only release, unchanged `uv.lock` | Yes (new image layers) | `skip` | Low (image only) |
+| Release with dependency changes in `uv.lock` | Yes | `delta-sync` | Medium (changed deps only) |
+| Runtime volume removed | No/Yes | `rebuild-sync` | High (full dependency fetch) |
+| Python ABI/arch incompatibility | Usually Yes | `rebuild-sync` | Medium to High |
+
+**Recommended update flow (least disruption)**
+```bash
+cd server/docker
+docker compose pull
+docker compose up -d
+```
+
+Use runtime reset only for recovery/maintenance.
+
+**Config reset semantics**
+- Normal image/runtime updates do **not** require deleting `~/.config/TranscriptionSuite` (or platform equivalent).
+- Remove config only for full reset or severe config corruption/recovery scenarios.
+- Dashboard "Also remove config directory" now performs a full dashboard state reset:
+  - Removes primary config directory (`~/.config/TranscriptionSuite` on Linux).
+  - Removes dashboard external state cache (`~/.cache/TranscriptionSuite` or `$XDG_CACHE_HOME/TranscriptionSuite`), including:
+    - `docker-user-config/` (effective `/user-config` bind mount copy),
+    - fallback managed `.env`,
+    - fallback saved Docker auth token.
+
+---
+
+## 7. API Reference
+
+### 7.1 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (no auth) |
+| `/api/status` | GET | Server status, GPU info |
+| `/api/auth/login` | POST | Authenticate with token |
+| `/api/admin/models/load` | POST | Load transcription models (admin only) |
+| `/api/admin/models/unload` | POST | Unload models to free GPU memory (admin only) |
+| `/api/transcribe/audio` | POST | Transcribe uploaded audio (`translation_enabled`, `translation_target_language` supported) |
+| `/api/transcribe/cancel` | POST | Cancel running transcription |
+| `/ws` | WebSocket | Real-time audio streaming |
+| `/ws/live` | WebSocket | Live Mode continuous transcription |
+| `/api/notebook/recordings` | GET | List all recordings |
+| `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
+| `/api/notebook/recordings/{id}/export` | GET | Export recording (`txt` for pure notes, `srt`/`ass` for timestamp-capable notes) |
+| `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization (`translation_enabled`, `translation_target_language` supported) |
+| `/api/notebook/calendar` | GET | Get recordings by date range |
+| `/api/notebook/recordings/{id}/title` | PATCH | Rename a recording |
+| `/api/notebook/recordings/{id}/date` | PATCH | Change recording date |
+| `/api/notebook/recordings/{id}/summary` | PATCH | Update or clear recording summary |
+| `/backups` | GET | List available database backups |
+| `/backup` | POST | Create new database backup |
+| `/restore` | POST | Restore database from backup |
+| `/api/search` | GET | Full-text search |
+| `/api/llm/chat` | POST | LLM chat integration |
+
+**LM Studio chat context:** When a new chat is started for a recording, the server injects the
+recording transcript as context using the **pure transcript** (no timestamps). Speaker tags are
+included **only** when diarization is enabled.
+
+### 7.2 WebSocket Protocol
+
+**Connection flow:**
+1. Connect to `/ws`
+2. Send auth: `{"type": "auth", "data": {"token": "<token>"}}`
+3. Receive: `{"type": "auth_ok", "data": {...}}`
+4. Send start: `{"type": "start", "data": {"language": "en"}}`
+5. Stream binary audio (16kHz PCM Int16)
+6. Send stop: `{"type": "stop"}`
+7. Receive final: `{"type": "final", "data": {"text": "...", "words": [...]}}`
+
+**Audio format:**
+- Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
+- Sample rate: 16kHz, Format: Int16 PCM (little-endian)
+
+### 7.3 Live Mode WebSocket Protocol
+
+**Connection flow:**
+1. Connect to `/ws/live`
+2. Send auth: `{"type": "auth", "data": {"token": "<token>"}}`
+3. Receive: `{"type": "auth_ok"}`
+4. Send start:
+   `{"type": "start", "data": {"config": {"model": "Systran/faster-whisper-large-v3", "language": "el", "translation_enabled": true, "translation_target_language": "en"}}}`
+5. Stream binary audio (16kHz PCM Int16)
+6. Receive real-time updates:
+   - `{"type": "partial", "data": {"text": "..."}}` - Interim transcription
+   - `{"type": "sentence", "data": {"text": "..."}}` - Completed sentence
+   - `{"type": "state", "data": {"state": "LISTENING|PROCESSING"}}` - Engine state changes
+7. Send stop: `{"type": "stop"}`
+
+**Key differences from `/ws`:**
+- Continuous operation: Engine stays active between utterances
+- Sentence-by-sentence output: Completed sentences sent immediately
+- Mute control: Client can pause/resume audio capture without disconnecting
+- Model swapping: Unloads main model to free VRAM for Live Mode model
+
+**Audio format:**
+- Sample rate: 16kHz, Format: Int16 PCM (little-endian)
+- Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
+
+---
+
+## 8. Backend Development
+
+### 8.1 Backend Structure
+
+```
+server/backend/
+├── api/
+│   ├── main.py                   # App factory, lifespan, routing
+│   └── routes/                   # API endpoint modules
+├── core/
+│   ├── diarization_engine.py     # PyAnnote wrapper
+│   ├── model_manager.py          # Model lifecycle, job tracking
+│   ├── realtime_engine.py        # Async wrapper for real-time STT
+│   ├── live_engine.py            # Live Mode engine (Whisper-only in v1)
+│   └── stt/                      # Speech-to-text subsystem
+│       ├── capabilities.py       # Translation/capability validation per backend
+│       ├── engine.py             # AudioToTextRecorder with VAD
+│       ├── vad.py                # Dual VAD (Silero + WebRTC)
+│       └── backends/             # Pluggable STT backends
+│           ├── base.py           # Abstract STTBackend interface
+│           ├── factory.py        # Backend detection + instantiation
+│           ├── whisper_backend.py        # Faster-whisper backend
+│           ├── whisperx_backend.py       # WhisperX (alignment + diarization)
+│           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR
+│           ├── canary_backend.py         # NVIDIA NeMo Canary (multitask)
+│           └── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental)
+├── database/
+│   └── database.py               # SQLite + FTS5 operations
+└── config.py                     # Configuration management
+```
+
+### 8.2 Running the Server Locally
+
+```bash
+cd server/backend
+uv venv --python 3.13
+uv sync
+
+# Development mode with auto-reload
+uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 8.3 Configuration System
+
+All modules use `get_config()` from `server.config`. Configuration is loaded with priority:
+
+1. `/user-config/config.yaml` (Docker with mounted user config)
+2. `~/.config/TranscriptionSuite/config.yaml` (Linux user config)
+3. `/app/config.yaml` (Docker default)
+4. `server/config.yaml` (native development)
+
+### 8.4 Testing
+
+```bash
+./build/.venv/bin/pytest server/backend/tests
+```
+
+---
+
+## 9. Dashboard Development
+
+### 9.1 Running from Source
+
+```bash
+cd dashboard
+npm install
+
+# Browser dev mode (Vite hot-reload at http://localhost:3000)
+npm run dev
+
+# Electron dev mode (Vite + Electron window)
+npm run dev:electron
+```
+
+### 9.2 Tech Stack
+
+- **Renderer**: React 19 + TypeScript 5.9 + Tailwind CSS 4 (Vite-bundled)
+- **Main Process**: Electron (Node.js)
+- **Build**: Vite (renderer) + tsc (main process) + electron-builder (packaging)
+- **Icons**: Lucide React
+- **Config**: electron-store (JSON) for client settings
+
+### 9.3 Key Modules
+
+**Electron Main Process (`electron/`):**
+
+| Module | Purpose |
+|--------|---------|
+| `main.ts` | Window creation, IPC handlers, app lifecycle |
+| `preload.ts` | Context bridge (safe IPC between renderer and main) |
+| `dockerManager.ts` | Docker CLI wrapper for container/image management |
+| `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
+| `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
+| `pasteAtCursor.ts` | Paste-at-cursor feature (xdotool/wtype/platform dispatch) |
+| `trayManager.ts` | System tray with 11 state-aware icons, context menu, and runtime icon tinting |
+| `updateManager.ts` | Opt-in update checker for app releases (GitHub) and server image (GHCR) |
+
+**Services (`src/services/`):**
+
+| Module | Purpose |
+|--------|---------|
+| `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
+| `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
+| `modelCapabilities.ts` | Multi-backend capability detection (translation, live mode support) |
+| `modelRegistry.ts` | Model family registry (Whisper, NeMo Parakeet/Canary, VibeVoice-ASR) |
+| `clientDebugLog.ts` | Client-side debug logging with structured log capture |
+
+**React Hooks (`src/hooks/`):**
+
+| Hook | Purpose |
+|------|---------|
+| `useServerStatus.ts` | Poll server health/status, connection state |
+| `useDocker.ts` | Docker container control via IPC (start/stop/status) |
+| `useTranscription.ts` | Real-time WebSocket transcription session |
+| `useLiveMode.ts` | Live Mode continuous transcription |
+| `useRecording.ts` | Fetch/manage individual recordings |
+| `useCalendar.ts` | Calendar view data fetching |
+| `useSearch.ts` | Full-text search across recordings |
+| `useUpload.ts` | Audio file upload with progress |
+| `useBackups.ts` | Database backup/restore operations |
+| `useLanguages.ts` | Available transcription languages |
+| `useAdminStatus.ts` | Admin authentication state |
+| `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
+| `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
+| `useClientDebugLogs.ts` | Client-side debug log capture and display |
+| `DockerContext.tsx` | React context provider for Docker state sharing |
+| `ServerStatusContext.tsx` | React context provider for server connection state |
+| `AdminStatusContext.tsx` | React context provider for admin authentication state |
+
+**Shared Source (`src/`):**
+
+| Module | Purpose |
+|--------|---------|
+| `api/client.ts` | REST API client for server communication |
+| `api/types.ts` | API request/response type definitions |
+| `config/store.ts` | Client config persistence (electron-store / localStorage fallback) |
+| `index.css` | Tailwind CSS entry point + global styles |
+| `types/electron.d.ts` | TypeScript declarations for Electron IPC bridge |
+| `types/audio-worklet.d.ts` | AudioWorklet API type declarations |
+
+**React Components (`components/`):**
+
+| Component | Purpose |
+|-----------|---------|
+| `Sidebar.tsx` | Collapsible sidebar navigation with status lights |
+| `AudioVisualizer.tsx` | Canvas-based bar visualizer with breathing idle animation and `amplitudeScale` prop for zoom (+/− buttons in Session view, 0.25–4.0×, step 0.25) |
+| `ui/Button.tsx` | 5 variants (primary/secondary/danger/ghost/glass), 4 sizes |
+| `ui/GlassCard.tsx` | Glassmorphism container with optional header |
+| `ui/AppleSwitch.tsx` | iOS-style toggle switch |
+| `ui/CustomSelect.tsx` | Portal-based dropdown selector |
+| `ui/StatusLight.tsx` | Animated pulse indicator (5 states) |
+| `ui/LogTerminal.tsx` | Terminal-style log viewer with color coding |
+
+**View Components (`components/views/`):**
+
+| View | Purpose |
+|------|---------|
+| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications. Layout order: Main Transcription card first, Audio Configuration below |
+| `ModelManagerTab.tsx` | Model Manager: browse by family, view capabilities, download/delete, cache status |
+| `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
+| `ServerView.tsx` | Docker server management: image selection, container control |
+| `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
+| `AboutModal.tsx` | Profile card, version, links |
+| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
+| `AddNoteModal.tsx` | Create new recording from calendar time slot |
+| `FullscreenVisualizer.tsx` | Fullscreen audio visualizer overlay |
+
+### 9.4 UI Contract System
+
+The dashboard enforces design consistency via a machine-validated UI contract. The contract operates in `closed_set` mode: any Tailwind class, token, or inline style not explicitly in the allowlists is a validation error.
+
+#### 9.4.1 Contract Files
+
+| File | Purpose |
+|------|---------|
+| `ui-contract/transcription-suite-ui.contract.yaml` | Canonical contract — single source of truth for renderer styling |
+| `ui-contract/transcription-suite-ui.contract.schema.json` | JSON Schema for structural validation |
+| `ui-contract/contract-baseline.json` | Content hash + version lock for semver bump enforcement |
+| `ui-contract/design-language.md` | Qualitative design direction (dark frosted glass, accent palette, motion rules) |
+| `scripts/ui-contract/extract-facts.mjs` | Extracts class/token/style facts from source files |
+| `scripts/ui-contract/build-contract.mjs` | Rebuilds contract YAML from extracted facts |
+| `scripts/ui-contract/validate-contract.mjs` | Validates schema + token drift + semver policy |
+| `scripts/ui-contract/diff-contract.mjs` | Generates structured mismatch report |
+| `scripts/ui-contract/test-contract.mjs` | Fixture-based contract tests |
+| `scripts/ui-contract/shared.mjs` | Shared extraction/comparison utilities |
+
+#### 9.4.2 Commands
+
+```bash
+# Extract facts from current source
+npm run ui:contract:extract
+
+# Rebuild contract from extracted facts
+node scripts/ui-contract/build-contract.mjs
+
+# Validate contract (schema + semantic drift + semver)
+npm run ui:contract:validate
+
+# Generate detailed mismatch report
+npm run ui:contract:diff
+
+# Run fixture-based contract tests
+npm run ui:contract:test
+
+# Update baseline (after intentional change + spec_version bump)
+node scripts/ui-contract/validate-contract.mjs --update-baseline
+```
+
+#### 9.4.3 Contract Structure
+
+The YAML contract contains these top-level sections:
+
+| Section | Contents |
+|---------|----------|
+| `meta` | Contract identity: `spec_version` (semver), `contract_mode: closed_set`, validation method |
+| `foundation.tailwind` | Canonical Tailwind theme extensions (fonts, glass/accent color scales, custom blur) |
+| `foundation.tokens` | Frozen token registries: colors, blur levels, shadows, motion, radii, z-index, spacing, status mappings |
+| `global_behaviors` | Global CSS policy: body styles, selection styling, scrollbar definitions, portal layering |
+| `utility_allowlist` | Full allowed class universe — `exact_classes` (normal) + `arbitrary_classes` (bracket-value) |
+| `inline_style_allowlist` | Allowed inline style properties and animation-related literals |
+| `component_contracts` | Per-component constraints: `required_tokens`, `allowed_variants`, `structural_invariants`, `behavior_rules`, `state_rules` |
+| `validation_policy` | Enforcement severity for each check (all currently `error`) |
+
+#### 9.4.4 Change Workflow
+
+When modifying UI styling, tokens, or component structure:
+
+1. Make the source changes
+2. Run `npm run ui:contract:extract` to extract updated facts
+3. Run `node scripts/ui-contract/build-contract.mjs` to rebuild the contract
+4. Run `npm run ui:contract:validate` to check for drift
+5. If changes are intentional, bump `meta.spec_version` in the contract YAML
+6. Run `node scripts/ui-contract/validate-contract.mjs --update-baseline` to lock the new baseline
+7. Run `npm run ui:contract:test` to verify fixtures
+
+#### 9.4.5 Validation Failures
+
+Validation fails when:
+
+- A new utility or arbitrary class appears that is not in allowlists
+- Token registries drift (colors, shadows, motion, radii, z-index, etc.)
+- Global CSS blocks differ from the contract
+- A discovered component has no entry in `component_contracts`
+- Contract content changes but `meta.spec_version` is not bumped
+
+**CI gate**: `npm run ui:contract:check` runs automatically (workflow: `.github/workflows/dashboard-quality.yml`).
+
+### 9.5 Server Busy Handling
+
+The dashboard handles server busy conditions automatically:
+- HTTP transcription: Server returns 409, dashboard shows "Server Busy" notification
+- WebSocket recording: Server sends `session_busy` message, dashboard shows error
+
+### 9.6 Model Management
+
+The dashboard provides controls for managing GPU memory:
+- Automatically disabled when server is stopped or becomes unhealthy
+- Checks server for active transcriptions before unloading
+- Returns HTTP 409 if server is busy
+
+**Model Manager Tab (`ModelManagerTab.tsx`):**
+- Browse STT models grouped by family (Whisper, NeMo Parakeet, NeMo Canary, VibeVoice-ASR)
+- View per-model capabilities: supported languages, translation support, live mode compatibility
+- Check HuggingFace cache status for each model (downloaded / not downloaded)
+- Download or delete models directly from the UI
+- Model family registry powered by `modelRegistry.ts`
+
+**Live Mode Model Swapping:**
+- When Live Mode starts, main transcription model is automatically unloaded to free VRAM
+- Live Mode defaults to `Systran/faster-whisper-medium` (hardcoded in `config.yaml`), not inherited from main_transcriber
+- Live Mode v1 supports only Whisper backend models
+- When Live Mode stops, main model is reloaded for normal transcription
+- This ensures efficient VRAM usage on consumer GPUs (e.g., RTX 3060 12GB)
+
+### 9.7 Package Management
+
+**Check for outdated packages:**
+```bash
+cd dashboard
+npm outdated
+```
+
+This shows a table with:
+- `Package`: Package name
+- `Current`: Currently installed version
+- `Wanted`: Latest version satisfying semver range in package.json
+- `Latest`: Latest version available on npm registry
+
+**Understanding npm update vs npm install:**
+
+| Command | Behavior |
+|---------|----------|
+| `npm install <package>@latest` | Updates specific package to latest version, modifies package.json |
+| `npm install` | Installs exact versions from package-lock.json |
+| `npm update` | Updates packages to `Wanted` version (respects semver ranges like `^` or `~`) |
+| `npm update <package>` | Updates specific package within semver range |
+
+**Safe updates (respects semver):**
+```bash
+cd dashboard
+npm update           # Updates all packages within their semver ranges
+npm update electron  # Updates only electron within its range
+```
+
+**Major version updates (breaking changes allowed):**
+```bash
+# Update specific packages to latest
+npm install electron@latest --save-dev
+npm install react@latest react-dom@latest
+
+# Or update all to latest (more risky)
+# Edit package.json manually to change versions, then:
+npm install
+```
+
+**Clean reinstall (recommended after major updates):**
+```bash
+cd dashboard
+rm -rf node_modules package-lock.json
+npm install
+```
+
+**Verify updates don't break the build:**
+```bash
+npm run typecheck    # TypeScript + JavaScript static type checking
+npm run build        # Production build
+npm run dev:electron # Test in development mode
+```
+
+**Best practices:**
+- Run `npm outdated` periodically to check for updates
+- Read changelogs for major version bumps (especially Electron, React, Vite)
+- Test thoroughly after updates (typecheck → build → runtime)
+- Update `README_DEV.md` dependency version numbers after major updates
+- npm deprecation warnings from transitive dependencies (like `inflight`, `glob` in electron-builder) are usually harmless and cannot be eliminated until upstream packages update
+
+---
+
+## 10. Configuration Reference
+
+### 10.1 Server Configuration
+
+Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPROFILE\Documents\TranscriptionSuite\config.yaml` (Windows)
+
+**Key sections:**
+- `main_transcriber` - Primary STT model (backend auto-detected from model name), device, batch settings
+- `live_transcriber` - Live Mode continuous transcription (Whisper-only in v1; defaults to `Systran/faster-whisper-medium`)
+- `diarization` - PyAnnote model and speaker detection
+- `remote_server` - Host, port, TLS settings
+- `storage` - Database path, audio storage
+- `local_llm` - LM Studio integration (supports v1 REST API for LM Studio 0.4.0+)
+- `backup` - Automatic database backup settings
+
+**Live Mode Configuration:**
+- `live_transcriber.enabled` - Enable/disable Live Mode feature
+- `live_transcriber.post_speech_silence_duration` - Grace period after silence (default: 3.0s)
+- `live_transcriber.live_language` - Language code for Live Mode (default: "en"; modified via Dashboard Client view)
+- `live_transcriber.translation_enabled` - Enable source-language -> English translation in Live Mode
+- `live_transcriber.translation_target_language` - Translation target (v1: `"en"` only)
+- `live_transcriber.model` defaults to `Systran/faster-whisper-medium` (hardcoded in `config.yaml`)
+- Live Mode v1 supports only Whisper backend models
+- Automatically swaps models to free VRAM when Live Mode starts
+- **Note:** Live Mode always unloads the main model and starts its own engine. The dashboard currently sends the main model on Live Mode start unless you explicitly wire `live_transcriber.model` through the client/server path.
+
+**Main Transcription Translation:**
+- `longform_recording.translation_enabled` - Enable translation for longform/static/notebook transcription flows
+- `longform_recording.translation_target_language` - Translation target language
+- **Whisper**: Translates source language → English only (`task="translate"`)
+- **Canary (NeMo)**: Bidirectional translation with 24 European target languages
+- **Parakeet / VibeVoice-ASR**: No translation support (toggle auto-disabled by `capabilities.py`)
+
+**Environment variables:**
+| Variable | Purpose |
+|----------|---------|
+| `HF_TOKEN` | HuggingFace token for PyAnnote models |
+| `HUGGINGFACE_TOKEN_DECISION` | One-time onboarding state: `unset`, `provided`, `skipped` |
+| `BOOTSTRAP_CACHE_DIR` | Runtime package cache path (default: `/runtime/cache`) |
+| `USER_CONFIG_DIR` | Path to user config directory |
+| `LOG_LEVEL` | Logging verbosity (DEBUG, INFO, WARNING) |
+| `TLS_ENABLED` | Enable HTTPS |
+| `TLS_CERT_PATH` | Path to TLS certificate |
+| `TLS_KEY_PATH` | Path to TLS private key |
+
+**Diarization prerequisites:** a valid HuggingFace token is not enough by itself; users must also accept the model terms at `https://huggingface.co/pyannote/speaker-diarization-community-1`.
+
+### 10.2 Dashboard Configuration
+
+The Electron dashboard persists settings via **electron-store** (JSON) at the
+platform-specific config path (e.g. `~/.config/TranscriptionSuite/dashboard-config.json`
+on Linux). Settings are managed through the **Settings** modal in the UI.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `connection.localHost` | `localhost` | Local server hostname |
+| `connection.remoteHost` | `""` | Remote server hostname (no protocol/port) |
+| `connection.useRemote` | `false` | Use remote host instead of local |
+| `connection.authToken` | `""` | Authentication token |
+| `connection.port` | `8000` | Server port |
+| `connection.useHttps` | `false` | Enable HTTPS (required for remote/Tailscale) |
+| `audio.gracePeriod` | `0.5` | Seconds of silence before finalising a recording chunk |
+| `diarization.constrainSpeakers` | `false` | Constrain speaker count for diarization |
+| `diarization.numSpeakers` | `2` | Number of speakers when constrained |
+| `notebook.autoAdd` | `true` | Auto-add longform transcriptions to Notebook |
+| `server.hfToken` | `""` | HuggingFace token for PyAnnote diarization models |
+| `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` — controls Docker GPU reservation |
+| `app.autoCopy` | `true` | Copy transcription to clipboard on completion |
+| `app.showNotifications` | `true` | Show desktop notifications |
+| `app.stopServerOnQuit` | `true` | Stop Docker container when quitting the app |
+| `app.startMinimized` | `false` | Start minimised to system tray |
+| `app.updateChecksEnabled` | `false` | Enable opt-in update checking |
+| `app.updateCheckIntervalMode` | `24h` | Check interval: `24h`, `7d`, `28d`, or `custom` |
+| `app.updateCheckCustomHours` | `24` | Custom interval in hours (when mode is `custom`) |
+
+> **`server.runtimeProfile`** — Controls whether the Docker container is
+> launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).
+> When set to `cpu`, the `docker-compose.gpu.yml` overlay is omitted and
+> `CUDA_VISIBLE_DEVICES` is set to an empty string, forcing the STT backend
+> to use the CPU compute backend. Change this from the **Server View** or
+> **Settings → App tab** in the dashboard UI.
+
+---
+
+## 11. Data Storage
+
+### 11.1 Database Schema
+
+| Table | Description |
+|-------|-------------|
+| `recordings` | Recording metadata (title, duration, date, summary) |
+| `segments` | Transcription segments with timestamps |
+| `words` | Word-level timestamps and confidence |
+| `conversations` | LLM chat conversations |
+| `messages` | Individual chat messages |
+| `words_fts` | FTS5 virtual table for full-text search |
+
+### 11.2 Database Migrations
+
+TranscriptionSuite uses Alembic for schema versioning. Migrations run automatically on server startup via the `run_migrations()` function in `database.py`.
+
+**Migration files:** `server/backend/database/migrations/versions/`
+
+**Creating new migrations:**
+1. Add a new file in `migrations/versions/` (e.g., `004_schema_sanity_and_segment_backfill.py`)
+2. Follow the pattern in `001_initial_schema.py`
+3. Use `op.batch_alter_table()` for SQLite compatibility
+
+### 11.3 Automatic Backups
+
+Backups are created on server startup using SQLite's backup API.
+
+**Configuration:**
+```yaml
+backup:
+    enabled: true        # Enable automatic backups
+    max_age_hours: 1     # Backup if latest is older than this
+    max_backups: 3       # Number of backups to keep
+```
+
+**Backup location:** `/data/database/backups/` (Docker)
+
+**Manual Backup/Restore via Dashboard:**
+
+The Dashboard provides a graphical interface for backup management in Settings → Notebook tab:
+- **Create Backup**: Manually trigger a database backup
+- **List Backups**: View all available backups with timestamps and sizes
+- **Restore Backup**: Restore database from any backup (creates safety backup first)
+
+**Export Individual Recordings:**
+
+Recordings can be exported from the Audio Notebook Calendar view:
+- Right-click on any recording → "Export transcription"
+- **Text format (.txt)**: Available only for pure transcription notes (no word-level timestamps, no diarization)
+- **SubRip format (.srt)**: Available for timestamp-capable notes (word timestamps enabled, with or without diarization)
+- **Advanced SubStation Alpha (.ass)**: Available for timestamp-capable notes (word timestamps enabled, with or without diarization)
+
+**API Endpoints:**
+- `GET /api/notebook/recordings/{id}/export?format=txt|srt|ass` - Export recording (capability-gated)
+- `GET /backups` - List available backups
+- `POST /backup` - Create new backup
+- `POST /restore` - Restore from backup (requires `filename` in request body)
+
+---
+
+## 12. Code Quality Checks
+
+### 12.1 Python Code Quality
+
+All Python code quality tools are installed in the build environment. Run these from the repository root:
+
+```bash
+# Lint check (identifies issues without fixing)
+./build/.venv/bin/ruff check .
+
+# Auto-format code (fixes style issues automatically)
+./build/.venv/bin/ruff format .
+
+# Type checking (static type analysis)
+./build/.venv/bin/pyright
+```
+
+**Check specific directories:**
+```bash
+./build/.venv/bin/ruff check server/backend/
+./build/.venv/bin/ruff format server/backend/
+```
+
+**Dashboard (TypeScript + JavaScript) quality commands:**
+```bash
+cd dashboard && npm run format
+cd dashboard && npm run format:check
+cd dashboard && npm run typecheck
+cd dashboard && npm run ui:contract:check
+```
+
+**Preview changes without modifying files:**
+```bash
+./build/.venv/bin/ruff format --diff .
+```
+
+**Typical workflow:**
+1. Run `ruff check` to identify issues
+2. Run `ruff format` to auto-fix style issues
+3. Run `pyright` for type errors (requires manual fixes)
+
+### 12.2 Complete Quality Check Workflow
+
+Run all checks across the entire codebase:
+
+```bash
+# From repository root
+
+# 1. Python checks
+./build/.venv/bin/ruff check .
+./build/.venv/bin/ruff format .
+./build/.venv/bin/pyright
+
+# 2. Python tests
+./build/.venv/bin/pytest server/backend/tests
+
+# 3. TypeScript + JavaScript checks (dashboard)
+cd dashboard && npm run format:check
+cd dashboard && npm run typecheck
+
+# 4. UI contract validation
+cd dashboard && npm run ui:contract:validate
+```
+
+### 12.3 GitHub CodeQL Layout
+
+The repository uses two different `.github` locations for different purposes:
+
+- `.github/workflows/`: GitHub Actions workflow definitions (when jobs run, trigger rules, runner setup).
+- `.github/codeql/`: CodeQL configuration consumed by workflows (for example, `codeql-config.yml` path filters and query configuration).
+- Active CodeQL language matrix in `.github/workflows/codeql-analysis.yml`: `python`, `javascript-typescript`.
+
+Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs and conflicting results.
+
+### 12.4 Pre-Commit Hooks
+
+Pre-commit checks are managed by the [pre-commit](https://pre-commit.com) framework. Configuration lives in `.pre-commit-config.yaml` at the repo root — this is the **only** tracked file related to pre-commit.
+
+#### Hooks
+
+| Hook | Source | Description |
+|------|--------|-------------|
+| `check-added-large-files` | pre-commit-hooks | Prevents giant files from being committed |
+| `check-ast` | pre-commit-hooks | Validates Python syntax |
+| `check-json` | pre-commit-hooks | Validates JSON syntax |
+| `check-merge-conflict` | pre-commit-hooks | Detects leftover merge conflict markers |
+| `check-symlinks` | pre-commit-hooks | Detects broken symlinks |
+| `check-toml` | pre-commit-hooks | Validates TOML syntax |
+| `check-yaml` | pre-commit-hooks | Validates YAML syntax |
+| `validate-pyproject` | validate-pyproject | Validates `pyproject.toml` files against PEP standards |
+| `ruff-format` | ruff-pre-commit | Auto-formats Python (uses `build/pyproject.toml` config) |
+| `ruff` | ruff-pre-commit | Lints Python with auto-fix (uses `build/pyproject.toml` config) |
+| `codespell` | codespell | Catches common spelling mistakes |
+| `prettier` | local | Auto-formats dashboard files (TypeScript, CSS, JSON, etc.) |
+| `ui-contract-check` | local | Validates UI contract schema + token drift + fixture tests (§9.4) |
+
+Formatters (`ruff-format`, `prettier`) modify files in place. If any staged file changes, `pre-commit` aborts the commit so you can re-stage and retry.
+
+#### Setup (one-time, per clone)
+
+```bash
+cd build && uv sync && cd ..
+./build/.venv/bin/pre-commit install
+```
+
+This writes a small stub into `.git/hooks/pre-commit` (untracked) that delegates to the framework.
+
+#### Running ad-hoc
+
+```bash
+# Run on staged files only (same as what runs on commit)
+./build/.venv/bin/pre-commit run
+
+# Run on every file in the repo
+./build/.venv/bin/pre-commit run --all-files
+
+# Run a single hook by id
+./build/.venv/bin/pre-commit run ruff-format --all-files
+./build/.venv/bin/pre-commit run ui-contract-check --all-files
+```
+
+#### Extending
+
+Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for third-party hooks or `repo: local` for project-specific scripts. See the [pre-commit docs](https://pre-commit.com/#plugins) for details.
+
+---
+
+## 13. Troubleshooting
 
 ### 13.1 Docker GPU Access
 
-Verify Docker can see the GPU:
-
 ```bash
+# Verify GPU is accessible
 docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
-```
 
-Inspect TranscriptionSuite container status/logs:
-
-```bash
-cd server/docker
-docker compose ps
+# Check container logs
 docker compose logs -f
 ```
 
-### 13.2 Docker Desktop Networking (Windows/macOS)
+### 13.2 Health Check Issues
 
-Current compose overlays intentionally differ by platform:
-- Linux uses host networking (`docker-compose.linux-host.yml`)
-- Windows/macOS use bridge networking + explicit ports (`docker-compose.desktop-vm.yml`)
-
-Docker Desktop overlay also sets LM Studio URL default to:
-- `http://host.docker.internal:1234`
-
-Manual Docker Desktop start example:
 ```bash
-cd server/docker
-TAG=latest docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+# Check health status
+docker compose ps
+docker inspect transcriptionsuite-container | grep Health -A 10
+
+# Test health endpoint
+docker compose exec transcriptionsuite-container curl -f http://localhost:8000/health
 ```
 
-### 13.3 Tailscale DNS and TLS Checks
+### 13.3 Tailscale DNS Resolution
 
-Useful diagnostics for remote mode:
+If DNS fails for `.ts.net` hostnames, the dashboard automatically falls back to Tailscale IP addresses with intelligent retry logic:
 
+1. First attempts DNS resolution of the configured hostname
+2. If DNS fails, queries `tailscale status --json` to discover available IPs
+3. Attempts connection to each IP (both IPv4 and IPv6) with per-IP timeout
+4. Returns success on first working IP, continues to next on failure
+5. Shows clear error messages distinguishing DNS vs connection failures
+
+**To diagnose:**
 ```bash
 tailscale status
-getent hosts <your-machine>.tail<xxxx>.ts.net
+getent hosts <your-machine>.tail1234.ts.net
 ```
 
-Validate certificate files exist and match `server/config.yaml` paths:
-- `remote_server.tls.host_cert_path`
-- `remote_server.tls.host_key_path`
-- `remote_server.tls.lan_host_cert_path`
-- `remote_server.tls.lan_host_key_path`
-
-If DNS resolution fails intermittently, restart Tailscale and re-check:
+**Quick fix:**
 ```bash
 sudo systemctl restart tailscaled
 ```
 
-### 13.4 AppImage Startup Issues (FUSE / Sandbox)
+### 13.4 AppImage Startup Failures
 
-#### Missing FUSE 2 (`libfuse.so.2`)
+```bash
+# Run from terminal to see errors
+./TranscriptionSuite-*-x86_64.AppImage
 
-AppImages need FUSE 2 on many distros.
+# Check for missing libraries
+./TranscriptionSuite-*-x86_64.AppImage --appimage-extract
+ldd squashfs-root/usr/bin/transcriptionsuite
+```
 
-| Distro | Package | Install command |
-|--------|---------|-----------------|
+**FUSE 2 missing (`dlopen(): error loading libfuse.so.2`):** AppImages require FUSE 2 which most modern distros no longer ship by default (they use FUSE 3). Install the appropriate package:
+
+| Distribution | Package | Install Command |
+|---|---|---|
 | Ubuntu 22.04 / Debian | `libfuse2` | `sudo apt install libfuse2` |
 | Ubuntu 24.04+ | `libfuse2t64` | `sudo apt install libfuse2t64` |
 | Fedora | `fuse-libs` | `sudo dnf install fuse-libs` |
 | Arch Linux | `fuse2` | `sudo pacman -S fuse2` |
 
-#### Chromium sandbox error in AppImage
-
-Current Electron main code adds `--no-sandbox` for Linux AppImage runs (plus packaging wrapper support). If you still hit a sandbox issue, test manually:
+**SUID sandbox error (`chrome-sandbox is owned by root and has mode 4755`):** This is handled automatically — the AppImage detects it is running inside an AppImage (via the `APPIMAGE` environment variable) and passes `--no-sandbox` to Chromium. This is the standard workaround for Electron AppImages since the squashfs mount cannot satisfy SUID permission requirements. If you still encounter this error on Ubuntu or Fedora GNOME (which use AppArmor to restrict unprivileged user namespaces), you can pass the flag manually:
 
 ```bash
 ./TranscriptionSuite-*-x86_64.AppImage --no-sandbox
 ```
 
-### 13.5 macOS DMG Build Failure (`dmgbuild`)
-
-`build/build-electron-mac.sh` documents and works around an `electron-builder` bundled `dmgbuild` binary compatibility issue on older macOS versions.
-
-If running `npm run package:mac` directly and it fails, install and point to a local `dmgbuild`:
+**Wayland / XWayland:** If the app has rendering issues on a Wayland compositor, you can try forcing XWayland mode or native Wayland mode:
 
 ```bash
+# Force XWayland
+./TranscriptionSuite-*-x86_64.AppImage --ozone-platform=x11
+
+# Force native Wayland
+ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
+```
+
+### 13.5 Windows / macOS Docker Networking
+
+**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected — the server listens inside the VM but the host can't reach `localhost:8000`.
+
+**Solution**: The layered compose system handles this automatically:
+- **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
+- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mappings `8000:8000`, `8443:8443`)
+- **LM Studio URL**: Windows/macOS uses `host.docker.internal:1234` to reach host services
+
+The Electron dashboard selects the correct overlay automatically based on `process.platform`.
+
+**Manual CLI usage** (Windows/macOS):
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
+```
+
+Then restart: `docker compose down && docker compose up -d`
+
+### 13.6 Checking Installed Packages
+
+To inspect packages in the runtime venv used by the server:
+
+```bash
+docker exec transcriptionsuite-container /runtime/.venv/bin/python -c "
+from importlib.metadata import distributions
+for dist in sorted(distributions(), key=lambda d: d.name.lower()):
+    print(f'{dist.name:40} {dist.version}')
+"
+```
+
+To validate full lock-level runtime integrity (all packages, not piecemeal checks):
+
+```bash
+docker exec transcriptionsuite-container env \
+  UV_PROJECT_ENVIRONMENT=/runtime/.venv \
+  UV_CACHE_DIR=/runtime/cache \
+  UV_PYTHON=/usr/bin/python3.13 \
+  uv sync --check --frozen --no-dev --project /app/server
+```
+
+If this command exits non-zero, the runtime environment is not fully aligned with `uv.lock`.
+
+These checks are useful for:
+- Verifying package versions
+- Debugging dependency conflicts
+- Confirming successful repair after bootstrap `delta-sync` or `rebuild-sync`
+
+### 13.7 macOS DMG Build Failure (dmgbuild binary)
+
+**Issue**: `electron-builder` ≥ 26.7 bundles a `dmgbuild` binary (`dmg-builder@1.2.0`) that was compiled for **macOS 15.7 (Sequoia)**. On older macOS versions, the build fails with:
+```
+dyld: Library not loaded: /usr/local/opt/gettext/lib/libintl.8.dylib
+  (built for macOS 15.7 which is newer than running OS)
+```
+
+**Solution**: Install `dmgbuild` locally via pip and tell electron-builder to use it:
+```bash
 pip3 install dmgbuild
+# Use the full path — pip user installs may not be on PATH (e.g. ~/Library/Python/3.x/bin)
 export CUSTOM_DMGBUILD_PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user") + "/dmgbuild")')"
-cd dashboard
 npm run package:mac
 ```
 
-### 13.6 Current Code/Script Caveats (Documented On Purpose)
+The `build-electron-mac.sh` script does this automatically. If you run `npm run package:mac` directly, set `CUSTOM_DMGBUILD_PATH` first.
 
-These are current repo behaviors, not typos in this document.
-
-1. **Live Mode v1 is whisper-only**
-- `/ws/live` rejects non-whisper backends in current `server/backend/api/routes/live.py`
-
-2. **Convenience startup scripts require `TAG`**
-- `start-common.sh` and `start-common.ps1` hard-require `TAG` even though Compose has a `latest` fallback
-
-3. **Startup scripts print likely stale `/record` and `/notebook` URLs**
-- backend route inventory in `server/backend` does not currently show `/record`
-
-4. **Native backend runs still have Docker-path assumptions**
-- token store defaults to `/data/tokens/tokens.json`
-- logging defaults target `/data/logs`
-
-5. **Server config key migration is partial**
-- `server/config.yaml` documents `storage.*`, `local_llm`, `remote_server`
-- some consumers still read legacy keys (for example `audio_notebook.audio_dir`)
-
-6. **Dashboard image start behavior prefers local images**
-- `dockerManager.startContainer()` selects newest local tag and errors when no local image exists (no implicit pull in that method)
-
-### 13.7 VibeVoice-ASR Import Probe Failures (Docker Runtime)
-
-VibeVoice-ASR is an optional experimental backend. Enable runtime installation with:
-
-```bash
-INSTALL_VIBEVOICE_ASR=true
-```
-
-Bootstrap installs VibeVoice into `/runtime/.venv` and then runs an import probe. If logs show
-that VibeVoice-ASR installation completed but the import check failed, the install itself may
-have succeeded but the upstream package layout changed (import-path drift) relative to the
-TranscriptionSuite integration.
-
-Useful diagnostics/workarounds:
-
-- Pin the VibeVoice install source to a known-good revision:
-
-```bash
-VIBEVOICE_ASR_PACKAGE_SPEC=git+https://github.com/microsoft/VibeVoice.git@<commit>
-```
-
-- Inspect bootstrap feature status:
-
-```bash
-docker exec -it transcriptionsuite cat /runtime/bootstrap-status.json
-```
-
-Check `features.vibevoice_asr` for `available`, `reason`, and `error`. A common symptom is
-`reason=import_failed` even when the VibeVoice install step itself completed successfully.
+**Alternative**: Upgrade macOS to 15.7+ (Sequoia), which is the minimum version the bundled binary supports.
 
 ---
 
-## 14. Dependency and Version Snapshot
+## 14. Dependencies
 
-### 14.1 Backend (`server/backend/pyproject.toml`)
+### 14.1 Server (Docker)
 
-Current package metadata highlights:
-- package: `transcriptionsuite-server`
-- version: `1.1.0`
-- Python: `>=3.13,<3.14`
+- Python 3.13
+- FastAPI + Uvicorn
+- faster-whisper (CTranslate2 backend)
+- WhisperX 3.1.0+ (faster-whisper + wav2vec2 alignment + diarization)
+- NVIDIA NeMo Toolkit (optional; Parakeet/Canary ASR backends)
+- VibeVoice-ASR (optional, experimental; Microsoft multimodal ASR)
+- PyAnnote Audio 4.0.3+ (speaker diarization)
+- PyTorch 2.8.0 + TorchAudio 2.8.0
+- SQLite with FTS5
+- NVIDIA GPU with CUDA support
 
-Core runtime groups (high level):
-- FastAPI / Uvicorn / WebSocket stack
-- Whisper/faster-whisper + CTranslate2 path
-- PyTorch / TorchAudio
-- WhisperX + PyAnnote for diarization/alignment flows
-- RealtimeSTT for Live Mode path
-- SQLite (`aiosqlite`, `sqlalchemy`, `alembic`)
-- audio libs (`soundfile`, `webrtcvad`, `silero-vad`, `ffmpeg-python`)
-- logging/utilities (`structlog`, `psutil`, `filelock`, etc.)
+### 14.2 Dashboard
 
-Optional extras:
-- `nemo` -> `nemo_toolkit[asr]`
-- `vibevoice_asr` -> VibeVoice git dependency
-
-Notable `uv` config:
-- override dependencies for `scipy` and `faster-whisper`
-- custom PyTorch CUDA index (`pytorch-cu129`) for `torch` and `torchaudio`
-
-### 14.2 Build Tooling (`build/pyproject.toml`)
-
-Current package metadata highlights:
-- package: `transcriptionsuite-build`
-- version: `1.1.0`
-- Python: `>=3.13,<3.14`
-
-Includes tools for:
-- `ruff`
-- `pyright`
-- `pytest`
-- `pre-commit`
-- packaging helpers (`pyinstaller`, `build`, `hatchling`)
-- some client build-time Python deps used by auxiliary tooling/scripts
-
-### 14.3 Dashboard (`dashboard/package.json`)
-
-Current package metadata highlights:
-- package: `transcriptionsuite`
-- version: `1.1.0`
-- Electron main entry: `dist-electron/main.js`
-
-Key scripts (selected):
-- dev: `dev`, `dev:electron`, `preview`
-- checks: `typecheck`, `format`, `format:check`, `check`
-- builds: `build`, `build:electron`
-- packaging: `package:linux`, `package:windows`, `package:mac`
-- UI contract: `ui:contract:*`
-- OpenAPI generation helpers: `types:spec`, `types:generate`
-
-Key stack versions (see `dashboard/package.json` for exact current pins/ranges):
-- React 19
-- TypeScript 5.9
-- Vite 7
-- Electron 40
+- Node.js 24+
+- Electron 40+
+- React 19 + TypeScript 5.9
+- Vite 7 (bundler)
 - Tailwind CSS 4
-- TanStack Query 5
-- Headless UI 2
-
-### 14.4 Release Version Alignment Fields
-
-For a release, verify all of the following are updated together:
-
-- `dashboard/package.json` -> `version`
-- `server/backend/pyproject.toml` -> `[project].version`
-- `build/pyproject.toml` -> `[project].version`
-
-Lockfiles to refresh/review as part of dependency updates:
-- `dashboard/package-lock.json`
-- `server/backend/uv.lock`
-- `build/uv.lock`
-
----
-
-## Appendix: Source-of-Truth Files for Future Doc Updates
-
-When updating this guide, prefer these files over old prose:
-
-- Backend API/router wiring: `server/backend/api/main.py`, `server/backend/api/routes/*.py`
-- Server config schema/defaults: `server/config.yaml`, `server/backend/config.py`
-- Docker runtime behavior: `server/docker/docker-compose*.yml`, `server/docker/bootstrap_runtime.py`, `server/docker/docker-entrypoint.sh`, `server/docker/entrypoint.py`
-- Startup script behavior: `server/docker/start-common.sh`, `server/docker/start-common.ps1`
-- Dashboard scripts/build config: `dashboard/package.json`, `dashboard/vite.config.ts`
-- Dashboard persisted defaults: `dashboard/electron/main.ts`
-- Dashboard socket protocol behavior: `dashboard/src/services/websocket.ts`, `dashboard/src/hooks/useTranscription.ts`, `dashboard/src/hooks/useLiveMode.ts`
-- UI contract system: `dashboard/ui-contract/*`, `dashboard/scripts/ui-contract/*`
-- CI/pre-commit: `.github/workflows/*.yml`, `.github/codeql/codeql-config.yml`, `.pre-commit-config.yaml`
+- electron-builder (packaging)
+- electron-store (client config persistence)
+- Lucide React (icons)
