@@ -11,13 +11,13 @@
 import { useEffect, useRef } from 'react';
 import type { LiveStatus } from './useLiveMode';
 import type { TranscriptionStatus } from './useTranscription';
-import type { ConnectionState } from './useServerStatus';
+import type { ServerHealthState } from './useServerStatus';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI != null;
 
 interface TrySyncDeps {
   /** Server connection state from useServerStatus */
-  serverStatus: ConnectionState;
+  serverStatus: ServerHealthState;
   /** Whether the Docker container is running */
   containerRunning: boolean;
   /** Docker container health status ('healthy' | 'starting' | 'unhealthy' | undefined) */

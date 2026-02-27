@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient, type ServerStatus } from '../api/client';
 
-export type ConnectionState = 'active' | 'inactive' | 'warning' | 'error' | 'loading';
+export type ServerHealthState = 'active' | 'inactive' | 'warning' | 'error' | 'loading';
 
 export interface ServerConnectionInfo {
   /** StatusLight-compatible state for the server */
-  serverStatus: ConnectionState;
+  serverStatus: ServerHealthState;
   /** StatusLight-compatible state for the client (connected to server?) */
-  clientStatus: ConnectionState;
+  clientStatus: ServerHealthState;
   /** Detailed server info when connected, null otherwise */
   details: ServerStatus | null;
   /** Human-readable status label */

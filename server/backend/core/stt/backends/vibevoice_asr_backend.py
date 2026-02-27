@@ -8,7 +8,6 @@ word-level timestamps empty.
 
 from __future__ import annotations
 
-import gc
 import importlib
 import json
 import logging
@@ -19,6 +18,7 @@ from typing import Any
 import numpy as np
 import torch
 from server.config import get_config
+from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -239,13 +239,7 @@ class VibeVoiceASRBackend(STTBackend):
         self._model = None
         self._processor = None
         self._model_name = None
-        try:
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except Exception as e:
-            logger.debug("Could not clear GPU cache: %s", e)
+        clear_gpu_cache()
 
     def is_loaded(self) -> bool:
         return self._model is not None and self._processor is not None

@@ -7,15 +7,15 @@ when ``nemo_toolkit`` is not installed.
 
 from __future__ import annotations
 
-import gc
 import logging
 import math
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-import torch
+from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -315,13 +315,7 @@ class ParakeetBackend(STTBackend):
     def unload(self) -> None:
         self._model = None
         self._model_name = None
-        try:
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except Exception as e:
-            logger.debug(f"Could not clear GPU cache: {e}")
+        clear_gpu_cache()
 
     def is_loaded(self) -> bool:
         return self._model is not None
@@ -482,8 +476,13 @@ class ParakeetBackend(STTBackend):
         audio: np.ndarray,
         *,
         word_timestamps: bool = True,
+        transcribe_fn: Callable[..., Any] | None = None,
+        language: str = "en",
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Chunk long audio at ~20 min boundaries and concatenate results."""
+        if transcribe_fn is None:
+            transcribe_fn = self._transcribe_array
+
         chunk_samples = int(MAX_CHUNK_DURATION * SAMPLE_RATE)
         total_samples = len(audio)
         num_chunks = math.ceil(total_samples / chunk_samples)
@@ -501,7 +500,7 @@ class ParakeetBackend(STTBackend):
                 f"({time_offset:.0f}s - {time_offset + len(chunk) / SAMPLE_RATE:.0f}s)"
             )
 
-            output = self._transcribe_array(chunk, timestamps=word_timestamps)
+            output = transcribe_fn(chunk, timestamps=word_timestamps)
             chunk_segments = self._parse_output(output, word_timestamps=word_timestamps)
 
             # Offset timestamps
@@ -516,7 +515,7 @@ class ParakeetBackend(STTBackend):
             time_offset += len(chunk) / SAMPLE_RATE
 
         info = BackendTranscriptionInfo(
-            language="en",
+            language=language,
             language_probability=1.0,
         )
         return all_segments, info

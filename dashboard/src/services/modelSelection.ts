@@ -1,7 +1,7 @@
 import { isNemoModel, isVibeVoiceASRModel } from './modelCapabilities';
+import type { ModelFamily, ModelRole } from './modelRegistry';
 
-export type ModelRole = 'main' | 'live';
-export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'none';
+export type { ModelFamily, ModelRole };
 
 export const MAIN_RECOMMENDED_MODEL = 'nvidia/parakeet-tdt-0.6b-v3';
 export const LIVE_RECOMMENDED_MODEL = 'Systran/faster-whisper-medium';

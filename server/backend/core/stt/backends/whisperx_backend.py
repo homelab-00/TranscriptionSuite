@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
-import torch
+from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -105,13 +105,7 @@ class WhisperXBackend(STTBackend):
         self._align_language = None
         self._transcribe_param_names = None
         self._compat_mode_logged = False
-        try:
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except Exception as e:
-            logger.debug(f"Could not clear GPU cache: {e}")
+        clear_gpu_cache()
 
     def is_loaded(self) -> bool:
         return self._model is not None

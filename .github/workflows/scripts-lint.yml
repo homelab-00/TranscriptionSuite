@@ -21,7 +21,7 @@ jobs:
       - name: Validate Bash syntax
         run: |
           set -euo pipefail
-          scripts=(server/docker/*.sh build/*.sh build/user-setup/*.sh)
+          scripts=(server/docker/*.sh build/*.sh)
           valid_scripts=()
           for script in "${scripts[@]}"; do
               if [[ -f "$script" ]]; then
@@ -39,7 +39,7 @@ jobs:
       - name: Run shellcheck
         run: |
           set -euo pipefail
-          scripts=(server/docker/*.sh build/*.sh build/user-setup/*.sh)
+          scripts=(server/docker/*.sh build/*.sh)
           valid_scripts=()
           for script in "${scripts[@]}"; do
               if [[ -f "$script" ]]; then
@@ -75,7 +75,6 @@ jobs:
           $scriptPaths = @()
           $scriptPaths += Get-ChildItem -Path "server/docker" -Filter "*.ps1" -File
           $scriptPaths += Get-ChildItem -Path "build" -Filter "*.ps1" -File -ErrorAction SilentlyContinue
-          $scriptPaths += Get-ChildItem -Path "build/user-setup" -Filter "*.ps1" -File -ErrorAction SilentlyContinue
 
           if ($scriptPaths.Count -eq 0) {
               Write-Host "No PowerShell scripts found to validate"

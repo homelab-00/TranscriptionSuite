@@ -265,13 +265,13 @@ TranscriptionSuite/
 │   │   │   ├── client.ts         # REST API client for server communication
 │   │   │   └── types.ts          # API request/response type definitions
 │   │   ├── config/store.ts       # Client config (electron-store / localStorage)
-│   │   ├── hooks/                # React hooks (see Key Modules section)
+│   │   ├── hooks/                # React hooks (includes server health + tray state sync; see Key Modules)
 │   │   ├── services/             # Core services
 │   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
 │   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
 │   │   │   ├── modelCapabilities.ts # Multi-backend capability detection (translation, live mode)
-│   │   │   ├── modelRegistry.ts  # Model family registry (Whisper, NeMo, VibeVoice-ASR)
-│   │   │   ├── modelSelection.ts # Main/live model selection + family/dependency gating helpers
+│   │   │   ├── modelRegistry.ts  # Model registry + canonical ModelFamily/ModelRole types (includes 'none')
+│   │   │   ├── modelSelection.ts # Main/live selection helpers + disabled-slot mapping (re-exports registry types)
 │   │   │   └── clientDebugLog.ts # Client debug logging service (persisted entries + IPC-ingested live Electron lines)
 │   │   ├── index.css             # Tailwind CSS + global styles
 │   │   └── types/
@@ -322,11 +322,11 @@ TranscriptionSuite/
 │   │   │   │   └── backends/            # Pluggable STT backends
 │   │   │   │       ├── base.py          # Abstract STTBackend interface
 │   │   │   │       ├── factory.py       # Backend detection + instantiation
-│   │   │   │       ├── whisper_backend.py       # Faster-whisper backend
-│   │   │   │       ├── whisperx_backend.py      # WhisperX (alignment + diarization)
-│   │   │   │       ├── parakeet_backend.py      # NVIDIA NeMo Parakeet ASR
-│   │   │   │       ├── canary_backend.py        # NVIDIA NeMo Canary (multitask)
-│   │   │   │       └── vibevoice_asr_backend.py # VibeVoice-ASR (experimental)
+│   │   │   │       ├── whisper_backend.py       # Faster-whisper backend (shared GPU cache cleanup on unload)
+│   │   │   │       ├── whisperx_backend.py      # WhisperX (alignment + diarization, shared GPU cache cleanup)
+│   │   │   │       ├── parakeet_backend.py      # NVIDIA NeMo Parakeet ASR (base warmup + reusable long-audio chunking)
+│   │   │   │       ├── canary_backend.py        # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
+│   │   │   │       └── vibevoice_asr_backend.py # VibeVoice-ASR (experimental, shared GPU cache cleanup on unload)
 │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
 │   │   │   ├── model_manager.py         # Model lifecycle, job tracking
 │   │   │   ├── realtime_engine.py       # Async wrapper for real-time STT
@@ -957,11 +957,11 @@ server/backend/
 │       └── backends/             # Pluggable STT backends
 │           ├── base.py           # Abstract STTBackend interface
 │           ├── factory.py        # Backend detection + instantiation
-│           ├── whisper_backend.py        # Faster-whisper backend
-│           ├── whisperx_backend.py       # WhisperX (alignment + diarization)
-│           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR
-│           ├── canary_backend.py         # NVIDIA NeMo Canary (multitask)
-│           └── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental)
+│           ├── whisper_backend.py        # Faster-whisper backend (shared GPU cache cleanup on unload)
+│           ├── whisperx_backend.py       # WhisperX (alignment + diarization, shared GPU cache cleanup)
+│           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR (base warmup + reusable long-audio chunking)
+│           ├── canary_backend.py         # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
+│           └── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, shared GPU cache cleanup on unload)
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
 └── config.py                     # Configuration management
@@ -1040,15 +1040,15 @@ npm run dev:electron
 | `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
 | `modelCapabilities.ts` | Multi-backend capability detection (translation, live mode support) |
-| `modelRegistry.ts` | Model family registry (Whisper, NeMo Parakeet/Canary, VibeVoice-ASR) |
-| `modelSelection.ts` | Shared model-selection constants, disabled sentinel mapping, and family/dependency resolution |
+| `modelRegistry.ts` | Model registry + canonical `ModelFamily` / `ModelRole` types (`ModelFamily` includes `'none'` for disabled-slot state) |
+| `modelSelection.ts` | Shared model-selection constants, disabled sentinel mapping, family/dependency resolution, and re-exported registry model types |
 | `clientDebugLog.ts` | Client-side debug logging with structured capture, shared append path, persisted writes, and non-persisted IPC line ingestion |
 
 **React Hooks (`src/hooks/`):**
 
 | Hook | Purpose |
 |------|---------|
-| `useServerStatus.ts` | Poll server health/status, connection state |
+| `useServerStatus.ts` | Poll server health/status and expose status-light-safe `ServerHealthState` values |
 | `useDocker.ts` | Docker container control via IPC (start/stop/status) with onboarding install flags (`installWhisper`, `installNemo`, `installVibeVoiceAsr`) |
 | `useTranscription.ts` | Real-time WebSocket transcription session |
 | `useLiveMode.ts` | Live Mode continuous transcription |
@@ -1059,7 +1059,7 @@ npm run dev:electron
 | `useBackups.ts` | Database backup/restore operations |
 | `useLanguages.ts` | Available transcription languages |
 | `useAdminStatus.ts` | Admin authentication state |
-| `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
+| `useTraySync.ts` | Resolve composite app state and sync tray icon/menu/tooltip using `ServerHealthState` from `useServerStatus` |
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
 | `useClientDebugLogs.ts` | Client debug log state + renderer bridge subscription for live `app:clientLogLine` updates into the Session log terminal |
 | `DockerContext.tsx` | React context provider for Docker state sharing |
@@ -1204,7 +1204,8 @@ The dashboard now uses model-first startup and additive dependency installs:
 - View per-model capabilities: supported languages, translation support, live mode compatibility
 - Check HuggingFace cache status for each model (downloaded / not downloaded)
 - Download or delete models directly from the UI
-- Model family registry powered by `modelRegistry.ts`
+- Model family registry powered by `modelRegistry.ts` (canonical `ModelFamily` / `ModelRole` definitions)
+- Disabled model selections map to `'none'` family state and are excluded from active-role resolution
 - Disabled slot selections are excluded from active role resolution
 
 **Live Mode Model Swapping:**

@@ -6,14 +6,13 @@ STTBackend interface so the engine doesn't depend on it directly.
 
 from __future__ import annotations
 
-import gc
 import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import soundfile as sf
-import torch
+from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -66,13 +65,7 @@ class WhisperBackend(STTBackend):
     def unload(self) -> None:
         self._model = None
         self._model_name = None
-        try:
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-        except Exception as e:
-            logger.debug(f"Could not clear GPU cache: {e}")
+        clear_gpu_cache()
 
     def is_loaded(self) -> bool:
         return self._model is not None

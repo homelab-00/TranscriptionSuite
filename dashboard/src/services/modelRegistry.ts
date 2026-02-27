@@ -13,7 +13,7 @@ import {
   isParakeetModel,
 } from './modelCapabilities';
 
-export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'diarization' | 'custom';
+export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'diarization' | 'custom' | 'none';
 export type ModelRole = 'main' | 'live' | 'diarization';
 
 export interface ModelInfo {

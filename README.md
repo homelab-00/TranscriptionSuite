@@ -83,7 +83,7 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup
 - **Multi-Backend STT**: Whisper, NVIDIA NeMo Parakeet/Canary, and VibeVoice-ASR — backend auto-detected from the model name
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet supports 25 European languages
-- **Model Manager**: Browse models by family, view capabilities, and manage downloads/cache
+- **Model Manager**: Browse models by family, view capabilities, manage downloads/cache, and intentionally disable model slots with **None (Disabled)**
 - **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS
 - **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds
