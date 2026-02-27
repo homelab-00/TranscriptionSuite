@@ -61,18 +61,18 @@ interface FamilySectionConfig {
 
 const FAMILY_SECTIONS: FamilySectionConfig[] = [
   {
-    family: 'whisper',
-    label: 'Whisper',
-    borderClass: 'border-l-slate-300',
-    badgeClass: 'bg-white/10 text-slate-200',
-    headerTextClass: 'text-slate-300',
-  },
-  {
     family: 'nemo',
     label: 'NeMo',
     borderClass: 'border-l-green-400',
     badgeClass: 'bg-green-500/10 text-green-400',
     headerTextClass: 'text-green-400',
+  },
+  {
+    family: 'whisper',
+    label: 'Faster Whisper',
+    borderClass: 'border-l-slate-300',
+    badgeClass: 'bg-white/10 text-slate-200',
+    headerTextClass: 'text-slate-300',
   },
   {
     family: 'vibevoice',

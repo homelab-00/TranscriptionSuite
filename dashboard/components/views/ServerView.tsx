@@ -71,11 +71,11 @@ const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(3
 const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
 const MAIN_MODEL_PRESETS = [
+  PARAKEET_TDT_0_6B,
+  CANARY_1B_V2,
   WHISPER_LARGE_V3,
   WHISPER_MEDIUM,
   WHISPER_SMALL,
-  PARAKEET_TDT_0_6B,
-  CANARY_1B_V2,
   VIBEVOICE_ASR,
   VIBEVOICE_ASR_4BIT,
 ];
@@ -1161,11 +1161,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         value={mainModelSelection}
                         onChange={setMainModelSelection}
                         options={[
+                          PARAKEET_TDT_0_6B,
+                          CANARY_1B_V2,
                           WHISPER_LARGE_V3,
                           WHISPER_MEDIUM,
                           WHISPER_SMALL,
-                          PARAKEET_TDT_0_6B,
-                          CANARY_1B_V2,
                           VIBEVOICE_ASR,
                           VIBEVOICE_ASR_4BIT,
                           MAIN_MODEL_CUSTOM_OPTION,

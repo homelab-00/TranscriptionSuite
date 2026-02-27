@@ -28,6 +28,7 @@ import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
+import { isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import type { AuthToken } from '../../src/api/types';
 
 interface SettingsModalProps {
@@ -41,6 +42,8 @@ const DEFAULT_SHORTCUTS = {
   stopTranscribe: 'Alt+Ctrl+S',
 } as const;
 const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
+const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
 
 function extractAdminTokenFromDockerLogLine(line: string): string | null {
   if (!line) return null;
@@ -49,6 +52,19 @@ function extractAdminTokenFromDockerLogLine(line: string): string | null {
   if (!match) return null;
   const token = match[1].trim();
   return token.length > 0 ? token : null;
+}
+
+function normalizeConfigString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveConfiguredMainModel(cfg: Record<string, unknown>): string {
+  const selection = normalizeConfigString(cfg['server.mainModelSelection']);
+  const custom = normalizeConfigString(cfg['server.mainCustomModel']);
+
+  if (selection === MAIN_MODEL_CUSTOM_OPTION) return custom;
+  if (!selection || selection === MODEL_DEFAULT_LOADING_PLACEHOLDER) return custom;
+  return selection;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
@@ -89,6 +105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [newTokenAdmin, setNewTokenAdmin] = useState(false);
   const [createdTokenPlaintext, setCreatedTokenPlaintext] = useState<string | null>(null);
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
+  const [configuredMainModel, setConfiguredMainModel] = useState('');
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -264,6 +281,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 startRecording: (cfg['shortcuts.startRecording'] as string) ?? prev.startRecording,
                 stopTranscribe: (cfg['shortcuts.stopTranscribe'] as string) ?? prev.stopTranscribe,
               }));
+              setConfiguredMainModel(resolveConfiguredMainModel(cfg));
             }
           })
           .catch(() => {});
@@ -342,6 +360,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   }, [clientSettings, appSettings, shortcutSettings, onClose]);
 
   if (!isRendered) return null;
+
+  const sampleRateHz = isVibeVoiceASRModel(configuredMainModel) ? 24000 : 16000;
+  const sampleRateHint = isVibeVoiceASRModel(configuredMainModel)
+    ? 'Fixed for VibeVoice models'
+    : 'Fixed for Faster Whisper and NeMo models';
 
   const renderAppTab = () => (
     <div className="space-y-6">
@@ -637,8 +660,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       <Section title="Audio">
         <div className="space-y-4">
           <div className="rounded-lg border border-white/5 bg-white/5 p-3 font-mono text-xs text-slate-400">
-            Sample Rate: <span className="text-accent-cyan">16000 Hz</span> (Fixed for Whisper &amp;
-            Parakeet)
+            Sample Rate: <span className="text-accent-cyan">{sampleRateHz} Hz</span> (
+            {sampleRateHint})
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-300">
