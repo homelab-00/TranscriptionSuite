@@ -63,8 +63,7 @@ nemo = [
     "nemo_toolkit[asr]>=2.2.0",
 ]
 vibevoice_asr = [
-    # NOTE: Pin to a tested commit after the compatibility spike is run in a networked env.
-    "vibevoice @ git+https://github.com/microsoft/VibeVoice.git",
+    "vibevoice @ git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e",
 ]
 [project.scripts]
 transcription-server = "server.api.main:main"

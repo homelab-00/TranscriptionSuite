@@ -1006,9 +1006,9 @@ def main() -> int:
     vibevoice_asr_package_spec = (
         os.environ.get(
             "VIBEVOICE_ASR_PACKAGE_SPEC",
-            "git+https://github.com/microsoft/VibeVoice.git",
+            "git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e",
         ).strip()
-        or "git+https://github.com/microsoft/VibeVoice.git"
+        or "git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e"
     )
     vibevoice_quantized_selected = is_vibevoice_asr_quantized_model_name(main_model)
     existing_vibevoice_asr_status = check_vibevoice_asr_import(

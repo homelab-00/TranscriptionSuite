@@ -701,7 +701,10 @@ def test_main_installs_vibevoice_quant_runtime_deps_for_4bit_model(
         "--python",
         str(runtime_dir / ".venv/bin/python"),
     ]
-    assert "git+https://github.com/microsoft/VibeVoice.git" in cmd
+    assert (
+        "git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e"
+        in cmd
+    )
     assert "accelerate>=0.26.0" in cmd
     assert "bitsandbytes>=0.43.1" in cmd
 
