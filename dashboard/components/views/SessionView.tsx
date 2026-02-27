@@ -1257,7 +1257,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     {canStartRecording ? (
                       <Button
                         variant="primary"
-                        className="bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30 flex-1"
+                        className="bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30 ml-auto w-44 shrink-0"
                         icon={
                           isConnecting ? (
                             <Loader2 size={16} className="animate-spin" />
@@ -1276,7 +1276,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       <>
                         <Button
                           variant="danger"
-                          className="flex-1"
+                          className="ml-auto w-44 shrink-0"
                           icon={
                             isProcessing ? (
                               <Loader2 size={16} className="animate-spin" />
