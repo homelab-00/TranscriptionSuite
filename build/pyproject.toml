@@ -15,28 +15,25 @@ classifiers = [
     "Topic :: Build Environment",
 ]
 
-dependencies = [
-    # Code quality
+[dependency-groups]
+# Developer tooling used from ./build/.venv
+tooling = [
     "ruff>=0.14.10",
     "pyright>=1.1.407",
+    "pre-commit>=4.2.0",
+]
+
+# Minimal extras used by backend test runs from the build environment
+backend-test = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "httpx>=0.25.0",
-    "pre-commit>=4.2.0",
-    # Build/packaging
-    "pyinstaller>=6.17.0",
-    "build>=1.3.0",
-    "hatchling>=1.28.0",
-    # Client dependencies for AppImage builds
-    "PyQt6>=6.6.0",
-    "pyaudio>=0.2.13",
-    "soundcard>=0.4.3",
-    "aiohttp>=3.13.3",
     "pyyaml>=6.0",
     "numpy>=1.26.0",
-    "requests>=2.32.0",
-    "toml>=0.10.2",
 ]
+
+[tool.uv]
+default-groups = ["tooling", "backend-test"]
 
 [tool.ruff]
 line-length = 100
