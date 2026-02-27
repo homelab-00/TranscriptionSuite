@@ -8,7 +8,7 @@
  *   - Listen for Activated / ShortcutsChanged signals
  *   - Read back actual portal-assigned triggers via ListShortcuts
  *
- * Uses `dbus-next` (CJS-only) imported via createRequire since the project is ESM.
+ * Uses `@particle/dbus-next` (CJS-only) imported via createRequire since the project is ESM.
  */
 
 import { createRequire } from 'module';
@@ -172,7 +172,7 @@ export async function initWaylandShortcuts(
   currentGetWindow = getWindow;
 
   try {
-    const dbus = require('dbus-next');
+    const dbus = require('@particle/dbus-next');
     bus = dbus.sessionBus();
 
     // Get the portal proxy
@@ -198,7 +198,7 @@ export async function initWaylandShortcuts(
 
     const responsePromise = waitForResponse(requestPath);
 
-    const dbus = require('dbus-next');
+    const dbus = require('@particle/dbus-next');
     const { Variant } = dbus;
 
     await portalProxy.CreateSession({
@@ -312,7 +312,7 @@ function buildBindings(store: ReadableStore): PortalBinding[] {
 async function bindShortcutsFromStore(store: ReadableStore): Promise<boolean> {
   if (!portalProxy || !sessionPath) return false;
 
-  const dbus = require('dbus-next');
+  const dbus = require('@particle/dbus-next');
   const { Variant } = dbus;
 
   const bindings = buildBindings(store);
@@ -428,7 +428,7 @@ function parsePortalShortcuts(shortcuts: any): PortalShortcutInfo[] {
 export async function listShortcuts(): Promise<PortalShortcutInfo[] | null> {
   if (!portalProxy || !sessionPath || !connected) return null;
 
-  const dbus = require('dbus-next');
+  const dbus = require('@particle/dbus-next');
   const { Variant } = dbus;
 
   const token = getRequestToken();

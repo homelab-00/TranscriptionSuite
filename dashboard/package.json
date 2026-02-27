@@ -31,7 +31,7 @@
   "dependencies": {
     "@headlessui/react": "^2.2.9",
     "@tanstack/react-query": "^5.90.21",
-    "dbus-next": "^0.10.2",
+    "@particle/dbus-next": "^0.11.4",
     "electron-store": "^11.0.2",
     "lucide-react": "^0.564.0",
     "react": "^19.2.4",
@@ -156,7 +156,7 @@
     "js-yaml": "4.1.1",
     "minimatch": "^10.2.1",
     "@develar/schema-utils": {
-      "ajv": "6.12.6",
+      "ajv": "6.14.0",
       "ajv-keywords": "3.5.2"
     }
   }
