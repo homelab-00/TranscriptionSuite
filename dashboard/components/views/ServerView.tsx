@@ -1122,7 +1122,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           variant="danger"
                           size="lg"
                           icon={<AlertTriangle size={16} />}
-                          className="h-12 w-full border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35 md:w-auto"
+                          className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
                           onClick={openCleanAllDialog}
                           disabled={docker.operating || startupFlowPending}
                         >

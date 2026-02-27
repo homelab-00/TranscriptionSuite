@@ -647,7 +647,6 @@ utility_allowlist:
     - md:items-center
     - md:items-end
     - md:justify-between
-    - md:w-auto
     - min-h-0
     - min-h-32
     - min-h-50
