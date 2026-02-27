@@ -50,7 +50,7 @@ def test_live_mode_start_returns_409_style_error_when_model_disabled(
     fake_ws = FakeWebSocket()
 
     # Force disabled/empty live model resolution and avoid config dependencies.
-    monkeypatch.setattr("server.api.routes.live.get_config", lambda: object())
+    monkeypatch.setattr("server.api.routes.live.get_config", object)
     monkeypatch.setattr("server.api.routes.live.resolve_live_transcriber_model", lambda _: "")
 
     async def _run_start() -> bool:

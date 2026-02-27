@@ -251,8 +251,8 @@ TranscriptionSuite uses layered security for remote access:
 TranscriptionSuite/
 ├── dashboard/                    # Electron + React dashboard application
 │   ├── electron/                 # Electron main process
-│   │   ├── main.ts               # Window creation, IPC handlers, app lifecycle
-│   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC)
+│   │   ├── main.ts               # Window/IPC lifecycle + main-process log routing (stdout/stderr -> client debug stream/file)
+│   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC), including app:clientLogLine subscription bridge
 │   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
 │   │   ├── shortcutManager.ts    # Global keyboard shortcuts (system-wide)
 │   │   ├── waylandShortcuts.ts   # Wayland portal integration for global shortcuts
@@ -272,7 +272,7 @@ TranscriptionSuite/
 │   │   │   ├── modelCapabilities.ts # Multi-backend capability detection (translation, live mode)
 │   │   │   ├── modelRegistry.ts  # Model family registry (Whisper, NeMo, VibeVoice-ASR)
 │   │   │   ├── modelSelection.ts # Main/live model selection + family/dependency gating helpers
-│   │   │   └── clientDebugLog.ts # Client-side debug logging service
+│   │   │   └── clientDebugLog.ts # Client debug logging service (persisted entries + IPC-ingested live Electron lines)
 │   │   ├── index.css             # Tailwind CSS + global styles
 │   │   └── types/
 │   │       ├── electron.d.ts     # TypeScript declarations for Electron IPC
@@ -1024,8 +1024,8 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow |
-| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration |
+| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing and `onClientLogLine` bridge wiring |
 | `dockerManager.ts` | Docker CLI wrapper for container/image management and additive optional-family install env updates |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
@@ -1042,7 +1042,7 @@ npm run dev:electron
 | `modelCapabilities.ts` | Multi-backend capability detection (translation, live mode support) |
 | `modelRegistry.ts` | Model family registry (Whisper, NeMo Parakeet/Canary, VibeVoice-ASR) |
 | `modelSelection.ts` | Shared model-selection constants, disabled sentinel mapping, and family/dependency resolution |
-| `clientDebugLog.ts` | Client-side debug logging with structured log capture |
+| `clientDebugLog.ts` | Client-side debug logging with structured capture, shared append path, persisted writes, and non-persisted IPC line ingestion |
 
 **React Hooks (`src/hooks/`):**
 
@@ -1061,7 +1061,7 @@ npm run dev:electron
 | `useAdminStatus.ts` | Admin authentication state |
 | `useTraySync.ts` | Resolve composite app state and sync to system tray icon/menu/tooltip |
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
-| `useClientDebugLogs.ts` | Client-side debug log capture and display |
+| `useClientDebugLogs.ts` | Client debug log state + renderer bridge subscription for live `app:clientLogLine` updates into the Session log terminal |
 | `DockerContext.tsx` | React context provider for Docker state sharing |
 | `ServerStatusContext.tsx` | React context provider for server connection state |
 | `AdminStatusContext.tsx` | React context provider for admin authentication state |

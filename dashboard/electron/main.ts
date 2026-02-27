@@ -49,7 +49,27 @@ const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
 const CLIENT_LOG_FILE = 'client-debug.log';
 const STOP_SERVER_ON_QUIT_TIMEOUT_MS = 30_000;
+const LEGACY_ELECTRON_DEBUG_LOG_FILE = path.resolve(__dirname, '../electron-debug.log');
+const MAIN_PROCESS_LOG_SOURCE = 'Electron';
+const MAIN_PROCESS_LOG_REMAINDER_MAX = 32_768;
 let clientLogFileSessionInitialized = false;
+let mainWindow: BrowserWindow | null = null;
+
+type ClientLogType = 'info' | 'success' | 'error' | 'warning';
+
+interface ClientLogLinePayload {
+  timestamp: string;
+  source: string;
+  message: string;
+  type: ClientLogType;
+}
+
+const MAIN_PROCESS_LOG_REMAINDERS: Record<'stdout' | 'stderr', string> = {
+  stdout: '',
+  stderr: '',
+};
+let mainProcessLogRouterInstalled = false;
+let legacyElectronDebugLogMigrated = false;
 
 function ensureClientLogFilePath(): string {
   const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
@@ -63,6 +83,169 @@ function ensureClientLogFilePath(): string {
   }
 
   return logFilePath;
+}
+
+function nowTimestamp(): string {
+  return new Date().toLocaleTimeString('en-US', { hour12: false });
+}
+
+function normalizeLogMessage(message: string): string {
+  return message.replace(/\r?\n/g, ' ').trim();
+}
+
+function classifyMainProcessLogType(message: string, stream: 'stdout' | 'stderr'): ClientLogType {
+  if (/(^|\b)(error|exception|fatal|traceback|uncaught|failed)(\b|$)/i.test(message)) {
+    return 'error';
+  }
+  if (/(^|\b)(warn|warning|deprecated)(\b|$)/i.test(message)) {
+    return 'warning';
+  }
+  if (/(^|\b)(ready|started|healthy|connected|success)(\b|$)/i.test(message)) {
+    return 'success';
+  }
+  if (stream === 'stderr') {
+    return 'warning';
+  }
+  return 'info';
+}
+
+function appendRoutedClientLogLine(message: string, type: ClientLogType): void {
+  const normalizedMessage = normalizeLogMessage(message);
+  if (!normalizedMessage) {
+    return;
+  }
+
+  const fileTimestamp = new Date().toISOString();
+  const fileLine = `[${fileTimestamp}] [${MAIN_PROCESS_LOG_SOURCE}] ${normalizedMessage}`;
+  try {
+    const logFilePath = ensureClientLogFilePath();
+    fs.appendFileSync(logFilePath, `${fileLine}\n`, 'utf8');
+  } catch {
+    // Best-effort only — do not block logging output.
+  }
+
+  const payload: ClientLogLinePayload = {
+    timestamp: nowTimestamp(),
+    source: MAIN_PROCESS_LOG_SOURCE,
+    message: normalizedMessage,
+    type,
+  };
+  try {
+    mainWindow?.webContents.send('app:clientLogLine', payload);
+  } catch {
+    // Ignore renderer delivery failures.
+  }
+}
+
+function routeMainProcessLogLine(rawLine: string, stream: 'stdout' | 'stderr'): void {
+  const normalizedLine = normalizeLogMessage(rawLine);
+  if (!normalizedLine) {
+    return;
+  }
+  appendRoutedClientLogLine(normalizedLine, classifyMainProcessLogType(normalizedLine, stream));
+}
+
+function trimMainProcessRemainder(line: string): string {
+  if (line.length <= MAIN_PROCESS_LOG_REMAINDER_MAX) {
+    return line;
+  }
+  return line.slice(-MAIN_PROCESS_LOG_REMAINDER_MAX);
+}
+
+function routeMainProcessLogChunk(chunkText: string, stream: 'stdout' | 'stderr'): void {
+  if (!chunkText) return;
+  const normalizedChunk = chunkText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const pending = MAIN_PROCESS_LOG_REMAINDERS[stream];
+  const combined = pending + normalizedChunk;
+  const lines = combined.split('\n');
+  const remainder = lines.pop() ?? '';
+  MAIN_PROCESS_LOG_REMAINDERS[stream] = trimMainProcessRemainder(remainder);
+  for (const line of lines) {
+    routeMainProcessLogLine(line, stream);
+  }
+}
+
+function flushMainProcessLogRemainders(): void {
+  for (const stream of ['stdout', 'stderr'] as const) {
+    const pending = MAIN_PROCESS_LOG_REMAINDERS[stream];
+    if (!pending) continue;
+    MAIN_PROCESS_LOG_REMAINDERS[stream] = '';
+    routeMainProcessLogLine(pending, stream);
+  }
+}
+
+function chunkToText(chunk: unknown, encoding?: BufferEncoding): string {
+  if (typeof chunk === 'string') {
+    return chunk;
+  }
+  if (Buffer.isBuffer(chunk)) {
+    return chunk.toString(encoding);
+  }
+  if (chunk instanceof Uint8Array) {
+    return Buffer.from(chunk).toString(encoding);
+  }
+  return String(chunk);
+}
+
+function installMainProcessLogRouter(): void {
+  if (mainProcessLogRouterInstalled) {
+    return;
+  }
+
+  for (const [streamName, stream] of [
+    ['stdout', process.stdout],
+    ['stderr', process.stderr],
+  ] as const) {
+    const originalWrite = stream.write.bind(stream);
+
+    const routedWrite: typeof stream.write = (
+      chunk: string | Uint8Array,
+      encoding?: BufferEncoding | ((error: Error | null | undefined) => void),
+      callback?: (error: Error | null | undefined) => void,
+    ): boolean => {
+      const resolvedEncoding = typeof encoding === 'string' ? encoding : undefined;
+      try {
+        routeMainProcessLogChunk(chunkToText(chunk, resolvedEncoding), streamName);
+      } catch {
+        // Ignore routing failures so stdout/stderr behavior is unchanged.
+      }
+      return originalWrite(chunk, encoding as any, callback as any);
+    };
+
+    stream.write = routedWrite;
+  }
+
+  mainProcessLogRouterInstalled = true;
+}
+
+function ingestLegacyElectronDebugLog(): void {
+  if (!fs.existsSync(LEGACY_ELECTRON_DEBUG_LOG_FILE)) {
+    return;
+  }
+
+  try {
+    const legacyContent = fs.readFileSync(LEGACY_ELECTRON_DEBUG_LOG_FILE, 'utf8');
+    for (const line of legacyContent.split(/\r?\n/)) {
+      routeMainProcessLogLine(line, 'stdout');
+    }
+  } catch {
+    // Best-effort only — continue startup if read fails.
+    return;
+  }
+
+  try {
+    fs.rmSync(LEGACY_ELECTRON_DEBUG_LOG_FILE, { force: true });
+  } catch {
+    // Ignore cleanup failures.
+  }
+}
+
+function migrateLegacyElectronDebugLogIfNeeded(): void {
+  if (legacyElectronDebugLogMigrated) {
+    return;
+  }
+  legacyElectronDebugLogMigrated = true;
+  ingestLegacyElectronDebugLog();
 }
 
 function getResolvedAppVersion(): string {
@@ -85,6 +268,8 @@ function getResolvedAppVersion(): string {
 
   return version;
 }
+
+installMainProcessLogRouter();
 
 // ─── Persistent Config Store ────────────────────────────────────────────────
 const store = new Store({
@@ -136,8 +321,6 @@ const store = new Store({
     'app.pasteAtCursor': false,
   },
 });
-
-let mainWindow: BrowserWindow | null = null;
 
 // ─── Tray Manager ───────────────────────────────────────────────────────────
 
@@ -320,6 +503,7 @@ ipcMain.handle('app:removeConfigAndCache', async () => {
 });
 
 ipcMain.handle('app:getClientLogPath', () => {
+  migrateLegacyElectronDebugLogIfNeeded();
   return ensureClientLogFilePath();
 });
 
@@ -550,6 +734,7 @@ function gracefulShutdown(): Promise<void> {
   isQuitting = true;
 
   shutdownPromise = (async () => {
+    flushMainProcessLogRemainders();
     shutdownLog('[Shutdown] Graceful shutdown started.');
 
     const shouldStopServer = (store.get('app.stopServerOnQuit') as boolean) ?? true;

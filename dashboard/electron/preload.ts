@@ -31,6 +31,14 @@ export interface TrayMenuState {
 
 export type RuntimeProfile = 'gpu' | 'cpu';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
+export type ClientLogType = 'info' | 'success' | 'error' | 'warning';
+
+export interface ClientLogLine {
+  timestamp: string;
+  source: string;
+  message: string;
+  type: ClientLogType;
+}
 
 export interface StartContainerOptions {
   mode: 'local' | 'remote';
@@ -63,6 +71,7 @@ export interface ElectronAPI {
     removeConfigAndCache: () => Promise<void>;
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
+    onClientLogLine: (callback: (entry: ClientLogLine) => void) => () => void;
     readLocalFile: (
       filePath: string,
     ) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
@@ -166,6 +175,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeConfigAndCache: () => ipcRenderer.invoke('app:removeConfigAndCache'),
     getClientLogPath: () => ipcRenderer.invoke('app:getClientLogPath'),
     appendClientLogLine: (line: string) => ipcRenderer.invoke('app:appendClientLogLine', line),
+    onClientLogLine: (callback: (entry: ClientLogLine) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, entry: ClientLogLine) => callback(entry);
+      ipcRenderer.on('app:clientLogLine', handler);
+      return () => ipcRenderer.removeListener('app:clientLogLine', handler);
+    },
     readLocalFile: (filePath: string) =>
       ipcRenderer.invoke('app:readLocalFile', filePath) as Promise<{
         name: string;

@@ -17,6 +17,14 @@ type TrayState =
 
 type RuntimeProfile = 'gpu' | 'cpu';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
+type ClientLogType = 'info' | 'success' | 'error' | 'warning';
+
+interface ClientLogLine {
+  timestamp: string;
+  source: string;
+  message: string;
+  type: ClientLogType;
+}
 
 interface StartContainerOptions {
   mode: 'local' | 'remote';
@@ -60,6 +68,7 @@ interface ElectronAPI {
     removeConfigAndCache: () => Promise<void>;
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
+    onClientLogLine: (callback: (entry: ClientLogLine) => void) => () => void;
     readLocalFile: (
       filePath: string,
     ) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;

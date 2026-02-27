@@ -40,10 +40,16 @@ tsc.on('close', (code) => {
     fetch(`http://localhost:${VITE_PORT}/`)
       .then(() => {
         console.log('[electron] Vite ready, launching Electron...');
+        const electronEnv = /** @type {Record<string, string | undefined>} */ ({
+          ...process.env,
+          NODE_ENV: 'development',
+        });
+        delete electronEnv.ELECTRON_LOG_FILE;
+        delete electronEnv.CHROME_LOG_FILE;
         const electron = spawn('npx', ['electron', '.'], {
           stdio: 'inherit',
           shell: true,
-          env: { ...process.env, NODE_ENV: 'development' },
+          env: electronEnv,
         });
 
         electron.on('close', () => {
