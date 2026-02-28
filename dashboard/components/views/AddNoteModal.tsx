@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { GlassCard } from '../ui/GlassCard';
 import type { UseImportQueueReturn } from '../../src/hooks/useImportQueue';
+import { apiClient } from '../../src/api/client';
 import { toast } from 'sonner';
 
 interface AddNoteModalProps {
@@ -40,6 +41,8 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   const [title, setTitle] = useState('');
   const [isDiarizationEnabled, setIsDiarizationEnabled] = useState(false);
   const [isTimestampsEnabled, setIsTimestampsEnabled] = useState(true);
+  const [parallelDiarization, setParallelDiarization] = useState<boolean>(true);
+  const [parallelDefault, setParallelDefault] = useState<boolean>(true);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,6 +124,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       queue.addFiles(selectedFiles, {
         enable_diarization: isDiarizationEnabled,
         enable_word_timestamps: enableWordTimestamps,
+        parallel_diarization: isDiarizationEnabled ? parallelDiarization : undefined,
         file_created_at: fileCreatedAt,
         title: title.trim() || undefined,
       });
@@ -142,6 +146,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     selectedFiles,
     isDiarizationEnabled,
     isTimestampsEnabled,
+    parallelDiarization,
     initialTime,
     onClose,
     queue,
@@ -167,6 +172,16 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       setSelectedFiles([]);
       setError(null);
       setIsSubmitting(false);
+
+      // Fetch server default for parallel diarization
+      apiClient
+        .getAdminStatus()
+        .then((status) => {
+          const val = status.config?.diarization?.parallel ?? true;
+          setParallelDefault(val);
+          setParallelDiarization(val);
+        })
+        .catch(() => {});
 
       rafId = requestAnimationFrame(() => {
         rafId = requestAnimationFrame(() => {
@@ -317,6 +332,23 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
                 label="Speaker Diarization"
                 description="Identify distinct speakers in the audio"
               />
+              {isDiarizationEnabled && (
+                <>
+                  <div className="h-px bg-white/5"></div>
+                  <div className="pl-1">
+                    <AppleSwitch
+                      checked={parallelDiarization}
+                      onChange={setParallelDiarization}
+                      label="Parallel Processing"
+                      description={
+                        parallelDiarization === parallelDefault
+                          ? 'Using server default'
+                          : 'Overrides the default set in Settings \u203A Server'
+                      }
+                    />
+                  </div>
+                </>
+              )}
               <div className="h-px bg-white/5"></div>
               <AppleSwitch
                 checked={isTimestampsEnabled}

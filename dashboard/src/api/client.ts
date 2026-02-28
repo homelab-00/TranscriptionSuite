@@ -377,6 +377,8 @@ export class APIClient {
       fd.append('enable_word_timestamps', String(options.enable_word_timestamps));
     if (options?.expected_speakers)
       fd.append('expected_speakers', String(options.expected_speakers));
+    if (options?.parallel_diarization !== undefined)
+      fd.append('parallel_diarization', String(options.parallel_diarization));
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
     if (options?.title) fd.append('title', options.title);
     return this.postFormData('/api/notebook/transcribe/upload', fd);
@@ -526,6 +528,13 @@ export class APIClient {
     if (level) params.set('level', level);
     const qs = params.toString();
     return this.get(`/api/admin/logs${qs ? `?${qs}` : ''}`);
+  }
+
+  /** PATCH /api/admin/diarization */
+  async updateDiarizationSettings(settings: {
+    parallel: boolean;
+  }): Promise<{ status: string; diarization: { parallel: boolean } }> {
+    return this.patch('/api/admin/diarization', settings);
   }
 
   // ─── LLM ──────────────────────────────────────────────────────────────────

@@ -207,6 +207,43 @@ class ServerConfig:
         """Return the path of the loaded configuration file."""
         return self._loaded_from
 
+    def set(self, *keys: str, value: Any) -> None:
+        """
+        Set a configuration value by nested key path and persist to disk.
+
+        Usage:
+            config.set("diarization", "parallel", value=False)
+
+        Updates the in-memory config dict, then writes the full config
+        back to the YAML file it was loaded from.
+
+        Raises:
+            RuntimeError: If no config file was loaded (nothing to write to).
+            TypeError: If any key argument is not a string.
+        """
+        if not keys:
+            raise ValueError("At least one key is required")
+
+        for i, key in enumerate(keys):
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"All configuration keys must be strings, got {type(key).__name__} "
+                    f"for keys[{i}]: {repr(key)}."
+                )
+
+        if self._loaded_from is None:
+            raise RuntimeError("Cannot persist config: no config file was loaded")
+
+        # Update in-memory config
+        section = self.config
+        for key in keys[:-1]:
+            section = section.setdefault(key, {})
+        section[keys[-1]] = value
+
+        # Write back to disk
+        with self._loaded_from.open("w", encoding="utf-8") as f:
+            yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
     def get(self, *keys: str, default: Any = None) -> Any:
         """
         Get a configuration value by dot-separated path.

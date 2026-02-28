@@ -403,6 +403,7 @@ async def upload_and_transcribe(
     enable_word_timestamps: bool = Form(True),
     file_created_at: str | None = Form(None),
     expected_speakers: int | None = Form(None),
+    parallel_diarization: bool | None = Form(None),
     title: str | None = Form(None),
 ) -> dict[str, Any]:
     """
@@ -414,6 +415,9 @@ async def upload_and_transcribe(
     - expected_speakers: Exact number of speakers (2-10). Forces diarization to
       identify exactly this many speakers. Useful for podcasts with known hosts
       where occasional clips should be attributed to the main speakers.
+    - parallel_diarization: Override the server default for parallel vs sequential
+      diarization. When False, transcription completes before diarization starts
+      (lower VRAM usage). When None, uses the server config default.
 
     Returns 409 Conflict if another transcription job is already running.
     """
@@ -540,10 +544,24 @@ async def upload_and_transcribe(
             need_word_timestamps = enable_word_timestamps or enable_diarization
 
             if enable_diarization and not diarization_outcome["performed"]:
-                # Run transcription and diarization in parallel
-                from server.core.parallel_diarize import transcribe_and_diarize
+                # Resolve parallel vs sequential diarization
+                config = request.app.state.config
+                use_parallel = (
+                    parallel_diarization
+                    if parallel_diarization is not None
+                    else config.get("diarization", "parallel", default=True)
+                )
 
-                result, diar_result = transcribe_and_diarize(
+                if use_parallel:
+                    from server.core.parallel_diarize import transcribe_and_diarize
+
+                    diarize_fn = transcribe_and_diarize
+                else:
+                    from server.core.parallel_diarize import transcribe_then_diarize
+
+                    diarize_fn = transcribe_then_diarize
+
+                result, diar_result = diarize_fn(
                     engine=engine,
                     model_manager=model_manager,
                     file_path=str(tmp_path),

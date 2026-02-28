@@ -68,6 +68,7 @@ async def transcribe_audio(
     word_timestamps: bool | None = Form(None),
     diarization: bool | None = Form(None),
     expected_speakers: int | None = Form(None),
+    parallel_diarization: bool | None = Form(None),
 ) -> dict[str, Any]:
     """
     Transcribe an uploaded audio file.
@@ -202,10 +203,24 @@ async def transcribe_audio(
         need_word_timestamps = word_timestamps or diarization
 
         if diarization:
-            # Run transcription and diarization in parallel
-            from server.core.parallel_diarize import transcribe_and_diarize
+            # Resolve parallel vs sequential diarization
+            config = request.app.state.config
+            use_parallel = (
+                parallel_diarization
+                if parallel_diarization is not None
+                else config.get("diarization", "parallel", default=True)
+            )
 
-            result, diar_result = transcribe_and_diarize(
+            if use_parallel:
+                from server.core.parallel_diarize import transcribe_and_diarize
+
+                diarize_fn = transcribe_and_diarize
+            else:
+                from server.core.parallel_diarize import transcribe_then_diarize
+
+                diarize_fn = transcribe_then_diarize
+
+            result, diar_result = diarize_fn(
                 engine=engine,
                 model_manager=model_manager,
                 file_path=tmp_path,

@@ -33,7 +33,10 @@ def _ensure_server_package_alias() -> None:
 _ensure_server_package_alias()
 
 from server.core.model_manager import TranscriptionCancelledError  # noqa: E402
-from server.core.parallel_diarize import transcribe_and_diarize  # noqa: E402
+from server.core.parallel_diarize import (  # noqa: E402
+    transcribe_and_diarize,
+    transcribe_then_diarize,
+)
 
 
 def _make_engine(result=None, side_effect=None):
@@ -235,3 +238,106 @@ def test_passes_language_and_task_to_transcribe(mock_load_audio):
     assert call_kwargs["language"] == "fr"
     assert call_kwargs["task"] == "translate"
     assert call_kwargs["translation_target_language"] == "en"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sequential: transcribe_then_diarize
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_sequential_both_succeed(mock_load_audio):
+    """Transcription completes before diarization starts (sequential)."""
+    call_order: list[str] = []
+
+    transcript_result = MagicMock(words=[], segments=[])
+    engine = MagicMock()
+
+    def fake_transcribe(*args, **kwargs):
+        call_order.append("transcribe")
+        return transcript_result
+
+    engine.transcribe_file.side_effect = fake_transcribe
+
+    mm = MagicMock()
+    diar_engine = MagicMock()
+    diar_result = MagicMock()
+    diar_result.segments = [MagicMock()]
+    diar_result.num_speakers = 2
+
+    def fake_diarize(*args, **kwargs):
+        call_order.append("diarize")
+        return diar_result
+
+    diar_engine.diarize_audio.side_effect = fake_diarize
+    mm.diarization_engine = diar_engine
+
+    result, diar = transcribe_then_diarize(
+        engine=engine,
+        model_manager=mm,
+        file_path="/tmp/test.wav",
+    )
+
+    assert result is transcript_result
+    assert diar is diar_result
+    # Verify sequential order: transcription must finish before diarization
+    assert call_order == ["transcribe", "diarize"]
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_sequential_diarization_failure_returns_transcript(mock_load_audio):
+    """When diarization fails in sequential mode, transcript is still returned."""
+    transcript_result = MagicMock(words=[], segments=[])
+    engine = _make_engine(result=transcript_result)
+    mm = _make_model_manager(diarize_error=RuntimeError("GPU OOM"))
+
+    result, diar = transcribe_then_diarize(
+        engine=engine,
+        model_manager=mm,
+        file_path="/tmp/test.wav",
+    )
+
+    assert result is transcript_result
+    assert diar is None
+
+
+def test_sequential_cancellation_propagates():
+    """TranscriptionCancelledError propagates from sequential transcription."""
+    engine = _make_engine(side_effect=TranscriptionCancelledError("cancelled"))
+    mm = _make_model_manager()
+
+    with pytest.raises(TranscriptionCancelledError):
+        transcribe_then_diarize(
+            engine=engine,
+            model_manager=mm,
+            file_path="/tmp/test.wav",
+        )
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_sequential_passes_parameters(mock_load_audio):
+    """Language, task, and expected_speakers are forwarded correctly in sequential mode."""
+    engine = _make_engine()
+    mm = _make_model_manager()
+
+    transcribe_then_diarize(
+        engine=engine,
+        model_manager=mm,
+        file_path="/tmp/test.wav",
+        language="de",
+        task="translate",
+        translation_target_language="en",
+        expected_speakers=4,
+    )
+
+    # Check transcription params
+    engine.transcribe_file.assert_called_once()
+    t_kwargs = engine.transcribe_file.call_args[1]
+    assert t_kwargs["language"] == "de"
+    assert t_kwargs["task"] == "translate"
+    assert t_kwargs["translation_target_language"] == "en"
+
+    # Check diarization params
+    mm.diarization_engine.diarize_audio.assert_called_once()
+    d_kwargs = mm.diarization_engine.diarize_audio.call_args[1]
+    assert d_kwargs["num_speakers"] == 4

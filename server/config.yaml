@@ -195,6 +195,10 @@ diarization:
     # Default: 0.5
     merge_gap_threshold: 0.5
 
+    # Run transcription and diarization concurrently (true) or sequentially (false).
+    # Parallel is faster but uses more GPU memory. Set to false on GPUs with <16GB VRAM.
+    parallel: true
+
 # ----------------------------------------------------------------------------
 # Audio Settings
 # ----------------------------------------------------------------------------

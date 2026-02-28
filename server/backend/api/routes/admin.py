@@ -68,6 +68,9 @@ async def get_admin_status(request: Request) -> dict[str, Any]:
                     "model": live_model,
                     "device": live_device,
                 },
+                "diarization": {
+                    "parallel": config.get("diarization", "parallel", default=True),
+                },
                 # Backward-compat aliases consumed by older clients.
                 "transcription": {
                     "model": main_model,
@@ -82,6 +85,32 @@ async def get_admin_status(request: Request) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to get admin status: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.patch("/diarization")
+async def update_diarization_settings(request: Request) -> dict[str, Any]:
+    """Update diarization configuration (persisted to config.yaml)."""
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+
+    config = request.app.state.config
+
+    if "parallel" in body:
+        parallel = bool(body["parallel"])
+        config.set("diarization", "parallel", value=parallel)
+        logger.info("Diarization parallel setting updated to %s", parallel)
+
+    return {
+        "status": "ok",
+        "diarization": {
+            "parallel": config.get("diarization", "parallel", default=True),
+        },
+    }
 
 
 @router.post("/models/load")

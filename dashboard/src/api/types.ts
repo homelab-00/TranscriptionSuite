@@ -97,6 +97,7 @@ export interface TranscriptionUploadOptions {
   enable_diarization?: boolean;
   enable_word_timestamps?: boolean;
   expected_speakers?: number;
+  parallel_diarization?: boolean;
   file_created_at?: string;
   title?: string;
 }
@@ -245,6 +246,10 @@ export interface AdminStatus {
     live_transcription?: {
       model: string;
       device?: string;
+      [key: string]: unknown;
+    };
+    diarization?: {
+      parallel?: boolean;
       [key: string]: unknown;
     };
     [key: string]: unknown;

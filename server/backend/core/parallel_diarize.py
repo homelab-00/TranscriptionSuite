@@ -29,6 +29,72 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def transcribe_then_diarize(
+    *,
+    engine: AudioToTextRecorder,
+    model_manager: ModelManager,
+    file_path: str,
+    language: str | None = None,
+    task: str | None = None,
+    translation_target_language: str | None = None,
+    word_timestamps: bool = True,
+    expected_speakers: int | None = None,
+    cancellation_check: Callable[[], bool] | None = None,
+) -> tuple[TranscriptionResult, DiarizationResult | None]:
+    """Run transcription and diarization **sequentially**.
+
+    Identical contract to :func:`transcribe_and_diarize` but never runs both
+    models on GPU at the same time.  Useful on GPUs with <16 GB VRAM where the
+    combined memory pressure of concurrent STT + diarization causes OOM.
+
+    Phase 1 — Transcribe (GPU).
+    Phase 2 — Load diarization model + audio, then diarize (GPU).
+
+    Returns ``(transcription_result, diarization_result | None)``.
+    *diarization_result* is ``None`` when diarization fails at any stage.
+    """
+
+    # ------------------------------------------------------------------
+    # Phase 1 — Transcribe
+    # ------------------------------------------------------------------
+    logger.info("Starting sequential transcription (transcribe-then-diarize)")
+    result = engine.transcribe_file(
+        file_path,
+        language=language,
+        task=task,
+        translation_target_language=translation_target_language,
+        word_timestamps=word_timestamps,
+        cancellation_check=cancellation_check,
+    )
+    logger.info("Transcription complete — starting diarization")
+
+    # ------------------------------------------------------------------
+    # Phase 2 — Diarize
+    # ------------------------------------------------------------------
+    try:
+        model_manager.load_diarization_model()
+        diar_engine = model_manager.diarization_engine
+
+        from server.core.audio_utils import load_audio
+
+        audio_data, audio_sample_rate = load_audio(file_path, target_sample_rate=16000)
+
+        diar_result = diar_engine.diarize_audio(
+            audio_data, audio_sample_rate, num_speakers=expected_speakers
+        )
+        logger.info(
+            "Sequential diarization complete: %s speakers found",
+            diar_result.num_speakers,
+        )
+        return result, diar_result
+    except Exception:
+        logger.warning(
+            "Diarization failed during sequential run — returning transcript without speakers",
+            exc_info=True,
+        )
+        return result, None
+
+
 def transcribe_and_diarize(
     *,
     engine: AudioToTextRecorder,

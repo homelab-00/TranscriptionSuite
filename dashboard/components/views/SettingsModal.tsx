@@ -107,6 +107,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [createdTokenPlaintext, setCreatedTokenPlaintext] = useState<string | null>(null);
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
   const [configuredMainModel, setConfiguredMainModel] = useState('');
+  const [diarizationParallel, setDiarizationParallel] = useState<boolean | null>(null);
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -156,6 +157,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   useEffect(() => {
     knownServerAdminTokenRef.current = clientSettings.authToken.trim();
   }, [clientSettings.authToken]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'Server') return;
+    let cancelled = false;
+    apiClient
+      .getAdminStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setDiarizationParallel(status.config?.diarization?.parallel ?? true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, activeTab]);
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'Server') return;
@@ -1225,6 +1242,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </Button>
           </div>
         </div>
+
+        {diarizationParallel !== null && (
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-300">Diarization</h3>
+            <AppleSwitch
+              checked={diarizationParallel}
+              onChange={async (v) => {
+                setDiarizationParallel(v);
+                try {
+                  await apiClient.updateDiarizationSettings({ parallel: v });
+                  toast.success(`Diarization set to ${v ? 'parallel' : 'sequential'}`);
+                } catch {
+                  setDiarizationParallel(!v);
+                  toast.error('Failed to update diarization setting');
+                }
+              }}
+              label="Parallel Processing"
+              description="Run transcription and diarization concurrently. Disable on GPUs with less than 16 GB VRAM to avoid out-of-memory errors."
+            />
+          </div>
+        )}
       </div>
     );
   };
