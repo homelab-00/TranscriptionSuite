@@ -1106,31 +1106,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </div>
                     </div>
 
-                    {/* Danger zone */}
-                    <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
-                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                        <div className="space-y-1">
-                          <p className="text-xs font-semibold tracking-wider text-red-300 uppercase">
-                            Danger Zone
-                          </p>
-                          <p className="text-sm text-red-200/90">
-                            Stop and remove container, remove all server images, delete runtime, and
-                            remove any unchecked persistent resources.
-                          </p>
-                        </div>
-                        <Button
-                          variant="danger"
-                          size="lg"
-                          icon={<AlertTriangle size={16} />}
-                          className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
-                          onClick={openCleanAllDialog}
-                          disabled={docker.operating || startupFlowPending}
-                        >
-                          Clean All
-                        </Button>
-                      </div>
-                    </div>
-
                     {/* Auth Token (read-only) */}
                     {authToken && (
                       <div className="border-t border-white/5 pt-4">
@@ -1464,6 +1439,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         ))}
                       </div>
                     )}
+                  </div>
+                </GlassCard>
+              </div>
+
+              {/* 6. Clean Up */}
+              <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
+                <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+                  <AlertTriangle size={14} />
+                </div>
+                <GlassCard title="6. Clean Up">
+                  <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold tracking-wider text-red-300 uppercase">
+                          Danger Zone
+                        </p>
+                        <p className="text-sm text-red-200/90">
+                          Stop and remove container, remove all server images, delete runtime, and
+                          remove any unchecked persistent resources.
+                        </p>
+                      </div>
+                      <Button
+                        variant="danger"
+                        size="lg"
+                        icon={<AlertTriangle size={16} />}
+                        className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
+                        onClick={openCleanAllDialog}
+                        disabled={docker.operating || startupFlowPending}
+                      >
+                        Clean All
+                      </Button>
+                    </div>
                   </div>
                 </GlassCard>
               </div>

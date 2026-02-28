@@ -481,15 +481,24 @@ ipcMain.handle('app:getConfigDir', () => {
 
 ipcMain.handle('app:removeConfigAndCache', async () => {
   const userDataDir = app.getPath('userData');
+  // Linux default: $XDG_CACHE_HOME or ~/.cache
   let cacheBaseDir = process.env.XDG_CACHE_HOME || path.join(app.getPath('home'), '.cache');
   try {
+    // Electron 20+ exposes app.getPath('cache') which returns the OS-appropriate base
+    // cache dir without the app name (Linux: ~/.cache, macOS: ~/Library/Caches,
+    // Windows: %LOCALAPPDATA%).
     cacheBaseDir = (app as unknown as { getPath: (name: string) => string }).getPath('cache');
   } catch {
+    // Fallback for older Electron builds.
     if (process.platform === 'win32') {
-      cacheBaseDir = path.join(app.getPath('appData'), 'TranscriptionSuite', 'Cache');
+      // On Windows, Chromium cache lives inside userData (already deleted above),
+      // so there is no separate external cache directory to remove. Point at the
+      // parent of userDataDir so the subsequent rm is a harmless no-op.
+      cacheBaseDir = path.dirname(userDataDir);
     } else if (process.platform === 'darwin') {
       cacheBaseDir = path.join(app.getPath('home'), 'Library', 'Caches');
     }
+    // Linux: the XDG_CACHE_HOME default set above is already correct.
   }
   const externalCacheDir = path.join(cacheBaseDir, 'TranscriptionSuite');
 
@@ -498,7 +507,9 @@ ipcMain.handle('app:removeConfigAndCache', async () => {
     fs.promises.rm(externalCacheDir, { recursive: true, force: true }),
   ]);
 
-  await fs.promises.mkdir(userDataDir, { recursive: true });
+  // Do NOT recreate userDataDir here — ensureClientLogFilePath() already calls
+  // mkdirSync lazily, so explicitly recreating the directory would cause the config
+  // folder to persist as an empty directory after "Clean All".
   clientLogFileSessionInitialized = false;
 });
 
