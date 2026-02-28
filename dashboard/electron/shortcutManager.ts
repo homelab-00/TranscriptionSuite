@@ -65,8 +65,8 @@ export async function registerShortcuts(
   }
 
   // Standard Electron globalShortcut path (X11, macOS, Windows, or portal fallback)
-  const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+R';
-  const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+S';
+  const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+Z';
+  const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+X';
 
   const bindings: Array<{ accelerator: string; action: string }> = [
     { accelerator: startAccelerator, action: 'start-recording' },

@@ -38,7 +38,7 @@ export interface PortalShortcutInfo {
 
 /**
  * Convert Electron accelerator format to XDG portal trigger format.
- * Electron: "Alt+Ctrl+R"  →  XDG: "CTRL+ALT+r"
+ * Electron: "Alt+Ctrl+Z"  →  XDG: "CTRL+ALT+z"
  *
  * XDG portal uses uppercase modifier names and lowercase key names,
  * with a canonical modifier order: SUPER, CTRL, ALT, SHIFT.
@@ -87,7 +87,7 @@ export function electronToXdg(accelerator: string): string {
 
 /**
  * Convert XDG portal trigger format to Electron accelerator format.
- * XDG: "CTRL+ALT+r"  →  Electron: "Ctrl+Alt+R"
+ * XDG: "CTRL+ALT+z"  →  Electron: "Ctrl+Alt+Z"
  */
 export function xdgToElectron(trigger: string): string {
   if (!trigger) return '';
@@ -287,8 +287,8 @@ function waitForResponse(
  * Build the shortcuts array for BindShortcuts from store config.
  */
 function buildBindings(store: ReadableStore): PortalBinding[] {
-  const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+R';
-  const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+S';
+  const startAccelerator = (store.get('shortcuts.startRecording') as string) || 'Alt+Ctrl+Z';
+  const stopAccelerator = (store.get('shortcuts.stopTranscribe') as string) || 'Alt+Ctrl+X';
 
   return [
     {

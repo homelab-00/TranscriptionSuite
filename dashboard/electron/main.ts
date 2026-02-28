@@ -316,8 +316,8 @@ const store = new Store({
     'server.liveCustomModel': '',
     'server.diarizationModelSelection': 'pyannote/speaker-diarization-community-1',
     'server.diarizationCustomModel': '',
-    'shortcuts.startRecording': 'Alt+Ctrl+R',
-    'shortcuts.stopTranscribe': 'Alt+Ctrl+S',
+    'shortcuts.startRecording': 'Alt+Ctrl+Z',
+    'shortcuts.stopTranscribe': 'Alt+Ctrl+X',
     'app.pasteAtCursor': false,
   },
 });

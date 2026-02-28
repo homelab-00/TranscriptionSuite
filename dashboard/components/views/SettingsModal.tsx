@@ -39,8 +39,8 @@ interface SettingsModalProps {
 
 const tabs = ['App', 'Client', 'Server', 'Notebook'];
 const DEFAULT_SHORTCUTS = {
-  startRecording: 'Alt+Ctrl+R',
-  stopTranscribe: 'Alt+Ctrl+S',
+  startRecording: 'Alt+Ctrl+Z',
+  stopTranscribe: 'Alt+Ctrl+X',
 } as const;
 const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
