@@ -197,7 +197,8 @@ diarization:
 
     # Run transcription and diarization concurrently (true) or sequentially (false).
     # Parallel is faster but uses more GPU memory. Set to false on GPUs with <16GB VRAM.
-    parallel: true
+    # Default: false (safer for most hardware)
+    parallel: false
 
 # ----------------------------------------------------------------------------
 # Audio Settings

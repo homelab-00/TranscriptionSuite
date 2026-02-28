@@ -41,8 +41,8 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   const [title, setTitle] = useState('');
   const [isDiarizationEnabled, setIsDiarizationEnabled] = useState(false);
   const [isTimestampsEnabled, setIsTimestampsEnabled] = useState(true);
-  const [parallelDiarization, setParallelDiarization] = useState<boolean>(true);
-  const [parallelDefault, setParallelDefault] = useState<boolean>(true);
+  const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
+  const [parallelDefault, setParallelDefault] = useState<boolean>(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -177,7 +177,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       apiClient
         .getAdminStatus()
         .then((status) => {
-          const val = status.config?.diarization?.parallel ?? true;
+          const val = status.config?.diarization?.parallel ?? false;
           setParallelDefault(val);
           setParallelDiarization(val);
         })
@@ -342,8 +342,8 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
                       label="Parallel Processing"
                       description={
                         parallelDiarization === parallelDefault
-                          ? 'Using server default'
-                          : 'Overrides the default set in Settings \u203A Server'
+                          ? 'Using server default (faster but requires more GPU memory)'
+                          : 'Override: Parallel mode places higher demand on GPU/CPU resources'
                       }
                     />
                   </div>

@@ -165,7 +165,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       .getAdminStatus()
       .then((status) => {
         if (!cancelled) {
-          setDiarizationParallel(status.config?.diarization?.parallel ?? true);
+          setDiarizationParallel(status.config?.diarization?.parallel ?? false);
         }
       })
       .catch(() => {});
@@ -1259,7 +1259,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 }
               }}
               label="Parallel Processing"
-              description="Run transcription and diarization concurrently. Disable on GPUs with less than 16 GB VRAM to avoid out-of-memory errors."
+              description="Run transcription and diarization concurrently (faster but requires more GPU memory). Disable on GPUs with less than 16 GB VRAM to avoid out-of-memory errors."
             />
           </div>
         )}

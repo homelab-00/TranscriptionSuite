@@ -1285,6 +1285,8 @@ const ImportTab = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diarization, setDiarization] = useState(true);
   const [wordTimestamps, setWordTimestamps] = useState(true);
+  const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
+  const [parallelDefault, setParallelDefault] = useState<boolean>(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
@@ -1292,6 +1294,17 @@ const ImportTab = ({
       setWordTimestamps(true);
     }
   }, [supportsExplicitWordTimestampToggle]);
+
+  useEffect(() => {
+    apiClient
+      .getAdminStatus()
+      .then((status) => {
+        const val = status.config?.diarization?.parallel ?? false;
+        setParallelDefault(val);
+        setParallelDiarization(val);
+      })
+      .catch(() => {});
+  }, []);
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {
@@ -1318,9 +1331,10 @@ const ImportTab = ({
       queue.addFiles(Array.from(files), {
         enable_diarization: diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
+        parallel_diarization: diarization ? parallelDiarization : undefined,
       });
     },
-    [diarization, queue, supportsExplicitWordTimestampToggle, wordTimestamps],
+    [diarization, parallelDiarization, queue, supportsExplicitWordTimestampToggle, wordTimestamps],
   );
 
   const handleDrop = useCallback(
@@ -1472,6 +1486,23 @@ const ImportTab = ({
             label="Speaker Diarization"
             description="Identify distinct speakers in the audio"
           />
+          {diarization && (
+            <>
+              <div className="h-px bg-white/5"></div>
+              <div className="pl-1">
+                <AppleSwitch
+                  checked={parallelDiarization}
+                  onChange={setParallelDiarization}
+                  label="Parallel Processing"
+                  description={
+                    parallelDiarization === parallelDefault
+                      ? 'Using server default (faster but requires more GPU memory)'
+                      : 'Override: Parallel mode places higher demand on GPU/CPU resources'
+                  }
+                />
+              </div>
+            </>
+          )}
           <div className="h-px bg-white/5"></div>
           <AppleSwitch
             checked={wordTimestamps}
