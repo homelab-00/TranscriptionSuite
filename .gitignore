@@ -16,6 +16,14 @@ dashboard/dist-ssr/
 dashboard/dist-electron/
 dashboard/release/
 
+## Dashboard UI / Node
+dashboard/logs/
+dashboard/node_modules/
+dashboard/*.suo
+dashboard/*.ntvs*
+dashboard/*.njsproj
+dashboard/*.sln
+dashboard/*.sw?
 
 
 # MISC
@@ -42,12 +50,4 @@ __pycache__/
 .gitnexus
 CLAUDE.md
 AGENTS.md
-
-## Dashboard UI / Node
-dashboard/logs/
-dashboard/node_modules/
-dashboard/*.suo
-dashboard/*.ntvs*
-dashboard/*.njsproj
-dashboard/*.sln
-dashboard/*.sw?
+.mcp.json
