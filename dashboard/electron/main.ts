@@ -479,6 +479,61 @@ ipcMain.handle('app:getConfigDir', () => {
   return app.getPath('userData');
 });
 
+ipcMain.handle('app:ensureServerConfig', async () => {
+  const configDir = app.getPath('userData');
+  const configPath = path.join(configDir, 'config.yaml');
+
+  if (fs.existsSync(configPath)) {
+    return configPath;
+  }
+
+  // Try to copy the default config from the server directory.
+  const candidates = [
+    // Dev mode: repo server/config.yaml
+    path.resolve(__dirname, '../../server/config.yaml'),
+    // Packaged: bundled extra resource
+    path.join(process.resourcesPath ?? '', 'config.yaml'),
+  ];
+
+  for (const src of candidates) {
+    try {
+      if (fs.existsSync(src)) {
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.copyFileSync(src, configPath);
+        return configPath;
+      }
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  // No template found — create a minimal stub so the file exists.
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    [
+      '# ============================================================================',
+      '# TranscriptionSuite — User Configuration',
+      '# ============================================================================',
+      '# This file overrides the container defaults.',
+      '# See the full reference at: server/config.yaml in the project repository.',
+      '#',
+      '# Uncomment and edit any section you want to customise.',
+      '',
+      '# main_transcriber:',
+      '#   model: "nvidia/parakeet-tdt-0.6b-v3"',
+      '#   compute_type: "default"',
+      '#   device: "cuda"',
+      '',
+      '# diarization:',
+      '#   parallel: false',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+  return configPath;
+});
+
 ipcMain.handle('app:removeConfigAndCache', async () => {
   const userDataDir = app.getPath('userData');
   // Linux default: $XDG_CACHE_HOME or ~/.cache

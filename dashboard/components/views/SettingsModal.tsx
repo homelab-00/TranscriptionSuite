@@ -1160,8 +1160,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const handleOpenConfigInEditor = async () => {
       const api = (window as any).electronAPI;
       if (api?.app?.openPath) {
-        const configPath = `${configDir}/config.yaml`;
-        const error = await api.app.openPath(configPath);
+        // Ensure the config file exists (creates from template if missing).
+        const resolvedPath =
+          (await api.app.ensureServerConfig?.().catch(() => null)) ?? `${configDir}/config.yaml`;
+        const error = await api.app.openPath(resolvedPath);
         if (error) {
           // Fallback: try opening the directory
           await api.app.openPath(configDir).catch(() => {});

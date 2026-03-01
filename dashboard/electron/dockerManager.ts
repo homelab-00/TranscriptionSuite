@@ -624,6 +624,9 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   upsertComposeEnvValues(envUpdates);
 
+  // Persist logs from the previous container run before recreating it.
+  await persistDockerLogs();
+
   const fileArgs = composeFileArgs(runtimeProfile);
 
   return exec('docker', ['compose', ...fileArgs, 'up', '-d'], {
@@ -932,6 +935,68 @@ async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependen
   }
 }
 
+// ─── Server Log Persistence ─────────────────────────────────────────────────
+
+const SESSION_MARKER = '══════ SERVER START';
+const MAX_LOG_SESSIONS = 5;
+
+/**
+ * Resolve the path to the persistent server log file inside the user config dir.
+ */
+function getServerLogPath(): string {
+  const logDir = path.join(app.getPath('userData'), 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  return path.join(logDir, 'server.log');
+}
+
+/**
+ * Save current docker container logs to the persistent server log file.
+ *
+ * Each server start is delimited by a session marker line.  Only the last
+ * {@link MAX_LOG_SESSIONS} sessions are kept — older sessions are trimmed.
+ *
+ * Called at the beginning of {@link startContainer} so that logs from the
+ * *previous* run are captured before the container is recreated.
+ */
+async function persistDockerLogs(): Promise<void> {
+  try {
+    const logPath = getServerLogPath();
+
+    // Capture all logs from the (possibly still-running) container.
+    let currentLogs = '';
+    try {
+      currentLogs = await exec('docker', ['logs', '--timestamps', CONTAINER_NAME]);
+    } catch {
+      // Container may not exist yet on first start — nothing to persist.
+    }
+
+    // Read existing persisted log (if any).
+    let existing = '';
+    try {
+      existing = fs.readFileSync(logPath, 'utf-8');
+    } catch {
+      // File doesn't exist yet — fine.
+    }
+
+    // Append a session marker + new logs.
+    const marker = `${SESSION_MARKER} ${new Date().toISOString()} ══════\n`;
+    const combined = existing + marker + (currentLogs ? currentLogs.trimEnd() + '\n' : '');
+
+    // Trim to keep only the last MAX_LOG_SESSIONS sessions.
+    const parts = combined.split(SESSION_MARKER);
+    // parts[0] is anything before the very first marker (usually empty).
+    // Each subsequent element is one session (marker suffix + logs).
+    const trimmed =
+      parts.length > MAX_LOG_SESSIONS
+        ? SESSION_MARKER + parts.slice(-MAX_LOG_SESSIONS).join(SESSION_MARKER)
+        : combined;
+
+    fs.writeFileSync(logPath, trimmed, 'utf-8');
+  } catch (err) {
+    console.warn('[DockerManager] Failed to persist docker logs:', err);
+  }
+}
+
 // ─── Log Streaming ──────────────────────────────────────────────────────────
 
 let logProcess: ChildProcess | null = null;
@@ -1168,7 +1233,7 @@ async function downloadModelToCache(modelId: string): Promise<void> {
   // Pass the model ID as an argv value instead of interpolating it into code.
   const pyCmd =
     "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
-  await execFileAsync('docker', ['exec', CONTAINER_NAME, 'python', '-c', pyCmd, trimmedModelId], {
+  await execFileAsync('docker', ['exec', CONTAINER_NAME, 'python3', '-c', pyCmd, trimmedModelId], {
     maxBuffer: 10 * 1024 * 1024,
     timeout: 600_000, // 10 minutes for large models
   });
