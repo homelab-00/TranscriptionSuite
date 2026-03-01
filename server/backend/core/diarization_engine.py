@@ -187,6 +187,14 @@ class DiarizationEngine:
                 else:
                     self._pipeline = self._pipeline.to(torch.device("cpu"))
 
+            # Apply embedding batch size from config
+            cfg = get_config()
+            diar_cfg = cfg.config.get("diarization", {})
+            batch_size = diar_cfg.get("embedding_batch_size", 32)
+            if hasattr(self._pipeline, "embedding_batch_size"):
+                self._pipeline.embedding_batch_size = batch_size
+                logger.info("Set embedding_batch_size=%s on diarization pipeline", batch_size)
+
             self._loaded = True
             logger.info(f"Diarization pipeline loaded successfully: {self.model}")
 

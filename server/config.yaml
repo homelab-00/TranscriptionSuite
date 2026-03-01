@@ -82,6 +82,22 @@ main_transcriber:
     no_log_file: true
 
 # ----------------------------------------------------------------------------
+# NeMo Parakeet Backend Settings
+# ----------------------------------------------------------------------------
+parakeet:
+    # Maximum chunk duration (seconds) for long audio. Audio longer than this
+    # is split into sequential chunks. Default: 300 (5 minutes).
+    max_chunk_duration_s: 300
+
+    # Enable local attention for long sequences. Caps attention memory at O(N)
+    # instead of O(N^2). Required for audio >5 min on GPUs with <16GB VRAM.
+    use_local_attention: true
+    local_attention_window: [128, 128]
+
+    # Chunk the subsampling convolution to reduce peak memory.
+    subsampling_conv_chunking: true
+
+# ----------------------------------------------------------------------------
 # VibeVoice-ASR (Experimental, In-Process Backend)
 # ----------------------------------------------------------------------------
 vibevoice_asr:
@@ -104,8 +120,8 @@ vibevoice_asr:
     # Set 0 (or null) only if you intentionally want to omit max_new_tokens.
     max_new_tokens: 32768
     # Maximum chunk duration (seconds) for long audio. Audio longer than this is
-    # split into chunks to avoid CUDA OOM. Default: 600 (10 minutes).
-    max_chunk_duration_s: 600
+    # split into chunks to avoid CUDA OOM. Default: 60 (1 minute).
+    max_chunk_duration_s: 60
 
 # ----------------------------------------------------------------------------
 # Live Mode (RealtimeSTT) Configuration
@@ -197,6 +213,11 @@ diarization:
     # Helps create cleaner segment boundaries.
     # Default: 0.5
     merge_gap_threshold: 0.5
+
+    # Batch size for speaker embeddings extraction. Lower values use less GPU
+    # memory. Set to 1 for minimum memory on GPUs with <16GB VRAM.
+    # Default: 32
+    embedding_batch_size: 32
 
     # Run transcription and diarization concurrently (true) or sequentially (false).
     # Parallel is faster but uses more GPU memory. Set to false on GPUs with <16GB VRAM.

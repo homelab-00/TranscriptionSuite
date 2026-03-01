@@ -84,7 +84,7 @@ services:
       - INSTALL_VIBEVOICE_ASR=${INSTALL_VIBEVOICE_ASR:-false}
       - VIBEVOICE_ASR_PACKAGE_SPEC=${VIBEVOICE_ASR_PACKAGE_SPEC:-git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e}
       # PyTorch CUDA memory allocator — reduce fragmentation on long transcriptions
-      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8
       # LM Studio URL — overridden in platform overlay (host.docker.internal for VM platforms)
       - LM_STUDIO_URL=${LM_STUDIO_URL:-http://127.0.0.1:1234}
       # TLS settings for remote access (optional)

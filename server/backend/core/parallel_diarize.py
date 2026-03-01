@@ -66,7 +66,8 @@ def transcribe_then_diarize(
         word_timestamps=word_timestamps,
         cancellation_check=cancellation_check,
     )
-    logger.info("Transcription complete — starting diarization")
+    logger.info("Transcription complete — unloading STT model before diarization")
+    model_manager.unload_transcription_model()  # Frees ~1-10GB VRAM depending on backend
 
     # ------------------------------------------------------------------
     # Phase 2 — Diarize

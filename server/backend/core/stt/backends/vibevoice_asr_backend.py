@@ -28,7 +28,7 @@ from server.core.stt.backends.base import (
 
 INPUT_SAMPLE_RATE = 16000
 DEFAULT_TARGET_SAMPLE_RATE = 24000
-DEFAULT_MAX_CHUNK_DURATION_S = 600  # 10 minutes
+DEFAULT_MAX_CHUNK_DURATION_S = 60  # 1 minute
 DEFAULT_LANGUAGE_MODEL = "Qwen/Qwen2.5-7B"
 DEFAULT_MAX_NEW_TOKENS = 32768
 DEFAULT_NUM_BEAMS = 1
@@ -543,7 +543,7 @@ class VibeVoiceASRBackend(STTBackend):
             generate_kwargs.get("temperature"),
             generate_kwargs.get("max_new_tokens", "<omitted>"),
         )
-        with torch.no_grad():
+        with torch.inference_mode():
             output = self._model.generate(**inputs, **generate_kwargs)
         sequences = getattr(output, "sequences", output)
 
@@ -560,6 +560,10 @@ class VibeVoiceASRBackend(STTBackend):
             prefix_len = int(input_ids.shape[1])
             if prefix_len < generated_ids.shape[0]:
                 generated_ids = generated_ids[prefix_len:]
+
+        # Free intermediate tensors to reclaim activation memory before next chunk
+        del output, sequences, inputs
+        clear_gpu_cache()
 
         decoded_text = _decode_generated_text(self._processor, generated_ids)
         normalized, parse_mode, parse_stats = _parse_vibevoice_structured_output_detailed(

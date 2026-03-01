@@ -15,6 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from server.config import get_config
 from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
     BackendSegment,
@@ -77,6 +78,7 @@ class ParakeetBackend(STTBackend):
         self._model_name: str | None = None
         self._warmup_complete: bool = False
         self._warmup_thread: threading.Thread | None = None
+        self._max_chunk_duration_s: int = MAX_CHUNK_DURATION
 
     @staticmethod
     def _find_cached_nemo_file(model_name: str) -> str | None:
@@ -308,9 +310,31 @@ class ParakeetBackend(STTBackend):
         model.eval()
         self._disable_cuda_graphs(model)
 
+        # Apply NeMo memory optimizations from config
+        cfg = get_config()
+        parakeet_cfg = cfg.get("parakeet", default={}) or {}
+
+        if parakeet_cfg.get("use_local_attention", True):
+            window = parakeet_cfg.get("local_attention_window", [128, 128])
+            model.change_attention_model("rel_pos_local_attn", window)
+            logger.info("Enabled local attention with window %s", window)
+
+        if parakeet_cfg.get("subsampling_conv_chunking", True):
+            model.change_subsampling_conv_chunking_factor(1)
+            logger.info("Enabled subsampling conv chunking (factor=1)")
+
+        # Configurable chunk duration (default 300s = 5 min)
+        try:
+            self._max_chunk_duration_s = max(
+                60,
+                int(parakeet_cfg.get("max_chunk_duration_s", 300) or 300),
+            )
+        except (TypeError, ValueError):
+            self._max_chunk_duration_s = 300
+
         self._model = model
         self._model_name = model_name
-        logger.info("Parakeet model loaded")
+        logger.info("Parakeet model loaded (max_chunk_duration_s=%d)", self._max_chunk_duration_s)
 
     def unload(self) -> None:
         self._model = None
@@ -411,7 +435,7 @@ class ParakeetBackend(STTBackend):
         total_samples = len(audio)
         total_duration = total_samples / SAMPLE_RATE
 
-        if total_duration > MAX_CHUNK_DURATION:
+        if total_duration > self._max_chunk_duration_s:
             return self._transcribe_long(audio, word_timestamps=word_timestamps)
 
         return self._transcribe_short(audio, word_timestamps=word_timestamps, language=language)
@@ -483,7 +507,7 @@ class ParakeetBackend(STTBackend):
         if transcribe_fn is None:
             transcribe_fn = self._transcribe_array
 
-        chunk_samples = int(MAX_CHUNK_DURATION * SAMPLE_RATE)
+        chunk_samples = int(self._max_chunk_duration_s * SAMPLE_RATE)
         total_samples = len(audio)
         num_chunks = math.ceil(total_samples / chunk_samples)
 

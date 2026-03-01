@@ -959,9 +959,9 @@ server/backend/
 │           ├── factory.py        # Backend detection + instantiation
 │           ├── whisper_backend.py        # Faster-whisper backend (shared GPU cache cleanup on unload)
 │           ├── whisperx_backend.py       # WhisperX (alignment + diarization, shared GPU cache cleanup)
-│           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR (10-min chunking + GPU cache cleanup)
+│           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR (local attention + configurable chunking + GPU cache cleanup)
 │           ├── canary_backend.py         # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
-│           └── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 10-min chunking + torch.no_grad)
+│           └── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 1-min chunking + inference_mode + GPU cache cleanup)
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
 └── config.py                     # Configuration management
@@ -1287,9 +1287,9 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 
 **Key sections:**
 - `main_transcriber` - Primary STT model (backend auto-detected from model name), device, batch settings
+- `parakeet` - NeMo Parakeet-specific settings (local attention, chunking duration, subsampling conv chunking)
 - `live_transcriber` - Live Mode continuous transcription (Whisper-only in v1; defaults to `Systran/faster-whisper-medium`)
-- `diarization` - PyAnnote model and speaker detection
-- `vibevoice_asr` - VibeVoice-ASR backend settings (sample rate, generation params, chunking duration)
+- `diarization` - PyAnnote model and speaker detection (embedding batch size configurable for VRAM)
 - `remote_server` - Host, port, TLS settings
 - `storage` - Database path, audio storage
 - `local_llm` - LM Studio integration (supports v1 REST API for LM Studio 0.4.0+)

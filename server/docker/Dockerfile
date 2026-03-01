@@ -84,7 +84,7 @@ ENV SERVER_PORT="8000"
 ENV LOG_LEVEL="INFO"
 # Prioritize PyTorch bundled libraries from runtime venv.
 ENV LD_LIBRARY_PATH="/runtime/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib:/runtime/.venv/lib/python3.13/site-packages/torch/lib:$LD_LIBRARY_PATH"
-ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8"
 
 # Expose port
 EXPOSE 8000
