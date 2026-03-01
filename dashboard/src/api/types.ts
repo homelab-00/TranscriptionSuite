@@ -153,6 +153,34 @@ export interface UploadResponse {
   };
 }
 
+/** Returned by POST /api/notebook/transcribe/upload (202 Accepted) */
+export interface TranscriptionAccepted {
+  job_id: string;
+}
+
+/** Result stored in job_tracker after background transcription completes */
+export interface JobTrackerResult {
+  job_id: string;
+  recording_id?: number;
+  message?: string;
+  diarization?: {
+    requested: boolean;
+    performed: boolean;
+    reason: string | null;
+  };
+  error?: string;
+}
+
+/** Typed status from job_tracker exposed via /api/admin/status */
+export interface JobTrackerStatus {
+  is_busy: boolean;
+  active_user: string | null;
+  active_job_id: string | null;
+  cancellation_requested: boolean;
+  progress: { current: number; total: number; message: string } | null;
+  result: JobTrackerResult | null;
+}
+
 export interface CalendarResponse {
   year: number;
   month: number;

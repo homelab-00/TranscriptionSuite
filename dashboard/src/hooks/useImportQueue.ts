@@ -7,7 +7,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { apiClient } from '../api/client';
-import type { TranscriptionUploadOptions, UploadResponse } from '../api/types';
+import type { TranscriptionUploadOptions, UploadResponse, JobTrackerResult } from '../api/types';
 
 export type ImportJobStatus = 'pending' | 'processing' | 'success' | 'error';
 
@@ -76,6 +76,52 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
     return next;
   }, []);
 
+  /**
+   * Poll /api/admin/status until job_tracker.result appears for the given job_id.
+   * Polls every 5 seconds. Gives up after 24 hours to prevent infinite loops.
+   */
+  const pollForResult = useCallback(async (serverJobId: string): Promise<JobTrackerResult> => {
+    const POLL_INTERVAL_MS = 5_000;
+    const MAX_POLLS = (24 * 60 * 60 * 1000) / POLL_INTERVAL_MS; // 24 hours
+
+    for (let i = 0; i < MAX_POLLS; i++) {
+      if (abortRef.current) {
+        throw new Error('Import queue aborted');
+      }
+
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+      try {
+        const status = await apiClient.getAdminStatus();
+        const jobTracker = (status?.models as any)?.job_tracker;
+
+        // If the job is still running, continue polling
+        if (jobTracker?.is_busy && jobTracker?.active_job_id === serverJobId) {
+          continue;
+        }
+
+        // Check for a result
+        const result = jobTracker?.result as JobTrackerResult | undefined;
+        if (result && result.job_id === serverJobId) {
+          return result;
+        }
+
+        // Job is not busy AND no result for our job_id — server may have restarted
+        if (!jobTracker?.is_busy && (!result || result.job_id !== serverJobId)) {
+          throw new Error('Transcription job lost — server may have restarted');
+        }
+      } catch (err) {
+        // If it's our own thrown error, re-throw
+        if (err instanceof Error && err.message.includes('job lost')) throw err;
+        if (err instanceof Error && err.message.includes('aborted')) throw err;
+        // Network errors during polling are transient — keep trying
+        console.warn('Poll error (will retry):', err);
+      }
+    }
+
+    throw new Error('Transcription timed out after 24 hours');
+  }, []);
+
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
     processingRef.current = true;
@@ -98,11 +144,30 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
         );
 
         try {
-          const result = await apiClient.uploadAndTranscribe(file, jobOptions);
+          // Submit file — returns 202 immediately with server job_id
+          const { job_id: serverJobId } = await apiClient.uploadAndTranscribe(file, jobOptions);
+
+          // Poll /api/admin/status until job_tracker.result appears for this job
+          const result = await pollForResult(serverJobId);
+
+          // Check if the background job failed
+          if (result.error) {
+            throw new Error(result.error);
+          }
+
+          // Map job tracker result to UploadResponse shape
+          const uploadResult: UploadResponse = {
+            recording_id: result.recording_id!,
+            message: result.message ?? 'Transcription complete',
+            diarization: result.diarization ?? { requested: false, performed: false, reason: null },
+          };
+
           updateJobs((prev) =>
-            prev.map((j) => (j.id === jobId ? { ...j, status: 'success' as const, result } : j)),
+            prev.map((j) =>
+              j.id === jobId ? { ...j, status: 'success' as const, result: uploadResult } : j,
+            ),
           );
-          callbacksRef.current?.onJobSuccess?.(nextJob, result);
+          callbacksRef.current?.onJobSuccess?.(nextJob, uploadResult);
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : 'Upload failed';
           updateJobs((prev) =>

@@ -65,6 +65,7 @@ class TranscriptionJobTracker:
         self._active_user: str | None = None
         self._cancelled: bool = False
         self._progress: dict[str, Any] | None = None
+        self._result: dict[str, Any] | None = None
         self._lock = threading.Lock()
 
     def try_start_job(self, user: str) -> tuple[bool, str | None, str | None]:
@@ -87,15 +88,19 @@ class TranscriptionJobTracker:
             self._active_job_id = job_id
             self._active_user = user
             self._cancelled = False
+            self._result = None  # Clear previous job result
             logger.info(f"Started transcription job {job_id[:8]} for user '{user}'")
             return (True, job_id, None)
 
-    def end_job(self, job_id: str) -> bool:
+    def end_job(self, job_id: str, result: dict[str, Any] | None = None) -> bool:
         """
         Mark a transcription job as complete.
 
         Args:
             job_id: The job ID returned from try_start_job
+            result: Optional result dict to store for client polling.
+                    On success: {"job_id": ..., "recording_id": ..., ...}
+                    On failure: {"job_id": ..., "error": "..."}
 
         Returns:
             True if the job was ended, False if job_id didn't match
@@ -107,6 +112,7 @@ class TranscriptionJobTracker:
                 self._active_user = None
                 self._cancelled = False
                 self._progress = None
+                self._result = result
                 return True
             return False
 
@@ -173,6 +179,7 @@ class TranscriptionJobTracker:
                 "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
                 "cancellation_requested": self._cancelled,
                 "progress": self._progress,
+                "result": self._result,
             }
 
 

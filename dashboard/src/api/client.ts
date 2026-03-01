@@ -19,7 +19,7 @@ import type {
   Recording,
   RecordingDetail,
   RecordingTranscription,
-  UploadResponse,
+  TranscriptionAccepted,
   CalendarResponse,
   TimeslotResponse,
   ExportFormat,
@@ -146,26 +146,13 @@ export class APIClient {
   }
 
   private async postFormData<T>(path: string, formData: FormData): Promise<T> {
-    const controller = new AbortController();
-    // 60-minute timeout for large audio uploads (long files with VibeVoice-ASR can take 25+ min)
-    const timeoutId = setTimeout(() => controller.abort(), 60 * 60 * 1000);
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: this.authHeaders(), // No Content-Type — browser sets multipart boundary
-        body: formData,
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new APIError(res.status, await res.text(), path);
-      return res.json();
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        throw new APIError(408, 'Upload timed out after 60 minutes', path);
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: this.authHeaders(), // No Content-Type — browser sets multipart boundary
+      body: formData,
+    });
+    if (!res.ok) throw new APIError(res.status, await res.text(), path);
+    return res.json();
   }
 
   // ─── Health / Status ──────────────────────────────────────────────────────
@@ -362,12 +349,13 @@ export class APIClient {
 
   /**
    * POST /api/notebook/transcribe/upload
-   * Upload audio, transcribe, and save to notebook in one step.
+   * Upload audio and start background transcription.
+   * Returns 202 with job_id immediately. Poll /api/admin/status for result.
    */
   async uploadAndTranscribe(
     file: File,
     options?: TranscriptionUploadOptions,
-  ): Promise<UploadResponse> {
+  ): Promise<TranscriptionAccepted> {
     const fd = new FormData();
     fd.append('file', file);
     if (options?.language) fd.append('language', options.language);

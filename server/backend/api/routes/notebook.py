@@ -7,6 +7,7 @@ Handles:
 - Transcription import and export
 """
 
+import asyncio
 import logging
 import re
 import tempfile
@@ -392,67 +393,38 @@ class UploadResponse(BaseModel):
     diarization: dict[str, Any]
 
 
-@router.post("/transcribe/upload", response_model=UploadResponse)
-async def upload_and_transcribe(
-    request: Request,
-    file: Annotated[UploadFile, File(...)],
-    language: str | None = Form(None),
-    translation_enabled: bool = Form(False),
-    translation_target_language: str | None = Form(None),
-    enable_diarization: bool = Form(False),
-    enable_word_timestamps: bool = Form(True),
-    file_created_at: str | None = Form(None),
-    expected_speakers: int | None = Form(None),
-    parallel_diarization: bool | None = Form(None),
-    title: str | None = Form(None),
-) -> dict[str, Any]:
+class AcceptedResponse(BaseModel):
+    """Response model for accepted transcription job (202)."""
+
+    job_id: str
+
+
+def _run_transcription(
+    *,
+    model_manager: Any,
+    tmp_path: Path,
+    filename: str,
+    language: str | None,
+    translation_enabled: bool,
+    translation_target_language: str | None,
+    enable_diarization: bool,
+    enable_word_timestamps: bool,
+    file_created_at: str | None,
+    expected_speakers: int | None,
+    parallel_diarization: bool | None,
+    use_parallel_default: bool,
+    title: str | None,
+    job_id: str,
+) -> None:
     """
-    Upload an audio file, transcribe it, and save to the notebook database.
+    Run transcription in a background thread.
 
-    Returns the recording_id for status tracking.
-
-    Parameters:
-    - expected_speakers: Exact number of speakers (2-10). Forces diarization to
-      identify exactly this many speakers. Useful for podcasts with known hosts
-      where occasional clips should be attributed to the main speakers.
-    - parallel_diarization: Override the server default for parallel vs sequential
-      diarization. When False, transcription completes before diarization starts
-      (lower VRAM usage). When None, uses the server config default.
-
-    Returns 409 Conflict if another transcription job is already running.
+    This is a synchronous function intended to be called via asyncio.to_thread().
+    It performs the full transcription pipeline and stores the result (or error)
+    in model_manager.job_tracker so that clients can poll for completion.
     """
     # Lazy import to avoid loading torch at module import time
     from server.core.audio_utils import convert_to_mp3, load_audio
-
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    # Validate expected_speakers parameter
-    if expected_speakers is not None:
-        if expected_speakers < 1 or expected_speakers > 10:
-            raise HTTPException(
-                status_code=400,
-                detail="expected_speakers must be between 1 and 10",
-            )
-
-    # Get model manager and check if busy
-    model_manager = request.app.state.model_manager
-    client_name = get_client_name(request)
-
-    # Try to acquire a job slot
-    success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
-    if not success:
-        raise HTTPException(
-            status_code=409,
-            detail=f"A transcription is already running for {active_user}",
-        )
-
-    # Save uploaded file to temp location
-    suffix = Path(file.filename).suffix or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
 
     try:
         # Progress callback to update job tracker with chunk progress
@@ -488,7 +460,7 @@ async def upload_and_transcribe(
                 logger.info(
                     "Using %s single-pass diarization for: %s",
                     backend_label,
-                    file.filename,
+                    filename,
                 )
                 preferred_rate = int(
                     getattr(backend, "preferred_input_sample_rate_hz", 16000) or 16000
@@ -550,11 +522,10 @@ async def upload_and_transcribe(
 
             if enable_diarization and not diarization_outcome["performed"]:
                 # Resolve parallel vs sequential diarization
-                config = request.app.state.config
                 use_parallel = (
                     parallel_diarization
                     if parallel_diarization is not None
-                    else config.get("diarization", "parallel", default=True)
+                    else use_parallel_default
                 )
 
                 if use_parallel:
@@ -594,7 +565,7 @@ async def upload_and_transcribe(
                     )
             else:
                 # Transcribe without diarization
-                logger.info(f"Transcribing uploaded file for notebook: {file.filename}")
+                logger.info(f"Transcribing uploaded file for notebook: {filename}")
                 result = engine.transcribe_file(
                     str(tmp_path),
                     language=language,
@@ -621,10 +592,9 @@ async def upload_and_transcribe(
         overlap = check_time_slot_overlap(check_time, result.duration)
         if overlap:
             overlap_title = overlap.get("title") or overlap.get("filename", "Unknown")
-            raise HTTPException(
-                status_code=409,
-                detail=f"Time slot conflict: overlaps with existing recording '{overlap_title}' "
-                f"(recorded at {overlap.get('recorded_at', 'unknown time')})",
+            raise ValueError(
+                f"Time slot conflict: overlaps with existing recording '{overlap_title}' "
+                f"(recorded at {overlap.get('recorded_at', 'unknown time')})"
             )
 
         # Convert audio to MP3 and save to permanent storage
@@ -634,7 +604,7 @@ async def upload_and_transcribe(
 
         # Keep original filename, convert to .mp3 extension
         # Sanitize filename to prevent path traversal
-        raw_stem = Path(file.filename or "audio").stem
+        raw_stem = Path(filename or "audio").stem
         # Remove any path separators and sanitize to alphanumeric + safe chars
         original_stem = "".join(c for c in raw_stem if c.isalnum() or c in "._- ")[:100]
         if not original_stem:
@@ -679,33 +649,128 @@ async def upload_and_transcribe(
         )
 
         if not recording_id:
-            raise HTTPException(status_code=500, detail="Failed to save recording to database")
+            raise RuntimeError("Failed to save recording to database")
 
-        return {
-            "recording_id": recording_id,
-            "message": f"Successfully transcribed and saved: {file.filename}",
-            "diarization": diarization_outcome,
-        }
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    except HTTPException:
-        raise
+        # Store successful result for client polling
+        model_manager.job_tracker.end_job(
+            job_id,
+            result={
+                "job_id": job_id[:8],
+                "recording_id": recording_id,
+                "message": f"Successfully transcribed and saved: {filename}",
+                "diarization": diarization_outcome,
+            },
+        )
+        logger.info(
+            f"Background transcription job {job_id[:8]} completed: recording_id={recording_id}"
+        )
 
     except Exception as e:
-        logger.error(f"Upload transcription failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error(f"Background transcription job {job_id[:8]} failed: {e}", exc_info=True)
+        # Store error result for client polling
+        model_manager.job_tracker.end_job(
+            job_id,
+            result={
+                "job_id": job_id[:8],
+                "error": str(e),
+            },
+        )
 
     finally:
-        # Release the job slot
-        model_manager.job_tracker.end_job(job_id)
-
         # Cleanup temp file
         try:
             tmp_path.unlink()
         except Exception as e:
             logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
+
+
+@router.post("/transcribe/upload", response_model=AcceptedResponse, status_code=202)
+async def upload_and_transcribe(
+    request: Request,
+    file: Annotated[UploadFile, File(...)],
+    language: str | None = Form(None),
+    translation_enabled: bool = Form(False),
+    translation_target_language: str | None = Form(None),
+    enable_diarization: bool = Form(False),
+    enable_word_timestamps: bool = Form(True),
+    file_created_at: str | None = Form(None),
+    expected_speakers: int | None = Form(None),
+    parallel_diarization: bool | None = Form(None),
+    title: str | None = Form(None),
+) -> dict[str, Any]:
+    """
+    Upload an audio file and start transcription in the background.
+
+    Returns 202 Accepted immediately with a job_id. Clients should poll
+    GET /api/admin/status to check job_tracker.result for completion.
+
+    Parameters:
+    - expected_speakers: Exact number of speakers (2-10). Forces diarization to
+      identify exactly this many speakers. Useful for podcasts with known hosts
+      where occasional clips should be attributed to the main speakers.
+    - parallel_diarization: Override the server default for parallel vs sequential
+      diarization. When False, transcription completes before diarization starts
+      (lower VRAM usage). When None, uses the server config default.
+
+    Returns 409 Conflict if another transcription job is already running.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    # Validate expected_speakers parameter
+    if expected_speakers is not None:
+        if expected_speakers < 1 or expected_speakers > 10:
+            raise HTTPException(
+                status_code=400,
+                detail="expected_speakers must be between 1 and 10",
+            )
+
+    # Get model manager and check if busy
+    model_manager = request.app.state.model_manager
+    client_name = get_client_name(request)
+
+    # Try to acquire a job slot
+    success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
+    if not success:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A transcription is already running for {active_user}",
+        )
+
+    # Save uploaded file to temp location (fast — just I/O)
+    suffix = Path(file.filename).suffix or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    # Resolve parallel diarization default from config before entering background thread
+    config = request.app.state.config
+    use_parallel_default = config.get("diarization", "parallel", default=True)
+
+    # Launch background transcription task (runs on thread pool, doesn't block event loop)
+    asyncio.get_event_loop().create_task(
+        asyncio.to_thread(
+            _run_transcription,
+            model_manager=model_manager,
+            tmp_path=tmp_path,
+            filename=file.filename,
+            language=language,
+            translation_enabled=translation_enabled,
+            translation_target_language=translation_target_language,
+            enable_diarization=enable_diarization,
+            enable_word_timestamps=enable_word_timestamps,
+            file_created_at=file_created_at,
+            expected_speakers=expected_speakers,
+            parallel_diarization=parallel_diarization,
+            use_parallel_default=use_parallel_default,
+            title=title,
+            job_id=job_id,
+        )
+    )
+
+    # Return immediately — client polls /api/admin/status for result
+    return {"job_id": job_id[:8]}
 
 
 @router.get("/calendar")
