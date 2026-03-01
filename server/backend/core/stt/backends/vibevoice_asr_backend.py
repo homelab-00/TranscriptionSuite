@@ -28,6 +28,7 @@ from server.core.stt.backends.base import (
 
 INPUT_SAMPLE_RATE = 16000
 DEFAULT_TARGET_SAMPLE_RATE = 24000
+DEFAULT_MAX_CHUNK_DURATION_S = 600  # 10 minutes
 DEFAULT_LANGUAGE_MODEL = "Qwen/Qwen2.5-7B"
 DEFAULT_MAX_NEW_TOKENS = 32768
 DEFAULT_NUM_BEAMS = 1
@@ -146,6 +147,7 @@ class VibeVoiceASRBackend(STTBackend):
         self._max_new_tokens: int | None = None
         self._num_beams: int = DEFAULT_NUM_BEAMS
         self._temperature: float = DEFAULT_TEMPERATURE
+        self._max_chunk_duration_s: int = DEFAULT_MAX_CHUNK_DURATION_S
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         cfg = get_config()
@@ -181,6 +183,16 @@ class VibeVoiceASRBackend(STTBackend):
         except (TypeError, ValueError):
             parsed_max_new_tokens = 0
         self._max_new_tokens = parsed_max_new_tokens if parsed_max_new_tokens > 0 else None
+        try:
+            self._max_chunk_duration_s = max(
+                60,
+                int(
+                    vv_cfg.get("max_chunk_duration_s", DEFAULT_MAX_CHUNK_DURATION_S)
+                    or DEFAULT_MAX_CHUNK_DURATION_S
+                ),
+            )
+        except (TypeError, ValueError):
+            self._max_chunk_duration_s = DEFAULT_MAX_CHUNK_DURATION_S
         attn_impl = str(vv_cfg.get("attn_implementation", "eager") or "eager")
         lm_model = str(
             vv_cfg.get("language_model_pretrained_name", DEFAULT_LANGUAGE_MODEL)
@@ -274,6 +286,15 @@ class VibeVoiceASRBackend(STTBackend):
                 "VibeVoice-ASR translation is not supported in TranscriptionSuite v1 integration."
             )
 
+        audio_duration = len(audio) / max(audio_sample_rate, 1)
+        if audio_duration > self._max_chunk_duration_s:
+            return self._transcribe_long(
+                audio,
+                audio_sample_rate=audio_sample_rate,
+                language=language,
+                beam_size=beam_size,
+            )
+
         raw_segments = self._generate_segments(
             audio,
             audio_sample_rate=audio_sample_rate,
@@ -310,6 +331,15 @@ class VibeVoiceASRBackend(STTBackend):
                 "VibeVoice-ASR translation is not supported in TranscriptionSuite v1 integration."
             )
 
+        audio_duration = len(audio) / max(audio_sample_rate, 1)
+        if audio_duration > self._max_chunk_duration_s:
+            return self._transcribe_long_diarized(
+                audio,
+                audio_sample_rate=audio_sample_rate,
+                language=language,
+                beam_size=beam_size,
+            )
+
         segments = self._generate_segments(
             audio,
             audio_sample_rate=audio_sample_rate,
@@ -340,6 +370,123 @@ class VibeVoiceASRBackend(STTBackend):
     @property
     def backend_name(self) -> str:
         return "vibevoice_asr"
+
+    # ------------------------------------------------------------------
+    # Long-audio chunking
+    # ------------------------------------------------------------------
+
+    def _transcribe_long(
+        self,
+        audio: np.ndarray,
+        *,
+        audio_sample_rate: int,
+        language: str | None,
+        beam_size: int,
+    ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
+        """Chunk long audio and concatenate transcription results."""
+        chunk_samples = int(self._max_chunk_duration_s * audio_sample_rate)
+        total_samples = len(audio)
+        num_chunks = math.ceil(total_samples / chunk_samples)
+
+        all_segments: list[BackendSegment] = []
+        time_offset = 0.0
+
+        for i in range(num_chunks):
+            start = i * chunk_samples
+            end = min(start + chunk_samples, total_samples)
+            chunk = audio[start:end]
+            chunk_duration = len(chunk) / max(audio_sample_rate, 1)
+
+            logger.info(
+                "VibeVoice-ASR chunk %d/%d (%.0fs - %.0fs)",
+                i + 1,
+                num_chunks,
+                time_offset,
+                time_offset + chunk_duration,
+            )
+
+            raw_segments = self._generate_segments(
+                chunk,
+                audio_sample_rate=audio_sample_rate,
+                language=language,
+                beam_size=beam_size,
+            )
+
+            for seg in raw_segments:
+                seg_start = float(seg.get("start", 0.0) or 0.0)
+                seg_end = float(seg.get("end", 0.0) or 0.0)
+                all_segments.append(
+                    BackendSegment(
+                        text=str(seg.get("text", "")).strip(),
+                        start=seg_start + time_offset,
+                        end=seg_end + time_offset,
+                        words=[],
+                    )
+                )
+
+            time_offset += chunk_duration
+            if i < num_chunks - 1:
+                clear_gpu_cache()
+
+        return all_segments, BackendTranscriptionInfo(language=language, language_probability=0.0)
+
+    def _transcribe_long_diarized(
+        self,
+        audio: np.ndarray,
+        *,
+        audio_sample_rate: int,
+        language: str | None,
+        beam_size: int,
+    ) -> DiarizedTranscriptionResult:
+        """Chunk long audio and concatenate diarized transcription results."""
+        chunk_samples = int(self._max_chunk_duration_s * audio_sample_rate)
+        total_samples = len(audio)
+        num_chunks = math.ceil(total_samples / chunk_samples)
+
+        all_segments: list[dict[str, Any]] = []
+        all_speakers: set[str] = set()
+        time_offset = 0.0
+
+        for i in range(num_chunks):
+            start = i * chunk_samples
+            end = min(start + chunk_samples, total_samples)
+            chunk = audio[start:end]
+            chunk_duration = len(chunk) / max(audio_sample_rate, 1)
+
+            logger.info(
+                "VibeVoice-ASR chunk %d/%d (%.0fs - %.0fs)",
+                i + 1,
+                num_chunks,
+                time_offset,
+                time_offset + chunk_duration,
+            )
+
+            segments = self._generate_segments(
+                chunk,
+                audio_sample_rate=audio_sample_rate,
+                language=language,
+                beam_size=beam_size,
+            )
+
+            for seg in segments:
+                seg["start"] = float(seg.get("start", 0.0) or 0.0) + time_offset
+                seg["end"] = float(seg.get("end", 0.0) or 0.0) + time_offset
+                speaker = str(seg.get("speaker", "")).strip()
+                if speaker:
+                    all_speakers.add(speaker)
+
+            all_segments.extend(segments)
+            time_offset += chunk_duration
+            if i < num_chunks - 1:
+                clear_gpu_cache()
+
+        return DiarizedTranscriptionResult(
+            segments=all_segments,
+            words=[],
+            num_speakers=len(all_speakers),
+            language=language,
+            language_probability=0.0,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -396,7 +543,8 @@ class VibeVoiceASRBackend(STTBackend):
             generate_kwargs.get("temperature"),
             generate_kwargs.get("max_new_tokens", "<omitted>"),
         )
-        output = self._model.generate(**inputs, **generate_kwargs)
+        with torch.no_grad():
+            output = self._model.generate(**inputs, **generate_kwargs)
         sequences = getattr(output, "sequences", output)
 
         if not isinstance(sequences, torch.Tensor):

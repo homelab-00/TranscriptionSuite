@@ -27,7 +27,7 @@ SAMPLE_RATE = 16000
 
 # Maximum audio duration (seconds) NeMo handles well in one pass.
 # Longer files are chunked at this boundary to avoid OOM / quality issues.
-MAX_CHUNK_DURATION = 20 * 60  # 20 minutes
+MAX_CHUNK_DURATION = 10 * 60  # 10 minutes
 
 logger = logging.getLogger(__name__)
 
@@ -513,6 +513,8 @@ class ParakeetBackend(STTBackend):
 
             all_segments.extend(chunk_segments)
             time_offset += len(chunk) / SAMPLE_RATE
+            if i < num_chunks - 1:
+                clear_gpu_cache()
 
         info = BackendTranscriptionInfo(
             language=language,

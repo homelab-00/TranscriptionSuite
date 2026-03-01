@@ -13,12 +13,15 @@ Configuration Priority (highest to lowest):
     4. Fallback: ./config.yaml (current directory)
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 FALLBACK_MAIN_TRANSCRIBER_MODEL = "Systran/faster-whisper-large-v3"
 DISABLED_MODEL_SENTINEL = "__none__"
@@ -241,8 +244,46 @@ class ServerConfig:
         section[keys[-1]] = value
 
         # Write back to disk
-        with self._loaded_from.open("w", encoding="utf-8") as f:
-            yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        try:
+            with self._loaded_from.open("w", encoding="utf-8") as f:
+                yaml.dump(
+                    self.config,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+        except PermissionError:
+            fallback_candidates = [
+                Path("/user-config/config.yaml"),
+                Path("/data/config/config.yaml"),
+            ]
+            written = False
+            for fallback in fallback_candidates:
+                try:
+                    fallback.parent.mkdir(parents=True, exist_ok=True)
+                    with fallback.open("w", encoding="utf-8") as f:
+                        yaml.dump(
+                            self.config,
+                            f,
+                            default_flow_style=False,
+                            allow_unicode=True,
+                            sort_keys=False,
+                        )
+                    logger.warning(
+                        "Config file %s is read-only; persisted to fallback %s",
+                        self._loaded_from,
+                        fallback,
+                    )
+                    self._loaded_from = fallback
+                    written = True
+                    break
+                except Exception:
+                    continue
+            if not written:
+                raise PermissionError(
+                    f"Cannot write config to {self._loaded_from} or any fallback path"
+                ) from None
 
     def get(self, *keys: str, default: Any = None) -> Any:
         """

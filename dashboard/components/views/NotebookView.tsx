@@ -1495,9 +1495,7 @@ const ImportTab = ({
                   onChange={setParallelDiarization}
                   label="Parallel Processing"
                   description={
-                    parallelDiarization === parallelDefault
-                      ? 'Using server default (faster but requires more GPU memory)'
-                      : 'Override: Parallel mode places higher demand on GPU/CPU resources'
+                    parallelDiarization === parallelDefault ? 'Using server default' : 'Override'
                   }
                 />
               </div>

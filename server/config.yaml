@@ -103,6 +103,9 @@ vibevoice_asr:
     # Explicitly cap generation to reduce malformed/truncated structured JSON.
     # Set 0 (or null) only if you intentionally want to omit max_new_tokens.
     max_new_tokens: 32768
+    # Maximum chunk duration (seconds) for long audio. Audio longer than this is
+    # split into chunks to avoid CUDA OOM. Default: 600 (10 minutes).
+    max_chunk_duration_s: 600
 
 # ----------------------------------------------------------------------------
 # Live Mode (RealtimeSTT) Configuration

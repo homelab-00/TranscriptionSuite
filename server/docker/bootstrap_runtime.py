@@ -559,6 +559,30 @@ def compute_diarization_preload_cache_key(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def should_reuse_cached_feature_status(
+    previous_status_payload: dict[str, Any],
+    sync_mode: str,
+) -> bool:
+    """Return True when all three feature import results can be reused from cache.
+
+    This is safe when ``sync_mode == "skip"`` (deps unchanged) and the previous
+    bootstrap-status.json already contains results for whisper, nemo, and
+    vibevoice_asr features.
+    """
+    if sync_mode != "skip":
+        return False
+    features = previous_status_payload.get("features")
+    if not isinstance(features, dict):
+        return False
+    for key in ("whisper", "nemo", "vibevoice_asr"):
+        entry = features.get(key)
+        if not isinstance(entry, dict):
+            return False
+        if "available" not in entry or "reason" not in entry:
+            return False
+    return True
+
+
 def should_reuse_cached_diarization_status(
     previous_status_payload: dict[str, Any],
     preload_cache_key: str,
@@ -668,7 +692,7 @@ def check_whisper_import(
     timeout_seconds: int,
 ) -> dict[str, Any]:
     checker = """
-import importlib
+import importlib.util
 import json
 
 modules = ("faster_whisper", "ctranslate2", "whisperx")
@@ -676,7 +700,9 @@ errors = []
 
 for module_name in modules:
     try:
-        importlib.import_module(module_name)
+        spec = importlib.util.find_spec(module_name)
+        if spec is None:
+            errors.append(f"{module_name}: not found")
     except Exception as exc:
         errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
 
@@ -733,12 +759,23 @@ def check_nemo_asr_import(
     timeout_seconds: int,
 ) -> dict[str, Any]:
     checker = """
-import importlib
+import importlib.util
 import json
 
 try:
-    importlib.import_module("nemo.collections.asr")
-    print(json.dumps({"available": True, "reason": "ready"}))
+    spec = importlib.util.find_spec("nemo.collections.asr")
+    if spec is None:
+        print(
+            json.dumps(
+                {
+                    "available": False,
+                    "reason": "import_failed",
+                    "error": "nemo.collections.asr: not found",
+                }
+            )
+        )
+    else:
+        print(json.dumps({"available": True, "reason": "ready"}))
 except Exception as exc:
     print(
         json.dumps(
@@ -790,7 +827,7 @@ def check_vibevoice_asr_import(
 ) -> dict[str, Any]:
     candidates_json = json.dumps(_VIBEVOICE_ASR_IMPORT_CANDIDATES)
     checker = f"""
-import importlib
+import importlib.util
 import json
 
 candidates = json.loads({candidates_json!r})
@@ -808,10 +845,16 @@ for (
         f"{{model_module}}:{{model_symbol}} + {{processor_module}}:{{processor_symbol}}"
     )
     try:
-        model_mod = importlib.import_module(model_module)
-        processor_mod = importlib.import_module(processor_module)
-        getattr(model_mod, model_symbol)
-        getattr(processor_mod, processor_symbol)
+        model_spec = importlib.util.find_spec(model_module)
+        processor_spec = importlib.util.find_spec(processor_module)
+        if model_spec is None or processor_spec is None:
+            missing = []
+            if model_spec is None:
+                missing.append(model_module)
+            if processor_spec is None:
+                missing.append(processor_module)
+            errors.append(f"{{variant}}: modules not found: {{', '.join(missing)}}")
+            continue
         print(
             json.dumps(
                 {{
@@ -830,7 +873,9 @@ for (
 else:
     top_level_error = None
     try:
-        importlib.import_module("vibevoice")
+        spec = importlib.util.find_spec("vibevoice")
+        if spec is None:
+            top_level_error = "vibevoice: not found"
     except Exception as exc:
         top_level_error = f"{{type(exc).__name__}}: {{exc}}"
 
@@ -1050,127 +1095,158 @@ def main() -> int:
         live_model
     )
 
+    # ── Reuse cached feature status when deps are unchanged ───────────────
+    _reuse_feature_cache = should_reuse_cached_feature_status(
+        previous_status_payload=previous_status_payload,
+        sync_mode=sync_mode,
+    )
+    if _reuse_feature_cache:
+        log("Reusing cached feature import results (deps unchanged, sync_mode=skip)")
+
     # ── faster-whisper family (optional) ───────────────────────────────────
     whisper_start = time.perf_counter()
     install_whisper = parse_bool_env("INSTALL_WHISPER", False)
     whisper_status: dict[str, Any]
-    existing_whisper_status = check_whisper_import(
-        venv_python=venv_python,
-        timeout_seconds=timeout_seconds,
-    )
 
-    if existing_whisper_status.get("available"):
-        whisper_status = existing_whisper_status
-        if install_whisper:
-            log("faster-whisper family already installed, skipping reinstall")
-        else:
-            log("faster-whisper family already available, skipping optional install")
-    elif install_whisper:
-        log("Installing faster-whisper family dependencies...")
-        try:
-            run_command(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    str(venv_python),
-                    "faster-whisper>=1.2.1",
-                    "ctranslate2>=4.6.2",
-                    "whisperx>=3.1.0",
-                ],
-                timeout_seconds=timeout_seconds,
-                env=build_uv_sync_env(
-                    venv_dir=venv_dir,
-                    cache_dir=cache_dir,
-                ),
-            )
-            whisper_status = check_whisper_import(
-                venv_python=venv_python,
-                timeout_seconds=timeout_seconds,
-            )
-            if whisper_status.get("available"):
-                log("faster-whisper family dependencies installed")
-            else:
-                failure_error = str(whisper_status.get("error", "")).strip()
-                log(
-                    "faster-whisper dependency installation completed but import check failed "
-                    f"({whisper_status.get('reason', 'import_failed')}"
-                    + (f": {failure_error}" if failure_error else "")
-                    + ")"
-                )
-        except Exception as exc:
-            whisper_status = {"available": False, "reason": "install_failed", "error": str(exc)}
-            log(f"faster-whisper dependency installation failed: {exc}")
+    if _reuse_feature_cache and not install_whisper:
+        whisper_status = previous_status_payload["features"]["whisper"]
+        log(
+            "faster-whisper feature check: reusing cached result "
+            f"(available={whisper_status.get('available')})"
+        )
     else:
-        reason = "selected_but_not_requested" if whisper_selected else "not_requested"
-        whisper_status = {"available": False, "reason": reason}
-        if whisper_selected:
-            log(
-                "faster-whisper selected but INSTALL_WHISPER is not enabled, "
-                "skipping optional install"
-            )
+        existing_whisper_status = check_whisper_import(
+            venv_python=venv_python,
+            timeout_seconds=timeout_seconds,
+        )
+
+        if existing_whisper_status.get("available"):
+            whisper_status = existing_whisper_status
+            if install_whisper:
+                log("faster-whisper family already installed, skipping reinstall")
+            else:
+                log("faster-whisper family already available, skipping optional install")
+        elif install_whisper:
+            log("Installing faster-whisper family dependencies...")
+            try:
+                run_command(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        str(venv_python),
+                        "faster-whisper>=1.2.1",
+                        "ctranslate2>=4.6.2",
+                        "whisperx>=3.1.0",
+                    ],
+                    timeout_seconds=timeout_seconds,
+                    env=build_uv_sync_env(
+                        venv_dir=venv_dir,
+                        cache_dir=cache_dir,
+                    ),
+                )
+                whisper_status = check_whisper_import(
+                    venv_python=venv_python,
+                    timeout_seconds=timeout_seconds,
+                )
+                if whisper_status.get("available"):
+                    log("faster-whisper family dependencies installed")
+                else:
+                    failure_error = str(whisper_status.get("error", "")).strip()
+                    log(
+                        "faster-whisper dependency installation completed but import check failed "
+                        f"({whisper_status.get('reason', 'import_failed')}"
+                        + (f": {failure_error}" if failure_error else "")
+                        + ")"
+                    )
+            except Exception as exc:
+                whisper_status = {
+                    "available": False,
+                    "reason": "install_failed",
+                    "error": str(exc),
+                }
+                log(f"faster-whisper dependency installation failed: {exc}")
         else:
-            log("faster-whisper not requested, skipping")
+            reason = "selected_but_not_requested" if whisper_selected else "not_requested"
+            whisper_status = {"available": False, "reason": reason}
+            if whisper_selected:
+                log(
+                    "faster-whisper selected but INSTALL_WHISPER is not enabled, "
+                    "skipping optional install"
+                )
+            else:
+                log("faster-whisper not requested, skipping")
     log_timing("faster-whisper feature check complete", whisper_start)
 
     # ── NeMo toolkit (optional, for NVIDIA Parakeet ASR models) ──────────
     nemo_start = time.perf_counter()
     install_nemo = parse_bool_env("INSTALL_NEMO", False)
     nemo_status: dict[str, Any]
-    existing_nemo_status = check_nemo_asr_import(
-        venv_python=venv_python,
-        timeout_seconds=timeout_seconds,
-    )
 
-    if existing_nemo_status.get("available"):
-        nemo_status = existing_nemo_status
-        if install_nemo:
-            log("NeMo toolkit already installed, skipping reinstall")
-        else:
-            log("NeMo toolkit already available, skipping optional install")
-    elif install_nemo:
-        log("Installing NeMo toolkit for NVIDIA Parakeet support...")
-        try:
-            run_command(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    str(venv_python),
-                    "nemo_toolkit[asr]>=2.2.0",
-                ],
-                timeout_seconds=timeout_seconds,
-                env=build_uv_sync_env(
-                    venv_dir=venv_dir,
-                    cache_dir=cache_dir,
-                ),
-            )
-            nemo_status = check_nemo_asr_import(
-                venv_python=venv_python,
-                timeout_seconds=timeout_seconds,
-            )
-            if nemo_status.get("available"):
-                log("NeMo toolkit installed")
-            else:
-                failure_error = str(nemo_status.get("error", "")).strip()
-                log(
-                    "NeMo toolkit installation completed but import check failed "
-                    f"({nemo_status.get('reason', 'import_failed')}"
-                    + (f": {failure_error}" if failure_error else "")
-                    + ")"
-                )
-        except Exception as exc:
-            nemo_status = {"available": False, "reason": "install_failed", "error": str(exc)}
-            log(f"NeMo toolkit installation failed: {exc}")
+    if _reuse_feature_cache and not install_nemo:
+        nemo_status = previous_status_payload["features"]["nemo"]
+        log(f"NeMo feature check: reusing cached result (available={nemo_status.get('available')})")
     else:
-        reason = "selected_but_not_requested" if nemo_selected else "not_requested"
-        nemo_status = {"available": False, "reason": reason}
-        if nemo_selected:
-            log("NeMo model selected but INSTALL_NEMO is not enabled, skipping optional install")
+        existing_nemo_status = check_nemo_asr_import(
+            venv_python=venv_python,
+            timeout_seconds=timeout_seconds,
+        )
+
+        if existing_nemo_status.get("available"):
+            nemo_status = existing_nemo_status
+            if install_nemo:
+                log("NeMo toolkit already installed, skipping reinstall")
+            else:
+                log("NeMo toolkit already available, skipping optional install")
+        elif install_nemo:
+            log("Installing NeMo toolkit for NVIDIA Parakeet support...")
+            try:
+                run_command(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        str(venv_python),
+                        "nemo_toolkit[asr]>=2.2.0",
+                    ],
+                    timeout_seconds=timeout_seconds,
+                    env=build_uv_sync_env(
+                        venv_dir=venv_dir,
+                        cache_dir=cache_dir,
+                    ),
+                )
+                nemo_status = check_nemo_asr_import(
+                    venv_python=venv_python,
+                    timeout_seconds=timeout_seconds,
+                )
+                if nemo_status.get("available"):
+                    log("NeMo toolkit installed")
+                else:
+                    failure_error = str(nemo_status.get("error", "")).strip()
+                    log(
+                        "NeMo toolkit installation completed but import check failed "
+                        f"({nemo_status.get('reason', 'import_failed')}"
+                        + (f": {failure_error}" if failure_error else "")
+                        + ")"
+                    )
+            except Exception as exc:
+                nemo_status = {
+                    "available": False,
+                    "reason": "install_failed",
+                    "error": str(exc),
+                }
+                log(f"NeMo toolkit installation failed: {exc}")
         else:
-            log("NeMo not requested, skipping")
+            reason = "selected_but_not_requested" if nemo_selected else "not_requested"
+            nemo_status = {"available": False, "reason": reason}
+            if nemo_selected:
+                log(
+                    "NeMo model selected but INSTALL_NEMO is not enabled, skipping optional install"
+                )
+            else:
+                log("NeMo not requested, skipping")
     log_timing("NeMo feature check complete", nemo_start)
 
     # ── VibeVoice-ASR (optional, experimental in-process backend) ───────────
@@ -1185,41 +1261,126 @@ def main() -> int:
         or "git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e"
     )
     vibevoice_quantized_selected = is_vibevoice_asr_quantized_model_name(main_model)
-    existing_vibevoice_asr_status = check_vibevoice_asr_import(
-        venv_python=venv_python,
-        timeout_seconds=timeout_seconds,
-    )
-    vibevoice_quant_runtime_status: dict[str, Any] | None = None
-    if install_vibevoice_asr and vibevoice_quantized_selected:
-        vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
+
+    if _reuse_feature_cache and not install_vibevoice_asr:
+        vibevoice_asr_status = previous_status_payload["features"]["vibevoice_asr"]
+        log(
+            "VibeVoice-ASR feature check: reusing cached result "
+            f"(available={vibevoice_asr_status.get('available')})"
+        )
+    else:
+        existing_vibevoice_asr_status = check_vibevoice_asr_import(
             venv_python=venv_python,
             timeout_seconds=timeout_seconds,
         )
+        vibevoice_quant_runtime_status: dict[str, Any] | None = None
+        if install_vibevoice_asr and vibevoice_quantized_selected:
+            vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
+                venv_python=venv_python,
+                timeout_seconds=timeout_seconds,
+            )
 
-    if existing_vibevoice_asr_status.get("available"):
-        need_quant_runtime_install = (
-            install_vibevoice_asr
-            and vibevoice_quantized_selected
-            and not bool((vibevoice_quant_runtime_status or {}).get("available", False))
-        )
-        if need_quant_runtime_install:
-            missing_quant_runtime = (
-                vibevoice_quant_runtime_status.get("missing_packages")
-                if isinstance(vibevoice_quant_runtime_status, dict)
-                else None
+        if existing_vibevoice_asr_status.get("available"):
+            need_quant_runtime_install = (
+                install_vibevoice_asr
+                and vibevoice_quantized_selected
+                and not bool((vibevoice_quant_runtime_status or {}).get("available", False))
             )
-            missing_list = (
-                [str(item) for item in missing_quant_runtime]
-                if isinstance(missing_quant_runtime, list)
-                else []
-            )
-            log(
-                "VibeVoice-ASR core already installed; installing quantization runtime "
-                "dependencies for selected quantized model"
-                + (f" (missing={', '.join(missing_list)})" if missing_list else "")
-                + "..."
-            )
+            if need_quant_runtime_install:
+                missing_quant_runtime = (
+                    vibevoice_quant_runtime_status.get("missing_packages")
+                    if isinstance(vibevoice_quant_runtime_status, dict)
+                    else None
+                )
+                missing_list = (
+                    [str(item) for item in missing_quant_runtime]
+                    if isinstance(missing_quant_runtime, list)
+                    else []
+                )
+                log(
+                    "VibeVoice-ASR core already installed; installing quantization runtime "
+                    "dependencies for selected quantized model"
+                    + (f" (missing={', '.join(missing_list)})" if missing_list else "")
+                    + "..."
+                )
+                try:
+                    run_command(
+                        [
+                            "uv",
+                            "pip",
+                            "install",
+                            "--python",
+                            str(venv_python),
+                            *_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS,
+                        ],
+                        timeout_seconds=timeout_seconds,
+                        env=build_uv_sync_env(
+                            venv_dir=venv_dir,
+                            cache_dir=cache_dir,
+                        ),
+                    )
+                    vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
+                        venv_python=venv_python,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    if vibevoice_quant_runtime_status.get("available"):
+                        log("VibeVoice-ASR quantization runtime dependencies ready")
+                    else:
+                        failure_error = str(vibevoice_quant_runtime_status.get("error", "")).strip()
+                        log(
+                            "VibeVoice-ASR quantization runtime dependency installation completed "
+                            "but verification failed "
+                            f"({vibevoice_quant_runtime_status.get('reason', 'missing_packages')}"
+                            + (f": {failure_error}" if failure_error else "")
+                            + ")"
+                        )
+                except Exception as exc:
+                    vibevoice_asr_status = {
+                        "available": False,
+                        "reason": "install_failed",
+                        "error": str(exc),
+                    }
+                    log(f"VibeVoice-ASR quantization runtime dependency installation failed: {exc}")
+                else:
+                    if vibevoice_quant_runtime_status.get("available"):
+                        vibevoice_asr_status = existing_vibevoice_asr_status
+                        variant = vibevoice_asr_status.get("variant")
+                        if variant:
+                            log(
+                                f"VibeVoice-ASR support already installed (import layout={variant})"
+                            )
+                        else:
+                            log("VibeVoice-ASR support already installed")
+                    else:
+                        vibevoice_asr_status = {
+                            "available": False,
+                            "reason": str(
+                                vibevoice_quant_runtime_status.get(
+                                    "reason", "quant_runtime_missing"
+                                )
+                                or "quant_runtime_missing"
+                            ),
+                        }
+                        error = vibevoice_quant_runtime_status.get("error")
+                        if error:
+                            vibevoice_asr_status["error"] = str(error)
+            else:
+                vibevoice_asr_status = existing_vibevoice_asr_status
+                variant = vibevoice_asr_status.get("variant")
+                if variant:
+                    log(f"VibeVoice-ASR support already installed (import layout={variant})")
+                else:
+                    log("VibeVoice-ASR support already installed")
+        elif install_vibevoice_asr:
+            log("Installing VibeVoice-ASR (experimental) support...")
             try:
+                vibevoice_install_specs = [vibevoice_asr_package_spec]
+                if vibevoice_quantized_selected:
+                    log(
+                        "Selected VibeVoice-ASR model appears quantized; installing quantization runtime "
+                        f"dependencies: {', '.join(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)}"
+                    )
+                    vibevoice_install_specs.extend(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)
                 run_command(
                     [
                         "uv",
@@ -1227,7 +1388,7 @@ def main() -> int:
                         "install",
                         "--python",
                         str(venv_python),
-                        *_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS,
+                        *vibevoice_install_specs,
                     ],
                     timeout_seconds=timeout_seconds,
                     env=build_uv_sync_env(
@@ -1235,18 +1396,21 @@ def main() -> int:
                         cache_dir=cache_dir,
                     ),
                 )
-                vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
+                vibevoice_asr_status = check_vibevoice_asr_import(
                     venv_python=venv_python,
                     timeout_seconds=timeout_seconds,
                 )
-                if vibevoice_quant_runtime_status.get("available"):
-                    log("VibeVoice-ASR quantization runtime dependencies ready")
+                if vibevoice_asr_status.get("available"):
+                    variant = vibevoice_asr_status.get("variant")
+                    if variant:
+                        log(f"VibeVoice-ASR support installed (import layout={variant})")
+                    else:
+                        log("VibeVoice-ASR support installed")
                 else:
-                    failure_error = str(vibevoice_quant_runtime_status.get("error", "")).strip()
+                    failure_error = str(vibevoice_asr_status.get("error", "")).strip()
                     log(
-                        "VibeVoice-ASR quantization runtime dependency installation completed "
-                        "but verification failed "
-                        f"({vibevoice_quant_runtime_status.get('reason', 'missing_packages')}"
+                        "VibeVoice-ASR installation completed but import check failed "
+                        f"({vibevoice_asr_status.get('reason', 'import_failed')}"
                         + (f": {failure_error}" if failure_error else "")
                         + ")"
                     )
@@ -1256,93 +1420,17 @@ def main() -> int:
                     "reason": "install_failed",
                     "error": str(exc),
                 }
-                log(f"VibeVoice-ASR quantization runtime dependency installation failed: {exc}")
-            else:
-                if vibevoice_quant_runtime_status.get("available"):
-                    vibevoice_asr_status = existing_vibevoice_asr_status
-                    variant = vibevoice_asr_status.get("variant")
-                    if variant:
-                        log(f"VibeVoice-ASR support already installed (import layout={variant})")
-                    else:
-                        log("VibeVoice-ASR support already installed")
-                else:
-                    vibevoice_asr_status = {
-                        "available": False,
-                        "reason": str(
-                            vibevoice_quant_runtime_status.get("reason", "quant_runtime_missing")
-                            or "quant_runtime_missing"
-                        ),
-                    }
-                    error = vibevoice_quant_runtime_status.get("error")
-                    if error:
-                        vibevoice_asr_status["error"] = str(error)
+                log(f"VibeVoice-ASR installation failed: {exc}")
         else:
-            vibevoice_asr_status = existing_vibevoice_asr_status
-            variant = vibevoice_asr_status.get("variant")
-            if variant:
-                log(f"VibeVoice-ASR support already installed (import layout={variant})")
-            else:
-                log("VibeVoice-ASR support already installed")
-    elif install_vibevoice_asr:
-        log("Installing VibeVoice-ASR (experimental) support...")
-        try:
-            vibevoice_install_specs = [vibevoice_asr_package_spec]
-            if vibevoice_quantized_selected:
+            reason = "selected_but_not_requested" if vibevoice_selected else "not_requested"
+            vibevoice_asr_status = {"available": False, "reason": reason}
+            if vibevoice_selected:
                 log(
-                    "Selected VibeVoice-ASR model appears quantized; installing quantization runtime "
-                    f"dependencies: {', '.join(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)}"
+                    "VibeVoice-ASR selected but INSTALL_VIBEVOICE_ASR is not enabled, "
+                    "skipping optional install"
                 )
-                vibevoice_install_specs.extend(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)
-            run_command(
-                [
-                    "uv",
-                    "pip",
-                    "install",
-                    "--python",
-                    str(venv_python),
-                    *vibevoice_install_specs,
-                ],
-                timeout_seconds=timeout_seconds,
-                env=build_uv_sync_env(
-                    venv_dir=venv_dir,
-                    cache_dir=cache_dir,
-                ),
-            )
-            vibevoice_asr_status = check_vibevoice_asr_import(
-                venv_python=venv_python,
-                timeout_seconds=timeout_seconds,
-            )
-            if vibevoice_asr_status.get("available"):
-                variant = vibevoice_asr_status.get("variant")
-                if variant:
-                    log(f"VibeVoice-ASR support installed (import layout={variant})")
-                else:
-                    log("VibeVoice-ASR support installed")
             else:
-                failure_error = str(vibevoice_asr_status.get("error", "")).strip()
-                log(
-                    "VibeVoice-ASR installation completed but import check failed "
-                    f"({vibevoice_asr_status.get('reason', 'import_failed')}"
-                    + (f": {failure_error}" if failure_error else "")
-                    + ")"
-                )
-        except Exception as exc:
-            vibevoice_asr_status = {
-                "available": False,
-                "reason": "install_failed",
-                "error": str(exc),
-            }
-            log(f"VibeVoice-ASR installation failed: {exc}")
-    else:
-        reason = "selected_but_not_requested" if vibevoice_selected else "not_requested"
-        vibevoice_asr_status = {"available": False, "reason": reason}
-        if vibevoice_selected:
-            log(
-                "VibeVoice-ASR selected but INSTALL_VIBEVOICE_ASR is not enabled, "
-                "skipping optional install"
-            )
-        else:
-            log("VibeVoice-ASR not requested, skipping")
+                log("VibeVoice-ASR not requested, skipping")
     log_timing("VibeVoice-ASR feature check complete", vibevoice_start)
 
     status_write_start = time.perf_counter()
