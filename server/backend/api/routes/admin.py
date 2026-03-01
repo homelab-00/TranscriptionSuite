@@ -113,6 +113,68 @@ async def update_diarization_settings(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/config/full")
+async def get_full_config(request: Request) -> dict[str, Any]:
+    """Return the full config.yaml parsed into a structured tree with metadata.
+
+    The tree includes sections, fields, types, and YAML comments so the
+    dashboard can dynamically render a settings editor.
+    """
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        config = request.app.state.config
+        config_path = config.loaded_from
+        if config_path is None:
+            raise HTTPException(status_code=500, detail="No config file loaded")
+
+        from server.config_tree import parse_config_tree
+
+        tree = parse_config_tree(config_path)
+        return tree
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get full config: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.patch("/config")
+async def update_config(request: Request) -> dict[str, Any]:
+    """Update config.yaml values in-place, preserving comments and formatting.
+
+    Expects JSON body: ``{"updates": {"section.key": value, ...}}``
+    """
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+
+    updates = body.get("updates")
+    if not isinstance(updates, dict) or not updates:
+        raise HTTPException(status_code=400, detail="'updates' must be a non-empty object")
+
+    config = request.app.state.config
+    config_path = config.loaded_from
+    if config_path is None:
+        raise HTTPException(status_code=500, detail="No config file loaded")
+
+    try:
+        from server.config_tree import apply_config_updates, parse_config_tree
+
+        results = apply_config_updates(config_path, updates)
+        # Return the freshly-parsed tree so the frontend can reconcile
+        tree = parse_config_tree(config_path)
+        return {"results": results, **tree}
+    except Exception as e:
+        logger.error("Failed to update config: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/models/load")
 async def load_models(request: Request) -> dict[str, str]:
     """Explicitly load transcription models."""

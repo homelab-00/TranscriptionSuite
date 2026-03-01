@@ -30,6 +30,8 @@ import type {
   WordSearchResponse,
   AdminStatus,
   LogsResponse,
+  ServerConfigTree,
+  ConfigUpdateResponse,
   LLMStatus,
   LLMResponse,
   LLMRequest,
@@ -535,6 +537,16 @@ export class APIClient {
     parallel: boolean;
   }): Promise<{ status: string; diarization: { parallel: boolean } }> {
     return this.patch('/api/admin/diarization', settings);
+  }
+
+  /** GET /api/admin/config/full — full config tree with metadata */
+  async getServerConfig(): Promise<ServerConfigTree> {
+    return this.get('/api/admin/config/full');
+  }
+
+  /** PATCH /api/admin/config — update config values in-place */
+  async updateServerConfig(updates: Record<string, unknown>): Promise<ConfigUpdateResponse> {
+    return this.patch('/api/admin/config', { updates });
   }
 
   // ─── LLM ──────────────────────────────────────────────────────────────────

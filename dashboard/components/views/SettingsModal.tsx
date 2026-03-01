@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import type { AuthToken } from '../../src/api/types';
+import { ServerConfigEditor } from './ServerConfigEditor';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -108,6 +109,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
   const [configuredMainModel, setConfiguredMainModel] = useState('');
   const [diarizationParallel, setDiarizationParallel] = useState<boolean | null>(null);
+  const [serverConfigUpdates, setServerConfigUpdates] = useState<Record<string, unknown>>({});
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -411,9 +413,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     await apiClient.syncFromConfig();
     apiClient.setAuthToken(clientSettings.authToken || null);
 
+    // Save server config.yaml changes (if any)
+    if (Object.keys(serverConfigUpdates).length > 0) {
+      try {
+        const resp = await apiClient.updateServerConfig(serverConfigUpdates);
+        const failures = Object.entries(resp.results).filter(([, v]) => v !== 'ok');
+        if (failures.length > 0) {
+          toast.error(`Some config updates failed: ${failures.map(([k]) => k).join(', ')}`);
+        } else {
+          toast.success('Server config updated');
+        }
+        setServerConfigUpdates({});
+      } catch {
+        toast.error('Failed to save server config changes');
+      }
+    }
+
     setIsDirty(false);
     onClose();
-  }, [clientSettings, appSettings, shortcutSettings, onClose]);
+  }, [clientSettings, appSettings, shortcutSettings, serverConfigUpdates, onClose]);
 
   if (!isRendered) return null;
 
@@ -1156,6 +1174,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     </div>
   );
 
+  const handleServerConfigFieldChange = useCallback((path: string, value: unknown) => {
+    setServerConfigUpdates((prev) => ({ ...prev, [path]: value }));
+    setIsDirty(true);
+  }, []);
+
   const renderServerTab = () => {
     const handleOpenConfigInEditor = async () => {
       const api = (window as any).electronAPI;
@@ -1175,13 +1198,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     return (
       <div className="space-y-6">
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="mb-4 text-sm text-slate-400">
-            Server settings are stored in{' '}
-            <span className="text-accent-cyan bg-accent-cyan/10 rounded px-1 font-mono">
-              config.yaml
-            </span>
-            . Open it in your system's default editor to review or change server settings.
-          </p>
           <div className="mb-4">
             <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
               Server Admin Token
@@ -1245,26 +1261,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
         </div>
 
-        {diarizationParallel !== null && (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <h3 className="mb-3 text-sm font-semibold text-slate-300">Diarization</h3>
-            <AppleSwitch
-              checked={diarizationParallel}
-              onChange={async (v) => {
-                setDiarizationParallel(v);
-                try {
-                  await apiClient.updateDiarizationSettings({ parallel: v });
-                  toast.success(`Diarization set to ${v ? 'parallel' : 'sequential'}`);
-                } catch {
-                  setDiarizationParallel(!v);
-                  toast.error('Failed to update diarization setting');
-                }
-              }}
-              label="Parallel Processing"
-              description="Run transcription and diarization concurrently (faster but requires more GPU memory). Disable on GPUs with less than 16 GB VRAM to avoid out-of-memory errors."
-            />
-          </div>
-        )}
+        <ServerConfigEditor
+          pendingUpdates={serverConfigUpdates}
+          onFieldChange={handleServerConfigFieldChange}
+        />
       </div>
     );
   };

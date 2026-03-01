@@ -278,6 +278,39 @@ export interface LogsResponse {
   };
 }
 
+// ─── Server Config Tree ──────────────────────────────────────────────────────
+
+export interface ConfigField {
+  key: string;
+  path: string;
+  value: unknown;
+  type: 'string' | 'boolean' | 'integer' | 'float' | 'list' | 'object';
+  comment: string;
+}
+
+export interface ConfigSubsection {
+  key: string;
+  title: string;
+  comment: string;
+  fields: ConfigField[];
+}
+
+export interface ConfigSection {
+  key: string;
+  title: string;
+  comment: string;
+  fields: ConfigField[];
+  subsections: ConfigSubsection[];
+}
+
+export interface ServerConfigTree {
+  sections: ConfigSection[];
+}
+
+export interface ConfigUpdateResponse extends ServerConfigTree {
+  results: Record<string, string>;
+}
+
 // ─── LLM ──────────────────────────────────────────────────────────────────────
 
 export interface LLMStatus {

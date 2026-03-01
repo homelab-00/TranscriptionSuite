@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.0
+  spec_version: 1.1.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -834,11 +834,14 @@ utility_allowlist:
     - text-indigo-400
     - text-left
     - text-lg
+    - text-orange-200
+    - text-orange-400
     - text-orange-500
     - text-red-100
     - text-red-200/90
     - text-red-300
     - text-red-400
+    - text-red-400/80
     - text-right
     - text-slate-200
     - text-slate-300
@@ -1251,6 +1254,22 @@ component_contracts:
     state_rules:
       - id: jan-highlight
         rule: Highlighted January event count and selected-day treatment remain explicit in current mock data states.
+  CollapsibleSection:
+    file: components/views/ServerConfigEditor.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CapBadge:
     file: components/views/ModelManagerTab.tsx
     required_tokens:
@@ -1316,6 +1335,21 @@ component_contracts:
       - motion
       - radii
       - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  FieldRow:
+    file: components/views/ServerConfigEditor.tsx
+    required_tokens:
+      - colors
+      - radii
     allowed_variants: {}
     structural_invariants:
       - id: structure-stable
@@ -1582,6 +1616,22 @@ component_contracts:
     state_rules:
       - id: heading-divider
         rule: Heading divider line remains part of section title structure.
+  ServerConfigEditor:
+    file: components/views/ServerConfigEditor.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+    allowed_variants: {}
+    structural_invariants:
+      - id: config-editor-layout
+        rule: Server config editor keeps search bar, collapsible section list, and type-aware field inputs.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ServerView:
     file: components/views/ServerView.tsx
     required_tokens:
