@@ -109,7 +109,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [createdTokenPlaintext, setCreatedTokenPlaintext] = useState<string | null>(null);
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
   const [configuredMainModel, setConfiguredMainModel] = useState('');
-  const [diarizationParallel, setDiarizationParallel] = useState<boolean | null>(null);
+  const [, setDiarizationParallel] = useState<boolean | null>(null);
   const [serverConfigUpdates, setServerConfigUpdates] = useState<Record<string, unknown>>({});
 
   // Settings state
@@ -433,6 +433,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setIsDirty(false);
     onClose();
   }, [clientSettings, appSettings, shortcutSettings, serverConfigUpdates, onClose]);
+
+  const handleServerConfigFieldChange = useCallback((path: string, value: unknown) => {
+    setServerConfigUpdates((prev) => ({ ...prev, [path]: value }));
+    setIsDirty(true);
+  }, []);
 
   if (!isRendered) return null;
 
@@ -1174,11 +1179,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       </Section>
     </div>
   );
-
-  const handleServerConfigFieldChange = useCallback((path: string, value: unknown) => {
-    setServerConfigUpdates((prev) => ({ ...prev, [path]: value }));
-    setIsDirty(true);
-  }, []);
 
   const renderServerTab = () => {
     const handleOpenConfigInEditor = async () => {
