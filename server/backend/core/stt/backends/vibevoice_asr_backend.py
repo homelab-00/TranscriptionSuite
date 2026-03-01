@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -31,9 +32,12 @@ INPUT_SAMPLE_RATE = 16000
 DEFAULT_TARGET_SAMPLE_RATE = 24000
 DEFAULT_MAX_CHUNK_DURATION_S = 60  # 1 minute
 DEFAULT_LANGUAGE_MODEL = "Qwen/Qwen2.5-7B"
-DEFAULT_MAX_NEW_TOKENS = 32768
+DEFAULT_MAX_NEW_TOKENS = 8192
 DEFAULT_NUM_BEAMS = 1
 DEFAULT_TEMPERATURE = 0.0
+# Maximum wall-clock seconds for a single model.generate() call.
+# Prevents runaway generation when the model fails to produce an EOS token.
+DEFAULT_GENERATE_TIMEOUT_S = 180  # 3 minutes
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +138,34 @@ def _import_vibevoice_asr_classes() -> tuple[type[Any], type[Any]]:
     if last_error is not None:
         raise ImportError(message) from last_error
     raise ImportError(message)
+
+
+class _MaxTimeStoppingCriteria:
+    """HuggingFace-compatible stopping criteria that terminates generation after a wall-clock limit.
+
+    ``model.generate()`` checks stopping criteria after every decoding step,
+    so this limits total wall-clock time without requiring the model to produce
+    an EOS token.  This prevents runaway generation on tricky audio chunks
+    (silence, noise, music) that could otherwise run for 15-30 minutes.
+    """
+
+    def __init__(self, max_seconds: float) -> None:
+        self._max_seconds = max_seconds
+        self._start: float = time.monotonic()
+
+    def __call__(
+        self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs: Any
+    ) -> bool:
+        elapsed = time.monotonic() - self._start
+        if elapsed >= self._max_seconds:
+            logger.warning(
+                "VibeVoice-ASR generate() exceeded %.0fs wall-clock limit (elapsed %.1fs), "
+                "terminating generation early — output may be truncated",
+                self._max_seconds,
+                elapsed,
+            )
+            return True
+        return False
 
 
 class VibeVoiceASRBackend(STTBackend):
@@ -413,11 +445,19 @@ class VibeVoiceASRBackend(STTBackend):
             if progress_callback is not None:
                 progress_callback(i + 1, num_chunks)
 
+            chunk_start_t = time.monotonic()
             raw_segments = self._generate_segments(
                 chunk,
                 audio_sample_rate=audio_sample_rate,
                 language=language,
                 beam_size=beam_size,
+            )
+            logger.info(
+                "VibeVoice-ASR chunk %d/%d completed in %.1fs (%d segments)",
+                i + 1,
+                num_chunks,
+                time.monotonic() - chunk_start_t,
+                len(raw_segments),
             )
 
             for seg in raw_segments:
@@ -472,11 +512,19 @@ class VibeVoiceASRBackend(STTBackend):
             if progress_callback is not None:
                 progress_callback(i + 1, num_chunks)
 
+            chunk_start_t = time.monotonic()
             segments = self._generate_segments(
                 chunk,
                 audio_sample_rate=audio_sample_rate,
                 language=language,
                 beam_size=beam_size,
+            )
+            logger.info(
+                "VibeVoice-ASR chunk %d/%d completed in %.1fs (%d segments)",
+                i + 1,
+                num_chunks,
+                time.monotonic() - chunk_start_t,
+                len(segments),
             )
 
             for seg in segments:
@@ -554,8 +602,15 @@ class VibeVoiceASRBackend(STTBackend):
             generate_kwargs.get("temperature"),
             generate_kwargs.get("max_new_tokens", "<omitted>"),
         )
+
+        # Apply per-chunk wall-clock timeout to prevent runaway generation.
+        timeout_criteria = _MaxTimeStoppingCriteria(DEFAULT_GENERATE_TIMEOUT_S)
+        generate_kwargs["stopping_criteria"] = [timeout_criteria]
+
+        gen_start = time.monotonic()
         with torch.inference_mode():
             output = self._model.generate(**inputs, **generate_kwargs)
+        gen_elapsed = time.monotonic() - gen_start
         sequences = getattr(output, "sequences", output)
 
         if not isinstance(sequences, torch.Tensor):
@@ -602,11 +657,12 @@ class VibeVoiceASRBackend(STTBackend):
 
         log_fn = logger.debug if parse_mode in {"direct_json", "embedded_json"} else logger.info
         log_fn(
-            "VibeVoice-ASR parse mode=%s decoded_chars=%d segments=%d json_start=%s unbalanced=%s in_string=%s "
+            "VibeVoice-ASR parse mode=%s decoded_chars=%d segments=%d generate_time=%.1fs json_start=%s unbalanced=%s in_string=%s "
             "bracket_depth=%s brace_depth=%s",
             parse_mode,
             len(decoded_text),
             len(normalized),
+            gen_elapsed,
             parse_stats.get("has_json_start"),
             parse_stats.get("unbalanced"),
             parse_stats.get("in_string"),
