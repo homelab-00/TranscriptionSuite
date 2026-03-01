@@ -222,6 +222,7 @@ diarization:
     # Run transcription and diarization concurrently (true) or sequentially (false).
     # Parallel is faster but uses more GPU memory. Set to false on GPUs with <16GB VRAM.
     # Default: false (safer for most hardware)
+    # Note that when this is set to (false) we also unload the main model during diarization.
     parallel: false
 
 # ----------------------------------------------------------------------------
