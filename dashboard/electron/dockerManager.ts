@@ -629,7 +629,12 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   const fileArgs = composeFileArgs(runtimeProfile);
 
-  return exec('docker', ['compose', ...fileArgs, 'up', '-d'], {
+  // --no-build: the build section is for manual dev builds only; the packaged
+  //   app copies compose files to a writable dir where the relative build
+  //   context (../..) resolves to the wrong location.
+  // --pull never: image pulling is handled explicitly by pullImage(); letting
+  //   compose pull during "up" can fail on private registries without auth.
+  return exec('docker', ['compose', ...fileArgs, 'up', '-d', '--no-build', '--pull', 'never'], {
     cwd: getComposeDir(),
     env: composeEnv,
   });
