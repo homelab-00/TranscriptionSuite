@@ -624,8 +624,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   upsertComposeEnvValues(envUpdates);
 
-  // Persist logs from the previous container run before recreating it.
-  await persistDockerLogs();
+  // Rotate the persistent server log — adds a session marker and trims old sessions.
+  rotateServerLog();
 
   const fileArgs = composeFileArgs(runtimeProfile);
 
@@ -950,25 +950,17 @@ function getServerLogPath(): string {
 }
 
 /**
- * Save current docker container logs to the persistent server log file.
+ * Mark a new server session in the persistent log file.
  *
- * Each server start is delimited by a session marker line.  Only the last
- * {@link MAX_LOG_SESSIONS} sessions are kept — older sessions are trimmed.
+ * Reads the existing log, appends a session marker, trims to keep only the
+ * last {@link MAX_LOG_SESSIONS} sessions, and overwrites the file.
  *
- * Called at the beginning of {@link startContainer} so that logs from the
- * *previous* run are captured before the container is recreated.
+ * Called at the beginning of {@link startContainer} before the container is
+ * recreated.  Subsequent log lines are appended by {@link appendLogLine}.
  */
-async function persistDockerLogs(): Promise<void> {
+function rotateServerLog(): void {
   try {
     const logPath = getServerLogPath();
-
-    // Capture all logs from the (possibly still-running) container.
-    let currentLogs = '';
-    try {
-      currentLogs = await exec('docker', ['logs', '--timestamps', CONTAINER_NAME]);
-    } catch {
-      // Container may not exist yet on first start — nothing to persist.
-    }
 
     // Read existing persisted log (if any).
     let existing = '';
@@ -978,9 +970,9 @@ async function persistDockerLogs(): Promise<void> {
       // File doesn't exist yet — fine.
     }
 
-    // Append a session marker + new logs.
+    // Append a session marker for the new start.
     const marker = `${SESSION_MARKER} ${new Date().toISOString()} ══════\n`;
-    const combined = existing + marker + (currentLogs ? currentLogs.trimEnd() + '\n' : '');
+    const combined = existing + marker;
 
     // Trim to keep only the last MAX_LOG_SESSIONS sessions.
     const parts = combined.split(SESSION_MARKER);
@@ -993,7 +985,19 @@ async function persistDockerLogs(): Promise<void> {
 
     fs.writeFileSync(logPath, trimmed, 'utf-8');
   } catch (err) {
-    console.warn('[DockerManager] Failed to persist docker logs:', err);
+    console.warn('[DockerManager] Failed to rotate server log:', err);
+  }
+}
+
+/**
+ * Append a single log line to the persistent server log file.
+ * Called for every line received via the docker log stream.
+ */
+function appendLogLine(line: string): void {
+  try {
+    fs.appendFileSync(getServerLogPath(), line + '\n', 'utf-8');
+  } catch {
+    // Best-effort — don't crash on write failures.
   }
 }
 
@@ -1039,6 +1043,7 @@ function startLogStream(onData: (line: string) => void, tail?: number): void {
     }
     for (const line of lines) {
       if (line.length > 0) {
+        appendLogLine(line);
         onData(line);
       }
     }
