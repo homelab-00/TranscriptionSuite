@@ -262,6 +262,9 @@ const AppInner: React.FC = () => {
 
       try {
         const shouldRunOnboarding = !docker.container.exists;
+        const modelOnboardingCompleted =
+          (await getConfig<boolean>('app.modelSelectionOnboardingCompleted')) === true;
+        const shouldRunModelOnboarding = !modelOnboardingCompleted;
         const dockerApi = (window as any).electronAPI?.docker;
 
         const readComposeEnvValue = async (key: string): Promise<string> => {
@@ -306,7 +309,7 @@ const AppInner: React.FC = () => {
         let selectedMainModel = (models?.mainTranscriberModel ?? '').trim();
         let selectedLiveModel = (models?.liveTranscriberModel ?? '').trim();
 
-        if (shouldRunOnboarding) {
+        if (shouldRunModelOnboarding) {
           const storedMainSelection =
             (await getConfig<string>('server.mainModelSelection')) ?? MAIN_RECOMMENDED_MODEL;
           const storedLiveSelection =
@@ -339,6 +342,7 @@ const AppInner: React.FC = () => {
             setConfig('server.mainCustomModel', ''),
             setConfig('server.liveModelSelection', mapBackendModelToUiSelection(selectedLiveModel)),
             setConfig('server.liveCustomModel', ''),
+            setConfig('app.modelSelectionOnboardingCompleted', true),
           ]);
         } else if (!selectedMainModel || !selectedLiveModel) {
           const [

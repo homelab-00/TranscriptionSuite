@@ -54,6 +54,7 @@ export interface ClientConfig {
     updateChecksEnabled: boolean;
     updateCheckIntervalMode: '24h' | '7d' | '28d' | 'custom';
     updateCheckCustomHours: number;
+    modelSelectionOnboardingCompleted: boolean;
     pasteAtCursor: boolean;
   };
   /** Global keyboard shortcuts (Electron accelerator strings) */
@@ -108,6 +109,7 @@ const DEFAULT_CONFIG: ClientConfig = {
     updateChecksEnabled: false,
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
+    modelSelectionOnboardingCompleted: false,
     pasteAtCursor: false,
   },
   shortcuts: {
