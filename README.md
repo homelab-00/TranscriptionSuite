@@ -280,7 +280,7 @@ The Dashboard features **sidebar navigation** with these main views:
 - **Model Manager**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
 - **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live
-- **Settings**: Connection, audio, diarization, notebook, app behaviour, and HuggingFace token management
+- **Settings**: 4-tab modal for Connection, Client Audio, Server Config, and Notebook settings. Server config is now edited locally (sparse YAML override to `~/.config/TranscriptionSuite/config.yaml`) with no server dependency; changes require a server restart to apply. Client settings are persisted via electron-store.
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
 recording state (11 distinct states), and the context menu provides quick controls

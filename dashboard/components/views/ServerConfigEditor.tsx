@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ChevronDown, Search, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
-import { apiClient } from '../../src/api/client';
+import { ChevronDown, Search, Loader2, AlertTriangle, FileWarning } from 'lucide-react';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { parseConfigTree, flattenYamlToOverrides } from '../../src/utils/configTree';
 import type {
   ConfigField,
   ConfigSection,
@@ -59,6 +59,14 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
+/** Shallow-compare two values for equality. */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (Array.isArray(a) && Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b);
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -109,15 +117,21 @@ const FieldRow: React.FC<{
   field: ConfigField;
   currentValue: unknown;
   isDirty: boolean;
+  isOverridden: boolean;
   onChange: (path: string, value: unknown) => void;
-}> = ({ field, currentValue, isDirty, onChange }) => {
+}> = ({ field, currentValue, isDirty, isOverridden, onChange }) => {
   const displayValue = currentValue ?? field.value;
+
+  // Visual indicator: dirty (unsaved) gets cyan accent, overridden gets amber
+  const ringClass = isDirty
+    ? 'bg-accent-cyan/5 ring-accent-cyan/20 ring-1'
+    : isOverridden
+      ? 'bg-amber-500/5 ring-amber-400/15 ring-1'
+      : '';
 
   if (field.type === 'boolean') {
     return (
-      <div
-        className={`rounded-lg px-3 py-1 ${isDirty ? 'bg-accent-cyan/5 ring-accent-cyan/20 ring-1' : ''}`}
-      >
+      <div className={`rounded-lg px-3 py-1 ${ringClass}`}>
         <AppleSwitch
           checked={displayValue === true}
           onChange={(v) => onChange(field.path, v)}
@@ -125,6 +139,9 @@ const FieldRow: React.FC<{
           description={field.comment}
           size="sm"
         />
+        {isOverridden && !isDirty && (
+          <span className="ml-1 text-[9px] text-amber-400/60">overridden</span>
+        )}
       </div>
     );
   }
@@ -133,11 +150,12 @@ const FieldRow: React.FC<{
   const step = field.type === 'float' ? '0.01' : undefined;
 
   return (
-    <div
-      className={`rounded-lg px-3 py-2 ${isDirty ? 'bg-accent-cyan/5 ring-accent-cyan/20 ring-1' : ''}`}
-    >
-      <label className="mb-1 block text-xs font-medium text-slate-400">
+    <div className={`rounded-lg px-3 py-2 ${ringClass}`}>
+      <label className="mb-1 flex items-center gap-2 text-xs font-medium text-slate-400">
         {field.key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+        {isOverridden && !isDirty && (
+          <span className="text-[9px] text-amber-400/60">overridden</span>
+        )}
       </label>
       <input
         type={inputType}
@@ -164,18 +182,47 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
   onFieldChange,
 }) => {
   const [configTree, setConfigTree] = useState<ServerConfigTree | null>(null);
+  /** Flat map of dotted-path → value for keys present in the user's local config. */
+  const [localOverrides, setLocalOverrides] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchConfig = useCallback(async () => {
+  // ── Load template + local config from disk via IPC ──
+  const loadConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const tree = await apiClient.getServerConfig();
+      const api = (
+        window as unknown as { electronAPI: import('../../electron/preload').ElectronAPI }
+      ).electronAPI;
+
+      // 1. Read the template (bundled defaults) to build the full field tree
+      const templateYaml = await api.serverConfig.readTemplate();
+      if (!templateYaml) {
+        setError('Could not find template config.yaml — is the app installed correctly?');
+        setLoading(false);
+        return;
+      }
+      const tree = parseConfigTree(templateYaml);
       setConfigTree(tree);
+
+      // 2. Read the user's local overrides (sparse YAML)
+      const localYaml = await api.serverConfig.readLocal();
+      if (localYaml) {
+        try {
+          const YAML = await import('yaml');
+          const parsed = YAML.parse(localYaml) as Record<string, unknown> | null;
+          if (parsed && typeof parsed === 'object') {
+            const overrides = flattenYamlToOverrides(parsed);
+            setLocalOverrides(overrides);
+          }
+        } catch {
+          // Malformed local YAML — treat as empty overrides
+        }
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load server config';
+      const msg = err instanceof Error ? err.message : 'Failed to load configuration files';
       setError(msg);
     } finally {
       setLoading(false);
@@ -183,8 +230,26 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
   }, []);
 
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    loadConfig();
+  }, [loadConfig]);
+
+  // ── Effective value: pendingUpdate > localOverride > template default ──
+  const getEffectiveValue = useCallback(
+    (field: ConfigField): unknown => {
+      if (field.path in pendingUpdates) return pendingUpdates[field.path];
+      if (field.path in localOverrides) return localOverrides[field.path];
+      return field.value;
+    },
+    [pendingUpdates, localOverrides],
+  );
+
+  // ── Is a field's value different from the template default? ──
+  const isFieldOverridden = useCallback(
+    (field: ConfigField): boolean => {
+      return field.path in localOverrides && !valuesEqual(localOverrides[field.path], field.value);
+    },
+    [localOverrides],
+  );
 
   // Filter sections/fields by search query
   const filteredSections = useMemo(() => {
@@ -237,11 +302,11 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
     (section: ConfigSection): number => {
       let count = 0;
       for (const f of section.fields) {
-        if (f.path in pendingUpdates) count++;
+        if (f.path in pendingUpdates && !valuesEqual(pendingUpdates[f.path], f.value)) count++;
       }
       for (const sub of section.subsections) {
         for (const f of sub.fields) {
-          if (f.path in pendingUpdates) count++;
+          if (f.path in pendingUpdates && !valuesEqual(pendingUpdates[f.path], f.value)) count++;
         }
       }
       return count;
@@ -254,7 +319,7 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
     return (
       <div className="flex items-center justify-center py-12 text-slate-500">
         <Loader2 size={20} className="mr-2 animate-spin" />
-        Loading server configuration…
+        Loading configuration…
       </div>
     );
   }
@@ -266,15 +331,15 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
         <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
           <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-400" />
           <div>
-            <p className="text-sm font-medium text-red-300">Could not load server config</p>
+            <p className="text-sm font-medium text-red-300">Could not load config</p>
             <p className="mt-1 text-xs text-red-400/80">{error}</p>
           </div>
         </div>
         <button
-          onClick={fetchConfig}
+          onClick={loadConfig}
           className="flex items-center gap-2 text-xs text-slate-400 transition-colors hover:text-white"
         >
-          <RefreshCw size={12} /> Retry
+          Retry
         </button>
       </div>
     );
@@ -283,7 +348,10 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
   // ── Empty state ──
   if (!configTree || configTree.sections.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-slate-500">No configuration sections found.</p>
+      <div className="flex flex-col items-center gap-2 py-8">
+        <FileWarning size={24} className="text-slate-500" />
+        <p className="text-sm text-slate-500">No configuration sections found.</p>
+      </div>
     );
   }
 
@@ -320,8 +388,12 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
             <FieldRow
               key={field.path}
               field={field}
-              currentValue={pendingUpdates[field.path] ?? field.value}
-              isDirty={field.path in pendingUpdates}
+              currentValue={getEffectiveValue(field)}
+              isDirty={
+                field.path in pendingUpdates &&
+                !valuesEqual(pendingUpdates[field.path], field.value)
+              }
+              isOverridden={isFieldOverridden(field)}
               onChange={onFieldChange}
             />
           ))}
@@ -340,8 +412,12 @@ export const ServerConfigEditor: React.FC<ServerConfigEditorProps> = ({
                 <FieldRow
                   key={field.path}
                   field={field}
-                  currentValue={pendingUpdates[field.path] ?? field.value}
-                  isDirty={field.path in pendingUpdates}
+                  currentValue={getEffectiveValue(field)}
+                  isDirty={
+                    field.path in pendingUpdates &&
+                    !valuesEqual(pendingUpdates[field.path], field.value)
+                  }
+                  isOverridden={isFieldOverridden(field)}
                   onChange={onFieldChange}
                 />
               ))}

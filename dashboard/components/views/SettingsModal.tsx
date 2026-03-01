@@ -30,6 +30,7 @@ import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
+import { buildSparseYaml } from '../../src/utils/configTree';
 import type { AuthToken } from '../../src/api/types';
 import { ServerConfigEditor } from './ServerConfigEditor';
 
@@ -414,16 +415,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     await apiClient.syncFromConfig();
     apiClient.setAuthToken(clientSettings.authToken || null);
 
-    // Save server config.yaml changes (if any)
+    // Save server config.yaml changes (if any) — write sparse overrides to local file
     if (Object.keys(serverConfigUpdates).length > 0) {
       try {
-        const resp = await apiClient.updateServerConfig(serverConfigUpdates);
-        const failures = Object.entries(resp.results).filter(([, v]) => v !== 'ok');
-        if (failures.length > 0) {
-          toast.error(`Some config updates failed: ${failures.map(([k]) => k).join(', ')}`);
-        } else {
-          toast.success('Server config updated');
-        }
+        const yamlText = buildSparseYaml(serverConfigUpdates);
+        await api.serverConfig.writeLocal(yamlText);
+        toast.success('Server config saved — restart the server for changes to take effect');
         setServerConfigUpdates({});
       } catch {
         toast.error('Failed to save server config changes');

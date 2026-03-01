@@ -538,6 +538,56 @@ ipcMain.handle('app:ensureServerConfig', async () => {
   return configPath;
 });
 
+// ---------------------------------------------------------------------------
+// Server config — local-first file editing
+// ---------------------------------------------------------------------------
+
+/** Return the path to the bundled template config.yaml (dev or packaged). */
+function getTemplateConfigPath(): string | null {
+  const candidates = [
+    // Dev mode: repo server/config.yaml
+    path.resolve(__dirname, '../../server/config.yaml'),
+    // Packaged: bundled extra resource
+    path.join(process.resourcesPath ?? '', 'config.yaml'),
+  ];
+  for (const p of candidates) {
+    try {
+      fs.accessSync(p, fs.constants.R_OK);
+      return p;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
+/** Read the bundled template config.yaml as text. */
+ipcMain.handle('serverConfig:readTemplate', async () => {
+  const templatePath = getTemplateConfigPath();
+  if (!templatePath) return null;
+  return fs.readFileSync(templatePath, 'utf-8');
+});
+
+/** Read the user's local config.yaml (sparse overrides). Returns null if missing. */
+ipcMain.handle('serverConfig:readLocal', async () => {
+  const configDir = app.getPath('userData');
+  const configPath = path.join(configDir, 'config.yaml');
+  try {
+    return fs.readFileSync(configPath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+});
+
+/** Write text to the user's local config.yaml. Creates parent dirs if needed. */
+ipcMain.handle('serverConfig:writeLocal', async (_event, yamlText: string) => {
+  const configDir = app.getPath('userData');
+  const configPath = path.join(configDir, 'config.yaml');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(configPath, yamlText, 'utf-8');
+});
+
 ipcMain.handle('app:removeConfigAndCache', async () => {
   const userDataDir = app.getPath('userData');
   // Linux default: $XDG_CACHE_HOME or ~/.cache

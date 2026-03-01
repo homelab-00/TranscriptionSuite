@@ -102,6 +102,10 @@
       {
         "from": "../server/docker/docker-compose.gpu.yml",
         "to": "docker/docker-compose.gpu.yml"
+      },
+      {
+        "from": "../server/config.yaml",
+        "to": "config.yaml"
       }
     ],
     "afterPack": "./scripts/afterPack.cjs",

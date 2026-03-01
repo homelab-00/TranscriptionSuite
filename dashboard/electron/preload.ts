@@ -144,6 +144,11 @@ export interface ElectronAPI {
       callback: (bindings: Array<{ id: string; trigger: string }>) => void,
     ) => () => void;
   };
+  serverConfig: {
+    readTemplate: () => Promise<string | null>;
+    readLocal: () => Promise<string | null>;
+    writeLocal: (yamlText: string) => Promise<void>;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -268,5 +273,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('shortcuts:portalChanged', handler);
       return () => ipcRenderer.removeListener('shortcuts:portalChanged', handler);
     },
+  },
+  serverConfig: {
+    readTemplate: () => ipcRenderer.invoke('serverConfig:readTemplate') as Promise<string | null>,
+    readLocal: () => ipcRenderer.invoke('serverConfig:readLocal') as Promise<string | null>,
+    writeLocal: (yamlText: string) =>
+      ipcRenderer.invoke('serverConfig:writeLocal', yamlText) as Promise<void>,
   },
 } satisfies ElectronAPI);

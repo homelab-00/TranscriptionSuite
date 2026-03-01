@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.1.0
+  spec_version: 1.1.1
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -392,6 +392,7 @@ utility_allowlist:
     - bg-accent-orange
     - bg-accent-orange/10
     - bg-amber-500/10
+    - bg-amber-500/5
     - bg-black/10
     - bg-black/20
     - bg-black/30
@@ -763,6 +764,8 @@ utility_allowlist:
     - right-4
     - ring-0
     - ring-1
+    - ring-accent-cyan/20
+    - ring-amber-400/15
     - ring-white/20
     - ring-white/5
     - rounded
@@ -824,6 +827,7 @@ utility_allowlist:
     - text-accent-orange
     - text-amber-300/80
     - text-amber-400
+    - text-amber-400/60
     - text-amber-400/80
     - text-base
     - text-black

@@ -335,10 +335,6 @@ export interface ServerConfigTree {
   sections: ConfigSection[];
 }
 
-export interface ConfigUpdateResponse extends ServerConfigTree {
-  results: Record<string, string>;
-}
-
 // ─── LLM ──────────────────────────────────────────────────────────────────────
 
 export interface LLMStatus {

@@ -260,10 +260,11 @@ TranscriptionSuite/
 │   │   ├── trayManager.ts        # System tray icon/menu with 11 state-aware icons (recording/live/model controls; no server start/stop)
 │   │   ├── updateManager.ts      # Opt-in update checker (app via GitHub, image via GHCR)
 │   │   └── tsconfig.json         # TypeScript config for main process
-│   ├── src/                      # Shared source (API, config, hooks, services)
+│   ├── src/                      # Shared source (API, config, hooks, services, utilities)
 │   │   ├── api/
 │   │   │   ├── client.ts         # REST API client for server communication
 │   │   │   └── types.ts          # API request/response type definitions
+│   │   ├── utils/configTree.ts   # Config YAML parser (local-first) + sparse override builder
 │   │   ├── config/store.ts       # Client config (electron-store / localStorage)
 │   │   ├── hooks/                # React hooks (includes server health + tray state sync; see Key Modules)
 │   │   ├── services/             # Core services
@@ -1024,8 +1025,8 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration |
-| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing and `onClientLogLine` bridge wiring |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write |
+| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal) |
 | `dockerManager.ts` | Docker CLI wrapper for container/image management and additive optional-family install env updates |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
@@ -1066,6 +1067,12 @@ npm run dev:electron
 | `ServerStatusContext.tsx` | React context provider for server connection state |
 | `AdminStatusContext.tsx` | React context provider for admin authentication state |
 
+**Utilities (`src/utils/`):**
+
+| Module | Purpose |
+|--------|---------|  
+| `configTree.ts` | Parse bundled template config.yaml into structured field tree; flatten local YAML to sparse overrides; build sparse YAML from override updates (preserves comments on in-place edit) |
+
 **Shared Source (`src/`):**
 
 | Module | Purpose |
@@ -1098,7 +1105,7 @@ npm run dev:electron
 | `ModelManagerTab.tsx` | Model Manager: browse by family, view capabilities, download/delete, cache status; treats `None (Disabled)` slot selections as intentionally empty |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
 | `ServerView.tsx` | Docker server management: image selection, container control, persisted main/live model selection including `None (Disabled)` |
-| `SettingsModal.tsx` | 4-tab settings: App, Client, Server, Notebook |
+| `SettingsModal.tsx` | 4-tab settings: App (autoCopy, notifications, server auto-stop, etc.), Client (connection/audio/diarization), Server (template-based config editor with local YAML persistence, no server dependency), Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
 | `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
 | `AddNoteModal.tsx` | Create new recording from calendar time slot |
