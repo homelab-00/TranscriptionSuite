@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import re
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -273,6 +274,7 @@ class VibeVoiceASRBackend(STTBackend):
         vad_filter: bool = True,
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         del (
             initial_prompt,
@@ -293,6 +295,7 @@ class VibeVoiceASRBackend(STTBackend):
                 audio_sample_rate=audio_sample_rate,
                 language=language,
                 beam_size=beam_size,
+                progress_callback=progress_callback,
             )
 
         raw_segments = self._generate_segments(
@@ -324,6 +327,7 @@ class VibeVoiceASRBackend(STTBackend):
         beam_size: int = 5,
         num_speakers: int | None = None,
         hf_token: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> DiarizedTranscriptionResult | None:
         del num_speakers, hf_token
         if task.strip().lower() == "translate":
@@ -338,6 +342,7 @@ class VibeVoiceASRBackend(STTBackend):
                 audio_sample_rate=audio_sample_rate,
                 language=language,
                 beam_size=beam_size,
+                progress_callback=progress_callback,
             )
 
         segments = self._generate_segments(
@@ -382,6 +387,7 @@ class VibeVoiceASRBackend(STTBackend):
         audio_sample_rate: int,
         language: str | None,
         beam_size: int,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Chunk long audio and concatenate transcription results."""
         chunk_samples = int(self._max_chunk_duration_s * audio_sample_rate)
@@ -404,6 +410,8 @@ class VibeVoiceASRBackend(STTBackend):
                 time_offset,
                 time_offset + chunk_duration,
             )
+            if progress_callback is not None:
+                progress_callback(i + 1, num_chunks)
 
             raw_segments = self._generate_segments(
                 chunk,
@@ -437,6 +445,7 @@ class VibeVoiceASRBackend(STTBackend):
         audio_sample_rate: int,
         language: str | None,
         beam_size: int,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> DiarizedTranscriptionResult:
         """Chunk long audio and concatenate diarized transcription results."""
         chunk_samples = int(self._max_chunk_duration_s * audio_sample_rate)
@@ -460,6 +469,8 @@ class VibeVoiceASRBackend(STTBackend):
                 time_offset,
                 time_offset + chunk_duration,
             )
+            if progress_callback is not None:
+                progress_callback(i + 1, num_chunks)
 
             segments = self._generate_segments(
                 chunk,

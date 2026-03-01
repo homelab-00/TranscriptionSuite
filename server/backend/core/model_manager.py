@@ -64,6 +64,7 @@ class TranscriptionJobTracker:
         self._active_job_id: str | None = None
         self._active_user: str | None = None
         self._cancelled: bool = False
+        self._progress: dict[str, Any] | None = None
         self._lock = threading.Lock()
 
     def try_start_job(self, user: str) -> tuple[bool, str | None, str | None]:
@@ -105,6 +106,7 @@ class TranscriptionJobTracker:
                 self._active_job_id = None
                 self._active_user = None
                 self._cancelled = False
+                self._progress = None
                 return True
             return False
 
@@ -152,6 +154,16 @@ class TranscriptionJobTracker:
                 return (True, self._active_user)
             return (False, None)
 
+    def update_progress(self, current: int, total: int, message: str = "") -> None:
+        """Update the progress of the current transcription job."""
+        with self._lock:
+            self._progress = {"current": current, "total": total, "message": message}
+
+    def clear_progress(self) -> None:
+        """Clear the current progress information."""
+        with self._lock:
+            self._progress = None
+
     def get_status(self) -> dict[str, Any]:
         """Get the current job tracker status."""
         with self._lock:
@@ -160,6 +172,7 @@ class TranscriptionJobTracker:
                 "active_user": self._active_user,
                 "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
                 "cancellation_requested": self._cancelled,
+                "progress": self._progress,
             }
 
 

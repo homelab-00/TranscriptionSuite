@@ -7,6 +7,7 @@ STTBackend interface so the engine doesn't depend on it directly.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -107,8 +108,9 @@ class WhisperBackend(STTBackend):
         vad_filter: bool = True,
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
-        del audio_sample_rate
+        del audio_sample_rate, progress_callback
         if self._model is None:
             raise RuntimeError("Whisper model is not loaded")
 

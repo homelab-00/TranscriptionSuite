@@ -40,6 +40,7 @@ def transcribe_then_diarize(
     word_timestamps: bool = True,
     expected_speakers: int | None = None,
     cancellation_check: Callable[[], bool] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[TranscriptionResult, DiarizationResult | None]:
     """Run transcription and diarization **sequentially**.
 
@@ -65,6 +66,7 @@ def transcribe_then_diarize(
         translation_target_language=translation_target_language,
         word_timestamps=word_timestamps,
         cancellation_check=cancellation_check,
+        progress_callback=progress_callback,
     )
     logger.info("Transcription complete — unloading STT model before diarization")
     model_manager.unload_transcription_model()  # Frees ~1-10GB VRAM depending on backend
@@ -107,6 +109,7 @@ def transcribe_and_diarize(
     word_timestamps: bool = True,
     expected_speakers: int | None = None,
     cancellation_check: Callable[[], bool] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[TranscriptionResult, DiarizationResult | None]:
     """Run transcription and diarization in parallel.
 
@@ -147,6 +150,7 @@ def transcribe_and_diarize(
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
             cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
         )
         return result, None
 
@@ -169,6 +173,7 @@ def transcribe_and_diarize(
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
             cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
         )
 
     def _do_diarize() -> DiarizationResult:

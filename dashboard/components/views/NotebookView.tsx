@@ -36,7 +36,7 @@ import { useImportQueue } from '../../src/hooks/useImportQueue';
 import type { ImportJob, UseImportQueueReturn } from '../../src/hooks/useImportQueue';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
-import type { Recording } from '../../src/api/types';
+import type { AdminStatus, Recording } from '../../src/api/types';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
@@ -121,6 +121,7 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
           <ImportTab
             queue={importQueue}
             supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
+            adminStatus={admin.status}
           />
         );
     }
@@ -1278,9 +1279,11 @@ const SearchTab: React.FC<{ onNoteClick: (note: any) => void }> = ({ onNoteClick
 const ImportTab = ({
   queue,
   supportsExplicitWordTimestampToggle,
+  adminStatus,
 }: {
   queue: UseImportQueueReturn;
   supportsExplicitWordTimestampToggle: boolean;
+  adminStatus: AdminStatus | null;
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diarization, setDiarization] = useState(true);
@@ -1363,8 +1366,13 @@ const ImportTab = ({
     switch (job.status) {
       case 'pending':
         return 'Queued';
-      case 'processing':
+      case 'processing': {
+        const progress = (adminStatus?.models as any)?.job_tracker?.progress;
+        if (progress?.total > 0) {
+          return `Chunk ${progress.current}/${progress.total}`;
+        }
         return 'Processing...';
+      }
       case 'success':
         return `Done — ID ${job.result?.recording_id}`;
       case 'error':

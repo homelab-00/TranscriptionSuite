@@ -414,6 +414,7 @@ class ParakeetBackend(STTBackend):
         vad_filter: bool = True,
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         del audio_sample_rate
         if self._model is None:
@@ -436,7 +437,11 @@ class ParakeetBackend(STTBackend):
         total_duration = total_samples / SAMPLE_RATE
 
         if total_duration > self._max_chunk_duration_s:
-            return self._transcribe_long(audio, word_timestamps=word_timestamps)
+            return self._transcribe_long(
+                audio,
+                word_timestamps=word_timestamps,
+                progress_callback=progress_callback,
+            )
 
         return self._transcribe_short(audio, word_timestamps=word_timestamps, language=language)
 
@@ -502,6 +507,7 @@ class ParakeetBackend(STTBackend):
         word_timestamps: bool = True,
         transcribe_fn: Callable[..., Any] | None = None,
         language: str = "en",
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Chunk long audio at ~20 min boundaries and concatenate results."""
         if transcribe_fn is None:
@@ -523,6 +529,8 @@ class ParakeetBackend(STTBackend):
                 f"Transcribing chunk {i + 1}/{num_chunks} "
                 f"({time_offset:.0f}s - {time_offset + len(chunk) / SAMPLE_RATE:.0f}s)"
             )
+            if progress_callback is not None:
+                progress_callback(i + 1, num_chunks)
 
             output = transcribe_fn(chunk, timestamps=word_timestamps)
             chunk_segments = self._parse_output(output, word_timestamps=word_timestamps)

@@ -664,6 +664,7 @@ class AudioToTextRecorder:
         word_timestamps: bool = True,
         apply_vad_preprocessing: bool = True,
         cancellation_check: Callable[[], bool] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> TranscriptionResult:
         """
         Transcribe an audio/video file directly (bypasses streaming recording workflow).
@@ -732,6 +733,7 @@ class AudioToTextRecorder:
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
             cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
         )
 
     def transcribe_audio(
@@ -744,6 +746,7 @@ class AudioToTextRecorder:
         word_timestamps: bool = True,
         initial_prompt: str | None = None,
         cancellation_check: Callable[[], bool] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> TranscriptionResult:
         """
         Transcribe preprocessed audio data directly (bypasses streaming recording workflow).
@@ -818,6 +821,7 @@ class AudioToTextRecorder:
                     vad_filter=self.faster_whisper_vad_filter,
                     word_timestamps=word_timestamps,
                     translation_target_language=effective_target,
+                    progress_callback=progress_callback,
                 )
 
                 # Collect results

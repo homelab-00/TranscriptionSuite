@@ -455,6 +455,10 @@ async def upload_and_transcribe(
         tmp_path = Path(tmp.name)
 
     try:
+        # Progress callback to update job tracker with chunk progress
+        def on_progress(current: int, total: int) -> None:
+            model_manager.job_tracker.update_progress(current, total)
+
         # Get transcription engine
         engine = model_manager.transcription_engine
 
@@ -500,6 +504,7 @@ async def upload_and_transcribe(
                     task="translate" if translation_enabled else "transcribe",
                     beam_size=engine.beam_size,
                     num_speakers=expected_speakers,
+                    progress_callback=on_progress,
                 )
 
                 from server.core.stt.engine import TranscriptionResult
@@ -572,6 +577,7 @@ async def upload_and_transcribe(
                     ),
                     word_timestamps=need_word_timestamps,
                     expected_speakers=expected_speakers,
+                    progress_callback=on_progress,
                 )
 
                 if diar_result is not None:
@@ -597,6 +603,7 @@ async def upload_and_transcribe(
                         translation_target_language if translation_enabled else None
                     ),
                     word_timestamps=need_word_timestamps,
+                    progress_callback=on_progress,
                 )
 
         # Determine recorded_at timestamp

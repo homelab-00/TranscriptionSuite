@@ -13,6 +13,7 @@ from __future__ import annotations
 import functools
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -65,6 +66,7 @@ class CanaryBackend(ParakeetBackend):
         vad_filter: bool = True,
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         del audio_sample_rate
         if self._model is None:
@@ -99,6 +101,7 @@ class CanaryBackend(ParakeetBackend):
                 word_timestamps=word_timestamps,
                 transcribe_fn=canary_fn,
                 language=source_lang,
+                progress_callback=progress_callback,
             )
 
         return self._transcribe_short_canary(

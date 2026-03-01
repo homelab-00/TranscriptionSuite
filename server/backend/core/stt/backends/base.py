@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -77,6 +78,7 @@ class STTBackend(abc.ABC):
         vad_filter: bool = True,
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Transcribe audio and return normalised segments + info.
 
@@ -117,6 +119,7 @@ class STTBackend(abc.ABC):
         beam_size: int = 5,
         num_speakers: int | None = None,
         hf_token: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> DiarizedTranscriptionResult | None:
         """Transcribe with integrated diarization (single-pass).
 

@@ -147,8 +147,8 @@ export class APIClient {
 
   private async postFormData<T>(path: string, formData: FormData): Promise<T> {
     const controller = new AbortController();
-    // 10-minute timeout for large audio uploads
-    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    // 60-minute timeout for large audio uploads (long files with VibeVoice-ASR can take 25+ min)
+    const timeoutId = setTimeout(() => controller.abort(), 60 * 60 * 1000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
@@ -160,7 +160,7 @@ export class APIClient {
       return res.json();
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        throw new APIError(408, 'Upload timed out after 10 minutes', path);
+        throw new APIError(408, 'Upload timed out after 60 minutes', path);
       }
       throw err;
     } finally {
