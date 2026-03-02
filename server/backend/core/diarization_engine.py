@@ -171,10 +171,6 @@ class DiarizationEngine:
         logger.info(f"Loading PyAnnote diarization pipeline: {self.model}")
 
         try:
-            if HAS_TORCH and torch is not None:
-                torch.backends.cuda.matmul.allow_tf32 = False
-                torch.backends.cudnn.allow_tf32 = False
-
             self._pipeline = Pipeline.from_pretrained(
                 self.model,
                 token=self.hf_token,
@@ -186,6 +182,13 @@ class DiarizationEngine:
                     self._pipeline = self._pipeline.to(torch.device("cuda"))
                 else:
                     self._pipeline = self._pipeline.to(torch.device("cpu"))
+
+                # Re-enable TF32 for inference performance (~10-15% GPU uplift).
+                # pyannote disables it globally for training reproducibility,
+                # but inference-only workloads benefit from the faster math.
+                if torch.cuda.is_available():
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
 
             # Apply embedding batch size from config
             cfg = get_config()

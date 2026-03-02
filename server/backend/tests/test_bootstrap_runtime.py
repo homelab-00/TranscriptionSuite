@@ -962,8 +962,9 @@ def test_main_reports_existing_optional_dependency_installs_without_install_flag
     vibevoice = features["vibevoice_asr"]  # type: ignore[index]
     assert whisper["available"] is True  # type: ignore[index]
     assert whisper["reason"] == "ready"  # type: ignore[index]
-    assert nemo["available"] is True  # type: ignore[index]
-    assert nemo["reason"] == "ready"  # type: ignore[index]
-    assert vibevoice["available"] is True  # type: ignore[index]
-    assert vibevoice["reason"] == "ready"  # type: ignore[index]
-    assert vibevoice["variant"] == "legacy"  # type: ignore[index]
+    # NeMo and VibeVoice are not selected by the configured whisper models,
+    # so their feature checks are skipped entirely (Change 1: conditional backend checks).
+    assert nemo["available"] is False  # type: ignore[index]
+    assert nemo["reason"] == "not_selected"  # type: ignore[index]
+    assert vibevoice["available"] is False  # type: ignore[index]
+    assert vibevoice["reason"] == "not_selected"  # type: ignore[index]

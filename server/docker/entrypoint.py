@@ -30,6 +30,36 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
+# torchcodec: broken with current torch/FFmpeg pairing.
+# Non-fatal since we always pass in-memory numpy arrays.
+warnings.filterwarnings(
+    "ignore", message=r"torchcodec is not installed correctly", category=UserWarning
+)
+
+# pydub 0.25.1: non-raw regex strings. SyntaxWarning on 3.13, SyntaxError on 3.14.
+warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"pydub\..*")
+
+# lhotse (NeMo transitive): same invalid escape sequence issue.
+warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"lhotse\..*")
+
+# torch.distributed ddp_comm_hooks: FutureWarning about functools.partial.
+warnings.filterwarnings(
+    "ignore",
+    message=r"functools\.partial will be a method descriptor",
+    category=FutureWarning,
+)
+
+# Suppress NeMo runtime logging noise (actual errors use application loggers).
+for _logger_name in (
+    "nemo_logger",
+    "nv_one_logger",
+    "nv_one_logger.api.config",
+    "nv_one_logger.exporter.export_config_manager",
+    "nv_one_logger.training_telemetry",
+    "nv_one_logger.training_telemetry.api.training_telemetry_provider",
+):
+    logging.getLogger(_logger_name).setLevel(logging.ERROR)
+
 # Add app root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

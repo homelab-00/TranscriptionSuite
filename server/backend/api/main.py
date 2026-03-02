@@ -298,12 +298,17 @@ def _start_import_prewarming() -> threading.Thread | None:
         "numexpr",
         "matplotlib.font_manager",
         "pyannote.audio",
-        "pydub",
     ]
 
     def _prewarm() -> None:
         import importlib
+        import warnings as _w
 
+        _w.filterwarnings(
+            "ignore",
+            message=r"torchcodec is not installed correctly",
+            category=UserWarning,
+        )
         for pkg in _HEAVY_PACKAGES:
             try:
                 importlib.import_module(pkg)

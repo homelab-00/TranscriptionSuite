@@ -1134,7 +1134,10 @@ def main() -> int:
     install_whisper = parse_bool_env("INSTALL_WHISPER", False)
     whisper_status: dict[str, Any]
 
-    if _reuse_feature_cache and not install_whisper:
+    if not whisper_selected and not install_whisper:
+        whisper_status = {"available": False, "reason": "not_selected"}
+        log("faster-whisper not selected by configured models, skipping feature check")
+    elif _reuse_feature_cache and not install_whisper:
         whisper_status = previous_status_payload["features"]["whisper"]
         log(
             "faster-whisper feature check: reusing cached result "
@@ -1210,7 +1213,10 @@ def main() -> int:
     install_nemo = parse_bool_env("INSTALL_NEMO", False)
     nemo_status: dict[str, Any]
 
-    if _reuse_feature_cache and not install_nemo:
+    if not nemo_selected and not install_nemo:
+        nemo_status = {"available": False, "reason": "not_selected"}
+        log("NeMo not selected by configured models, skipping feature check")
+    elif _reuse_feature_cache and not install_nemo:
         nemo_status = previous_status_payload["features"]["nemo"]
         log(f"NeMo feature check: reusing cached result (available={nemo_status.get('available')})")
     else:
@@ -1288,7 +1294,10 @@ def main() -> int:
     )
     vibevoice_quantized_selected = is_vibevoice_asr_quantized_model_name(main_model)
 
-    if _reuse_feature_cache and not install_vibevoice_asr:
+    if not vibevoice_selected and not install_vibevoice_asr:
+        vibevoice_asr_status = {"available": False, "reason": "not_selected"}
+        log("VibeVoice-ASR not selected by configured models, skipping feature check")
+    elif _reuse_feature_cache and not install_vibevoice_asr:
         vibevoice_asr_status = previous_status_payload["features"]["vibevoice_asr"]
         log(
             "VibeVoice-ASR feature check: reusing cached result "
