@@ -14,6 +14,7 @@ import logging
 import os
 import time
 import warnings
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -190,8 +191,9 @@ class WhisperXBackend(STTBackend):
         vad_filter: bool = True,
         word_timestamps: bool = True,
         translation_target_language: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
-        del audio_sample_rate
+        del audio_sample_rate, progress_callback
         if self._model is None:
             raise RuntimeError("WhisperX model is not loaded")
 
@@ -524,7 +526,11 @@ class WhisperXBackend(STTBackend):
                 device=self._device,
             )
             self._align_language = lang
-            logger.info("Alignment model loaded (lang=%s, %.2fs)", lang, time.perf_counter() - t0)
+            logger.info(
+                "Alignment model loaded (lang=%s, %.2fs)",
+                lang,
+                time.perf_counter() - t0,
+            )
 
         t0 = time.perf_counter()
         result = whisperx.align(
