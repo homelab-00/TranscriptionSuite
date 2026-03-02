@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.1.1
+  spec_version: 1.1.2
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -264,7 +264,6 @@ foundation:
         - max-h-[80vh]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
-        - min-w-[170px]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
@@ -657,6 +656,7 @@ utility_allowlist:
     - min-w-25
     - min-w-32.5
     - min-w-36
+    - min-w-42.5
     - min-w-6
     - ml-0.5
     - ml-1
@@ -938,7 +938,6 @@ utility_allowlist:
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
-    - min-w-[170px]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
     - shadow-[0_0_15px_rgba(251,146,60,0.5)]

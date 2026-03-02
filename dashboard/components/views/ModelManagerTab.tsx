@@ -237,7 +237,7 @@ function ModelRow({
                 <ChevronDown size={12} className="ml-1" />
               </Button>
               {selectOpen && (
-                <div className="absolute right-0 z-20 mt-1 min-w-[170px] overflow-hidden rounded-lg border border-white/10 bg-slate-800 py-1 shadow-xl">
+                <div className="absolute right-0 z-20 mt-1 min-w-42.5 overflow-hidden rounded-lg border border-white/10 bg-slate-800 py-1 shadow-xl">
                   {roleOptions.map((opt) => (
                     <button
                       key={opt.role}
@@ -420,7 +420,7 @@ function CustomModelRow({
               <ChevronDown size={12} className="ml-1" />
             </Button>
             {selectOpen && (
-              <div className="absolute right-0 z-20 mt-1 min-w-[170px] overflow-hidden rounded-lg border border-white/10 bg-slate-800 py-1 shadow-xl">
+              <div className="absolute right-0 z-20 mt-1 min-w-42.5 overflow-hidden rounded-lg border border-white/10 bg-slate-800 py-1 shadow-xl">
                 {roleOptions.map((opt) => (
                   <button
                     key={opt.role}
