@@ -1241,12 +1241,17 @@ async function downloadModelToCache(modelId: string): Promise<void> {
   }
 
   // Pass the model ID as an argv value instead of interpolating it into code.
+  // Use the runtime venv's Python, which has huggingface_hub installed.
   const pyCmd =
     "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
-  await execFileAsync('docker', ['exec', CONTAINER_NAME, 'python3', '-c', pyCmd, trimmedModelId], {
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: 600_000, // 10 minutes for large models
-  });
+  await execFileAsync(
+    'docker',
+    ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, trimmedModelId],
+    {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 600_000, // 10 minutes for large models
+    },
+  );
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
