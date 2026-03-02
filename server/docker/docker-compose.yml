@@ -66,6 +66,7 @@ services:
       # HuggingFace token for downloading models (optional)
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
       - HF_HOME=/models
+      - TORCH_HOME=/models/torch-cache
       - BOOTSTRAP_RUNTIME_DIR=/runtime
       - BOOTSTRAP_CACHE_DIR=/runtime/cache
       - BOOTSTRAP_STATUS_FILE=/runtime/bootstrap-status.json

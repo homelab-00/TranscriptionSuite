@@ -147,11 +147,13 @@ def update_hash_with_file(hasher: Any, label: str, path: Path) -> None:
 def compute_dependency_fingerprint(
     python_abi: str,
     arch: str,
+    extras: tuple[str, ...] = (),
 ) -> str:
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
     hasher.update(f"abi={python_abi}".encode())
     hasher.update(f"arch={arch}".encode())
+    hasher.update(f"extras={','.join(sorted(extras))}".encode())
 
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
 
@@ -255,17 +257,21 @@ def run_dependency_sync(
     venv_dir: Path,
     cache_dir: Path,
     timeout_seconds: int,
+    extras: tuple[str, ...] = (),
 ) -> None:
     """Run dependency sync into the runtime virtual environment."""
+    cmd = [
+        "uv",
+        "sync",
+        "--frozen",
+        "--no-dev",
+        "--project",
+        str(PROJECT_DIR),
+    ]
+    for extra in extras:
+        cmd.extend(["--extra", extra])
     run_command(
-        [
-            "uv",
-            "sync",
-            "--frozen",
-            "--no-dev",
-            "--project",
-            str(PROJECT_DIR),
-        ],
+        cmd,
         timeout_seconds=timeout_seconds,
         env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
     )
@@ -306,6 +312,7 @@ def ensure_runtime_dependencies(
     cache_dir: Path,
     timeout_seconds: int,
     log_changes: bool,
+    extras: tuple[str, ...] = (),
 ) -> tuple[Path, str, dict[str, int], dict[str, Any]]:
     ensure_start = time.perf_counter()
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -320,6 +327,7 @@ def ensure_runtime_dependencies(
     fingerprint = compute_dependency_fingerprint(
         python_abi=python_abi,
         arch=arch,
+        extras=extras,
     )
 
     package_delta: dict[str, int] = {
@@ -373,6 +381,7 @@ def ensure_runtime_dependencies(
                 venv_dir=venv_dir,
                 cache_dir=cache_dir,
                 timeout_seconds=timeout_seconds,
+                extras=extras,
             )
             log_timing(
                 f"dependency sync complete (mode={final_sync_mode})",
@@ -428,10 +437,16 @@ def ensure_runtime_dependencies(
 
         log("Runtime dependencies installed")
 
-        # Prune UV package cache to reclaim space from the runtime volume.
-        # Packages are now installed in the venv; the cache is no longer needed.
-        log("Pruning UV cache to reclaim space from runtime volume...")
-        shutil.rmtree(cache_dir, ignore_errors=True)
+        # Optionally prune UV package cache to reclaim space from the runtime volume.
+        # Keeping the cache speeds up future rebuild-syncs (warm wheel cache).
+        # Set BOOTSTRAP_PRUNE_UV_CACHE=true to reclaim ~1-2GB if disk space is tight.
+        if parse_bool_env("BOOTSTRAP_PRUNE_UV_CACHE", False):
+            log("Pruning UV cache to reclaim space from runtime volume...")
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        else:
+            log(
+                "Keeping UV cache for faster future syncs (set BOOTSTRAP_PRUNE_UV_CACHE=true to prune)"
+            )
 
     log_timing(
         f"ensure_runtime_dependencies complete (mode={final_sync_mode})",
@@ -1025,12 +1040,23 @@ def main() -> int:
         log("HF token required by configuration but not provided")
         return 1
 
+    # Compute extras to include in uv sync based on env flags.
+    # This avoids separate `uv pip install` calls for optional packages.
+    requested_extras: list[str] = []
+    if parse_bool_env("INSTALL_WHISPER", False):
+        requested_extras.append("whisper")
+    if parse_bool_env("INSTALL_NEMO", False):
+        requested_extras.append("nemo")
+    # vibevoice_asr uses env-overridable git+ URL, continues with uv pip install
+    extras_tuple = tuple(sorted(requested_extras))
+
     deps_start = time.perf_counter()
     venv_dir, sync_mode, package_delta, diagnostics = ensure_runtime_dependencies(
         runtime_dir=runtime_dir,
         cache_dir=cache_dir,
         timeout_seconds=timeout_seconds,
         log_changes=log_changes,
+        extras=extras_tuple,
     )
     log_timing("runtime dependency bootstrap phase complete", deps_start)
     log(f"Dependency update path: {sync_mode}")

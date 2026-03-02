@@ -25,6 +25,7 @@ Provides a single API serving:
 import asyncio  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
+import threading  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -290,11 +291,38 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         )
 
 
+def _start_import_prewarming() -> threading.Thread | None:
+    """Pre-import heavy ML packages in background to avoid cascading
+    import stalls during whisperx.load_model()."""
+    _HEAVY_PACKAGES = [
+        "numexpr",
+        "matplotlib.font_manager",
+        "pyannote.audio",
+        "pydub",
+    ]
+
+    def _prewarm() -> None:
+        import importlib
+
+        for pkg in _HEAVY_PACKAGES:
+            try:
+                importlib.import_module(pkg)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_prewarm, name="import-prewarm", daemon=True)
+    thread.start()
+    return thread
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan handler for startup/shutdown."""
     # Lazy import to avoid loading torch/faster_whisper at module load time
     from server.core.model_manager import cleanup_models, get_model_manager
+
+    # Start pre-importing heavy ML packages in background
+    prewarm_thread = _start_import_prewarming()
 
     # Startup
     _log_time("lifespan() started")
@@ -347,6 +375,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
 
     # Preload transcription model at startup
+    if prewarm_thread is not None and prewarm_thread.is_alive():
+        _log_time("waiting for import pre-warming to finish...")
+        prewarm_thread.join(timeout=60)
+    _log_time("import pre-warming complete")
+
     selected_main_model = resolve_main_transcriber_model(config)
     if not selected_main_model.strip():
         logger.info("No main model selected; preload skipped (intentional disabled slot mode)")

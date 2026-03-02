@@ -28,6 +28,7 @@ ENV BOOTSTRAP_REQUIRE_HF_TOKEN="false"
 ENV BOOTSTRAP_LOG_CHANGES="true"
 ENV UV_CACHE_DIR="/runtime/cache"
 ENV HF_HOME="/models"
+ENV TORCH_HOME="/models/torch-cache"
 
 # Install runtime + bootstrap build prerequisites.
 # Some Python packages still need local compilation on first bootstrap.
