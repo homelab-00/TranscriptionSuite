@@ -554,7 +554,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.docker
         .checkModelsCached(modelIds)
         .then((result: Record<string, { exists: boolean; size?: string }>) => {
-          setModelCacheStatus(result);
+          setModelCacheStatus((prev) => ({ ...prev, ...result }));
         })
         .catch(() => {});
     }, 500);
@@ -658,22 +658,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   }, []);
 
   // Refresh model cache status (callable from Model Manager tab)
-  const refreshCacheStatus = useCallback(() => {
-    const api = (window as any).electronAPI;
-    if (!api?.docker?.checkModelsCached || !isRunning) return;
-    const modelIds = [
-      ...new Set([activeTranscriber, normalizedLiveModel, activeDiarizationModel]),
-    ].filter(
-      (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
-    );
-    if (modelIds.length === 0) return;
-    api.docker
-      .checkModelsCached(modelIds)
-      .then((result: Record<string, { exists: boolean; size?: string }>) => {
-        setModelCacheStatus(result);
-      })
-      .catch(() => {});
-  }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel, isRunning]);
+  // Accepts optional extra model IDs so the Model Manager can request a
+  // cache check for all registry models, not just the active ones.
+  const refreshCacheStatus = useCallback(
+    (extraIds?: string[]) => {
+      const api = (window as any).electronAPI;
+      if (!api?.docker?.checkModelsCached || !isRunning) return;
+      const baseIds = [activeTranscriber, normalizedLiveModel, activeDiarizationModel].filter(
+        (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
+      );
+      const modelIds = [...new Set([...baseIds, ...(extraIds ?? [])])].filter(Boolean);
+      if (modelIds.length === 0) return;
+      api.docker
+        .checkModelsCached(modelIds)
+        .then((result: Record<string, { exists: boolean; size?: string }>) => {
+          setModelCacheStatus((prev) => ({ ...prev, ...result }));
+        })
+        .catch(() => {});
+    },
+    [activeTranscriber, normalizedLiveModel, activeDiarizationModel, isRunning],
+  );
 
   // Model load/unload handlers
   const handleLoadModels = useCallback(async () => {

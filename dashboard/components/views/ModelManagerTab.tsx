@@ -49,7 +49,7 @@ export interface ModelManagerTabProps {
   setDiarizationCustomModel: (value: string) => void;
   modelCacheStatus: Record<string, { exists: boolean; size?: string }>;
   isRunning: boolean;
-  refreshCacheStatus: () => void;
+  refreshCacheStatus: (extraIds?: string[]) => void;
 }
 
 // ─── Family section configuration ───────────────────────────────────────────
@@ -538,7 +538,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
       try {
         await api.docker.downloadModelToCache(modelId);
         showToast(`Downloaded ${modelId}`);
-        refreshCacheStatus();
+        refreshCacheStatus([modelId]);
       } catch (err: any) {
         showToast(`Download failed: ${err?.message || 'Unknown error'}`);
       } finally {
@@ -560,7 +560,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
       try {
         await api.docker.removeModelCache(modelId);
         showToast(`Removed cache for ${modelId}`);
-        refreshCacheStatus();
+        refreshCacheStatus([modelId]);
       } catch (err: any) {
         showToast(`Remove failed: ${err?.message || 'Unknown error'}`);
       }
@@ -653,25 +653,21 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const api = (window as any).electronAPI;
-    if (!api?.docker?.checkModelsCached || !isRunning) return;
+    if (!isRunning) return;
 
     const ids = allModelIds.filter(Boolean);
     if (ids.length === 0) return;
 
     if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
     cacheCheckRef.current = setTimeout(() => {
-      api.docker
-        .checkModelsCached(ids)
-        .then(() => refreshCacheStatus())
-        .catch(() => {});
+      refreshCacheStatus(ids);
     }, 800);
 
     return () => {
       if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRunning, customModels.length]);
+  }, [isRunning, customModels.length, refreshCacheStatus]);
 
   return (
     <div className="space-y-6">
