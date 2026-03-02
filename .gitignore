@@ -51,3 +51,4 @@ __pycache__/
 CLAUDE.md
 AGENTS.md
 .mcp.json
+codeql-agent-results/
