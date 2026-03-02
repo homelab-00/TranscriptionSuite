@@ -1248,64 +1248,66 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   </div>
 
                   {/* Record / Stop Button */}
-                  <div className="flex items-center gap-3 pt-1">
+                  <div className="flex flex-col gap-2">
                     {mainModelDisabled && (
-                      <div className="w-full rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
                         Main model not selected.
                       </div>
                     )}
-                    {canStartRecording ? (
-                      <Button
-                        variant="primary"
-                        className="bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30 ml-auto w-44 shrink-0"
-                        icon={
-                          isConnecting ? (
-                            <Loader2 size={16} className="animate-spin" />
-                          ) : (
-                            <Mic size={16} />
-                          )
-                        }
-                        onClick={handleStartRecording}
-                        disabled={
-                          isLive || !clientRunning || !serverConnection.ready || mainModelDisabled
-                        }
-                      >
-                        {isConnecting ? 'Connecting...' : 'Start Recording'}
-                      </Button>
-                    ) : (
-                      <>
+                    <div className="flex items-center gap-2">
+                      {canStartRecording ? (
                         <Button
-                          variant="danger"
-                          className="ml-auto w-44 shrink-0"
+                          variant="primary"
+                          className="bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30 w-full"
                           icon={
-                            isProcessing ? (
+                            isConnecting ? (
                               <Loader2 size={16} className="animate-spin" />
                             ) : (
-                              <Square size={16} />
+                              <Mic size={16} />
                             )
                           }
-                          onClick={handleStopRecording}
-                          disabled={isProcessing}
+                          onClick={handleStartRecording}
+                          disabled={
+                            isLive || !clientRunning || !serverConnection.ready || mainModelDisabled
+                          }
                         >
-                          {isProcessing ? 'Processing...' : 'Stop Recording'}
+                          {isConnecting ? 'Connecting...' : 'Start Recording'}
                         </Button>
-                        {isProcessing && (
+                      ) : (
+                        <>
                           <Button
-                            variant="secondary"
-                            className="shrink-0"
-                            icon={<X size={16} />}
-                            onClick={handleCancelProcessing}
+                            variant="danger"
+                            className="w-full"
+                            icon={
+                              isProcessing ? (
+                                <Loader2 size={16} className="animate-spin" />
+                              ) : (
+                                <Square size={16} />
+                              )
+                            }
+                            onClick={handleStopRecording}
+                            disabled={isProcessing}
                           >
-                            Cancel
+                            {isProcessing ? 'Processing...' : 'Stop Recording'}
                           </Button>
-                        )}
-                      </>
-                    )}
-                    {transcription.vadActive && (
-                      <span className="animate-pulse font-mono text-xs whitespace-nowrap text-green-400">
-                        VAD Active
-                      </span>
-                    )}
+                          {isProcessing && (
+                            <Button
+                              variant="secondary"
+                              className="shrink-0"
+                              icon={<X size={16} />}
+                              onClick={handleCancelProcessing}
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {transcription.vadActive && (
+                        <span className="animate-pulse font-mono text-xs whitespace-nowrap text-green-400">
+                          VAD Active
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Transcription Result */}
