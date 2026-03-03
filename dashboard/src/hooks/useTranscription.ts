@@ -38,7 +38,6 @@ export interface TranscriptionState {
     translate?: boolean;
     translationTarget?: string;
     systemAudio?: boolean;
-    desktopSourceId?: string;
   }) => void;
   /** Stop recording and wait for the final result */
   stop: () => void;
@@ -68,7 +67,6 @@ export function useTranscription(): TranscriptionState {
     translate?: boolean;
     translationTarget?: string;
     systemAudio?: boolean;
-    desktopSourceId?: string;
   }>({});
 
   // Cleanup on unmount
@@ -112,7 +110,6 @@ export function useTranscription(): TranscriptionState {
             .start({
               deviceId: startOptsRef.current.deviceId,
               systemAudio: startOptsRef.current.systemAudio,
-              desktopSourceId: startOptsRef.current.desktopSourceId,
               targetSampleRateHz: captureSampleRateHz,
             })
             .then(() => {
@@ -176,7 +173,6 @@ export function useTranscription(): TranscriptionState {
       translate?: boolean;
       translationTarget?: string;
       systemAudio?: boolean;
-      desktopSourceId?: string;
     }) => {
       // Reset previous state
       setResult(null);

@@ -127,6 +127,8 @@ export interface ElectronAPI {
   };
   audio: {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
+    enableSystemAudioLoopback: () => Promise<void>;
+    disableSystemAudioLoopback: () => Promise<void>;
   };
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
@@ -252,6 +254,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDesktopSources: async () => {
       return ipcRenderer.invoke('audio:getDesktopSources');
     },
+    enableSystemAudioLoopback: () => ipcRenderer.invoke('audio:enableSystemAudioLoopback'),
+    disableSystemAudioLoopback: () => ipcRenderer.invoke('audio:disableSystemAudioLoopback'),
   },
   updates: {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),

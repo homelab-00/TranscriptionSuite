@@ -55,7 +55,6 @@ export interface LiveStartOptions {
   gracePeriodSeconds?: number;
   model?: string;
   systemAudio?: boolean;
-  desktopSourceId?: string;
 }
 
 export function useLiveMode(): LiveModeState {
@@ -117,7 +116,6 @@ export function useLiveMode(): LiveModeState {
               .start({
                 deviceId: startOptsRef.current.deviceId,
                 systemAudio: startOptsRef.current.systemAudio,
-                desktopSourceId: startOptsRef.current.desktopSourceId,
               })
               .then(() => {
                 setAnalyser(captureRef.current?.analyser ?? null);

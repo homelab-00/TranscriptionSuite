@@ -272,6 +272,8 @@ The Dashboard features **sidebar navigation** with these main views:
 
 - **Session**: Main transcription interface with:
   - Main Transcription controls (language, translate, record/stop) and Audio Configuration below
+    - Microphone: dropdown to select input device
+    - System Audio: silently captures all system audio via loopback (no device selection; enabled Chromium feature flags + IPC handler manage capture lifecycle)
   - Audio visualizer with amplitude zoom (+/− buttons, hover to reveal)
   - Live Mode toggle and real-time transcript display
   - Explicit disabled-slot messaging when Main and/or Live model is set to `None (Disabled)`

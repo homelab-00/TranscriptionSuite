@@ -138,7 +138,10 @@
         }
       ],
       "category": "public.app-category.utilities",
-      "icon": "../build/assets/logo.icns"
+      "icon": "../build/assets/logo.icns",
+      "extendInfo": {
+        "NSAudioCaptureUsageDescription": "TranscriptionSuite needs access to system audio for transcription."
+      }
     },
     "dmg": {
       "sign": false,

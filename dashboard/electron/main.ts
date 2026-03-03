@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { app, BrowserWindow, clipboard, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, session, shell, dialog } from 'electron';
 import Store from 'electron-store';
 import { dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
@@ -41,6 +41,18 @@ if (process.platform === 'linux' && process.env.APPIMAGE) {
 // GlobalShortcutsPortal Chromium feature flag removed — our D-Bus module
 // (waylandShortcuts.ts) handles portal communication directly, which avoids
 // duplicate portal sessions and lets us set human-readable descriptions.
+
+// ─── System audio loopback flags ────────────────────────────────────────────
+// These must be set before app.whenReady() so Chromium picks them up.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'PulseaudioLoopbackForScreenShare');
+} else if (process.platform === 'darwin') {
+  app.commandLine.appendSwitch(
+    'enable-features',
+    'MacLoopbackAudioForScreenShare,MacSckSystemAudioLoopbackOverride',
+  );
+}
+// Windows: native WASAPI loopback — no flags needed.
 
 // Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
@@ -745,28 +757,20 @@ ipcMain.handle('docker:stopLogStream', async () => {
 
 // ─── Audio IPC ──────────────────────────────────────────────────────────────
 
-// desktopCapturer was removed in Electron 35+; use session-based display media handler instead.
-// For now, provide a stub that returns empty sources. System audio capture uses
-// navigator.mediaDevices.getDisplayMedia() in the renderer directly.
-ipcMain.handle('audio:getDesktopSources', async () => {
-  try {
-    // Try dynamic import in case a future Electron re-exports it
-    const { desktopCapturer } = await import('electron');
-    if (desktopCapturer) {
-      const sources = await desktopCapturer.getSources({
-        types: ['window', 'screen'],
-        thumbnailSize: { width: 150, height: 150 },
-      });
-      return sources.map((source: any) => ({
-        id: source.id,
-        name: source.name,
-        thumbnail: source.thumbnail.toDataURL(),
-      }));
-    }
-  } catch {
-    // desktopCapturer not available in this Electron version
-  }
-  return [];
+// Legacy stub — kept so older renderer builds don't crash on missing handler.
+ipcMain.handle('audio:getDesktopSources', async () => []);
+
+// Modern system audio: register session.setDisplayMediaRequestHandler to
+// silently capture loopback audio without the Wayland screen-sharing picker.
+ipcMain.handle('audio:enableSystemAudioLoopback', async () => {
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    callback({ audio: 'loopback', enableLocalEcho: false } as any);
+  });
+});
+
+ipcMain.handle('audio:disableSystemAudioLoopback', async () => {
+  // Passing null clears the handler, restoring default behavior.
+  session.defaultSession.setDisplayMediaRequestHandler(null as any);
 });
 
 // ─── Clipboard IPC ──────────────────────────────────────────────────────────

@@ -126,24 +126,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Audio device enumeration
   const [micDevices, setMicDevices] = useState<string[]>([]);
-  const [sysDevices, setSysDevices] = useState<string[]>([]);
   const [micDeviceIds, setMicDeviceIds] = useState<Record<string, string>>({});
-
-  // Desktop sources for system audio capture (Electron only)
-  const [_desktopSources, setDesktopSources] = useState<
-    // codeql[js/unused-local-variable] — will be consumed once the source-picker UI is wired up
-    Array<{ id: string; name: string; thumbnail: string }>
-  >([]);
-  const [desktopSourceIds, setDesktopSourceIds] = useState<Record<string, string>>({});
 
   // Audio Configuration State
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
   const [micDevice, setMicDevice] = useState('Default Microphone');
-  const [sysDevice, setSysDevice] = useState('Default Output');
   const persistedSelectionsRef = useRef<{
     audioSource?: 'mic' | 'system';
     micDevice?: string;
-    sysDevice?: string;
     mainLanguage?: string;
     liveLanguage?: string;
   }>({});
@@ -157,39 +147,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
     [],
   );
 
-  // Fetch desktop sources when system audio is selected (Electron only)
-  const fetchDesktopSources = useCallback(async () => {
-    if (!window.electronAPI?.audio?.getDesktopSources) return;
-    try {
-      const sources = await window.electronAPI.audio.getDesktopSources();
-      setDesktopSources(sources);
-      const idMap: Record<string, string> = {};
-      sources.forEach((s) => {
-        idMap[s.name] = s.id;
-      });
-      setDesktopSourceIds(idMap);
-      const sourceNames = sources.map((s) => s.name);
-      const options = sourceNames.length > 0 ? sourceNames : ['No sources available'];
-      setSysDevices(options);
-      const nextSystemDevice = pickPreferredOption(
-        options,
-        sysDevice,
-        persistedSelectionsRef.current.sysDevice,
-      );
-      if (nextSystemDevice !== sysDevice) setSysDevice(nextSystemDevice);
-    } catch (err) {
-      console.error('Failed to fetch desktop sources:', err);
-      setSysDevices(['No sources available']);
-    }
-  }, [sysDevice, pickPreferredOption]);
-
-  // Refresh desktop sources when switching to system audio
-  useEffect(() => {
-    if (audioSource === 'system') {
-      fetchDesktopSources();
-    }
-  }, [audioSource, fetchDesktopSources]);
-
   const enumerateDevices = useCallback(async () => {
     try {
       // Request permission first (needed to get labels)
@@ -198,36 +155,24 @@ export const SessionView: React.FC<SessionViewProps> = ({
         .then((s) => s.getTracks().forEach((t) => t.stop()));
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter((d) => d.kind === 'audioinput' && d.label);
-      const audioOutputs = devices
-        .filter((d) => d.kind === 'audiooutput' && d.label)
-        .map((d) => d.label);
       const inputLabels = audioInputs.map((d) => d.label);
       const idMap: Record<string, string> = {};
       audioInputs.forEach((d) => {
         idMap[d.label] = d.deviceId;
       });
       const micOptions = inputLabels.length > 0 ? inputLabels : ['Default Microphone'];
-      const outputOptions = audioOutputs.length > 0 ? audioOutputs : ['Default Output'];
       setMicDevices(micOptions);
       setMicDeviceIds(idMap);
-      setSysDevices(outputOptions);
       const nextMicDevice = pickPreferredOption(
         micOptions,
         micDevice,
         persistedSelectionsRef.current.micDevice,
       );
-      const nextSystemDevice = pickPreferredOption(
-        outputOptions,
-        sysDevice,
-        persistedSelectionsRef.current.sysDevice,
-      );
       if (nextMicDevice !== micDevice) setMicDevice(nextMicDevice);
-      if (nextSystemDevice !== sysDevice) setSysDevice(nextSystemDevice);
     } catch {
       setMicDevices(['Default Microphone']);
-      setSysDevices(['Default Output']);
     }
-  }, [micDevice, sysDevice, pickPreferredOption]);
+  }, [micDevice, pickPreferredOption]);
 
   useEffect(() => {
     enumerateDevices();
@@ -292,7 +237,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       const [
         savedAudioSource,
         savedMicDevice,
-        savedSystemDevice,
+        _savedSystemDevice,
         savedMainLanguage,
         savedLiveLanguage,
       ] = await Promise.all([
@@ -311,10 +256,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
       if (savedMicDevice) {
         persistedSelectionsRef.current.micDevice = savedMicDevice;
         setMicDevice(savedMicDevice);
-      }
-      if (savedSystemDevice) {
-        persistedSelectionsRef.current.sysDevice = savedSystemDevice;
-        setSysDevice(savedSystemDevice);
       }
       if (savedMainLanguage) {
         persistedSelectionsRef.current.mainLanguage = savedMainLanguage;
@@ -341,12 +282,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setMicDevice(device);
     persistedSelectionsRef.current.micDevice = device;
     void setConfig('session.micDevice', device).catch(() => {});
-  }, []);
-
-  const handleSystemDeviceChange = useCallback((device: string) => {
-    setSysDevice(device);
-    persistedSelectionsRef.current.sysDevice = device;
-    void setConfig('session.systemDevice', device).catch(() => {});
   }, []);
 
   const handleMainLanguageChange = useCallback((language: string) => {
@@ -543,13 +478,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const isSystemAudio = audioSource === 'system';
     const mainTranslateActive = isCanaryMainBidi ? mainBidiTarget !== 'Off' : mainTranslate;
     const mainTranslateTarget = isCanaryMainBidi ? (resolveLanguage(mainBidiTarget) ?? 'en') : 'en';
-    transcription.start({
-      language: resolveLanguage(mainLanguage),
-      deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
-      translate: mainTranslateActive,
-      translationTarget: mainTranslateTarget,
-      systemAudio: isSystemAudio,
-      desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
+
+    // Enable loopback handler before capturing system audio
+    const prepare = isSystemAudio
+      ? (window.electronAPI?.audio?.enableSystemAudioLoopback?.() ?? Promise.resolve())
+      : Promise.resolve();
+
+    prepare.then(() => {
+      transcription.start({
+        language: resolveLanguage(mainLanguage),
+        deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
+        translate: mainTranslateActive,
+        translationTarget: mainTranslateTarget,
+        systemAudio: isSystemAudio,
+      });
     });
   }, [
     canStartRecording,
@@ -561,14 +503,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
     audioSource,
     micDevice,
     micDeviceIds,
-    sysDevice,
-    desktopSourceIds,
     resolveLanguage,
     mainModelDisabled,
   ]);
 
   const handleStopRecording = useCallback(() => {
     transcription.stop();
+    // Clear the loopback handler when done
+    window.electronAPI?.audio?.disableSystemAudioLoopback?.();
   }, [transcription]);
 
   const handleCancelProcessing = useCallback(async () => {
@@ -615,6 +557,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
               ? rawGracePeriod
               : 1.0;
 
+          // Enable loopback handler before capturing system audio
+          if (isSystemAudio) {
+            await (window.electronAPI?.audio?.enableSystemAudioLoopback?.() ?? Promise.resolve());
+          }
+
           live.start({
             language: resolveLanguage(liveLanguage),
             deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
@@ -622,11 +569,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
             translationTarget: liveTranslateTarget,
             gracePeriodSeconds,
             systemAudio: isSystemAudio,
-            desktopSourceId: isSystemAudio ? desktopSourceIds[sysDevice] : undefined,
           });
         })();
       } else {
         live.stop();
+        // Clear the loopback handler when done
+        window.electronAPI?.audio?.disableSystemAudioLoopback?.();
       }
     },
     [
@@ -639,8 +587,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
       audioSource,
       micDevice,
       micDeviceIds,
-      sysDevice,
-      desktopSourceIds,
       resolveLanguage,
       liveModelDisabled,
     ],
@@ -1442,7 +1388,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           <label
                             className={`text-xs font-medium ${audioSource === 'system' ? 'text-white' : 'text-slate-400'}`}
                           >
-                            System Device
+                            System Audio
                           </label>
                         </div>
                         {audioSource === 'system' && (
@@ -1453,20 +1399,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                       <div className="flex min-w-0 items-center gap-2">
                         <div className="min-w-0 flex-1">
-                          <CustomSelect
-                            value={sysDevice}
-                            onChange={handleSystemDeviceChange}
-                            options={sysDevices.length > 0 ? sysDevices : ['Default Output']}
-                            className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
-                          />
+                          <div className="w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/60 select-none">
+                            All System Audio
+                          </div>
                         </div>
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="shrink-0"
-                          icon={<RefreshCw size={14} />}
-                          onClick={enumerateDevices}
-                        />
                       </div>
                     </div>
                   </div>

@@ -123,6 +123,8 @@ interface ElectronAPI {
   };
   audio: {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
+    enableSystemAudioLoopback: () => Promise<void>;
+    disableSystemAudioLoopback: () => Promise<void>;
   };
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;

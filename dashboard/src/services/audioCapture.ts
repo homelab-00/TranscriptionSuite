@@ -22,7 +22,10 @@ export interface AudioCaptureOptions {
   deviceId?: string;
   /** Whether to capture system audio instead of microphone */
   systemAudio?: boolean;
-  /** Desktop source ID from desktopCapturer (required when systemAudio=true) */
+  /**
+   * @deprecated No longer used — system audio capture now uses loopback via
+   * getDisplayMedia. Kept for API compatibility.
+   */
   desktopSourceId?: string;
   /** Target PCM sample rate emitted by the worklet (e.g. 16000 or 24000) */
   targetSampleRateHz?: number;
@@ -48,31 +51,21 @@ export class AudioCapture {
     this.stop();
 
     // 1. Get media stream — microphone or system audio
-    let constraints: MediaStreamConstraints;
-
-    if (options.systemAudio && options.desktopSourceId) {
-      // System audio capture via Electron desktopCapturer
-      // Note: 'loopback' audio requires Chromium/Electron flags on Linux
-      constraints = {
-        audio: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: options.desktopSourceId,
-          },
-        } as MediaTrackConstraints,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: options.desktopSourceId,
-            maxWidth: 1,
-            maxHeight: 1,
-            maxFrameRate: 1,
-          },
-        } as MediaTrackConstraints,
-      };
+    if (options.systemAudio) {
+      // System audio capture via Electron's session-level loopback handler.
+      // The main process registers setDisplayMediaRequestHandler with
+      // { audio: 'loopback' } before we reach here, so getDisplayMedia()
+      // silently returns a loopback stream without popping a picker.
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        audio: true,
+        video: true, // video is required by spec; we drop the tracks immediately
+      });
+      // Drop the video tracks we don't need
+      displayStream.getVideoTracks().forEach((t) => t.stop());
+      this.stream = displayStream;
     } else {
       // Standard microphone capture
-      constraints = {
+      const constraints: MediaStreamConstraints = {
         audio: {
           ...(options.deviceId ? { deviceId: { exact: options.deviceId } } : {}),
           echoCancellation: false,
@@ -82,12 +75,7 @@ export class AudioCapture {
           channelCount: 1,
         },
       };
-    }
-    this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-    // For system audio, we only need the audio track
-    if (options.systemAudio) {
-      this.stream.getVideoTracks().forEach((t) => t.stop());
+      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
     }
 
     // 2. Create AudioContext

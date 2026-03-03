@@ -251,8 +251,8 @@ TranscriptionSuite uses layered security for remote access:
 TranscriptionSuite/
 ├── dashboard/                    # Electron + React dashboard application
 │   ├── electron/                 # Electron main process
-│   │   ├── main.ts               # Window/IPC lifecycle + main-process log routing (stdout/stderr -> client debug stream/file)
-│   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC), including app:clientLogLine subscription bridge
+│   │   ├── main.ts               # Window/IPC lifecycle + main-process log routing (stdout/stderr -> client debug stream/file); session.displayMediaRequestHandler for loopback system audio
+│   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC), including app:clientLogLine subscription bridge + loopback enable/disable
 │   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
 │   │   ├── shortcutManager.ts    # Global keyboard shortcuts (system-wide)
 │   │   ├── waylandShortcuts.ts   # Wayland portal integration for global shortcuts
@@ -268,7 +268,7 @@ TranscriptionSuite/
 │   │   ├── config/store.ts       # Client config (electron-store / localStorage)
 │   │   ├── hooks/                # React hooks (includes server health + tray state sync; see Key Modules)
 │   │   ├── services/             # Core services
-│   │   │   ├── audioCapture.ts   # AudioWorklet-based mic capture
+│   │   │   ├── audioCapture.ts   # AudioWorklet-based capture: microphone via getUserMedia or system audio via getDisplayMedia loopback
 │   │   │   ├── websocket.ts      # WebSocket client for real-time/live transcription
 │   │   │   ├── modelCapabilities.ts # Multi-backend capability detection (translation, live mode)
 │   │   │   ├── modelRegistry.ts  # Model registry + canonical ModelFamily/ModelRole types (includes 'none')
@@ -1025,8 +1025,8 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write |
-| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal) |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture |
+| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle |
 | `dockerManager.ts` | Docker CLI wrapper for container/image management and additive optional-family install env updates |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
@@ -1038,7 +1038,7 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `audioCapture.ts` | AudioWorklet-based microphone capture with PCM streaming |
+| `audioCapture.ts` | AudioWorklet-based capture for microphone (via `getUserMedia`) and system audio (via `getDisplayMedia` with loopback handler) with PCM resampling and visualization |
 | `websocket.ts` | WebSocket client for real-time and Live Mode transcription |
 | `modelCapabilities.ts` | Multi-backend capability detection (translation, live mode support) |
 | `modelRegistry.ts` | Model registry + canonical `ModelFamily` / `ModelRole` types (`ModelFamily` includes `'none'` for disabled-slot state) |
