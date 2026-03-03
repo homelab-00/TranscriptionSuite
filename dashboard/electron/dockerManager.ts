@@ -1008,7 +1008,10 @@ function appendLogLine(line: string): void {
 
 // ─── Log Streaming ──────────────────────────────────────────────────────────
 
+const LOG_RING_BUFFER_MAX = 1000;
 let logProcess: ChildProcess | null = null;
+const logSubscribers = new Set<(line: string) => void>();
+const logLineBuffer: string[] = [];
 
 function resolveDockerTailArg(tail?: number): string {
   if (typeof tail !== 'number' || !Number.isFinite(tail) || tail < 0) {
@@ -1018,19 +1021,35 @@ function resolveDockerTailArg(tail?: number): string {
 }
 
 /**
- * Start streaming container logs. Returns recent logs immediately.
- * The callback receives new log lines as they appear.
+ * Central dispatcher for every incoming docker log line.
+ * Writes to disk, appends to the in-memory ring buffer, and notifies all
+ * active subscribers.
  */
-function startLogStream(onData: (line: string) => void, tail?: number): void {
-  stopLogStream();
+function dispatchLogLine(line: string): void {
+  appendLogLine(line);
+  if (logLineBuffer.length >= LOG_RING_BUFFER_MAX) {
+    logLineBuffer.shift();
+  }
+  logLineBuffer.push(line);
+  for (const cb of logSubscribers) {
+    cb(line);
+  }
+}
 
-  const tailArg = resolveDockerTailArg(tail);
+/**
+ * Start the persistent background docker log stream if not already running.
+ * Idempotent — safe to call multiple times or when already streaming.
+ * Disk writes happen regardless of whether any UI subscriber is attached.
+ */
+function startBackgroundLogStream(): void {
+  if (logProcess) return;
+
   let stdoutRemainder = '';
   let stderrRemainder = '';
 
   logProcess = spawn(
     'docker',
-    ['logs', '--follow', '--timestamps', '--tail', tailArg, CONTAINER_NAME],
+    ['logs', '--follow', '--timestamps', '--tail', 'all', CONTAINER_NAME],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: buildProcessEnv(),
@@ -1048,8 +1067,7 @@ function startLogStream(onData: (line: string) => void, tail?: number): void {
     }
     for (const line of lines) {
       if (line.length > 0) {
-        appendLogLine(line);
-        onData(line);
+        dispatchLogLine(line);
       }
     }
   };
@@ -1058,12 +1076,13 @@ function startLogStream(onData: (line: string) => void, tail?: number): void {
   logProcess.stderr?.on('data', (data: Buffer) => handle(data, 'stderr'));
 
   logProcess.on('close', () => {
+    // Flush any partial line buffered at process close.
     if (stdoutRemainder.length > 0) {
-      onData(stdoutRemainder);
+      dispatchLogLine(stdoutRemainder);
       stdoutRemainder = '';
     }
     if (stderrRemainder.length > 0) {
-      onData(stderrRemainder);
+      dispatchLogLine(stderrRemainder);
       stderrRemainder = '';
     }
     logProcess = null;
@@ -1071,13 +1090,40 @@ function startLogStream(onData: (line: string) => void, tail?: number): void {
 }
 
 /**
- * Stop any active log stream.
+ * Subscribe to the continuous docker log stream.
+ * Replays the in-memory ring buffer to the caller synchronously (so the UI
+ * gets historical lines before live ones), then adds it as a live subscriber
+ * and ensures the background process is running.
  */
-function stopLogStream(): void {
+function subscribeToLogStream(callback: (line: string) => void): void {
+  // Replay history before registering so the caller sees past lines first.
+  for (const line of logLineBuffer) {
+    callback(line);
+  }
+  logSubscribers.add(callback);
+  startBackgroundLogStream();
+}
+
+/**
+ * Unsubscribe a callback from the live log stream.
+ * Does NOT stop the background process — disk writing continues uninterrupted.
+ */
+function unsubscribeFromLogStream(callback: (line: string) => void): void {
+  logSubscribers.delete(callback);
+}
+
+/**
+ * Stop the background log stream process and clear all subscribers and the
+ * ring buffer. Should only be called during app shutdown or after the
+ * container is fully removed.
+ */
+function stopBackgroundLogStream(): void {
   if (logProcess) {
     logProcess.kill();
     logProcess = null;
   }
+  logSubscribers.clear();
+  logLineBuffer.length = 0;
 }
 
 /**
@@ -1274,8 +1320,10 @@ export const dockerManager = {
   readComposeEnvValue,
   volumeExists,
   readOptionalDependencyBootstrapStatus,
-  startLogStream,
-  stopLogStream,
+  startBackgroundLogStream,
+  subscribeToLogStream,
+  unsubscribeFromLogStream,
+  stopBackgroundLogStream,
   getLogs,
   checkModelsCached,
   removeModelCache,

@@ -705,7 +705,10 @@ ipcMain.handle('docker:getContainerStatus', async () => {
 });
 
 ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOptions) => {
-  return dockerManager.startContainer(options);
+  const result = await dockerManager.startContainer(options);
+  // Begin writing to server.log as soon as the container is running.
+  dockerManager.startBackgroundLogStream();
+  return result;
 });
 
 ipcMain.handle('docker:stopContainer', async () => {
@@ -754,14 +757,21 @@ ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
 
 // ─── Docker Log Streaming IPC ───────────────────────────────────────────────
 
-ipcMain.handle('docker:startLogStream', async (_event, tail?: number) => {
-  dockerManager.startLogStream((line: string) => {
+// Stable callback reference so subscribe and unsubscribe target the same function.
+let rendererLogCallback: ((line: string) => void) | null = null;
+
+ipcMain.handle('docker:startLogStream', async () => {
+  rendererLogCallback = (line: string) => {
     mainWindow?.webContents.send('docker:logLine', line);
-  }, tail);
+  };
+  dockerManager.subscribeToLogStream(rendererLogCallback);
 });
 
 ipcMain.handle('docker:stopLogStream', async () => {
-  dockerManager.stopLogStream();
+  if (rendererLogCallback) {
+    dockerManager.unsubscribeFromLogStream(rendererLogCallback);
+    rendererLogCallback = null;
+  }
 });
 
 // ─── Audio IPC ──────────────────────────────────────────────────────────────
@@ -846,19 +856,12 @@ let isQuitting = false;
 let shutdownPromise: Promise<void> | null = null;
 
 /**
- * Persistent shutdown logger — writes to both console and a log file so that
- * shutdown diagnostics survive Wayland stdout teardown.
+ * Log a shutdown diagnostic message. Writes to console, which is already
+ * routed to client-debug.log by installMainProcessLogRouter — no separate
+ * shutdown.log file is needed.
  */
 function shutdownLog(message: string): void {
-  const line = `${new Date().toISOString()} ${message}`;
-  console.log(line);
-  try {
-    const logDir = path.join(app.getPath('userData'), 'logs');
-    fs.mkdirSync(logDir, { recursive: true });
-    fs.appendFileSync(path.join(logDir, 'shutdown.log'), line + '\n');
-  } catch {
-    // Best-effort — don't let logging failures block shutdown
-  }
+  console.log(`${new Date().toISOString()} ${message}`);
 }
 
 /**
@@ -872,6 +875,8 @@ function gracefulShutdown(): Promise<void> {
 
   shutdownPromise = (async () => {
     flushMainProcessLogRemainders();
+    // Stop the background log stream so the disk writer shuts down cleanly.
+    dockerManager.stopBackgroundLogStream();
     shutdownLog('[Shutdown] Graceful shutdown started.');
 
     const shouldStopServer = (store.get('app.stopServerOnQuit') as boolean) ?? true;
@@ -941,6 +946,17 @@ app.whenReady().then(() => {
   trayManager.create();
   updateManager.start();
   createWindow();
+
+  // If the container is already running (app restarted while server was up),
+  // start streaming its logs to disk immediately — no UI interaction needed.
+  dockerManager
+    .getContainerStatus()
+    .then((status) => {
+      if (status.running) dockerManager.startBackgroundLogStream();
+    })
+    .catch(() => {
+      // Best-effort — Docker may not be available yet.
+    });
 
   // Register global keyboard shortcuts (async — uses D-Bus portal on Wayland)
   registerShortcuts(store, () => mainWindow).catch((err) =>
