@@ -128,12 +128,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [micDevices, setMicDevices] = useState<string[]>([]);
   const [micDeviceIds, setMicDeviceIds] = useState<Record<string, string>>({});
 
+  // Linux system audio: PulseAudio/PipeWire sink list
+  const isLinux = typeof navigator !== 'undefined' && navigator.platform.startsWith('Linux');
+  const [sysDevices, setSysDevices] = useState<string[]>([]);
+  const [sysDevice, setSysDevice] = useState('Default Output');
+  // Maps sink description → internal PulseAudio sink name
+  const [sinkNameMap, setSinkNameMap] = useState<Record<string, string>>({});
+
   // Audio Configuration State
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
   const [micDevice, setMicDevice] = useState('Default Microphone');
   const persistedSelectionsRef = useRef<{
     audioSource?: 'mic' | 'system';
     micDevice?: string;
+    sysDevice?: string;
     mainLanguage?: string;
     liveLanguage?: string;
   }>({});
@@ -177,6 +185,39 @@ export const SessionView: React.FC<SessionViewProps> = ({
   useEffect(() => {
     enumerateDevices();
   }, [enumerateDevices]);
+
+  // Linux: fetch PulseAudio/PipeWire sinks for system audio capture
+  const fetchSinks = useCallback(async () => {
+    if (!isLinux) return;
+    try {
+      const sinks = await window.electronAPI?.audio?.listSinks?.();
+      if (!sinks || sinks.length === 0) {
+        setSysDevices(['No sinks found']);
+        return;
+      }
+      const descriptions = sinks.map((s) => s.description);
+      const map: Record<string, string> = {};
+      sinks.forEach((s) => {
+        map[s.description] = s.name;
+      });
+      setSysDevices(descriptions);
+      setSinkNameMap(map);
+      const next = pickPreferredOption(
+        descriptions,
+        sysDevice,
+        persistedSelectionsRef.current.sysDevice,
+      );
+      if (next !== sysDevice) setSysDevice(next);
+    } catch {
+      setSysDevices(['No sinks found']);
+    }
+  }, [isLinux, sysDevice, pickPreferredOption]);
+
+  useEffect(() => {
+    if (audioSource === 'system' && isLinux) {
+      fetchSinks();
+    }
+  }, [audioSource, isLinux, fetchSinks]);
 
   // Control Center State — real Docker container status
   const docker = useDockerContext();
@@ -237,7 +278,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       const [
         savedAudioSource,
         savedMicDevice,
-        _savedSystemDevice,
+        savedSystemDevice,
         savedMainLanguage,
         savedLiveLanguage,
       ] = await Promise.all([
@@ -256,6 +297,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
       if (savedMicDevice) {
         persistedSelectionsRef.current.micDevice = savedMicDevice;
         setMicDevice(savedMicDevice);
+      }
+      if (savedSystemDevice) {
+        persistedSelectionsRef.current.sysDevice = savedSystemDevice;
+        setSysDevice(savedSystemDevice);
       }
       if (savedMainLanguage) {
         persistedSelectionsRef.current.mainLanguage = savedMainLanguage;
@@ -282,6 +327,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setMicDevice(device);
     persistedSelectionsRef.current.micDevice = device;
     void setConfig('session.micDevice', device).catch(() => {});
+  }, []);
+
+  const handleSystemDeviceChange = useCallback((device: string) => {
+    setSysDevice(device);
+    persistedSelectionsRef.current.sysDevice = device;
+    void setConfig('session.systemDevice', device).catch(() => {});
   }, []);
 
   const handleMainLanguageChange = useCallback((language: string) => {
@@ -479,20 +530,30 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const mainTranslateActive = isCanaryMainBidi ? mainBidiTarget !== 'Off' : mainTranslate;
     const mainTranslateTarget = isCanaryMainBidi ? (resolveLanguage(mainBidiTarget) ?? 'en') : 'en';
 
-    // Enable loopback handler before capturing system audio
-    const prepare = isSystemAudio
-      ? (window.electronAPI?.audio?.enableSystemAudioLoopback?.() ?? Promise.resolve())
-      : Promise.resolve();
-
-    prepare.then(() => {
+    void (async () => {
+      let monitorLabel: string | undefined;
+      if (isSystemAudio) {
+        if (isLinux) {
+          // Linux: create a virtual mic from the selected sink's monitor source
+          const selectedSink = sinkNameMap[sysDevice];
+          if (selectedSink) {
+            await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
+            monitorLabel = 'TranscriptionSuite_Loopback';
+          }
+        } else {
+          // Windows / macOS: register getDisplayMedia loopback handler
+          await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
+        }
+      }
       transcription.start({
         language: resolveLanguage(mainLanguage),
         deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
         translate: mainTranslateActive,
         translationTarget: mainTranslateTarget,
         systemAudio: isSystemAudio,
+        monitorDeviceLabel: monitorLabel,
       });
-    });
+    })();
   }, [
     canStartRecording,
     transcription,
@@ -505,13 +566,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
     micDeviceIds,
     resolveLanguage,
     mainModelDisabled,
+    isLinux,
+    sysDevice,
+    sinkNameMap,
   ]);
 
   const handleStopRecording = useCallback(() => {
     transcription.stop();
-    // Clear the loopback handler when done
-    window.electronAPI?.audio?.disableSystemAudioLoopback?.();
-  }, [transcription]);
+    if (isLinux) {
+      window.electronAPI?.audio?.removeMonitorLoopback?.();
+    } else {
+      window.electronAPI?.audio?.disableSystemAudioLoopback?.();
+    }
+  }, [transcription, isLinux]);
 
   const handleCancelProcessing = useCallback(async () => {
     try {
@@ -557,9 +624,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
               ? rawGracePeriod
               : 1.0;
 
-          // Enable loopback handler before capturing system audio
+          let monitorLabel: string | undefined;
           if (isSystemAudio) {
-            await (window.electronAPI?.audio?.enableSystemAudioLoopback?.() ?? Promise.resolve());
+            if (isLinux) {
+              const selectedSink = sinkNameMap[sysDevice];
+              if (selectedSink) {
+                await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
+                monitorLabel = 'TranscriptionSuite_Loopback';
+              }
+            } else {
+              await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
+            }
           }
 
           live.start({
@@ -569,12 +644,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
             translationTarget: liveTranslateTarget,
             gracePeriodSeconds,
             systemAudio: isSystemAudio,
+            monitorDeviceLabel: monitorLabel,
           });
         })();
       } else {
         live.stop();
-        // Clear the loopback handler when done
-        window.electronAPI?.audio?.disableSystemAudioLoopback?.();
+        if (isLinux) {
+          window.electronAPI?.audio?.removeMonitorLoopback?.();
+        } else {
+          window.electronAPI?.audio?.disableSystemAudioLoopback?.();
+        }
       }
     },
     [
@@ -589,6 +668,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
       micDeviceIds,
       resolveLanguage,
       liveModelDisabled,
+      isLinux,
+      sysDevice,
+      sinkNameMap,
     ],
   );
 
@@ -1399,10 +1481,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                       <div className="flex min-w-0 items-center gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/60 select-none">
-                            All System Audio
-                          </div>
+                          {isLinux ? (
+                            <CustomSelect
+                              value={sysDevice}
+                              onChange={handleSystemDeviceChange}
+                              options={sysDevices.length > 0 ? sysDevices : ['Default Output']}
+                              className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
+                            />
+                          ) : (
+                            <div className="w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/60 select-none">
+                              All System Audio
+                            </div>
+                          )}
                         </div>
+                        {isLinux && (
+                          <Button
+                            variant="secondary"
+                            size="icon"
+                            className="shrink-0"
+                            icon={<RefreshCw size={14} />}
+                            onClick={fetchSinks}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>

@@ -129,6 +129,12 @@ export interface ElectronAPI {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
     enableSystemAudioLoopback: () => Promise<void>;
     disableSystemAudioLoopback: () => Promise<void>;
+    /** Linux: list PulseAudio/PipeWire output sinks for system audio capture. */
+    listSinks: () => Promise<Array<{ name: string; description: string }>>;
+    /** Linux: create a virtual mic from a sink's monitor source. */
+    createMonitorLoopback: (sinkName: string) => Promise<number>;
+    /** Linux: remove the virtual mic. */
+    removeMonitorLoopback: () => Promise<void>;
   };
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
@@ -256,6 +262,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     enableSystemAudioLoopback: () => ipcRenderer.invoke('audio:enableSystemAudioLoopback'),
     disableSystemAudioLoopback: () => ipcRenderer.invoke('audio:disableSystemAudioLoopback'),
+    listSinks: () => ipcRenderer.invoke('audio:listSinks'),
+    createMonitorLoopback: (sinkName: string) =>
+      ipcRenderer.invoke('audio:createMonitorLoopback', sinkName),
+    removeMonitorLoopback: () => ipcRenderer.invoke('audio:removeMonitorLoopback'),
   },
   updates: {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),

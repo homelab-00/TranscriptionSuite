@@ -23,10 +23,14 @@ export interface AudioCaptureOptions {
   /** Whether to capture system audio instead of microphone */
   systemAudio?: boolean;
   /**
-   * @deprecated No longer used — system audio capture now uses loopback via
-   * getDisplayMedia. Kept for API compatibility.
+   * When set, the Linux monitor-source path is used: enumerate devices, find
+   * the virtual input whose label contains this string, and capture via
+   * getUserMedia (no xdg-desktop-portal picker).
+   *
+   * If unset while systemAudio=true, the Windows/macOS getDisplayMedia path
+   * is used instead.
    */
-  desktopSourceId?: string;
+  monitorDeviceLabel?: string;
   /** Target PCM sample rate emitted by the worklet (e.g. 16000 or 24000) */
   targetSampleRateHz?: number;
 }
@@ -51,16 +55,28 @@ export class AudioCapture {
     this.stop();
 
     // 1. Get media stream — microphone or system audio
-    if (options.systemAudio) {
-      // System audio capture via Electron's session-level loopback handler.
+    if (options.systemAudio && options.monitorDeviceLabel) {
+      // Linux path: a virtual input was created from the PulseAudio/PipeWire
+      // monitor source via module-remap-source.  Find it by label and capture
+      // with plain getUserMedia — no xdg-desktop-portal, no screen picker.
+      const deviceId = await AudioCapture.waitForDevice(options.monitorDeviceLabel);
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: deviceId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      });
+    } else if (options.systemAudio) {
+      // Windows / macOS path: getDisplayMedia with loopback handler.
       // The main process registers setDisplayMediaRequestHandler with
-      // { audio: 'loopback' } before we reach here, so getDisplayMedia()
-      // silently returns a loopback stream without popping a picker.
+      // { audio: 'loopback' } before we reach here.
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         audio: true,
-        video: true, // video is required by spec; we drop the tracks immediately
+        video: true, // video required by spec; tracks dropped immediately
       });
-      // Drop the video tracks we don't need
       displayStream.getVideoTracks().forEach((t) => t.stop());
       this.stream = displayStream;
     } else {
@@ -178,5 +194,20 @@ export class AudioCapture {
   /** The actual sample rate the browser chose. */
   get sampleRate(): number {
     return this.ctx?.sampleRate ?? 0;
+  }
+
+  /**
+   * Poll enumerateDevices until a device whose label contains `substring`
+   * appears.  Returns its deviceId.  Throws after `timeoutMs`.
+   */
+  private static async waitForDevice(substring: string, timeoutMs = 3000): Promise<string> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const match = devices.find((d) => d.kind === 'audioinput' && d.label.includes(substring));
+      if (match) return match.deviceId;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    throw new Error(`System audio device "${substring}" did not appear in time`);
   }
 }

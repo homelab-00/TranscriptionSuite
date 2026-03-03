@@ -125,6 +125,9 @@ interface ElectronAPI {
     getDesktopSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
     enableSystemAudioLoopback: () => Promise<void>;
     disableSystemAudioLoopback: () => Promise<void>;
+    listSinks: () => Promise<Array<{ name: string; description: string }>>;
+    createMonitorLoopback: (sinkName: string) => Promise<number>;
+    removeMonitorLoopback: () => Promise<void>;
   };
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;

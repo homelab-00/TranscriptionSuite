@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
 import {
   app,
   BrowserWindow,
@@ -11,6 +13,8 @@ import {
   shell,
   dialog,
 } from 'electron';
+
+const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
@@ -779,12 +783,13 @@ ipcMain.handle('docker:stopLogStream', async () => {
 // Legacy stub — kept so older renderer builds don't crash on missing handler.
 ipcMain.handle('audio:getDesktopSources', async () => []);
 
-// Modern system audio: register session.setDisplayMediaRequestHandler to
-// silently capture loopback audio without the Wayland screen-sharing picker.
-// We must supply a video source alongside the loopback audio: Electron throws
-// "Video was requested, but no video stream was provided" if video: true was
-// requested by the renderer but the callback omits a video source.
+// --- Windows / macOS: getDisplayMedia loopback (no portal picker) -----------
+// On Linux/Wayland the xdg-desktop-portal ALWAYS shows a screen picker for
+// getDisplayMedia — setDisplayMediaRequestHandler cannot suppress it.  These
+// handlers are therefore only useful on Windows & macOS.
+
 ipcMain.handle('audio:enableSystemAudioLoopback', async () => {
+  if (process.platform === 'linux') return; // no-op on Linux
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     callback({ audio: 'loopback', video: sources[0], enableLocalEcho: false } as any);
@@ -792,8 +797,75 @@ ipcMain.handle('audio:enableSystemAudioLoopback', async () => {
 });
 
 ipcMain.handle('audio:disableSystemAudioLoopback', async () => {
-  // Passing null clears the handler, restoring default behavior.
+  if (process.platform === 'linux') return;
   session.defaultSession.setDisplayMediaRequestHandler(null as any);
+});
+
+// --- Linux: PulseAudio/PipeWire monitor-source loopback ---------------------
+// Create a temporary virtual input device from the PulseAudio/PipeWire monitor
+// source via module-remap-source.  The renderer then captures from it with
+// plain getUserMedia — no xdg-desktop-portal, no screen picker.
+
+let loopbackModuleId: number | null = null;
+
+/** List audio output sinks (for the system-device dropdown on Linux). */
+ipcMain.handle(
+  'audio:listSinks',
+  async (): Promise<Array<{ name: string; description: string }>> => {
+    if (process.platform !== 'linux') return [];
+    try {
+      const { stdout } = await execFileAsync('pactl', ['-f', 'json', 'list', 'sinks']);
+      const sinks = JSON.parse(stdout) as Array<{ name: string; description: string }>;
+      return sinks.map((s) => ({ name: s.name, description: s.description }));
+    } catch {
+      return [];
+    }
+  },
+);
+
+/** Create a virtual mic from a sink's monitor source. */
+ipcMain.handle('audio:createMonitorLoopback', async (_e, sinkName: string) => {
+  // Clean up any previous loopback first
+  if (loopbackModuleId !== null) {
+    try {
+      await execFileAsync('pactl', ['unload-module', String(loopbackModuleId)]);
+    } catch {
+      /* already gone */
+    }
+    loopbackModuleId = null;
+  }
+  const { stdout } = await execFileAsync('pactl', [
+    'load-module',
+    'module-remap-source',
+    `master=${sinkName}.monitor`,
+    'source_name=tsuite_loopback',
+    'source_properties=device.description=TranscriptionSuite_Loopback',
+  ]);
+  loopbackModuleId = parseInt(stdout.trim(), 10);
+  return loopbackModuleId;
+});
+
+/** Remove the virtual mic. */
+ipcMain.handle('audio:removeMonitorLoopback', async () => {
+  if (loopbackModuleId === null) return;
+  try {
+    await execFileAsync('pactl', ['unload-module', String(loopbackModuleId)]);
+  } catch {
+    /* already gone */
+  }
+  loopbackModuleId = null;
+});
+
+// Safety-net: clean up the loopback module on quit so it doesn't linger.
+app.on('will-quit', () => {
+  if (loopbackModuleId !== null && process.platform === 'linux') {
+    try {
+      execFileSync('pactl', ['unload-module', String(loopbackModuleId)]);
+    } catch {
+      /* best-effort */
+    }
+    loopbackModuleId = null;
+  }
 });
 
 // ─── Clipboard IPC ──────────────────────────────────────────────────────────

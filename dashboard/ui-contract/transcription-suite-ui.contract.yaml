@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.1.3
+  spec_version: 1.0.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -23,6 +23,7 @@ meta:
       - components/views/FullscreenVisualizer.tsx
       - components/views/ModelManagerTab.tsx
       - components/views/NotebookView.tsx
+      - components/views/ServerConfigEditor.tsx
       - components/views/ServerView.tsx
       - components/views/SessionView.tsx
       - components/views/SettingsModal.tsx
@@ -30,7 +31,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-02-27T16:18:41.370Z
+    generated_at: 2026-03-03T14:39:15.645Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -195,6 +196,7 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - shadow-2xl
         - shadow-accent-cyan/20
         - shadow-accent-cyan/40
@@ -276,6 +278,7 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - text-[10px]
         - text-[11px]
         - text-[8px]
@@ -613,7 +616,10 @@ utility_allowlist:
     - left-4
     - left-8
     - lg:col-span-2
+    - lg:col-span-5
+    - lg:col-span-7
     - lg:flex
+    - lg:grid-cols-12
     - lg:grid-cols-2
     - lg:grid-cols-3
     - lg:p-10
@@ -677,6 +683,7 @@ utility_allowlist:
     - mt-6
     - mt-8
     - mt-auto
+    - mx-0.5
     - mx-2
     - mx-auto
     - my-1
@@ -693,6 +700,7 @@ utility_allowlist:
     - outline-none
     - overflow-auto
     - overflow-hidden
+    - overflow-visible
     - overflow-x-auto
     - overflow-y-auto
     - p-0.5
@@ -816,6 +824,7 @@ utility_allowlist:
     - space-y-2.5
     - space-y-3
     - space-y-4
+    - space-y-5
     - space-y-6
     - space-y-8
     - sticky
@@ -825,6 +834,7 @@ utility_allowlist:
     - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
+    - text-amber-300
     - text-amber-300/80
     - text-amber-400
     - text-amber-400/60
@@ -951,6 +961,7 @@ utility_allowlist:
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+    - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
     - text-[10px]
     - text-[11px]
     - text-[8px]
@@ -1258,22 +1269,6 @@ component_contracts:
     state_rules:
       - id: jan-highlight
         rule: Highlighted January event count and selected-day treatment remain explicit in current mock data states.
-  CollapsibleSection:
-    file: components/views/ServerConfigEditor.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CapBadge:
     file: components/views/ModelManagerTab.tsx
     required_tokens:
@@ -1291,6 +1286,25 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  CollapsibleSection:
+    file: components/views/ServerConfigEditor.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+    allowed_variants:
+      isOpen:
+        - "true"
+        - "false"
+    structural_invariants:
+      - id: collapsible-header-body
+        rule: CollapsibleSection keeps clickable header row and overflow-hidden content body container.
+    behavior_rules:
+      - id: collapsible-motion
+        rule: Open/close height/opacity/rotation transitions remain tied to approved 200/300ms tokens.
+    state_rules:
+      - id: open-accent
+        rule: Open state title accent remains magenta and chevron rotates with white highlighted background.
   CustomModelRow:
     file: components/views/ModelManagerTab.tsx
     required_tokens:
@@ -1353,7 +1367,9 @@ component_contracts:
     file: components/views/ServerConfigEditor.tsx
     required_tokens:
       - colors
+      - motion
       - radii
+      - shadows
     allowed_variants: {}
     structural_invariants:
       - id: structure-stable
@@ -1626,10 +1642,11 @@ component_contracts:
       - colors
       - motion
       - radii
+      - shadows
     allowed_variants: {}
     structural_invariants:
-      - id: config-editor-layout
-        rule: Server config editor keeps search bar, collapsible section list, and type-aware field inputs.
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
     behavior_rules:
       - id: motion-locked
         rule: Use only approved motion tokens and classes from foundation token registry.
