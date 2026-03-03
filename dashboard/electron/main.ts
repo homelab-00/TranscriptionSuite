@@ -1,7 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { app, BrowserWindow, clipboard, ipcMain, session, shell, dialog } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  desktopCapturer,
+  ipcMain,
+  session,
+  shell,
+  dialog,
+} from 'electron';
 import Store from 'electron-store';
 import { dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
@@ -762,9 +771,13 @@ ipcMain.handle('audio:getDesktopSources', async () => []);
 
 // Modern system audio: register session.setDisplayMediaRequestHandler to
 // silently capture loopback audio without the Wayland screen-sharing picker.
+// We must supply a video source alongside the loopback audio: Electron throws
+// "Video was requested, but no video stream was provided" if video: true was
+// requested by the renderer but the callback omits a video source.
 ipcMain.handle('audio:enableSystemAudioLoopback', async () => {
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
-    callback({ audio: 'loopback', enableLocalEcho: false } as any);
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    callback({ audio: 'loopback', video: sources[0], enableLocalEcho: false } as any);
   });
 });
 
