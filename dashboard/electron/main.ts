@@ -73,6 +73,9 @@ app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'))
 const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
 const CLIENT_LOG_FILE = 'client-debug.log';
+const CLIENT_SESSION_MARKER = '══════ CLIENT START';
+const MAX_CLIENT_LOG_SESSIONS = 5;
+const MAX_CLIENT_LOG_LINES = 10_000;
 const STOP_SERVER_ON_QUIT_TIMEOUT_MS = 30_000;
 const LEGACY_ELECTRON_DEBUG_LOG_FILE = path.resolve(__dirname, '../electron-debug.log');
 const MAIN_PROCESS_LOG_SOURCE = 'Electron';
@@ -101,9 +104,39 @@ function ensureClientLogFilePath(): string {
   fs.mkdirSync(logDir, { recursive: true });
   const logFilePath = path.join(logDir, CLIENT_LOG_FILE);
 
-  // Start each dashboard session with a fresh client debug log file.
   if (!clientLogFileSessionInitialized) {
-    fs.writeFileSync(logFilePath, '', { flag: 'w' });
+    try {
+      // Read existing log (if any).
+      let existing = '';
+      try {
+        existing = fs.readFileSync(logFilePath, 'utf-8');
+      } catch {
+        // File doesn't exist yet — fine.
+      }
+
+      // Append a session marker for the new start.
+      const marker = `${CLIENT_SESSION_MARKER} ${new Date().toISOString()} ══════\n`;
+      const combined = existing + marker;
+
+      // Trim to keep only the last MAX_CLIENT_LOG_SESSIONS sessions.
+      const parts = combined.split(CLIENT_SESSION_MARKER);
+      const sessionTrimmed =
+        parts.length > MAX_CLIENT_LOG_SESSIONS
+          ? CLIENT_SESSION_MARKER +
+            parts.slice(-MAX_CLIENT_LOG_SESSIONS).join(CLIENT_SESSION_MARKER)
+          : combined;
+
+      // Also enforce a hard line cap, keeping the most recent lines.
+      const sessionLines = sessionTrimmed.split('\n');
+      const trimmed =
+        sessionLines.length > MAX_CLIENT_LOG_LINES
+          ? sessionLines.slice(-MAX_CLIENT_LOG_LINES).join('\n')
+          : sessionTrimmed;
+
+      fs.writeFileSync(logFilePath, trimmed, 'utf-8');
+    } catch (err) {
+      console.warn('[Main] Failed to rotate client log:', err);
+    }
     clientLogFileSessionInitialized = true;
   }
 

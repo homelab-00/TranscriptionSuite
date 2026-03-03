@@ -944,6 +944,7 @@ async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependen
 
 const SESSION_MARKER = '══════ SERVER START';
 const MAX_LOG_SESSIONS = 5;
+const MAX_SERVER_LOG_LINES = 10_000;
 
 /**
  * Resolve the path to the persistent server log file inside the user config dir.
@@ -983,10 +984,17 @@ function rotateServerLog(): void {
     const parts = combined.split(SESSION_MARKER);
     // parts[0] is anything before the very first marker (usually empty).
     // Each subsequent element is one session (marker suffix + logs).
-    const trimmed =
+    const sessionTrimmed =
       parts.length > MAX_LOG_SESSIONS
         ? SESSION_MARKER + parts.slice(-MAX_LOG_SESSIONS).join(SESSION_MARKER)
         : combined;
+
+    // Also enforce a hard line cap, keeping the most recent lines.
+    const sessionLines = sessionTrimmed.split('\n');
+    const trimmed =
+      sessionLines.length > MAX_SERVER_LOG_LINES
+        ? sessionLines.slice(-MAX_SERVER_LOG_LINES).join('\n')
+        : sessionTrimmed;
 
     fs.writeFileSync(logPath, trimmed, 'utf-8');
   } catch (err) {
