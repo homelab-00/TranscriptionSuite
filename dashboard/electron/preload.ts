@@ -132,7 +132,9 @@ export interface ElectronAPI {
     /** Linux: list PulseAudio/PipeWire output sinks for system audio capture. */
     listSinks: () => Promise<Array<{ name: string; description: string }>>;
     /** Linux: create a virtual mic from a sink's monitor source. */
-    createMonitorLoopback: (sinkName: string) => Promise<number>;
+    createMonitorLoopback: (
+      sinkName: string,
+    ) => Promise<{ moduleId: number; volumePct: number | null }>;
     /** Linux: remove the virtual mic. */
     removeMonitorLoopback: () => Promise<void>;
   };

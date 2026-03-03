@@ -513,6 +513,13 @@ stt:
     # Default: false
     normalize_audio: false
 
+    # Normalize each incoming audio chunk BEFORE VAD evaluation.
+    # Helps quiet monitor sources (e.g. headphone sinks) pass the VAD
+    # threshold without manual capture-gain adjustment on the client.
+    # Only amplifies — never attenuates.
+    # Default: false
+    pre_vad_normalize: false
+
     # --------------------------------------------------------------------------
     # Performance Tuning
     # --------------------------------------------------------------------------

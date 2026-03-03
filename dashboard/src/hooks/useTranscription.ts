@@ -50,6 +50,8 @@ export interface TranscriptionState {
   muted: boolean;
   /** Toggle mute during recording */
   toggleMute: () => void;
+  /** Set capture gain (amplification). Values >1 boost quiet sources. */
+  setGain: (value: number) => void;
 }
 
 export function useTranscription(): TranscriptionState {
@@ -239,5 +241,21 @@ export function useTranscription(): TranscriptionState {
     });
   }, []);
 
-  return { status, result, error, analyser, start, stop, reset, vadActive, muted, toggleMute };
+  const setGain = useCallback((value: number) => {
+    captureRef.current?.setGain(value);
+  }, []);
+
+  return {
+    status,
+    result,
+    error,
+    analyser,
+    start,
+    stop,
+    reset,
+    vadActive,
+    muted,
+    toggleMute,
+    setGain,
+  };
 }

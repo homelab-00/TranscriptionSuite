@@ -41,6 +41,8 @@ export interface LiveModeState {
   stop: () => void;
   /** Toggle mute */
   toggleMute: () => void;
+  /** Set capture gain (amplification). Values >1 boost quiet sources. */
+  setGain: (value: number) => void;
   /** Clear accumulated sentences */
   clearHistory: () => void;
   /** Copy all sentences as text */
@@ -231,6 +233,10 @@ export function useLiveMode(): LiveModeState {
     });
   }, []);
 
+  const setGain = useCallback((value: number) => {
+    captureRef.current?.setGain(value);
+  }, []);
+
   const clearHistory = useCallback(() => {
     socketRef.current?.sendJSON({ type: 'clear_history' });
     setSentences([]);
@@ -252,6 +258,7 @@ export function useLiveMode(): LiveModeState {
     start,
     stop,
     toggleMute,
+    setGain,
     clearHistory,
     getText,
   };

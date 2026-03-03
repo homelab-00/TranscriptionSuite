@@ -116,6 +116,7 @@ class AudioToTextRecorder:
         # Processing parameters
         faster_whisper_vad_filter: bool | None = None,
         normalize_audio: bool | None = None,
+        pre_vad_normalize: bool | None = None,
         early_transcription_on_silence: int | None = None,
         allowed_latency_limit: int | None = None,
         # Text processing
@@ -157,6 +158,9 @@ class AudioToTextRecorder:
             pre_recording_buffer_duration: Pre-recording buffer (seconds)
             faster_whisper_vad_filter: Enable faster-whisper VAD filter
             normalize_audio: Normalize audio to -0.95 dBFS
+            pre_vad_normalize: Normalize each incoming chunk before VAD
+                evaluation.  Helps quiet monitor sources pass the VAD
+                threshold without manual gain adjustment.
             early_transcription_on_silence: Trigger early transcription (seconds)
             allowed_latency_limit: Max audio queue size
             ensure_sentence_starting_uppercase: Capitalize first letter
@@ -235,6 +239,11 @@ class AudioToTextRecorder:
             normalize_audio
             if normalize_audio is not None
             else stt_cfg.get("normalize_audio", False)
+        )
+        self.pre_vad_normalize = (
+            pre_vad_normalize
+            if pre_vad_normalize is not None
+            else stt_cfg.get("pre_vad_normalize", False)
         )
         self.early_transcription_on_silence = (
             early_transcription_on_silence
@@ -432,6 +441,20 @@ class AudioToTextRecorder:
         while len(self._feed_buffer) >= buf_size:
             to_process = bytes(self._feed_buffer[:buf_size])
             self._feed_buffer = self._feed_buffer[buf_size:]
+
+            # Pre-VAD peak normalization: scale quiet chunks so that VAD
+            # can detect speech even from faint monitor sources.
+            if self.pre_vad_normalize:
+                samples = np.frombuffer(to_process, dtype=np.int16).copy()
+                peak = np.max(np.abs(samples))
+                if peak > 0:
+                    scale = (0.95 * 32767) / peak
+                    if scale > 1.0:  # only amplify, never attenuate
+                        samples = np.clip(
+                            (samples.astype(np.float32) * scale), -32768, 32767
+                        ).astype(np.int16)
+                        to_process = samples.tobytes()
+
             self.audio_queue.put(to_process)
 
     def start(self) -> "AudioToTextRecorder":

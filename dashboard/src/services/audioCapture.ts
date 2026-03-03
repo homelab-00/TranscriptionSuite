@@ -44,6 +44,7 @@ export class AudioCapture {
   private analyserNode: AnalyserNode | null = null;
   private onChunk: AudioChunkCallback;
   private _muted = false;
+  private _gain = 1;
 
   constructor(onChunk: AudioChunkCallback) {
     this.onChunk = onChunk;
@@ -106,7 +107,7 @@ export class AudioCapture {
     this.sourceNode = this.ctx.createMediaStreamSource(this.stream);
 
     this.gainNode = this.ctx.createGain();
-    this.gainNode.gain.value = 1;
+    this.gainNode.gain.value = this._gain;
 
     this.analyserNode = this.ctx.createAnalyser();
     this.analyserNode.fftSize = 2048;
@@ -174,7 +175,24 @@ export class AudioCapture {
   /** Unmute — resumes sending audio chunks and restores the visualiser. */
   unmute(): void {
     this._muted = false;
-    if (this.gainNode) this.gainNode.gain.value = 1;
+    if (this.gainNode) this.gainNode.gain.value = this._gain;
+  }
+
+  /**
+   * Set the capture gain (amplification).
+   * Values >1 boost quiet sources; values <1 attenuate.
+   * Clamped to [0, 10].  The value is remembered and re-applied on unmute.
+   */
+  setGain(value: number): void {
+    this._gain = Math.max(0, Math.min(10, value));
+    if (this.gainNode && !this._muted) {
+      this.gainNode.gain.value = this._gain;
+    }
+  }
+
+  /** Current capture gain multiplier. */
+  get gain(): number {
+    return this._gain;
   }
 
   get isMuted(): boolean {

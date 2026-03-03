@@ -114,6 +114,7 @@ class RealtimeTranscriptionEngine:
             pre_recording_buffer_duration=main_config.get("pre_recording_buffer_duration"),
             faster_whisper_vad_filter=main_config.get("faster_whisper_vad_filter"),
             normalize_audio=main_config.get("normalize_audio"),
+            pre_vad_normalize=main_config.get("pre_vad_normalize"),
             on_recording_start=self._handle_recording_start,
             on_recording_stop=self._handle_recording_stop,
             on_vad_start=self._handle_vad_start,

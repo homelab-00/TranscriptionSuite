@@ -842,7 +842,42 @@ ipcMain.handle('audio:createMonitorLoopback', async (_e, sinkName: string) => {
     'source_properties=device.description=TranscriptionSuite_Loopback',
   ]);
   loopbackModuleId = parseInt(stdout.trim(), 10);
-  return loopbackModuleId;
+
+  // Ensure both the master monitor source and the virtual remap source are at
+  // 100 % (0 dB).  PipeWire/PulseAudio may inherit a lower volume from the
+  // sink, causing very faint capture on some devices (e.g. headphone outputs
+  // whose sink volume is low).  65536 = 100 % in PulseAudio volume units.
+  try {
+    await execFileAsync('pactl', ['set-source-volume', `${sinkName}.monitor`, '65536']);
+  } catch {
+    /* best-effort — some sinks may not allow volume changes */
+  }
+  try {
+    await execFileAsync('pactl', ['set-source-volume', 'tsuite_loopback', '65536']);
+  } catch {
+    /* best-effort */
+  }
+
+  // Read back the effective volume to return as a diagnostic percentage.
+  let volumePct: number | null = null;
+  try {
+    const { stdout: srcJson } = await execFileAsync('pactl', ['-f', 'json', 'list', 'sources']);
+    const sources = JSON.parse(srcJson) as Array<{
+      name: string;
+      volume: Record<string, { value_percent: string }>;
+    }>;
+    const loopSrc = sources.find((s) => s.name === 'tsuite_loopback');
+    if (loopSrc?.volume) {
+      const firstCh = Object.values(loopSrc.volume)[0];
+      if (firstCh?.value_percent) {
+        volumePct = parseInt(firstCh.value_percent, 10);
+      }
+    }
+  } catch {
+    /* diagnostic only — non-fatal */
+  }
+
+  return { moduleId: loopbackModuleId, volumePct };
 });
 
 /** Remove the virtual mic. */

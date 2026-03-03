@@ -126,7 +126,9 @@ interface ElectronAPI {
     enableSystemAudioLoopback: () => Promise<void>;
     disableSystemAudioLoopback: () => Promise<void>;
     listSinks: () => Promise<Array<{ name: string; description: string }>>;
-    createMonitorLoopback: (sinkName: string) => Promise<number>;
+    createMonitorLoopback: (
+      sinkName: string,
+    ) => Promise<{ moduleId: number; volumePct: number | null }>;
     removeMonitorLoopback: () => Promise<void>;
   };
   updates: {

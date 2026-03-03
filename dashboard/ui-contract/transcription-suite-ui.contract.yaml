@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.0
+  spec_version: 1.1.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -31,7 +31,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-03T14:39:15.645Z
+    generated_at: 2026-03-03T16:02:04.782Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -129,6 +129,7 @@ foundation:
         - rgba(255, 255, 255, 0.4)
         - rgba(255,145,0,0.15)
         - rgba(255,255,255,0.3)
+        - rgba(34, 211, 238, 0.4)
         - rgba(34, 211, 238, 0.6)
         - rgba(34, 211, 238, 0.8)
         - rgba(34,197,94,0.5)
@@ -266,6 +267,7 @@ foundation:
         - max-h-[80vh]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
+        - min-w-[3ch]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
@@ -678,6 +680,7 @@ utility_allowlist:
     - mt-1.5
     - mt-10
     - mt-2
+    - mt-2.5
     - mt-3
     - mt-4
     - mt-6
@@ -949,6 +952,7 @@ utility_allowlist:
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
+    - min-w-[3ch]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
     - shadow-[0_0_15px_rgba(251,146,60,0.5)]

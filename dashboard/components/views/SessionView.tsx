@@ -83,6 +83,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
   const [visualizerAmplitudeScale, setVisualizerAmplitudeScale] = useState(1.0);
 
+  // Capture gain — boosts quiet system audio sources via Web Audio GainNode.
+  // Persisted per-sink in config store. Also drives live mode gain.
+  const [captureGain, setCaptureGain] = useState(1.0);
+  // Diagnostic: effective monitor source volume after loopback creation (Linux)
+  const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
+
   // Runtime profile (read from persisted config)
   const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu'>('gpu');
   useEffect(() => {
@@ -208,6 +214,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
         persistedSelectionsRef.current.sysDevice,
       );
       if (next !== sysDevice) setSysDevice(next);
+      // Restore persisted capture gain for the active sink
+      const activeSinkName = map[next] ?? map[sysDevice];
+      if (activeSinkName) {
+        const saved = await getConfig<number>(`session.sinkGain.${activeSinkName}`);
+        if (typeof saved === 'number' && Number.isFinite(saved)) {
+          setCaptureGain(saved);
+        }
+      }
     } catch {
       setSysDevices(['No sinks found']);
     }
@@ -329,11 +343,40 @@ export const SessionView: React.FC<SessionViewProps> = ({
     void setConfig('session.micDevice', device).catch(() => {});
   }, []);
 
-  const handleSystemDeviceChange = useCallback((device: string) => {
-    setSysDevice(device);
-    persistedSelectionsRef.current.sysDevice = device;
-    void setConfig('session.systemDevice', device).catch(() => {});
-  }, []);
+  const handleSystemDeviceChange = useCallback(
+    (device: string) => {
+      setSysDevice(device);
+      persistedSelectionsRef.current.sysDevice = device;
+      void setConfig('session.systemDevice', device).catch(() => {});
+      // Restore persisted gain for the newly-selected sink
+      const sinkName = sinkNameMap[device];
+      if (sinkName) {
+        void getConfig<number>(`session.sinkGain.${sinkName}`).then((saved) => {
+          const g = typeof saved === 'number' && Number.isFinite(saved) ? saved : 1.0;
+          setCaptureGain(g);
+          transcription.setGain(g);
+          live.setGain(g);
+        });
+      }
+    },
+    [sinkNameMap, transcription, live],
+  );
+
+  /** Update capture gain, apply to active captures, and persist per-sink. */
+  const handleCaptureGainChange = useCallback(
+    (value: number) => {
+      const clamped = Math.max(0.25, Math.min(5, value));
+      setCaptureGain(clamped);
+      transcription.setGain(clamped);
+      live.setGain(clamped);
+      // Persist for the current sink
+      const sinkName = sinkNameMap[sysDevice];
+      if (sinkName) {
+        void setConfig(`session.sinkGain.${sinkName}`, clamped).catch(() => {});
+      }
+    },
+    [sinkNameMap, sysDevice, transcription, live],
+  );
 
   const handleMainLanguageChange = useCallback((language: string) => {
     setMainLanguage(language);
@@ -537,8 +580,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
           // Linux: create a virtual mic from the selected sink's monitor source
           const selectedSink = sinkNameMap[sysDevice];
           if (selectedSink) {
-            await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
+            const result = await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
             monitorLabel = 'TranscriptionSuite_Loopback';
+            setMonitorVolumePct(result?.volumePct ?? null);
           }
         } else {
           // Windows / macOS: register getDisplayMedia loopback handler
@@ -553,6 +597,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
         systemAudio: isSystemAudio,
         monitorDeviceLabel: monitorLabel,
       });
+      // Apply persisted capture gain after capture starts
+      if (isSystemAudio) {
+        transcription.setGain(captureGain);
+      }
     })();
   }, [
     canStartRecording,
@@ -569,6 +617,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     isLinux,
     sysDevice,
     sinkNameMap,
+    captureGain,
   ]);
 
   const handleStopRecording = useCallback(() => {
@@ -629,8 +678,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
             if (isLinux) {
               const selectedSink = sinkNameMap[sysDevice];
               if (selectedSink) {
-                await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
+                const result = await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
                 monitorLabel = 'TranscriptionSuite_Loopback';
+                setMonitorVolumePct(result?.volumePct ?? null);
               }
             } else {
               await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
@@ -646,6 +696,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
             systemAudio: isSystemAudio,
             monitorDeviceLabel: monitorLabel,
           });
+          // Apply persisted capture gain after capture starts
+          if (isSystemAudio) {
+            live.setGain(captureGain);
+          }
         })();
       } else {
         live.stop();
@@ -671,6 +725,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       isLinux,
       sysDevice,
       sinkNameMap,
+      captureGain,
     ],
   );
 
@@ -1504,6 +1559,35 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           />
                         )}
                       </div>
+                      {/* Capture gain slider — boost or attenuate system audio input */}
+                      {audioSource === 'system' && (
+                        <div className="mt-2.5">
+                          <div className="mb-1 flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-slate-400">
+                              Capture Gain
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              {monitorVolumePct !== null && (
+                                <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-500 tabular-nums">
+                                  src {monitorVolumePct}%
+                                </span>
+                              )}
+                              <span className="min-w-[3ch] text-right text-[11px] text-slate-300 tabular-nums">
+                                {captureGain.toFixed(2)}x
+                              </span>
+                            </div>
+                          </div>
+                          <input
+                            type="range"
+                            min={0.25}
+                            max={5}
+                            step={0.25}
+                            value={captureGain}
+                            onChange={(e) => handleCaptureGainChange(parseFloat(e.target.value))}
+                            className="ts-gain-slider h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-cyan-400"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

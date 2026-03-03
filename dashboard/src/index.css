@@ -168,3 +168,42 @@ body {
 .dropdown-appear {
   animation: dropdown-appear 100ms ease-out 20ms both;
 }
+
+/* ── Capture gain slider (System Audio card) ──────────────────────────── */
+.ts-gain-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+.ts-gain-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #22d3ee; /* accent-cyan */
+  border: 2px solid rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.4);
+  transition: box-shadow 150ms ease;
+}
+.ts-gain-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+}
+.ts-gain-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #22d3ee;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.4);
+}
+.ts-gain-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+}
