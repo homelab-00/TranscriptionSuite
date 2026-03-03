@@ -29,6 +29,10 @@ ENV BOOTSTRAP_LOG_CHANGES="true"
 ENV UV_CACHE_DIR="/runtime/cache"
 ENV HF_HOME="/models"
 ENV TORCH_HOME="/models/torch-cache"
+# Suppress the torchcodec/pyannote UserWarning at the interpreter level so it
+# is silenced even in background threads that import pyannote.audio before any
+# Python-level warnings.filterwarnings() call runs.
+ENV PYTHONWARNINGS="ignore::UserWarning:pyannote.audio.core.io"
 
 # Install runtime + bootstrap build prerequisites.
 # Some Python packages still need local compilation on first bootstrap.

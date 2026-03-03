@@ -36,6 +36,15 @@ warnings.filterwarnings(
     "ignore", message=r"torchcodec is not installed correctly", category=UserWarning
 )
 
+# pyannote TF32 ReproducibilityWarning: intentional safeguard that disables
+# TensorFloat-32 for reproducible diarization.  The behavior is correct;
+# suppress the noisy console warning only.
+warnings.filterwarnings(
+    "ignore",
+    message=r"TensorFloat-32 \(TF32\) has been disabled",
+    module=r"pyannote\.audio\.utils\.reproducibility",
+)
+
 # pydub 0.25.1: non-raw regex strings. SyntaxWarning on 3.13, SyntaxError on 3.14.
 warnings.filterwarnings("ignore", category=SyntaxWarning, module=r"pydub\..*")
 
@@ -59,6 +68,27 @@ for _logger_name in (
     "nv_one_logger.training_telemetry.api.training_telemetry_provider",
 ):
     logging.getLogger(_logger_name).setLevel(logging.ERROR)
+
+# Lightning checkpoint upgrade notice ("automatically upgraded from v1.5.4 to v2.4.0")
+# is purely informational — the upgrade is applied transparently in memory.
+logging.getLogger("lightning.pytorch.utilities.migration.utils").setLevel(logging.ERROR)
+
+# NumExpr "defaulting to N threads" is INFO-level noise; keep WARNING and above.
+logging.getLogger("numexpr.utils").setLevel(logging.WARNING)
+
+
+class _NeMoMegatronFilter(logging.Filter):
+    """Drop the NeMo '[NeMo W] Megatron num_microbatches_calculator not found'
+    message, which leaks through NeMo's custom logger rather than the standard
+    ``nemo_logger`` hierarchy.  Only relevant for training, not inference."""
+
+    _pattern = "Megatron num_microbatches_calculator not found"
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        return self._pattern not in record.getMessage()
+
+
+logging.getLogger().addFilter(_NeMoMegatronFilter())
 
 # Add app root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -256,30 +256,90 @@ export async function initWaylandShortcuts(
 
 /**
  * Wait for a portal Response signal on the given request path.
- * The portal sends a Response signal with (code, results) on the request object.
+ *
+ * Uses the low-level D-Bus message interface (AddMatch + bus.on('message'))
+ * instead of getProxyObject().  This avoids the introspection race condition
+ * where the portal destroys the ephemeral Request object before dbus-next can
+ * introspect it, resulting in "Interface org.freedesktop.portal.Request not
+ * found".
  */
 function waitForResponse(
   requestPath: string,
   timeoutMs = 30000,
 ): Promise<{ code: number; results: any }> {
   return new Promise((resolve, reject) => {
+    const dbus = require('@particle/dbus-next');
+    const Message = dbus.Message;
+
+    const matchRule =
+      `type='signal',` +
+      `sender='org.freedesktop.portal.Desktop',` +
+      `interface='org.freedesktop.portal.Request',` +
+      `path='${requestPath}',` +
+      `member='Response'`;
+
+    let settled = false;
+
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       reject(new Error(`Portal response timeout on ${requestPath}`));
     }, timeoutMs);
 
-    bus
-      .getProxyObject('org.freedesktop.portal.Desktop', requestPath)
-      .then((reqObj: any) => {
-        const reqIface = reqObj.getInterface('org.freedesktop.portal.Request');
-        reqIface.on('Response', (code: number, results: any) => {
-          clearTimeout(timer);
-          resolve({ code, results });
-        });
-      })
-      .catch((err: any) => {
+    function onMessage(msg: any) {
+      if (settled) return;
+      if (
+        msg.type === dbus.MessageType.SIGNAL &&
+        msg.path === requestPath &&
+        msg.interface === 'org.freedesktop.portal.Request' &&
+        msg.member === 'Response'
+      ) {
+        settled = true;
         clearTimeout(timer);
-        reject(err);
-      });
+        cleanup();
+        const [code, results] = msg.body ?? [1, {}];
+        resolve({ code, results });
+      }
+    }
+
+    function cleanup() {
+      bus.removeListener('message', onMessage);
+      // Best-effort RemoveMatch — ignore errors (bus may be closing).
+      try {
+        const removeMsg = new Message({
+          destination: 'org.freedesktop.DBus',
+          path: '/org/freedesktop/DBus',
+          interface: 'org.freedesktop.DBus',
+          member: 'RemoveMatch',
+          signature: 's',
+          body: [matchRule],
+        });
+        bus.send(removeMsg);
+      } catch {
+        // Ignore — match may already be gone or bus disconnected.
+      }
+    }
+
+    // Register the listener BEFORE sending AddMatch so we can't miss the signal.
+    bus.on('message', onMessage);
+
+    const addMatchMsg = new Message({
+      destination: 'org.freedesktop.DBus',
+      path: '/org/freedesktop/DBus',
+      interface: 'org.freedesktop.DBus',
+      member: 'AddMatch',
+      signature: 's',
+      body: [matchRule],
+    });
+
+    bus.call(addMatchMsg).catch((err: any) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      bus.removeListener('message', onMessage);
+      reject(err);
+    });
   });
 }
 

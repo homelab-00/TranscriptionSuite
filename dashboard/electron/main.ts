@@ -58,6 +58,12 @@ if (process.platform === 'linux' && process.env.APPIMAGE) {
 // ─── System audio loopback flags ────────────────────────────────────────────
 // These must be set before app.whenReady() so Chromium picks them up.
 if (process.platform === 'linux') {
+  // Disable VA-API probing — NVIDIA GPUs don't support it (they use NVDEC),
+  // so Chromium's vaInitialize() fails with a scary but harmless error.
+  app.commandLine.appendSwitch(
+    'disable-features',
+    'VaapiVideoDecoder,VaapiVideoEncoder,VaapiVideoDecodeLinuxGL',
+  );
   app.commandLine.appendSwitch('enable-features', 'PulseaudioLoopbackForScreenShare');
 } else if (process.platform === 'darwin') {
   app.commandLine.appendSwitch(
@@ -195,9 +201,22 @@ function appendRoutedClientLogLine(message: string, type: ClientLogType): void {
   }
 }
 
+// Chromium internal stderr noise that has no functional impact.
+// These are logged at ERROR level by Chromium's C++ code but are actually
+// harmless probes or race conditions — suppress them from the client log.
+const SUPPRESSED_STDERR_PATTERNS: RegExp[] = [
+  // VA-API probe failure on NVIDIA GPUs (belt-and-suspenders alongside disable-features)
+  /vaInitialize failed/,
+  // systemd scope race with --no-sandbox AppImage
+  /StartTransientUnit.*UnitExists/,
+];
+
 function routeMainProcessLogLine(rawLine: string, stream: 'stdout' | 'stderr'): void {
   const normalizedLine = normalizeLogMessage(rawLine);
   if (!normalizedLine) {
+    return;
+  }
+  if (stream === 'stderr' && SUPPRESSED_STDERR_PATTERNS.some((re) => re.test(normalizedLine))) {
     return;
   }
   appendRoutedClientLogLine(normalizedLine, classifyMainProcessLogType(normalizedLine, stream));
