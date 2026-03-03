@@ -9,7 +9,6 @@ import {
   Volume2,
   VolumeX,
   Maximize2,
-  Terminal,
   Activity,
   Server,
   Laptop,
@@ -24,7 +23,6 @@ import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { StatusLight } from '../ui/StatusLight';
 import { AudioVisualizer } from '../AudioVisualizer';
-import { LogTerminal } from '../ui/LogTerminal';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { useLanguages } from '../../src/hooks/useLanguages';
@@ -35,7 +33,6 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
-import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { apiClient } from '../../src/api/client';
 import { getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
@@ -77,9 +74,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   live,
 }) => {
   // Global State
-  const [showLogs, setShowLogs] = useState(false);
-  const [logsRendered, setLogsRendered] = useState(false);
-  const [logsVisible, setLogsVisible] = useState(false);
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
   const [visualizerAmplitudeScale, setVisualizerAmplitudeScale] = useState(1.0);
 
@@ -125,7 +119,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Transcription hooks
   const transcription = useTranscription();
-  const { logs: clientLogs, logPath: clientLogPath } = useClientDebugLogs();
 
   // Active analyser: live mode takes priority when active, then one-shot
   const activeAnalyser = live.analyser ?? transcription.analyser;
@@ -729,116 +722,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
     ],
   );
 
-  // Build server log entries from Docker stream + runtime errors.
-  const serverLogs = useMemo(() => {
-    const logs: Array<{
-      timestamp: string;
-      source: string;
-      message: string;
-      type: 'info' | 'success' | 'error' | 'warning';
-    }> = [];
-    const now = () => new Date().toLocaleTimeString('en-US', { hour12: false });
-
-    const classifyDockerLine = (line: string): 'info' | 'success' | 'error' | 'warning' => {
-      if (/(^|\b)(error|exception|traceback|fatal)(\b|$)/i.test(line)) return 'error';
-      if (/(^|\b)(warn|warning)(\b|$)/i.test(line)) return 'warning';
-      if (/(^|\b)(started|ready|listening|healthy)(\b|$)/i.test(line)) return 'success';
-      return 'info';
-    };
-
-    const parseDockerLine = (line: string) => {
-      const trimmed = line.trimEnd();
-      const match = trimmed.match(
-        /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\s+(.*)$/,
-      );
-      if (!match) {
-        return {
-          timestamp: now(),
-          source: 'Docker',
-          message: trimmed,
-          type: classifyDockerLine(trimmed),
-        };
-      }
-      const parsedDate = new Date(match[1]);
-      const time = Number.isNaN(parsedDate.getTime())
-        ? now()
-        : parsedDate.toLocaleTimeString('en-US', { hour12: false });
-      return {
-        timestamp: time,
-        source: 'Docker',
-        message: match[2],
-        type: classifyDockerLine(match[2]),
-      };
-    };
-
-    for (const line of docker.logLines) {
-      logs.push(parseDockerLine(line));
-    }
-
-    if (docker.container.running && logs.length === 0) {
-      logs.push({
-        timestamp: now(),
-        source: 'Docker',
-        message: 'Waiting for docker logs...',
-        type: 'info',
-      });
-    }
-
-    if (docker.operationError) {
-      logs.push({
-        timestamp: now(),
-        source: 'Docker',
-        message: docker.operationError,
-        type: 'error',
-      });
-    }
-
-    if (transcription.error) {
-      logs.push({
-        timestamp: now(),
-        source: 'Transcription',
-        message: transcription.error,
-        type: 'error',
-      });
-    }
-    if (live.error) {
-      logs.push({ timestamp: now(), source: 'Live', message: live.error, type: 'error' });
-    }
-    return logs;
-  }, [
-    docker.logLines,
-    docker.container.running,
-    docker.operationError,
-    transcription.error,
-    live.error,
-  ]);
-
-  // Keep Docker logs streaming so the terminal updates in real time.
-  useEffect(() => {
-    if (!docker.container.exists) {
-      docker.stopLogStream();
-      return;
-    }
-    docker.startLogStream();
-    return () => {
-      docker.stopLogStream();
-    };
-  }, [
-    docker.container.exists,
-    docker.container.running,
-    docker.startLogStream,
-    docker.stopLogStream,
-  ]);
-
-  const announcedClientLogPathRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!clientLogPath || announcedClientLogPathRef.current === clientLogPath) {
-      return;
-    }
-    announcedClientLogPathRef.current = clientLogPath;
-    logClientEvent('Client', `Debug log file: ${clientLogPath}`);
-  }, [clientLogPath]);
-
   const prevClientConnectedRef = useRef(clientConnected);
   useEffect(() => {
     if (prevClientConnectedRef.current === clientConnected) {
@@ -851,17 +734,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
       clientConnected ? 'success' : 'warning',
     );
   }, [clientConnected]);
-
-  // Copy all logs to clipboard
-  const handleCopyLogs = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const allLogs = [...serverLogs, ...clientLogs];
-      const logText = allLogs.map((l) => `[${l.timestamp}] [${l.source}] ${l.message}`).join('\n');
-      writeToClipboard(logText).catch(() => {});
-    },
-    [serverLogs, clientLogs],
-  );
 
   // Auto-copy transcription to clipboard on completion + desktop notification
   const prevStatusRef = useRef(transcription.status);
@@ -909,7 +781,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   }, []);
 
   // Scroll State
-  const initialMountRef = useRef(true);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
   const leftContentRef = useRef<HTMLDivElement>(null);
@@ -938,7 +809,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   }, [calculateScrollState]);
 
   const captureColumnBaselines = useCallback(() => {
-    if (showLogs) return;
     const nextLeftHeight = leftScrollRef.current?.clientHeight ?? null;
     const nextRightHeight = rightScrollRef.current?.clientHeight ?? null;
     if (nextLeftHeight) {
@@ -947,7 +817,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (nextRightHeight) {
       setRightColumnBaselineHeight((prev) => (prev === nextRightHeight ? prev : nextRightHeight));
     }
-  }, [showLogs]);
+  }, []);
 
   const recalcScrollIndicators = useCallback(() => {
     captureColumnBaselines();
@@ -1004,30 +874,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       cancelAnimationFrame(raf);
       clearTimeout(timer);
     };
-  }, [showLogs, logsRendered, logsVisible, recalcScrollIndicators]);
-
-  // Logs Animation Logic
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    if (showLogs) {
-      setLogsRendered(true);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          setLogsVisible(true);
-        });
-      });
-    } else {
-      setLogsVisible(false);
-      timer = setTimeout(() => {
-        setLogsRendered(false);
-      }, 550);
-    }
-    return () => clearTimeout(timer);
-  }, [showLogs]);
-
-  const toggleLogs = () => {
-    setShowLogs(!showLogs);
-  };
+  }, [recalcScrollIndicators]);
 
   const maskStyle: React.CSSProperties = {
     backgroundColor: '#0f172a',
@@ -1035,32 +882,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
       'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%)',
     backgroundAttachment: 'fixed',
   };
-
-  // Scroll both columns to the bottom whenever logs are toggled (skip initial mount)
-  useEffect(() => {
-    if (initialMountRef.current) {
-      initialMountRef.current = false;
-      return;
-    }
-    const leftEl = leftScrollRef.current;
-    const rightEl = rightScrollRef.current;
-    if (!leftEl && !rightEl) return;
-
-    const duration = 600;
-    const startTime = performance.now();
-    let animationFrameId: number;
-
-    const animateScroll = (currentTime: number) => {
-      if (leftEl) leftEl.scrollTop = leftEl.scrollHeight;
-      if (rightEl) rightEl.scrollTop = rightEl.scrollHeight;
-      if (currentTime - startTime < duration) {
-        animationFrameId = requestAnimationFrame(animateScroll);
-      }
-    };
-
-    animationFrameId = requestAnimationFrame(animateScroll);
-    return () => cancelAnimationFrame(animationFrameId);
-  }, [showLogs]);
 
   return (
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col p-6">
@@ -1070,7 +891,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       </div>
 
       {/* 2. Main Content Area */}
-      <div className="mb-6 grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] lg:grid-cols-12">
+      <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-12">
         {/* Left Column: Controls (40%) */}
         <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-5">
           {/* Left Top Scroll Indicator */}
@@ -1592,36 +1413,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   </div>
                 </div>
               </GlassCard>
-
-              <div className="pt-2">
-                <div
-                  onClick={toggleLogs}
-                  className={`group flex w-full cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 transition-all duration-200 select-none ${showLogs ? 'bg-accent-cyan/10 border-accent-cyan/30 text-accent-cyan shadow-[0_0_15px_rgba(34,211,238,0.15)]' : 'from-glass-200 to-glass-100 border-glass-border bg-linear-to-br text-slate-400 backdrop-blur-xl hover:text-white hover:brightness-110'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Terminal size={18} />
-                    <span className="text-sm font-medium">System Logs</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showLogs ? 'w-24 opacity-100' : 'w-0 opacity-0'}`}
-                    >
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="h-8 w-full text-xs whitespace-nowrap text-slate-300"
-                        onClick={handleCopyLogs}
-                        icon={<Copy size={14} />}
-                      >
-                        Copy All
-                      </Button>
-                    </div>
-                    <div className="text-xs font-bold tracking-wider uppercase">
-                      {showLogs ? 'Hide' : 'Show'}
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -1904,26 +1695,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
           />
         </div>
       </div>
-
-      {/* 3. Bottom Drawer: Logs */}
-      {logsRendered && (
-        <div
-          className={`grid flex-none grid-cols-1 gap-6 overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] lg:grid-cols-2 ${logsVisible ? 'h-72 translate-y-0 border-t border-white/10 pt-4 pb-1 opacity-100' : 'h-0 translate-y-4 border-t-0 border-transparent py-0 opacity-0'}`}
-        >
-          <LogTerminal
-            title="Server Output (Docker)"
-            logs={serverLogs}
-            color="magenta"
-            className="h-full"
-          />
-          <LogTerminal
-            title="Client Debug (Socket)"
-            logs={clientLogs}
-            color="cyan"
-            className="h-full"
-          />
-        </div>
-      )}
 
       {/* Fullscreen Visualizer Modal */}
       <FullscreenVisualizer

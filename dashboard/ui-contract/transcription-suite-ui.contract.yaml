@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.1.0
+  spec_version: 1.0.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -21,6 +21,7 @@ meta:
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/FullscreenVisualizer.tsx
+      - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
       - components/views/NotebookView.tsx
       - components/views/ServerConfigEditor.tsx
@@ -31,7 +32,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-03T16:02:04.782Z
+    generated_at: 2026-03-03T17:39:16.903Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1498,6 +1499,23 @@ component_contracts:
     state_rules:
       - id: import-switch-options
         rule: Speaker diarization and word timestamp option switches remain present in fixed order.
+  LogsView:
+    file: components/views/LogsView.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   LogTerminal:
     file: components/ui/LogTerminal.tsx
     required_tokens:

@@ -1,6 +1,15 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { View } from '../types';
-import { Mic2, Book, Server, Settings, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import {
+  Mic2,
+  Book,
+  Server,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Terminal,
+} from 'lucide-react';
 import logoUrl from '../../build/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
 
@@ -116,6 +125,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Server',
       icon: <Server size={20} />,
       status: serverSidebarStatus as 'active' | 'warning' | 'inactive',
+    },
+    {
+      id: View.LOGS,
+      label: 'Logs',
+      icon: <Terminal size={20} />,
     },
   ];
 

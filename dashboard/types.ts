@@ -2,6 +2,7 @@ export enum View {
   SESSION = 'SESSION',
   NOTEBOOK = 'NOTEBOOK',
   SERVER = 'SERVER',
+  LOGS = 'LOGS',
 }
 
 export enum ServerTab {
