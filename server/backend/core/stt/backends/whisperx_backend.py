@@ -111,13 +111,18 @@ class WhisperXBackend(STTBackend):
     def is_loaded(self) -> bool:
         return self._model is not None
 
-    def warmup(self) -> None:
+    def warmup(self, *, language: str = "en") -> None:
         """Run full end-to-end warmup: transcribe → load alignment model → run alignment.
 
         This ensures CUDA kernels are compiled for both the transcription and
         alignment pipelines at startup, rather than on the first user request.
         CUDA kernel compilation is per-architecture, so warming up with an English
         wav2vec2 model also helps Greek/French/etc. (same architecture, different weights).
+
+        Args:
+            language: Language code for the alignment model to pre-load.
+                      Defaults to "en". Pass the engine's configured language
+                      so the correct wav2vec2 model is loaded at startup.
         """
         if self._model is None:
             return
@@ -131,7 +136,7 @@ class WhisperXBackend(STTBackend):
         else:
             warmup_audio, _ = sf.read(str(warmup_path), dtype="float32")
 
-        # Step 1: Transcribe warmup audio (warms faster-whisper + Pyannote VAD kernels)
+        # Step 1: Transcribe warmup audio (always English — the audio file is English)
         wx_result: dict[str, Any] = {}
         try:
             t0 = time.perf_counter()
@@ -140,8 +145,8 @@ class WhisperXBackend(STTBackend):
         except Exception as e:
             logger.warning(f"Warmup transcribe failed (non-critical): {e}")
 
-        # Step 2: Load alignment model (downloads wav2vec2 weights on first run)
-        align_lang = "en"
+        # Step 2: Load alignment model for the CONFIGURED language
+        align_lang = language or "en"
         try:
             t0 = time.perf_counter()
             self._align_model, self._align_metadata = whisperx.load_align_model(

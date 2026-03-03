@@ -379,6 +379,8 @@ class AudioToTextRecorder:
 
             if use_background_warmup:
                 backend.warmup(background=True)
+            elif backend_name == "whisperx":
+                backend.warmup(language=self.language or "en")
             else:
                 backend.warmup()
 
@@ -712,7 +714,10 @@ class AudioToTextRecorder:
         # so pre-stripping silence is redundant and wastes GPU time.
         # Skip for VibeVoice-ASR too: it produces structured timestamps, so
         # physically removing silence before inference can shift timings.
-        if apply_vad_preprocessing and backend_name not in {"whisperx", "vibevoice_asr"}:
+        if apply_vad_preprocessing and backend_name not in {
+            "whisperx",
+            "vibevoice_asr",
+        }:
             cfg = get_config()
             static_cfg = cfg.get("static_transcription", default={})
             vad_enabled = static_cfg.get("silero_vad_preprocessing", True)
