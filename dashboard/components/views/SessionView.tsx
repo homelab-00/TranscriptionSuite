@@ -1249,7 +1249,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                   {/* Record / Stop Button */}
                   <div className="flex flex-col gap-2">
-                    {mainModelDisabled && (
+                    {serverRunning && mainModelDisabled && (
                       <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
                         Main model not selected.
                       </div>
@@ -1709,7 +1709,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                 {/* Transcript Area */}
                 <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
-                  {liveModelDisabled && (
+                  {serverRunning && liveModelDisabled && (
                     <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
                   )}
                   {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
