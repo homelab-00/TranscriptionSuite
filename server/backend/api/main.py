@@ -312,8 +312,8 @@ def _start_import_prewarming() -> threading.Thread | None:
         for pkg in _HEAVY_PACKAGES:
             try:
                 importlib.import_module(pkg)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Import pre-warming skipped for %s: %s", pkg, exc)
 
     thread = threading.Thread(target=_prewarm, name="import-prewarm", daemon=True)
     thread.start()

@@ -1197,15 +1197,15 @@ def main() -> int:
                 }
                 log(f"faster-whisper dependency installation failed: {exc}")
         else:
-            reason = "selected_but_not_requested" if whisper_selected else "not_requested"
-            whisper_status = {"available": False, "reason": reason}
-            if whisper_selected:
-                log(
-                    "faster-whisper selected but INSTALL_WHISPER is not enabled, "
-                    "skipping optional install"
-                )
-            else:
-                log("faster-whisper not requested, skipping")
+            # Reachable only when whisper_selected=True and install_whisper=False
+            whisper_status = {
+                "available": False,
+                "reason": "selected_but_not_requested",
+            }
+            log(
+                "faster-whisper selected but INSTALL_WHISPER is not enabled, "
+                "skipping optional install"
+            )
     log_timing("faster-whisper feature check complete", whisper_start)
 
     # ── NeMo toolkit (optional, for NVIDIA Parakeet ASR models) ──────────
@@ -1271,14 +1271,9 @@ def main() -> int:
                 }
                 log(f"NeMo toolkit installation failed: {exc}")
         else:
-            reason = "selected_but_not_requested" if nemo_selected else "not_requested"
-            nemo_status = {"available": False, "reason": reason}
-            if nemo_selected:
-                log(
-                    "NeMo model selected but INSTALL_NEMO is not enabled, skipping optional install"
-                )
-            else:
-                log("NeMo not requested, skipping")
+            # Reachable only when nemo_selected=True and install_nemo=False
+            nemo_status = {"available": False, "reason": "selected_but_not_requested"}
+            log("NeMo model selected but INSTALL_NEMO is not enabled, skipping optional install")
     log_timing("NeMo feature check complete", nemo_start)
 
     # ── VibeVoice-ASR (optional, experimental in-process backend) ───────────
@@ -1457,15 +1452,15 @@ def main() -> int:
                 }
                 log(f"VibeVoice-ASR installation failed: {exc}")
         else:
-            reason = "selected_but_not_requested" if vibevoice_selected else "not_requested"
-            vibevoice_asr_status = {"available": False, "reason": reason}
-            if vibevoice_selected:
-                log(
-                    "VibeVoice-ASR selected but INSTALL_VIBEVOICE_ASR is not enabled, "
-                    "skipping optional install"
-                )
-            else:
-                log("VibeVoice-ASR not requested, skipping")
+            # Reachable only when vibevoice_selected=True and install_vibevoice_asr=False
+            vibevoice_asr_status = {
+                "available": False,
+                "reason": "selected_but_not_requested",
+            }
+            log(
+                "VibeVoice-ASR selected but INSTALL_VIBEVOICE_ASR is not enabled, "
+                "skipping optional install"
+            )
     log_timing("VibeVoice-ASR feature check complete", vibevoice_start)
 
     status_write_start = time.perf_counter()
