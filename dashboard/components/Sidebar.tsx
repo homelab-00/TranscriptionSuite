@@ -125,6 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: View.NOTEBOOK,
       label: 'Notebook',
       icon: <Book size={20} />,
+      status: serverSidebarStatus as 'active' | 'warning' | 'inactive',
     },
     {
       id: View.SERVER,

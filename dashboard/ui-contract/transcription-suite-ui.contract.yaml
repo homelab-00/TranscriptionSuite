@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.5
+  spec_version: 1.0.3
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -33,7 +33,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-04T20:23:35.703Z
+    generated_at: 2026-03-04T20:45:13.678Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1843,6 +1843,7 @@ component_contracts:
         - SERVER
       status_light_bindings:
         - SESSION=sessionStatus
+        - NOTEBOOK=serverSidebarStatus
         - SERVER=serverSidebarStatus
     structural_invariants:
       - id: sidebar-width-modes
@@ -1852,7 +1853,7 @@ component_contracts:
         rule: Collapse/expand and active pill transitions must remain within approved duration/easing tokens.
     state_rules:
       - id: status-dots
-        rule: Session and server nav items retain StatusLight indicators; notebook does not show a status light.
+        rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
   StatusLight:
     file: components/ui/StatusLight.tsx
     required_tokens:
