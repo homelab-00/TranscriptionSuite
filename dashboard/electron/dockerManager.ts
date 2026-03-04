@@ -17,6 +17,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { app } from 'electron';
+import YAML from 'yaml';
 
 const execFileAsync = promisify(execFile);
 
@@ -197,6 +198,179 @@ function upsertComposeEnvValues(values: Record<string, string>): void {
     .replace(/\n{3,}/g, '\n\n')
     .trimEnd();
   fs.writeFileSync(composeEnvPath, `${normalizedText}\n`, 'utf8');
+}
+
+// ─── TLS Certificate Resolution ────────────────────────────────────────────
+
+type RemoteTlsProfile = 'tailscale' | 'lan';
+
+/**
+ * Read the active remote TLS profile from the electron-store JSON on disk.
+ * Falls back to 'tailscale' if the file is missing or the key is absent.
+ */
+function readRemoteTlsProfile(): RemoteTlsProfile {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const value = data['connection.remoteProfile'];
+    return value === 'lan' ? 'lan' : 'tailscale';
+  } catch {
+    return 'tailscale';
+  }
+}
+
+/**
+ * Locate the effective server config.yaml.
+ * Preference: user-local sparse override → bundled template (dev or packaged).
+ */
+function findServerConfigPath(): string | null {
+  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  if (fs.existsSync(userConfigPath)) {
+    return userConfigPath;
+  }
+
+  // Dev mode: repo server/config.yaml
+  const devPath = path.resolve(__dirname, '../../server/config.yaml');
+  if (fs.existsSync(devPath)) {
+    return devPath;
+  }
+
+  // Packaged: bundled extra resource
+  const bundledPath = path.join(process.resourcesPath ?? '', 'config.yaml');
+  if (fs.existsSync(bundledPath)) {
+    return bundledPath;
+  }
+
+  return null;
+}
+
+/**
+ * Deeply get a dotted key path from a nested object.
+ * e.g. getNestedValue(obj, 'remote_server.tls.host_cert_path')
+ */
+function getNestedValue(obj: unknown, keyPath: string): unknown {
+  let current: unknown = obj;
+  for (const segment of keyPath.split('.')) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+/** Expand leading `~` or `~/<rest>` to the user's home directory. */
+function expandTilde(p: string): string {
+  if (p === '~') return app.getPath('home');
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
+    return path.join(app.getPath('home'), p.slice(2));
+  }
+  return p;
+}
+
+interface TlsCertPaths {
+  certPath: string;
+  keyPath: string;
+  profile: RemoteTlsProfile;
+}
+
+/**
+ * Resolve the host-side TLS cert + key paths for the active remote profile.
+ *
+ * Reads `connection.remoteProfile` from the electron-store to decide which
+ * set of paths to extract from `config.yaml`, then validates the files exist.
+ *
+ * This mirrors the logic in `start-common.sh` (lines 297-365) so the Electron
+ * dashboard behaves identically to the CLI scripts.
+ *
+ * @throws {Error} If config.yaml is missing, cert paths are unset, or files don't exist
+ */
+function resolveTlsCertPaths(): TlsCertPaths {
+  const profile = readRemoteTlsProfile();
+
+  // ---------- Read config.yaml ----------
+  // The user's local config may be a sparse override that doesn't include
+  // the TLS section.  We read both user-local and the bundled template,
+  // then merge (user values win) so defaults always exist.
+
+  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  const templateCandidates = [
+    path.resolve(__dirname, '../../server/config.yaml'),
+    path.join(process.resourcesPath ?? '', 'config.yaml'),
+  ];
+
+  let templateData: Record<string, unknown> = {};
+  for (const candidate of templateCandidates) {
+    try {
+      const content = fs.readFileSync(candidate, 'utf8');
+      templateData = (YAML.parse(content) as Record<string, unknown>) ?? {};
+      break;
+    } catch {
+      // try next
+    }
+  }
+
+  let userData: Record<string, unknown> = {};
+  try {
+    const content = fs.readFileSync(userConfigPath, 'utf8');
+    userData = (YAML.parse(content) as Record<string, unknown>) ?? {};
+  } catch {
+    // user config is optional
+  }
+
+  // Simple two-level merge: user TLS section wins if present
+  const templateTls = getNestedValue(templateData, 'remote_server.tls') as
+    | Record<string, unknown>
+    | undefined;
+  const userTls = getNestedValue(userData, 'remote_server.tls') as
+    | Record<string, unknown>
+    | undefined;
+  const mergedTls: Record<string, unknown> = { ...templateTls, ...userTls };
+
+  // ---------- Pick paths for the active profile ----------
+  const certKey = profile === 'lan' ? 'lan_host_cert_path' : 'host_cert_path';
+  const keyKey = profile === 'lan' ? 'lan_host_key_path' : 'host_key_path';
+  const profileLabel = profile === 'lan' ? 'LAN' : 'Tailscale';
+
+  const rawCertPath = mergedTls[certKey];
+  const rawKeyPath = mergedTls[keyKey];
+
+  if (typeof rawCertPath !== 'string' || !rawCertPath.trim()) {
+    throw new Error(
+      `TLS certificate path (remote_server.tls.${certKey}) is not set in config.yaml.\n\n` +
+        `Please edit your config.yaml and set the ${profileLabel} TLS certificate path.\n` +
+        `See the README for certificate generation instructions.`,
+    );
+  }
+
+  if (typeof rawKeyPath !== 'string' || !rawKeyPath.trim()) {
+    throw new Error(
+      `TLS key path (remote_server.tls.${keyKey}) is not set in config.yaml.\n\n` +
+        `Please edit your config.yaml and set the ${profileLabel} TLS key path.`,
+    );
+  }
+
+  const certPath = expandTilde(rawCertPath.trim());
+  const keyPath = expandTilde(rawKeyPath.trim());
+
+  // ---------- Validate files exist on disk ----------
+  if (!fs.existsSync(certPath)) {
+    const hint =
+      profile === 'tailscale'
+        ? 'Generate certificates with:  sudo tailscale cert <your-machine>.tail<xxxx>.ts.net\n' +
+          'Then rename and move them to the path configured in config.yaml.'
+        : 'Create or obtain a TLS certificate for your LAN hostname/IP\n' +
+          'and place it at the path configured in config.yaml.';
+    throw new Error(`TLS certificate file not found: ${certPath}\n\n${hint}`);
+  }
+
+  if (!fs.existsSync(keyPath)) {
+    throw new Error(
+      `TLS key file not found: ${keyPath}\n\n` +
+        `Please ensure the key file exists at the configured path.`,
+    );
+  }
+
+  return { certPath, keyPath, profile };
 }
 
 // ─── Compose File Selection ─────────────────────────────────────────────────
@@ -565,6 +739,15 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   if (mode === 'remote') {
     composeEnv['TLS_ENABLED'] = 'true';
+
+    // Resolve host TLS certificate paths and pass them to docker-compose so
+    // the bind mounts (${TLS_CERT_PATH}:/certs/cert.crt:ro etc.) resolve to
+    // real files instead of the .empty sentinel directory.
+    if (!tlsEnv?.TLS_CERT_PATH || !tlsEnv?.TLS_KEY_PATH) {
+      const tls = resolveTlsCertPaths();
+      composeEnv['TLS_CERT_PATH'] = tls.certPath;
+      composeEnv['TLS_KEY_PATH'] = tls.keyPath;
+    }
   }
 
   // For CPU mode, force CUDA invisible so the server deterministically uses CPU

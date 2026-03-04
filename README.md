@@ -207,13 +207,16 @@ modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
   - Restore from any backup (creates safety backup first)
 * **Client tab**: Configure connection mode:
   * **Local**: Use default settings (localhost:8000)
-  * **Remote**: See [Section 6: Remote Access](#6-remote-access) to set up Tailscale first.
+  * **Remote (Tailscale)**: See [Section 6.1: Tailscale Setup](#61-option-a-tailscale-recommended) for full instructions.
     Then configure:
-    - Enter your Tailscale hostname in 'Remote Host' (e.g., `my-machine.tail1234.ts.net`)
     - Enable 'Use remote server instead of local'
-    - Set port to 8443
+    - Select **Tailscale** remote profile
+    - Enter your Tailscale hostname (e.g., `my-machine.tail1234.ts.net`)
+    - Set port to `8443`
     - Enable 'Use HTTPS'
     - Enter auth token (obtained after first server start)
+  * **Remote (LAN)**: See [Section 6.2: LAN Setup](#62-option-b-lan-same-local-network) for connecting
+    to a server on your local network without Tailscale.
 
 *Settings are saved to:*
 *- Linux: `~/.config/TranscriptionSuite/`*
@@ -307,40 +310,71 @@ image updates (GHCR). Configurable interval in Settings.
 
 ## 6. Remote Access
 
-As previously mentioned, TranscriptionSuite gives you the ability to remote connect from
-one machine running the app to another, via Tailscale.
+TranscriptionSuite supports remote transcription where a **server machine** (with a
+GPU) runs the Docker container and a **client machine** connects to it via the
+Dashboard app. Two connection profiles are available:
 
-It uses a **layered security model** for remote access:
+| Profile | Use Case | Network Requirement |
+|---------|----------|---------------------|
+| **Tailscale** | Cross-network / internet (recommended) | Both machines on the same [Tailnet](https://tailscale.com/) |
+| **LAN** | Same local network, no Tailscale needed | Both machines on the same LAN / subnet |
+
+Both profiles use **HTTPS + token authentication**. The only difference is *how* the
+client reaches the server and *where* the TLS certificates come from.
+
+**Architecture overview:**
+
+```
+┌─────────────────────────┐         HTTPS (port 8443)        ┌─────────────────────────┐
+│      Server Machine     │◄────────────────────────────────►│      Client Machine     │
+│                         │         + Auth Token              │                         │
+│  • Runs the Dashboard   │                                   │  • Runs the Dashboard   │
+│  • Clicks "Start Remote"│         Tailscale Tunnel          │  • Settings → Client →  │
+│  • Has TLS certificates │         ── or ──                  │    "Use remote server"  │
+│  • Has the GPU          │         LAN connection            │  • No GPU needed        │
+└─────────────────────────┘                                   └─────────────────────────┘
+```
+
+**Security model:**
 
 | Layer | Protection |
 |-------|------------|
-| **Tailscale Network** | Only devices on your Tailnet can reach the server |
-| **TLS/HTTPS** | All traffic encrypted with Tailscale certificates |
+| **Tailscale Network** *(Tailscale profile)* | Only devices on your Tailnet can reach the server |
+| **TLS/HTTPS** | All traffic encrypted with certificates |
 | **Token Authentication** | Required for all API requests in remote mode |
 
-### 6.1 Step 1: Set Up Tailscale
+### 6.1 Option A: Tailscale (recommended)
+
+Use this when the server and client are on **different networks** (e.g., home
+server ↔ work laptop), or when you want Tailscale's zero-config networking
+and automatic DNS.
+
+#### Server Machine Setup
+
+**Step 1 — Install & Authenticate Tailscale**
 
 1. Install Tailscale: [tailscale.com/download](https://tailscale.com/download)
-2. Authenticate: `sudo tailscale up` (Linux) or via the app (Windows)
-3. Go to [Tailscale Admin Console](https://login.tailscale.com/admin) → DNS tab
+2. Authenticate: `sudo tailscale up` (Linux) or via the Tailscale app (Windows/macOS)
+3. Go to [Tailscale Admin Console](https://login.tailscale.com/admin) → **DNS** tab
 4. Enable **MagicDNS** and **HTTPS Certificates**
 
 Your DNS settings should look like this:
 
 ![Tailscale DNS Settings](./build/assets/tailscale-dns-settings.png)
 
-### 6.2 Step 2: Generate Certificates
-
-Note: You only need to do this on the machine you'll be using as the *server*.
+**Step 2 — Generate TLS Certificates** *(server machine only)*
 
 ```bash
-# Generate certificate for your machine
+# Replace with your actual machine name + tailnet
 sudo tailscale cert your-machine.your-tailnet.ts.net
 ```
 
-Move the certificates to the standard location:
-*(Note: To change the default location and name of the certs the app is looking for,*
-*edit the `remote_server` section in `config.yaml`.)*
+This produces two files: `your-machine.your-tailnet.ts.net.crt` and
+`your-machine.your-tailnet.ts.net.key`. Move and rename them to the standard
+location so the app can find them without config changes:
+
+*(To change the default location, edit `remote_server.tls.host_cert_path` and
+`host_key_path` in `config.yaml`.)*
 
 **Linux:**
 ```bash
@@ -358,12 +392,132 @@ mv your-machine.your-tailnet.ts.net.crt "$env:USERPROFILE\Documents\Tailscale\my
 mv your-machine.your-tailnet.ts.net.key "$env:USERPROFILE\Documents\Tailscale\my-machine.key"
 ```
 
-For Windows, you also need to edit a couple of lines in `config.yaml`:
-* Change `~/.config/Tailscale/my-machine.crt` to `~/Documents/Tailscale/my-machine.crt`
-* Change `~/.config/Tailscale/my-machine.key` to `~/Documents/Tailscale/my-machine.key`
+For Windows, also update the certificate paths in `config.yaml`:
+```yaml
+remote_server:
+  tls:
+    host_cert_path: "~/Documents/Tailscale/my-machine.crt"
+    host_key_path: "~/Documents/Tailscale/my-machine.key"
+```
 
-**Note:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, so MagicDNS
-must be enabled in your Tailnet.
+> **Note:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, so
+> MagicDNS must be enabled in your Tailnet.
+
+**Step 3 — Start the Server in Remote Mode**
+
+1. Open the Dashboard on the server machine
+2. Navigate to the **Server** view
+3. Click **Start Remote**
+4. Wait for the container to become healthy (green status)
+
+On the first remote start, an admin **auth token** is generated automatically.
+You can find it in the Server view's "Auth Token" field, or in the container logs:
+```bash
+docker compose logs | grep "Admin Token:"
+```
+
+Copy this token — you'll need it on the client machine.
+
+#### Client Machine Setup
+
+1. Install Tailscale on the client machine and sign in with the **same account**
+   as the server machine (so both devices are on the same Tailnet)
+2. Open the Dashboard on the client machine
+3. Go to **Settings** → **Client** tab
+4. Enable **"Use remote server instead of local"**
+5. Select **Tailscale** as the remote profile
+6. Enter the server's **Tailscale hostname** in the host field
+   (e.g., `my-machine.tail1234.ts.net`)
+7. Set port to **`8443`**
+8. **Use HTTPS** will be automatically enabled
+9. Paste the **auth token** from the server into the Auth Token field
+10. Close the Settings modal — the client now connects to the remote server
+
+> **Tip:** The client machine does *not* need certificates, Docker, or a GPU.
+> It only needs Tailscale running and a valid auth token.
+
+### 6.2 Option B: LAN (same local network)
+
+Use this when both machines are on the **same local network** and you don't want
+to use Tailscale. This is common for home-lab setups or office environments.
+
+LAN mode uses the same HTTPS + token authentication as Tailscale mode — the only
+differences are the hostname (LAN IP or local DNS name instead of a `.ts.net`
+address) and the certificate source (self-signed, local CA, or other locally
+trusted certificate instead of a Tailscale-issued one).
+
+#### Server Machine Setup
+
+**Step 1 — Generate or obtain a TLS certificate** *(server machine only)*
+
+You need a certificate that covers the server's LAN IP or hostname.
+For a self-signed certificate (suitable for home use):
+
+**Linux:**
+```bash
+mkdir -p ~/.config/TranscriptionSuite
+
+# Generate a self-signed cert valid for 365 days
+# Replace 192.168.1.100 with your server's LAN IP
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout ~/.config/TranscriptionSuite/lan-server.key \
+  -out ~/.config/TranscriptionSuite/lan-server.crt \
+  -days 365 \
+  -subj "/CN=TranscriptionSuite" \
+  -addext "subjectAltName=IP:192.168.1.100"
+
+chmod 600 ~/.config/TranscriptionSuite/lan-server.key
+```
+
+**Windows (PowerShell):**
+```powershell
+mkdir "$env:USERPROFILE\Documents\TranscriptionSuite" -Force
+
+# Using OpenSSL (install via winget: winget install ShiningLight.OpenSSL)
+openssl req -x509 -newkey rsa:2048 -nodes `
+  -keyout "$env:USERPROFILE\Documents\TranscriptionSuite\lan-server.key" `
+  -out "$env:USERPROFILE\Documents\TranscriptionSuite\lan-server.crt" `
+  -days 365 `
+  -subj "/CN=TranscriptionSuite" `
+  -addext "subjectAltName=IP:192.168.1.100"
+```
+
+For Windows, update the paths in `config.yaml`:
+```yaml
+remote_server:
+  tls:
+    lan_host_cert_path: "~/Documents/TranscriptionSuite/lan-server.crt"
+    lan_host_key_path: "~/Documents/TranscriptionSuite/lan-server.key"
+```
+
+> **Note:** Self-signed certificates will cause browser warnings if you access the
+> web UI directly. The Dashboard app accepts them without issues.
+
+**Step 2 — Start the Server in Remote Mode**
+
+Same as Tailscale above:
+1. Open the Dashboard, go to **Server** view, click **Start Remote**
+2. Copy the auth token once the container is healthy
+
+#### Client Machine Setup
+
+1. Open the Dashboard on the client machine
+2. Go to **Settings** → **Client** tab
+3. Enable **"Use remote server instead of local"**
+4. Select **LAN** as the remote profile
+5. Enter the server's **LAN IP or hostname** (e.g., `192.168.1.100`)
+6. Set port to **`8443`**
+7. **Use HTTPS** will be automatically enabled
+8. Paste the **auth token** from the server
+9. Close Settings — the client now connects over your local network
+
+> **Note on Kubernetes / custom deployments:** If you run the server container
+> directly (e.g., via Kubernetes or your own Docker setup), you can still use the
+> LAN profile on the client. Just point the LAN host at your load balancer or
+> service IP. The server image is available at
+> `ghcr.io/homelab-00/transcriptionsuite-server`. Ensure `TLS_ENABLED=true` and
+> the certificate/key are mounted at `/certs/cert.crt` and `/certs/cert.key`
+> inside the container.
 
 ---
 
@@ -447,12 +601,35 @@ will be significantly slower.
 
 ### 8.3 Connection Issues (Remote Mode)
 
-1. Verify Tailscale is connected: `tailscale status`
-2. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
-3. Check certificate paths in `config.yaml`
-4. Ensure port 8443 is used for HTTPS
+**"TLS certificate not found" error on server start:**
 
-**DNS Resolution Errors:**
+The server couldn't find the TLS certificate files on the host machine.
+1. Verify the certificate files exist at the paths configured in `config.yaml`
+   (under `remote_server.tls`)
+2. For the **Tailscale** profile, check `host_cert_path` and `host_key_path`
+   (default: `~/.config/Tailscale/my-machine.crt` / `.key`)
+3. For the **LAN** profile, check `lan_host_cert_path` and `lan_host_key_path`
+   (default: `~/.config/TranscriptionSuite/lan-server.crt` / `.key`)
+4. Ensure the key file has proper permissions: `chmod 600 <key-file>`
+5. Ensure the files are owned by your user: `sudo chown $USER:$USER <cert-files>`
+
+**General checklist (Tailscale profile):**
+
+1. Verify Tailscale is connected on both machines: `tailscale status`
+2. Ensure both machines are signed into the **same Tailscale account**
+3. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
+4. Check certificate paths in `config.yaml`
+5. Ensure port `8443` is used for HTTPS
+
+**General checklist (LAN profile):**
+
+1. Verify both machines can reach each other: `ping <server-ip>`
+2. Ensure the server's firewall allows port `8443`
+3. Check that the self-signed cert was generated with the correct IP/hostname
+   in the SAN (Subject Alternative Name)
+4. Ensure port `8443` is used for HTTPS
+
+**DNS Resolution Errors (Tailscale):**
 
 If you see errors like `Name or service not known` for `.ts.net` hostnames:
 
@@ -464,6 +641,13 @@ If you see errors like `Name or service not known` for `.ts.net` hostnames:
   Tailscale's MagicDNS.
 
 See [README_DEV.md](README_DEV.md#133-tailscale-dns-resolution) for detailed troubleshooting.
+
+**Docker vs Podman:**
+
+TranscriptionSuite is designed for **Docker Engine** (Linux) and **Docker Desktop**
+(Windows/macOS). Podman and podman-compose are **not officially supported** and may
+fail due to differences in compose file handling (e.g., build context resolution).
+If you use Podman, you may need to adapt the compose files manually.
 
 ---
 

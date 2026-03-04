@@ -712,7 +712,7 @@ to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
    mv <hostname>.crt ~/.config/Tailscale/my-machine.crt
    mv <hostname>.key ~/.config/Tailscale/my-machine.key
    sudo chown $USER:$USER ~/.config/Tailscale/my-machine.*
-   chmod 640 ~/.config/Tailscale/my-machine.key
+   chmod 600 ~/.config/Tailscale/my-machine.key
    ```
 
 4. **Start with TLS:**
