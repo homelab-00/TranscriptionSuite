@@ -526,7 +526,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
       try {
         const { name, buffer, mimeType } = await window.electronAPI!.app.readLocalFile(filePath);
         const file = new File([buffer], name, { type: mimeType });
-        await apiClient.uploadAndTranscribe(file, { enable_diarization: false });
+        // Use the quick endpoint: text-only, no timestamps, no diarization, not saved to notebook.
+        const result = await apiClient.transcribeQuick(file);
+        if (result.text) {
+          writeToClipboard(result.text).catch(() => {});
+          if (window.electronAPI?.clipboard?.pasteAtCursor) {
+            getConfig<boolean>('app.pasteAtCursor').then((enabled) => {
+              if (enabled) {
+                window.electronAPI!.clipboard.pasteAtCursor(result.text).catch((err: any) => {
+                  console.error('Tray transcribe file paste failed:', err);
+                });
+              }
+            });
+          }
+        }
       } catch (err: any) {
         console.error('Tray transcribe file failed:', err);
       }
