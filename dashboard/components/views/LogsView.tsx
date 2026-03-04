@@ -106,9 +106,9 @@ export const LogsView: React.FC = () => {
       <div className="mb-6 flex flex-none items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight text-white">System Logs</h1>
         <Button
-          variant="secondary"
+          variant="glass"
           size="sm"
-          className="h-8 text-xs text-slate-300"
+          className="h-8 text-xs"
           onClick={handleCopyLogs}
           icon={<Copy size={14} />}
         >
