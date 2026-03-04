@@ -33,7 +33,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-04T20:13:51.237Z
+    generated_at: 2026-03-04T20:23:35.703Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -540,6 +540,7 @@ utility_allowlist:
     - grid-cols-2
     - grid-cols-3
     - grid-cols-7
+    - grid-template-rows
     - group
     - h-1
     - h-1.5
@@ -984,27 +985,35 @@ inline_style_allowlist:
     - gridTemplateRows
     - height
     - left
+    - marginTop
     - maskImage
     - opacity
     - top
     - transform
+    - transition
     - WebkitMaskImage
     - width
   allowed_literals:
+    - -0.5rem
     - "#0f172a"
     - ${100 / visibleSlots}%
     - "0"
+    - "0.1"
     - "0.16"
+    - "0.25"
     - "0.3"
     - 0.4s
     - 0%
+    - 0fr
     - "1"
     - 1.5rem
     - "100"
     - 100%
     - 16%
+    - 1fr
     - 1px
     - 1rem
+    - 200ms
     - 20px
     - 20px 20px
     - "225"
@@ -1019,6 +1028,7 @@ inline_style_allowlist:
     - "90"
     - auto repeat(${gridRows}, 1fr)
     - fixed
+    - grid-template-rows 200ms cubic-bezier(0.25,0.1,0.25,1), margin-top 200ms cubic-bezier(0.25,0.1,0.25,1), opacity 200ms cubic-bezier(0.25,0.1,0.25,1)
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)
@@ -1027,7 +1037,7 @@ inline_style_allowlist:
     - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
-    - translateY(calc(1.5rem + ${activeIndex} * 3.5rem + ${pillExtraOffsetRem}rem))
+    - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
   keyframes:
     - dropdown-appear
     - slideInLeft

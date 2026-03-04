@@ -151,12 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const activeIndex = navItems.findIndex((item) => item.id === currentView);
-
-  // Sub-items occupy h-9 (2.25rem) + gap-2 (0.5rem) = 2.75rem each.
-  // Items after Notebook in the nav must be offset by the total sub-item height.
-  const notebookNavIndex = navItems.findIndex((item) => item.id === View.NOTEBOOK);
-  const subItemsOffsetRem = notebookSubItems.length * 2.75;
-  const pillExtraOffsetRem = activeIndex > notebookNavIndex ? subItemsOffsetRem : 0;
+  const notebookOpen = currentView === View.NOTEBOOK;
 
   const sidebarWidthPx = collapsed ? SIDEBAR_COLLAPSED_WIDTH_PX : expandedWidthPx;
 
@@ -208,8 +203,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div
             className="pointer-events-none absolute top-0 right-3 left-3 z-0 h-12 rounded-xl border border-white/5 bg-linear-to-r from-white/10 to-transparent shadow-inner transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
             style={{
-              // 1.5rem (py-6) + index * (h-12 + gap-2) + extra offset for sub-items after Notebook
-              transform: `translateY(calc(1.5rem + ${activeIndex} * 3.5rem + ${pillExtraOffsetRem}rem))`,
+              // 1.5rem (py-6) + index * (h-12 + gap-2)
+              transform: `translateY(calc(1.5rem + ${activeIndex} * 3.5rem))`,
             }}
           >
             {/* Active Indicator Bar (Cyan) */}
@@ -254,38 +249,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </button>
 
-              {/* Notebook sub-tabs: Search and Import */}
-              {item.id === View.NOTEBOOK &&
-                notebookSubItems.map((subItem) => {
-                  const isSubActive = currentView === View.NOTEBOOK && notebookTab === subItem.id;
-                  return (
-                    <button
-                      key={subItem.id}
-                      onClick={() => {
-                        onChangeView(View.NOTEBOOK);
-                        onChangeNotebookTab(subItem.id);
-                      }}
-                      className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
-                        isSubActive
-                          ? 'bg-white/[0.06] text-slate-200'
-                          : 'text-slate-500 hover:bg-white/5 hover:text-slate-400'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`transition-colors duration-200 ${isSubActive ? 'text-accent-cyan/70' : ''}`}
+              {/* Notebook sub-tabs: Search and Import — animated collapse */}
+              {item.id === View.NOTEBOOK && (
+                <div
+                  className={`grid ${notebookOpen ? '' : 'pointer-events-none'}`}
+                  style={{
+                    // grid-template-rows 0fr→1fr animates height without knowing content size
+                    gridTemplateRows: notebookOpen ? '1fr' : '0fr',
+                    // cancel the flex gap-2 above this wrapper when collapsed so
+                    // the gap between Notebook and Server stays a single gap-2
+                    marginTop: notebookOpen ? '0' : '-0.5rem',
+                    opacity: notebookOpen ? 1 : 0,
+                    transition:
+                      'grid-template-rows 200ms cubic-bezier(0.25,0.1,0.25,1), margin-top 200ms cubic-bezier(0.25,0.1,0.25,1), opacity 200ms cubic-bezier(0.25,0.1,0.25,1)',
+                  }}
+                >
+                  <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
+                    {notebookSubItems.map((subItem) => {
+                      const isSubActive = notebookOpen && notebookTab === subItem.id;
+                      return (
+                        <button
+                          key={subItem.id}
+                          onClick={() => {
+                            onChangeView(View.NOTEBOOK);
+                            onChangeNotebookTab(subItem.id);
+                          }}
+                          className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
+                            isSubActive
+                              ? 'bg-white/6 text-slate-200'
+                              : 'text-slate-500 hover:bg-white/5 hover:text-slate-400'
+                          }`}
                         >
-                          {subItem.icon}
-                        </span>
-                        <span
-                          className={`text-xs font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
-                        >
-                          {subItem.label}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`transition-colors duration-200 ${isSubActive ? 'text-accent-cyan/70' : ''}`}
+                            >
+                              {subItem.icon}
+                            </span>
+                            <span
+                              className={`text-xs font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
+                            >
+                              {subItem.label}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </React.Fragment>
           );
         })}
