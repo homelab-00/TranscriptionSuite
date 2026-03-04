@@ -17,7 +17,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { app } from 'electron';
-import YAML from 'yaml';
 
 const execFileAsync = promisify(execFile);
 
@@ -246,16 +245,16 @@ function findServerConfigPath(): string | null {
 }
 
 /**
- * Deeply get a dotted key path from a nested object.
- * e.g. getNestedValue(obj, 'remote_server.tls.host_cert_path')
+ * Extract the value of a named scalar key from YAML text using simple
+ * line-based regex — no YAML parser needed.
+ * Handles:  key: value  /  key: "value"  /  key: 'value'
+ * This mirrors the grep/sed approach used by start-common.sh.
  */
-function getNestedValue(obj: unknown, keyPath: string): unknown {
-  let current: unknown = obj;
-  for (const segment of keyPath.split('.')) {
-    if (current == null || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
+function extractYamlScalar(yamlText: string, key: string): string | undefined {
+  // Match lines like:  [whitespace]key: [optional-quote]value[optional-quote]
+  const re = new RegExp(`^[ \\t]+${key}:[ \\t]*(["']?)([^"'\\r\\n#]+?)\\1[ \\t]*$`, 'm');
+  const m = re.exec(yamlText);
+  return m ? m[2].trim() || undefined : undefined;
 }
 
 /** Expand leading `~` or `~/<rest>` to the user's home directory. */
@@ -288,9 +287,9 @@ function resolveTlsCertPaths(): TlsCertPaths {
   const profile = readRemoteTlsProfile();
 
   // ---------- Read config.yaml ----------
-  // The user's local config may be a sparse override that doesn't include
-  // the TLS section.  We read both user-local and the bundled template,
-  // then merge (user values win) so defaults always exist.
+  // The user's local sparse override is checked first; the bundled template
+  // provides defaults.  We read both as raw text and use simple line-based
+  // regex extraction (no YAML parser) so there is no external dependency.
 
   const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
   const templateCandidates = [
@@ -298,43 +297,34 @@ function resolveTlsCertPaths(): TlsCertPaths {
     path.join(process.resourcesPath ?? '', 'config.yaml'),
   ];
 
-  let templateData: Record<string, unknown> = {};
+  let templateText = '';
   for (const candidate of templateCandidates) {
     try {
-      const content = fs.readFileSync(candidate, 'utf8');
-      templateData = (YAML.parse(content) as Record<string, unknown>) ?? {};
+      templateText = fs.readFileSync(candidate, 'utf8');
       break;
     } catch {
       // try next
     }
   }
 
-  let userData: Record<string, unknown> = {};
+  let userText = '';
   try {
-    const content = fs.readFileSync(userConfigPath, 'utf8');
-    userData = (YAML.parse(content) as Record<string, unknown>) ?? {};
+    userText = fs.readFileSync(userConfigPath, 'utf8');
   } catch {
     // user config is optional
   }
 
-  // Simple two-level merge: user TLS section wins if present
-  const templateTls = getNestedValue(templateData, 'remote_server.tls') as
-    | Record<string, unknown>
-    | undefined;
-  const userTls = getNestedValue(userData, 'remote_server.tls') as
-    | Record<string, unknown>
-    | undefined;
-  const mergedTls: Record<string, unknown> = { ...templateTls, ...userTls };
-
   // ---------- Pick paths for the active profile ----------
+  // User config wins over template; template provides defaults.
   const certKey = profile === 'lan' ? 'lan_host_cert_path' : 'host_cert_path';
   const keyKey = profile === 'lan' ? 'lan_host_key_path' : 'host_key_path';
   const profileLabel = profile === 'lan' ? 'LAN' : 'Tailscale';
 
-  const rawCertPath = mergedTls[certKey];
-  const rawKeyPath = mergedTls[keyKey];
+  const rawCertPath =
+    extractYamlScalar(userText, certKey) ?? extractYamlScalar(templateText, certKey);
+  const rawKeyPath = extractYamlScalar(userText, keyKey) ?? extractYamlScalar(templateText, keyKey);
 
-  if (typeof rawCertPath !== 'string' || !rawCertPath.trim()) {
+  if (!rawCertPath) {
     throw new Error(
       `TLS certificate path (remote_server.tls.${certKey}) is not set in config.yaml.\n\n` +
         `Please edit your config.yaml and set the ${profileLabel} TLS certificate path.\n` +
@@ -342,7 +332,7 @@ function resolveTlsCertPaths(): TlsCertPaths {
     );
   }
 
-  if (typeof rawKeyPath !== 'string' || !rawKeyPath.trim()) {
+  if (!rawKeyPath) {
     throw new Error(
       `TLS key path (remote_server.tls.${keyKey}) is not set in config.yaml.\n\n` +
         `Please edit your config.yaml and set the ${profileLabel} TLS key path.`,
