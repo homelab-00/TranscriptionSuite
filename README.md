@@ -327,12 +327,12 @@ client reaches the server and *where* the TLS certificates come from.
 ```
 ┌─────────────────────────┐         HTTPS (port 8443)        ┌─────────────────────────┐
 │      Server Machine     │◄────────────────────────────────►│      Client Machine     │
-│                         │         + Auth Token              │                         │
-│  • Runs the Dashboard   │                                   │  • Runs the Dashboard   │
-│  • Clicks "Start Remote"│         Tailscale Tunnel          │  • Settings → Client →  │
-│  • Has TLS certificates │         ── or ──                  │    "Use remote server"  │
-│  • Has the GPU          │         LAN connection            │  • No GPU needed        │
-└─────────────────────────┘                                   └─────────────────────────┘
+│                         │         + Auth Token             │                         │
+│  • Runs the Dashboard   │                                  │  • Runs the Dashboard   │
+│  • Clicks "Start Remote"│         Tailscale Tunnel         │  • Settings → Client →  │
+│  • Has TLS certificates │         ── or ──                 │    "Use remote server"  │
+│  • Has the GPU          │         LAN connection           │  • No GPU needed        │
+└─────────────────────────┘                                  └─────────────────────────┘
 ```
 
 **Security model:**
