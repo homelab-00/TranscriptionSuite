@@ -33,7 +33,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-04T20:00:22.782Z
+    generated_at: 2026-03-04T20:13:51.237Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -997,7 +997,6 @@ inline_style_allowlist:
     - "0.16"
     - "0.3"
     - 0.4s
-    - 0.5rem
     - 0%
     - "1"
     - 1.5rem
@@ -1014,7 +1013,6 @@ inline_style_allowlist:
     - 30%
     - "339"
     - 39%
-    - 3rem
     - 49%
     - 50%
     - 7%
@@ -1029,7 +1027,7 @@ inline_style_allowlist:
     - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
-    - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
+    - translateY(calc(1.5rem + ${activeIndex} * 3.5rem + ${pillExtraOffsetRem}rem))
   keyframes:
     - dropdown-appear
     - slideInLeft

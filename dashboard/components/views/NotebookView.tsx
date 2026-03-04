@@ -43,10 +43,15 @@ import { useConfirm } from '../../src/hooks/useConfirm';
 
 interface NotebookViewProps {
   onUploadingChange?: (uploading: boolean) => void;
+  activeTab: NotebookTab;
+  onChangeTab: (tab: NotebookTab) => void;
 }
 
-export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange }) => {
-  const [activeTab, setActiveTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
+export const NotebookView: React.FC<NotebookViewProps> = ({
+  onUploadingChange,
+  activeTab,
+  onChangeTab,
+}) => {
   const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
   const [adminStatusPollingEnabled, setAdminStatusPollingEnabled] = useState(true);
   const admin = useAdminStatus(10_000, adminStatusPollingEnabled);
@@ -139,7 +144,7 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange })
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => onChangeTab(tab.id)}
               className={`flex items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 ${
                 activeTab === tab.id
                   ? 'bg-white/10 text-white shadow-sm'

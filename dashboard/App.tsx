@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { View } from './types';
+import { View, NotebookTab } from './types';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
@@ -57,6 +57,7 @@ function isComposeEnvFlagEnabled(value: string | null | undefined): boolean {
 
 const AppInner: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.SESSION);
+  const [notebookTab, setNotebookTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const serverConnection = useServerStatus();
@@ -513,7 +514,11 @@ const AppInner: React.FC = () => {
       case View.NOTEBOOK:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <NotebookView onUploadingChange={setIsUploading} />
+            <NotebookView
+              onUploadingChange={setIsUploading}
+              activeTab={notebookTab}
+              onChangeTab={setNotebookTab}
+            />
           </ErrorBoundary>
         );
       case View.SERVER:
@@ -560,6 +565,8 @@ const AppInner: React.FC = () => {
       <Sidebar
         currentView={currentView}
         onChangeView={setCurrentView}
+        notebookTab={notebookTab}
+        onChangeNotebookTab={setNotebookTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
         containerRunning={docker.container.running}

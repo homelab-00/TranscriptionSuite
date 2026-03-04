@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { View } from '../types';
+import { View, NotebookTab } from '../types';
 import {
   Mic2,
   Book,
@@ -10,6 +10,8 @@ import {
   ChevronRight,
   Info,
   Terminal,
+  Search,
+  Upload,
 } from 'lucide-react';
 import logoUrl from '../../build/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
@@ -17,6 +19,8 @@ import { StatusLight } from './ui/StatusLight';
 interface SidebarProps {
   currentView: View;
   onChangeView: (view: View) => void;
+  notebookTab: NotebookTab;
+  onChangeNotebookTab: (tab: NotebookTab) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
   containerRunning: boolean;
@@ -33,6 +37,8 @@ const SIDEBAR_LOGO_COMFORT_BUFFER_PX = 16;
 export const Sidebar: React.FC<SidebarProps> = ({
   currentView,
   onChangeView,
+  notebookTab,
+  onChangeNotebookTab,
   onOpenSettings,
   onOpenAbout,
   containerRunning,
@@ -138,7 +144,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
+  // Sub-items shown indented below the Notebook nav item
+  const notebookSubItems = [
+    { id: NotebookTab.SEARCH, icon: <Search size={14} />, label: 'Search' },
+    { id: NotebookTab.IMPORT, icon: <Upload size={14} />, label: 'Import' },
+  ];
+
   const activeIndex = navItems.findIndex((item) => item.id === currentView);
+
+  // Sub-items occupy h-9 (2.25rem) + gap-2 (0.5rem) = 2.75rem each.
+  // Items after Notebook in the nav must be offset by the total sub-item height.
+  const notebookNavIndex = navItems.findIndex((item) => item.id === View.NOTEBOOK);
+  const subItemsOffsetRem = notebookSubItems.length * 2.75;
+  const pillExtraOffsetRem = activeIndex > notebookNavIndex ? subItemsOffsetRem : 0;
+
   const sidebarWidthPx = collapsed ? SIDEBAR_COLLAPSED_WIDTH_PX : expandedWidthPx;
 
   return (
@@ -189,8 +208,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div
             className="pointer-events-none absolute top-0 right-3 left-3 z-0 h-12 rounded-xl border border-white/5 bg-linear-to-r from-white/10 to-transparent shadow-inner transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
             style={{
-              // 1.5rem (py-6) + index * (3rem height + 0.5rem gap)
-              transform: `translateY(calc(1.5rem + ${activeIndex} * 3.5rem))`,
+              // 1.5rem (py-6) + index * (h-12 + gap-2) + extra offset for sub-items after Notebook
+              transform: `translateY(calc(1.5rem + ${activeIndex} * 3.5rem + ${pillExtraOffsetRem}rem))`,
             }}
           >
             {/* Active Indicator Bar (Cyan) */}
@@ -201,39 +220,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {navItems.map((item) => {
           const isActive = currentView === item.id;
           return (
-            <button
-              key={item.id}
-              onClick={() => onChangeView(item.id)}
-              className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'px-4'} h-12 rounded-xl transition-colors duration-200 ${
-                isActive ? 'text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
-              } `}
-            >
-              <div className={`flex items-center gap-4 transition-all duration-200`}>
-                <span
-                  className={`transition-colors duration-200 ${isActive ? 'text-accent-cyan' : ''}`}
-                >
-                  {item.icon}
-                </span>
-                <span
-                  className={`text-sm font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
-                >
-                  {item.label}
-                </span>
-              </div>
-
-              {/* Status Dots */}
-              {item.status && (
-                <div
-                  className={`absolute transition-all duration-200 ${collapsed ? 'top-2 right-2' : 'top-1/2 right-3 -translate-y-1/2'}`}
-                >
-                  <StatusLight
-                    status={item.status}
-                    className={collapsed ? 'h-2 w-2' : ''}
-                    animate={!collapsed}
-                  />
+            <React.Fragment key={item.id}>
+              <button
+                onClick={() => onChangeView(item.id)}
+                className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'px-4'} h-12 rounded-xl transition-colors duration-200 ${
+                  isActive ? 'text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                } `}
+              >
+                <div className={`flex items-center gap-4 transition-all duration-200`}>
+                  <span
+                    className={`transition-colors duration-200 ${isActive ? 'text-accent-cyan' : ''}`}
+                  >
+                    {item.icon}
+                  </span>
+                  <span
+                    className={`text-sm font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
+                  >
+                    {item.label}
+                  </span>
                 </div>
-              )}
-            </button>
+
+                {/* Status Dots */}
+                {item.status && (
+                  <div
+                    className={`absolute transition-all duration-200 ${collapsed ? 'top-2 right-2' : 'top-1/2 right-3 -translate-y-1/2'}`}
+                  >
+                    <StatusLight
+                      status={item.status}
+                      className={collapsed ? 'h-2 w-2' : ''}
+                      animate={!collapsed}
+                    />
+                  </div>
+                )}
+              </button>
+
+              {/* Notebook sub-tabs: Search and Import */}
+              {item.id === View.NOTEBOOK &&
+                notebookSubItems.map((subItem) => {
+                  const isSubActive = currentView === View.NOTEBOOK && notebookTab === subItem.id;
+                  return (
+                    <button
+                      key={subItem.id}
+                      onClick={() => {
+                        onChangeView(View.NOTEBOOK);
+                        onChangeNotebookTab(subItem.id);
+                      }}
+                      className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
+                        isSubActive
+                          ? 'bg-white/[0.06] text-slate-200'
+                          : 'text-slate-500 hover:bg-white/5 hover:text-slate-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`transition-colors duration-200 ${isSubActive ? 'text-accent-cyan/70' : ''}`}
+                        >
+                          {subItem.icon}
+                        </span>
+                        <span
+                          className={`text-xs font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
+                        >
+                          {subItem.label}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+            </React.Fragment>
           );
         })}
       </nav>
