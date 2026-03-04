@@ -132,15 +132,17 @@ async function main() {
     'Drift fail for missing component contract coverage',
   );
 
-  // 8. Drift fail: Sidebar notebook status light must stay bound to server status source.
+  // 8. Drift fail: Sidebar status light bindings must match the contract closed set.
   const factsSidebarBindingDrift = clone(baseFacts);
   factsSidebarBindingDrift.sidebar = factsSidebarBindingDrift.sidebar || {};
   const currentBindings = Array.isArray(factsSidebarBindingDrift.sidebar.status_light_bindings)
     ? factsSidebarBindingDrift.sidebar.status_light_bindings
     : [];
-  factsSidebarBindingDrift.sidebar.status_light_bindings = currentBindings.map((binding) =>
-    String(binding).startsWith('NOTEBOOK=') ? 'NOTEBOOK=sessionStatus' : String(binding),
-  );
+  // Inject a rogue binding that is not in the allowed set to trigger a set_mismatch.
+  factsSidebarBindingDrift.sidebar.status_light_bindings = [
+    ...currentBindings,
+    'NOTEBOOK=sessionStatus',
+  ];
   const sidebarBindingDrift = await createValidationReport({
     factsOverride: factsSidebarBindingDrift,
   });

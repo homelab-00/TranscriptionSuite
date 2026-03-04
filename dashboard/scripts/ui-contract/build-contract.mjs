@@ -37,11 +37,7 @@ const componentSpecs = {
     allowed_variants: {
       collapsed: ['true', 'false'],
       active_view: ['SESSION', 'NOTEBOOK', 'SERVER'],
-      status_light_bindings: [
-        'SESSION=sessionStatus',
-        'NOTEBOOK=serverSidebarStatus',
-        'SERVER=serverSidebarStatus',
-      ],
+      status_light_bindings: ['SESSION=sessionStatus', 'SERVER=serverSidebarStatus'],
     },
     structural_invariants: [
       {
@@ -58,7 +54,7 @@ const componentSpecs = {
     state_rules: [
       {
         id: 'status-dots',
-        rule: 'Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.',
+        rule: 'Session and server nav items retain StatusLight indicators; notebook does not show a status light.',
       },
     ],
   },
@@ -734,7 +730,7 @@ for (const name of facts.components.names) {
 
 const contract = {
   meta: {
-    spec_version: '1.0.3',
+    spec_version: '1.0.5',
     contract_mode: 'closed_set',
     source_scope: 'mockup_repo',
     validation_method: 'static_source_scan',
