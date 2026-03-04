@@ -6,6 +6,7 @@ import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
+import { ModelManagerView } from './components/views/ModelManagerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { Button } from './components/ui/Button';
@@ -522,6 +523,12 @@ const AppInner: React.FC = () => {
               onStartServer={startServerWithOnboarding}
               startupFlowPending={startupFlowPending}
             />
+          </ErrorBoundary>
+        );
+      case View.MODEL_MANAGER:
+        return (
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <ModelManagerView />
           </ErrorBoundary>
         );
       case View.LOGS:

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.2
+  spec_version: 1.0.3
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -23,6 +23,7 @@ meta:
       - components/views/FullscreenVisualizer.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
+      - components/views/ModelManagerView.tsx
       - components/views/NotebookView.tsx
       - components/views/ServerConfigEditor.tsx
       - components/views/ServerView.tsx
@@ -32,7 +33,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-04T09:48:53.802Z
+    generated_at: 2026-03-04T19:25:47.501Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1539,6 +1540,23 @@ component_contracts:
         rule: Info/success/warning/error message coloring remains bound to approved text tokens.
   ModelManagerTab:
     file: components/views/ModelManagerTab.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ModelManagerView:
+    file: components/views/ModelManagerView.tsx
     required_tokens:
       - colors
       - motion

@@ -19,15 +19,12 @@ import {
   Eye,
   EyeOff,
   Users,
-  Settings,
-  Library,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
-import { ModelManagerTab } from './ModelManagerTab';
-import { ServerTab } from '../../types';
+
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
@@ -189,9 +186,6 @@ function mapDiarizationModelToSelection(modelName: string): { selection: string;
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
   const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatus();
   const docker = useDockerContext();
-
-  // Sub-tab state
-  const [activeTab, setActiveTab] = useState<ServerTab>(ServerTab.CONFIGURATION);
 
   // Model selection state
   const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
@@ -722,764 +716,703 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     <>
       <div className="custom-scrollbar h-full w-full overflow-y-auto">
         <div className="mx-auto flex max-w-4xl flex-col space-y-6 p-6 pt-8 pb-10">
-          <div className="flex flex-none items-center justify-between pt-2">
+          <div className="flex flex-none items-center pt-2">
             <div>
               <h1 className="mb-2 text-3xl font-bold tracking-tight text-white">
-                {activeTab === ServerTab.CONFIGURATION ? 'Server Configuration' : 'Model Manager'}
+                Server Configuration
               </h1>
               <p className="-mt-1 text-slate-400">
-                {activeTab === ServerTab.CONFIGURATION
-                  ? 'Manage runtime resources and persistent storage.'
-                  : 'Browse, download, and manage model weights.'}
+                Manage runtime resources and persistent storage.
               </p>
-            </div>
-            <div className="bg-glass-200 flex rounded-lg border border-white/5 p-1 backdrop-blur-md">
-              {[
-                {
-                  id: ServerTab.CONFIGURATION,
-                  icon: <Settings size={16} />,
-                  label: 'Configuration',
-                },
-                {
-                  id: ServerTab.MODEL_MANAGER,
-                  icon: <Library size={16} />,
-                  label: 'Model Manager',
-                },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 ${
-                    activeTab === tab.id
-                      ? 'bg-white/10 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              ))}
             </div>
           </div>
 
-          {activeTab === ServerTab.MODEL_MANAGER ? (
-            <ModelManagerTab
-              mainModelSelection={mainModelSelection}
-              setMainModelSelection={setMainModelSelection}
-              mainCustomModel={mainCustomModel}
-              setMainCustomModel={setMainCustomModel}
-              liveModelSelection={liveModelSelection}
-              setLiveModelSelection={setLiveModelSelection}
-              liveCustomModel={liveCustomModel}
-              setLiveCustomModel={setLiveCustomModel}
-              diarizationModelSelection={diarizationModelSelection}
-              setDiarizationModelSelection={setDiarizationModelSelection}
-              diarizationCustomModel={diarizationCustomModel}
-              setDiarizationCustomModel={setDiarizationCustomModel}
-              modelCacheStatus={modelCacheStatus}
-              isRunning={isRunning}
-              refreshCacheStatus={refreshCacheStatus}
-            />
-          ) : (
-            <>
-              {/* Setup checklist — shown on first run or when prerequisites are missing */}
-              {showChecklist && (
-                <div
-                  className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/5' : 'border-accent-orange/20 bg-accent-orange/5'}`}
-                >
-                  <button
-                    onClick={() => setSetupExpanded(!setupExpanded)}
-                    className="flex w-full items-center justify-between px-5 py-3.5 transition-colors hover:bg-white/5"
-                  >
-                    <div className="flex items-center gap-3">
-                      {allPassed ? (
-                        <CheckCircle2 size={18} className="text-green-400" />
-                      ) : (
-                        <AlertTriangle size={18} className="text-accent-orange" />
-                      )}
-                      <span className="text-sm font-semibold text-white">
-                        {allPassed ? 'Setup Complete' : 'Setup Checklist'}
-                      </span>
-                      <span className="font-mono text-xs text-slate-500">
-                        {setupChecks.filter((c) => c.ok).length}/{setupChecks.length} checks passed
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {!allPassed && (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            docker.retryDetection();
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.stopPropagation();
-                              docker.retryDetection();
-                            }
-                          }}
-                          className="hover:text-accent-cyan flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10"
-                          title="Re-check Docker, images, and GPU"
-                        >
-                          <RotateCcw size={12} />
-                          Retry
-                        </div>
-                      )}
-                      {allPassed && (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDismissSetup();
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.stopPropagation();
-                              handleDismissSetup();
-                            }
-                          }}
-                          className="cursor-pointer rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-                        >
-                          Dismiss
-                        </div>
-                      )}
-                      {setupExpanded ? (
-                        <ChevronUp size={14} className="text-slate-400" />
-                      ) : (
-                        <ChevronDown size={14} className="text-slate-400" />
-                      )}
-                    </div>
-                  </button>
-                  {setupExpanded && (
-                    <div className="space-y-2.5 px-5 pb-4">
-                      {setupChecks.map((check, i) => (
-                        <div key={i} className="flex items-center gap-3">
-                          {check.ok ? (
-                            <CheckCircle2 size={15} className="shrink-0 text-green-400" />
-                          ) : check.warn ? (
-                            <AlertTriangle size={15} className="text-accent-orange shrink-0" />
-                          ) : (
-                            <XCircle size={15} className="shrink-0 text-red-400" />
-                          )}
-                          <span className={`text-sm ${check.ok ? 'text-slate-300' : 'text-white'}`}>
-                            {check.label}
-                          </span>
-                          <span className="ml-auto text-xs text-slate-500">{check.hint}</span>
-                        </div>
-                      ))}
+          {/* Setup checklist — shown on first run or when prerequisites are missing */}
+          {showChecklist && (
+            <div
+              className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/5' : 'border-accent-orange/20 bg-accent-orange/5'}`}
+            >
+              <button
+                onClick={() => setSetupExpanded(!setupExpanded)}
+                className="flex w-full items-center justify-between px-5 py-3.5 transition-colors hover:bg-white/5"
+              >
+                <div className="flex items-center gap-3">
+                  {allPassed ? (
+                    <CheckCircle2 size={18} className="text-green-400" />
+                  ) : (
+                    <AlertTriangle size={18} className="text-accent-orange" />
+                  )}
+                  <span className="text-sm font-semibold text-white">
+                    {allPassed ? 'Setup Complete' : 'Setup Checklist'}
+                  </span>
+                  <span className="font-mono text-xs text-slate-500">
+                    {setupChecks.filter((c) => c.ok).length}/{setupChecks.length} checks passed
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!allPassed && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        docker.retryDetection();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.stopPropagation();
+                          docker.retryDetection();
+                        }
+                      }}
+                      className="hover:text-accent-cyan flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10"
+                      title="Re-check Docker, images, and GPU"
+                    >
+                      <RotateCcw size={12} />
+                      Retry
                     </div>
                   )}
+                  {allPassed && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDismissSetup();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.stopPropagation();
+                          handleDismissSetup();
+                        }
+                      }}
+                      className="cursor-pointer rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      Dismiss
+                    </div>
+                  )}
+                  {setupExpanded ? (
+                    <ChevronUp size={14} className="text-slate-400" />
+                  ) : (
+                    <ChevronDown size={14} className="text-slate-400" />
+                  )}
+                </div>
+              </button>
+              {setupExpanded && (
+                <div className="space-y-2.5 px-5 pb-4">
+                  {setupChecks.map((check, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      {check.ok ? (
+                        <CheckCircle2 size={15} className="shrink-0 text-green-400" />
+                      ) : check.warn ? (
+                        <AlertTriangle size={15} className="text-accent-orange shrink-0" />
+                      ) : (
+                        <XCircle size={15} className="shrink-0 text-red-400" />
+                      )}
+                      <span className={`text-sm ${check.ok ? 'text-slate-300' : 'text-white'}`}>
+                        {check.label}
+                      </span>
+                      <span className="ml-auto text-xs text-slate-500">{check.hint}</span>
+                    </div>
+                  ))}
                 </div>
               )}
+            </div>
+          )}
 
-              {/* 1. Image Card */}
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-                <div
-                  className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-                >
-                  <Download size={14} />
-                </div>
-                <GlassCard
-                  title="1. Docker Image"
-                  className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-                >
-                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-3">
-                        <StatusLight status={hasImages ? 'active' : 'inactive'} />
-                        <span
-                          className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
-                        >
-                          {hasImages
-                            ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
-                            : 'No images'}
+          {/* 1. Image Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+            >
+              <Download size={14} />
+            </div>
+            <GlassCard
+              title="1. Docker Image"
+              className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+            >
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div className="space-y-4">
+                  <div className="flex items-center space-x-3">
+                    <StatusLight status={hasImages ? 'active' : 'inactive'} />
+                    <span
+                      className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
+                    >
+                      {hasImages
+                        ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
+                        : 'No images'}
+                    </span>
+
+                    {hasImages && docker.images[0] && (
+                      <div className="flex gap-2 transition-opacity duration-300">
+                        <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                          {docker.images[0].created.split(' ')[0]}
                         </span>
+                        <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                          {docker.images[0].size}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">
+                      Select Image Tag
+                    </label>
+                    <CustomSelect
+                      value={selectedImage}
+                      onChange={setSelectedImage}
+                      options={imageOptions}
+                      className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col justify-end space-y-2">
+                  <Button
+                    variant="secondary"
+                    className="h-10 w-full"
+                    onClick={() => docker.refreshImages()}
+                    disabled={docker.operating}
+                  >
+                    <RefreshCw size={14} className="mr-2" />
+                    Scan Local Images
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="h-10 w-full"
+                    onClick={() => docker.pullImage(selectedTagForActions)}
+                    disabled={docker.operating}
+                  >
+                    {docker.pulling ? (
+                      <>
+                        <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
+                      </>
+                    ) : (
+                      'Fetch Fresh Image'
+                    )}
+                  </Button>
+                  {docker.pulling && (
+                    <Button
+                      variant="danger"
+                      className="h-10 w-full"
+                      onClick={() => docker.cancelPull()}
+                    >
+                      Cancel Pull
+                    </Button>
+                  )}
+                  <Button
+                    variant="danger"
+                    className="h-10 w-full"
+                    onClick={() => docker.removeImage(selectedTagForActions)}
+                    disabled={docker.operating || docker.images.length === 0}
+                  >
+                    Remove Image
+                  </Button>
+                </div>
+              </div>
+              {docker.operationError && (
+                <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                  {docker.operationError}
+                </div>
+              )}
+            </GlassCard>
+          </div>
 
-                        {hasImages && docker.images[0] && (
-                          <div className="flex gap-2 transition-opacity duration-300">
-                            <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                              {docker.images[0].created.split(' ')[0]}
-                            </span>
-                            <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                              {docker.images[0].size}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-500">
-                          Select Image Tag
-                        </label>
-                        <CustomSelect
-                          value={selectedImage}
-                          onChange={setSelectedImage}
-                          options={imageOptions}
-                          className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex flex-col justify-end space-y-2">
+          {/* 2. Container Card (Config & Controls) */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+            >
+              <Box size={16} />
+            </div>
+            <GlassCard
+              title="2. Instance Settings"
+              className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+            >
+              <div className="space-y-6">
+                {/* Runtime Profile Selector */}
+                <div className="flex items-center gap-4 border-b border-white/5 pb-4">
+                  <label className="text-xs font-medium tracking-wider whitespace-nowrap text-slate-500 uppercase">
+                    Runtime
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleRuntimeProfileChange('gpu')}
+                      disabled={isRunning}
+                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                        runtimeProfile === 'gpu'
+                          ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.15)]'
+                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                    >
+                      <Gpu size={14} />
+                      GPU (CUDA)
+                    </button>
+                    <button
+                      onClick={() => handleRuntimeProfileChange('cpu')}
+                      disabled={isRunning}
+                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                        runtimeProfile === 'cpu'
+                          ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange shadow-[0_0_10px_rgba(255,145,0,0.15)]'
+                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                    >
+                      <Cpu size={14} />
+                      CPU Only
+                    </button>
+                  </div>
+                  {runtimeProfile === 'cpu' && !isRunning && (
+                    <span className="text-xs text-slate-500 italic">
+                      Slower transcription, no NVIDIA GPU required
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-5">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        isRunningAndHealthy
+                          ? 'active'
+                          : containerStatus.exists
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={isRunningAndHealthy}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        isRunning
+                          ? 'text-slate-300'
+                          : containerStatus.exists
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                    <div className="flex gap-2">
                       <Button
                         variant="secondary"
-                        className="h-10 w-full"
-                        onClick={() => docker.refreshImages()}
-                        disabled={docker.operating}
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('local', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
                       >
-                        <RefreshCw size={14} className="mr-2" />
-                        Scan Local Images
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-10 w-full"
-                        onClick={() => docker.pullImage(selectedTagForActions)}
-                        disabled={docker.operating}
-                      >
-                        {docker.pulling ? (
-                          <>
-                            <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                          </>
+                        {docker.operating || startupFlowPending ? (
+                          <Loader2 size={14} className="animate-spin" />
                         ) : (
-                          'Fetch Fresh Image'
+                          'Start Local'
                         )}
                       </Button>
-                      {docker.pulling && (
-                        <Button
-                          variant="danger"
-                          className="h-10 w-full"
-                          onClick={() => docker.cancelPull()}
-                        >
-                          Cancel Pull
-                        </Button>
-                      )}
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        Start Remote
+                      </Button>
                       <Button
                         variant="danger"
-                        className="h-10 w-full"
-                        onClick={() => docker.removeImage(selectedTagForActions)}
-                        disabled={docker.operating || docker.images.length === 0}
-                      >
-                        Remove Image
-                      </Button>
-                    </div>
-                  </div>
-                  {docker.operationError && (
-                    <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                      {docker.operationError}
-                    </div>
-                  )}
-                </GlassCard>
-              </div>
-
-              {/* 2. Container Card (Config & Controls) */}
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-                <div
-                  className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-                >
-                  <Box size={16} />
-                </div>
-                <GlassCard
-                  title="2. Instance Settings"
-                  className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-                >
-                  <div className="space-y-6">
-                    {/* Runtime Profile Selector */}
-                    <div className="flex items-center gap-4 border-b border-white/5 pb-4">
-                      <label className="text-xs font-medium tracking-wider whitespace-nowrap text-slate-500 uppercase">
-                        Runtime
-                      </label>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleRuntimeProfileChange('gpu')}
-                          disabled={isRunning}
-                          className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                            runtimeProfile === 'gpu'
-                              ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.15)]'
-                              : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                          } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                        >
-                          <Gpu size={14} />
-                          GPU (CUDA)
-                        </button>
-                        <button
-                          onClick={() => handleRuntimeProfileChange('cpu')}
-                          disabled={isRunning}
-                          className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                            runtimeProfile === 'cpu'
-                              ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange shadow-[0_0_10px_rgba(255,145,0,0.15)]'
-                              : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                          } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                        >
-                          <Cpu size={14} />
-                          CPU Only
-                        </button>
-                      </div>
-                      {runtimeProfile === 'cpu' && !isRunning && (
-                        <span className="text-xs text-slate-500 italic">
-                          Slower transcription, no NVIDIA GPU required
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-5">
-                      <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                        <StatusLight
-                          status={
-                            isRunningAndHealthy
-                              ? 'active'
-                              : containerStatus.exists
-                                ? 'warning'
-                                : 'inactive'
-                          }
-                          animate={isRunningAndHealthy}
-                        />
-                        <span
-                          className={`font-mono text-sm transition-colors ${
-                            isRunning
-                              ? 'text-slate-300'
-                              : containerStatus.exists
-                                ? 'text-accent-orange'
-                                : 'text-slate-500'
-                          }`}
-                        >
-                          {statusLabel}
-                        </span>
-                      </div>
-
-                      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                        <div className="flex gap-2">
-                          <Button
-                            variant="secondary"
-                            className="h-9 px-4"
-                            onClick={() =>
-                              onStartServer('local', runtimeProfile, selectedTagForStart, {
-                                mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                                liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                                diarizationModel: sanitizeModelName(activeDiarizationModel),
-                              })
-                            }
-                            disabled={
-                              docker.operating ||
-                              isRunning ||
-                              startupFlowPending ||
-                              !liveModelWhisperOnlyCompatible
-                            }
-                          >
-                            {docker.operating || startupFlowPending ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                              'Start Local'
-                            )}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            className="h-9 px-4"
-                            onClick={() =>
-                              onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                                mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                                liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                                diarizationModel: sanitizeModelName(activeDiarizationModel),
-                              })
-                            }
-                            disabled={
-                              docker.operating ||
-                              isRunning ||
-                              startupFlowPending ||
-                              !liveModelWhisperOnlyCompatible
-                            }
-                          >
-                            Start Remote
-                          </Button>
-                          <Button
-                            variant="danger"
-                            className="h-9 px-4"
-                            onClick={() => docker.stopContainer()}
-                            disabled={docker.operating || !isRunning}
-                          >
-                            Stop
-                          </Button>
-                        </div>
-                        <Button
-                          variant="danger"
-                          className="h-9 px-4"
-                          onClick={() => docker.removeContainer()}
-                          disabled={docker.operating || isRunning || !containerStatus.exists}
-                        >
-                          Remove Container
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Auth Token (read-only) */}
-                    {authToken && (
-                      <div className="border-t border-white/5 pt-4">
-                        <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                          Auth Token
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showAuthToken ? 'text' : 'password'}
-                            value={authToken}
-                            readOnly
-                            className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 pr-20 font-mono text-sm text-white focus:outline-none"
-                          />
-                          <div className="absolute top-2 right-2 flex items-center gap-1">
-                            <button
-                              onClick={() => {
-                                writeToClipboard(authToken).catch(() => {});
-                                setAuthTokenCopied(true);
-                                setTimeout(() => setAuthTokenCopied(false), 2000);
-                              }}
-                              className="p-1 text-slate-500 transition-colors hover:text-white"
-                              title="Copy token"
-                            >
-                              {authTokenCopied ? (
-                                <Check size={14} className="text-green-400" />
-                              ) : (
-                                <Copy size={14} />
-                              )}
-                            </button>
-                            <button
-                              onClick={() => setShowAuthToken(!showAuthToken)}
-                              className="p-1 text-slate-500 transition-colors hover:text-white"
-                            >
-                              {showAuthToken ? <EyeOff size={14} /> : <Eye size={14} />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {containerStatus.startedAt && isRunning && (
-                      <div className="font-mono text-xs text-slate-500">
-                        Started: {new Date(containerStatus.startedAt).toLocaleString()}
-                        {containerStatus.health && (
-                          <span className="ml-3">
-                            Health:{' '}
-                            <span
-                              className={
-                                containerStatus.health === 'healthy'
-                                  ? 'text-green-400'
-                                  : 'text-accent-orange'
-                              }
-                            >
-                              {containerStatus.health}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </GlassCard>
-              </div>
-
-              {/* 3. ASR Models Card */}
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-                <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-                  <Cpu size={14} />
-                </div>
-                <GlassCard title="3. ASR Models Configuration">
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-sm font-medium text-slate-300">
-                            Main Transcriber
-                          </label>
-                          {isRunning &&
-                            activeTranscriber &&
-                            activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
-                            activeTranscriber !== DISABLED_MODEL_SENTINEL && (
-                              <div className="flex items-center gap-1.5">
-                                <span
-                                  className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                                />
-                                <span
-                                  className={`font-mono text-[10px] ${modelCacheStatus[activeTranscriber]?.exists ? 'text-green-400' : 'text-slate-500'}`}
-                                >
-                                  {modelCacheStatus[activeTranscriber]?.exists
-                                    ? 'Downloaded'
-                                    : 'Missing'}
-                                </span>
-                              </div>
-                            )}
-                        </div>
-                        <CustomSelect
-                          value={mainModelSelection}
-                          onChange={setMainModelSelection}
-                          options={[
-                            MAIN_RECOMMENDED_MODEL,
-                            CANARY_1B_V2,
-                            WHISPER_LARGE_V3,
-                            WHISPER_MEDIUM,
-                            WHISPER_SMALL,
-                            VIBEVOICE_ASR,
-                            VIBEVOICE_ASR_4BIT,
-                            MODEL_DISABLED_OPTION,
-                            MAIN_MODEL_CUSTOM_OPTION,
-                          ]}
-                          accentColor="magenta"
-                          className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                          disabled={isRunning}
-                        />
-                        {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
-                          <input
-                            type="text"
-                            value={mainCustomModel}
-                            onChange={(e) => setMainCustomModel(e.target.value)}
-                            placeholder="owner/model-name"
-                            disabled={isRunning}
-                            className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-                          />
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-sm font-medium text-slate-300">
-                            Live Mode Model
-                          </label>
-                          {isRunning &&
-                            activeLiveModel &&
-                            activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
-                            activeLiveModel !== DISABLED_MODEL_SENTINEL &&
-                            (() => {
-                              const liveKey =
-                                liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
-                                  ? activeTranscriber
-                                  : activeLiveModel;
-                              const liveExists = modelCacheStatus[liveKey ?? '']?.exists;
-                              return (
-                                <div className="flex items-center gap-1.5">
-                                  <span
-                                    className={`inline-block h-2 w-2 rounded-full ${liveExists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                                  />
-                                  <span
-                                    className={`font-mono text-[10px] ${liveExists ? 'text-green-400' : 'text-slate-500'}`}
-                                  >
-                                    {liveExists ? 'Downloaded' : 'Missing'}
-                                  </span>
-                                </div>
-                              );
-                            })()}
-                        </div>
-                        <CustomSelect
-                          value={liveModelSelection}
-                          onChange={setLiveModelSelection}
-                          options={[
-                            LIVE_MODEL_SAME_AS_MAIN_OPTION,
-                            WHISPER_LARGE_V3,
-                            WHISPER_MEDIUM,
-                            WHISPER_SMALL,
-                            MODEL_DISABLED_OPTION,
-                            LIVE_MODEL_CUSTOM_OPTION,
-                          ]}
-                          className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                          disabled={isRunning}
-                        />
-                        {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
-                          <input
-                            type="text"
-                            value={liveCustomModel}
-                            onChange={(e) => setLiveCustomModel(e.target.value)}
-                            placeholder="owner/model-name"
-                            disabled={isRunning}
-                            className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-                          />
-                        )}
-                        {!liveModelWhisperOnlyCompatible && (
-                          <p className="text-accent-orange text-xs">
-                            {liveModeModelConstraintMessage}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 border-t border-white/5 pt-2">
-                      <Button
-                        variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
                         className="h-9 px-4"
-                        onClick={
-                          adminStatus?.models_loaded === false
-                            ? handleLoadModels
-                            : handleUnloadModels
-                        }
-                        disabled={modelsLoading || !isRunning}
+                        onClick={() => docker.stopContainer()}
+                        disabled={docker.operating || !isRunning}
                       >
-                        {modelsLoading ? (
-                          <>
-                            <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
-                          </>
-                        ) : adminStatus?.models_loaded === false ? (
-                          'Load Models'
-                        ) : (
-                          'Unload Models'
-                        )}
+                        Stop
                       </Button>
-                      {adminStatus?.models_loaded !== undefined && (
-                        <span
-                          className={`ml-auto self-center font-mono text-xs ${adminStatus.models_loaded ? 'text-green-400' : 'text-slate-500'}`}
+                    </div>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4"
+                      onClick={() => docker.removeContainer()}
+                      disabled={docker.operating || isRunning || !containerStatus.exists}
+                    >
+                      Remove Container
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Auth Token (read-only) */}
+                {authToken && (
+                  <div className="border-t border-white/5 pt-4">
+                    <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+                      Auth Token
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showAuthToken ? 'text' : 'password'}
+                        value={authToken}
+                        readOnly
+                        className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 pr-20 font-mono text-sm text-white focus:outline-none"
+                      />
+                      <div className="absolute top-2 right-2 flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            writeToClipboard(authToken).catch(() => {});
+                            setAuthTokenCopied(true);
+                            setTimeout(() => setAuthTokenCopied(false), 2000);
+                          }}
+                          className="p-1 text-slate-500 transition-colors hover:text-white"
+                          title="Copy token"
                         >
-                          {adminStatus.models_loaded ? 'Models Loaded' : 'Models Not Loaded'}
-                        </span>
-                      )}
+                          {authTokenCopied ? (
+                            <Check size={14} className="text-green-400" />
+                          ) : (
+                            <Copy size={14} />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setShowAuthToken(!showAuthToken)}
+                          className="p-1 text-slate-500 transition-colors hover:text-white"
+                        >
+                          {showAuthToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </GlassCard>
-              </div>
+                )}
 
-              {/* 4. Diarization Models Card */}
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-                <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-                  <Users size={14} />
-                </div>
-                <GlassCard title="4. Diarization Models Configuration">
+                {containerStatus.startedAt && isRunning && (
+                  <div className="font-mono text-xs text-slate-500">
+                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
+                    {containerStatus.health && (
+                      <span className="ml-3">
+                        Health:{' '}
+                        <span
+                          className={
+                            containerStatus.health === 'healthy'
+                              ? 'text-green-400'
+                              : 'text-accent-orange'
+                          }
+                        >
+                          {containerStatus.health}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 3. ASR Models Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <Cpu size={14} />
+            </div>
+            <GlassCard title="3. ASR Models Configuration">
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-slate-300">
-                        Diarization Model
-                      </label>
-                      {isRunning && activeDiarizationModel && (
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeDiarizationModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                          />
-                          <span
-                            className={`font-mono text-[10px] ${modelCacheStatus[activeDiarizationModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}
-                          >
-                            {modelCacheStatus[activeDiarizationModel]?.exists
-                              ? 'Downloaded'
-                              : 'Missing'}
-                          </span>
-                        </div>
-                      )}
+                      <label className="text-sm font-medium text-slate-300">Main Transcriber</label>
+                      {isRunning &&
+                        activeTranscriber &&
+                        activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
+                        activeTranscriber !== DISABLED_MODEL_SENTINEL && (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                            />
+                            <span
+                              className={`font-mono text-[10px] ${modelCacheStatus[activeTranscriber]?.exists ? 'text-green-400' : 'text-slate-500'}`}
+                            >
+                              {modelCacheStatus[activeTranscriber]?.exists
+                                ? 'Downloaded'
+                                : 'Missing'}
+                            </span>
+                          </div>
+                        )}
                     </div>
                     <CustomSelect
-                      value={diarizationModelSelection}
-                      onChange={setDiarizationModelSelection}
-                      options={[DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
+                      value={mainModelSelection}
+                      onChange={setMainModelSelection}
+                      options={[
+                        MAIN_RECOMMENDED_MODEL,
+                        CANARY_1B_V2,
+                        WHISPER_LARGE_V3,
+                        WHISPER_MEDIUM,
+                        WHISPER_SMALL,
+                        VIBEVOICE_ASR,
+                        VIBEVOICE_ASR_4BIT,
+                        MODEL_DISABLED_OPTION,
+                        MAIN_MODEL_CUSTOM_OPTION,
+                      ]}
+                      accentColor="magenta"
+                      className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                      disabled={isRunning}
+                    />
+                    {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
+                      <input
+                        type="text"
+                        value={mainCustomModel}
+                        onChange={(e) => setMainCustomModel(e.target.value)}
+                        placeholder="owner/model-name"
+                        disabled={isRunning}
+                        className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-slate-300">Live Mode Model</label>
+                      {isRunning &&
+                        activeLiveModel &&
+                        activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
+                        activeLiveModel !== DISABLED_MODEL_SENTINEL &&
+                        (() => {
+                          const liveKey =
+                            liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
+                              ? activeTranscriber
+                              : activeLiveModel;
+                          const liveExists = modelCacheStatus[liveKey ?? '']?.exists;
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`inline-block h-2 w-2 rounded-full ${liveExists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                              />
+                              <span
+                                className={`font-mono text-[10px] ${liveExists ? 'text-green-400' : 'text-slate-500'}`}
+                              >
+                                {liveExists ? 'Downloaded' : 'Missing'}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                    </div>
+                    <CustomSelect
+                      value={liveModelSelection}
+                      onChange={setLiveModelSelection}
+                      options={[
+                        LIVE_MODEL_SAME_AS_MAIN_OPTION,
+                        WHISPER_LARGE_V3,
+                        WHISPER_MEDIUM,
+                        WHISPER_SMALL,
+                        MODEL_DISABLED_OPTION,
+                        LIVE_MODEL_CUSTOM_OPTION,
+                      ]}
                       className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
-                    {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
+                    {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
                       <input
                         type="text"
-                        value={diarizationCustomModel}
-                        onChange={(e) => setDiarizationCustomModel(e.target.value)}
+                        value={liveCustomModel}
+                        onChange={(e) => setLiveCustomModel(e.target.value)}
                         placeholder="owner/model-name"
                         disabled={isRunning}
                         className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                       />
                     )}
+                    {!liveModelWhisperOnlyCompatible && (
+                      <p className="text-accent-orange text-xs">{liveModeModelConstraintMessage}</p>
+                    )}
                   </div>
-                </GlassCard>
-              </div>
-
-              {/* 5. Volumes Card */}
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
-                <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-                  <HardDrive size={14} />
                 </div>
-                <GlassCard
-                  title="5. Persistent Volumes"
-                  action={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon={<RefreshCw size={14} />}
-                      onClick={() => docker.refreshVolumes()}
-                    >
-                      Refresh
-                    </Button>
-                  }
-                >
-                  <div className="space-y-4">
-                    {docker.volumes.length > 0 ? (
-                      docker.volumes.map((vol) => {
-                        const colorMap: Record<string, string> = {
-                          'transcriptionsuite-data': 'bg-blue-500',
-                          'transcriptionsuite-models': 'bg-purple-500',
-                          'transcriptionsuite-runtime': 'bg-orange-500',
-                        };
-                        return (
-                          <div
-                            key={vol.name}
-                            className="flex items-center justify-between py-1 text-sm"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div
-                                className={`h-2 w-2 rounded-full ${colorMap[vol.name] || 'bg-slate-500'}`}
-                              ></div>
-                              <span className="text-slate-300">{vol.label}</span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <span className="font-mono text-slate-500">{vol.size || '—'}</span>
-                              <span
-                                className={`text-xs ${vol.mountpoint ? 'text-green-400' : 'text-slate-500'}`}
-                              >
-                                {vol.mountpoint ? 'Mounted' : 'Not Found'}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
+                <div className="flex gap-2 border-t border-white/5 pt-2">
+                  <Button
+                    variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
+                    className="h-9 px-4"
+                    onClick={
+                      adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
+                    }
+                    disabled={modelsLoading || !isRunning}
+                  >
+                    {modelsLoading ? (
+                      <>
+                        <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
+                      </>
+                    ) : adminStatus?.models_loaded === false ? (
+                      'Load Models'
                     ) : (
-                      <div className="py-2 text-center text-sm text-slate-500">
-                        {docker.available ? 'No volumes found' : 'Docker not available'}
-                      </div>
+                      'Unload Models'
                     )}
-
-                    {docker.volumes.length > 0 && (
-                      <div className="mt-4 flex gap-2 overflow-x-auto border-t border-white/5 pt-4 pb-2">
-                        {docker.volumes.map((vol) => (
-                          <Button
-                            key={vol.name}
-                            size="sm"
-                            variant="danger"
-                            className="text-xs whitespace-nowrap"
-                            onClick={() => docker.removeVolume(vol.name)}
-                            disabled={docker.operating || isRunning}
-                          >
-                            Clear {vol.label.replace(' Volume', '')}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </GlassCard>
-              </div>
-
-              {/* 6. Clean Up */}
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
-                <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-                  <AlertTriangle size={14} />
+                  </Button>
+                  {adminStatus?.models_loaded !== undefined && (
+                    <span
+                      className={`ml-auto self-center font-mono text-xs ${adminStatus.models_loaded ? 'text-green-400' : 'text-slate-500'}`}
+                    >
+                      {adminStatus.models_loaded ? 'Models Loaded' : 'Models Not Loaded'}
+                    </span>
+                  )}
                 </div>
-                <GlassCard title="6. Clean Up">
-                  <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                      <div className="space-y-1">
-                        <p className="text-xs font-semibold tracking-wider text-red-300 uppercase">
-                          Danger Zone
-                        </p>
-                        <p className="text-sm text-red-200/90">
-                          Stop and remove container, remove all server images, delete runtime, and
-                          remove any unchecked persistent resources.
-                        </p>
-                      </div>
-                      <Button
-                        variant="danger"
-                        size="lg"
-                        icon={<AlertTriangle size={16} />}
-                        className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
-                        onClick={openCleanAllDialog}
-                        disabled={docker.operating || startupFlowPending}
-                      >
-                        Clean All
-                      </Button>
-                    </div>
-                  </div>
-                </GlassCard>
               </div>
-            </>
-          )}
+            </GlassCard>
+          </div>
+
+          {/* 4. Diarization Models Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <Users size={14} />
+            </div>
+            <GlassCard title="4. Diarization Models Configuration">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-slate-300">Diarization Model</label>
+                  {isRunning && activeDiarizationModel && (
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeDiarizationModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                      />
+                      <span
+                        className={`font-mono text-[10px] ${modelCacheStatus[activeDiarizationModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}
+                      >
+                        {modelCacheStatus[activeDiarizationModel]?.exists
+                          ? 'Downloaded'
+                          : 'Missing'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <CustomSelect
+                  value={diarizationModelSelection}
+                  onChange={setDiarizationModelSelection}
+                  options={[DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
+                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                  disabled={isRunning}
+                />
+                {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
+                  <input
+                    type="text"
+                    value={diarizationCustomModel}
+                    onChange={(e) => setDiarizationCustomModel(e.target.value)}
+                    placeholder="owner/model-name"
+                    disabled={isRunning}
+                    className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
+                  />
+                )}
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 5. Volumes Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <HardDrive size={14} />
+            </div>
+            <GlassCard
+              title="5. Persistent Volumes"
+              action={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<RefreshCw size={14} />}
+                  onClick={() => docker.refreshVolumes()}
+                >
+                  Refresh
+                </Button>
+              }
+            >
+              <div className="space-y-4">
+                {docker.volumes.length > 0 ? (
+                  docker.volumes.map((vol) => {
+                    const colorMap: Record<string, string> = {
+                      'transcriptionsuite-data': 'bg-blue-500',
+                      'transcriptionsuite-models': 'bg-purple-500',
+                      'transcriptionsuite-runtime': 'bg-orange-500',
+                    };
+                    return (
+                      <div
+                        key={vol.name}
+                        className="flex items-center justify-between py-1 text-sm"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`h-2 w-2 rounded-full ${colorMap[vol.name] || 'bg-slate-500'}`}
+                          ></div>
+                          <span className="text-slate-300">{vol.label}</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="font-mono text-slate-500">{vol.size || '—'}</span>
+                          <span
+                            className={`text-xs ${vol.mountpoint ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {vol.mountpoint ? 'Mounted' : 'Not Found'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="py-2 text-center text-sm text-slate-500">
+                    {docker.available ? 'No volumes found' : 'Docker not available'}
+                  </div>
+                )}
+
+                {docker.volumes.length > 0 && (
+                  <div className="mt-4 flex gap-2 overflow-x-auto border-t border-white/5 pt-4 pb-2">
+                    {docker.volumes.map((vol) => (
+                      <Button
+                        key={vol.name}
+                        size="sm"
+                        variant="danger"
+                        className="text-xs whitespace-nowrap"
+                        onClick={() => docker.removeVolume(vol.name)}
+                        disabled={docker.operating || isRunning}
+                      >
+                        Clear {vol.label.replace(' Volume', '')}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 6. Clean Up */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <AlertTriangle size={14} />
+            </div>
+            <GlassCard title="6. Clean Up">
+              <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold tracking-wider text-red-300 uppercase">
+                      Danger Zone
+                    </p>
+                    <p className="text-sm text-red-200/90">
+                      Stop and remove container, remove all server images, delete runtime, and
+                      remove any unchecked persistent resources.
+                    </p>
+                  </div>
+                  <Button
+                    variant="danger"
+                    size="lg"
+                    icon={<AlertTriangle size={16} />}
+                    className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
+                    onClick={openCleanAllDialog}
+                    disabled={docker.operating || startupFlowPending}
+                  >
+                    Clean All
+                  </Button>
+                </div>
+              </div>
+            </GlassCard>
+          </div>
         </div>
       </div>
       <Dialog
