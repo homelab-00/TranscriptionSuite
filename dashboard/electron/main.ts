@@ -73,8 +73,12 @@ if (process.platform === 'linux') {
 }
 // Windows: native WASAPI loopback — no flags needed.
 
-// Ensure userData path uses PascalCase: ~/.config/TranscriptionSuite (not lowercase)
+// Ensure all Electron paths use PascalCase: ~/.config/TranscriptionSuite (not lowercase).
+// Both 'userData' AND 'crashDumps' must be set explicitly — Electron derives them
+// independently, and 'crashDumps' defaults to ~/.config/{package.name}/Crashpad (which
+// would be lowercase because npm requires lowercase package names).
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
+app.setPath('crashDumps', path.join(app.getPath('appData'), 'TranscriptionSuite', 'Crashpad'));
 
 const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
