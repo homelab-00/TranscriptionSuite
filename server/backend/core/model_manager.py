@@ -492,6 +492,48 @@ class ModelManager:
 
         return normalize(model_a) == normalize(model_b)
 
+    def _scale_batch_size(self, configured_batch_size: int) -> int:
+        """Scale batch_size down for GPUs with limited VRAM.
+
+        WhisperX batched inference allocates ~0.2-0.3 GB per batch slot for
+        encoder outputs, decoder KV caches, and attention matrices.  On GPUs
+        with ≤12 GB total VRAM, the default batch_size=16 can push peak usage
+        beyond the available budget when combined with the whisper model itself
+        (~3 GB) and the PyAnnote VAD (~0.5 GB).
+
+        The scaling is conservative — it only reduces, never increases, and
+        logs when it does so.
+        """
+        if not self.gpu_available:
+            return configured_batch_size
+
+        from server.core.audio_utils import get_gpu_memory_info
+
+        gpu_info = get_gpu_memory_info()
+        total_gb = gpu_info.get("total_gb", 0)
+        if total_gb <= 0:
+            return configured_batch_size
+
+        # Tiered caps based on total GPU VRAM
+        if total_gb <= 8:
+            cap = 4
+        elif total_gb <= 12:
+            cap = 8
+        elif total_gb <= 16:
+            cap = 12
+        else:
+            return configured_batch_size  # ≥24 GB — no cap needed
+
+        if configured_batch_size > cap:
+            logger.info(
+                "Auto-scaling batch_size %d → %d for %.1f GB GPU to avoid OOM",
+                configured_batch_size,
+                cap,
+                total_gb,
+            )
+            return cap
+        return configured_batch_size
+
     @property
     def transcription_engine(self) -> "AudioToTextRecorder":
         """Get or create the unified transcription engine."""
@@ -518,13 +560,16 @@ class ModelManager:
                 "Main transcriber model is disabled; select a model before recording."
             )
 
+        configured_batch_size = main_cfg.get("batch_size", 16)
+        effective_batch_size = self._scale_batch_size(configured_batch_size)
+
         return AudioToTextRecorder(
             instance_name="file_transcriber",
             model=resolved_main_model,
             device=main_cfg.get("device", "cuda"),
             compute_type=main_cfg.get("compute_type", "default"),
             beam_size=main_cfg.get("beam_size", 5),
-            batch_size=main_cfg.get("batch_size", 16),
+            batch_size=effective_batch_size,
             language=trans_opts.get("language", ""),
             task=("translate" if trans_opts.get("translation_enabled", False) else "transcribe"),
             translation_target_language=trans_opts.get("translation_target_language", "en"),

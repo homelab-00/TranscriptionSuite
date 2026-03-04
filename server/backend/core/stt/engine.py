@@ -331,13 +331,19 @@ class AudioToTextRecorder:
         self.start_recording_on_voice_activity = False
         self.stop_recording_on_voice_deactivity = False
 
-        # Initialize VAD
-        self.vad = VoiceActivityDetector(
-            silero_sensitivity=silero_sensitivity,
-            webrtc_sensitivity=webrtc_sensitivity,
-            silero_use_onnx=silero_use_onnx,
-            use_silero_deactivity=silero_deactivity_detection,
-        )
+        # Initialize VAD — skip for file-only instances (e.g. "file_transcriber")
+        # that never use real-time voice activity detection.  Silero VAD runs on
+        # CPU so the VRAM impact is negligible, but the initialization is wasteful.
+        self._is_file_only = instance_name == "file_transcriber"
+        if self._is_file_only:
+            self.vad = None  # type: ignore[assignment]
+        else:
+            self.vad = VoiceActivityDetector(
+                silero_sensitivity=silero_sensitivity,
+                webrtc_sensitivity=webrtc_sensitivity,
+                silero_use_onnx=silero_use_onnx,
+                use_silero_deactivity=silero_deactivity_detection,
+            )
 
         # Initialize transcription backend
         self._backend: Any | None = None

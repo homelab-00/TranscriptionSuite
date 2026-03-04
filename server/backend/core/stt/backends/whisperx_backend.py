@@ -183,6 +183,19 @@ class WhisperXBackend(STTBackend):
         except Exception as e:
             logger.warning(f"Warmup alignment inference failed (non-critical): {e}")
 
+        # Step 4: Release alignment model to free VRAM (~1.2 GB).
+        # CUDA kernels compiled above are cached per-architecture and persist
+        # after the model is unloaded, so the warmup benefit is retained.
+        # The alignment model will be lazily reloaded in _align() when actually
+        # needed (after transcription completes and batch activations are freed).
+        del self._align_model
+        del self._align_metadata
+        self._align_model = None
+        self._align_metadata = None
+        self._align_language = None
+        clear_gpu_cache()
+        logger.info("Warmup alignment model released to free VRAM for transcription")
+
     def transcribe(
         self,
         audio: np.ndarray,
@@ -526,6 +539,7 @@ class WhisperXBackend(STTBackend):
                 del self._align_model
                 del self._align_metadata
                 gc.collect()
+                clear_gpu_cache()
             self._align_model, self._align_metadata = whisperx.load_align_model(
                 language_code=lang,
                 device=self._device,
