@@ -220,31 +220,6 @@ function readRemoteTlsProfile(): RemoteTlsProfile {
 }
 
 /**
- * Locate the effective server config.yaml.
- * Preference: user-local sparse override → bundled template (dev or packaged).
- */
-function findServerConfigPath(): string | null {
-  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
-  if (fs.existsSync(userConfigPath)) {
-    return userConfigPath;
-  }
-
-  // Dev mode: repo server/config.yaml
-  const devPath = path.resolve(__dirname, '../../server/config.yaml');
-  if (fs.existsSync(devPath)) {
-    return devPath;
-  }
-
-  // Packaged: bundled extra resource
-  const bundledPath = path.join(process.resourcesPath ?? '', 'config.yaml');
-  if (fs.existsSync(bundledPath)) {
-    return bundledPath;
-  }
-
-  return null;
-}
-
-/**
  * Extract the value of a named scalar key from YAML text using simple
  * line-based regex — no YAML parser needed.
  * Handles:  key: value  /  key: "value"  /  key: 'value'
