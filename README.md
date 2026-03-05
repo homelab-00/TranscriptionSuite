@@ -43,7 +43,7 @@ or CPU mode. Dockerized for fast setup.
 
 **Demo**
 
-https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
+https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 </div>
 
@@ -54,6 +54,7 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 - [1. Introduction](#1-introduction)
   - [1.1 Features](#11-features)
   - [1.2 Screenshots](#12-screenshots)
+  - [1.3 Short Tour](#13-short-tour)
 - [2. Prerequisites](#2-prerequisites)
   - [2.1 Docker](#21-docker)
 - [3. Installation](#3-installation)
@@ -114,6 +115,14 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
 
 **Server Tab**
 ![Server Tab](./build/assets/shot-4.png)
+
+</div>
+
+### 1.3 Short Tour
+
+<div align="center">
+
+https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 </div>
 
