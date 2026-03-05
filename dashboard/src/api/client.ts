@@ -198,10 +198,20 @@ export class APIClient {
         const useRemote = await electronAPI.config?.get?.('connection.useRemote');
         const skipCertVerify = useRemote === true && remoteProfile === 'lan';
 
+        console.debug('[APIClient] Probing', this.baseUrl, '(skipCertVerify:', skipCertVerify, ')');
+
         const probe = await electronAPI.server.probeConnection(
           `${this.baseUrl}/api/status`,
           skipCertVerify,
         );
+
+        console.debug('[APIClient] Probe result:', {
+          ok: probe.ok,
+          httpStatus: probe.httpStatus,
+          error: probe.error,
+          hasBody: !!probe.body,
+        });
+
         if (!probe.ok) {
           // For TLS-specific errors, fall through to fetch() — the renderer's
           // certificate-error handler can accept certs that Node.js rejected
@@ -215,6 +225,7 @@ export class APIClient {
             'ERR_TLS_CERT_AUTHORITY_INVALID',
           ]);
           if (!probe.errorCode || !tlsFallbackCodes.has(probe.errorCode)) {
+            console.warn('[APIClient] Probe failed (non-TLS), returning early:', probe.error);
             return {
               reachable: false,
               ready: false,
@@ -223,14 +234,39 @@ export class APIClient {
             };
           }
           // TLS error → fall through to renderer fetch (certificate-error handler may accept)
+          console.debug(
+            '[APIClient] TLS error from probe, falling through to renderer fetch:',
+            probe.errorCode,
+          );
+        }
+
+        // If probe succeeded and returned a body, try to use it directly
+        // to avoid a redundant second fetch() that CSP might block.
+        if (probe.ok && probe.body) {
+          try {
+            const status = JSON.parse(probe.body) as ServerStatus;
+            console.debug('[APIClient] Connected via probe body, ready:', status.ready);
+            return {
+              reachable: true,
+              ready: status.ready === true,
+              status,
+              error: null,
+            };
+          } catch {
+            // Body parse failed — fall through to normal fetch
+            console.debug('[APIClient] Probe body parse failed, falling through to fetch');
+          }
         }
       } catch {
         // Probe IPC failed — fall through to normal fetch
+        console.warn('[APIClient] Probe IPC call failed, falling through to fetch');
       }
     }
 
     try {
+      console.debug('[APIClient] Fetching /api/status via renderer fetch()');
       const status = await this.getStatus();
+      console.debug('[APIClient] Fetch succeeded, ready:', status.ready);
       return {
         reachable: true,
         ready: status.ready === true,
@@ -260,6 +296,7 @@ export class APIClient {
       // Note: Chromium's "Failed to fetch" is generic and covers DNS, TLS,
       // refused, timeout — it falls through to the default "Server unreachable".
       const msg = err instanceof Error ? err.message : 'Unknown error';
+      console.warn('[APIClient] Fetch failed:', msg);
       let detail = 'Server unreachable';
       if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo/i.test(msg)) {
         detail = 'DNS lookup failed — check hostname';

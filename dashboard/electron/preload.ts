@@ -163,7 +163,13 @@ export interface ElectronAPI {
     probeConnection: (
       url: string,
       skipCertVerify?: boolean,
-    ) => Promise<{ ok: boolean; httpStatus?: number; error?: string; errorCode?: string }>;
+    ) => Promise<{
+      ok: boolean;
+      httpStatus?: number;
+      error?: string;
+      errorCode?: string;
+      body?: string;
+    }>;
     checkFirewallPort: (
       port: number,
     ) => Promise<{ listening: boolean; firewallSuspect: boolean; hint: string | null }>;
@@ -315,6 +321,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         httpStatus?: number;
         error?: string;
         errorCode?: string;
+        body?: string;
       }>,
     checkFirewallPort: (port: number) =>
       ipcRenderer.invoke('server:checkFirewallPort', port) as Promise<{

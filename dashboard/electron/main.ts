@@ -1118,7 +1118,13 @@ ipcMain.handle(
     _event,
     url: string,
     skipCertVerify: boolean,
-  ): Promise<{ ok: boolean; httpStatus?: number; error?: string; errorCode?: string }> => {
+  ): Promise<{
+    ok: boolean;
+    httpStatus?: number;
+    error?: string;
+    errorCode?: string;
+    body?: string;
+  }> => {
     return new Promise((resolve) => {
       try {
         const parsed = new URL(url);
@@ -1139,11 +1145,31 @@ ipcMain.handle(
         };
 
         const req = mod.request(options, (res) => {
-          // Consume the response body to free resources
-          res.resume();
-          resolve({
-            ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400,
-            httpStatus: res.statusCode,
+          // Collect the response body (up to 64 KB) so the renderer can
+          // use it directly instead of making a redundant second request.
+          const chunks: Buffer[] = [];
+          let totalLen = 0;
+          const MAX_BODY = 64 * 1024;
+          res.on('data', (chunk: Buffer) => {
+            if (totalLen < MAX_BODY) {
+              chunks.push(chunk);
+              totalLen += chunk.length;
+            }
+          });
+          res.on('end', () => {
+            const body = Buffer.concat(chunks).toString('utf-8').slice(0, MAX_BODY);
+            resolve({
+              ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400,
+              httpStatus: res.statusCode,
+              body,
+            });
+          });
+          res.on('error', () => {
+            // Body read failed — still return probe result without body
+            resolve({
+              ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400,
+              httpStatus: res.statusCode,
+            });
           });
         });
 

@@ -551,11 +551,13 @@ async function dockerAvailable(): Promise<boolean> {
     console.warn('[DockerManager] docker info failed:', err.message);
   }
 
-  // Stage 3: binary-only check (daemon might be down but binary exists)
+  // Stage 3: binary-only check — daemon is not running, so Docker operations
+  // will fail.  Return false to avoid polling spam (listImages every 10 s).
+  // Users can re-check via the "Retry Detection" button.
   try {
     const clientVer = await exec('docker', ['--version']);
-    console.log('[DockerManager] Docker binary found (daemon may be down):', clientVer);
-    return true;
+    console.log('[DockerManager] Docker binary found but daemon is not running:', clientVer);
+    return false;
   } catch (err: any) {
     console.error('[DockerManager] Docker not found at all:', err.message);
     console.error('[DockerManager] Verify Docker is installed and available on PATH.');
