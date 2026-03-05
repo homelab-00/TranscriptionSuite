@@ -11,11 +11,12 @@
  *   GPU:          docker-compose.gpu.yml         (NVIDIA reservation)
  */
 
-import { execFile, spawn, ChildProcess } from 'child_process';
+import { execFile, execFileSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import os from 'os';
 import { app } from 'electron';
 
 const execFileAsync = promisify(execFile);
@@ -248,6 +249,92 @@ interface TlsCertPaths {
 }
 
 /**
+ * Collect non-internal IPv4 addresses from all network interfaces.
+ * Used to populate the SAN (Subject Alternative Name) field when
+ * auto-generating self-signed LAN certificates.
+ */
+function getLanIpAddresses(): string[] {
+  const interfaces = os.networkInterfaces();
+  const ips: string[] = [];
+  for (const [, addrs] of Object.entries(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        ips.push(addr.address);
+      }
+    }
+  }
+  return ips;
+}
+
+/**
+ * Auto-generate a self-signed TLS certificate + key for LAN mode.
+ *
+ * The cert is valid for 10 years and includes SANs for all detected
+ * LAN IP addresses plus localhost / 127.0.0.1.  This allows clients
+ * on the same network to connect via any of the server's IPs.
+ *
+ * Uses `openssl` CLI which is available on Linux and macOS by default.
+ * On Windows, it's commonly available via Git for Windows or WSL.
+ *
+ * @returns true if the files were generated, false if openssl is unavailable
+ */
+function generateSelfSignedLanCert(certPath: string, keyPath: string): boolean {
+  // Ensure parent directories exist
+  const certDir = path.dirname(certPath);
+  const keyDir = path.dirname(keyPath);
+  fs.mkdirSync(certDir, { recursive: true });
+  if (keyDir !== certDir) fs.mkdirSync(keyDir, { recursive: true });
+
+  // Collect SANs: all LAN IPs + loopback + localhost
+  const lanIps = getLanIpAddresses();
+  const sanEntries: string[] = ['DNS:localhost', 'IP:127.0.0.1', ...lanIps.map((ip) => `IP:${ip}`)];
+  const sanString = sanEntries.join(',');
+
+  // Build openssl command
+  // -x509: self-signed; -newkey rsa:2048: generate new 2048-bit RSA key;
+  // -nodes: no passphrase; -days 3650: valid ~10 years;
+  // -subj: minimal subject; -addext: SAN extension.
+  const opensslBinary = process.platform === 'win32' ? 'openssl.exe' : 'openssl';
+  const args = [
+    'req',
+    '-x509',
+    '-newkey',
+    'rsa:2048',
+    '-keyout',
+    keyPath,
+    '-out',
+    certPath,
+    '-days',
+    '3650',
+    '-nodes',
+    '-subj',
+    '/CN=TranscriptionSuite LAN',
+    '-addext',
+    `subjectAltName=${sanString}`,
+  ];
+
+  try {
+    execFileSync(opensslBinary, args, {
+      timeout: 30_000,
+      stdio: 'pipe',
+    });
+    console.log(
+      `[DockerManager] Auto-generated self-signed LAN certificate:\n` +
+        `  Cert: ${certPath}\n` +
+        `  Key:  ${keyPath}\n` +
+        `  SANs: ${sanString}`,
+    );
+    return true;
+  } catch (err: any) {
+    console.warn(
+      `[DockerManager] Failed to auto-generate LAN certificate (openssl): ${err.message}`,
+    );
+    return false;
+  }
+}
+
+/**
  * Resolve the host-side TLS cert + key paths for the active remote profile.
  *
  * Reads `connection.remoteProfile` from the electron-store to decide which
@@ -318,7 +405,23 @@ function resolveTlsCertPaths(): TlsCertPaths {
   const keyPath = expandTilde(rawKeyPath.trim());
 
   // ---------- Validate files exist on disk ----------
-  if (!fs.existsSync(certPath)) {
+  const certMissing = !fs.existsSync(certPath);
+  const keyMissing = !fs.existsSync(keyPath);
+
+  if ((certMissing || keyMissing) && profile === 'lan') {
+    // Auto-generate self-signed certs for LAN mode — the client pins
+    // the certificate fingerprint for LAN connections, so self-signed is fine.
+    console.log(`[DockerManager] LAN cert/key not found at configured paths — auto-generating...`);
+    const generated = generateSelfSignedLanCert(certPath, keyPath);
+    if (!generated) {
+      throw new Error(
+        `LAN TLS certificate files not found and auto-generation failed.\n\n` +
+          `Cert: ${certPath}\nKey:  ${keyPath}\n\n` +
+          `Please install openssl or manually create the certificate files.\n` +
+          `On Arch/Ubuntu: sudo pacman -S openssl / sudo apt install openssl`,
+      );
+    }
+  } else if (certMissing) {
     const hint =
       profile === 'tailscale'
         ? 'Generate certificates with:  sudo tailscale cert <your-machine>.tail<xxxx>.ts.net\n' +
@@ -326,9 +429,7 @@ function resolveTlsCertPaths(): TlsCertPaths {
         : 'Create or obtain a TLS certificate for your LAN hostname/IP\n' +
           'and place it at the path configured in config.yaml.';
     throw new Error(`TLS certificate file not found: ${certPath}\n\n${hint}`);
-  }
-
-  if (!fs.existsSync(keyPath)) {
+  } else if (keyMissing) {
     throw new Error(
       `TLS key file not found: ${keyPath}\n\n` +
         `Please ensure the key file exists at the configured path.`,

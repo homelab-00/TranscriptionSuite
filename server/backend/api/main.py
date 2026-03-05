@@ -191,9 +191,22 @@ class OriginValidationMiddleware(BaseHTTPMiddleware):
     """
     Middleware to validate CORS origins based on deployment mode.
 
-    In TLS mode: Only allow same-origin requests (server's own hostname)
-    In local mode: Only allow localhost origins
+    In TLS mode: Allow same-origin, Electron app (null / file:// origin),
+                 and localhost origins (dev mode).
+    In local mode: Only allow localhost origins and Electron app origins.
+
+    Electron's Chromium renderer sends ``Origin: null`` for fetch() from
+    file:// pages (production builds) and ``Origin: http://localhost:3000``
+    in dev mode.  Both must be accepted for the desktop client to reach a
+    remote server.  Auth tokens (checked by AuthenticationMiddleware)
+    protect sensitive endpoints; the origin check guards against CSRF from
+    arbitrary web pages, which does not apply to native Electron apps.
     """
+
+    # Localhost addresses accepted in both local and TLS modes so the
+    # Electron dev server (http://localhost:3000) works against a remote
+    # server running on the same machine.
+    _LOCALHOST = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
@@ -202,16 +215,30 @@ class OriginValidationMiddleware(BaseHTTPMiddleware):
         if not origin:
             return await call_next(request)
 
+        # Electron production builds send the literal string "null" as the
+        # origin (opaque origin from file:// pages).  Always allow it — the
+        # request is coming from our own native app, not a web page.
+        if origin == "null":
+            return await call_next(request)
+
         # Parse the origin
         from urllib.parse import urlparse
 
         parsed_origin = urlparse(origin)
+        origin_host = parsed_origin.netloc.split(":")[0]
+
+        # Empty netloc means an opaque/unrecognised origin (e.g. file://).
+        # Allow it — same rationale as the "null" check above.
+        if not origin_host:
+            return await call_next(request)
+
+        # Localhost origins are always safe (Electron dev, local testing)
+        if origin_host in self._LOCALHOST:
+            return await call_next(request)
 
         if TLS_MODE:
-            # In TLS mode, only allow same-origin requests
-            # Compare origin hostname with request hostname
+            # In TLS mode, additionally allow same-origin requests
             request_host = request.headers.get("host", "").split(":")[0]
-            origin_host = parsed_origin.netloc.split(":")[0]
 
             if origin_host != request_host:
                 logger.warning(
@@ -222,16 +249,13 @@ class OriginValidationMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Cross-origin requests not allowed"},
                 )
         else:
-            # In local mode, only allow localhost origins
-            allowed_hosts = {"localhost", "127.0.0.1", "::1", "[::1]"}
-            origin_host = parsed_origin.netloc.split(":")[0]
-
-            if origin_host not in allowed_hosts:
-                logger.warning(f"CORS: Blocked non-localhost origin {origin}")
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Only localhost origins allowed"},
-                )
+            # In local mode, only localhost origins are allowed (already
+            # handled above) — block everything else.
+            logger.warning(f"CORS: Blocked non-localhost origin {origin}")
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Only localhost origins allowed"},
+            )
 
         return await call_next(request)
 

@@ -224,6 +224,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [keepModelsVolume, setKeepModelsVolume] = useState(false);
   const [keepConfigDirectory, setKeepConfigDirectory] = useState(false);
 
+  // Firewall warning state (remote mode)
+  const [firewallWarning, setFirewallWarning] = useState<string | null>(null);
+
   // Load persisted runtime profile, auth token, and Tailscale hostname on mount
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -403,6 +406,40 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
     : 'Not Found';
+
+  // Check firewall when container becomes healthy in remote mode
+  useEffect(() => {
+    if (!isRunningAndHealthy) {
+      setFirewallWarning(null);
+      return;
+    }
+    const api = (window as any).electronAPI;
+    if (!api?.server?.checkFirewallPort || !api?.config?.get) return;
+
+    // Only check if server was started in remote/TLS mode
+    api.config
+      .get('connection.useRemote')
+      .then(async (useRemote: unknown) => {
+        // Also check the compose env to see if TLS was enabled (server-side indicator)
+        const tlsFromCompose = await api.docker
+          ?.readComposeEnvValue?.('TLS_ENABLED')
+          .catch(() => null);
+        const isRemote = useRemote === true || tlsFromCompose === 'true';
+        if (!isRemote) return;
+
+        try {
+          const result = await api.server.checkFirewallPort(8000);
+          if (result.firewallSuspect && result.hint) {
+            setFirewallWarning(result.hint);
+          } else {
+            setFirewallWarning(null);
+          }
+        } catch {
+          // Best effort
+        }
+      })
+      .catch(() => {});
+  }, [isRunningAndHealthy]);
 
   // Resolve configured model names from admin status payload (new + legacy shapes)
   const adminConfig = (adminStatus?.config ?? {}) as Record<string, unknown>;
@@ -1115,6 +1152,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <p className="mt-1.5 text-xs text-slate-500">
                       Use this hostname when configuring remote clients to connect via Tailscale.
                     </p>
+                  </div>
+                )}
+
+                {/* Firewall warning (remote mode) */}
+                {firewallWarning && isRunningAndHealthy && (
+                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
+                    <div className="text-xs text-amber-200">
+                      <p className="font-medium">Firewall may block remote connections</p>
+                      <p className="mt-0.5 text-amber-300/80">{firewallWarning}</p>
+                    </div>
                   </div>
                 )}
 

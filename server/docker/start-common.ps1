@@ -500,9 +500,9 @@ Write-Host "==========================================================" -Foregro
 Write-Host ""
 
 if ($Mode -eq "remote") {
-    Write-Host "  HTTPS URL:   https://localhost:8443"
-    Write-Host "  Web UI:      https://localhost:8443/record"
-    Write-Host "  Notebook:    https://localhost:8443/notebook"
+    Write-Host "  HTTPS URL:   https://localhost:8000"
+    Write-Host "  Web UI:      https://localhost:8000/record"
+    Write-Host "  Notebook:    https://localhost:8000/notebook"
     Write-Host ""
     Write-Host "  Certificate: $HostCertPath"
     Write-Host "  Key:         $HostKeyPath"

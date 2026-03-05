@@ -212,7 +212,7 @@ modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
     - Enable 'Use remote server instead of local'
     - Select **Tailscale** remote profile
     - Enter your Tailscale hostname (e.g., `my-machine.tail1234.ts.net`)
-    - Set port to `8443`
+    - Set port to `8000`
     - Enable 'Use HTTPS'
     - Enter auth token (obtained after first server start)
   * **Remote (LAN)**: See [Section 6.2: LAN Setup](#62-option-b-lan-same-local-network) for connecting
@@ -325,7 +325,7 @@ client reaches the server and *where* the TLS certificates come from.
 **Architecture overview:**
 
 ```
-┌─────────────────────────┐         HTTPS (port 8443)        ┌─────────────────────────┐
+┌─────────────────────────┐         HTTPS (port 8000)        ┌─────────────────────────┐
 │      Server Machine     │◄────────────────────────────────►│      Client Machine     │
 │                         │         + Auth Token             │                         │
 │  • Runs the Dashboard   │                                  │  • Runs the Dashboard   │
@@ -428,7 +428,7 @@ Copy this token — you'll need it on the client machine.
 5. Select **Tailscale** as the remote profile
 6. Enter the server's **Tailscale hostname** in the host field
    (e.g., `my-machine.tail1234.ts.net`)
-7. Set port to **`8443`**
+7. Set port to **`8000`**
 8. **Use HTTPS** will be automatically enabled
 9. Paste the **auth token** from the server into the Auth Token field
 10. Close the Settings modal — the client now connects to the remote server
@@ -506,7 +506,7 @@ Same as Tailscale above:
 3. Enable **"Use remote server instead of local"**
 4. Select **LAN** as the remote profile
 5. Enter the server's **LAN IP or hostname** (e.g., `192.168.1.100`)
-6. Set port to **`8443`**
+6. Set port to **`8000`**
 7. **Use HTTPS** will be automatically enabled
 8. Paste the **auth token** from the server
 9. Close Settings — the client now connects over your local network
@@ -619,15 +619,15 @@ The server couldn't find the TLS certificate files on the host machine.
 2. Ensure both machines are signed into the **same Tailscale account**
 3. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
 4. Check certificate paths in `config.yaml`
-5. Ensure port `8443` is used for HTTPS
+5. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
 
 **General checklist (LAN profile):**
 
 1. Verify both machines can reach each other: `ping <server-ip>`
-2. Ensure the server's firewall allows port `8443`
+2. Ensure the server's firewall allows port `8000` (e.g. `sudo ufw allow 8000/tcp` on Linux)
 3. Check that the self-signed cert was generated with the correct IP/hostname
    in the SAN (Subject Alternative Name)
-4. Ensure port `8443` is used for HTTPS
+4. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
 
 **DNS Resolution Errors (Tailscale):**
 

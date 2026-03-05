@@ -1,4 +1,7 @@
+import crypto from 'crypto';
 import fs from 'fs';
+import net from 'net';
+import os from 'os';
 import path from 'path';
 import https from 'https';
 import http from 'http';
@@ -988,6 +991,80 @@ ipcMain.handle('updates:checkNow', async () => {
 
 // ─── Server Connection Probe IPC ────────────────────────────────────────────
 
+/**
+ * Build an https.Agent that trusts only the known LAN self-signed certificate.
+ * Instead of blanket `rejectUnauthorized: false` (CodeQL CWE-295/297), we:
+ *   1. Load the LAN cert from disk as a trusted CA.
+ *   2. Pin its SHA-256 fingerprint in `checkServerIdentity` so hostname
+ *      mismatch is tolerated *only* when the peer presents our exact cert.
+ * If the cert file is unreadable we return `undefined` — the caller should
+ * let the request fail with a proper TLS error rather than silently skip.
+ */
+function buildLanCertPinnedAgent(): https.Agent | undefined {
+  try {
+    // Mirror the path resolution logic from dockerManager's resolveTlsCertPaths
+    const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+    const templateCandidates = [
+      path.resolve(__dirname, '../../server/config.yaml'),
+      path.join(process.resourcesPath ?? '', 'config.yaml'),
+    ];
+
+    let templateText = '';
+    for (const candidate of templateCandidates) {
+      try {
+        templateText = fs.readFileSync(candidate, 'utf8');
+        break;
+      } catch {
+        /* next */
+      }
+    }
+    let userText = '';
+    try {
+      userText = fs.readFileSync(userConfigPath, 'utf8');
+    } catch {
+      /* optional */
+    }
+
+    // Simple line-based YAML scalar extraction (same regex as dockerManager)
+    const extract = (text: string, key: string) => {
+      const m = new RegExp(`^[ \\t]+${key}:[ \\t]*(["']?)([^"'\\r\\n#]+?)\\1[ \\t]*$`, 'm').exec(
+        text,
+      );
+      return m ? m[2].trim() || undefined : undefined;
+    };
+    const expandTilde = (p: string) => {
+      if (p === '~') return app.getPath('home');
+      if (p.startsWith('~/') || p.startsWith('~\\'))
+        return path.join(app.getPath('home'), p.slice(2));
+      return p;
+    };
+
+    const rawCertPath =
+      extract(userText, 'lan_host_cert_path') ?? extract(templateText, 'lan_host_cert_path');
+    if (!rawCertPath) return undefined;
+    const certPath = expandTilde(rawCertPath);
+    const certPem = fs.readFileSync(certPath);
+
+    // Compute expected SHA-256 fingerprint of the DER-encoded cert
+    const cert = new crypto.X509Certificate(certPem);
+    const expectedFingerprint = cert.fingerprint256; // colon-separated hex
+
+    return new https.Agent({
+      ca: [certPem],
+      checkServerIdentity: (_hostname: string, peerCert: { fingerprint256?: string }) => {
+        // Accept the connection only if the peer certificate matches our
+        // pinned cert — this prevents MITM even though we skip hostname check.
+        if (peerCert.fingerprint256 === expectedFingerprint) return undefined;
+        return new Error(
+          'TLS certificate fingerprint mismatch — the server is not presenting the expected LAN certificate',
+        );
+      },
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 /** Probe a URL from the main process using Node.js http(s) for specific error codes. */
 ipcMain.handle(
   'server:probeConnection',
@@ -1001,13 +1078,18 @@ ipcMain.handle(
         const parsed = new URL(url);
         const isHttps = parsed.protocol === 'https:';
         const mod = isHttps ? https : http;
+
+        // For LAN profile: use a certificate-pinned agent instead of
+        // disabling validation entirely (avoids CodeQL CWE-295/297).
+        const lanAgent = isHttps && skipCertVerify ? buildLanCertPinnedAgent() : undefined;
+
         const options: https.RequestOptions = {
           hostname: parsed.hostname,
           port: parsed.port || (isHttps ? 443 : 80),
           path: parsed.pathname + parsed.search,
           method: 'GET',
           timeout: 10_000,
-          ...(isHttps && skipCertVerify ? { rejectUnauthorized: false } : {}),
+          ...(lanAgent ? { agent: lanAgent } : {}),
         };
 
         const req = mod.request(options, (res) => {
@@ -1035,7 +1117,7 @@ ipcMain.handle(
           } else if (code === 'DEPTH_ZERO_SELF_SIGNED_CERT') {
             error = 'TLS: self-signed certificate';
           } else if (code === 'ETIMEDOUT' || code === 'ERR_CONNECTION_TIMED_OUT') {
-            error = 'Connection timed out';
+            error = `Connection timed out — check if the server firewall allows port ${parsed.port || (isHttps ? 443 : 80)}`;
           } else if (code.startsWith('ERR_TLS_') || code.startsWith('CERT_')) {
             error = `TLS error: ${err.message}`;
           } else {
@@ -1046,7 +1128,11 @@ ipcMain.handle(
 
         req.on('timeout', () => {
           req.destroy();
-          resolve({ ok: false, error: 'Connection timed out', errorCode: 'ETIMEDOUT' });
+          resolve({
+            ok: false,
+            error: `Connection timed out — check if the server firewall allows port ${parsed.port || (isHttps ? 443 : 80)}`,
+            errorCode: 'ETIMEDOUT',
+          });
         });
 
         req.end();
@@ -1079,6 +1165,92 @@ ipcMain.handle('tailscale:getHostname', async (): Promise<string | null> => {
 });
 
 // ─── Tray IPC Handlers ─────────────────────────────────────────────────────
+
+/**
+ * Check if port 8000 is accessible from a non-loopback interface.
+ *
+ * This helps detect firewall issues on the server machine when running in
+ * remote mode: the server may be listening on 0.0.0.0:8000 but a host
+ * firewall (ufw, firewalld, Windows Firewall) may be blocking inbound
+ * connections.  We attempt a TCP connect from the loopback address to a
+ * non-loopback IP to simulate what a LAN/Tailscale client would do.
+ *
+ * Returns { listening, firewallSuspect, hint }.
+ */
+ipcMain.handle(
+  'server:checkFirewallPort',
+  async (
+    _event,
+    port: number,
+  ): Promise<{ listening: boolean; firewallSuspect: boolean; hint: string | null }> => {
+    // Step 1: Is anything listening on 0.0.0.0:<port> locally?
+    const localReachable = await new Promise<boolean>((resolve) => {
+      const sock = net.createConnection({ host: '127.0.0.1', port, timeout: 3000 });
+      sock.on('connect', () => {
+        sock.destroy();
+        resolve(true);
+      });
+      sock.on('error', () => resolve(false));
+      sock.on('timeout', () => {
+        sock.destroy();
+        resolve(false);
+      });
+    });
+
+    if (!localReachable) {
+      return { listening: false, firewallSuspect: false, hint: null };
+    }
+
+    // Step 2: Find a non-loopback IPv4 address and try to connect via it.
+    // If the connection times out but localhost worked, a firewall is likely blocking.
+    const interfaces = os.networkInterfaces();
+    let lanIp: string | null = null;
+    for (const [, addrs] of Object.entries(interfaces)) {
+      if (!addrs) continue;
+      for (const addr of addrs) {
+        if (addr.family === 'IPv4' && !addr.internal) {
+          lanIp = addr.address;
+          break;
+        }
+      }
+      if (lanIp) break;
+    }
+
+    if (!lanIp) {
+      // No LAN interfaces — can't test, assume OK
+      return { listening: true, firewallSuspect: false, hint: null };
+    }
+
+    const externalReachable = await new Promise<boolean>((resolve) => {
+      const sock = net.createConnection({ host: lanIp!, port, timeout: 3000 });
+      sock.on('connect', () => {
+        sock.destroy();
+        resolve(true);
+      });
+      sock.on('error', () => resolve(false));
+      sock.on('timeout', () => {
+        sock.destroy();
+        resolve(false);
+      });
+    });
+
+    if (externalReachable) {
+      return { listening: true, firewallSuspect: false, hint: null };
+    }
+
+    // Server listens locally but not on external IP → firewall is likely blocking
+    const platform = process.platform;
+    let hint: string;
+    if (platform === 'linux') {
+      hint = `Port ${port} appears blocked by your firewall. Try: sudo ufw allow ${port}/tcp`;
+    } else if (platform === 'win32') {
+      hint = `Port ${port} appears blocked by Windows Firewall. Open it in Windows Defender Firewall settings.`;
+    } else {
+      hint = `Port ${port} appears blocked by your firewall. Allow incoming connections on port ${port}.`;
+    }
+    return { listening: true, firewallSuspect: true, hint };
+  },
+);
 
 ipcMain.handle('tray:setTooltip', async (_event, tooltip: string) => {
   trayManager.setTooltip(tooltip);
