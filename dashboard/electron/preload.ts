@@ -159,6 +159,15 @@ export interface ElectronAPI {
     readLocal: () => Promise<string | null>;
     writeLocal: (yamlText: string) => Promise<void>;
   };
+  server: {
+    probeConnection: (
+      url: string,
+      skipCertVerify?: boolean,
+    ) => Promise<{ ok: boolean; httpStatus?: number; error?: string; errorCode?: string }>;
+  };
+  tailscale: {
+    getHostname: () => Promise<string | null>;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -295,5 +304,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readLocal: () => ipcRenderer.invoke('serverConfig:readLocal') as Promise<string | null>,
     writeLocal: (yamlText: string) =>
       ipcRenderer.invoke('serverConfig:writeLocal', yamlText) as Promise<void>,
+  },
+  server: {
+    probeConnection: (url: string, skipCertVerify?: boolean) =>
+      ipcRenderer.invoke('server:probeConnection', url, skipCertVerify ?? false) as Promise<{
+        ok: boolean;
+        httpStatus?: number;
+        error?: string;
+        errorCode?: string;
+      }>,
+  },
+  tailscale: {
+    getHostname: () => ipcRenderer.invoke('tailscale:getHostname') as Promise<string | null>,
   },
 } satisfies ElectronAPI);

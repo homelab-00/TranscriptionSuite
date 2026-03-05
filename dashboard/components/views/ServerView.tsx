@@ -214,13 +214,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [authTokenCopied, setAuthTokenCopied] = useState(false);
   const [authToken, setAuthToken] = useState('');
 
+  // Tailscale hostname auto-detection
+  const [tailscaleHostname, setTailscaleHostname] = useState<string | null>(null);
+  const [tailscaleHostnameCopied, setTailscaleHostnameCopied] = useState(false);
+
   // Clean-all modal state
   const [isCleanAllDialogOpen, setIsCleanAllDialogOpen] = useState(false);
   const [keepDataVolume, setKeepDataVolume] = useState(false);
   const [keepModelsVolume, setKeepModelsVolume] = useState(false);
   const [keepConfigDirectory, setKeepConfigDirectory] = useState(false);
 
-  // Load persisted runtime profile and auth token on mount
+  // Load persisted runtime profile, auth token, and Tailscale hostname on mount
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
@@ -234,6 +238,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         .get('connection.authToken')
         .then((val: unknown) => {
           if (typeof val === 'string') setAuthToken(val);
+        })
+        .catch(() => {});
+    }
+    // Detect local Tailscale hostname
+    if (api?.tailscale?.getHostname) {
+      api.tailscale
+        .getHostname()
+        .then((hostname: string | null) => {
+          if (hostname) setTailscaleHostname(hostname);
         })
         .catch(() => {});
     }
@@ -1070,6 +1083,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         </button>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Tailscale Hostname (for remote mode configuration) */}
+                {tailscaleHostname && (
+                  <div className="border-t border-white/5 pt-4">
+                    <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+                      Tailscale Hostname
+                    </label>
+                    <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                      <span className="flex-1 truncate font-mono text-sm text-slate-300">
+                        {tailscaleHostname}
+                      </span>
+                      <button
+                        onClick={() => {
+                          writeToClipboard(tailscaleHostname).catch(() => {});
+                          setTailscaleHostnameCopied(true);
+                          setTimeout(() => setTailscaleHostnameCopied(false), 2000);
+                        }}
+                        className="shrink-0 p-1 text-slate-500 transition-colors hover:text-white"
+                        title="Copy Tailscale hostname"
+                      >
+                        {tailscaleHostnameCopied ? (
+                          <Check size={14} className="text-green-400" />
+                        ) : (
+                          <Copy size={14} />
+                        )}
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      Use this hostname when configuring remote clients to connect via Tailscale.
+                    </p>
                   </div>
                 )}
 

@@ -175,6 +175,13 @@ export class APIClient {
    * Uses a single GET /api/status request whose ``ready`` field
    * consolidates the old /health + /ready + /api/status triple.
    * Does not throw; returns an error state object on failure.
+   *
+   * When running in Electron, performs a main-process IPC probe first.
+   * Node.js gives specific error codes (ENOTFOUND, ECONNREFUSED,
+   * ERR_TLS_CERT_ALTNAME_INVALID, etc.) that Chromium's renderer
+   * `fetch()` can never expose.  If the probe fails, the specific error
+   * is returned immediately.  If it succeeds, the normal `fetch()`
+   * call proceeds to obtain the full /api/status payload.
    */
   async checkConnection(): Promise<{
     reachable: boolean;
@@ -182,6 +189,32 @@ export class APIClient {
     status: ServerStatus | null;
     error: string | null;
   }> {
+    // In Electron, probe via main process first for specific error diagnostics.
+    const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
+    if (electronAPI?.server?.probeConnection) {
+      try {
+        // Determine whether to skip cert verification (LAN profile)
+        const remoteProfile = await electronAPI.config?.get?.('connection.remoteProfile');
+        const useRemote = await electronAPI.config?.get?.('connection.useRemote');
+        const skipCertVerify = useRemote === true && remoteProfile === 'lan';
+
+        const probe = await electronAPI.server.probeConnection(
+          `${this.baseUrl}/api/status`,
+          skipCertVerify,
+        );
+        if (!probe.ok) {
+          return {
+            reachable: false,
+            ready: false,
+            status: null,
+            error: probe.error ?? 'Server unreachable',
+          };
+        }
+      } catch {
+        // Probe IPC failed — fall through to normal fetch
+      }
+    }
+
     try {
       const status = await this.getStatus();
       return {
@@ -208,16 +241,19 @@ export class APIClient {
           error: `Server error (${err.status})`,
         };
       }
-      // Network-level failure — classify for user-friendly messages
+      // Network-level failure — classify for user-friendly messages.
+      // Order matters: specific patterns first, generic fallback last.
+      // Note: Chromium's "Failed to fetch" is generic and covers DNS, TLS,
+      // refused, timeout — it falls through to the default "Server unreachable".
       const msg = err instanceof Error ? err.message : 'Unknown error';
       let detail = 'Server unreachable';
-      if (/fetch|network|ERR_CONNECTION_REFUSED/i.test(msg)) {
-        detail = 'Connection refused — is the server running?';
-      } else if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND/i.test(msg)) {
+      if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo/i.test(msg)) {
         detail = 'DNS lookup failed — check hostname';
-      } else if (/ERR_CERT|certificate|ssl|tls/i.test(msg)) {
+      } else if (/ERR_CERT|CERT_|certificate|ssl|tls|self.signed/i.test(msg)) {
         detail = 'TLS certificate error — check server certificates';
-      } else if (/timeout|ETIMEDOUT/i.test(msg)) {
+      } else if (/ERR_CONNECTION_REFUSED|ECONNREFUSED/i.test(msg)) {
+        detail = 'Connection refused — is the server running?';
+      } else if (/timeout|ETIMEDOUT|ERR_CONNECTION_TIMED_OUT/i.test(msg)) {
         detail = 'Connection timed out';
       }
       return { reachable: false, ready: false, status: null, error: detail };

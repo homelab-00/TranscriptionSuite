@@ -881,6 +881,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 disabled={!clientSettings.useRemote}
                 className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
               />
+              {clientSettings.useRemote &&
+                clientSettings.remoteProfile !== 'lan' &&
+                /^[^.]+\.ts\.net$/i.test(clientSettings.remoteHost.trim()) && (
+                  <p className="mt-1.5 text-xs text-amber-300/80">
+                    This looks like a tailnet name. The hostname should include the machine name,
+                    e.g.{' '}
+                    <span className="font-mono">
+                      machine-name.{clientSettings.remoteHost.trim()}
+                    </span>
+                  </p>
+                )}
             </div>
           </div>
 

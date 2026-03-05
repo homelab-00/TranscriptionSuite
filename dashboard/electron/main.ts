@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
+import http from 'http';
 import { fileURLToPath } from 'url';
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
@@ -984,6 +986,98 @@ ipcMain.handle('updates:checkNow', async () => {
   return updateManager.check();
 });
 
+// ─── Server Connection Probe IPC ────────────────────────────────────────────
+
+/** Probe a URL from the main process using Node.js http(s) for specific error codes. */
+ipcMain.handle(
+  'server:probeConnection',
+  async (
+    _event,
+    url: string,
+    skipCertVerify: boolean,
+  ): Promise<{ ok: boolean; httpStatus?: number; error?: string; errorCode?: string }> => {
+    return new Promise((resolve) => {
+      try {
+        const parsed = new URL(url);
+        const isHttps = parsed.protocol === 'https:';
+        const mod = isHttps ? https : http;
+        const options: https.RequestOptions = {
+          hostname: parsed.hostname,
+          port: parsed.port || (isHttps ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          method: 'GET',
+          timeout: 10_000,
+          ...(isHttps && skipCertVerify ? { rejectUnauthorized: false } : {}),
+        };
+
+        const req = mod.request(options, (res) => {
+          // Consume the response body to free resources
+          res.resume();
+          resolve({
+            ok: (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400,
+            httpStatus: res.statusCode,
+          });
+        });
+
+        req.on('error', (err: NodeJS.ErrnoException) => {
+          const code = err.code ?? '';
+          let error: string;
+          if (code === 'ENOTFOUND') {
+            error = `DNS: '${parsed.hostname}' not found`;
+          } else if (code === 'ECONNREFUSED') {
+            error = `Connection refused on port ${parsed.port || (isHttps ? 443 : 80)}`;
+          } else if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') {
+            error = `TLS: certificate is for a different hostname`;
+          } else if (code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+            error = 'TLS: certificate not trusted';
+          } else if (code === 'CERT_HAS_EXPIRED') {
+            error = 'TLS: certificate expired';
+          } else if (code === 'DEPTH_ZERO_SELF_SIGNED_CERT') {
+            error = 'TLS: self-signed certificate';
+          } else if (code === 'ETIMEDOUT' || code === 'ERR_CONNECTION_TIMED_OUT') {
+            error = 'Connection timed out';
+          } else if (code.startsWith('ERR_TLS_') || code.startsWith('CERT_')) {
+            error = `TLS error: ${err.message}`;
+          } else {
+            error = err.message || 'Unknown connection error';
+          }
+          resolve({ ok: false, error, errorCode: code });
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({ ok: false, error: 'Connection timed out', errorCode: 'ETIMEDOUT' });
+        });
+
+        req.end();
+      } catch (err) {
+        resolve({
+          ok: false,
+          error: err instanceof Error ? err.message : 'Invalid URL',
+          errorCode: 'ERR_INVALID_URL',
+        });
+      }
+    });
+  },
+);
+
+// ─── Tailscale Hostname IPC ─────────────────────────────────────────────────
+
+/** Detect the local machine's Tailscale FQDN via `tailscale status --json`. */
+ipcMain.handle('tailscale:getHostname', async (): Promise<string | null> => {
+  try {
+    const { stdout } = await execFileAsync('tailscale', ['status', '--json'], { timeout: 5000 });
+    const parsed = JSON.parse(stdout) as { Self?: { DNSName?: string } };
+    const dnsName = parsed?.Self?.DNSName;
+    if (!dnsName) return null;
+    // Strip trailing dot from FQDN (e.g. "desktop.my-server.ts.net." → "desktop.my-server.ts.net")
+    return dnsName.replace(/\.$/, '');
+  } catch {
+    // Tailscale not installed or not running
+    return null;
+  }
+});
+
 // ─── Tray IPC Handlers ─────────────────────────────────────────────────────
 
 ipcMain.handle('tray:setTooltip', async (_event, tooltip: string) => {
@@ -1106,6 +1200,21 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  // ─── Certificate Error Handler (LAN profile) ────────────────────────────
+  // Tailscale certs only cover *.ts.net FQDNs, not IP addresses. LAN
+  // connections will always fail TLS hostname validation. Accept the cert
+  // mismatch when the user has selected LAN remote profile.
+  app.on('certificate-error', (event, _webContents, _url, _error, _certificate, callback) => {
+    const remoteProfile = store.get('connection.remoteProfile') as string;
+    const useRemote = store.get('connection.useRemote') as boolean;
+    if (useRemote && remoteProfile === 'lan') {
+      event.preventDefault();
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
   trayManager.create();
   updateManager.start();
   createWindow();
