@@ -657,19 +657,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
                   Custom Interval (hours)
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={appSettings.updateCheckCustomHours}
-                  onChange={(e) => {
-                    setAppSettings((prev) => ({
-                      ...prev,
-                      updateCheckCustomHours: Math.max(1, parseInt(e.target.value) || 1),
-                    }));
-                    setIsDirty(true);
-                  }}
-                  className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
-                />
+                <div className="flex items-center rounded-lg border border-white/10 bg-black/20">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppSettings((prev) => ({
+                        ...prev,
+                        updateCheckCustomHours: Math.max(1, prev.updateCheckCustomHours - 1),
+                      }));
+                      setIsDirty(true);
+                    }}
+                    className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    value={appSettings.updateCheckCustomHours}
+                    onChange={(e) => {
+                      setAppSettings((prev) => ({
+                        ...prev,
+                        updateCheckCustomHours: Math.max(1, parseInt(e.target.value) || 1),
+                      }));
+                      setIsDirty(true);
+                    }}
+                    className="min-w-0 flex-1 [appearance:textfield] bg-transparent py-2 text-center text-sm text-white focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppSettings((prev) => ({
+                        ...prev,
+                        updateCheckCustomHours: prev.updateCheckCustomHours + 1,
+                      }));
+                      setIsDirty(true);
+                    }}
+                    className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             )}
             <div className="flex items-center gap-3">
@@ -756,15 +784,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <label className="mb-2 block text-sm font-medium text-slate-300">
               Live Mode Grace Period (seconds)
             </label>
-            <input
-              type="number"
-              step="0.1"
-              value={clientSettings.gracePeriod}
-              onChange={(e) =>
-                setClientSettings((prev) => ({ ...prev, gracePeriod: parseFloat(e.target.value) }))
-              }
-              className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
-            />
+            <div className="flex items-center rounded-lg border border-white/10 bg-black/20">
+              <button
+                type="button"
+                onClick={() =>
+                  setClientSettings((prev) => ({
+                    ...prev,
+                    gracePeriod: Math.max(0, parseFloat((prev.gracePeriod - 0.1).toFixed(1))),
+                  }))
+                }
+                className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                step="0.1"
+                value={clientSettings.gracePeriod}
+                onChange={(e) =>
+                  setClientSettings((prev) => ({
+                    ...prev,
+                    gracePeriod: parseFloat(e.target.value),
+                  }))
+                }
+                className="min-w-0 flex-1 [appearance:textfield] bg-transparent py-2 text-center text-sm text-white focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setClientSettings((prev) => ({
+                    ...prev,
+                    gracePeriod: parseFloat((prev.gracePeriod + 0.1).toFixed(1)),
+                  }))
+                }
+                className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+              >
+                +
+              </button>
+            </div>
             <p className="mt-1 text-xs text-slate-500">Buffer time before committing a segment.</p>
           </div>
         </div>
@@ -782,16 +839,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <label className="mb-2 block text-sm font-medium text-slate-300">
             Number of Speakers
           </label>
-          <input
-            type="number"
-            min="1"
-            max="10"
-            value={clientSettings.numSpeakers}
-            onChange={(e) =>
-              setClientSettings((prev) => ({ ...prev, numSpeakers: parseInt(e.target.value) }))
-            }
-            className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
-          />
+          <div className="flex items-center rounded-lg border border-white/10 bg-black/20">
+            <button
+              type="button"
+              onClick={() =>
+                setClientSettings((prev) => ({
+                  ...prev,
+                  numSpeakers: Math.max(1, prev.numSpeakers - 1),
+                }))
+              }
+              className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              value={clientSettings.numSpeakers}
+              onChange={(e) =>
+                setClientSettings((prev) => ({ ...prev, numSpeakers: parseInt(e.target.value) }))
+              }
+              className="min-w-0 flex-1 [appearance:textfield] bg-transparent py-2 text-center text-sm text-white focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            />
+            <button
+              type="button"
+              onClick={() =>
+                setClientSettings((prev) => ({
+                  ...prev,
+                  numSpeakers: Math.min(10, prev.numSpeakers + 1),
+                }))
+              }
+              className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+            >
+              +
+            </button>
+          </div>
         </div>
       </Section>
 
@@ -1166,7 +1249,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 onChange={(e) =>
                   setClientSettings((prev) => ({ ...prev, port: parseInt(e.target.value) }))
                 }
-                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
+                className="focus:border-accent-cyan/50 w-full [appearance:textfield] rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
             </div>
             <div className="pb-1">

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.4
+  spec_version: 1.0.3
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -33,7 +33,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-05T08:33:19.701Z
+    generated_at: 2026-03-05T19:02:48.590Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -944,6 +944,7 @@ utility_allowlist:
     - z-60
     - z-9999
   arbitrary_classes:
+    - "[appearance:textfield]"
     - bg-[#0b1120]
     - bg-[rgba(22,31,50,0.9)]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
