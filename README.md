@@ -211,13 +211,13 @@ modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
   - View list of available backups with timestamps and sizes
   - Restore from any backup (creates safety backup first)
 * **Client tab**: Configure connection mode:
-  * **Local**: Use default settings (localhost:8000)
+  * **Local**: Use default settings (localhost:9786)
   * **Remote (Tailscale)**: See [Section 6.1: Tailscale Setup](#61-option-a-tailscale-recommended) for full instructions.
     Then configure:
     - Enable 'Use remote server instead of local'
     - Select **Tailscale** remote profile
     - Enter your Tailscale hostname (e.g., `my-machine.tail1234.ts.net`)
-    - Set port to `8000`
+    - Set port to `9786`
     - Enable 'Use HTTPS'
     - Enter auth token (obtained after first server start)
   * **Remote (LAN)**: See [Section 6.2: LAN Setup](#62-option-b-lan-same-local-network) for connecting
@@ -289,7 +289,7 @@ The Dashboard features **sidebar navigation** with these main views:
   - Processing logs
 - **Model Manager**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
-- **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live. In remote mode: displays the local Tailscale hostname with a copy button (when Tailscale is installed) and shows a firewall warning banner if port 8000 appears blocked
+- **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live. In remote mode: displays the local Tailscale hostname with a copy button (when Tailscale is installed) and shows a firewall warning banner if the server port appears blocked
 - **Settings**: 4-tab modal for Connection, Client Audio, Server Config, and Notebook settings. Server config is now edited locally (sparse YAML override to `~/.config/TranscriptionSuite/config.yaml`) with no server dependency; changes require a server restart to apply. Client settings are persisted via electron-store.
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
@@ -330,7 +330,7 @@ client reaches the server and *where* the TLS certificates come from.
 **Architecture overview:**
 
 ```
-┌─────────────────────────┐         HTTPS (port 8000)        ┌─────────────────────────┐
+┌─────────────────────────┐         HTTPS (port 9786)        ┌─────────────────────────┐
 │      Server Machine     │◄────────────────────────────────►│      Client Machine     │
 │                         │         + Auth Token             │                         │
 │  • Runs the Dashboard   │                                  │  • Runs the Dashboard   │
@@ -430,13 +430,13 @@ Copy this token — you'll need it on the client machine.
 
 **Step 4 — Open the Firewall Port (Linux)**
 
-If the server machine runs a firewall, port 8000 must be open for
+If the server machine runs a firewall, port 9786 must be open for
 remote clients to reach the server. Without this, connections silently time out.
 
 | Distribution | Command |
 |---|---|
-| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 8000/tcp` |
-| **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload` |
+| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 9786/tcp` |
+| **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload` |
 
 The dashboard will show a firewall warning banner on the Server view if it
 detects the port may be blocked.
@@ -455,7 +455,7 @@ detects the port may be blocked.
 6. Enter the server's **full Tailscale hostname** in the host field
    (e.g., `my-machine.tail1234.ts.net`) — copy it from the Server view on the
    server machine
-7. Set port to **`8000`**
+7. Set port to **`9786`**
 8. **Use HTTPS** will be automatically enabled
 9. Paste the **auth token** from the server into the Auth Token field
 10. Close the Settings modal — the client now connects to the remote server
@@ -505,8 +505,8 @@ Same as Tailscale above — if a firewall is active:
 
 | Distribution | Command |
 |---|---|
-| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 8000/tcp` |
-| **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload` |
+| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 9786/tcp` |
+| **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload` |
 
 #### Client Machine Setup
 
@@ -515,7 +515,7 @@ Same as Tailscale above — if a firewall is active:
 3. Enable **"Use remote server instead of local"**
 4. Select **LAN** as the remote profile
 5. Enter the server's **LAN IP or hostname** (e.g., `192.168.1.100`)
-6. Set port to **`8000`**
+6. Set port to **`9786`**
 7. **Use HTTPS** will be automatically enabled
 8. Paste the **auth token** from the server
 9. Close Settings — the client now connects over your local network
@@ -617,11 +617,11 @@ unreachable". Use the table below to identify and fix the issue:
 
 | Error Message | Meaning | Fix |
 |---|---|---|
-| `Connection refused — is the server running?` | Nothing is listening on that port | Start the server container; verify port 8000 |
+| `Connection refused — is the server running?` | Nothing is listening on that port | Start the server container; verify port 9786 |
 | `DNS lookup failed — check hostname` | Hostname can't be resolved | Check spelling; ensure Tailscale is running |
 | `DNS: '...' not found — is Tailscale running?` | `.ts.net` hostname failed DNS | Start Tailscale on the **client** machine |
 | `TLS certificate error` | Certificate validation failure | Verify certs exist and match hostname |
-| `Connection timed out` | Network or firewall blocking | Open port 8000 in firewall — Ubuntu/Debian: `sudo ufw allow 8000/tcp`; Fedora: `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload` |
+| `Connection timed out` | Network or firewall blocking | Open port 9786 in firewall — Ubuntu/Debian: `sudo ufw allow 9786/tcp`; Fedora: `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload` |
 | `Connection timed out — check Tailscale status` | Tailscale tunnel not working | Run `tailscale status` on **both** machines |
 | `Authentication required (401)` | Server reachable but token wrong/missing | Check auth token in Settings → Client |
 
@@ -644,24 +644,24 @@ The server couldn't find the TLS certificate files on the host machine.
 2. Ensure both machines are signed into the **same Tailscale account**
 3. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
 4. Check certificate paths in `config.yaml`
-5. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
+5. Ensure port `9786` is used for HTTPS (same port for both HTTP and HTTPS)
 6. On the server, verify the Server view shows the Tailscale hostname (confirms
    Tailscale is running on the server)
 7. Enter the **full machine hostname** (e.g., `desktop.tail1234.ts.net`), not
    just the tailnet name
-8. If the dashboard shows a firewall warning banner, open port 8000:
-   - Ubuntu / Debian: `sudo ufw allow 8000/tcp`
-   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload`
+8. If the dashboard shows a firewall warning banner, open port 9786:
+   - Ubuntu / Debian: `sudo ufw allow 9786/tcp`
+   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload`
 
 **General checklist (LAN profile):**
 
 1. Verify both machines can reach each other: `ping <server-ip>`
-2. Ensure the server's firewall allows port `8000`:
-   - Ubuntu / Debian: `sudo ufw allow 8000/tcp`
-   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload`
+2. Ensure the server's firewall allows port `9786`:
+   - Ubuntu / Debian: `sudo ufw allow 9786/tcp`
+   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload`
 3. LAN TLS certificates are auto-generated on first remote start; no manual
    setup needed unless you want custom certs
-4. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
+4. Ensure port `9786` is used for HTTPS (same port for both HTTP and HTTPS)
 
 **DNS Resolution Errors (Tailscale):**
 

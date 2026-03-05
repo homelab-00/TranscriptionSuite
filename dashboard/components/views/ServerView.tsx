@@ -48,6 +48,7 @@ import {
   resolveLiveModelSelectionValue,
   toBackendModelEnvValue,
 } from '../../src/services/modelSelection';
+import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu';
 
@@ -428,7 +429,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         if (!isRemote) return;
 
         try {
-          const result = await api.server.checkFirewallPort(8000);
+          const port = ((await api.config.get('connection.port')) as number) ?? DEFAULT_SERVER_PORT;
+          const result = await api.server.checkFirewallPort(port);
           if (result.firewallSuspect && result.hint) {
             setFirewallWarning(result.hint);
           } else {

@@ -61,7 +61,7 @@ services:
     environment:
       - DATA_DIR=/data
       - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8000
+      - SERVER_PORT=${SERVER_PORT:-9786}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # HuggingFace token for downloading models (optional)
       - HF_TOKEN=${HUGGINGFACE_TOKEN:-}
@@ -113,7 +113,7 @@ services:
     
     # Health check - works with both HTTP and HTTPS modes
     healthcheck:
-      test: ["CMD", "sh", "-c", "if [ \"$${TLS_ENABLED:-false}\" = \"true\" ]; then curl -f -k https://localhost:8000/health; else curl -f http://localhost:8000/health; fi"]
+      test: ["CMD", "sh", "-c", "if [ \"$${TLS_ENABLED:-false}\" = \"true\" ]; then curl -f -k https://localhost:$${SERVER_PORT:-9786}/health; else curl -f http://localhost:$${SERVER_PORT:-9786}/health; fi"]
       interval: 30s
       timeout: 10s
       retries: 3

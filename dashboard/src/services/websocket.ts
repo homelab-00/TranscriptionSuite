@@ -146,7 +146,7 @@ export class TranscriptionSocket {
 
   /** Derive ws:// or wss:// URL from the API client's base URL */
   private getWsUrl(): string {
-    const httpUrl = apiClient.getBaseUrl(); // e.g. "http://localhost:8000"
+    const httpUrl = apiClient.getBaseUrl(); // e.g. "http://localhost:9786"
     const wsUrl = httpUrl.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
     return `${wsUrl}${this.endpoint}`;
   }

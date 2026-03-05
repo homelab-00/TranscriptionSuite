@@ -8,9 +8,7 @@ cross-origin requests based on deployment mode.
 
 def test_cors_local_mode_localhost_allowed(test_client_local):
     """Test that localhost origins are allowed in local mode."""
-    response = test_client_local.get(
-        "/health", headers={"Origin": "http://localhost:8000"}
-    )
+    response = test_client_local.get("/health", headers={"Origin": "http://localhost:9786"})
     assert response.status_code == 200
 
 

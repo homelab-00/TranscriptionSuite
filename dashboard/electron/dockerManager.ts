@@ -220,6 +220,26 @@ function readRemoteTlsProfile(): RemoteTlsProfile {
   }
 }
 
+/** Default server port — must match dashboard/src/config/store.ts::DEFAULT_SERVER_PORT */
+const DEFAULT_SERVER_PORT = 9786;
+
+/**
+ * Read the configured server port from the electron-store JSON on disk.
+ * Falls back to {@link DEFAULT_SERVER_PORT} if the file is missing or the key is absent.
+ */
+function readPortFromStore(): number {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const port = data['server.port'] ?? data['connection.port'];
+    if (typeof port === 'number' && port > 0 && port < 65536) return port;
+  } catch {
+    // fall through
+  }
+  return DEFAULT_SERVER_PORT;
+}
+
 /**
  * Extract the value of a named scalar key from YAML text using simple
  * line-based regex — no YAML parser needed.
@@ -804,6 +824,10 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   } else {
     throw new Error('No image tag specified and no local images found. Pull an image first.');
   }
+
+  // Pass configured server port to Docker Compose — available for both
+  // compose variable interpolation (port mapping) and container env override.
+  composeEnv['SERVER_PORT'] = String(readPortFromStore());
 
   if (mode === 'remote') {
     composeEnv['TLS_ENABLED'] = 'true';

@@ -68,10 +68,13 @@ export interface ClientConfig {
   };
 }
 
+/** Default server port — single source of truth for all client-side defaults. */
+export const DEFAULT_SERVER_PORT = 9786;
+
 const DEFAULT_CONFIG: ClientConfig = {
   server: {
     host: 'localhost',
-    port: 8000,
+    port: DEFAULT_SERVER_PORT,
     https: false,
   },
   connection: {
@@ -81,7 +84,7 @@ const DEFAULT_CONFIG: ClientConfig = {
     remoteProfile: 'tailscale',
     useRemote: false,
     authToken: '',
-    port: 8000,
+    port: DEFAULT_SERVER_PORT,
     useHttps: false,
   },
   audio: {

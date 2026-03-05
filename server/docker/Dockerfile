@@ -85,18 +85,18 @@ RUN mkdir -p /data/database /data/audio /data/logs /data/tokens /data/certs /mod
 # Environment variables
 ENV DATA_DIR="/data"
 ENV SERVER_HOST="0.0.0.0"
-ENV SERVER_PORT="8000"
+ENV SERVER_PORT="9786"
 ENV LOG_LEVEL="INFO"
 # Prioritize PyTorch bundled libraries from runtime venv.
 ENV LD_LIBRARY_PATH="/runtime/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib:/runtime/.venv/lib/python3.13/site-packages/torch/lib:$LD_LIBRARY_PATH"
 ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8"
 
 # Expose port
-EXPOSE 8000
+EXPOSE 9786
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${SERVER_PORT}/health || exit 1
 
 # NOTE: We don't use USER directive here because the shell entrypoint needs
 # to run as root initially to copy TLS certificates with proper permissions.

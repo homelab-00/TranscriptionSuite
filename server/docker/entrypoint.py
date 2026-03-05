@@ -236,7 +236,7 @@ def main() -> None:
 
     # Configuration
     host = os.environ.get("SERVER_HOST", "0.0.0.0")
-    port = int(os.environ.get("SERVER_PORT", "8000"))
+    port = int(os.environ.get("SERVER_PORT", "9786"))
     log_level = os.environ.get("LOG_LEVEL", "info").lower()
 
     # TLS configuration - prepare certs before printing banner

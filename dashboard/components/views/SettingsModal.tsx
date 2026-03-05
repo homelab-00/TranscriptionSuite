@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import { buildSparseYaml } from '../../src/utils/configTree';
+import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken } from '../../src/api/types';
 import { ServerConfigEditor } from './ServerConfigEditor';
 
@@ -152,7 +153,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     remoteProfile: 'tailscale',
     useRemote: false,
     authToken: '',
-    port: 8000,
+    port: DEFAULT_SERVER_PORT,
     useHttps: false,
     hfToken: '',
   });

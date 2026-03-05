@@ -108,7 +108,7 @@ cd dashboard && npm run dev:electron
 # 1. Run backend server (native Python)
 cd server/backend
 uv venv --python 3.13 && uv sync
-uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 9786
 
 # 2. Run dashboard (in a separate terminal)
 cd dashboard
@@ -119,7 +119,7 @@ npm run dev:electron  # Full Electron window with Vite hot-reload
 ```
 
 **Notes:**
-- Backend runs on port 8000
+- Backend runs on port 9786
 - Dashboard Vite dev server runs on port 3000
 - Backend must be running for live API features to work
 - `npm run dev` enables hot-reload for the renderer; `npm run dev:electron` also compiles the Electron main process
@@ -200,7 +200,7 @@ TranscriptionSuite uses a **client-server architecture**:
 
 - **Server in Docker**: All ML/GPU operations run in Docker for reproducibility
 - **Dashboard as command center**: Native application manages server control, client control, and configuration
-- **Single port**: Server exposes everything on port 8000 (API, WebSocket, static files)
+- **Single port**: Server exposes everything on port 9786 (API, WebSocket, static files)
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
@@ -239,7 +239,7 @@ TranscriptionSuite uses layered security for remote access:
 
 | Access Method | Authentication | Trust Level |
 |---------------|----------------|-------------|
-| `localhost:8000` (HTTP) | None | Full trust (user's own machine) |
+| `localhost:9786` (HTTP) | None | Full trust (user's own machine) |
 | Tailscale + TLS | Token required | High trust (your Tailnet) |
 | LAN + TLS | Token required | Medium trust (local network) |
 | Public internet | Not supported | N/A (blocked by design) |
@@ -473,7 +473,7 @@ TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 
 # Dashboard side: Configure server host in Settings
-# Set host to <your-machine>.tail1234.ts.net, port 8000, HTTPS enabled
+# Set host to <your-machine>.tail1234.ts.net, port 9786, HTTPS enabled
 ```
 
 ### 4.5 Publishing Docker Images
@@ -671,7 +671,7 @@ docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-
 ```
 
 **Ports:**
-- `8000` — Both HTTP and HTTPS (single port; HTTPS when `TLS_ENABLED=true`)
+- `9786` — Both HTTP and HTTPS (single port; HTTPS when `TLS_ENABLED=true`)
 
 ### 6.3 CPU Mode
 
@@ -976,7 +976,7 @@ uv venv --python 3.13
 uv sync
 
 # Development mode with auto-reload
-uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 9786
 ```
 
 ### 8.3 Configuration System
@@ -1346,7 +1346,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `connection.remoteHost` | `""` | Remote server hostname (no protocol/port) |
 | `connection.useRemote` | `false` | Use remote host instead of local |
 | `connection.authToken` | `""` | Authentication token |
-| `connection.port` | `8000` | Server port |
+| `connection.port` | `9786` | Server port |
 | `connection.useHttps` | `false` | Enable HTTPS (required for remote/Tailscale) |
 | `audio.gracePeriod` | `0.5` | Seconds of silence before finalising a recording chunk |
 | `diarization.constrainSpeakers` | `false` | Constrain speaker count for diarization |
@@ -1579,7 +1579,7 @@ docker compose ps
 docker inspect transcriptionsuite-container | grep Health -A 10
 
 # Test health endpoint
-docker compose exec transcriptionsuite-container curl -f http://localhost:8000/health
+docker compose exec transcriptionsuite-container curl -f http://localhost:9786/health
 ```
 
 ### 13.3 Tailscale DNS Resolution
@@ -1641,11 +1641,11 @@ ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
 
 ### 13.5 Windows / macOS Docker Networking
 
-**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected — the server listens inside the VM but the host can't reach `localhost:8000`.
+**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected — the server listens inside the VM but the host can't reach `localhost:9786`.
 
 **Solution**: The layered compose system handles this automatically:
 - **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
-- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mapping `8000:8000`)
+- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mapping `9786:9786`)
 - **LM Studio URL**: Windows/macOS uses `host.docker.internal:1234` to reach host services
 
 The Electron dashboard selects the correct overlay automatically based on `process.platform`.

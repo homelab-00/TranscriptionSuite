@@ -368,7 +368,7 @@ const store = new Store({
     'connection.remoteProfile': 'tailscale',
     'connection.useRemote': false,
     'connection.authToken': '',
-    'connection.port': 8000,
+    'connection.port': 9786,
     'connection.useHttps': false,
     'session.audioSource': 'mic',
     'session.micDevice': 'Default Microphone',
@@ -389,7 +389,7 @@ const store = new Store({
     'app.modelSelectionOnboardingCompleted': false,
     'ui.sidebarCollapsed': false,
     'server.host': 'localhost',
-    'server.port': 8000,
+    'server.port': 9786,
     'server.https': false,
     'server.hfToken': '',
     'server.hfTokenDecision': 'unset',
@@ -1248,10 +1248,10 @@ ipcMain.handle('tailscale:getHostname', async (): Promise<string | null> => {
 // ─── Tray IPC Handlers ─────────────────────────────────────────────────────
 
 /**
- * Check if port 8000 is accessible from a non-loopback interface.
+ * Check if the server port is accessible from a non-loopback interface.
  *
  * This helps detect firewall issues on the server machine when running in
- * remote mode: the server may be listening on 0.0.0.0:8000 but a host
+ * remote mode: the server may be listening on 0.0.0.0:<port> but a host
  * firewall (ufw, firewalld, Windows Firewall) may be blocking inbound
  * connections.  We attempt a TCP connect from the loopback address to a
  * non-loopback IP to simulate what a LAN/Tailscale client would do.

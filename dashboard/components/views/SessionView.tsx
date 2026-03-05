@@ -34,7 +34,7 @@ import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
-import { getAuthToken, getConfig, setConfig } from '../../src/config/store';
+import { DEFAULT_SERVER_PORT, getAuthToken, getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
 import {
   supportsTranslation,
@@ -426,7 +426,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     await setConfig('connection.useRemote', false);
     await setConfig('connection.useHttps', false);
     await setConfig('connection.localHost', 'localhost');
-    await setConfig('connection.port', 8000);
+    await setConfig('connection.port', DEFAULT_SERVER_PORT);
     await apiClient.syncFromConfig();
     apiClient.setAuthToken((await getAuthToken()) ?? null);
     setClientRunning(true);

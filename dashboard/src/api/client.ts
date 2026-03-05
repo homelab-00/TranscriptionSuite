@@ -3,7 +3,7 @@
  * Covers all REST endpoints; WebSocket connections are handled separately.
  */
 
-import { getAuthToken, getServerBaseUrl } from '../config/store';
+import { DEFAULT_SERVER_PORT, getAuthToken, getServerBaseUrl } from '../config/store';
 import type {
   HealthResponse,
   ReadyResponse,
@@ -47,7 +47,7 @@ export class APIClient {
   private baseUrl: string;
   private authToken: string | null = null;
 
-  constructor(baseUrl: string = 'http://localhost:8000') {
+  constructor(baseUrl: string = `http://localhost:${DEFAULT_SERVER_PORT}`) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
