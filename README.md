@@ -104,17 +104,13 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 <div align="center">
 
-**Session Tab**
-![Session Tab](./build/assets/shot-1.png)
+| Session Tab | Notebook Tab |
+|:-----------:|:------------:|
+| ![Session Tab](./build/assets/shot-1.png) | ![Notebook Tab](./build/assets/shot-2.png) |
 
-**Notebook Tab**
-![Notebook Tab](./build/assets/shot-2.png)
-
-**Audio Note View**
-![Audio Note View](./build/assets/shot-3.png)
-
-**Server Tab**
-![Server Tab](./build/assets/shot-4.png)
+| Audio Note View | Server Tab |
+|:---------------:|:----------:|
+| ![Audio Note View](./build/assets/shot-3.png) | ![Server Tab](./build/assets/shot-4.png) |
 
 </div>
 
@@ -434,12 +430,13 @@ Copy this token — you'll need it on the client machine.
 
 **Step 4 — Open the Firewall Port (Linux)**
 
-If the server machine runs a firewall (e.g., `ufw`), port 8000 must be open for
+If the server machine runs a firewall, port 8000 must be open for
 remote clients to reach the server. Without this, connections silently time out.
 
-```bash
-sudo ufw allow 8000/tcp
-```
+| Distribution | Command |
+|---|---|
+| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 8000/tcp` |
+| **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload` |
 
 The dashboard will show a firewall warning banner on the Server view if it
 detects the port may be blocked.
@@ -504,10 +501,12 @@ Same as Tailscale above:
 
 **Step 3 — Open the Firewall Port (Linux)**
 
-Same as Tailscale above — if `ufw` or another firewall is active:
-```bash
-sudo ufw allow 8000/tcp
-```
+Same as Tailscale above — if a firewall is active:
+
+| Distribution | Command |
+|---|---|
+| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 8000/tcp` |
+| **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload` |
 
 #### Client Machine Setup
 
@@ -622,7 +621,7 @@ unreachable". Use the table below to identify and fix the issue:
 | `DNS lookup failed — check hostname` | Hostname can't be resolved | Check spelling; ensure Tailscale is running |
 | `DNS: '...' not found — is Tailscale running?` | `.ts.net` hostname failed DNS | Start Tailscale on the **client** machine |
 | `TLS certificate error` | Certificate validation failure | Verify certs exist and match hostname |
-| `Connection timed out` | Network or firewall blocking | Open port 8000 in firewall (`sudo ufw allow 8000/tcp`) |
+| `Connection timed out` | Network or firewall blocking | Open port 8000 in firewall — Ubuntu/Debian: `sudo ufw allow 8000/tcp`; Fedora: `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload` |
 | `Connection timed out — check Tailscale status` | Tailscale tunnel not working | Run `tailscale status` on **both** machines |
 | `Authentication required (401)` | Server reachable but token wrong/missing | Check auth token in Settings → Client |
 
@@ -650,13 +649,16 @@ The server couldn't find the TLS certificate files on the host machine.
    Tailscale is running on the server)
 7. Enter the **full machine hostname** (e.g., `desktop.tail1234.ts.net`), not
    just the tailnet name
-8. If the dashboard shows a firewall warning banner, run
-   `sudo ufw allow 8000/tcp`
+8. If the dashboard shows a firewall warning banner, open port 8000:
+   - Ubuntu / Debian: `sudo ufw allow 8000/tcp`
+   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload`
 
 **General checklist (LAN profile):**
 
 1. Verify both machines can reach each other: `ping <server-ip>`
-2. Ensure the server's firewall allows port `8000` (e.g., `sudo ufw allow 8000/tcp` on Linux)
+2. Ensure the server's firewall allows port `8000`:
+   - Ubuntu / Debian: `sudo ufw allow 8000/tcp`
+   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=8000/tcp && sudo firewall-cmd --reload`
 3. LAN TLS certificates are auto-generated on first remote start; no manual
    setup needed unless you want custom certs
 4. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
