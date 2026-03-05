@@ -203,12 +203,26 @@ export class APIClient {
           skipCertVerify,
         );
         if (!probe.ok) {
-          return {
-            reachable: false,
-            ready: false,
-            status: null,
-            error: probe.error ?? 'Server unreachable',
-          };
+          // For TLS-specific errors, fall through to fetch() — the renderer's
+          // certificate-error handler can accept certs that Node.js rejected
+          // (e.g. hostname mismatch for LAN profile).  For connectivity errors
+          // (DNS, refused, timeout) return immediately — fetch would also fail.
+          const tlsFallbackCodes = new Set([
+            'ERR_TLS_CERT_ALTNAME_INVALID',
+            'DEPTH_ZERO_SELF_SIGNED_CERT',
+            'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+            'CERT_HAS_EXPIRED',
+            'ERR_TLS_CERT_AUTHORITY_INVALID',
+          ]);
+          if (!probe.errorCode || !tlsFallbackCodes.has(probe.errorCode)) {
+            return {
+              reachable: false,
+              ready: false,
+              status: null,
+              error: probe.error ?? 'Server unreachable',
+            };
+          }
+          // TLS error → fall through to renderer fetch (certificate-error handler may accept)
         }
       } catch {
         // Probe IPC failed — fall through to normal fetch
