@@ -35,16 +35,37 @@ async function hasCommand(name: string): Promise<boolean> {
 
 async function simulatePasteLinuxWayland(): Promise<void> {
   // Wayland fallback chain: wtype → dotool → ydotool
+  // Each tool is tried at runtime — a tool may be installed but fail if the
+  // compositor doesn't support its required protocol (e.g. wtype needs
+  // zwp_virtual_keyboard_v1, which KWin/KDE does not expose).
   if (await hasCommand('wtype')) {
-    await execFileAsync('wtype', ['-M', 'ctrl', 'v', '-m', 'ctrl']);
-    return;
+    try {
+      await execFileAsync('wtype', ['-M', 'ctrl', 'v', '-m', 'ctrl']);
+      return;
+    } catch {
+      // fall through to next tool
+    }
   }
   if (await hasCommand('dotool')) {
-    await execFileAsync('dotool', ['key', 'ctrl+v']);
-    return;
+    try {
+      await execFileAsync('dotool', ['key', 'ctrl+v']);
+      return;
+    } catch {
+      // fall through to next tool
+    }
   }
   if (await hasCommand('ydotool')) {
-    await execFileAsync('ydotool', ['key', '29:1', '47:1', '47:0', '29:0']);
+    try {
+      await execFileAsync('ydotool', ['key', '29:1', '47:1', '47:0', '29:0']);
+      return;
+    } catch {
+      // fall through to next tool
+    }
+  }
+  // Last resort: xdotool works for XWayland apps even in a Wayland session
+  // (e.g. KDE Plasma, where many apps still run via XWayland).
+  if (await hasCommand('xdotool')) {
+    await execFileAsync('xdotool', ['key', '--clearmodifiers', 'ctrl+v']);
     return;
   }
   throw new Error(
