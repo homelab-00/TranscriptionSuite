@@ -140,7 +140,8 @@
       "category": "public.app-category.utilities",
       "icon": "../build/assets/logo.icns",
       "extendInfo": {
-        "NSAudioCaptureUsageDescription": "TranscriptionSuite needs access to system audio for transcription."
+        "NSAudioCaptureUsageDescription": "TranscriptionSuite needs access to system audio for transcription.",
+        "NSAppleEventsUsageDescription": "TranscriptionSuite needs to paste transcribed text at your cursor position."
       }
     },
     "dmg": {

@@ -91,18 +91,59 @@ async function simulatePasteLinuxX11(): Promise<void> {
 }
 
 async function simulatePasteMacOS(): Promise<void> {
-  await execFileAsync('osascript', [
-    '-e',
-    'tell application "System Events" to keystroke "v" using command down',
-  ]);
+  let stderr = '';
+  try {
+    const result = await Promise.race([
+      execFileAsync('osascript', [
+        '-e',
+        'tell application "System Events" to keystroke "v" using command down',
+      ]),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error('osascript timed out — grant Accessibility access in System Settings'),
+            ),
+          3000,
+        ),
+      ),
+    ]);
+    stderr = (result as { stderr: string }).stderr ?? '';
+  } catch (err) {
+    throw err; // timeout or exec failure
+  }
+  if (stderr.toLowerCase().includes('not allowed assistive access')) {
+    throw new Error(
+      'macOS Accessibility permission denied. Grant access to TranscriptionSuite in ' +
+        'System Settings → Privacy & Security → Accessibility.',
+    );
+  }
 }
 
 async function simulatePasteWindows(): Promise<void> {
-  await execFileAsync('powershell', [
-    '-NoProfile',
-    '-Command',
-    'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("^v")',
-  ]);
+  // mshta runs inline VBScript and starts ~5-10x faster than PowerShell,
+  // reducing the window in which focus can change before Ctrl+V fires.
+  try {
+    await execFileAsync(
+      'mshta',
+      ['vbscript:Execute("CreateObject(\"WScript.Shell\").SendKeys \"^v\":close")'],
+      { timeout: 3000 },
+    );
+    return;
+  } catch {
+    // fall through to PowerShell
+  }
+  // Fallback: explicit powershell.exe (Windows PowerShell 5.1, not pwsh/PS7).
+  // PS7 cannot reliably load System.Windows.Forms.
+  await execFileAsync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-Command',
+      'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("^v")',
+    ],
+    { timeout: 5000 },
+  );
 }
 
 async function simulatePaste(): Promise<void> {

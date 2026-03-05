@@ -465,8 +465,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           label="Auto-paste transcription at cursor"
         />
         <p className="text-xs text-slate-500">
-          After transcription, paste the text into the focused application. On Linux: requires
-          wtype, xdotool, dotool, or ydotool.
+          After transcription, paste the text into the focused application. Linux: requires wtype,
+          xdotool, dotool, or ydotool. macOS: grant Accessibility access in System Settings →
+          Privacy &amp; Security. Windows: works out of the box.
         </p>
       </Section>
       <Section title="Notifications">
