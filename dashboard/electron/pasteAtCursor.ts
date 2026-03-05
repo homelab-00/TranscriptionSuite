@@ -10,7 +10,7 @@
 import { clipboard } from 'electron';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { isWayland, isKdePlasma } from './shortcutManager.js';
+import { isWayland } from './shortcutManager.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -34,8 +34,8 @@ async function hasCommand(name: string): Promise<boolean> {
 // ─── Keystroke Simulation ───────────────────────────────────────────────────
 
 async function simulatePasteLinuxWayland(): Promise<void> {
-  // Wayland fallback chain: wtype (skip on KDE) → dotool → ydotool
-  if (!isKdePlasma() && (await hasCommand('wtype'))) {
+  // Wayland fallback chain: wtype → dotool → ydotool
+  if (await hasCommand('wtype')) {
     await execFileAsync('wtype', ['-M', 'ctrl', 'v', '-m', 'ctrl']);
     return;
   }
