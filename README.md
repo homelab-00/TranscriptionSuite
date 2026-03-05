@@ -64,8 +64,8 @@ https://github.com/user-attachments/assets/13063bf9-0e1d-4688-af84-cb21686c7f41
   - [5.1 Quick Start](#51-quick-start)
   - [5.2 Dashboard Views](#52-dashboard-views)
 - [6. Remote Access](#6-remote-access)
-  - [6.1 Step 1: Set Up Tailscale](#61-step-1-set-up-tailscale)
-  - [6.2 Step 2: Generate Certificates](#62-step-2-generate-certificates)
+  - [6.1 Option A: Tailscale (recommended)](#61-option-a-tailscale-recommended)
+  - [6.2 Option B: LAN (same local network)](#62-option-b-lan-same-local-network)
 - [7. Database & Backups](#7-database--backups)
 - [8. Troubleshooting](#8-troubleshooting)
   - [8.1 Server Won't Start](#81-server-wont-start)
@@ -284,7 +284,7 @@ The Dashboard features **sidebar navigation** with these main views:
   - Processing logs
 - **Model Manager**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
-- **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live
+- **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live. In remote mode: displays the local Tailscale hostname with a copy button (when Tailscale is installed) and shows a firewall warning banner if port 8000 appears blocked
 - **Settings**: 4-tab modal for Connection, Client Audio, Server Config, and Notebook settings. Server config is now edited locally (sparse YAML override to `~/.config/TranscriptionSuite/config.yaml`) with no server dependency; changes require a server restart to apply. Client settings are persisted via electron-store.
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
@@ -418,6 +418,26 @@ docker compose logs | grep "Admin Token:"
 
 Copy this token — you'll need it on the client machine.
 
+> **Tailscale hostname:** Once the server is running, the Server view displays the
+> machine's Tailscale FQDN (e.g., `desktop.tail1234.ts.net`) with a copy button.
+> Use this exact hostname when configuring clients — don't enter just the tailnet
+> suffix (e.g., `tail1234.ts.net`).
+
+**Step 4 — Open the Firewall Port (Linux)**
+
+If the server machine runs a firewall (e.g., `ufw`), port 8000 must be open for
+remote clients to reach the server. Without this, connections silently time out.
+
+```bash
+sudo ufw allow 8000/tcp
+```
+
+The dashboard will show a firewall warning banner on the Server view if it
+detects the port may be blocked.
+
+> **Note:** This step is only needed on Linux with an active firewall. Windows and
+> macOS do not typically block Docker ports by default.
+
 #### Client Machine Setup
 
 1. Install Tailscale on the client machine and sign in with the **same account**
@@ -426,8 +446,9 @@ Copy this token — you'll need it on the client machine.
 3. Go to **Settings** → **Client** tab
 4. Enable **"Use remote server instead of local"**
 5. Select **Tailscale** as the remote profile
-6. Enter the server's **Tailscale hostname** in the host field
-   (e.g., `my-machine.tail1234.ts.net`)
+6. Enter the server's **full Tailscale hostname** in the host field
+   (e.g., `my-machine.tail1234.ts.net`) — copy it from the Server view on the
+   server machine
 7. Set port to **`8000`**
 8. **Use HTTPS** will be automatically enabled
 9. Paste the **auth token** from the server into the Auth Token field
@@ -435,6 +456,11 @@ Copy this token — you'll need it on the client machine.
 
 > **Tip:** The client machine does *not* need certificates, Docker, or a GPU.
 > It only needs Tailscale running and a valid auth token.
+
+> **Common mistake:** Enter the **full machine hostname** (e.g.,
+> `desktop.tail1234.ts.net`), not just the tailnet name (`tail1234.ts.net`).
+> The Settings modal will warn you if it detects a bare tailnet name without a
+> machine prefix.
 
 ### 6.2 Option B: LAN (same local network)
 
@@ -448,56 +474,31 @@ trusted certificate instead of a Tailscale-issued one).
 
 #### Server Machine Setup
 
-**Step 1 — Generate or obtain a TLS certificate** *(server machine only)*
+**Step 1 — TLS Certificate**
 
-You need a certificate that covers the server's LAN IP or hostname.
-For a self-signed certificate (suitable for home use):
+LAN mode requires a TLS certificate. The dashboard **auto-generates** a
+self-signed certificate on the first remote start if none exists, covering
+`localhost` and all detected LAN IP addresses. No manual steps are needed in
+most cases.
 
-**Linux:**
-```bash
-mkdir -p ~/.config/TranscriptionSuite
-
-# Generate a self-signed cert valid for 365 days
-# Replace 192.168.1.100 with your server's LAN IP
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout ~/.config/TranscriptionSuite/lan-server.key \
-  -out ~/.config/TranscriptionSuite/lan-server.crt \
-  -days 365 \
-  -subj "/CN=TranscriptionSuite" \
-  -addext "subjectAltName=IP:192.168.1.100"
-
-chmod 600 ~/.config/TranscriptionSuite/lan-server.key
-```
-
-**Windows (PowerShell):**
-```powershell
-mkdir "$env:USERPROFILE\Documents\TranscriptionSuite" -Force
-
-# Using OpenSSL (install via winget: winget install ShiningLight.OpenSSL)
-openssl req -x509 -newkey rsa:2048 -nodes `
-  -keyout "$env:USERPROFILE\Documents\TranscriptionSuite\lan-server.key" `
-  -out "$env:USERPROFILE\Documents\TranscriptionSuite\lan-server.crt" `
-  -days 365 `
-  -subj "/CN=TranscriptionSuite" `
-  -addext "subjectAltName=IP:192.168.1.100"
-```
-
-For Windows, update the paths in `config.yaml`:
-```yaml
-remote_server:
-  tls:
-    lan_host_cert_path: "~/Documents/TranscriptionSuite/lan-server.crt"
-    lan_host_key_path: "~/Documents/TranscriptionSuite/lan-server.key"
-```
-
-> **Note:** Self-signed certificates will cause browser warnings if you access the
-> web UI directly. The Dashboard app accepts them without issues.
+> **Custom certificate (optional):** If you prefer to use your own certificate
+> (e.g., from an internal CA), place it at the paths in `config.yaml` under
+> `remote_server.tls.lan_host_cert_path` / `lan_host_key_path`
+> (defaults: `~/.config/TranscriptionSuite/lan-server.crt` / `.key` on Linux,
+> `~/Documents/TranscriptionSuite/lan-server.crt` / `.key` on Windows).
 
 **Step 2 — Start the Server in Remote Mode**
 
 Same as Tailscale above:
 1. Open the Dashboard, go to **Server** view, click **Start Remote**
 2. Copy the auth token once the container is healthy
+
+**Step 3 — Open the Firewall Port (Linux)**
+
+Same as Tailscale above — if `ufw` or another firewall is active:
+```bash
+sudo ufw allow 8000/tcp
+```
 
 #### Client Machine Setup
 
@@ -601,6 +602,21 @@ will be significantly slower.
 
 ### 8.3 Connection Issues (Remote Mode)
 
+**Understanding connection error messages:**
+
+The dashboard shows specific diagnostic messages instead of a generic "Server
+unreachable". Use the table below to identify and fix the issue:
+
+| Error Message | Meaning | Fix |
+|---|---|---|
+| `Connection refused — is the server running?` | Nothing is listening on that port | Start the server container; verify port 8000 |
+| `DNS lookup failed — check hostname` | Hostname can't be resolved | Check spelling; ensure Tailscale is running |
+| `DNS: '...' not found — is Tailscale running?` | `.ts.net` hostname failed DNS | Start Tailscale on the **client** machine |
+| `TLS certificate error` | Certificate validation failure | Verify certs exist and match hostname |
+| `Connection timed out` | Network or firewall blocking | Open port 8000 in firewall (`sudo ufw allow 8000/tcp`) |
+| `Connection timed out — check Tailscale status` | Tailscale tunnel not working | Run `tailscale status` on **both** machines |
+| `Authentication required (401)` | Server reachable but token wrong/missing | Check auth token in Settings → Client |
+
 **"TLS certificate not found" error on server start:**
 
 The server couldn't find the TLS certificate files on the host machine.
@@ -608,7 +624,8 @@ The server couldn't find the TLS certificate files on the host machine.
    (under `remote_server.tls`)
 2. For the **Tailscale** profile, check `host_cert_path` and `host_key_path`
    (default: `~/.config/Tailscale/my-machine.crt` / `.key`)
-3. For the **LAN** profile, check `lan_host_cert_path` and `lan_host_key_path`
+3. For the **LAN** profile: certificates are auto-generated on first start.
+   If you need to regenerate, delete the existing files and restart.
    (default: `~/.config/TranscriptionSuite/lan-server.crt` / `.key`)
 4. Ensure the key file has proper permissions: `chmod 600 <key-file>`
 5. Ensure the files are owned by your user: `sudo chown $USER:$USER <cert-files>`
@@ -620,13 +637,19 @@ The server couldn't find the TLS certificate files on the host machine.
 3. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
 4. Check certificate paths in `config.yaml`
 5. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
+6. On the server, verify the Server view shows the Tailscale hostname (confirms
+   Tailscale is running on the server)
+7. Enter the **full machine hostname** (e.g., `desktop.tail1234.ts.net`), not
+   just the tailnet name
+8. If the dashboard shows a firewall warning banner, run
+   `sudo ufw allow 8000/tcp`
 
 **General checklist (LAN profile):**
 
 1. Verify both machines can reach each other: `ping <server-ip>`
-2. Ensure the server's firewall allows port `8000` (e.g. `sudo ufw allow 8000/tcp` on Linux)
-3. Check that the self-signed cert was generated with the correct IP/hostname
-   in the SAN (Subject Alternative Name)
+2. Ensure the server's firewall allows port `8000` (e.g., `sudo ufw allow 8000/tcp` on Linux)
+3. LAN TLS certificates are auto-generated on first remote start; no manual
+   setup needed unless you want custom certs
 4. Ensure port `8000` is used for HTTPS (same port for both HTTP and HTTPS)
 
 **DNS Resolution Errors (Tailscale):**

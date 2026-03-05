@@ -241,6 +241,7 @@ TranscriptionSuite uses layered security for remote access:
 |---------------|----------------|-------------|
 | `localhost:8000` (HTTP) | None | Full trust (user's own machine) |
 | Tailscale + TLS | Token required | High trust (your Tailnet) |
+| LAN + TLS | Token required | Medium trust (local network) |
 | Public internet | Not supported | N/A (blocked by design) |
 
 ---
@@ -472,7 +473,7 @@ TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose up -d
 
 # Dashboard side: Configure server host in Settings
-# Set host to <your-machine>.tail1234.ts.net, port 8443, HTTPS enabled
+# Set host to <your-machine>.tail1234.ts.net, port 8000, HTTPS enabled
 ```
 
 ### 4.5 Publishing Docker Images
@@ -670,8 +671,7 @@ docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-
 ```
 
 **Ports:**
-- `8000` — HTTP API (always available)
-- `8443` — HTTPS (only when `TLS_ENABLED=true`)
+- `8000` — Both HTTP and HTTPS (single port; HTTPS when `TLS_ENABLED=true`)
 
 ### 6.3 CPU Mode
 
@@ -1025,9 +1025,9 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture |
-| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle |
-| `dockerManager.ts` | Docker CLI wrapper for container/image management and additive optional-family install env updates |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors — falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks) |
+| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle; `server.probeConnection` and `server.checkFirewallPort` for connection diagnostics; `tailscale.getHostname` for FQDN auto-detection |
+| `dockerManager.ts` | Docker CLI wrapper for container/image management, additive optional-family install env updates, and auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs) |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
 | `pasteAtCursor.ts` | Paste-at-cursor feature (xdotool/wtype/platform dispatch) |
@@ -1050,7 +1050,7 @@ npm run dev:electron
 | Hook | Purpose |
 |------|---------|
 | `useServerStatus.ts` | Poll server health/status and expose status-light-safe `ServerHealthState` values |
-| `useDocker.ts` | Docker container control via IPC (start/stop/status) with onboarding install flags (`installWhisper`, `installNemo`, `installVibeVoiceAsr`) |
+| `useDocker.ts` | Docker container control via IPC (start/stop/status) with onboarding install flags (`installWhisper`, `installNemo`, `installVibeVoiceAsr`); polling suppressed when Docker daemon is unavailable (client-only machines) |
 | `useTranscription.ts` | Real-time WebSocket transcription session |
 | `useLiveMode.ts` | Live Mode continuous transcription |
 | `useRecording.ts` | Fetch/manage individual recordings |
@@ -1077,7 +1077,7 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `api/client.ts` | REST API client for server communication |
+| `api/client.ts` | REST API client for server communication; `checkConnection()` uses main-process IPC probe (when in Electron) for precise error codes, then falls back to renderer `fetch()` with classified error messages |
 | `api/types.ts` | API request/response type definitions |
 | `config/store.ts` | Client config persistence (electron-store / localStorage fallback) |
 | `index.css` | Tailwind CSS entry point + global styles |
@@ -1645,7 +1645,7 @@ ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
 
 **Solution**: The layered compose system handles this automatically:
 - **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
-- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mappings `8000:8000`, `8443:8443`)
+- **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mapping `8000:8000`)
 - **LM Studio URL**: Windows/macOS uses `host.docker.internal:1234` to reach host services
 
 The Electron dashboard selects the correct overlay automatically based on `process.platform`.
