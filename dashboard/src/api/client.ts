@@ -190,8 +190,37 @@ export class APIClient {
         status,
         error: null,
       };
-    } catch {
-      return { reachable: false, ready: false, status: null, error: 'Server unreachable' };
+    } catch (err: unknown) {
+      // Distinguish HTTP errors (server reachable) from network errors
+      if (err instanceof APIError) {
+        if (err.status === 401 || err.status === 403) {
+          return {
+            reachable: true,
+            ready: false,
+            status: null,
+            error: `Authentication required (${err.status})`,
+          };
+        }
+        return {
+          reachable: true,
+          ready: false,
+          status: null,
+          error: `Server error (${err.status})`,
+        };
+      }
+      // Network-level failure — classify for user-friendly messages
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      let detail = 'Server unreachable';
+      if (/fetch|network|ERR_CONNECTION_REFUSED/i.test(msg)) {
+        detail = 'Connection refused — is the server running?';
+      } else if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND/i.test(msg)) {
+        detail = 'DNS lookup failed — check hostname';
+      } else if (/ERR_CERT|certificate|ssl|tls/i.test(msg)) {
+        detail = 'TLS certificate error — check server certificates';
+      } else if (/timeout|ETIMEDOUT/i.test(msg)) {
+        detail = 'Connection timed out';
+      }
+      return { reachable: false, ready: false, status: null, error: detail };
     }
   }
 

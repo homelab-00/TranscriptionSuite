@@ -140,6 +140,31 @@ export function useDocker(): UseDockerReturn {
           setImages(imgs);
           setContainer(status);
           setVolumes(vols);
+
+          // Only start polling if Docker is actually available
+          pollRef.current = setInterval(async () => {
+            const d = api();
+            if (!d) return;
+            try {
+              const [st, im] = await Promise.all([d.getContainerStatus(), d.listImages()]);
+              setContainer(st);
+              setImages(im);
+
+              // Auto-refresh volume sizes once when the server first reports healthy
+              if (st.health === 'healthy' && !volumeRefreshedOnHealthyRef.current) {
+                volumeRefreshedOnHealthyRef.current = true;
+                d.getVolumes()
+                  .then((vols2) => setVolumes(vols2))
+                  .catch(() => {});
+              }
+              // Reset flag when container stops so it triggers again on next startup
+              if (!st.running) {
+                volumeRefreshedOnHealthyRef.current = false;
+              }
+            } catch {
+              /* ignore */
+            }
+          }, 10_000);
         }
       } catch {
         setAvailable(false);
@@ -147,31 +172,6 @@ export function useDocker(): UseDockerReturn {
         setLoading(false);
       }
     })();
-
-    // Poll container status and images every 10s
-    pollRef.current = setInterval(async () => {
-      const d = api();
-      if (!d) return;
-      try {
-        const [status, imgs] = await Promise.all([d.getContainerStatus(), d.listImages()]);
-        setContainer(status);
-        setImages(imgs);
-
-        // Auto-refresh volume sizes once when the server first reports healthy
-        if (status.health === 'healthy' && !volumeRefreshedOnHealthyRef.current) {
-          volumeRefreshedOnHealthyRef.current = true;
-          d.getVolumes()
-            .then((vols) => setVolumes(vols))
-            .catch(() => {});
-        }
-        // Reset flag when container stops so it triggers again on next startup
-        if (!status.running) {
-          volumeRefreshedOnHealthyRef.current = false;
-        }
-      } catch {
-        /* ignore */
-      }
-    }, 10_000);
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);

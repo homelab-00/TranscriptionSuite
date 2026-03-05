@@ -194,7 +194,7 @@ def prepare_tls_certs(data_dir: Path) -> tuple[str | None, str | None]:
 def print_banner(data_dir: Path, log_dir: Path, port: int, tls_enabled: bool = False) -> None:
     """Print startup banner."""
     scheme = "https" if tls_enabled else "http"
-    actual_port = 8443 if tls_enabled else port
+    actual_port = port
 
     print("=" * 60)
     print("TranscriptionSuite Unified Server")
@@ -270,10 +270,10 @@ def main() -> None:
 
     # Enable TLS if configured
     if tls_enabled and tls_cert and tls_key:
-        uvicorn_config["port"] = 8443
+        uvicorn_config["port"] = port
         uvicorn_config["ssl_certfile"] = tls_cert
         uvicorn_config["ssl_keyfile"] = tls_key
-        print(f"TLS enabled - listening on https://{host}:8443")
+        print(f"TLS enabled - listening on https://{host}:{port}")
     else:
         uvicorn_config["port"] = port
         print(f"TLS disabled - listening on http://{host}:{port}")

@@ -83,6 +83,7 @@ TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
 # Routes that don't require authentication
 PUBLIC_ROUTES = {
     "/health",
+    "/api/status",
     "/api/auth/login",
     "/auth",
     "/auth/",

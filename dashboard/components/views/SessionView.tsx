@@ -34,7 +34,7 @@ import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
-import { getConfig, setConfig } from '../../src/config/store';
+import { getAuthToken, getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
 import {
   supportsTranslation,
@@ -416,7 +416,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const clientStatusLabel = clientConnected
     ? 'Connected to Server'
     : clientRunning && !serverConnection.reachable
-      ? 'Server Unreachable'
+      ? serverConnection.error || 'Server Unreachable'
       : transcription.status === 'connecting' || live.status === 'connecting'
         ? 'Connecting...'
         : 'Disconnected';
@@ -428,8 +428,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     await setConfig('connection.localHost', 'localhost');
     await setConfig('connection.port', 8000);
     await apiClient.syncFromConfig();
+    apiClient.setAuthToken((await getAuthToken()) ?? null);
     setClientRunning(true);
-    logClientEvent('Client', 'Configured local connection (localhost:8000)');
+    logClientEvent('Client', `Configured local connection → ${apiClient.getBaseUrl()}`);
     serverConnection.refresh();
   }, [serverConnection]);
 
@@ -439,10 +440,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
     await setConfig('connection.useRemote', true);
     await setConfig('connection.useHttps', true);
     await apiClient.syncFromConfig();
+    apiClient.setAuthToken((await getAuthToken()) ?? null);
     setClientRunning(true);
     logClientEvent(
       'Client',
-      `Configured remote connection (${remoteProfile === 'lan' ? 'LAN' : 'Tailscale'})`,
+      `Configured remote connection (${remoteProfile === 'lan' ? 'LAN' : 'Tailscale'}) → ${apiClient.getBaseUrl()}`,
     );
     serverConnection.refresh();
   }, [serverConnection]);

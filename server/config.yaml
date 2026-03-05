@@ -378,12 +378,6 @@ remote_server:
     # Use "127.0.0.1" for local-only connections.
     host: "0.0.0.0"
 
-    # Port for HTTPS (web UI + REST API)
-    https_port: 8443
-
-    # Port for WebSocket Secure (audio streaming)
-    wss_port: 8444
-
     # Path to token storage file
     token_store: "/data/tokens/tokens.json"
 
