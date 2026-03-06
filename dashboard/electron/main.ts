@@ -535,7 +535,8 @@ function createWindow(): void {
 // remain the single source of truth and prevents silent default-value surprises
 // when defaults are changed between releases.
 ipcMain.handle('config:get', async (_event, key: string) => {
-  return store.has(key) ? store.get(key) : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return store.has(key as any) ? store.get(key as any) : null;
 });
 
 ipcMain.handle('config:set', async (_event, key: string, value: unknown) => {
