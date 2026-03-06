@@ -96,6 +96,21 @@ def transcribe_then_diarize(
             exc_info=True,
         )
         return result, None
+    finally:
+        # Restore the pre-job model state:
+        #   • Unload the diarization model — it's only needed during this phase.
+        #   • Reload the STT model — it was unloaded above to free VRAM.
+        # Both are no-ops when models are already in the target state.
+        # Running here (before any return) guarantees the STT model is available
+        # for subsequent jobs regardless of how this function exits.
+        model_manager.unload_diarization_model()
+        try:
+            model_manager.load_transcription_model()
+        except Exception:
+            logger.warning(
+                "Failed to reload STT model after sequential diarization",
+                exc_info=True,
+            )
 
 
 def transcribe_and_diarize(
