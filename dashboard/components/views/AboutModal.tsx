@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Github } from 'lucide-react';
-import profileImage from '../../../build/assets/profile.png';
-import greeceFlagImage from '../../../build/assets/flag-greece-flat.svg';
+import profileImage from '../../../docs/assets/profile.png';
+import greeceFlagImage from '../../../docs/assets/flag-greece-flat.svg';
 
 interface AboutModalProps {
   isOpen: boolean;

@@ -475,7 +475,7 @@ function createWindow(): void {
   const startMinimized = store.get('app.startMinimized') as boolean;
 
   const iconPath = isDev
-    ? path.join(__dirname, '../../build/assets/logo.png')
+    ? path.join(__dirname, '../../docs/assets/logo.png')
     : path.join(process.resourcesPath, 'logo.png');
 
   mainWindow = new BrowserWindow({

@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="../build/assets/logo_wide_readme.png" alt="TranscriptionSuite logo" width="680">
+  <img src="assets/logo_wide_readme.png" alt="TranscriptionSuite logo" width="680">
 </p>
 
 <table width="100%">
@@ -108,11 +108,11 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 | Session Tab | Notebook Tab |
 |:-----------:|:------------:|
-| ![Session Tab](../build/assets/shot-1.png) | ![Notebook Tab](../build/assets/shot-2.png) |
+| ![Session Tab](assets/shot-1.png) | ![Notebook Tab](assets/shot-2.png) |
 
 | Audio Note View | Server Tab |
 |:---------------:|:----------:|
-| ![Audio Note View](../build/assets/shot-3.png) | ![Server Tab](../build/assets/shot-4.png) |
+| ![Audio Note View](assets/shot-3.png) | ![Server Tab](assets/shot-4.png) |
 
 </div>
 
@@ -192,7 +192,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
    - matching signature file (`.sig`)
 2. Install Kleopatra: https://apps.kde.org/kleopatra/
 3. Import the public key in Kleopatra from this repository:
-   - [`build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](../build/assets/homelab-00_0xBFE4CC5D72020691_public.asc)
+   - [`docs/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](assets/homelab-00_0xBFE4CC5D72020691_public.asc)
 4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
 5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
 
@@ -367,7 +367,7 @@ and automatic DNS.
 
 Your DNS settings should look like this:
 
-![Tailscale DNS Settings](../build/assets/tailscale-dns-settings.png)
+![Tailscale DNS Settings](assets/tailscale-dns-settings.png)
 
 **Step 2 — Generate TLS Certificates** *(server machine only)*
 

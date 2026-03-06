@@ -5,10 +5,9 @@ build/dist/
 build/appimage-kde/
 build/appimage-gnome/
 build/pyinstaller-windows
-build/assets/logo.ico
 
 ## Video files
-build/assets/videos/
+docs/assets/videos/
 
 ## Dashboard UI build outputs
 dashboard/dist/

@@ -72,19 +72,19 @@
     ],
     "extraResources": [
       {
-        "from": "../build/assets/logo.png",
+        "from": "../docs/assets/logo.png",
         "to": "logo.png"
       },
       {
-        "from": "../build/assets/tray-icon.png",
+        "from": "../docs/assets/tray-icon.png",
         "to": "tray-icon.png"
       },
       {
-        "from": "../build/assets/tray-icon@1x.png",
+        "from": "../docs/assets/tray-icon@1x.png",
         "to": "tray-icon@1x.png"
       },
       {
-        "from": "../build/assets/tray-icon@2x.png",
+        "from": "../docs/assets/tray-icon@2x.png",
         "to": "tray-icon@2x.png"
       },
       {
@@ -112,11 +112,11 @@
     "linux": {
       "target": "AppImage",
       "category": "Utility",
-      "icon": "../build/assets/logo.png"
+      "icon": "../docs/assets/logo.png"
     },
     "win": {
       "target": "nsis",
-      "icon": "../build/assets/logo.ico"
+      "icon": "../docs/assets/logo.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -138,7 +138,7 @@
         }
       ],
       "category": "public.app-category.utilities",
-      "icon": "../build/assets/logo.icns",
+      "icon": "../docs/assets/logo.icns",
       "extendInfo": {
         "NSAudioCaptureUsageDescription": "TranscriptionSuite needs access to system audio for transcription.",
         "NSAppleEventsUsageDescription": "TranscriptionSuite needs to paste transcribed text at your cursor position."

@@ -241,7 +241,7 @@ export class TrayManager {
 
   private loadBaseIcon(): Electron.NativeImage {
     const iconPath = this.isDev
-      ? path.join(__dirname, '../../build/assets/tray-icon.png')
+      ? path.join(__dirname, '../../docs/assets/tray-icon.png')
       : path.join(process.resourcesPath, 'tray-icon.png');
     return nativeImage.createFromPath(iconPath);
   }

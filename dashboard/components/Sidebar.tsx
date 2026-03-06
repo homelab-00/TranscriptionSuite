@@ -13,7 +13,7 @@ import {
   Search,
   Upload,
 } from 'lucide-react';
-import logoUrl from '../../build/assets/logo.png';
+import logoUrl from '../../docs/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
 
 interface SidebarProps {

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ASSETS_DIR="$SCRIPT_DIR/assets"
+ASSETS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/docs/assets"
 
 echo "→ Generating PNG/ICO assets from SVG sources..."
 

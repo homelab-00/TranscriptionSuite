@@ -259,6 +259,26 @@ Detailed PlantUML diagrams are located in [`docs/architecture/`](architecture/).
 
 **Quickest way to render:** install the [PlantUML VS Code extension](https://marketplace.visualstudio.com/items?itemName=jebbs.plantuml) (`jebbs.plantuml`), open any `.puml` file, and press `Alt+D`.
 
+#### High-Level Architecture
+
+![High-Level Architecture](assets/diagrams/High-Level%20Architecture.png)
+
+#### Server API & Routing
+
+![Server API & Routing](assets/diagrams/Server%20API%20%26%20Routing.png)
+
+#### STT Backend Subsystem
+
+![STT Backend Subsystem](assets/diagrams/STT%20Backend%20Subsystem.png)
+
+#### Dashboard Component Tree
+
+![Dashboard Component Tree](assets/diagrams/Dashboard%20Component%20Tree.png)
+
+#### Transcription Data Flows
+
+![Transcription Data Flows](assets/diagrams/Transcription%20Data%20Flows.png)
+
 ---
 
 ## 3. Project Structure
@@ -301,7 +321,7 @@ TranscriptionSuite/
 │   │   └── views/                # View components (SessionView, ModelManagerView, NotebookView, ServerView, LogsView, modals)
 │   ├── public/                   # Static assets (served at /)
 │   │   ├── audio-worklet-processor.js  # AudioWorklet for mic capture
-│   │   └── logo.svg              # App logo (copied from build/assets/ by generate-ico.sh)
+│   │   └── logo.svg              # App logo (copied from docs/assets/ by generate-ico.sh)
 │   ├── ui-contract/              # Machine-validated UI contract (design enforcement)
 │   ├── scripts/                  # Dev scripts + UI contract tooling
 │   ├── App.tsx                   # Root React component
@@ -603,13 +623,13 @@ Required GitHub secrets for CI signing:
 
 ### 5.6 Build Assets
 
-**Source files (manually maintained in `build/assets/`):**
+**Source files (manually maintained in `docs/assets/`):**
 - `logo.svg` — Master vector logo (**source of truth for all raster derivatives**)
 - `logo_wide.svg` — Wide variant for documentation/marketing
 - `profile.png` — Author profile picture for About dialog
 - `homelab-00_0xBFE4CC5D72020691_public.asc` — Public key used by users to verify release `.asc` signatures
 
-> **Important:** `build/assets/` is the single source of truth for SVG logos.
+> **Important:** `docs/assets/` is the single source of truth for SVG logos.
 > Never edit the copies in `dashboard/public/` directly — run `generate-ico.sh`
 > to propagate changes.
 
@@ -634,7 +654,7 @@ cd build && ./generate-ico.sh
 ### 5.7 End-User Verification Docs
 
 - User-facing verification steps are documented in `README.md` section `3.1 Verify Download (Kleopatra)`.
-- Keep this key path stable for docs and releases: `build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
+- Keep this key path stable for docs and releases: `docs/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
 - Kleopatra reference page used in docs: https://apps.kde.org/kleopatra/
 
 ---

@@ -32,7 +32,6 @@ env
 
 # Build artifacts
 build/
-!build/assets/
 dist/
 *.spec
 
