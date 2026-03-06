@@ -517,6 +517,20 @@ function createWindow(): void {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
+    // Block all DevTools entry points in production.
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      const ctrl = input.control || input.meta;
+      if (
+        input.key === 'F12' ||
+        (ctrl && input.shift && ['i', 'j', 'c'].includes(input.key.toLowerCase()))
+      ) {
+        event.preventDefault();
+      }
+    });
+    // Defense-in-depth: close DevTools if opened by any other means.
+    mainWindow.webContents.on('devtools-opened', () => {
+      mainWindow?.webContents.closeDevTools();
+    });
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
