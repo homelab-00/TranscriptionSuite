@@ -7,11 +7,16 @@ skinparam sequenceParticipantBackgroundColor #313244
 skinparam sequenceParticipantBorderColor #585b70
 skinparam sequenceLifeLineBorderColor #585b70
 skinparam sequenceGroupBackgroundColor #181825
+skinparam sequenceGroupBodyBackgroundColor #381b2f
 skinparam sequenceGroupBorderColor #45475a
 skinparam sequenceDividerBackgroundColor #313244
 skinparam sequenceDividerBorderColor #585b70
 skinparam noteBackgroundColor #313244
 skinparam noteBorderColor #585b70
+skinparam cloudBackgroundColor #45475a
+skinparam cloudBorderColor #89b4fa
+skinparam databaseBackgroundColor #313244
+skinparam databaseBorderColor #585b70
 
 title Transcription Data Flows
 
@@ -94,7 +99,7 @@ loop Continuous streaming
 
   Server -> Server : VAD detects speech segment
 
-  alt Speech segment complete
+  alt #543a67 Speech segment complete
     Server -> STT : transcribe(segment)
     STT --> Server : (text, timestamps)
     Server --> WS : {type: "sentence", text: "..."}

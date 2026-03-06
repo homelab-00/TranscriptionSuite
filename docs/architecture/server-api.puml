@@ -9,6 +9,8 @@ skinparam packageBorderColor #45475a
 skinparam arrowColor #89b4fa
 skinparam noteBackgroundColor #313244
 skinparam noteBorderColor #585b70
+skinparam cloudBackgroundColor #45475a
+skinparam cloudBorderColor #89b4fa
 skinparam linetype ortho
 
 left to right direction

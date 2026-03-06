@@ -10,6 +10,8 @@ skinparam arrowColor #89b4fa
 skinparam noteBackgroundColor #313244
 skinparam noteBorderColor #585b70
 skinparam stereotypeFontColor #a6adc8
+skinparam cloudBackgroundColor #45475a
+skinparam cloudBorderColor #89b4fa
 skinparam linetype ortho
 
 title Dashboard Component Tree (Electron React App)
