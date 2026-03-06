@@ -58,7 +58,9 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - [2. Prerequisites](#2-prerequisites)
   - [2.1 Docker](#21-docker)
 - [3. Installation](#3-installation)
-  - [3.1 Verify Download (Kleopatra)](#31-verify-download-kleopatra)
+  - [3.1 Download the app](#31-download-the-app)
+    - [3.1.1 Linux AppImage Prerequisites](#311-linux-appimage-prerequisites-linux-only)
+    - [3.1.2 Verify Download with Kleopatra (optional)](#312-verify-download-with-kleopatra-optional)
 - [4. First time setup](#4-first-time-setup)
   - [4.1 Starting the Server & Client](#41-starting-the-server--client)
 - [5. Usage](#5-usage)
@@ -158,18 +160,14 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 3. Installation
 
-Download the Dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page:
+### 3.1 Download the app
 
-| Platform | Download | Notes |
-|----------|----------|-------|
-| **Linux** | `TranscriptionSuite-x86_64.AppImage` | May require FUSE 2 (see below) |
-| **Windows** | `TranscriptionSuite Setup.exe` | Standalone installer |
-| **macOS** | `TranscriptionSuite-arm64.dmg` | Unsigned build for Apple Silicon |
+Download the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
 
 >* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
->* *Each release artifact includes an armored detached signature (`.asc`)*
+>* *Each release artifact includes an gpg signature by my key (`.sig`)*
 
-#### Linux AppImage Prerequisites
+##### 3.1.1 Linux AppImage Prerequisites (Linux only)
 
 AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
 
@@ -185,7 +183,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 > requirements. This is the standard approach for Electron-based AppImages and does
 > not affect application security.
 
-### 3.1 Verify Download (Kleopatra)
+##### 3.1.2 Verify Download with Kleopatra (optional)
 
 1. Download both files from the same release:
    - installer/app (`.AppImage`, `.exe` or `.dmg`)
