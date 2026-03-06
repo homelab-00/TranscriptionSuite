@@ -840,6 +840,10 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       composeEnv['TLS_CERT_PATH'] = tls.certPath;
       composeEnv['TLS_KEY_PATH'] = tls.keyPath;
     }
+  } else {
+    // Explicitly write false so a stale 'true' from a previous remote start
+    // doesn't persist in the .env file and mislead readComposeEnvValue().
+    composeEnv['TLS_ENABLED'] = 'false';
   }
 
   // For CPU mode, force CUDA invisible so the server deterministically uses CPU
@@ -856,6 +860,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
 
   const envUpdates: Record<string, string> = {};
+  // Persist TLS mode so readComposeEnvValue('TLS_ENABLED') reflects reality
+  envUpdates['TLS_ENABLED'] = mode === 'remote' ? 'true' : 'false';
   if (hfToken !== undefined) {
     envUpdates['HUGGINGFACE_TOKEN'] = hfToken;
   }
