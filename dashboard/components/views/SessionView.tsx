@@ -34,7 +34,7 @@ import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
-import { DEFAULT_SERVER_PORT, getAuthToken, getConfig, setConfig } from '../../src/config/store';
+import { getAuthToken, getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
 import {
   supportsTranslation,
@@ -95,6 +95,23 @@ export const SessionView: React.FC<SessionViewProps> = ({
         })
         .catch(() => {});
     }
+  }, []);
+
+  // Server mode badge (local vs remote) — derived from TLS_ENABLED compose env
+  const [serverMode, setServerMode] = useState<'local' | 'remote' | null>(null);
+
+  // Client connection mode badge (local vs remote) — from connection.useRemote config
+  const [clientMode, setClientMode] = useState<'local' | 'remote' | null>(null);
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    api.config
+      .get('connection.useRemote')
+      .then((val: unknown) => {
+        if (val === true) setClientMode('remote');
+        else if (val === false) setClientMode('local');
+      })
+      .catch(() => {});
   }, []);
 
   // Admin status (needed early for model-aware language list)
@@ -229,6 +246,22 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Control Center State — real Docker container status
   const docker = useDockerContext();
   const serverRunning = docker.container.running;
+
+  // serverMode effect — must live after docker/serverRunning are declared
+  useEffect(() => {
+    if (!serverRunning) {
+      setServerMode(null);
+      return;
+    }
+    const dockerApi = (window as any).electronAPI?.docker;
+    if (!dockerApi?.readComposeEnvValue) return;
+    dockerApi
+      .readComposeEnvValue('TLS_ENABLED')
+      .then((val: unknown) => {
+        setServerMode(val === 'true' ? 'remote' : 'local');
+      })
+      .catch(() => {});
+  }, [serverRunning]);
   // Client connection state — tracked at App level via props
   const isAsrModelsLoaded =
     admin.status?.models_loaded ??
@@ -426,9 +459,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     await setConfig('connection.useRemote', false);
     await setConfig('connection.useHttps', false);
     await setConfig('connection.localHost', 'localhost');
-    await setConfig('connection.port', DEFAULT_SERVER_PORT);
     await apiClient.syncFromConfig();
     apiClient.setAuthToken((await getAuthToken()) ?? null);
+    setClientMode('local');
     setClientRunning(true);
     logClientEvent('Client', `Configured local connection → ${apiClient.getBaseUrl()}`);
     serverConnection.refresh();
@@ -441,6 +474,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     await setConfig('connection.useHttps', true);
     await apiClient.syncFromConfig();
     apiClient.setAuthToken((await getAuthToken()) ?? null);
+    setClientMode('remote');
     setClientRunning(true);
     logClientEvent(
       'Client',
@@ -973,6 +1007,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                 ? 'Container Stopped'
                                 : 'Container Missing'}
                         </span>
+                        {serverRunning && serverMode && (
+                          <span
+                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                          >
+                            {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                            {serverMode}
+                          </span>
+                        )}
                         <StatusLight
                           status={
                             serverRunning && docker.container.health === 'healthy'
@@ -1057,6 +1099,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         <span className="text-xs font-medium text-slate-400">
                           {clientStatusLabel}
                         </span>
+                        {clientRunning && clientMode && (
+                          <span
+                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${clientMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                          >
+                            {clientMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                            {clientMode}
+                          </span>
+                        )}
                         <StatusLight
                           status={
                             clientRunning && !serverConnection.reachable

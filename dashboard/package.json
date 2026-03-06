@@ -25,7 +25,7 @@
     "ui:contract:check": "npm run ui:contract:validate && npm run ui:contract:test",
     "ui:contract:diff": "node scripts/ui-contract/diff-contract.mjs",
     "ui:contract:test": "node scripts/ui-contract/test-contract.mjs",
-    "types:spec": "curl -s http://localhost:8000/openapi.json > src/api/openapi.json",
+    "types:spec": "curl -s http://localhost:9786/openapi.json > src/api/openapi.json",
     "types:generate": "openapi-typescript src/api/openapi.json -o src/api/generated-types.ts"
   },
   "dependencies": {

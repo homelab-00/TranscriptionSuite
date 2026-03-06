@@ -435,7 +435,7 @@ remote clients to reach the server. Without this, connections silently time out.
 
 | Distribution | Command |
 |---|---|
-| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 9786/tcp` |
+| **Ubuntu / Debian** (`ufw`) | `sudo ufw allow 9786/tcp comment 'TranscriptionSuite Server'` |
 | **Fedora GNOME / Fedora KDE** (`firewalld`) | `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload` |
 
 The dashboard will show a firewall warning banner on the Server view if it

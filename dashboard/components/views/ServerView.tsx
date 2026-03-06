@@ -19,6 +19,8 @@ import {
   Eye,
   EyeOff,
   Users,
+  Laptop,
+  Radio,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -227,6 +229,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Firewall warning state (remote mode)
   const [firewallWarning, setFirewallWarning] = useState<string | null>(null);
+
+  // Server mode badge (local vs remote)
+  const [serverMode, setServerMode] = useState<'local' | 'remote' | null>(null);
 
   // Load persisted runtime profile, auth token, and Tailscale hostname on mount
   useEffect(() => {
@@ -442,6 +447,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       })
       .catch(() => {});
   }, [isRunningAndHealthy]);
+
+  // Track server mode (local vs remote) from compose env
+  useEffect(() => {
+    if (!isRunning) {
+      setServerMode(null);
+      return;
+    }
+    const dockerApi = (window as any).electronAPI?.docker;
+    if (!dockerApi?.readComposeEnvValue) return;
+    dockerApi
+      .readComposeEnvValue('TLS_ENABLED')
+      .then((val: unknown) => {
+        setServerMode(val === 'true' ? 'remote' : 'local');
+      })
+      .catch(() => {});
+  }, [isRunning]);
 
   // Resolve configured model names from admin status payload (new + legacy shapes)
   const adminConfig = (adminStatus?.config ?? {}) as Record<string, unknown>;
@@ -1019,6 +1040,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     >
                       {statusLabel}
                     </span>
+                    {isRunning && serverMode && (
+                      <span
+                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                      >
+                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                        {serverMode}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
