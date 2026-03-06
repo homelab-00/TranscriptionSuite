@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="./build/assets/logo_wide_readme.png" alt="TranscriptionSuite logo" width="680">
+  <img src="../build/assets/logo_wide_readme.png" alt="TranscriptionSuite logo" width="680">
 </p>
 
 <table width="100%">
@@ -81,14 +81,14 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 ### 1.1 Features
 
-- **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup
+- **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
 - **Multi-Backend STT**: Whisper, NVIDIA NeMo Parakeet/Canary, and VibeVoice-ASR — backend auto-detected from the model name
-- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet supports 25 European languages
+- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [50 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Model Manager**: Browse models by family, view capabilities, manage downloads/cache, and intentionally disable model slots with **None (Disabled)**
 - **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS
 - **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
-- **Longform Transcription**: Record as long as you want and have it transcribed in seconds
-- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only in v1)
+- **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only currently)
 - **Speaker Diarization**: PyAnnote-based speaker identification
 - **Static File Transcription**: Transcribe existing audio/video files with multi-file import queue, retry, and progress tracking
 - **Global Keyboard Shortcuts**: System-wide shortcuts with Wayland portal support and paste-at-cursor
@@ -100,17 +100,19 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 📌*Half an hour of audio transcribed in under a minute with Whisper (RTX 3060)!*
 
+**All transcription processing runs entirely on your own computer — your audio never leaves your machine. Internet is only needed to download model weights on first use (STT models, PyAnnote diarization, and wav2vec2 alignment models); all weights are cached locally in a Docker volume and no further internet access is required after that.*
+
 ### 1.2 Screenshots
 
 <div align="center">
 
 | Session Tab | Notebook Tab |
 |:-----------:|:------------:|
-| ![Session Tab](./build/assets/shot-1.png) | ![Notebook Tab](./build/assets/shot-2.png) |
+| ![Session Tab](../build/assets/shot-1.png) | ![Notebook Tab](../build/assets/shot-2.png) |
 
 | Audio Note View | Server Tab |
 |:---------------:|:----------:|
-| ![Audio Note View](./build/assets/shot-3.png) | ![Server Tab](./build/assets/shot-4.png) |
+| ![Audio Note View](../build/assets/shot-3.png) | ![Server Tab](../build/assets/shot-4.png) |
 
 </div>
 
@@ -190,7 +192,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
    - matching signature file (`.sig`)
 2. Install Kleopatra: https://apps.kde.org/kleopatra/
 3. Import the public key in Kleopatra from this repository:
-   - [`build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](./build/assets/homelab-00_0xBFE4CC5D72020691_public.asc)
+   - [`build/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](../build/assets/homelab-00_0xBFE4CC5D72020691_public.asc)
 4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
 5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
 
@@ -286,10 +288,10 @@ The Dashboard features **sidebar navigation** with these main views:
   - Live Mode toggle and real-time transcript display
   - Explicit disabled-slot messaging when Main and/or Live model is set to `None (Disabled)`
   - Transcription output with copy/download buttons
-  - Processing logs
-- **Model Manager**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
+- **Models**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
 - **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
 - **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live. In remote mode: displays the local Tailscale hostname with a copy button (when Tailscale is installed) and shows a firewall warning banner if the server port appears blocked
+- **Logs**: Processing logs and client debug output
 - **Settings**: 4-tab modal for Connection, Client Audio, Server Config, and Notebook settings. Server config is now edited locally (sparse YAML override to `~/.config/TranscriptionSuite/config.yaml`) with no server dependency; changes require a server restart to apply. Client settings are persisted via electron-store.
 
 **System Tray**: The app can minimise to the system tray. The tray icon reflects server and
@@ -365,7 +367,7 @@ and automatic DNS.
 
 Your DNS settings should look like this:
 
-![Tailscale DNS Settings](./build/assets/tailscale-dns-settings.png)
+![Tailscale DNS Settings](../build/assets/tailscale-dns-settings.png)
 
 **Step 2 — Generate TLS Certificates** *(server machine only)*
 
@@ -687,7 +689,7 @@ If you use Podman, you may need to adapt the compose files manually.
 
 ## 9. License
 
-GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](LICENSE).
+GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 

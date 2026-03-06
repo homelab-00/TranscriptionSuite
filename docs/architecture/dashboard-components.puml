@@ -1,0 +1,117 @@
+@startuml TranscriptionSuite - Dashboard Component Tree
+!theme plain
+skinparam backgroundColor #1e1e2e
+skinparam defaultFontColor #cdd6f4
+skinparam componentBackgroundColor #313244
+skinparam componentBorderColor #585b70
+skinparam packageBackgroundColor #181825
+skinparam packageBorderColor #45475a
+skinparam arrowColor #89b4fa
+skinparam noteBackgroundColor #313244
+skinparam noteBorderColor #585b70
+skinparam stereotypeFontColor #a6adc8
+skinparam linetype ortho
+
+title Dashboard Component Tree (Electron React App)
+
+' ── Root ──────────────────────────────────────────
+package "App.tsx" as root {
+  component "QueryClientProvider" as queryProvider
+  component "DockerProvider" as dockerProvider
+  component "AppInner" as appInner
+}
+
+note right of appInner
+  Lifted state:
+  currentView, useLiveMode(),
+  clientRunning, isUploading
+end note
+
+queryProvider -down-> dockerProvider
+dockerProvider -down-> appInner
+
+' ── Layout ────────────────────────────────────────
+component "Sidebar" as sidebar
+
+appInner -down-> sidebar
+
+' ── Views + their hooks (grouped) ─────────────────
+package "SessionView" as sessionPkg {
+  component "SessionView" as sessionView
+  component "useTranscription" as hookTranscribe
+  component "useLiveMode\n(from parent)" as hookLive
+  component "useRecording" as hookRecording
+  component "useUpload" as hookUpload
+  component "AudioVisualizer" as audioVis
+
+  sessionView --> hookTranscribe
+  sessionView --> hookLive
+  sessionView --> hookRecording
+  sessionView --> hookUpload
+  sessionView --> audioVis
+}
+
+package "NotebookView" as notebookPkg {
+  component "NotebookView" as notebookView
+  component "useCalendar" as hookCalendar
+  component "useSearch" as hookSearch
+  component "useImportQueue" as hookImport
+
+  notebookView --> hookCalendar
+  notebookView --> hookSearch
+  notebookView --> hookImport
+}
+
+package "ServerView" as serverPkg {
+  component "ServerView" as serverView
+  component "useDocker" as hookDocker
+  component "useServerStatus" as hookServer
+
+  serverView --> hookDocker
+  serverView --> hookServer
+}
+
+package "ModelManagerView" as modelPkg {
+  component "ModelManagerView" as modelMgrView
+}
+
+package "LogsView" as logsPkg {
+  component "LogsView" as logsView
+  component "LogTerminal" as logTerm
+
+  logsView --> logTerm
+}
+
+appInner -down-> sessionPkg
+appInner -down-> notebookPkg
+appInner -down-> serverPkg
+appInner -down-> modelPkg
+appInner -down-> logsPkg
+
+' ── Services (shared) ─────────────────────────────
+package "Services" as services {
+  component "API Client\n(client.ts)" as apiClient
+  component "TranscriptionSocket\n(websocket.ts)" as wsService
+  component "AudioCapture\n(audioCapture.ts)" as audioCap
+  component "Model Capabilities /\nModel Selection" as modelSvc
+}
+
+' Hook → Service wiring (grouped to reduce arrows)
+hookTranscribe -down-> wsService
+hookLive -down-> wsService
+hookRecording -down-> audioCap
+hookUpload -down-> apiClient
+hookSearch -down-> apiClient
+hookCalendar -down-> apiClient
+hookServer -down-> apiClient
+
+' ── Modals (simple list) ──────────────────────────
+package "Modals" as modals {
+  component "SettingsModal" as settingsModal
+  component "AboutModal" as aboutModal
+  component "AudioNoteModal" as audioNoteModal
+}
+
+appInner -down-> modals
+
+@enduml

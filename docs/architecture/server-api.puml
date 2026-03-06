@@ -1,0 +1,91 @@
+@startuml TranscriptionSuite - Server API & Routing
+!theme plain
+skinparam backgroundColor #1e1e2e
+skinparam defaultFontColor #cdd6f4
+skinparam componentBackgroundColor #313244
+skinparam componentBorderColor #585b70
+skinparam packageBackgroundColor #181825
+skinparam packageBorderColor #45475a
+skinparam arrowColor #89b4fa
+skinparam noteBackgroundColor #313244
+skinparam noteBorderColor #585b70
+skinparam linetype ortho
+
+left to right direction
+
+title Server API & Routing (api/main.py)
+
+' ── Middleware ─────────────────────────────────────
+package "Middleware" as middleware {
+  component "CORS" as cors
+  component "Origin\nValidation" as originVal
+  component "Auth\n(TLS only)" as authMw
+}
+
+' ── Lifespan ──────────────────────────────────────
+component "Lifespan Handler" as lifespan
+
+note bottom of lifespan
+  Startup: logging, init_db(),
+  token store, ModelManager,
+  ML import pre-warm,
+  preload model (GPU)
+  --
+  Shutdown: cleanup_models()
+end note
+
+' ── Routes ────────────────────────────────────────
+package "REST Routes" as restRoutes {
+  component "/health" as healthRoute
+  component "/api/auth" as authRoute
+  component "/api/transcribe" as transcribeRoute
+  component "/api/notebook" as notebookRoute
+  component "/api/search" as searchRoute
+  component "/api/llm" as llmRoute
+  component "/api/admin" as adminRoute
+}
+
+package "WebSocket" as wsRoutes {
+  component "/ws\n(longform)" as wsRoute
+  component "/ws/live\n(real-time)" as liveRoute
+}
+
+' ── Core ──────────────────────────────────────────
+package "Core Modules" as core {
+  component "ModelManager" as mm
+  component "AudioToText\nRecorder" as engine
+  component "LiveMode\nEngine" as liveEng
+  component "Diarization\nEngine" as diarEng
+  component "Database" as database
+  component "TokenStore" as tokenStore
+  component "Config" as config
+}
+
+' ── Wiring ────────────────────────────────────────
+
+' Middleware
+authMw -right-> tokenStore
+
+' Lifespan
+lifespan --> mm
+lifespan --> database
+lifespan --> config
+
+' REST routes to core
+healthRoute --> mm
+authRoute --> tokenStore
+transcribeRoute --> engine
+notebookRoute --> database
+searchRoute --> database
+llmRoute --> database
+adminRoute --> mm
+adminRoute --> database
+
+' WebSocket routes to core
+wsRoute --> engine
+wsRoute --> diarEng
+wsRoute --> mm
+liveRoute --> liveEng
+liveRoute --> mm
+
+@enduml

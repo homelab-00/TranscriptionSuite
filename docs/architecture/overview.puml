@@ -1,0 +1,94 @@
+@startuml TranscriptionSuite - High-Level Architecture
+!theme plain
+skinparam backgroundColor #1e1e2e
+skinparam defaultFontColor #cdd6f4
+skinparam componentBackgroundColor #313244
+skinparam componentBorderColor #585b70
+skinparam packageBackgroundColor #181825
+skinparam packageBorderColor #45475a
+skinparam arrowColor #89b4fa
+skinparam noteBackgroundColor #313244
+skinparam noteBorderColor #585b70
+skinparam stereotypeFontColor #a6adc8
+skinparam linetype ortho
+
+title TranscriptionSuite - System Architecture
+
+' ── Tier 1: Electron ──────────────────────────────
+package "Electron App" as electron #181825 {
+  package "Main Process" as elMain {
+    component "IPC Bridge" as ipc
+    component "Docker Manager" as dockerMgr
+    component "System Tray /\nGlobal Shortcuts" as trayShortcuts
+  }
+
+  package "Renderer (React)" as renderer {
+    component "Views\n(Session, Notebook,\nServer, Models, Logs)" as views
+    component "Sidebar" as sidebar
+  }
+
+  package "Services" as services {
+    component "API Client" as apiClient
+    component "WebSocket Client" as wsClient
+    component "Audio Capture" as audioCapture
+  }
+}
+
+' ── Tier 2: Server ────────────────────────────────
+package "Docker Container" as docker #181825 {
+  package "FastAPI (port 9786)" as fastapi {
+    component "REST Routes\n(/api/transcribe, /notebook,\n/search, /llm, /admin, /auth)" as restRoutes
+    component "WebSocket\n/ws (longform)\n/ws/live (real-time)" as wsEndpoints
+  }
+
+  package "Core Engine" as core {
+    component "Model Manager" as modelMgr
+    component "STT Backends\n(WhisperX, Parakeet,\nCanary, VibeVoice)" as sttBackends
+    component "Live Engine" as liveEngine
+    component "Diarization\n(PyAnnote)" as diarEngine
+  }
+}
+
+' ── Tier 3: Data ──────────────────────────────────
+package "Data Layer" as data #181825 {
+  database "SQLite + FTS5" as db
+  storage "Model Cache" as modelCache
+  file "config.yaml" as configFile
+}
+
+' ── External ──────────────────────────────────────
+cloud "HuggingFace Hub" as hfHub
+cloud "GPU (CUDA)" as gpu
+
+' ── Connections (minimized) ───────────────────────
+
+' Electron internal
+views -down-> services
+views <-left-> sidebar
+renderer <--> ipc
+trayShortcuts --> ipc
+ipc --> dockerMgr
+
+' Services to Server
+apiClient -down-> restRoutes : "REST"
+wsClient -down-> wsEndpoints : "WebSocket\n(PCM audio)"
+audioCapture -right-> wsClient
+
+' Server internal
+restRoutes -down-> core
+wsEndpoints -down-> core
+modelMgr -right-> sttBackends
+liveEngine --> modelMgr
+
+' Data access
+restRoutes -down-> db
+core -down-> db
+modelMgr -down-> modelCache
+fastapi -down-> configFile
+
+' External
+modelMgr -down-> hfHub : "download"
+sttBackends -down-> gpu : "inference"
+diarEngine -down-> gpu
+
+@enduml

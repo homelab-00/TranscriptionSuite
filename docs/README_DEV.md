@@ -13,6 +13,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [2.1 Design Principles](#21-design-principles)
   - [2.2 Platform Architectures](#22-platform-architectures)
   - [2.3 Security Model](#23-security-model)
+  - [2.4 Architecture Diagrams](#24-architecture-diagrams)
 - [3. Project Structure](#3-project-structure)
   - [3.1 Configuration Files](#31-configuration-files)
   - [3.2 Version Management](#32-version-management)
@@ -219,7 +220,7 @@ TranscriptionSuite uses a **client-server architecture**:
 **Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
 - Status lights show Server and Client states with color indicators (green=running AND healthy, orange=container exists but not healthy, gray=missing, red=unhealthy/error, blue=starting)
-- Main content area on the right with views: Session, Notebook, Server
+- Main content area on the right with views: Session, Models, Notebook, Server, Logs
 - Notebook tab contains Calendar, Search, and Import sub-tabs
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
 - App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
@@ -243,6 +244,20 @@ TranscriptionSuite uses layered security for remote access:
 | Tailscale + TLS | Token required | High trust (your Tailnet) |
 | LAN + TLS | Token required | Medium trust (local network) |
 | Public internet | Not supported | N/A (blocked by design) |
+
+### 2.4 Architecture Diagrams
+
+Detailed PlantUML diagrams are located in [`docs/architecture/`](architecture/). See [`architecture/PlantUML Diagrams - Info.md`](architecture/PlantUML%20Diagrams%20-%20Info.md) for rendering instructions.
+
+| File | Description |
+|------|-------------|
+| [`overview.puml`](architecture/overview.puml) | High-level system architecture (Electron, FastAPI, data layer, external services) |
+| [`server-api.puml`](architecture/server-api.puml) | Server API routing, middleware stack, and lifespan lifecycle |
+| [`stt-backends.puml`](architecture/stt-backends.puml) | STT backend class hierarchy, factory pattern, and model manager |
+| [`dashboard-components.puml`](architecture/dashboard-components.puml) | React component tree, hooks, services, and their relationships |
+| [`data-flow.puml`](architecture/data-flow.puml) | Sequence diagrams for longform, file upload, and live mode transcription |
+
+**Quickest way to render:** install the [PlantUML VS Code extension](https://marketplace.visualstudio.com/items?itemName=jebbs.plantuml) (`jebbs.plantuml`), open any `.puml` file, and press `Alt+D`.
 
 ---
 
@@ -283,7 +298,7 @@ TranscriptionSuite/
 │   │   ├── Sidebar.tsx           # Collapsible sidebar navigation
 │   │   ├── AudioVisualizer.tsx   # Canvas-based bar visualizer with idle breathing animation
 │   │   ├── ui/                   # Primitives (Button, GlassCard, StatusLight, etc.)
-│   │   └── views/                # View components (SessionView, NotebookView, ServerView, modals)
+│   │   └── views/                # View components (SessionView, ModelManagerView, NotebookView, ServerView, LogsView, modals)
 │   ├── public/                   # Static assets (served at /)
 │   │   ├── audio-worklet-processor.js  # AudioWorklet for mic capture
 │   │   └── logo.svg              # App logo (copied from build/assets/ by generate-ico.sh)
@@ -1109,6 +1124,7 @@ npm run dev:electron
 | `AboutModal.tsx` | Profile card, version, links |
 | `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
 | `AddNoteModal.tsx` | Create new recording from calendar time slot |
+| `LogsView.tsx` | Processing logs and client debug output viewer |
 | `FullscreenVisualizer.tsx` | Fullscreen audio visualizer overlay |
 
 ### 9.4 UI Contract System

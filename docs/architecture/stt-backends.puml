@@ -1,0 +1,160 @@
+@startuml TranscriptionSuite - STT Backend Subsystem
+!theme plain
+skinparam backgroundColor #1e1e2e
+skinparam defaultFontColor #cdd6f4
+skinparam classBackgroundColor #313244
+skinparam classBorderColor #585b70
+skinparam packageBackgroundColor #181825
+skinparam packageBorderColor #45475a
+skinparam arrowColor #89b4fa
+skinparam noteBackgroundColor #313244
+skinparam noteBorderColor #585b70
+skinparam stereotypeFontColor #a6adc8
+
+title STT Backend Subsystem (server/backend/core/stt/)
+
+' ── Data Classes ──────────────────────────────────
+package "Data Types (base.py)" as dataTypes {
+  class BackendSegment {
+    + text: str
+    + start: float
+    + end: float
+    + words: list[dict]
+  }
+
+  class BackendTranscriptionInfo {
+    + language: str | None
+    + language_probability: float
+  }
+
+  class DiarizedTranscriptionResult {
+    + segments: list[dict]
+    + words: list[dict]
+    + num_speakers: int
+    + language: str | None
+    + language_probability: float
+  }
+}
+
+' ── Abstract Base ─────────────────────────────────
+abstract class STTBackend <<base.py>> {
+  {abstract} + load(model_name, device, **kwargs)
+  {abstract} + unload()
+  {abstract} + is_loaded(): bool
+  {abstract} + warmup()
+  {abstract} + transcribe(audio, language, task, ...): (list[BackendSegment], BackendTranscriptionInfo)
+  {abstract} + supports_translation(): bool
+  {abstract} + backend_name: str
+  + preferred_input_sample_rate_hz: int = 16000
+  + transcribe_with_diarization(...): DiarizedTranscriptionResult | None
+}
+
+' ── Concrete Backends ─────────────────────────────
+class WhisperXBackend <<whisperx_backend.py>> {
+  + backend_name = "whisperx"
+  + supports_translation(): bool
+  + transcribe_with_diarization(...)
+  -- uses --
+  faster-whisper / WhisperX
+  Integrated diarization support
+}
+
+class ParakeetBackend <<parakeet_backend.py>> {
+  + backend_name = "parakeet"
+  + supports_translation() = False
+  -- uses --
+  NVIDIA NeMo ASR
+  20min chunk splitting
+  CUDA graph workaround
+}
+
+class CanaryBackend <<canary_backend.py>> {
+  + backend_name = "canary"
+  + supports_translation() = True
+  -- uses --
+  NVIDIA NeMo Canary
+  20min chunk splitting
+  24 EU target languages
+}
+
+class VibeVoiceASRBackend <<vibevoice_asr_backend.py>> {
+  + backend_name = "vibevoice_asr"
+  + supports_translation() = False
+  + DEFAULT_MAX_CHUNK_DURATION_S = 120
+  -- uses --
+  VibeVoice-ASR
+  Semantic tokenizer
+}
+
+' ── Factory ───────────────────────────────────────
+class "factory.py" as factory <<factory>> {
+  + detect_backend_type(model_name): str
+  + create_backend(model_name): STTBackend
+  + is_parakeet_model(model_name): bool
+  + is_canary_model(model_name): bool
+  + is_nemo_model(model_name): bool
+  + is_vibevoice_asr_model(model_name): bool
+}
+
+note right of factory
+  Model name routing:
+  nvidia/parakeet*        -> "parakeet"
+  nvidia/nemotron-speech*  -> "parakeet"
+  nvidia/canary*           -> "canary"
+  */vibevoice-asr*         -> "vibevoice_asr"
+  (everything else)        -> "whisperx"
+end note
+
+' ── Model Manager ─────────────────────────────────
+class ModelManager <<model_manager.py>> {
+  - _backend: STTBackend | None
+  - _config: dict
+  + gpu_available: bool
+  + load_transcription_model()
+  + load_live_model()
+  + unload_transcription_model()
+  + get_transcription_model(): STTBackend
+  + cleanup_models()
+}
+
+' ── Engine ────────────────────────────────────────
+class AudioToTextRecorder <<engine.py>> {
+  - _backend: STTBackend
+  + transcribe_audio(audio, language, ...)
+  -- orchestrates --
+  Backend transcription
+  Progress callbacks
+}
+
+class LiveModeEngine <<live_engine.py>> {
+  - _model_manager: ModelManager
+  + start(language, translate, ...)
+  + feed_audio(chunk)
+  + stop(): results
+  -- orchestrates --
+  VAD-based segmentation
+  Real-time partial results
+}
+
+' ── Relationships ─────────────────────────────────
+STTBackend <|-- WhisperXBackend
+STTBackend <|-- ParakeetBackend
+STTBackend <|-- CanaryBackend
+STTBackend <|-- VibeVoiceASRBackend
+
+factory ..> WhisperXBackend : creates
+factory ..> ParakeetBackend : creates
+factory ..> CanaryBackend : creates
+factory ..> VibeVoiceASRBackend : creates
+
+ModelManager --> factory : "create_backend()"
+ModelManager *-- STTBackend : "holds active backend"
+
+AudioToTextRecorder --> STTBackend : "transcribe()"
+LiveModeEngine --> ModelManager : "load/unload live model"
+
+STTBackend ..> BackendSegment : returns
+STTBackend ..> BackendTranscriptionInfo : returns
+STTBackend ..> DiarizedTranscriptionResult : returns
+
+@enduml

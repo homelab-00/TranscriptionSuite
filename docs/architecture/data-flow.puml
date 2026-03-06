@@ -1,0 +1,125 @@
+@startuml TranscriptionSuite - Transcription Data Flows
+!theme plain
+skinparam backgroundColor #1e1e2e
+skinparam defaultFontColor #cdd6f4
+skinparam sequenceArrowColor #89b4fa
+skinparam sequenceParticipantBackgroundColor #313244
+skinparam sequenceParticipantBorderColor #585b70
+skinparam sequenceLifeLineBorderColor #585b70
+skinparam sequenceGroupBackgroundColor #181825
+skinparam sequenceGroupBorderColor #45475a
+skinparam sequenceDividerBackgroundColor #313244
+skinparam sequenceDividerBorderColor #585b70
+skinparam noteBackgroundColor #313244
+skinparam noteBorderColor #585b70
+
+title Transcription Data Flows
+
+actor User
+participant "Dashboard\n(Electron)" as UI
+participant "AudioCapture\n(Web Audio)" as Audio
+participant "WebSocket\nClient" as WS
+participant "FastAPI\nServer" as Server
+participant "Model\nManager" as MM
+participant "STT\nBackend" as STT
+participant "Diarization\nEngine" as Diar
+database "SQLite\n+ FTS5" as DB
+
+== Longform Transcription (Record) ==
+
+User -> UI : Click "Record"
+UI -> Audio : Start capture (mic)
+Audio -> WS : Open /ws
+WS -> Server : Auth handshake (token)
+Server --> WS : Auth OK
+
+WS -> Server : {start: {language, device, translate}}
+Server -> MM : get_transcription_model()
+MM --> Server : STTBackend instance
+
+loop Audio streaming
+  Audio -> WS : PCM Int16 binary chunks
+  WS -> Server : forward audio
+end
+
+User -> UI : Click "Stop"
+UI -> Audio : Stop capture
+WS -> Server : {stop: true}
+
+Server -> STT : transcribe(audio, language, task)
+STT --> Server : (segments[], info)
+
+opt Diarization enabled
+  Server -> Diar : diarize(audio)
+  Diar --> Server : speaker segments
+  Server -> Server : merge transcription\n+ diarization
+end
+
+Server -> DB : Save recording + segments + words
+Server --> WS : {result: {segments, words, language, ...}}
+WS --> UI : Display transcription
+WS -> WS : Close connection
+
+== Longform Transcription (File Upload) ==
+
+User -> UI : Upload audio file
+UI -> Server : POST /api/transcribe/upload\n(multipart file)
+Server -> Server : FFmpeg decode to PCM
+Server -> STT : transcribe(audio)
+STT --> Server : (segments[], info)
+Server -> DB : Save recording
+Server --> UI : {recording_id, segments}
+
+== Live Mode (Real-time) ==
+
+User -> UI : Toggle "Live Mode"
+UI -> WS : Open /ws/live
+WS -> Server : Auth handshake
+
+note over Server, MM
+  Model Swap Sequence:
+  1. Unload main transcription model
+  2. Load live model (e.g. whisper-medium)
+end note
+
+Server -> MM : unload main model
+Server -> MM : load live model
+MM -> STT : load(live_model_name)
+
+WS -> Server : {start: {language, translate}}
+
+loop Continuous streaming
+  Audio -> WS : PCM Int16 chunks (continuous)
+  WS -> Server : forward audio
+
+  Server -> Server : VAD detects speech segment
+
+  alt Speech segment complete
+    Server -> STT : transcribe(segment)
+    STT --> Server : (text, timestamps)
+    Server --> WS : {type: "sentence", text: "..."}
+    WS --> UI : Append sentence
+  else Partial speech
+    Server --> WS : {type: "partial", text: "..."}
+    WS --> UI : Update partial text
+  end
+end
+
+User -> UI : Toggle "Live Mode" off
+WS -> Server : {stop: true}
+
+note over Server, MM
+  Model Restore Sequence:
+  1. Unload live model
+  2. Reload main transcription model
+end note
+
+Server -> MM : unload live model
+Server -> MM : load main model
+MM -> STT : load(main_model_name)
+
+Server -> DB : Save live session
+Server --> WS : {result: final_transcript}
+WS -> WS : Close connection
+
+@enduml
