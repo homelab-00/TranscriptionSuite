@@ -63,9 +63,14 @@ npm test
 | `test_stt_engine_helpers.py` | 28 | `TranscriptionResult.to_dict()`, `_preprocess_output()` text processing, `get_status()`, constants |
 | `test_database.py` | 56 | Recording/segment/word CRUD, FTS search, conversation/message CRUD, cascading deletes, Unicode, `Recording` model |
 
-### Frontend — 0 tests
+### Frontend — 4 test files, 123 tests
 
-Tooling is installed (Vitest + Testing Library); tests will be added in Phase 5.
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
+| `modelCapabilities.test.ts` | 41 | Model family detection, NeMo languages, translation support, language filtering |
+| `modelSelection.test.ts` | 48 | Model normalisation, family resolution, install flag computation, UI ↔ backend mapping |
+| `transcriptionBackend.test.ts` | 11 | Backend type detection, word-timestamp toggle support |
+| `configTree.test.ts` | 23 | YAML parse/edit round-trip, type detection, comment extraction, flatten/sparse helpers |
 
 ## Conventions
 
@@ -117,5 +122,5 @@ with similar testing characteristics.
 | **2** | State machines (done) | 107 | `TranscriptionJobTracker`, model manager init, diarisation data, live engine config |
 | **3** | Audio / engine (done) | 68 | `audio_utils`, STT engine helpers |
 | **4** | Database (done) | 56 | `database.py` CRUD, FTS, cascading deletes |
-| **5** | Frontend logic | ~30 | `modelCapabilities`, `modelSelection`, `transcriptionBackend` |
+| **5** | Frontend logic (done) | 123 | `modelCapabilities`, `modelSelection`, `transcriptionBackend`, `configTree` |
 | **6** | Route handlers | ~46 | health, auth, search routes; fix existing broken tests |
