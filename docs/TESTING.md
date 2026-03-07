@@ -28,7 +28,7 @@ npm test
 
 ## Current Coverage
 
-### Backend — 30 test files, ~472 tests
+### Backend — 33 test files, ~502 tests
 
 | Test File | Tests | Module Under Test |
 |-----------|------:|-------------------|
@@ -62,6 +62,9 @@ npm test
 | `test_audio_utils.py` | 40 | GPU cache, CUDA check, convert WAV/MP3, legacy normalise, format timestamp, duration, WebRTC/Silero VAD |
 | `test_stt_engine_helpers.py` | 28 | `TranscriptionResult.to_dict()`, `_preprocess_output()` text processing, `get_status()`, constants |
 | `test_database.py` | 56 | Recording/segment/word CRUD, FTS search, conversation/message CRUD, cascading deletes, Unicode, `Recording` model |
+| `test_health_routes.py` | 9 | `/health`, `/ready`, `/api/status` endpoints, TLS public-route access |
+| `test_auth_routes.py` | 12 | `/api/auth/login`, token CRUD, admin-only gating, TLS auth enforcement |
+| `test_search_routes.py` | 9 | `/api/search/words`, `/api/search/recordings`, unified search, date-range filtering |
 
 ### Frontend — 4 test files, 123 tests
 
@@ -107,8 +110,10 @@ npm test
 | Fixture | Scope | Autouse | Purpose |
 |---------|-------|---------|---------|
 | `_server_package_alias` | session | **yes** | Registers `server` as a top-level package so `from server.xxx import …` works without pip-install |
-| `torch_stub` | session | no | Installs a lightweight `torch` stub into `sys.modules` for tests that import ML modules |
-
+| `torch_stub` | session | no | Installs a lightweight `torch` stub into `sys.modules` for tests that import ML modules || `test_client_local` | function | no | Starlette `TestClient` against a lightweight app with TLS disabled (local mode) |
+| `test_client_tls` | function | no | Starlette `TestClient` against a lightweight app with TLS enabled (auth required) |
+| `admin_token` | function | no | Plaintext admin bearer token from a temporary `TokenStore` |
+| `user_token` | function | no | Plaintext non-admin bearer token from a temporary `TokenStore` |
 ## Roadmap
 
 The roadmap is split into phases ordered by effort-to-value ratio. Phase 0
@@ -123,4 +128,4 @@ with similar testing characteristics.
 | **3** | Audio / engine (done) | 68 | `audio_utils`, STT engine helpers |
 | **4** | Database (done) | 56 | `database.py` CRUD, FTS, cascading deletes |
 | **5** | Frontend logic (done) | 123 | `modelCapabilities`, `modelSelection`, `transcriptionBackend`, `configTree` |
-| **6** | Route handlers | ~46 | health, auth, search routes; fix existing broken tests |
+| **6** | Route handlers (done) | 30 + 13 recovered | health, auth, search routes; `test_client_tls`/`test_client_local` fixtures unblock `test_admin_auth`, `test_cors` |
