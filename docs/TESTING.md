@@ -28,7 +28,7 @@ npm test
 
 ## Current Coverage
 
-### Backend — 29 test files, ~416 tests
+### Backend — 30 test files, ~472 tests
 
 | Test File | Tests | Module Under Test |
 |-----------|------:|-------------------|
@@ -61,6 +61,7 @@ npm test
 | `test_live_engine_config.py` | 34 | `LiveModeState` enum, `LiveModeConfig` defaults, engine init/history/callbacks |
 | `test_audio_utils.py` | 40 | GPU cache, CUDA check, convert WAV/MP3, legacy normalise, format timestamp, duration, WebRTC/Silero VAD |
 | `test_stt_engine_helpers.py` | 28 | `TranscriptionResult.to_dict()`, `_preprocess_output()` text processing, `get_status()`, constants |
+| `test_database.py` | 56 | Recording/segment/word CRUD, FTS search, conversation/message CRUD, cascading deletes, Unicode, `Recording` model |
 
 ### Frontend — 0 tests
 
@@ -115,6 +116,6 @@ with similar testing characteristics.
 | **1** | Pure logic (done) | 131 | `token_store`, `speaker_merge`, `config_tree`, route utils |
 | **2** | State machines (done) | 107 | `TranscriptionJobTracker`, model manager init, diarisation data, live engine config |
 | **3** | Audio / engine (done) | 68 | `audio_utils`, STT engine helpers |
-| **4** | Database | ~25 | `database.py` CRUD, FTS, cascading deletes |
+| **4** | Database (done) | 56 | `database.py` CRUD, FTS, cascading deletes |
 | **5** | Frontend logic | ~30 | `modelCapabilities`, `modelSelection`, `transcriptionBackend` |
 | **6** | Route handlers | ~46 | health, auth, search routes; fix existing broken tests |
