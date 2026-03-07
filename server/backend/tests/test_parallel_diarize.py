@@ -2,38 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
-import sys
 import threading
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
-def _ensure_server_package_alias() -> None:
-    if "server" in sys.modules:
-        return
-
-    backend_root = Path(__file__).resolve().parents[1]
-    init_file = backend_root / "__init__.py"
-    spec = importlib.util.spec_from_file_location(
-        "server",
-        init_file,
-        submodule_search_locations=[str(backend_root)],
-    )
-    assert spec is not None and spec.loader is not None
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["server"] = module
-    spec.loader.exec_module(module)
-
-
-_ensure_server_package_alias()
-
-from server.core.model_manager import TranscriptionCancelledError  # noqa: E402
-from server.core.parallel_diarize import (  # noqa: E402
+from server.core.model_manager import TranscriptionCancelledError
+from server.core.parallel_diarize import (
     transcribe_and_diarize,
     transcribe_then_diarize,
 )
