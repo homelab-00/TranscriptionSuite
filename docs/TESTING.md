@@ -28,7 +28,7 @@ npm test
 
 ## Current Coverage
 
-### Backend — 19 test files, ~110 tests
+### Backend — 23 test files, ~241 tests
 
 | Test File | Tests | Module Under Test |
 |-----------|------:|-------------------|
@@ -51,6 +51,10 @@ npm test
 | `test_live_mode_model_constraints.py` | 2 | Live model validation |
 | `test_database_migration_versioning.py` | 1 | DB migration stamps |
 | `test_transcription_languages_route.py` | 1 | Languages endpoint |
+| `test_token_store.py` | 30 | Token hashing, create/validate/revoke, expiry, persistence, v1→v2 migration |
+| `test_speaker_merge.py` | 28 | Speaker assignment via overlap, fallback chain, micro-turn smoothing, segment builder |
+| `test_config_tree.py` | 33 | Type detection, key humanisation, comment extraction, parse/edit round-trip |
+| `test_route_utils_pure.py` | 22 | `is_localhost`, `extract_bearer_token`, `sanitize_for_log`, Docker gateway detection |
 
 ### Frontend — 0 tests
 
@@ -102,7 +106,7 @@ with similar testing characteristics.
 | Phase | Focus | ~New Tests | Key Modules |
 |-------|-------|-----------|-------------|
 | **0** | Infrastructure (done) | 0 | `conftest.py`, vitest setup, this doc |
-| **1** | Pure logic | ~50 | `token_store`, `speaker_merge`, `config_tree`, route utils |
+| **1** | Pure logic (done) | 131 | `token_store`, `speaker_merge`, `config_tree`, route utils |
 | **2** | State machines | ~35 | `TranscriptionJobTracker`, model manager init, diarisation data |
 | **3** | Audio / engine | ~30 | `audio_utils`, STT engine helpers |
 | **4** | Database | ~25 | `database.py` CRUD, FTS, cascading deletes |
