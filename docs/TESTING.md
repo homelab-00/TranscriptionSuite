@@ -28,7 +28,7 @@ npm test
 
 ## Current Coverage
 
-### Backend — 23 test files, ~241 tests
+### Backend — 27 test files, ~348 tests
 
 | Test File | Tests | Module Under Test |
 |-----------|------:|-------------------|
@@ -55,6 +55,10 @@ npm test
 | `test_speaker_merge.py` | 28 | Speaker assignment via overlap, fallback chain, micro-turn smoothing, segment builder |
 | `test_config_tree.py` | 33 | Type detection, key humanisation, comment extraction, parse/edit round-trip |
 | `test_route_utils_pure.py` | 22 | `is_localhost`, `extract_bearer_token`, `sanitize_for_log`, Docker gateway detection |
+| `test_transcription_job_tracker.py` | 27 | Job mutual exclusion, cancellation, progress, status dict, thread safety |
+| `test_model_manager_init.py` | 27 | Feature flag init from bootstrap/env, error classification, model normalisation |
+| `test_diarization_data.py` | 19 | `DiarizationSegment` duration/to_dict, `DiarizationResult` speaker lookups |
+| `test_live_engine_config.py` | 34 | `LiveModeState` enum, `LiveModeConfig` defaults, engine init/history/callbacks |
 
 ### Frontend — 0 tests
 
@@ -107,7 +111,7 @@ with similar testing characteristics.
 |-------|-------|-----------|-------------|
 | **0** | Infrastructure (done) | 0 | `conftest.py`, vitest setup, this doc |
 | **1** | Pure logic (done) | 131 | `token_store`, `speaker_merge`, `config_tree`, route utils |
-| **2** | State machines | ~35 | `TranscriptionJobTracker`, model manager init, diarisation data |
+| **2** | State machines (done) | 107 | `TranscriptionJobTracker`, model manager init, diarisation data, live engine config |
 | **3** | Audio / engine | ~30 | `audio_utils`, STT engine helpers |
 | **4** | Database | ~25 | `database.py` CRUD, FTS, cascading deletes |
 | **5** | Frontend logic | ~30 | `modelCapabilities`, `modelSelection`, `transcriptionBackend` |
