@@ -56,6 +56,8 @@ export interface CleanAllOptions {
 export interface UseDockerReturn {
   available: boolean;
   loading: boolean;
+  /** Detected runtime display name ('Docker' or 'Podman'), null if not detected */
+  runtimeKind: string | null;
 
   // Image state
   images: DockerImage[];
@@ -109,6 +111,7 @@ const EMPTY_CONTAINER: ContainerStatus = { exists: false, running: false, status
 export function useDocker(): UseDockerReturn {
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [runtimeKind, setRuntimeKind] = useState<string | null>(null);
   const [images, setImages] = useState<DockerImage[]>([]);
   const [container, setContainer] = useState<ContainerStatus>(EMPTY_CONTAINER);
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
@@ -132,6 +135,10 @@ export function useDocker(): UseDockerReturn {
         const ok = await docker.available();
         setAvailable(ok);
         if (ok) {
+          docker
+            .getRuntimeKind()
+            .then(setRuntimeKind)
+            .catch(() => {});
           const [imgs, status, vols] = await Promise.all([
             docker.listImages(),
             docker.getContainerStatus(),
@@ -206,6 +213,10 @@ export function useDocker(): UseDockerReturn {
       const ok = await docker.retryDetection();
       setAvailable(ok);
       if (ok) {
+        docker
+          .getRuntimeKind()
+          .then(setRuntimeKind)
+          .catch(() => {});
         const [imgs, status, vols] = await Promise.all([
           docker.listImages(),
           docker.getContainerStatus(),
@@ -428,6 +439,7 @@ export function useDocker(): UseDockerReturn {
   return {
     available,
     loading,
+    runtimeKind,
     images,
     refreshImages,
     pullImage,

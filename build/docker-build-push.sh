@@ -4,6 +4,9 @@
 # This script builds the Docker image locally and pushes it to GitHub Container Registry (GHCR).
 # It's designed to replace the GitHub Actions workflow due to disk space limitations on free runners.
 #
+# Note: This script intentionally uses Docker only (not Podman) since it pushes
+# to GHCR which requires Docker's credential/manifest tooling.
+#
 # Prerequisites:
 #   1. Docker installed and running
 #   2. Logged into GHCR: docker login ghcr.io -u <username>

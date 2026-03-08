@@ -693,14 +693,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   }, []);
 
   // Setup checks
+  const rtName = docker.runtimeKind ?? 'Docker';
   const setupChecks = [
     {
-      label: 'Docker installed',
+      label: `${rtName} installed`,
       ok: docker.available,
-      hint: 'Install Docker Engine or Docker Desktop',
+      hint: 'Install Docker Engine, Docker Desktop, or Podman',
     },
     {
-      label: 'Docker image pulled',
+      label: `${rtName} image pulled`,
       ok: docker.images.length > 0,
       hint: 'Pull an image below to get started',
     },
@@ -711,7 +712,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       hint: gpuInfo?.gpu
         ? gpuInfo.toolkit
           ? 'nvidia-container-toolkit ready'
-          : 'Run: sudo nvidia-ctk runtime configure --runtime=docker'
+          : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
         : 'CPU mode will be used (slower)',
     },
   ];
@@ -816,7 +817,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         }
                       }}
                       className="hover:text-accent-cyan flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10"
-                      title="Re-check Docker, images, and GPU"
+                      title="Re-check container runtime, images, and GPU"
                     >
                       <RotateCcw size={12} />
                       Retry
@@ -1460,7 +1461,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   })
                 ) : (
                   <div className="py-2 text-center text-sm text-slate-500">
-                    {docker.available ? 'No volumes found' : 'Docker not available'}
+                    {docker.available ? 'No volumes found' : 'Container runtime not available'}
                   </div>
                 )}
 

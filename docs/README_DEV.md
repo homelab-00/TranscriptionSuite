@@ -289,7 +289,8 @@ TranscriptionSuite/
 │   ├── electron/                 # Electron main process
 │   │   ├── main.ts               # Window/IPC lifecycle + main-process log routing (stdout/stderr -> client debug stream/file); session.displayMediaRequestHandler for loopback system audio
 │   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC), including app:clientLogLine subscription bridge + loopback enable/disable
-│   │   ├── dockerManager.ts      # Docker CLI operations (start/stop/status/images)
+│   │   ├── containerRuntime.ts    # Container runtime detection (Docker vs Podman)
+│   │   ├── dockerManager.ts      # Container CLI operations (start/stop/status/images) — supports Docker & Podman
 │   │   ├── shortcutManager.ts    # Global keyboard shortcuts (system-wide)
 │   │   ├── waylandShortcuts.ts   # Wayland portal integration for global shortcuts
 │   │   ├── pasteAtCursor.ts      # Paste-at-cursor feature (xdotool/wtype/platform)
@@ -675,10 +676,13 @@ Docker Compose configuration is split into layered files for cross-platform and 
 **Usage examples:**
 
 ```bash
-# Linux + GPU (most common, equivalent to previous default)
+# Linux + GPU with Docker (most common, equivalent to previous default)
 docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 
-# Linux + CPU only
+# Linux + GPU with Podman (uses CDI device passthrough)
+podman compose -f docker-compose.yml -f docker-compose.linux-host.yml -f podman-compose.gpu.yml up -d
+
+# Linux + CPU only (works with both Docker and Podman)
 docker compose -f docker-compose.yml -f docker-compose.linux-host.yml up -d
 
 # macOS or Windows + CPU (Docker Desktop)
@@ -688,9 +692,9 @@ docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
 ```
 
-The Electron dashboard selects the correct compose file stack automatically based on the detected platform and the user's runtime profile setting.
+The Electron dashboard selects the correct compose file stack automatically based on the detected platform, container runtime (Docker vs Podman), and the user's runtime profile setting.
 
-The `start-local.sh` / `start-remote.sh` convenience scripts default to Linux + GPU mode.
+The `start-local.sh` / `start-remote.sh` convenience scripts auto-detect Docker or Podman and default to Linux + GPU mode.
 
 ### 6.2 Local vs Remote Mode
 
@@ -1071,7 +1075,8 @@ npm run dev:electron
 |--------|---------|
 | `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors — falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks) |
 | `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle; `server.probeConnection` and `server.checkFirewallPort` for connection diagnostics; `tailscale.getHostname` for FQDN auto-detection |
-| `dockerManager.ts` | Docker CLI wrapper for container/image management, additive optional-family install env updates, and auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs) |
+| `containerRuntime.ts` | Auto-detects Docker or Podman, caches the result, handles rootless socket resolution; supports `CONTAINER_RUNTIME` env override |
+| `dockerManager.ts` | Container CLI wrapper for Docker/Podman — container/image management, additive optional-family install env updates, and auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs) |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
 | `pasteAtCursor.ts` | Paste-at-cursor feature (xdotool/wtype/platform dispatch) |

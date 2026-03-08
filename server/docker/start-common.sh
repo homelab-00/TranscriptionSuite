@@ -12,6 +12,58 @@ fi
 shift || true
 
 # ============================================================================
+# Container Runtime Detection (Docker or Podman)
+# ============================================================================
+detect_container_runtime() {
+    # Allow explicit override via environment variable
+    if [[ -n "${CONTAINER_RUNTIME:-}" ]]; then
+        local override
+        override="$(printf '%s' "$CONTAINER_RUNTIME" | tr '[:upper:]' '[:lower:]')"
+        if [[ "$override" == "docker" || "$override" == "podman" ]]; then
+            if command -v "$override" &>/dev/null; then
+                echo "$override"
+                return
+            fi
+        fi
+    fi
+
+    # Auto-detect: prefer Docker, fall back to Podman
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        echo "docker"
+    elif command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+        echo "podman"
+    else
+        echo ""
+    fi
+}
+
+RT="$(detect_container_runtime)"
+if [[ -z "$RT" ]]; then
+    # Check if binaries exist but daemons aren't running
+    if command -v docker &>/dev/null; then
+        echo -e "\033[1;31mError:\033[0m Docker is installed but the daemon is not running." >&2
+        echo "" >&2
+        echo "Please start Docker:" >&2
+        echo "  sudo systemctl start docker" >&2
+    elif command -v podman &>/dev/null; then
+        echo -e "\033[1;31mError:\033[0m Podman is installed but the service is not available." >&2
+        echo "" >&2
+        echo "Please start Podman:" >&2
+        echo "  systemctl --user start podman.socket" >&2
+    else
+        echo -e "\033[1;31mError:\033[0m Neither Docker nor Podman is installed." >&2
+        echo "" >&2
+        echo "Please install Docker or Podman:" >&2
+        echo "  Docker: https://docs.docker.com/engine/install/" >&2
+        echo "  Podman: https://podman.io/docs/installation" >&2
+    fi
+    exit 1
+fi
+
+RT_DISPLAY="Docker"
+[[ "$RT" == "podman" ]] && RT_DISPLAY="Podman"
+
+# ============================================================================
 # Constants
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -233,22 +285,22 @@ prepare_hf_token_decision() {
 }
 
 check_existing_container_mode() {
-    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    if $RT ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         print_info "Container already exists, checking mode..."
 
         local current_tls
-        current_tls="$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^TLS_ENABLED=' | cut -d'=' -f2 || echo "false")"
+        current_tls="$($RT inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^TLS_ENABLED=' | cut -d'=' -f2 || echo "false")"
 
         if [[ "$MODE" == "local" && "$current_tls" == "true" ]]; then
             print_info "Mode conflict: container is in remote/TLS mode, but starting in local mode"
             print_info "Removing existing container..."
             cd "$SCRIPT_DIR"
-            docker compose down 2>&1 | grep -v "No resource found to remove" || true
+            $RT compose down 2>&1 | grep -v "No resource found to remove" || true
         elif [[ "$MODE" == "remote" && "$current_tls" != "true" ]]; then
             print_info "Mode conflict: container is in local mode, but starting in remote/TLS mode"
             print_info "Removing existing container..."
             cd "$SCRIPT_DIR"
-            docker compose down 2>&1 | grep -v "No resource found to remove" || true
+            $RT compose down 2>&1 | grep -v "No resource found to remove" || true
         else
             print_info "Container is already in ${MODE} mode"
         fi
@@ -258,13 +310,8 @@ check_existing_container_mode() {
 # ============================================================================
 # Pre-flight Checks
 # ============================================================================
-if ! docker info &>/dev/null 2>&1; then
-    print_error "Docker daemon is not running."
-    echo ""
-    echo "Please start Docker:"
-    echo "  sudo systemctl start docker"
-    exit 1
-fi
+# Runtime availability already verified in Container Runtime Detection above.
+print_info "Using container runtime: $RT_DISPLAY ($RT)"
 
 if [[ ! -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
     print_error "docker-compose.yml not found in $SCRIPT_DIR"
@@ -377,7 +424,7 @@ fi
 # ============================================================================
 check_existing_container_mode
 
-if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${DOCKER_IMAGE}$"; then
+if $RT images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${DOCKER_IMAGE}$"; then
     print_info "Using existing image: $DOCKER_IMAGE"
 else
     print_info "Image will be built on first run"
@@ -401,10 +448,15 @@ fi
 cd "$SCRIPT_DIR"
 
 # Build compose file list: base + linux host-network + GPU overlay
-COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml)
+# Podman uses CDI for GPU passthrough instead of Docker's deploy.resources
+if [[ "$RT" == "podman" ]]; then
+    COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.linux-host.yml -f podman-compose.gpu.yml)
+else
+    COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml)
+fi
 
 compose_output=""
-if ! compose_output="$(docker compose "${COMPOSE_FILES[@]}" "${ENV_FILE_ARGS[@]}" up -d 2>&1)"; then
+if ! compose_output="$($RT compose "${COMPOSE_FILES[@]}" "${ENV_FILE_ARGS[@]}" up -d 2>&1)"; then
     echo "$compose_output"
     exit 1
 fi
@@ -436,9 +488,9 @@ fi
 echo ""
 echo "  Note: On first run, an admin token will be generated."
 echo "        Wait ~10 seconds, then run:"
-echo "        docker compose logs | grep \"Admin Token:\""
+echo "        $RT compose logs | grep \"Admin Token:\""
 echo ""
-echo "  View logs:   docker compose logs -f"
+echo "  View logs:   $RT compose logs -f"
 echo "  Stop:        ./stop.sh"
 echo ""
 echo "=========================================================="

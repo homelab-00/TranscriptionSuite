@@ -127,9 +127,12 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 2. Prerequisites
 
-### 2.1 Docker
+### 2.1 Container Runtime (Docker or Podman)
 
-**Linux:**
+Both Docker and Podman are supported. The dashboard and shell scripts auto-detect which
+runtime is available (Docker is checked first, then Podman).
+
+**Linux (Docker):**
 
 1. Install Docker Engine
     * For Arch run `sudo pacman -S --needed docker`
@@ -143,6 +146,19 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
     * Refer to the [NVIDIA documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
     * Not required if using CPU mode
 
+**Linux (Podman):**
+
+1. Install Podman (4.7+ required for `podman compose` support)
+    * For Arch run `sudo pacman -S --needed podman`
+    * For Fedora/RHEL: Podman is pre-installed
+    * For other distros refer to the [Podman documentation](https://podman.io/docs/installation)
+2. For GPU mode, configure CDI (Container Device Interface):
+    ```bash
+    sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    ```
+    * Requires nvidia-container-toolkit 1.14+
+    * Not required if using CPU mode
+
 **Windows:**
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (during installation make sure the
   *'Use WSL 2 instead of Hyper-V'* checkbox is enabled)
@@ -150,7 +166,7 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
     * Not required if using CPU mode
 
 **macOS (Apple Silicon):**
-1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) or [Podman Desktop](https://podman-desktop.io/)
 2. GPU mode is not available on macOS — the server runs in CPU mode automatically
 
 ---
@@ -675,10 +691,10 @@ See [README_DEV.md](README_DEV.md#133-tailscale-dns-resolution) for detailed tro
 
 **Docker vs Podman:**
 
-TranscriptionSuite is designed for **Docker Engine** (Linux) and **Docker Desktop**
-(Windows/macOS). Podman and podman-compose are **not officially supported** and may
-fail due to differences in compose file handling (e.g., build context resolution).
-If you use Podman, you may need to adapt the compose files manually.
+TranscriptionSuite supports both **Docker** and **Podman**. The dashboard and CLI
+scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI
+is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).
+Podman 4.7+ is required for `podman compose` support.
 
 ---
 
