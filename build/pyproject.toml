@@ -23,6 +23,12 @@ tooling = [
     "pre-commit>=4.2.0",
 ]
 
+# Security and license auditing tools
+security = [
+    "bandit==1.9.4",
+    "pip-licenses==5.5.1",
+]
+
 # Minimal extras used by backend test runs from the build environment
 backend-test = [
     "pytest>=9.0.2",
@@ -42,7 +48,7 @@ backend-test = [
 ]
 
 [tool.uv]
-default-groups = ["tooling", "backend-test"]
+default-groups = ["tooling", "backend-test", "security"]
 
 [tool.ruff]
 line-length = 100

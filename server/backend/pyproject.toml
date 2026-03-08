@@ -79,6 +79,7 @@ allow-direct-references = true
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "pip-licenses==5.5.1",
 ]
 
 [tool.pytest.ini_options]
