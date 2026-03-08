@@ -20,7 +20,7 @@ if "server" not in sys.modules:
     server_pkg.__version__ = "test"
     sys.modules["server"] = server_pkg
 
-from server.api.main import AuthenticationMiddleware
+from server.api.main import AuthenticationMiddleware  # noqa: E402
 
 
 class _StubTokenStore:
@@ -34,10 +34,10 @@ class _StubTokenStore:
 
 
 def _build_client(monkeypatch, valid_token: str = "valid-token") -> TestClient:
-    import server.api.main as main_module
+    import server.core.token_store as ts_mod
 
     monkeypatch.setattr(
-        main_module,
+        ts_mod,
         "get_token_store",
         lambda: _StubTokenStore(valid_token),
     )
@@ -69,9 +69,7 @@ def test_query_token_allows_audio_route(monkeypatch):
 
 def test_query_token_allows_export_route(monkeypatch):
     client = _build_client(monkeypatch)
-    response = client.get(
-        "/api/notebook/recordings/1/export?format=txt&token=valid-token"
-    )
+    response = client.get("/api/notebook/recordings/1/export?format=txt&token=valid-token")
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 

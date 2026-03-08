@@ -11,8 +11,8 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
 
+import server.core.token_store as _ts_mod
 from fastapi import Request, WebSocket
-from server.core.token_store import get_token_store
 from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ def validate_auth_token(token: str | None):
     """Validate a token and return the stored token object if valid."""
     if not token:
         return None
-    return get_token_store().validate_token(token)
+    return _ts_mod.get_token_store().validate_token(token)
 
 
 async def send_websocket_auth_failure(

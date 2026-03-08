@@ -8,13 +8,12 @@ Handles:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
+import server.core.token_store as _ts_mod
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-
 from server.api.routes.utils import require_admin
-from server.core.token_store import get_token_store
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +30,8 @@ class LoginResponse(BaseModel):
     """Response model for login."""
 
     success: bool
-    user: Optional[Dict[str, Any]] = None
-    message: Optional[str] = None
+    user: dict[str, Any] | None = None
+    message: str | None = None
 
 
 class CreateTokenRequest(BaseModel):
@@ -40,18 +39,18 @@ class CreateTokenRequest(BaseModel):
 
     client_name: str
     is_admin: bool = False
-    expiry_days: Optional[int] = None
+    expiry_days: int | None = None
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest) -> Dict[str, Any]:
+async def login(request: LoginRequest) -> dict[str, Any]:
     """
     Authenticate with a token.
 
     Returns user information if the token is valid.
     """
     try:
-        token_store = get_token_store()
+        token_store = _ts_mod.get_token_store()
         stored_token = token_store.validate_token(request.token)
 
         if stored_token is None:
@@ -78,7 +77,7 @@ async def login(request: LoginRequest) -> Dict[str, Any]:
 
 
 @router.get("/tokens")
-async def list_tokens(request: Request) -> Dict[str, Any]:
+async def list_tokens(request: Request) -> dict[str, Any]:
     """
     List all tokens (admin only).
     """
@@ -86,7 +85,7 @@ async def list_tokens(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=403, detail="Admin access required")
 
     try:
-        token_store = get_token_store()
+        token_store = _ts_mod.get_token_store()
         tokens = token_store.list_tokens()
 
         return {
@@ -99,9 +98,7 @@ async def list_tokens(request: Request) -> Dict[str, Any]:
                     "expires_at": t.expires_at,
                     "is_revoked": t.is_revoked,
                     "is_expired": t.is_expired(),
-                    "token": f"{t.token[:8]}..."
-                    if t.token
-                    else None,  # Show partial hash only
+                    "token": f"{t.token[:8]}..." if t.token else None,  # Show partial hash only
                 }
                 for t in tokens
             ]
@@ -109,11 +106,11 @@ async def list_tokens(request: Request) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to list tokens: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/tokens")
-async def create_token(request: Request, body: CreateTokenRequest) -> Dict[str, Any]:
+async def create_token(request: Request, body: CreateTokenRequest) -> dict[str, Any]:
     """
     Create a new token (admin only).
 
@@ -123,7 +120,7 @@ async def create_token(request: Request, body: CreateTokenRequest) -> Dict[str, 
         raise HTTPException(status_code=403, detail="Admin access required")
 
     try:
-        token_store = get_token_store()
+        token_store = _ts_mod.get_token_store()
         stored_token, plaintext_token = token_store.generate_token(
             client_name=body.client_name,
             is_admin=body.is_admin,
@@ -145,11 +142,11 @@ async def create_token(request: Request, body: CreateTokenRequest) -> Dict[str, 
 
     except Exception as e:
         logger.error(f"Failed to create token: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.delete("/tokens/{token_id}")
-async def revoke_token(request: Request, token_id: str) -> Dict[str, Any]:
+async def revoke_token(request: Request, token_id: str) -> dict[str, Any]:
     """
     Revoke a token by its ID (admin only).
     """
@@ -157,7 +154,7 @@ async def revoke_token(request: Request, token_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=403, detail="Admin access required")
 
     try:
-        token_store = get_token_store()
+        token_store = _ts_mod.get_token_store()
         success = token_store.revoke_token_by_id(token_id)
 
         if not success:
@@ -169,4 +166,4 @@ async def revoke_token(request: Request, token_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Failed to revoke token: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

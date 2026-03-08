@@ -39,7 +39,7 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
 _log_time("fastapi imports done")
 
-from server.core.token_store import get_token_store  # noqa: E402
+import server.core.token_store as _ts_mod  # noqa: E402
 
 _log_time("token_store imported")
 
@@ -293,7 +293,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 token = query_token
 
         if token:
-            token_store = get_token_store()
+            token_store = _ts_mod.get_token_store()
             if token_store.validate_token(token):
                 return await call_next(request)
 
@@ -395,7 +395,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info(f"Backup check scheduled (max_age={max_age_hours}h, max_backups={max_backups})")
 
     # Initialize token store (generates admin token on first run)
-    get_token_store()
+    _ts_mod.get_token_store()
     _log_time("token store initialized")
     logger.info("Token store initialized")
 
