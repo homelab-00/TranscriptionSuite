@@ -50,32 +50,26 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ---
 
 ## Table of Contents
+ 
+## Table of Contents
 
-- [1. Introduction](#1-introduction)
+ - [1. Introduction](#1-introduction)
   - [1.1 Features](#11-features)
   - [1.2 Screenshots](#12-screenshots)
   - [1.3 Short Tour](#13-short-tour)
-- [2. Prerequisites](#2-prerequisites)
-  - [2.1 Docker](#21-docker)
-- [3. Installation](#3-installation)
-  - [3.1 Download the app](#31-download-the-app)
-    - [3.1.1 Linux AppImage Prerequisites](#311-linux-appimage-prerequisites-linux-only)
-    - [3.1.2 Verify Download with Kleopatra (optional)](#312-verify-download-with-kleopatra-optional)
-- [4. First time setup](#4-first-time-setup)
-  - [4.1 Starting the Server & Client](#41-starting-the-server--client)
-- [5. Usage](#5-usage)
-  - [5.1 Quick Start](#51-quick-start)
-  - [5.2 Dashboard Views](#52-dashboard-views)
-- [6. Remote Access](#6-remote-access)
-  - [6.1 Option A: Tailscale (recommended)](#61-option-a-tailscale-recommended)
-  - [6.2 Option B: LAN (same local network)](#62-option-b-lan-same-local-network)
-- [7. Database & Backups](#7-database--backups)
-- [8. Troubleshooting](#8-troubleshooting)
-  - [8.1 Server Won't Start](#81-server-wont-start)
-  - [8.2 GPU Not Detected](#82-gpu-not-detected)
-  - [8.3 Connection Issues (Remote Mode)](#83-connection-issues-remote-mode)
-- [9. License](#9-license)
-- [10. Acknowledgments](#10-acknowledgments)
+ - [2. Installation](#2-installation)
+   - [2.1 Prerequisites](#21-prerequisites)
+   - [2.2 Download the Dashboard app](#22-download-the-dashboard-app)
+     - [2.2.1 Linux AppImage Prerequisites (Linux only)](#221-linux-appimage-prerequisites-linux-only)
+     - [2.2.2 Verify Download with Kleopatra (optional)](#222-verify-download-with-kleopatra-optional)
+   - [2.3 Setting Up the Server](#23-setting-up-the-server)
+ - [3. Remote Connection](#3-remote-connection)
+   - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
+     - [Server Machine Setup](#server-machine-setup)
+   - [3.2 Option B: LAN (same local network)](#32-option-b-lan-same-local-network)
+ - [4. Technical Info](#4-technical-info)
+ - [5. License](#5-license)
+ - [6. Acknowledgments](#6-acknowledgments)
 
 ---
 
@@ -125,12 +119,13 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ---
 
-## 2. Prerequisites
+## 2. Installation
 
-### 2.1 Container Runtime (Docker or Podman)
+### 2.1 Prerequisites
 
-Both Docker and Podman are supported. The dashboard and shell scripts auto-detect which
-runtime is available (Docker is checked first, then Podman).
+To begin with, you need to install Docker (or Podman).
+
+> *Both are supported; the dashboard and shell scripts auto-detect which runtime is available (Docker is checked first, then Podman).*
 
 **Linux (Docker):**
 
@@ -165,22 +160,19 @@ runtime is available (Docker is checked first, then Podman).
 2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
     * Not required if using CPU mode
 
-**macOS (Apple Silicon):**
+**macOS:**
 1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) or [Podman Desktop](https://podman-desktop.io/)
 2. GPU mode is not available on macOS — the server runs in CPU mode automatically
 
----
+### 2.2 Download the Dashboard app
 
-## 3. Installation
+Before doing anything else, you need to download the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
+This is just the frontend, no models or packages are downloaded yet.
 
-### 3.1 Download the app
-
-Download the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
-
->* *Linux and Windows builds are x64; macOS is arm64 (Apple Silicon)*
+>* *Linux and Windows builds are x64; macOS is arm64*
 >* *Each release artifact includes an gpg signature by my key (`.sig`)*
 
-##### 3.1.1 Linux AppImage Prerequisites (Linux only)
+##### 2.2.1 Linux AppImage Prerequisites (Linux only)
 
 AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
 
@@ -196,7 +188,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 > requirements. This is the standard approach for Electron-based AppImages and does
 > not affect application security.
 
-##### 3.1.2 Verify Download with Kleopatra (optional)
+##### 2.2.2 Verify Download with Kleopatra (optional)
 
 1. Download both files from the same release:
    - installer/app (`.AppImage`, `.exe` or `.dmg`)
@@ -207,126 +199,34 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
 5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
 
----
+### 2.3 Setting Up the Server
 
-## 4. First time setup
+We're now ready to start the server. This process includes two parts: downloading the Docker image and starting a Docker container based off of that image.
 
-**Before starting either Client or Server, you need to configure a few settings.**
+1. *Download the image*: Using the Sidebar on the left, head over to the Server tab and click the button 'Fetch Fresh Image'
+2. *Starting the container*: Scroll down a bit and click the 'Start Local' button in the #2 box
+3. *Initial setup - models, diarization*: A series of prompts will ask you for which models you want to download to begin with, and if you want to enable diarization (entering your HuggingFace token and accepting the [terms of the model](https://huggingface.co/pyannote/speaker-diarization-community-1) is required)
+4. **Wait** - Initial startup can take a long time, even on newer hardware and fast internet speeds; we're talking 10-20 minutes with reasonable specs though, not hours; you'll know it's done when the server status light turns green
+5. **Start the client**: Head to the Session tab and click on the 'Start Local' button inside the Client Link box - if it turns green you're ready to roll!
 
-To access settings, click the Settings button in the sidebar (gear icon). The Settings
-modal has four tabs: `App`, `Client`, `Server`, and `Notebook`.
+<br>
 
-* **App tab**: General application settings (notifications, auto-copy, etc.)
-* **Server tab**: Opens  the full `config.yaml` for advanced server parameters.
-  Refer to [README_DEV.md](README_DEV.md) for more information.
-* **Notebook tab**: Database backup and restore functionality:
-  - Create manual backups of your Audio Notebook database
-  - View list of available backups with timestamps and sizes
-  - Restore from any backup (creates safety backup first)
-* **Client tab**: Configure connection mode:
-  * **Local**: Use default settings (localhost:9786)
-  * **Remote (Tailscale)**: See [Section 6.1: Tailscale Setup](#61-option-a-tailscale-recommended) for full instructions.
-    Then configure:
-    - Enable 'Use remote server instead of local'
-    - Select **Tailscale** remote profile
-    - Enter your Tailscale hostname (e.g., `my-machine.tail1234.ts.net`)
-    - Set port to `9786`
-    - Enable 'Use HTTPS'
-    - Enter auth token (obtained after first server start)
-  * **Remote (LAN)**: See [Section 6.2: LAN Setup](#62-option-b-lan-same-local-network) for connecting
-    to a server on your local network without Tailscale.
-
-*Settings are saved to:*
+Notes:
+* *Settings are saved to:*
 *- Linux: `~/.config/TranscriptionSuite/`*
 *- Windows: `%APPDATA%\TranscriptionSuite\`*
 *- macOS: `~/Library/Application Support/TranscriptionSuite/`*
 
-### 4.1 Starting the Server & Client
+* *GNOME note: The [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension is required for system tray support.*
 
-You're now ready to start both Server & Client. Navigate to the **Server** view
-in the sidebar:
+* *Docker vs Podman:*
+*TranscriptionSuite supports both Docker and Podman. The dashboard and CLI scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).*
+*Podman 4.7+ is required for `podman compose` support.*
 
-1. Click 'Pull Image' to download the Docker server image (first time only)
-2. Wait for the download to complete
-3. Click 'Start Container' to launch the server
-4. Wait for the container health status to turn green
-
-Once the server is running, navigate to the **Session** view to start transcribing.
 
 ---
 
-## 5. Usage
-
-### 5.1 Quick Start
-
-* Run the AppImage (Linux) or installer (Windows)
-* The Dashboard window opens with sidebar navigation
-* Navigate to **Session** view for transcription
-
-**Longform Transcription:**
-* Click the Record button to start capturing audio
-* Click Stop to end recording and begin transcription
-* Result appears in the transcription display and is auto-copied to clipboard
-
-**Live Mode:**
-* In the Session view, enable the Live Mode toggle
-* Speak naturally with pauses — sentences appear in real-time
-* Use Mute/Unmute to control audio capture
-* Completed sentences accumulate in the display
-
-**Static File Transcription:**
-* Navigate to **Notebook** → **Import** tab
-* Drag and drop audio/video files or click to browse
-* Queue multiple files at once — each is transcribed with individual progress and retry on failure
-* Completed files are automatically added to the Audio Notebook using the file name as the note title
-
-**Translation (optional):**
-* Enable `Translation` toggle in the Session controls
-* **Whisper**: Translates source language → English (longform, file, Live Mode, Notebook)
-* **Canary (NeMo)**: Bidirectional translation with 24 European target languages
-* **Parakeet / VibeVoice-ASR**: No translation support (toggle auto-disabled)
-* **Live Mode note**: Live Mode v1 supports Whisper backends only
-
-### 5.2 Dashboard Views
-
-The Dashboard features **sidebar navigation** with these main views:
-
-- **Session**: Main transcription interface with:
-  - Main Transcription controls (language, translate, record/stop) and Audio Configuration below
-    - Microphone: dropdown to select input device
-    - System Audio: silently captures all system audio via loopback (no device selection; enabled Chromium feature flags + IPC handler manage capture lifecycle)
-  - Audio visualizer with amplitude zoom (+/− buttons, hover to reveal)
-  - Live Mode toggle and real-time transcript display
-  - Explicit disabled-slot messaging when Main and/or Live model is set to `None (Disabled)`
-  - Transcription output with copy/download buttons
-- **Models**: Browse STT models by family, view capabilities (languages, translation, live mode), manage downloads and cache
-- **Notebook**: Audio Notebook with Calendar, Search, and Import tabs
-- **Server**: Docker server management (container, images, volumes), including `None (Disabled)` model slots for Main and Live. In remote mode: displays the local Tailscale hostname with a copy button (when Tailscale is installed) and shows a firewall warning banner if the server port appears blocked
-- **Logs**: Processing logs and client debug output
-- **Settings**: 4-tab modal for Connection, Client Audio, Server Config, and Notebook settings. Server config is now edited locally (sparse YAML override to `~/.config/TranscriptionSuite/config.yaml`) with no server dependency; changes require a server restart to apply. Client settings are persisted via electron-store.
-
-**System Tray**: The app can minimise to the system tray. The tray icon reflects server and
-recording state (11 distinct states), and the context menu provides quick controls
-(recording controls, Live Mode, model reload/unload, open dashboard, transcribe file, quit).
-Server start/stop is intentionally handled in the dashboard UI flow so model/dependency gating
-always runs first. Left-click the tray icon toggles recording: starts a recording when
-idle/standby, or stops and transcribes if already recording. On Windows/macOS, middle-click
-also stops and transcribes.
-
-> **Note:** "Transcribe File" from the system tray always uses pure transcription (no diarization), regardless of main transcriber settings.
-
-> **GNOME note:** GNOME desktop requires the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension for system tray support.
-
-**Setup Checklist**: On first launch a setup checklist guides you through Docker verification and
-GPU detection. Server startup now begins with model-first onboarding (Main + Live selection with
-recommended defaults), then prompts for HuggingFace token/dependency installs only when needed.
-
-**Update Checker**: Opt-in background checks for new app releases (GitHub) and server Docker
-image updates (GHCR). Configurable interval in Settings.
-
----
-
-## 6. Remote Access
+## 3. Remote Connection
 
 TranscriptionSuite supports remote transcription where a **server machine** (with a
 GPU) runs the Docker container and a **client machine** connects to it via the
@@ -361,7 +261,7 @@ client reaches the server and *where* the TLS certificates come from.
 | **TLS/HTTPS** | All traffic encrypted with certificates |
 | **Token Authentication** | Required for all API requests in remote mode |
 
-### 6.1 Option A: Tailscale (recommended)
+### 3.1 Option A: Tailscale (recommended)
 
 Use this when the server and client are on **different networks** (e.g., home
 server ↔ work laptop), or when you want Tailscale's zero-config networking
@@ -481,7 +381,7 @@ detects the port may be blocked.
 > The Settings modal will warn you if it detects a bare tailnet name without a
 > machine prefix.
 
-### 6.2 Option B: LAN (same local network)
+### 3.2 Option B: LAN (same local network)
 
 Use this when both machines are on the **same local network** and you don't want
 to use Tailscale. This is common for home-lab setups or office environments.
@@ -543,168 +443,19 @@ Same as Tailscale above — if a firewall is active:
 
 ---
 
-## 7. Database & Backups
+## 4. Technical Info
 
-TranscriptionSuite automatically backs up the SQLite database on server startup:
-
-- Backups are stored in the Docker volume (`/data/database/backups/`)
-- A new backup is created if the latest is more than 1 hour old
-- Up to 3 backups are kept (oldest automatically deleted)
-- Uses SQLite's built-in backup API (safe with concurrent access)
-
-**Configuration** (in `config.yaml`):
-```yaml
-backup:
-    enabled: true        # Enable/disable automatic backups
-    max_age_hours: 1     # Backup if latest is older than this
-    max_backups: 3       # Number of backups to keep
-```
-
-**Manual Backup via Dashboard:**
-
-The Dashboard provides a graphical interface for backup management:
-1. Open Settings → Notebook tab
-2. Click "Create Backup" to create a new backup
-3. View list of available backups with timestamps and sizes
-4. Select a backup and click "Restore Selected Backup" to restore
-
-**Manual Backup via Command Line:**
-```bash
-# Stop the server first
-docker compose down
-
-# Copy the database file
-docker run --rm -v transcriptionsuite-data:/data -v $(pwd):/backup \
-    alpine cp /data/database/notebook.db /backup/notebook_backup.db
-
-# Restart the server
-docker compose up -d
-```
-
-**Export Individual Recordings:**
-
-You can export individual transcriptions from the Audio Notebook:
-1. Right-click on any recording in the Calendar view
-2. Select "Export transcription"
-3. Choose format based on note data:
-   - `Text (.txt)` for pure transcription notes
-   - `SubRip (.srt)` or `Advanced SubStation Alpha (.ass)` for timestamp-capable notes
-4. Select save location
-
-When diarization is present, subtitle exports include normalized speaker labels
-(`Speaker 1`, `Speaker 2`, ...).
+For more information about the technical aspects of the project, check out [README_DEV](README_DEV.md).
 
 ---
 
-## 8. Troubleshooting
-
-### 8.1 Server Won't Start
-
-Check Docker logs:
-```bash
-docker compose logs -f
-```
-
-Alternatively install `lazydocker`, it's an excellent cli tool to manage docker.
-*(Then simply run it by running `lazydocker` in your terminal. Select your container on*
-*the left and you'll see its logs on the right.)*
-
-### 8.2 GPU Not Detected
-
-Verify NVIDIA Container Toolkit is installed:
-```bash
-docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
-```
-
-If you don't have an NVIDIA GPU or prefer not to use GPU acceleration, switch to
-**CPU mode** in Settings → App → Runtime Mode, or in the Server view before starting
-the container. CPU mode works on all platforms (Linux, Windows, macOS) but transcription
-will be significantly slower.
-
-### 8.3 Connection Issues (Remote Mode)
-
-**Understanding connection error messages:**
-
-The dashboard shows specific diagnostic messages instead of a generic "Server
-unreachable". Use the table below to identify and fix the issue:
-
-| Error Message | Meaning | Fix |
-|---|---|---|
-| `Connection refused — is the server running?` | Nothing is listening on that port | Start the server container; verify port 9786 |
-| `DNS lookup failed — check hostname` | Hostname can't be resolved | Check spelling; ensure Tailscale is running |
-| `DNS: '...' not found — is Tailscale running?` | `.ts.net` hostname failed DNS | Start Tailscale on the **client** machine |
-| `TLS certificate error` | Certificate validation failure | Verify certs exist and match hostname |
-| `Connection timed out` | Network or firewall blocking | Open port 9786 in firewall — Ubuntu/Debian: `sudo ufw allow 9786/tcp`; Fedora: `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload` |
-| `Connection timed out — check Tailscale status` | Tailscale tunnel not working | Run `tailscale status` on **both** machines |
-| `Authentication required (401)` | Server reachable but token wrong/missing | Check auth token in Settings → Client |
-
-**"TLS certificate not found" error on server start:**
-
-The server couldn't find the TLS certificate files on the host machine.
-1. Verify the certificate files exist at the paths configured in `config.yaml`
-   (under `remote_server.tls`)
-2. For the **Tailscale** profile, check `host_cert_path` and `host_key_path`
-   (default: `~/.config/Tailscale/my-machine.crt` / `.key`)
-3. For the **LAN** profile: certificates are auto-generated on first start.
-   If you need to regenerate, delete the existing files and restart.
-   (default: `~/.config/TranscriptionSuite/lan-server.crt` / `.key`)
-4. Ensure the key file has proper permissions: `chmod 600 <key-file>`
-5. Ensure the files are owned by your user: `sudo chown $USER:$USER <cert-files>`
-
-**General checklist (Tailscale profile):**
-
-1. Verify Tailscale is connected on both machines: `tailscale status`
-2. Ensure both machines are signed into the **same Tailscale account**
-3. Ensure MagicDNS + HTTPS certificates are enabled in Tailscale Admin Console
-4. Check certificate paths in `config.yaml`
-5. Ensure port `9786` is used for HTTPS (same port for both HTTP and HTTPS)
-6. On the server, verify the Server view shows the Tailscale hostname (confirms
-   Tailscale is running on the server)
-7. Enter the **full machine hostname** (e.g., `desktop.tail1234.ts.net`), not
-   just the tailnet name
-8. If the dashboard shows a firewall warning banner, open port 9786:
-   - Ubuntu / Debian: `sudo ufw allow 9786/tcp`
-   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload`
-
-**General checklist (LAN profile):**
-
-1. Verify both machines can reach each other: `ping <server-ip>`
-2. Ensure the server's firewall allows port `9786`:
-   - Ubuntu / Debian: `sudo ufw allow 9786/tcp`
-   - Fedora GNOME / Fedora KDE: `sudo firewall-cmd --permanent --add-port=9786/tcp && sudo firewall-cmd --reload`
-3. LAN TLS certificates are auto-generated on first remote start; no manual
-   setup needed unless you want custom certs
-4. Ensure port `9786` is used for HTTPS (same port for both HTTP and HTTPS)
-
-**DNS Resolution Errors (Tailscale):**
-
-If you see errors like `Name or service not known` for `.ts.net` hostnames:
-
-- **Automatic fallback:** The client automatically detects DNS failures and falls back
-  to Tailscale IP addresses with intelligent retry logic. It attempts multiple IPs
-  (both IPv4 and IPv6) when available. Check the logs for "Tailscale IP fallback" messages.
-- **Check for DNS fight:** Run `tailscale status` and look for DNS warnings. If you see
-  `/etc/resolv.conf overwritten`, your system's DNS isn't forwarding to
-  Tailscale's MagicDNS.
-
-See [README_DEV.md](README_DEV.md#133-tailscale-dns-resolution) for detailed troubleshooting.
-
-**Docker vs Podman:**
-
-TranscriptionSuite supports both **Docker** and **Podman**. The dashboard and CLI
-scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI
-is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).
-Podman 4.7+ is required for `podman compose` support.
-
----
-
-## 9. License
+## 5. License
 
 GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 
-## 10. Acknowledgments
+## 6. Acknowledgments
 
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
@@ -714,3 +465,4 @@ GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 - [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 - [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
 - [Tailscale](https://tailscale.com/)
+- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) - For inspiring this project!
