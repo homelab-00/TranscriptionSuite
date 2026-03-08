@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run format:check && npm run ui:contract:check",
+    "test": "vitest run --passWithNoTests",
     "build:electron": "npm run build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
     "package:linux": "npm run build:electron && electron-builder --linux AppImage",
@@ -30,8 +31,8 @@
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
-    "@tanstack/react-query": "^5.90.21",
     "@particle/dbus-next": "^0.11.4",
+    "@tanstack/react-query": "^5.90.21",
     "electron-store": "^11.0.2",
     "lucide-react": "^0.564.0",
     "react": "^19.2.4",
@@ -44,6 +45,9 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-query-devtools": "^5.91.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -52,12 +56,14 @@
     "autoprefixer": "^10.4.24",
     "electron": "^40.4.1",
     "electron-builder": "^26.7.0",
+    "jsdom": "^28.1.0",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "vite": "^7.3.1",
+    "vitest": "^4.0.18",
     "yaml": "^2.8.2"
   },
   "build": {

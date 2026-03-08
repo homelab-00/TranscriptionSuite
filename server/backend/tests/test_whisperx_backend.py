@@ -4,28 +4,20 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
-import importlib.util
 import logging
 import sys
 import types
 import warnings
-from pathlib import Path
 
 import numpy as np
+import pytest
+
+# Ensure the torch stub from conftest.py is installed for every test in this module.
+pytestmark = pytest.mark.usefixtures("torch_stub")
 
 
-def _install_minimal_runtime_stubs() -> None:
-    """Stub heavy optional modules so backend imports in the lightweight test env."""
-    if "torch" not in sys.modules:
-        torch_stub = types.ModuleType("torch")
-        torch_stub.cuda = types.SimpleNamespace(
-            is_available=lambda: False,
-            empty_cache=lambda: None,
-            synchronize=lambda: None,
-        )
-        torch_stub.device = lambda value: value
-        sys.modules["torch"] = torch_stub
-
+def _install_soundfile_stub() -> None:
+    """Stub soundfile so backend imports in the lightweight test env."""
     if "soundfile" not in sys.modules:
         soundfile_stub = types.ModuleType("soundfile")
         soundfile_stub.read = lambda *args, **kwargs: (
@@ -35,27 +27,8 @@ def _install_minimal_runtime_stubs() -> None:
         sys.modules["soundfile"] = soundfile_stub
 
 
-def _ensure_server_package_alias() -> None:
-    if "server" in sys.modules:
-        return
-
-    backend_root = Path(__file__).resolve().parents[1]
-    init_file = backend_root / "__init__.py"
-    spec = importlib.util.spec_from_file_location(
-        "server",
-        init_file,
-        submodule_search_locations=[str(backend_root)],
-    )
-    assert spec is not None and spec.loader is not None
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["server"] = module
-    spec.loader.exec_module(module)
-
-
 def _import_whisperx_backend():
-    _install_minimal_runtime_stubs()
-    _ensure_server_package_alias()
+    _install_soundfile_stub()
     return importlib.import_module("server.core.stt.backends.whisperx_backend")
 
 
@@ -76,7 +49,12 @@ class _ModernFakeModel:
 
     def transcribe(self, audio, language=None, task=None, batch_size=None):
         self.calls.append(
-            {"language": language, "task": task, "audio": audio, "batch_size": batch_size}
+            {
+                "language": language,
+                "task": task,
+                "audio": audio,
+                "batch_size": batch_size,
+            }
         )
         self.options_seen.append(self.options)
         return {

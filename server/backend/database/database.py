@@ -91,6 +91,7 @@ def get_connection() -> Generator[sqlite3.Connection]:
     )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")  # 5s retry on SQLITE_BUSY
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
     finally:

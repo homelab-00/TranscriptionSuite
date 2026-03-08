@@ -11,7 +11,6 @@ All operations use ffmpeg-python for pipe-based processing to avoid disk I/O ove
 
 import logging
 import shutil
-from typing import Tuple
 
 import ffmpeg
 import numpy as np
@@ -33,7 +32,7 @@ def load_audio_ffmpeg(
     file_path: str,
     target_sample_rate: int = 16000,
     target_channels: int = 1,
-) -> Tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int]:
     """
     Load audio file using FFmpeg with integrated resampling and channel conversion.
 
@@ -99,7 +98,7 @@ def load_audio_ffmpeg(
     except ffmpeg.Error as e:
         error_msg = e.stderr.decode() if e.stderr else str(e)
         logger.error(f"FFmpeg error loading audio: {error_msg}")
-        raise RuntimeError(f"Audio loading failed: {error_msg}")
+        raise RuntimeError(f"Audio loading failed: {error_msg}") from e
 
 
 def normalize_audio_ffmpeg(
@@ -200,22 +199,18 @@ def normalize_audio_ffmpeg(
         normalized = np.frombuffer(out, dtype=np.float32)
 
         logger.debug(
-            f"Normalized audio using {method}: "
-            f"{len(audio)} samples -> {len(normalized)} samples"
+            f"Normalized audio using {method}: {len(audio)} samples -> {len(normalized)} samples"
         )
 
         return normalized
 
     except ffmpeg.Error as e:
         error_msg = e.stderr.decode() if e.stderr else str(e)
-        logger.warning(
-            f"FFmpeg normalization ({method}) failed: {error_msg}, using original audio"
-        )
+        logger.warning(f"FFmpeg normalization ({method}) failed: {error_msg}, using original audio")
         return audio
     except Exception as e:
         logger.warning(
-            f"Unexpected error during normalization ({method}): {e}, "
-            f"using original audio"
+            f"Unexpected error during normalization ({method}): {e}, using original audio"
         )
         return audio
 
@@ -262,11 +257,17 @@ def resample_audio_ffmpeg(
         raise RuntimeError("FFmpeg is not installed or not in PATH")
 
     if resampler not in ["soxr", "swr_linear"]:
-        raise ValueError(
-            f"Unsupported resampler: {resampler}. Choose 'soxr' or 'swr_linear'."
-        )
+        raise ValueError(f"Unsupported resampler: {resampler}. Choose 'soxr' or 'swr_linear'.")
 
     try:
+        # Map user-facing resampler names to ffmpeg's aresample options.
+        # ffmpeg only accepts "swr" or "soxr"; "swr_linear" is our alias
+        # for the SWR engine with linear interpolation enabled.
+        ffmpeg_resampler = "swr" if resampler == "swr_linear" else resampler
+        filter_kwargs: dict[str, object] = {"resampler": ffmpeg_resampler}
+        if resampler == "soxr":
+            filter_kwargs["precision"] = 28
+
         # Build FFmpeg pipeline with resampling
         process = (
             ffmpeg.input(
@@ -279,8 +280,7 @@ def resample_audio_ffmpeg(
             .filter(
                 "aresample",
                 target_sample_rate,
-                resampler=resampler,
-                precision=28 if resampler == "soxr" else None,
+                **filter_kwargs,
             )
             .output("pipe:", format="f32le", acodec="pcm_f32le")
             .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True, quiet=True)
@@ -302,4 +302,4 @@ def resample_audio_ffmpeg(
     except ffmpeg.Error as e:
         error_msg = e.stderr.decode() if e.stderr else str(e)
         logger.error(f"FFmpeg resampling failed: {error_msg}")
-        raise RuntimeError(f"Audio resampling failed: {error_msg}")
+        raise RuntimeError(f"Audio resampling failed: {error_msg}") from e

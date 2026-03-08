@@ -84,21 +84,18 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multi-Backend STT**: Whisper, NVIDIA NeMo Parakeet/Canary, and VibeVoice-ASR — backend auto-detected from the model name
+- **Multiple Models available**: *WhisperX* (all three sizes of the [`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), and [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR) models are supported
+- **Speaker Diarization**: Speaker identification & diarization (subtitling) for all three model families; Whisper and Nemo use PyAnnote for diarization while VibeVoice does it by itself
+- **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [50 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
-- **Model Manager**: Browse models by family, view capabilities, manage downloads/cache, and intentionally disable model slots with **None (Disabled)**
-- **Fully featured GUI**: Electron desktop app for Linux, Windows, and macOS
-- **GPU + CPU Mode**: NVIDIA CUDA acceleration (recommended), or CPU-only mode for any platform including macOS
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only currently)
-- **Speaker Diarization**: PyAnnote-based speaker identification
-- **Static File Transcription**: Transcribe existing audio/video files with multi-file import queue, retry, and progress tracking
-- **Global Keyboard Shortcuts**: System-wide shortcuts with Wayland portal support and paste-at-cursor
+- **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere
-  (utilizing Tailscale)
+  (utilizing Tailscale) or share it on your local network via LAN
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
-  full-text search, and LM Studio integration (chat about your notes with the AI)
-- **System Tray Control**: Quickly start/stop a recording, plus a lot of other controls, available via the system tray.
+  full-text search, and LM Studio integration (chat with the AI about your notes)
+
 
 📌*Half an hour of audio transcribed in under a minute with Whisper (RTX 3060)!*
 
