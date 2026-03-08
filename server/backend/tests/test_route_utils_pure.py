@@ -119,28 +119,28 @@ class TestSanitizeForLog:
 
 
 class TestIsDockerHostGateway:
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", True)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", True)
     def test_docker_bridge_gateway(self):
         assert is_docker_host_gateway("172.17.0.1") is True
 
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", True)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", True)
     def test_docker_desktop_gateway(self):
         assert is_docker_host_gateway("192.168.65.1") is True
 
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", True)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", True)
     def test_non_gateway_ip(self):
         # .2 is not a gateway (must end in .1)
         assert is_docker_host_gateway("172.17.0.2") is False
 
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", False)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", False)
     def test_not_in_docker(self):
         assert is_docker_host_gateway("172.17.0.1") is False
 
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", True)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", True)
     def test_none_host(self):
         assert is_docker_host_gateway(None) is False
 
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", True)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", True)
     def test_ipv6_not_matched(self):
         assert is_docker_host_gateway("::1") is False
 
@@ -152,7 +152,7 @@ class TestIsLocalAuthBypassHost:
     def test_localhost_passes(self):
         assert is_local_auth_bypass_host("127.0.0.1") is True
 
-    @patch("server.api.routes.utils.RUNNING_IN_DOCKER", True)
+    @patch("server.api.routes.utils.RUNNING_IN_CONTAINER", True)
     def test_docker_gateway_passes(self):
         assert is_local_auth_bypass_host("172.17.0.1") is True
 

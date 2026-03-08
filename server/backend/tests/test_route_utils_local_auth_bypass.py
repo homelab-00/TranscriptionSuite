@@ -40,7 +40,7 @@ def _request_with_host(host: str):
 
 def test_websocket_auth_allows_docker_gateway_local_bypass(monkeypatch) -> None:
     monkeypatch.setattr(utils, "TLS_MODE", False)
-    monkeypatch.setattr(utils, "RUNNING_IN_DOCKER", True)
+    monkeypatch.setattr(utils, "RUNNING_IN_CONTAINER", True)
 
     def _unexpected_validate(_token):
         raise AssertionError("Token validation should be skipped for Docker gateway bypass")
@@ -64,7 +64,7 @@ def test_websocket_auth_allows_docker_gateway_local_bypass(monkeypatch) -> None:
 
 def test_websocket_auth_missing_token_returns_clear_message(monkeypatch) -> None:
     monkeypatch.setattr(utils, "TLS_MODE", False)
-    monkeypatch.setattr(utils, "RUNNING_IN_DOCKER", True)
+    monkeypatch.setattr(utils, "RUNNING_IN_CONTAINER", True)
     monkeypatch.setattr(utils, "validate_auth_token", lambda _token: None)
 
     ws = _StubWebSocket("172.18.0.2", {"type": "auth", "data": {"token": ""}})
@@ -85,7 +85,7 @@ def test_websocket_auth_missing_token_returns_clear_message(monkeypatch) -> None
 
 def test_require_admin_allows_docker_gateway_in_local_mode(monkeypatch) -> None:
     monkeypatch.setattr(utils, "TLS_MODE", False)
-    monkeypatch.setattr(utils, "RUNNING_IN_DOCKER", True)
+    monkeypatch.setattr(utils, "RUNNING_IN_CONTAINER", True)
     monkeypatch.setattr(utils, "get_authenticated_token", lambda _request: None)
 
     assert utils.require_admin(_request_with_host("172.18.0.1")) is True
@@ -93,7 +93,7 @@ def test_require_admin_allows_docker_gateway_in_local_mode(monkeypatch) -> None:
 
 def test_require_admin_does_not_bypass_non_gateway_private_ip(monkeypatch) -> None:
     monkeypatch.setattr(utils, "TLS_MODE", False)
-    monkeypatch.setattr(utils, "RUNNING_IN_DOCKER", True)
+    monkeypatch.setattr(utils, "RUNNING_IN_CONTAINER", True)
     monkeypatch.setattr(utils, "get_authenticated_token", lambda _request: None)
 
     assert utils.require_admin(_request_with_host("172.18.0.2")) is False

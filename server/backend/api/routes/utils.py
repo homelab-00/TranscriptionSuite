@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 
 # Check if TLS mode is enabled
 TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
-RUNNING_IN_DOCKER = Path("/.dockerenv").exists()
+RUNNING_IN_CONTAINER = (
+    Path("/.dockerenv").exists()  # Docker
+    or Path("/run/.containerenv").exists()  # Podman
+)
 
-# Common Docker host-gateway subnets seen by Linux Docker and Docker Desktop.
+# Common container host-gateway subnets seen by Linux Docker/Podman and Docker Desktop.
 # We intentionally keep this allowlist narrow instead of treating all RFC1918
 # addresses as local to avoid broadening local-mode admin bypass.
 _DOCKER_HOST_GATEWAY_NETWORKS = (
@@ -58,8 +61,8 @@ def _parse_ip_address(
 
 
 def is_docker_host_gateway(client_host: str | None) -> bool:
-    """Return True for common Docker host-gateway IPs seen from containers."""
-    if not RUNNING_IN_DOCKER:
+    """Return True for common container host-gateway IPs seen from containers."""
+    if not RUNNING_IN_CONTAINER:
         return False
 
     parsed_ip = _parse_ip_address(client_host)

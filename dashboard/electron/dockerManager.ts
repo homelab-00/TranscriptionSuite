@@ -1,14 +1,18 @@
 /**
- * Docker management abstraction for the Electron main process.
+ * Container management abstraction for the Electron main process.
  *
- * Uses Docker CLI via child_process — no Dockerode dependency.
+ * Supports both Docker and Podman — the runtime is auto-detected at startup
+ * via containerRuntime.ts and all CLI commands use the resolved binary name.
+ *
+ * Uses container CLI via child_process — no Dockerode dependency.
  * All methods are async and designed to be called from IPC handlers.
  *
  * Compose file layering:
  *   base:         docker-compose.yml            (service, env, volumes)
  *   linux host:   docker-compose.linux-host.yml  (host networking)
  *   desktop VM:   docker-compose.desktop-vm.yml  (bridge + port mapping, macOS/Windows)
- *   GPU:          docker-compose.gpu.yml         (NVIDIA reservation)
+ *   GPU:          docker-compose.gpu.yml         (NVIDIA reservation, Docker)
+ *                 podman-compose.gpu.yml         (CDI device passthrough, Podman)
  */
 
 import { execFile, execFileSync, spawn, ChildProcess } from 'child_process';
@@ -18,6 +22,15 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import os from 'os';
 import { app } from 'electron';
+import {
+  type ContainerRuntimeKind,
+  getRuntimeBin,
+  getContainerRuntime,
+  getDetectionResult,
+  resetDetection,
+  resolveRootlessSocket,
+  getSocketPaths,
+} from './containerRuntime.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -462,9 +475,13 @@ function resolveTlsCertPaths(): TlsCertPaths {
 // ─── Compose File Selection ─────────────────────────────────────────────────
 
 /**
- * Build the list of compose file args (-f ...) based on platform and runtime profile.
+ * Build the list of compose file args (-f ...) based on platform, runtime profile,
+ * and container runtime (Docker vs Podman).
  */
-function composeFileArgs(runtimeProfile: RuntimeProfile): string[] {
+function composeFileArgs(
+  runtimeProfile: RuntimeProfile,
+  runtimeKind: ContainerRuntimeKind = 'docker',
+): string[] {
   const files: string[] = ['docker-compose.yml'];
 
   // Platform overlay
@@ -475,16 +492,19 @@ function composeFileArgs(runtimeProfile: RuntimeProfile): string[] {
     files.push('docker-compose.desktop-vm.yml');
   }
 
-  // GPU overlay (only for GPU profile)
+  // GPU overlay (only for GPU profile) — Podman uses CDI, Docker uses deploy.resources
   if (runtimeProfile === 'gpu') {
-    files.push('docker-compose.gpu.yml');
+    files.push(runtimeKind === 'podman' ? 'podman-compose.gpu.yml' : 'docker-compose.gpu.yml');
   }
 
-  // Flatten into docker compose args
+  // Flatten into compose args
   return files.flatMap((f) => ['-f', f]);
 }
 
-function buildProcessEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
+function buildProcessEnv(
+  extraEnv?: Record<string, string>,
+  runtimeKind?: ContainerRuntimeKind,
+): NodeJS.ProcessEnv {
   const delimiter = path.delimiter;
   const currentPath = process.env.PATH ?? '';
   const defaultPathEntries =
@@ -495,35 +515,31 @@ function buildProcessEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
     new Set([...currentPath.split(delimiter).filter(Boolean), ...defaultPathEntries]),
   ).join(delimiter);
 
-  let rootlessDockerHost: string | undefined;
-  const explicitDockerHost = process.env.DOCKER_HOST || extraEnv?.DOCKER_HOST;
-  if (!explicitDockerHost && process.platform === 'linux' && typeof process.getuid === 'function') {
-    const systemDockerSocket = '/var/run/docker.sock';
-    const userDockerSocket = `/run/user/${process.getuid()}/docker.sock`;
-    if (fs.existsSync(userDockerSocket)) {
-      let systemSocketAccessible = false;
-      try {
-        fs.accessSync(systemDockerSocket, fs.constants.R_OK | fs.constants.W_OK);
-        systemSocketAccessible = true;
-      } catch {
-        systemSocketAccessible = false;
-      }
+  const socketEnv: Record<string, string> = {};
+  const kind = runtimeKind ?? 'docker';
+  const socketPaths = getSocketPaths(kind);
+  const explicitHost =
+    process.env[socketPaths.envVar] || process.env.DOCKER_HOST || extraEnv?.[socketPaths.envVar];
 
-      if (!systemSocketAccessible) {
-        rootlessDockerHost = `unix://${userDockerSocket}`;
-      }
+  if (!explicitHost && process.platform === 'linux' && typeof process.getuid === 'function') {
+    const resolved = resolveRootlessSocket(kind, process.getuid());
+    if (resolved) {
+      socketEnv[resolved.envVar] = resolved.socketUri;
     }
   }
 
   return {
     ...process.env,
     PATH: mergedPath,
-    ...(rootlessDockerHost ? { DOCKER_HOST: rootlessDockerHost } : {}),
+    ...socketEnv,
     ...extraEnv,
   };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Cached runtime kind for synchronous access after initial detection */
+let detectedRuntimeKind: ContainerRuntimeKind | null = null;
 
 async function exec(
   cmd: string,
@@ -533,57 +549,62 @@ async function exec(
   try {
     const { stdout } = await execFileAsync(cmd, args, {
       cwd: opts?.cwd,
-      env: buildProcessEnv(opts?.env),
+      env: buildProcessEnv(opts?.env, detectedRuntimeKind ?? undefined),
       maxBuffer: 10 * 1024 * 1024, // 10MB
       timeout: 120_000, // 2 minutes
     });
     return stdout.trim();
   } catch (err: any) {
-    const msg = err.stderr?.trim() || err.message || 'Unknown Docker error';
+    const msg = err.stderr?.trim() || err.message || 'Unknown container runtime error';
     throw new Error(msg);
   }
 }
 
+/** Get the resolved runtime binary, caching the kind for buildProcessEnv */
+async function runtimeBin(): Promise<string> {
+  const bin = await getRuntimeBin();
+  const runtime = await getContainerRuntime();
+  detectedRuntimeKind = runtime?.kind ?? null;
+  return bin;
+}
+
 /**
- * Detect Docker availability using a three-stage fallback:
- *   1. `docker version --format` — validates daemon connectivity (strongest)
- *   2. `docker info`             — alternative daemon check
- *   3. `docker --version`        — binary-only presence check (weakest)
+ * Detect container runtime (Docker or Podman) availability.
+ *
+ * Delegates to containerRuntime.ts for auto-detection, which probes
+ * Docker first, then Podman, using daemon connectivity checks.
  *
  * All stages log diagnostics to the main-process console for debugging.
  */
 async function dockerAvailable(): Promise<boolean> {
-  // Stage 1: validate full daemon connectivity (matches original working code)
-  try {
-    const ver = await exec('docker', ['version', '--format', '{{.Server.Version}}']);
-    console.log('[DockerManager] Docker daemon detected, server version:', ver);
+  const result = await getDetectionResult();
+
+  if (result.runtime) {
+    detectedRuntimeKind = result.runtime.kind;
+    console.log(
+      `[DockerManager] ${result.runtime.displayName} detected (binary: ${result.runtime.bin})`,
+    );
     return true;
-  } catch (err: any) {
-    console.warn('[DockerManager] docker version failed:', err.message);
   }
 
-  // Stage 2: try docker info as alternative daemon check
-  try {
-    await exec('docker', ['info', '--format', '{{.ServerVersion}}']);
-    console.log('[DockerManager] Docker detected via docker info');
-    return true;
-  } catch (err: any) {
-    console.warn('[DockerManager] docker info failed:', err.message);
-  }
-
-  // Stage 3: binary-only check — daemon is not running, so Docker operations
-  // will fail.  Return false to avoid polling spam (listImages every 10 s).
-  // Users can re-check via the "Retry Detection" button.
-  try {
-    const clientVer = await exec('docker', ['--version']);
-    console.log('[DockerManager] Docker binary found but daemon is not running:', clientVer);
-    return false;
-  } catch (err: any) {
-    console.error('[DockerManager] Docker not found at all:', err.message);
-    console.error('[DockerManager] Verify Docker is installed and available on PATH.');
+  if (result.binaryFoundButNotRunning) {
+    console.log(
+      `[DockerManager] ${result.binaryFound} binary found but daemon/service is not running`,
+    );
+  } else {
+    console.error('[DockerManager] No container runtime found (Docker or Podman).');
+    console.error('[DockerManager] Verify Docker or Podman is installed and available on PATH.');
   }
 
   return false;
+}
+
+/**
+ * Reset cached runtime detection. Call when the user clicks "Retry Detection".
+ */
+function retryDetection(): void {
+  resetDetection();
+  detectedRuntimeKind = null;
 }
 
 // ─── Image Operations ───────────────────────────────────────────────────────
@@ -611,7 +632,7 @@ async function listImages(): Promise<DockerImage[]> {
 
   // Strategy 1: JSON format with filter (most reliable on modern Docker)
   try {
-    const output = await exec('docker', [
+    const output = await exec(await runtimeBin(), [
       'images',
       '--format',
       'json',
@@ -664,7 +685,7 @@ async function listImages(): Promise<DockerImage[]> {
 
   // Strategy 2: Go template format with filter (original working approach)
   try {
-    const legacyOutput = await exec('docker', [
+    const legacyOutput = await exec(await runtimeBin(), [
       'images',
       '--format',
       '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
@@ -680,7 +701,7 @@ async function listImages(): Promise<DockerImage[]> {
 
   // Strategy 3: No filter, manual filtering (broadest compatibility)
   try {
-    const rawOutput = await exec('docker', [
+    const rawOutput = await exec(await runtimeBin(), [
       'images',
       '--format',
       '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
@@ -698,13 +719,14 @@ async function listImages(): Promise<DockerImage[]> {
  * Pull an image tag from the registry.
  * Uses spawn instead of exec so the process can be cancelled.
  */
-function pullImage(tag: string): Promise<string> {
+async function pullImage(tag: string): Promise<string> {
+  const bin = await runtimeBin();
   return new Promise((resolve, reject) => {
     cancelPull(); // kill any existing pull first
 
-    const proc = spawn('docker', ['pull', `${IMAGE_REPO}:${tag}`], {
+    const proc = spawn(bin, ['pull', `${IMAGE_REPO}:${tag}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: buildProcessEnv(),
+      env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
     });
     pullProcess = proc;
 
@@ -758,7 +780,7 @@ function isPulling(): boolean {
  * Remove a local image by tag.
  */
 async function removeImage(tag: string): Promise<string> {
-  return exec('docker', ['rmi', `${IMAGE_REPO}:${tag}`]);
+  return exec(await runtimeBin(), ['rmi', `${IMAGE_REPO}:${tag}`]);
 }
 
 // ─── Container Operations ───────────────────────────────────────────────────
@@ -768,7 +790,7 @@ async function removeImage(tag: string): Promise<string> {
  */
 async function getContainerStatus(): Promise<ContainerStatus> {
   try {
-    const output = await exec('docker', [
+    const output = await exec(await runtimeBin(), [
       'inspect',
       '--format',
       '{{.State.Status}}\t{{.State.Health.Status}}\t{{.State.StartedAt}}\t{{.Config.ExposedPorts}}',
@@ -908,17 +930,21 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   // Rotate the persistent server log — adds a session marker and trims old sessions.
   rotateServerLog();
 
-  const fileArgs = composeFileArgs(runtimeProfile);
+  const fileArgs = composeFileArgs(runtimeProfile, detectedRuntimeKind ?? undefined);
 
   // --no-build: the build section is for manual dev builds only; the packaged
   //   app copies compose files to a writable dir where the relative build
   //   context (../..) resolves to the wrong location.
   // --pull never: image pulling is handled explicitly by pullImage(); letting
   //   compose pull during "up" can fail on private registries without auth.
-  return exec('docker', ['compose', ...fileArgs, 'up', '-d', '--no-build', '--pull', 'never'], {
-    cwd: getComposeDir(),
-    env: composeEnv,
-  });
+  return exec(
+    await runtimeBin(),
+    ['compose', ...fileArgs, 'up', '-d', '--no-build', '--pull', 'never'],
+    {
+      cwd: getComposeDir(),
+      env: composeEnv,
+    },
+  );
 }
 
 /**
@@ -926,7 +952,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
  */
 async function stopContainer(): Promise<string> {
   try {
-    return await exec('docker', ['compose', 'stop'], { cwd: getComposeDir() });
+    return await exec(await runtimeBin(), ['compose', 'stop'], { cwd: getComposeDir() });
   } catch (composeErr: any) {
     console.warn(
       '[DockerManager] docker compose stop failed; falling back to docker stop:',
@@ -949,7 +975,7 @@ async function stopContainer(): Promise<string> {
 async function forceStopContainer(timeoutSeconds = 3): Promise<string> {
   const seconds = Math.max(0, Math.floor(timeoutSeconds));
   try {
-    return await exec('docker', ['stop', '--time', String(seconds), CONTAINER_NAME]);
+    return await exec(await runtimeBin(), ['stop', '--time', String(seconds), CONTAINER_NAME]);
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     // Treat "already stopped / missing" as success from a shutdown perspective.
@@ -964,7 +990,7 @@ async function forceStopContainer(timeoutSeconds = 3): Promise<string> {
  * Remove the container (docker compose down).
  */
 async function removeContainer(): Promise<string> {
-  return exec('docker', ['compose', 'down'], { cwd: getComposeDir() });
+  return exec(await runtimeBin(), ['compose', 'down'], { cwd: getComposeDir() });
 }
 
 // ─── Volume Operations ──────────────────────────────────────────────────────
@@ -985,7 +1011,7 @@ async function getVolumes(): Promise<VolumeInfo[]> {
 
   for (const name of names) {
     try {
-      const output = await exec('docker', [
+      const output = await exec(await runtimeBin(), [
         'volume',
         'inspect',
         '--format',
@@ -1036,7 +1062,7 @@ async function getDockerReportedVolumeSizes(): Promise<Record<string, string>> {
   };
 
   try {
-    const rowsOutput = await exec('docker', [
+    const rowsOutput = await exec(await runtimeBin(), [
       'system',
       'df',
       '-v',
@@ -1063,7 +1089,13 @@ async function getDockerReportedVolumeSizes(): Promise<Record<string, string>> {
   }
 
   try {
-    const raw = await exec('docker', ['system', 'df', '-v', '--format', '{{json .Volumes}}']);
+    const raw = await exec(await runtimeBin(), [
+      'system',
+      'df',
+      '-v',
+      '--format',
+      '{{json .Volumes}}',
+    ]);
     const rows = JSON.parse(raw) as DockerDfVolumeRow[];
     addRows(rows);
   } catch {
@@ -1075,7 +1107,7 @@ async function getDockerReportedVolumeSizes(): Promise<Record<string, string>> {
   }
 
   try {
-    const raw = await exec('docker', ['system', 'df', '-v']);
+    const raw = await exec(await runtimeBin(), ['system', 'df', '-v']);
     const lines = raw.split(/\r?\n/);
     const sectionStart = lines.findIndex((line) => /local volumes space usage/i.test(line));
     if (sectionStart === -1) {
@@ -1115,7 +1147,7 @@ async function getDockerReportedVolumeSizes(): Promise<Record<string, string>> {
  * Remove a Docker volume by name. Container must be stopped first.
  */
 async function removeVolume(name: string): Promise<string> {
-  return exec('docker', ['volume', 'rm', name]);
+  return exec(await runtimeBin(), ['volume', 'rm', name]);
 }
 
 /**
@@ -1149,7 +1181,7 @@ function readComposeEnvValue(key: string): string | null {
  */
 async function volumeExists(name: string): Promise<boolean> {
   try {
-    await exec('docker', ['volume', 'inspect', '--format', '{{.Name}}', name]);
+    await exec(await runtimeBin(), ['volume', 'inspect', '--format', '{{.Name}}', name]);
     return true;
   } catch {
     return false;
@@ -1185,7 +1217,7 @@ function parseOptionalDependencyBootstrapFeature(
  */
 async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependencyBootstrapStatus | null> {
   try {
-    const mountpoint = await exec('docker', [
+    const mountpoint = await exec(await runtimeBin(), [
       'volume',
       'inspect',
       '--format',
@@ -1326,24 +1358,21 @@ function dispatchLogLine(line: string): void {
 }
 
 /**
- * Start the persistent background docker log stream if not already running.
+ * Start the persistent background container log stream if not already running.
  * Idempotent — safe to call multiple times or when already streaming.
  * Disk writes happen regardless of whether any UI subscriber is attached.
  */
-function startBackgroundLogStream(): void {
+async function startBackgroundLogStream(): Promise<void> {
   if (logProcess) return;
 
+  const bin = await runtimeBin();
   let stdoutRemainder = '';
   let stderrRemainder = '';
 
-  logProcess = spawn(
-    'docker',
-    ['logs', '--follow', '--timestamps', '--tail', 'all', CONTAINER_NAME],
-    {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: buildProcessEnv(),
-    },
-  );
+  logProcess = spawn(bin, ['logs', '--follow', '--timestamps', '--tail', 'all', CONTAINER_NAME], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
+  });
 
   const handle = (data: Buffer, stream: 'stdout' | 'stderr') => {
     const previousRemainder = stream === 'stdout' ? stdoutRemainder : stderrRemainder;
@@ -1384,7 +1413,7 @@ function startBackgroundLogStream(): void {
  * gets historical lines before live ones), then adds it as a live subscriber
  * and ensures the background process is running.
  */
-function subscribeToLogStream(callback: (line: string) => void): void {
+async function subscribeToLogStream(callback: (line: string) => void): Promise<void> {
   // Replay history before registering so the caller sees past lines first.
   for (const line of logLineBuffer) {
     callback(line);
@@ -1420,7 +1449,7 @@ function stopBackgroundLogStream(): void {
  */
 async function getLogs(tail?: number): Promise<string[]> {
   try {
-    const output = await exec('docker', [
+    const output = await exec(await runtimeBin(), [
       'logs',
       '--timestamps',
       '--tail',
@@ -1450,18 +1479,24 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
     console.warn('[DockerManager] nvidia-smi not found or failed:', err.message);
   }
   if (gpu) {
-    // Check 1: Legacy nvidia runtime registered in Docker
-    try {
-      const info = await exec('docker', ['info', '--format', '{{json .Runtimes}}']);
-      if (info.includes('nvidia')) {
-        toolkit = true;
-        console.log('[DockerManager] NVIDIA container toolkit: legacy runtime detected');
+    const isPodman = detectedRuntimeKind === 'podman';
+
+    // Check 1: Legacy nvidia runtime registered in Docker (not applicable to Podman)
+    if (!isPodman) {
+      try {
+        const bin = await runtimeBin();
+        const info = await exec(bin, ['info', '--format', '{{json .Runtimes}}']);
+        if (info.includes('nvidia')) {
+          toolkit = true;
+          console.log('[DockerManager] NVIDIA container toolkit: legacy runtime detected');
+        }
+      } catch (err: any) {
+        console.warn('[DockerManager] runtime info for toolkit check failed:', err.message);
       }
-    } catch (err: any) {
-      console.warn('[DockerManager] docker info for toolkit check failed:', err.message);
     }
 
     // Check 2: Modern CDI (Container Device Interface) — nvidia-container-toolkit 1.14+
+    // This is the only method supported by Podman.
     if (!toolkit) {
       try {
         const cdiOutput = await exec('nvidia-ctk', ['cdi', 'list']);
@@ -1475,9 +1510,10 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
     }
 
     if (!toolkit) {
-      console.warn(
-        '[DockerManager] NVIDIA container toolkit: not found (install nvidia-container-toolkit and configure CDI)',
-      );
+      const hint = isPodman
+        ? 'install nvidia-container-toolkit and run: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
+        : 'install nvidia-container-toolkit and configure CDI';
+      console.warn(`[DockerManager] NVIDIA container toolkit: not found (${hint})`);
     }
   }
   return { gpu, toolkit };
@@ -1508,7 +1544,7 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
   }
 
   try {
-    const output = await exec('docker', ['exec', CONTAINER_NAME, 'ls', '/models/hub/']);
+    const output = await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'ls', '/models/hub/']);
 
     const entries = new Set(
       output
@@ -1528,7 +1564,7 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
 
       let size: string | undefined;
       try {
-        const duOutput = await exec('docker', [
+        const duOutput = await exec(await runtimeBin(), [
           'exec',
           CONTAINER_NAME,
           'du',
@@ -1559,7 +1595,7 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
  */
 async function removeModelCache(modelId: string): Promise<void> {
   const cacheName = `models--${modelId.trim().replace(/\//g, '--')}`;
-  await exec('docker', ['exec', CONTAINER_NAME, 'rm', '-rf', `/models/hub/${cacheName}`]);
+  await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'rm', '-rf', `/models/hub/${cacheName}`]);
 }
 
 /**
@@ -1579,8 +1615,9 @@ async function downloadModelToCache(modelId: string): Promise<void> {
   // Use the runtime venv's Python, which has huggingface_hub installed.
   const pyCmd =
     "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
+  const bin = await runtimeBin();
   await execFileAsync(
-    'docker',
+    bin,
     ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, trimmedModelId],
     {
       maxBuffer: 10 * 1024 * 1024,
@@ -1591,8 +1628,16 @@ async function downloadModelToCache(modelId: string): Promise<void> {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+/** Get the detected runtime kind for UI display (e.g. 'Docker' vs 'Podman'). */
+async function getRuntimeKind(): Promise<string | null> {
+  const runtime = await getContainerRuntime();
+  return runtime?.displayName ?? null;
+}
+
 export const dockerManager = {
   dockerAvailable,
+  retryDetection,
+  getRuntimeKind,
   checkGpu,
   listImages,
   pullImage,

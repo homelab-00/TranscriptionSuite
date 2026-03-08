@@ -110,6 +110,10 @@
         "to": "docker/docker-compose.gpu.yml"
       },
       {
+        "from": "../server/docker/podman-compose.gpu.yml",
+        "to": "docker/podman-compose.gpu.yml"
+      },
+      {
         "from": "../server/config.yaml",
         "to": "config.yaml"
       }

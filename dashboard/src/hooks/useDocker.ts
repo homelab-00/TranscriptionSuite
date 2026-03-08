@@ -193,9 +193,9 @@ export function useDocker(): UseDockerReturn {
   }, []);
 
   /**
-   * Re-run Docker detection from scratch.
-   * Useful when Docker was started after the app launched, or detection failed due
-   * to a transient issue (e.g. daemon not ready yet).
+   * Re-run container runtime detection from scratch (resets Docker/Podman cache).
+   * Useful when the runtime was started after the app launched, or detection failed
+   * due to a transient issue (e.g. daemon not ready yet).
    */
   const retryDetection = useCallback(async () => {
     const docker = api();
@@ -203,7 +203,7 @@ export function useDocker(): UseDockerReturn {
     setLoading(true);
     setOperationError(null);
     try {
-      const ok = await docker.available();
+      const ok = await docker.retryDetection();
       setAvailable(ok);
       if (ok) {
         const [imgs, status, vols] = await Promise.all([

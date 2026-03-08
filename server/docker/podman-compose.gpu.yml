@@ -1,0 +1,8 @@
+# Podman GPU overlay — uses CDI (Container Device Interface) for NVIDIA GPU access.
+# Requires nvidia-container-toolkit configured for CDI: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# Usage: podman compose -f docker-compose.yml -f docker-compose.linux-host.yml -f podman-compose.gpu.yml up -d
+
+services:
+  transcriptionsuite:
+    devices:
+      - nvidia.com/gpu=all

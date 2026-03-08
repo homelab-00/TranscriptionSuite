@@ -766,6 +766,15 @@ ipcMain.handle('docker:available', async () => {
   return dockerManager.dockerAvailable();
 });
 
+ipcMain.handle('docker:retryDetection', async () => {
+  dockerManager.retryDetection();
+  return dockerManager.dockerAvailable();
+});
+
+ipcMain.handle('docker:getRuntimeKind', async () => {
+  return dockerManager.getRuntimeKind();
+});
+
 ipcMain.handle('docker:checkGpu', async () => {
   return dockerManager.checkGpu();
 });

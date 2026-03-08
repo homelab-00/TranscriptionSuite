@@ -79,6 +79,8 @@ export interface ElectronAPI {
   };
   docker: {
     available: () => Promise<boolean>;
+    retryDetection: () => Promise<boolean>;
+    getRuntimeKind: () => Promise<string | null>;
     checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean }>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
@@ -224,6 +226,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   docker: {
     available: () => ipcRenderer.invoke('docker:available'),
+    retryDetection: () => ipcRenderer.invoke('docker:retryDetection'),
+    getRuntimeKind: () => ipcRenderer.invoke('docker:getRuntimeKind') as Promise<string | null>,
     checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
     listImages: () => ipcRenderer.invoke('docker:listImages'),
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
