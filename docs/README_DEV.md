@@ -982,10 +982,17 @@ server/backend/
 │   ├── main.py                   # App factory, lifespan, routing
 │   └── routes/                   # API endpoint modules
 ├── core/
+│   ├── audio_utils.py            # Audio conversion, resampling, VAD helpers, GPU cache management
+│   ├── client_detector.py        # Client/host detection utilities
 │   ├── diarization_engine.py     # PyAnnote wrapper
+│   ├── ffmpeg_utils.py           # FFmpeg-based audio loading and resampling (soxr / swr_linear)
 │   ├── model_manager.py          # Model lifecycle, job tracking, feature availability + disabled-slot state
+│   ├── parallel_diarize.py       # Parallel transcription + diarisation orchestration
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
 │   ├── live_engine.py            # Live Mode engine (Whisper-only in v1)
+│   ├── speaker_merge.py          # Speaker assignment via overlap, fallback chain, micro-turn smoothing
+│   ├── subtitle_export.py        # SRT/ASS subtitle rendering
+│   ├── token_store.py            # Token hashing, generation, validation, expiry, migration
 │   └── stt/                      # Speech-to-text subsystem
 │       ├── capabilities.py       # Translation/capability validation per backend
 │       ├── engine.py             # AudioToTextRecorder with VAD
@@ -1024,6 +1031,8 @@ All modules use `get_config()` from `server.config`. Configuration is loaded wit
 4. `server/config.yaml` (native development)
 
 ### 8.4 Testing
+
+See [`docs/testing/TESTING.md`](testing/TESTING.md) for the full developer guide (directory layout, how to write tests, fixture reference, future upgrade recommendations).
 
 ```bash
 ./build/.venv/bin/pytest server/backend/tests

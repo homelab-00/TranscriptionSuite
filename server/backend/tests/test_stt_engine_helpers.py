@@ -59,12 +59,10 @@ def _ensure_engine_importable() -> None:
         factory_stub.detect_backend_type = MagicMock(return_value="whisper")  # type: ignore[attr-defined]
         sys.modules[factory_mod_name] = factory_stub
 
-    # server.core.stt.capabilities
-    cap_mod_name = "server.core.stt.capabilities"
-    if cap_mod_name not in sys.modules:
-        cap_stub = types.ModuleType(cap_mod_name)
-        cap_stub.validate_translation_request = MagicMock(return_value=None)  # type: ignore[attr-defined]
-        sys.modules[cap_mod_name] = cap_stub
+    # server.core.stt.capabilities — the real module has no heavy deps
+    # (only imports ``re``), so we let it import naturally instead of stubbing.
+    # This avoids poisoning sys.modules for other test files that test the
+    # real capabilities functions.
 
     # server.core.stt.vad
     vad_mod_name = "server.core.stt.vad"

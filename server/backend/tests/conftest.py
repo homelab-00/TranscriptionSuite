@@ -61,6 +61,21 @@ _ensure_server_package_alias()
 # ---------------------------------------------------------------------------
 
 
+class _InferenceModeStub:
+    """Minimal stand-in for ``torch.inference_mode()`` context manager."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __call__(self, func=None):
+        if func is not None:
+            return func
+        return self
+
+
 @pytest.fixture(scope="session")
 def torch_stub() -> types.ModuleType:
     """Install a minimal ``torch`` stub into ``sys.modules``.
@@ -70,23 +85,34 @@ def torch_stub() -> types.ModuleType:
 
     Returns the stub module so tests can inspect or extend it.
     """
-    if "torch" in sys.modules:
-        return sys.modules["torch"]  # type: ignore[return-value]
+    # If another test file installed an early torch stub at collection time,
+    # augment it with any missing attributes rather than short-circuiting.
+    stub = sys.modules.get("torch")  # type: ignore[assignment]
+    if stub is None:
+        stub = types.ModuleType("torch")
+        sys.modules["torch"] = stub
 
-    stub = types.ModuleType("torch")
-    stub.Tensor = type("Tensor", (), {})  # type: ignore[attr-defined]
-    stub.float16 = "float16"  # type: ignore[attr-defined]
-    stub.float32 = "float32"  # type: ignore[attr-defined]
-    stub.bfloat16 = "bfloat16"  # type: ignore[attr-defined]
-    stub.dtype = object  # type: ignore[attr-defined]
-    stub.device = lambda value: value  # type: ignore[attr-defined]
-    stub.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
-        is_available=lambda: False,
-        is_bf16_supported=lambda: False,
-        empty_cache=lambda: None,
-        synchronize=lambda: None,
-    )
-    sys.modules["torch"] = stub
+    if not hasattr(stub, "Tensor"):
+        stub.Tensor = type("Tensor", (), {})  # type: ignore[attr-defined]
+    if not hasattr(stub, "float16"):
+        stub.float16 = "float16"  # type: ignore[attr-defined]
+    if not hasattr(stub, "float32"):
+        stub.float32 = "float32"  # type: ignore[attr-defined]
+    if not hasattr(stub, "bfloat16"):
+        stub.bfloat16 = "bfloat16"  # type: ignore[attr-defined]
+    if not hasattr(stub, "dtype"):
+        stub.dtype = object  # type: ignore[attr-defined]
+    if not hasattr(stub, "device"):
+        stub.device = lambda value: value  # type: ignore[attr-defined]
+    if not hasattr(stub, "cuda"):
+        stub.cuda = types.SimpleNamespace(  # type: ignore[attr-defined]
+            is_available=lambda: False,
+            is_bf16_supported=lambda: False,
+            empty_cache=lambda: None,
+            synchronize=lambda: None,
+        )
+    if not hasattr(stub, "inference_mode"):
+        stub.inference_mode = _InferenceModeStub  # type: ignore[attr-defined]
     return stub
 
 
