@@ -79,7 +79,7 @@ Server --> UI : {recording_id, segments}
 
 User -> UI : Toggle "Live Mode"
 UI -> WS : Open /ws/live
-WS -> Server : Auth handshake
+WS -> Server : Auth handshake (token)
 
 note over Server, MM
   Model Swap Sequence:
