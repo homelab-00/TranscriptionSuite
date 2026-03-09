@@ -88,7 +88,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({ isOpen, onClose 
   const handleSubmit = () => {
     const title = encodeURIComponent('Bug Report');
     const sysInfo = `**Version:** ${appVersion}\n**Platform:** ${platform}`;
-    const body = `## Description\n\n${description || '_No description provided._'}\n\n## System Info\n\n${sysInfo}\n\n---\n\n_Please attach your log files to this issue (paths shown in the app after submitting)._`;
+    const body = `## Description\n\n${description || '_No description provided._'}\n\n## System Info\n\n${sysInfo}\n\n---\n\n_Please attach your log files to this issue before submitting (paths shown in the app)._`;
 
     const url = `${REPO_ISSUES_URL}?title=${title}&body=${encodeURIComponent(body)}`;
     void openExternal(url);

@@ -60,7 +60,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // ── Faster Whisper ──────────────────────────────────────────────────────────────
   {
     id: 'Systran/faster-whisper-large-v3',
-    displayName: 'Faster Whisper Large V3',
+    displayName: 'Faster Whisper Large v3',
     family: 'whisper',
     description: 'State-of-the-art multilingual ASR. Best accuracy, higher VRAM usage.',
     parameterCount: '1.5B',
@@ -70,7 +70,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'Systran/faster-distil-whisper-large-v3',
-    displayName: 'Distil Whisper Large V3',
+    displayName: 'Faster Distil Whisper Large v3',
     family: 'whisper',
     description: 'Distilled large-v3. ~6x faster with minimal accuracy loss.',
     parameterCount: '756M',
@@ -80,7 +80,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'deepdml/faster-whisper-large-v3-turbo-ct2',
-    displayName: 'Faster Whisper Large V3 Turbo',
+    displayName: 'Faster Whisper Large v3 Turbo',
     family: 'whisper',
     description: 'Turbo variant of large-v3. Fastest large model, no translation support.',
     parameterCount: '809M',
@@ -92,7 +92,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     id: 'Systran/faster-whisper-medium',
     displayName: 'Faster Whisper Medium',
     family: 'whisper',
-    description: 'Good balance of accuracy and speed. Lower VRAM than Large V3.',
+    description: 'Good balance of accuracy and speed. Lower VRAM than Large v3.',
     parameterCount: '769M',
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-medium',
     capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
@@ -110,7 +110,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'Systran/faster-distil-whisper-medium.en',
-    displayName: 'Distil Whisper Medium (English)',
+    displayName: 'Faster Distil Whisper Medium (English)',
     family: 'whisper',
     description: 'Distilled English-only medium. Fast with good English accuracy.',
     parameterCount: '394M',
@@ -140,7 +140,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'Systran/faster-distil-whisper-small.en',
-    displayName: 'Distil Whisper Small (English)',
+    displayName: 'Faster Distil Whisper Small (English)',
     family: 'whisper',
     description: 'Distilled English-only small. Smallest and fastest model available.',
     parameterCount: '166M',

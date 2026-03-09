@@ -14,9 +14,9 @@ def test_supports_translation_for_multilingual_model() -> None:
 @pytest.mark.parametrize(
     "model_name",
     [
-        "openai/whisper-small.en",
-        "openai/whisper-large-v3-turbo",
-        "distil-whisper/distil-large-v3",
+        "Systran/faster-whisper-small.en",
+        "Systran/faster-whisper-medium.en",
+        "deepdml/faster-whisper-large-v3-turbo-ct2",
         "microsoft/VibeVoice-ASR",
         "scerz/VibeVoice-ASR-4bit",
     ],
@@ -37,7 +37,7 @@ def test_validate_translation_rejects_non_english_target() -> None:
 def test_validate_translation_rejects_unsupported_model() -> None:
     with pytest.raises(ValueError, match="does not support translation"):
         validate_translation_request(
-            model_name="openai/whisper-small.en",
+            model_name="Systran/faster-whisper-small.en",
             task="translate",
             translation_target_language="en",
         )
@@ -46,7 +46,7 @@ def test_validate_translation_rejects_unsupported_model() -> None:
 def test_non_translate_task_is_noop_validation() -> None:
     assert (
         validate_translation_request(
-            model_name="openai/whisper-small.en",
+            model_name="Systran/faster-whisper-small.en",
             task="transcribe",
             translation_target_language="el",
         )
