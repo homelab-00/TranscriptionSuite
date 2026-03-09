@@ -155,9 +155,9 @@ async def create_transcription(
         return _openai_error(400, str(exc))
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception("OpenAI transcription endpoint error")
-        return _openai_error(500, f"Internal error: {exc}", error_type="server_error")
+        return _openai_error(500, "Internal server error", error_type="server_error")
     finally:
         model_manager.job_tracker.end_job(job_id)
         if tmp_path:
@@ -238,9 +238,9 @@ async def create_translation(
         return _openai_error(400, str(exc))
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         logger.exception("OpenAI translation endpoint error")
-        return _openai_error(500, f"Internal error: {exc}", error_type="server_error")
+        return _openai_error(500, "Internal server error", error_type="server_error")
     finally:
         model_manager.job_tracker.end_job(job_id)
         if tmp_path:
