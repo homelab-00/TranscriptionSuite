@@ -50,6 +50,7 @@ from server.api.routes import (  # noqa: E402
     live,
     llm,
     notebook,
+    openai_audio,
     search,
     transcription,
     websocket,
@@ -298,7 +299,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         # For API requests, return 401
-        if path.startswith("/api/") or path == "/ws":
+        if path.startswith("/api/") or path.startswith("/v1/") or path == "/ws":
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Authentication required"},
@@ -504,6 +505,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+    app.include_router(openai_audio.router, prefix="/v1/audio", tags=["OpenAI Compatible"])
     app.include_router(websocket.router, tags=["WebSocket"])
     app.include_router(live.router, tags=["Live Mode"])
 

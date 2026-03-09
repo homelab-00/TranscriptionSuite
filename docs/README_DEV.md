@@ -40,9 +40,18 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.6 Docker Image Selection](#66-docker-image-selection)
   - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
 - [7. API Reference](#7-api-reference)
-  - [7.1 API Endpoints](#71-api-endpoints)
-  - [7.2 WebSocket Protocol](#72-websocket-protocol)
-  - [7.3 Live Mode WebSocket Protocol](#73-live-mode-websocket-protocol)
+  - [7.1 API Endpoints — Quick Reference](#71-api-endpoints--quick-reference)
+  - [7.2 Endpoint Details](#72-endpoint-details)
+    - [Health & Status](#health--status)
+    - [Authentication](#authentication)
+    - [Transcription](#transcription)
+    - [Audio Notebook](#audio-notebook)
+    - [Search](#search)
+    - [LLM Integration](#llm-integration)
+    - [Admin](#admin)
+  - [7.3 WebSocket Protocol](#73-websocket-protocol)
+  - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
+  - [7.5 OpenAI-Compatible Endpoints](#75-openai-compatible-endpoints)
 - [8. Backend Development](#8-backend-development)
   - [8.1 Backend Structure](#81-backend-structure)
   - [8.2 Running the Server Locally](#82-running-the-server-locally)
@@ -905,38 +914,381 @@ Use runtime reset only for recovery/maintenance.
 
 ## 7. API Reference
 
-### 7.1 API Endpoints
+> **Authentication note:** By default (local mode) all routes except `/health`, `/ready`, and `/api/auth/login` are open to localhost clients. In TLS mode every request must include `Authorization: Bearer <token>`, a valid `auth_token` cookie, or `?token=` query parameter. Admin-only endpoints additionally require the token to have `is_admin=true`.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check (no auth) |
-| `/api/status` | GET | Server status, GPU info |
-| `/api/auth/login` | POST | Authenticate with token |
-| `/api/admin/models/load` | POST | Load transcription models (admin only) |
-| `/api/admin/models/unload` | POST | Unload models to free GPU memory (admin only) |
-| `/api/transcribe/audio` | POST | Transcribe uploaded audio (`translation_enabled`, `translation_target_language` supported) |
-| `/api/transcribe/cancel` | POST | Cancel running transcription |
-| `/ws` | WebSocket | Real-time audio streaming |
-| `/ws/live` | WebSocket | Live Mode continuous transcription |
-| `/api/notebook/recordings` | GET | List all recordings |
-| `/api/notebook/recordings/{id}` | GET/DELETE | Get or delete recording |
-| `/api/notebook/recordings/{id}/export` | GET | Export recording (`txt` for pure notes, `srt`/`ass` for timestamp-capable notes) |
-| `/api/notebook/transcribe/upload` | POST | Upload and transcribe with diarization (`translation_enabled`, `translation_target_language` supported) |
-| `/api/notebook/calendar` | GET | Get recordings by date range |
-| `/api/notebook/recordings/{id}/title` | PATCH | Rename a recording |
-| `/api/notebook/recordings/{id}/date` | PATCH | Change recording date |
-| `/api/notebook/recordings/{id}/summary` | PATCH | Update or clear recording summary |
-| `/backups` | GET | List available database backups |
-| `/backup` | POST | Create new database backup |
-| `/restore` | POST | Restore database from backup |
-| `/api/search` | GET | Full-text search |
-| `/api/llm/chat` | POST | LLM chat integration |
+### 7.1 API Endpoints — Quick Reference
 
-**LM Studio chat context:** When a new chat is started for a recording, the server injects the
-recording transcript as context using the **pure transcript** (no timestamps). Speaker tags are
-included **only** when diarization is enabled.
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/health` | GET | None | Liveness probe |
+| `/ready` | GET | None | Readiness probe (503 until model loaded) |
+| `/api/status` | GET | User | Server status, GPU info, model state |
+| `/api/auth/login` | POST | None | Validate a token, returns user info |
+| `/api/auth/tokens` | GET | Admin | List all tokens |
+| `/api/auth/tokens` | POST | Admin | Create a new token |
+| `/api/auth/tokens/{id}` | DELETE | Admin | Revoke a token |
+| `/api/transcribe/audio` | POST | User | Transcribe uploaded audio (full pipeline) |
+| `/api/transcribe/quick` | POST | User | Transcribe uploaded audio (fast, no word timestamps or diarization) |
+| `/api/transcribe/cancel` | POST | User | Cancel the running transcription |
+| `/api/transcribe/languages` | GET | User | List languages supported by the active model |
+| `/api/notebook/recordings` | GET | User | List recordings (optional date filter) |
+| `/api/notebook/recordings/{id}` | GET | User | Get recording with full segments and words |
+| `/api/notebook/recordings/{id}` | DELETE | User | Delete recording and audio file |
+| `/api/notebook/recordings/{id}/audio` | GET | User | Stream audio file (Range supported) |
+| `/api/notebook/recordings/{id}/transcription` | GET | User | Get transcription segments/words only |
+| `/api/notebook/recordings/{id}/export` | GET | User | Export transcription (`txt`, `srt`, `ass`) |
+| `/api/notebook/recordings/{id}/title` | PATCH | User | Rename a recording |
+| `/api/notebook/recordings/{id}/date` | PATCH | User | Change recording date |
+| `/api/notebook/recordings/{id}/summary` | PATCH | User | Update or clear summary |
+| `/api/notebook/transcribe/upload` | POST | User | Upload + transcribe in background (202 Accepted) |
+| `/api/notebook/calendar` | GET | User | Recordings grouped by day for a month |
+| `/api/notebook/timeslot` | GET | User | Time-slot availability info |
+| `/api/notebook/backups` | GET | User | List database backups |
+| `/api/notebook/backup` | POST | User | Create a database backup |
+| `/api/notebook/restore` | POST | User | Restore database from a backup |
+| `/api/search` | GET | User | Full-text search across recordings |
+| `/api/search/words` | GET | User | Full-text search in word table |
+| `/api/search/recordings` | GET | User | Full-text search in recording metadata |
+| `/api/llm/status` | GET | User | LM Studio connection status |
+| `/api/llm/process` | POST | User | Run LLM prompt (blocking) |
+| `/api/llm/process/stream` | POST | User | Run LLM prompt (streaming SSE) |
+| `/api/llm/summarize/{id}` | POST | User | Summarize a recording (blocking) |
+| `/api/llm/summarize/{id}/stream` | POST | User | Summarize a recording (streaming SSE) |
+| `/api/llm/models/available` | GET | User | List models available in LM Studio |
+| `/api/llm/server/start` | POST | User | Start LM Studio server |
+| `/api/llm/server/stop` | POST | User | Stop LM Studio server |
+| `/api/llm/model/load` | POST | User | Load a model in LM Studio |
+| `/api/llm/model/unload` | POST | User | Unload the active LM Studio model |
+| `/api/admin/status` | GET | Admin | Detailed server + model + config status |
+| `/api/admin/config/full` | GET | Admin | Full parsed config tree for the settings editor |
+| `/api/admin/config` | PATCH | Admin | Update config.yaml values in-place |
+| `/api/admin/diarization` | PATCH | Admin | Toggle parallel diarization |
+| `/api/admin/models/load` | POST | Admin | Load transcription models |
+| `/api/admin/models/load/stream` | WS | Admin | Load models with streaming progress |
+| `/api/admin/models/unload` | POST | Admin | Unload models to free GPU memory |
+| `/api/admin/logs` | GET | Admin | Tail server log |
+| `/ws` | WebSocket | User | Real-time audio streaming |
+| `/ws/live` | WebSocket | User | Live Mode continuous transcription |
+| `/v1/audio/transcriptions` | POST | User | **OpenAI-compatible** transcription |
+| `/v1/audio/translations` | POST | User | **OpenAI-compatible** translation to English |
 
-### 7.2 WebSocket Protocol
+---
+
+### 7.2 Endpoint Details
+
+#### Health & Status
+
+##### `GET /health`
+Liveness probe. No authentication required. Always returns `200 OK`.
+```json
+{"status": "healthy", "service": "transcriptionsuite"}
+```
+
+##### `GET /ready`
+Readiness probe. Returns `200` once a transcription model is loaded (or when Live Mode is active or the main model slot is disabled). Returns `503` while still loading. Clients should poll this before sending transcription requests.
+
+```json
+// 200 — ready
+{"status": "ready", "models": {...}}
+// 503 — still loading
+{"status": "loading", "models": {...}}
+```
+
+##### `GET /api/status`
+Detailed server status. Includes version, model state, GPU info, feature availability, and a consolidated `ready` boolean so clients can use a single endpoint.
+
+```json
+{
+  "status": "running",
+  "version": "1.1.3",
+  "ready": true,
+  "models": {
+    "transcription": {"loaded": true, "disabled": false, ...},
+    "features": {"translation": true, "diarization": true, ...}
+  }
+}
+```
+
+---
+
+#### Authentication
+
+> Authentication endpoints are under `/api/auth/`. Token management endpoints (`/tokens`) require an admin token.
+
+##### `POST /api/auth/login`
+Validate a bearer token. No authentication required.
+
+**Request body (JSON):** `{"token": "<plaintext token>"}`
+
+**Response:**
+```json
+// Success
+{"success": true, "user": {"name": "alice", "is_admin": true, "token_id": "..."}}
+// Failure
+{"success": false, "message": "Invalid or expired token"}
+```
+
+##### `GET /api/auth/tokens` _(admin)_
+List all stored tokens with metadata (IDs, names, admin flag, expiry, revocation state). Plaintext token values are never returned after creation.
+
+##### `POST /api/auth/tokens` _(admin)_
+Create a new token. Returns the plaintext token exactly once.
+
+**Request body (JSON):**
+```json
+{"client_name": "my-client", "is_admin": false, "expiry_days": 90}
+```
+
+**Response:** `{"success": true, "token": {"token": "<plaintext>", "token_id": "...", ...}}`
+
+##### `DELETE /api/auth/tokens/{token_id}` _(admin)_
+Revoke a token by its ID. Returns `404` if not found.
+
+---
+
+#### Transcription
+
+> All transcription endpoints return `409 Conflict` when a job is already running. Only one transcription job runs at a time. The job is identified by the client name derived from the request.
+
+##### `POST /api/transcribe/audio`
+Full transcription pipeline: word timestamps, optional speaker diarization, optional translation.
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `language` | `string` | auto-detect | BCP-47 language code (e.g. `en`, `fr`) |
+| `translation_enabled` | `bool` | `false` | Translate output to `translation_target_language` |
+| `translation_target_language` | `string` | `null` | Target language code (e.g. `en`) |
+| `word_timestamps` | `bool` | `false` | Include word-level timestamps |
+| `diarization` | `bool` | `false` | Run speaker diarization |
+| `expected_speakers` | `int` | `null` | Force exactly N speakers (1–10) |
+| `parallel_diarization` | `bool` | config default | Run diarization in parallel with transcription |
+
+**Headers:** `X-Client-Type: standalone` applies config-file defaults for word timestamps and diarization instead of API defaults.
+
+**Response:** [`TranscriptionResult`](#transcriptionresult-schema) JSON object.
+
+**Errors:** `400` invalid params · `409` job busy · `499` cancelled · `500` internal error
+
+##### `POST /api/transcribe/quick`
+Simplified transcription: text only, no word timestamps, no diarization. Intended for the Record view where speed matters.
+
+**Form fields:** `file`, `language`, `translation_enabled`, `translation_target_language` (same semantics as `/audio`).
+
+**Response:** `TranscriptionResult` with empty `words` and minimal metadata.
+
+##### `POST /api/transcribe/cancel`
+Request cancellation of the current transcription job. Cancellation is checked between segments, so there may be a brief delay. Safe to call when no job is running.
+
+**Response:**
+```json
+// Job was cancelled
+{"success": true, "cancelled_user": "alice", "message": "Cancellation requested for alice's transcription"}
+// No job running
+{"success": false, "cancelled_user": null, "message": "No transcription job is currently running"}
+```
+
+##### `GET /api/transcribe/languages`
+List supported languages for the currently loaded backend.
+
+- **whisper / whisperx**: 90 Whisper languages; supports translation to English.
+- **parakeet**: 25 European languages; no translation.
+- **canary**: 25 European languages; bidirectional English ↔ EU translation.
+- **vibevoice_asr**: Auto-detect only (no explicit selection in v1).
+
+**Response:**
+```json
+{
+  "languages": {"en": "English", "fr": "French", ...},
+  "translation_enabled": true,
+  "translation_target_languages": {"en": "English"}
+}
+```
+
+###### TranscriptionResult schema
+```json
+{
+  "text": "Full transcript text",
+  "language": "en",
+  "language_probability": 0.98,
+  "duration": 42.3,
+  "segments": [
+    {"id": 0, "start_time": 0.0, "end_time": 3.2, "text": "Hello world", "speaker": null}
+  ],
+  "words": [
+    {"word": "Hello", "start_time": 0.0, "end_time": 0.5, "segment_id": 0}
+  ],
+  "num_speakers": 0,
+  "total_words": 2,
+  "metadata": {"num_segments": 1}
+}
+```
+
+---
+
+#### Audio Notebook
+
+##### `GET /api/notebook/recordings`
+List recordings. Optional query params: `start_date` and `end_date` (format: `YYYY-MM-DD`) to filter by date range.
+
+##### `GET /api/notebook/recordings/{id}`
+Get a single recording with its full segment and word lists.
+
+##### `DELETE /api/notebook/recordings/{id}`
+Delete a recording. Database row is deleted first; audio file is removed second (orphan file is safer than orphan record). Returns `404` if not found.
+
+##### `GET /api/notebook/recordings/{id}/audio`
+Stream the audio file. Supports HTTP `Range` requests (returns `206 Partial Content`) for efficient seeking in large files.
+
+##### `GET /api/notebook/recordings/{id}/transcription`
+Get only the transcription data (segments + words) for a recording, without the full recording metadata.
+
+##### `GET /api/notebook/recordings/{id}/export`
+Export a recording as a formatted file.
+
+**Query param:** `format` — one of `txt`, `srt`, `ass` (default: `txt`).
+
+Capability gating:
+- `txt` — always available (plain text with metadata header).
+- `srt` / `ass` — require the recording to have word-level timestamps. Returns `400` for pure-note recordings that lack timestamps.
+
+##### `PATCH /api/notebook/recordings/{id}/title`
+Rename a recording. **JSON body:** `{"title": "New title"}`
+
+##### `PATCH /api/notebook/recordings/{id}/date`
+Change the `recorded_at` timestamp. **JSON body:** `{"recorded_at": "2026-03-09T14:00:00"}`
+
+##### `PATCH /api/notebook/recordings/{id}/summary`
+Update or clear the AI-generated summary. **JSON body:** `{"summary": "...", "summary_model": "model-name"}`. Pass `null` for `summary` to clear it.
+
+##### `PUT /api/notebook/recordings/{id}/summary`
+Legacy variant of the summary update — same semantics, values passed as query params.
+
+##### `POST /api/notebook/transcribe/upload`
+Upload an audio file and start background transcription. Returns `202 Accepted` immediately. Poll `GET /api/admin/status` → `job_tracker.result` for completion.
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `language` | `string` | auto-detect | Language code |
+| `translation_enabled` | `bool` | `false` | Enable translation |
+| `translation_target_language` | `string` | `null` | Target language |
+| `enable_diarization` | `bool` | `false` | Run speaker diarization |
+| `enable_word_timestamps` | `bool` | `true` | Include word timestamps |
+| `expected_speakers` | `int` | `null` | Force exactly N speakers (1–10) |
+| `parallel_diarization` | `bool` | config | Parallel vs sequential diarization |
+| `file_created_at` | `string` | `null` | ISO timestamp to use as the recording date |
+| `title` | `string` | `null` | Override auto-generated title |
+
+**Response:** `{"job_id": "<8-char prefix>"}` (`202`)
+
+##### `GET /api/notebook/calendar`
+Return recordings grouped by calendar day for a given month.
+
+**Query params:** `year` (int), `month` (int, 1–12).
+
+**Response:** `{"year": 2026, "month": 3, "days": {"2026-03-09": [...recordings...]}, "total_recordings": 5}`
+
+##### `GET /api/notebook/timeslot`
+Get availability info for a specific hour-long slot.
+
+**Query params:** `date` (`YYYY-MM-DD`), `hour` (0–23).
+
+**Response:** `{"recordings": [...], "next_available": "...", "total_duration": 1800, "available_seconds": 1800, "is_full": false}`
+
+##### `GET /api/notebook/backups`
+List available SQLite database backup files.
+
+##### `POST /api/notebook/backup`
+Create a timestamped backup of the database.
+
+##### `POST /api/notebook/restore`
+Restore the database from a specified backup. **JSON body:** `{"filename": "backup-2026-03-09.db"}`
+
+---
+
+#### Search
+
+All search endpoints accept a `q` (query string) parameter and return matched recordings with highlighted snippets.
+
+##### `GET /api/search`
+Unified full-text search across recording titles and transcription content. Also accepts optional `start_date` / `end_date` filters.
+
+##### `GET /api/search/words`
+Full-text search in the word-level table (higher precision, slower).
+
+##### `GET /api/search/recordings`
+Full-text search in recording metadata only (title, summary).
+
+---
+
+#### LLM Integration
+
+LLM endpoints proxy requests to a local [LM Studio](https://lmstudio.ai/) instance. The LM Studio base URL is configurable in `config.yaml`.
+
+> **Chat context injection:** When summarizing or chatting about a recording, the server prepends the **pure transcript** (no timestamps) as system context. Speaker tags are included only when diarization data exists.
+
+##### `GET /api/llm/status`
+Check whether LM Studio is reachable and which model is loaded.
+
+##### `POST /api/llm/process` / `POST /api/llm/process/stream`
+Send a free-form prompt to LM Studio. The `/stream` variant returns a Server-Sent Events stream.
+
+**Request body (JSON):** `{"prompt": "...", "model": "...", "system_prompt": "...", "recording_id": null}`
+
+##### `POST /api/llm/summarize/{id}` / `POST /api/llm/summarize/{id}/stream`
+Summarize a recording. The transcript is injected automatically. The `/stream` variant streams the response via SSE. The result is persisted to the recording's `summary` field on completion.
+
+##### `GET /api/llm/models/available`
+List models available in the connected LM Studio instance.
+
+##### `POST /api/llm/model/load` / `POST /api/llm/model/unload`
+Load or unload a model in LM Studio. **Load body (JSON):** `{"model_id": "..."}` 
+
+##### `POST /api/llm/server/start` / `POST /api/llm/server/stop`
+Start or stop the LM Studio server process (only works when LM Studio is installed on the same machine).
+
+---
+
+#### Admin
+
+> All admin endpoints require a token with `is_admin=true`.
+
+##### `GET /api/admin/status`
+Full server state: model manager status, active config values (main and live transcriber model, device, diarization settings), and current job tracker state.
+
+##### `GET /api/admin/config/full`
+Return the full parsed `config.yaml` as a structured tree with sections, fields, types, and inline YAML comments. Used by the dashboard settings editor to dynamically render fields.
+
+##### `PATCH /api/admin/config`
+Update one or more config values in-place, preserving YAML comments and formatting.
+
+**Request body (JSON):** `{"updates": {"section.key": value, ...}}`
+
+**Response:** `{"results": {"section.key": "updated"}, ...full config tree...}`
+
+##### `PATCH /api/admin/diarization`
+Toggle parallel diarization. **JSON body:** `{"parallel": true}`
+
+##### `POST /api/admin/models/load`
+Load the configured transcription models. Returns `{"status": "loaded"}` or `500` on failure.
+
+##### `WebSocket /api/admin/models/load/stream`
+Load models with streaming progress updates. The WebSocket streams JSON progress messages so the dashboard can show a loading indicator and log output during large model downloads.
+
+##### `POST /api/admin/models/unload`
+Unload all transcription models to free GPU memory. Returns `409` if a transcription job is active.
+
+##### `GET /api/admin/logs`
+Tail recent server log entries. Query params: `service` (filter), `level` (filter), `limit` (1–1000, default 100).
+
+---
+
+### 7.3 WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws`
@@ -951,7 +1303,7 @@ included **only** when diarization is enabled.
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
 
-### 7.3 Live Mode WebSocket Protocol
+### 7.4 Live Mode WebSocket Protocol
 
 **Connection flow:**
 1. Connect to `/ws/live`
@@ -975,6 +1327,96 @@ included **only** when diarization is enabled.
 **Audio format:**
 - Sample rate: 16kHz, Format: Int16 PCM (little-endian)
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
+
+---
+
+### 7.5 OpenAI-Compatible Endpoints
+
+Mounted at `/v1/audio/`. These endpoints follow the [OpenAI Audio API spec](https://platform.openai.com/docs/api-reference/audio) so that OpenAI-compatible clients (Open-WebUI, LM Studio, etc.) can point at TranscriptionSuite as a drop-in STT backend.
+
+**Auth:** Same rules as all other API routes — Bearer token required in TLS mode; open to localhost in local mode.
+
+**Error shape:** All errors follow the OpenAI error envelope:
+```json
+{"error": {"message": "...", "type": "...", "param": null, "code": null}}
+```
+
+#### `POST /v1/audio/transcriptions`
+
+Transcribe an audio or video file. Language auto-detected when `language` is omitted.
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `model` | `string` | `"whisper-1"` | Accepted but ignored; the server uses whatever model is configured |
+| `language` | `string` | auto-detect | BCP-47 language code (e.g. `en`, `fr`) |
+| `prompt` | `string` | `null` | Initial prompt passed to the transcription engine as `initial_prompt` |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `temperature` | `float` | `null` | Accepted but ignored |
+| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps (only effective with `verbose_json`) |
+
+**Response formats:**
+
+| `response_format` | Content-Type | Shape |
+|-------------------|--------------|-------|
+| `json` | `application/json` | `{"text": "..."}` |
+| `text` | `text/plain` | Raw transcript string |
+| `verbose_json` | `application/json` | Full object with `task`, `language`, `duration`, `text`, `segments`, optional `words` |
+| `srt` | `text/plain` | SRT subtitle file |
+| `vtt` | `text/plain` | WebVTT subtitle file |
+
+**Error codes:**
+
+| Status | `type` | Cause |
+|--------|--------|-------|
+| `400` | `invalid_request_error` | Unknown `response_format`, missing/empty `file` |
+| `429` | `rate_limit_error` | Another transcription job is already running |
+| `503` | `server_error` | No transcription model is configured |
+| `500` | `server_error` | Internal engine error |
+
+**Example (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/transcriptions \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@recording.wav" \
+  -F "model=whisper-1" \
+  -F "response_format=verbose_json" \
+  -F "timestamp_granularities[]=word"
+```
+
+---
+
+#### `POST /v1/audio/translations`
+
+Transcribe **and translate** an audio or video file to English. Identical to `/transcriptions` except:
+- `language` is not accepted (source language is always auto-detected)
+- Translation target is always English
+- The `task` field in `verbose_json` responses is `"translate"` instead of `"transcribe"`
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `model` | `string` | `"whisper-1"` | Accepted but ignored |
+| `prompt` | `string` | `null` | Initial prompt passed to the transcription engine |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `temperature` | `float` | `null` | Accepted but ignored |
+| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps |
+
+**Error codes:** Same as `/transcriptions`.
+
+> **Backend note:** Translation requires a Whisper-family model with translation capability. Parakeet/Canary backends that don't support `task="translate"` will return a `400` or `500` from the engine layer.
+
+**Example (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/translations \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@foreign_audio.mp3" \
+  -F "response_format=text"
+```
 
 ---
 

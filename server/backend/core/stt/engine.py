@@ -693,6 +693,7 @@ class AudioToTextRecorder:
         task: str | None = None,
         translation_target_language: str | None = None,
         word_timestamps: bool = True,
+        initial_prompt: str | None = None,
         apply_vad_preprocessing: bool = True,
         cancellation_check: Callable[[], bool] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
@@ -766,6 +767,7 @@ class AudioToTextRecorder:
             task=task,
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
+            initial_prompt=initial_prompt,
             cancellation_check=cancellation_check,
             progress_callback=progress_callback,
         )
