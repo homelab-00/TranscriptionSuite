@@ -37,6 +37,8 @@ def _write_marker(runtime_dir: Path, payload: dict[str, str]) -> None:
 
 def _patch_fingerprint_context(module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module, "compute_dependency_fingerprint", lambda **_: "fp")
+    monkeypatch.setattr(module, "compute_structural_fingerprint", lambda **_: "struct-fp")
+    monkeypatch.setattr(module, "compute_lock_fingerprint", lambda: "lock-fp")
     monkeypatch.setattr(module, "python_abi_tag", lambda: "abi")
     monkeypatch.setattr(module.platform, "machine", lambda: "arch")
 
@@ -161,7 +163,7 @@ def test_hash_mismatch_rebuilds_sync_once(
 
     assert sync_mode == "rebuild-sync"
     assert len(sync_calls) == 1
-    assert diagnostics["selection_reason"] == "hash_mismatch"
+    assert diagnostics["selection_reason"] == "structural_mismatch"
     assert rmtree_calls[0] == runtime_dir / ".venv"
 
 
@@ -243,7 +245,7 @@ def test_hash_mismatch_selects_rebuild_sync_without_integrity_checks(
     )
 
     assert sync_mode == "rebuild-sync"
-    assert diagnostics["selection_reason"] == "hash_mismatch"
+    assert diagnostics["selection_reason"] == "structural_mismatch"
     assert len(sync_calls) == 1
 
 
@@ -968,3 +970,239 @@ def test_main_reports_existing_optional_dependency_installs_without_install_flag
     assert nemo["reason"] == "not_selected"  # type: ignore[index]
     assert vibevoice["available"] is False  # type: ignore[index]
     assert vibevoice["reason"] == "not_selected"  # type: ignore[index]
+
+
+def test_lock_only_change_uses_delta_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "old-lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+
+    sync_calls: list[str] = []
+    rmtree_calls: list[Path] = []
+
+    def fake_sync(**_: object) -> None:
+        sync_calls.append("sync")
+
+    def fake_rmtree(path: Path, ignore_errors: bool = False) -> None:
+        rmtree_calls.append(path)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module.shutil, "rmtree", fake_rmtree)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    assert sync_mode == "delta-sync"
+    assert diagnostics["selection_reason"] == "lock_changed"
+    assert len(sync_calls) == 1
+    assert len(rmtree_calls) == 0
+
+
+def test_delta_sync_fallback_to_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "old-lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+
+    sync_calls: list[str] = []
+    rmtree_calls: list[Path] = []
+    original_rmtree = module.shutil.rmtree
+
+    def fake_rmtree(path: Path, ignore_errors: bool = False) -> None:
+        rmtree_calls.append(path)
+        if Path(path) == runtime_dir / ".venv" and (runtime_dir / ".venv").exists():
+            original_rmtree(path, ignore_errors=ignore_errors)
+
+    call_count = 0
+
+    def fake_sync(**_: object) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("delta-sync failed")
+        sync_calls.append("sync")
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module.shutil, "rmtree", fake_rmtree)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    assert sync_mode == "rebuild-sync"
+    assert diagnostics["escalated_to_rebuild"] is True
+    assert "delta-sync failed" in diagnostics["delta_sync_error"]
+    assert call_count == 2
+    assert rmtree_calls[0] == runtime_dir / ".venv"
+
+
+def test_force_rebuild_env_var(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "fp",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+    monkeypatch.setenv("BOOTSTRAP_FORCE_REBUILD", "true")
+
+    sync_calls: list[str] = []
+
+    def fake_sync(**_: object) -> None:
+        sync_calls.append("sync")
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    assert sync_mode == "rebuild-sync"
+    assert diagnostics["selection_reason"] == "force_rebuild"
+    assert len(sync_calls) == 1
+
+
+def test_old_marker_without_structural_fp_triggers_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    # Old schema v2 marker without structural_fingerprint field
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+
+    sync_calls: list[str] = []
+
+    def fake_sync(**_: object) -> None:
+        sync_calls.append("sync")
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    assert sync_mode == "rebuild-sync"
+    assert diagnostics["selection_reason"] == "structural_mismatch"
+    assert len(sync_calls) == 1
+
+
+def test_marker_written_with_sub_fingerprints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "old-lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+
+    def fake_sync(**_: object) -> None:
+        pass  # delta-sync succeeds
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    marker_file = runtime_dir / ".runtime-bootstrap-marker.json"
+    persisted = json.loads(marker_file.read_text(encoding="utf-8"))
+    assert persisted["structural_fingerprint"] == "struct-fp"
+    assert persisted["lock_fingerprint"] == "lock-fp"
+    assert persisted["sync_mode"] == "delta-sync"
+    assert persisted["escalated_to_rebuild"] is False

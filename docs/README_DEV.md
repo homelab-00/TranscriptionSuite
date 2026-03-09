@@ -864,7 +864,7 @@ In short: an image update mainly changes code and runtime tooling; dependency do
 - `rebuild-sync` (fresh venv + sync) happens when:
   - `/runtime/.venv` is missing.
   - Runtime reset is requested (Dashboard: `Remove Runtime`).
-  - ABI/arch incompatibility is detected (with `BOOTSTRAP_REBUILD_POLICY=abi_only`).
+  - ABI/arch incompatibility is detected (with `BOOTSTRAP_FORCE_REBUILD=true`).
   - `delta-sync` fails or post-sync integrity check still fails.
 
 **How runtime updates minimize download size**

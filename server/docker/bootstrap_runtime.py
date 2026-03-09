@@ -160,6 +160,30 @@ def compute_dependency_fingerprint(
     return hasher.hexdigest()
 
 
+def compute_structural_fingerprint(
+    python_abi: str,
+    arch: str,
+    extras: tuple[str, ...] = (),
+) -> str:
+    """Hash of factors that determine venv shape (ABI, arch, extras).
+
+    A change here means the venv cannot be incrementally updated.
+    """
+    hasher = hashlib.sha256()
+    hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
+    hasher.update(f"abi={python_abi}".encode())
+    hasher.update(f"arch={arch}".encode())
+    hasher.update(f"extras={','.join(sorted(extras))}".encode())
+    return hasher.hexdigest()
+
+
+def compute_lock_fingerprint() -> str:
+    """Hash of uv.lock content only — changes here are ideal for incremental sync."""
+    hasher = hashlib.sha256()
+    update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
+    return hasher.hexdigest()
+
+
 def run_command(
     cmd: list[str],
     timeout_seconds: int,
@@ -329,6 +353,13 @@ def ensure_runtime_dependencies(
         arch=arch,
         extras=extras,
     )
+    structural_fp = compute_structural_fingerprint(
+        python_abi=python_abi,
+        arch=arch,
+        extras=extras,
+    )
+    lock_fp = compute_lock_fingerprint()
+    force_rebuild = parse_bool_env("BOOTSTRAP_FORCE_REBUILD", False)
 
     package_delta: dict[str, int] = {
         "added": 0,
@@ -350,6 +381,7 @@ def ensure_runtime_dependencies(
 
         marker_matches = bool(
             venv_exists
+            and not force_rebuild
             and marker_data.get("schema_version") == BOOTSTRAP_SCHEMA_VERSION
             and marker_data.get("fingerprint") == fingerprint
             and marker_data.get("python_abi") == python_abi
@@ -363,41 +395,120 @@ def ensure_runtime_dependencies(
             log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
             return venv_dir, "skip", package_delta, diagnostics
 
-        diagnostics["selection_reason"] = "venv_missing" if not venv_exists else "hash_mismatch"
-        log(f"Bootstrap path selected: mode=rebuild-sync reason={diagnostics['selection_reason']}")
+        structural_matches = bool(
+            venv_exists
+            and not force_rebuild
+            and marker_data.get("schema_version") == BOOTSTRAP_SCHEMA_VERSION
+            and marker_data.get("structural_fingerprint") == structural_fp
+            and marker_data.get("python_abi") == python_abi
+            and marker_data.get("arch") == arch
+        )
 
         before_packages: dict[str, str] = {}
-        if log_changes and venv_exists:
-            before_packages = collect_installed_packages(venv_python, timeout_seconds)
-        if venv_dir.exists():
-            log("Rebuilding runtime virtual environment (hash mismatch or missing marker)")
-            shutil.rmtree(venv_dir, ignore_errors=True)
 
-        final_sync_mode = "rebuild-sync"
-        log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
-        sync_start = time.perf_counter()
-        try:
-            run_dependency_sync(
-                venv_dir=venv_dir,
-                cache_dir=cache_dir,
-                timeout_seconds=timeout_seconds,
-                extras=extras,
+        if structural_matches:
+            # Delta-sync: only uv.lock changed, venv shape is compatible
+            diagnostics["selection_reason"] = "lock_changed"
+            final_sync_mode = "delta-sync"
+            log(f"Bootstrap path selected: mode={final_sync_mode} reason=lock_changed")
+
+            if log_changes:
+                before_packages = collect_installed_packages(venv_python, timeout_seconds)
+
+            log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
+            sync_start = time.perf_counter()
+            try:
+                run_dependency_sync(
+                    venv_dir=venv_dir,
+                    cache_dir=cache_dir,
+                    timeout_seconds=timeout_seconds,
+                    extras=extras,
+                )
+                log_timing(
+                    f"dependency sync complete (mode={final_sync_mode})",
+                    sync_start,
+                )
+            except Exception as delta_exc:
+                log_timing(
+                    f"dependency sync failed (mode={final_sync_mode})",
+                    sync_start,
+                )
+                log("Delta-sync failed, falling back to rebuild-sync")
+                diagnostics["escalated_to_rebuild"] = True
+                diagnostics["delta_sync_error"] = str(delta_exc)[:240]
+                final_sync_mode = "rebuild-sync"
+
+                if venv_dir.exists():
+                    shutil.rmtree(venv_dir, ignore_errors=True)
+
+                log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
+                sync_start = time.perf_counter()
+                try:
+                    run_dependency_sync(
+                        venv_dir=venv_dir,
+                        cache_dir=cache_dir,
+                        timeout_seconds=timeout_seconds,
+                        extras=extras,
+                    )
+                    log_timing(
+                        f"dependency sync complete (mode={final_sync_mode})",
+                        sync_start,
+                    )
+                except Exception as exc:
+                    log_timing(
+                        f"dependency sync failed (mode={final_sync_mode})",
+                        sync_start,
+                    )
+                    failure_snippet = str(exc).strip()
+                    if len(failure_snippet) > 240:
+                        failure_snippet = f"{failure_snippet[:237]}..."
+                    raise RuntimeError(
+                        f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
+                    ) from exc
+        else:
+            # Rebuild-sync: venv missing, structural mismatch, or force rebuild
+            if force_rebuild:
+                diagnostics["selection_reason"] = "force_rebuild"
+            elif not venv_exists:
+                diagnostics["selection_reason"] = "venv_missing"
+            else:
+                diagnostics["selection_reason"] = "structural_mismatch"
+
+            final_sync_mode = "rebuild-sync"
+            log(
+                f"Bootstrap path selected: mode={final_sync_mode} reason={diagnostics['selection_reason']}"
             )
-            log_timing(
-                f"dependency sync complete (mode={final_sync_mode})",
-                sync_start,
-            )
-        except Exception as exc:
-            log_timing(
-                f"dependency sync failed (mode={final_sync_mode})",
-                sync_start,
-            )
-            failure_snippet = str(exc).strip()
-            if len(failure_snippet) > 240:
-                failure_snippet = f"{failure_snippet[:237]}..."
-            raise RuntimeError(
-                f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
-            ) from exc
+
+            if log_changes and venv_exists:
+                before_packages = collect_installed_packages(venv_python, timeout_seconds)
+            if venv_dir.exists():
+                log(f"Rebuilding runtime virtual environment ({diagnostics['selection_reason']})")
+                shutil.rmtree(venv_dir, ignore_errors=True)
+
+            log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
+            sync_start = time.perf_counter()
+            try:
+                run_dependency_sync(
+                    venv_dir=venv_dir,
+                    cache_dir=cache_dir,
+                    timeout_seconds=timeout_seconds,
+                    extras=extras,
+                )
+                log_timing(
+                    f"dependency sync complete (mode={final_sync_mode})",
+                    sync_start,
+                )
+            except Exception as exc:
+                log_timing(
+                    f"dependency sync failed (mode={final_sync_mode})",
+                    sync_start,
+                )
+                failure_snippet = str(exc).strip()
+                if len(failure_snippet) > 240:
+                    failure_snippet = f"{failure_snippet[:237]}..."
+                raise RuntimeError(
+                    f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
+                ) from exc
 
         venv_python = venv_dir / "bin/python"
         if not venv_python.exists():
@@ -427,9 +538,12 @@ def ensure_runtime_dependencies(
                 "fingerprint": fingerprint,
                 "python_abi": python_abi,
                 "arch": arch,
+                "structural_fingerprint": structural_fp,
+                "lock_fingerprint": lock_fp,
                 "sync_mode": final_sync_mode,
                 "selection_reason": diagnostics["selection_reason"],
                 "package_delta": package_delta,
+                "escalated_to_rebuild": diagnostics.get("escalated_to_rebuild", False),
                 "updated_at": datetime.now(UTC).isoformat(),
             },
         )
@@ -1473,6 +1587,8 @@ def main() -> int:
                 "sync_mode": sync_mode,
                 "package_delta": package_delta,
                 "selection_reason": diagnostics.get("selection_reason"),
+                "escalated_to_rebuild": diagnostics.get("escalated_to_rebuild", False),
+                "delta_sync_error": diagnostics.get("delta_sync_error"),
             },
             "features": {
                 "diarization": diarization_status,
