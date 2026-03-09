@@ -73,6 +73,12 @@ export interface ElectronAPI {
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
     onClientLogLine: (callback: (entry: ClientLogLine) => void) => () => void;
+    readLogFiles: (tailLines?: number) => Promise<{
+      clientLog: string;
+      serverLog: string;
+      clientLogPath: string;
+      serverLogPath: string;
+    }>;
     readLocalFile: (
       filePath: string,
     ) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;
@@ -217,6 +223,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('app:clientLogLine', handler);
       return () => ipcRenderer.removeListener('app:clientLogLine', handler);
     },
+    readLogFiles: (tailLines = 200) =>
+      ipcRenderer.invoke('app:readLogFiles', tailLines) as Promise<{
+        clientLog: string;
+        serverLog: string;
+        clientLogPath: string;
+        serverLogPath: string;
+      }>,
     readLocalFile: (filePath: string) =>
       ipcRenderer.invoke('app:readLocalFile', filePath) as Promise<{
         name: string;

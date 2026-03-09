@@ -406,6 +406,8 @@ const store = new Store({
     'shortcuts.startRecording': 'Alt+Ctrl+Z',
     'shortcuts.stopTranscribe': 'Alt+Ctrl+X',
     'app.pasteAtCursor': false,
+    'app.cumulativeUsageMs': 0,
+    'app.starPopupShown': false,
   },
 });
 
@@ -742,6 +744,29 @@ ipcMain.handle('app:appendClientLogLine', async (_event, line: string) => {
   const logFilePath = ensureClientLogFilePath();
   const normalizedLine = String(line).replace(/\r?\n/g, ' ');
   await fs.promises.appendFile(logFilePath, `${normalizedLine}\n`, 'utf8');
+});
+
+ipcMain.handle('app:readLogFiles', async (_event, tailLines: number) => {
+  const logDir = path.join(app.getPath('userData'), 'logs');
+  const clientLogPath = path.join(logDir, 'client-debug.log');
+  const serverLogPath = path.join(logDir, 'server.log');
+
+  const readTail = (filePath: string, maxLines: number): string => {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const lines = content.split('\n');
+      return lines.slice(-maxLines).join('\n');
+    } catch {
+      return '';
+    }
+  };
+
+  return {
+    clientLog: readTail(clientLogPath, tailLines),
+    serverLog: readTail(serverLogPath, tailLines),
+    clientLogPath,
+    serverLogPath,
+  };
 });
 
 ipcMain.handle('app:readLocalFile', async (_event, filePath: string) => {

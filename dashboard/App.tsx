@@ -9,6 +9,8 @@ import { LogsView } from './components/views/LogsView';
 import { ModelManagerView } from './components/views/ModelManagerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
+import { BugReportModal } from './components/views/BugReportModal';
+import { StarPopupModal } from './components/views/StarPopupModal';
 import { Button } from './components/ui/Button';
 import { CustomSelect } from './components/ui/CustomSelect';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -22,6 +24,7 @@ import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
+import { useStarPopup } from './src/hooks/useStarPopup';
 import {
   MAIN_RECOMMENDED_MODEL,
   LIVE_RECOMMENDED_MODEL,
@@ -60,6 +63,7 @@ const AppInner: React.FC = () => {
   const [notebookTab, setNotebookTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const serverConnection = useServerStatus();
   const docker = useDockerContext();
 
@@ -68,6 +72,9 @@ const AppInner: React.FC = () => {
 
   // Live mode lifted to App level so state survives tab switches
   const live = useLiveMode();
+
+  // Star popup (one-time after 2+ hours cumulative use)
+  const { showStarPopup, dismissStarPopup } = useStarPopup();
 
   // Lifted upload/import status so tray sync (in SessionView) can reflect it
   const [isUploading, setIsUploading] = useState(false);
@@ -569,6 +576,7 @@ const AppInner: React.FC = () => {
         onChangeNotebookTab={setNotebookTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
+        onOpenBugReport={() => setIsBugReportOpen(true)}
         containerRunning={docker.container.running}
         containerExists={docker.container.exists}
         containerHealth={docker.container.health}
@@ -591,6 +599,8 @@ const AppInner: React.FC = () => {
       {/* Modals */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <AboutModal isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
+      <BugReportModal isOpen={isBugReportOpen} onClose={() => setIsBugReportOpen(false)} />
+      <StarPopupModal isOpen={showStarPopup} onDismiss={() => void dismissStarPopup()} />
 
       {modelOnboardingOpen && (
         <div className="fixed inset-0 z-60 flex items-center justify-center p-4">

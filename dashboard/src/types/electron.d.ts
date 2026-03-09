@@ -69,6 +69,12 @@ interface ElectronAPI {
     getClientLogPath: () => Promise<string>;
     appendClientLogLine: (line: string) => Promise<void>;
     onClientLogLine: (callback: (entry: ClientLogLine) => void) => () => void;
+    readLogFiles: (tailLines?: number) => Promise<{
+      clientLog: string;
+      serverLog: string;
+      clientLogPath: string;
+      serverLogPath: string;
+    }>;
     readLocalFile: (
       filePath: string,
     ) => Promise<{ name: string; buffer: ArrayBuffer; mimeType: string }>;

@@ -12,6 +12,7 @@ import {
   Terminal,
   Search,
   Upload,
+  Bug,
 } from 'lucide-react';
 import logoUrl from '../../docs/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
@@ -23,6 +24,7 @@ interface SidebarProps {
   onChangeNotebookTab: (tab: NotebookTab) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
+  onOpenBugReport: () => void;
   containerRunning: boolean;
   containerExists: boolean;
   containerHealth?: string;
@@ -41,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeNotebookTab,
   onOpenSettings,
   onOpenAbout,
+  onOpenBugReport,
   containerRunning,
   containerExists,
   containerHealth,
@@ -303,6 +306,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      {/* Bug Report - above the separator */}
+      <div className="px-3 pb-2">
+        <button
+          onClick={onOpenBugReport}
+          className={`flex h-12 w-full items-center rounded-xl text-slate-400 transition-colors hover:bg-white/5 hover:text-white focus:ring-0 focus:outline-none ${collapsed ? 'justify-center' : 'gap-4 px-4'} `}
+        >
+          <Bug size={20} />
+          <span
+            className={`text-sm font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
+          >
+            Bug Report
+          </span>
+        </button>
+      </div>
 
       {/* Footer / Settings */}
       <div className="border-glass-border space-y-1 border-t p-4">

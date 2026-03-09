@@ -56,6 +56,8 @@ export interface ClientConfig {
     updateCheckCustomHours: number;
     modelSelectionOnboardingCompleted: boolean;
     pasteAtCursor: boolean;
+    cumulativeUsageMs: number;
+    starPopupShown: boolean;
   };
   /** Global keyboard shortcuts (Electron accelerator strings) */
   shortcuts: {
@@ -114,6 +116,8 @@ const DEFAULT_CONFIG: ClientConfig = {
     updateCheckCustomHours: 24,
     modelSelectionOnboardingCompleted: false,
     pasteAtCursor: false,
+    cumulativeUsageMs: 0,
+    starPopupShown: false,
   },
   shortcuts: {
     startRecording: 'Alt+Ctrl+Z',
