@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.3
+  spec_version: 1.0.4
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -35,7 +35,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-09T15:25:17.461Z
+    generated_at: 2026-03-09T16:25:54.577Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -272,6 +272,7 @@ foundation:
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
         - min-w-[3ch]
+        - min-w-[499px]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
@@ -954,6 +955,7 @@ utility_allowlist:
     - ease-[cubic-bezier(0.33,1,0.68,1)]
     - h-[85%]
     - h-[85vh]
+    - lg:min-w-[499px]
     - max-h-[80vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]

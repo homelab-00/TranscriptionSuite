@@ -483,7 +483,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1530,
     height: 860,
-    minWidth: 960,
+    minWidth: 1262,
     minHeight: 600,
     show: !startMinimized,
     icon: iconPath,
