@@ -24,7 +24,6 @@ or CPU mode. Dockerized for fast setup.
       </table>
     </td>
     <td align="left" valign="top" width="280px">
-      <br>
       <strong>OS Support:</strong><br>
       <img src="https://img.shields.io/badge/Linux-%23FCC624.svg?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
       <img src="https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white" alt="Windows 11"><br>
