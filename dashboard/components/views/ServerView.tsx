@@ -39,13 +39,9 @@ import {
   LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
   DISABLED_MODEL_SENTINEL,
-  MAIN_RECOMMENDED_MODEL,
-  WHISPER_LARGE_V3,
   WHISPER_MEDIUM,
-  WHISPER_SMALL,
-  CANARY_1B_V2,
-  VIBEVOICE_ASR,
-  VIBEVOICE_ASR_4BIT,
+  MAIN_MODEL_PRESETS,
+  LIVE_MODEL_PRESETS,
   resolveMainModelSelectionValue,
   resolveLiveModelSelectionValue,
   toBackendModelEnvValue,
@@ -73,16 +69,6 @@ const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
 const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
-const MAIN_MODEL_PRESETS = [
-  MAIN_RECOMMENDED_MODEL,
-  CANARY_1B_V2,
-  WHISPER_LARGE_V3,
-  WHISPER_MEDIUM,
-  WHISPER_SMALL,
-  VIBEVOICE_ASR,
-  VIBEVOICE_ASR_4BIT,
-];
-const LIVE_MODEL_PRESETS = [WHISPER_LARGE_V3, WHISPER_MEDIUM, WHISPER_SMALL];
 const MAIN_MODEL_SELECTION_OPTIONS = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   ...MAIN_MODEL_PRESETS,
@@ -1254,13 +1240,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       value={mainModelSelection}
                       onChange={setMainModelSelection}
                       options={[
-                        MAIN_RECOMMENDED_MODEL,
-                        CANARY_1B_V2,
-                        WHISPER_LARGE_V3,
-                        WHISPER_MEDIUM,
-                        WHISPER_SMALL,
-                        VIBEVOICE_ASR,
-                        VIBEVOICE_ASR_4BIT,
+                        ...MAIN_MODEL_PRESETS,
                         MODEL_DISABLED_OPTION,
                         MAIN_MODEL_CUSTOM_OPTION,
                       ]}
@@ -1311,9 +1291,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       onChange={setLiveModelSelection}
                       options={[
                         LIVE_MODEL_SAME_AS_MAIN_OPTION,
-                        WHISPER_LARGE_V3,
-                        WHISPER_MEDIUM,
-                        WHISPER_SMALL,
+                        ...LIVE_MODEL_PRESETS,
                         MODEL_DISABLED_OPTION,
                         LIVE_MODEL_CUSTOM_OPTION,
                       ]}

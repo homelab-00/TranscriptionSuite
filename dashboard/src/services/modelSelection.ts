@@ -1,4 +1,5 @@
 import { isNemoModel, isVibeVoiceASRModel } from './modelCapabilities';
+import { MODEL_REGISTRY } from './modelRegistry';
 import type { ModelFamily, ModelRole } from './modelRegistry';
 
 export type { ModelFamily, ModelRole };
@@ -27,43 +28,23 @@ export const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
 export const VIBEVOICE_ASR = 'microsoft/VibeVoice-ASR';
 export const VIBEVOICE_ASR_4BIT = 'scerz/VibeVoice-ASR-4bit';
 
-export const MAIN_MODEL_PRESETS = [
-  MAIN_RECOMMENDED_MODEL,
-  CANARY_1B_V2,
-  WHISPER_LARGE_V3,
-  WHISPER_DISTIL_LARGE_V3,
-  WHISPER_LARGE_V3_TURBO,
-  WHISPER_MEDIUM,
-  WHISPER_MEDIUM_EN,
-  WHISPER_DISTIL_MEDIUM_EN,
-  WHISPER_SMALL,
-  WHISPER_SMALL_EN,
-  WHISPER_DISTIL_SMALL_EN,
-  VIBEVOICE_ASR,
-  VIBEVOICE_ASR_4BIT,
-] as const;
+export const MAIN_MODEL_PRESETS: string[] = MODEL_REGISTRY.filter((m) =>
+  m.roles.includes('main'),
+).map((m) => m.id);
 
-export const LIVE_MODEL_PRESETS = [
-  WHISPER_LARGE_V3,
-  WHISPER_DISTIL_LARGE_V3,
-  WHISPER_LARGE_V3_TURBO,
-  WHISPER_MEDIUM,
-  WHISPER_MEDIUM_EN,
-  WHISPER_DISTIL_MEDIUM_EN,
-  WHISPER_SMALL,
-  WHISPER_SMALL_EN,
-  WHISPER_DISTIL_SMALL_EN,
-] as const;
+export const LIVE_MODEL_PRESETS: string[] = MODEL_REGISTRY.filter((m) =>
+  m.roles.includes('live'),
+).map((m) => m.id);
 
-export const ONBOARDING_MAIN_MODEL_OPTIONS = [
+export const ONBOARDING_MAIN_MODEL_OPTIONS: string[] = [
   ...MAIN_MODEL_PRESETS,
   MODEL_DISABLED_OPTION,
-] as const;
+];
 
-export const ONBOARDING_LIVE_MODEL_OPTIONS = [
+export const ONBOARDING_LIVE_MODEL_OPTIONS: string[] = [
   ...LIVE_MODEL_PRESETS,
   MODEL_DISABLED_OPTION,
-] as const;
+];
 
 export type OptionalDependencyBootstrapFeatureStatus = {
   available: boolean;
