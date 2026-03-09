@@ -20,49 +20,49 @@ classifiers = [
 
 dependencies = [
     # Web / API
-    "fastapi>=0.128.0",
-    "uvicorn[standard]>=0.40.0",
-    "python-multipart>=0.0.21",
-    "pydantic>=2.12.5",
-    "aiohttp>=3.13.3",
-    "httpx>=0.28.1",
-    "websockets>=15.0.1",
+    "fastapi==0.135.1",
+    "uvicorn[standard]==0.41.0",
+    "python-multipart==0.0.22",
+    "pydantic==2.12.5",
+    "aiohttp==3.13.3",
+    "httpx==0.28.1",
+    "websockets==16.0",
 
     # Core ML / Transcription
-    "torch>=2.8.0",          # Required by PyAnnote 4.0.3
-    "torchaudio>=2.8.0",     # Required by PyAnnote 4.0.3
-    "pyannote.audio>=4.0.3", # Diarization (still needed for NeMo backends)
+    "torch==2.8.0",          # Required by PyAnnote 4.0.3
+    "torchaudio==2.8.0",     # Required by PyAnnote 4.0.3
+    "pyannote.audio==4.0.4", # Diarization (still needed for NeMo backends)
 
     # Audio Processing
-    "numpy>=2.4.0",
-    "soundfile>=0.13.1",
-    "webrtcvad>=2.0.10",
-    "silero-vad>=6.2.0",
-    "ffmpeg-python>=0.2.0",
-    "scipy>=1.17.0",
+    "numpy==2.4.2",
+    "soundfile==0.13.1",
+    "webrtcvad==2.0.10",
+    "silero-vad==6.2.1",
+    "ffmpeg-python==0.2.0",
+    "scipy==1.17.1",
 
     # Database
-    "aiosqlite>=0.22.1",
-    "sqlalchemy>=2.0.45",
-    "alembic>=1.17.1",
+    "aiosqlite==0.22.1",
+    "sqlalchemy==2.0.48",
+    "alembic==1.18.4",
 
     # Utilities
     "setuptools<81",          # webrtcvad imports pkg_resources, removed in setuptools>=81
-    "pyyaml>=6.0.3",
-    "psutil>=7.2.0",
-    "filelock>=3.20.1",
-    "aiofiles>=24.1.0",
-    "structlog>=24.4.0",
+    "pyyaml==6.0.3",
+    "psutil==7.2.2",
+    "filelock==3.25.0",
+    "aiofiles==24.1.0",
+    "structlog==25.5.0",
 ]
 
 [project.optional-dependencies]
 whisper = [
-    "faster-whisper>=1.2.1",
-    "ctranslate2>=4.6.2",
-    "whisperx>=3.1.0",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.7.1",
+    "whisperx==3.8.1",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
 ]
 nemo = [
-    "nemo_toolkit[asr]>=2.2.0",
+    "nemo_toolkit[asr]==2.7.0",
 ]
 vibevoice_asr = [
     "vibevoice @ git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e",
@@ -78,7 +78,7 @@ allow-direct-references = true
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
+    "pytest==9.0.2",
     "pip-licenses==5.5.1",
 ]
 

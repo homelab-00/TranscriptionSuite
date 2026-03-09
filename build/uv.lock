@@ -697,29 +697,29 @@ tooling = [
 
 [package.metadata.requires-dev]
 backend-test = [
-    { name = "aiofiles", specifier = ">=25.1.0" },
-    { name = "fastapi", specifier = ">=0.135.1" },
-    { name = "ffmpeg-python", specifier = ">=0.2.0" },
-    { name = "httpx", specifier = ">=0.25.0" },
-    { name = "numpy", specifier = ">=1.26.0" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "pytest-cov", specifier = ">=6.1.0" },
-    { name = "python-multipart", specifier = ">=0.0.22" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "scipy", specifier = ">=1.17.1" },
-    { name = "soundfile", specifier = ">=0.13.1" },
-    { name = "structlog", specifier = ">=25.5.0" },
+    { name = "aiofiles", specifier = "==25.1.0" },
+    { name = "fastapi", specifier = "==0.135.1" },
+    { name = "ffmpeg-python", specifier = "==0.2.0" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "numpy", specifier = "==2.4.2" },
+    { name = "pydantic", specifier = "==2.12.5" },
+    { name = "pytest", specifier = "==9.0.2" },
+    { name = "pytest-asyncio", specifier = "==1.3.0" },
+    { name = "pytest-cov", specifier = "==7.0.0" },
+    { name = "python-multipart", specifier = "==0.0.22" },
+    { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "scipy", specifier = "==1.17.1" },
+    { name = "soundfile", specifier = "==0.13.1" },
+    { name = "structlog", specifier = "==25.5.0" },
 ]
 security = [
     { name = "bandit", specifier = "==1.9.4" },
     { name = "pip-licenses", specifier = "==5.5.1" },
 ]
 tooling = [
-    { name = "pre-commit", specifier = ">=4.2.0" },
-    { name = "pyright", specifier = ">=1.1.407" },
-    { name = "ruff", specifier = ">=0.14.10" },
+    { name = "pre-commit", specifier = "==4.5.1" },
+    { name = "pyright", specifier = "==1.1.408" },
+    { name = "ruff", specifier = "==0.15.5" },
 ]
 
 [[package]]

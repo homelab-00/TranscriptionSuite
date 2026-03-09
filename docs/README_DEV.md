@@ -392,9 +392,8 @@ Keep these version fields aligned for a release:
 
 **Manual version bump process:**
 1. Update the `version` field in all three files above
-2. Run `uv lock --upgrade && uv sync` in `build/`
-3. Run `uv lock --upgrade && uv sync` in `server/backend/`
-4. Run `npm update` in `dashboard/`
+2. Upgrade and re-pin Python deps (see §9.7 / §14.1 for the workflow)
+3. Upgrade and re-pin npm deps (see §9.7 for the workflow)
 
 *Note: Release tags should continue to match the Dashboard `package.json` version.*
 
@@ -404,9 +403,12 @@ Keep these version fields aligned for a release:
 
 ### 4.1 Step 1: Environment Setup
 
+**Required Node.js version:** 25.7.0 — use [nvm](https://github.com/nvm-sh/nvm) and run `nvm use` inside `dashboard/` to activate the pinned version from `.nvmrc`.
+
 ```bash
 # Dashboard (Node.js)
 cd dashboard
+nvm use   # activates Node 25.7.0 from .nvmrc
 npm install
 cd ..
 
@@ -1274,6 +1276,8 @@ The dashboard now uses model-first startup and additive dependency installs:
 
 ### 9.7 Package Management
 
+**Pinning strategy:** All direct dependencies in `dashboard/package.json` are pinned to exact versions (no `^` or `~`). This prevents silent version drift between environments and ensures the lock file remains stable across `npm install` runs. CI and the `.nvmrc` file pin Node.js to the same version used locally (25.7.0).
+
 **Check for outdated packages:**
 ```bash
 cd dashboard
@@ -1283,55 +1287,72 @@ npm outdated
 This shows a table with:
 - `Package`: Package name
 - `Current`: Currently installed version
-- `Wanted`: Latest version satisfying semver range in package.json
+- `Wanted`: Latest version satisfying semver range in package.json (same as `Current` when pinned exactly)
 - `Latest`: Latest version available on npm registry
 
-**Understanding npm update vs npm install:**
+**Understanding npm commands with exact pins:**
 
 | Command | Behavior |
 |---------|----------|
-| `npm install <package>@latest` | Updates specific package to latest version, modifies package.json |
-| `npm install` | Installs exact versions from package-lock.json |
-| `npm update` | Updates packages to `Wanted` version (respects semver ranges like `^` or `~`) |
-| `npm update <package>` | Updates specific package within semver range |
+| `npm install` | Installs exact versions from `package-lock.json` — no drift possible |
+| `npm install <package>@latest` | Upgrades a specific package; you must then update `package.json` to the new exact version |
+| `npm update` | No-op when all versions are pinned exactly |
 
-**Safe updates (respects semver):**
+**Upgrading a dependency (intentional update workflow):**
 ```bash
 cd dashboard
-npm update           # Updates all packages within their semver ranges
-npm update electron  # Updates only electron within its range
-```
 
-**Major version updates (breaking changes allowed):**
-```bash
-# Update specific packages to latest
+# 1. Install the new version
 npm install electron@latest --save-dev
-npm install react@latest react-dom@latest
 
-# Or update all to latest (more risky)
-# Edit package.json manually to change versions, then:
-npm install
+# 2. Extract the exact resolved version and update package.json
+node -e "console.log(require('./package-lock.json').packages['node_modules/electron'].version)"
+# e.g. prints 41.0.0 — edit package.json to set "electron": "41.0.0"
+
+# 3. Verify lock file is stable
+npm install          # should print "up to date"
+git diff package-lock.json  # should only show specifier changes, not version changes
+
+# 4. Run quality checks
+npm run check
 ```
 
-**Clean reinstall (recommended after major updates):**
+**Upgrading all dependencies at once:**
 ```bash
 cd dashboard
-rm -rf node_modules package-lock.json
+
+# 1. Update all to latest and regenerate lock file
+npm install $(npm outdated --json | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+console.log(Object.entries(d).map(([k,v])=>k+'@'+v.latest).join(' '))
+")
+
+# 2. Extract new exact versions from lock file and update package.json
+node -e "
+const l=require('./package-lock.json'), p=require('./package.json');
+const all={...p.dependencies,...p.devDependencies};
+Object.keys(all).forEach(name=>{
+  const v=l.packages['node_modules/'+name]?.version;
+  if(v) console.log(name+': '+v);
+});"
+
+# 3. Edit package.json to set each dep to its exact resolved version, then:
 npm install
+npm run check
 ```
 
-**Verify updates don't break the build:**
+**Clean reinstall:**
 ```bash
-npm run typecheck    # TypeScript + JavaScript static type checking
-npm run build        # Production build
-npm run dev:electron # Test in development mode
+cd dashboard
+rm -rf node_modules
+npm install   # re-installs exact versions from package-lock.json
 ```
 
 **Best practices:**
 - Run `npm outdated` periodically to check for updates
 - Read changelogs for major version bumps (especially Electron, React, Vite)
 - Test thoroughly after updates (typecheck → build → runtime)
-- Update `README_DEV.md` dependency version numbers after major updates
+- After upgrading Node.js itself, update both `dashboard/.nvmrc` and the `node-version` in `.github/workflows/dashboard-quality.yml`
 - npm deprecation warnings from transitive dependencies (like `inflight`, `glob` in electron-builder) are usually harmless and cannot be eliminated until upstream packages update
 
 ---
@@ -1774,8 +1795,8 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 
 ### 14.2 Dashboard
 
-- Node.js 24+
-- Electron 40+
+- Node.js 25.7.0 (pinned in `dashboard/.nvmrc` and CI)
+- Electron 40.8.0
 - React 19 + TypeScript 5.9
 - Vite 7 (bundler)
 - Tailwind CSS 4
