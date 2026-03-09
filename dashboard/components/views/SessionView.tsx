@@ -949,16 +949,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-7xl flex-col p-6">
+    <div className="mx-auto flex h-full w-full max-w-7xl flex-col py-6 pr-3 pl-6">
       {/* 1. Header (Fixed) */}
       <div className="mb-6 flex flex-none flex-col space-y-2">
         <h1 className="text-3xl font-bold tracking-tight text-white">Session</h1>
       </div>
 
       {/* 2. Main Content Area */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-12">
+      <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
         {/* Left Column: Controls (40%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-5 lg:min-w-[499px]">
+        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
           {/* Left Top Scroll Indicator */}
           <div
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
@@ -1521,7 +1521,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         </div>
 
         {/* Right Column: Visualizer & Live Mode (60%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl lg:col-span-7 lg:min-w-[499px]">
+        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
           {/* Right Top Scroll Indicator */}
           <div
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
