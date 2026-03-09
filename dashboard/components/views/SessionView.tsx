@@ -537,17 +537,29 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // System Health Check for Visual Effects
   const isSystemHealthy = serverRunning && clientConnected;
 
+  // In remote mode there is no local Docker container; derive "container" state from the
+  // remote server connection so tray controls remain functional.
+  const isRemoteMode = clientMode === 'remote';
+  const trayContainerRunning = isRemoteMode ? clientRunning : serverRunning;
+  const trayContainerHealth = isRemoteMode
+    ? serverConnection.serverStatus === 'active'
+      ? 'healthy'
+      : serverConnection.serverStatus === 'error'
+        ? 'unhealthy'
+        : 'starting'
+    : docker.container.health;
+
   // Sync tray icon state with application state
   useTraySync({
     serverStatus: clientRunning ? serverConnection.serverStatus : 'inactive',
-    containerRunning: serverRunning,
-    containerHealth: docker.container.health,
+    containerRunning: trayContainerRunning,
+    containerHealth: trayContainerHealth,
     transcriptionStatus: transcription.status,
     liveStatus: live.status,
     muted: transcription.muted || live.muted,
     activeModel: activeModel ?? undefined,
     modelsLoaded: isAsrModelsLoaded,
-    isLocalConnection: true,
+    isLocalConnection: !isRemoteMode,
     isUploading,
     onStartRecording: () => transcription.start(),
     onStopRecording: () => {
