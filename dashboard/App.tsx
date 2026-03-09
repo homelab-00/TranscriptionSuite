@@ -25,6 +25,8 @@ import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
 import { useStarPopup } from './src/hooks/useStarPopup';
+import { useServerEventReactor } from './src/hooks/useServerEventReactor';
+import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import {
   MAIN_RECOMMENDED_MODEL,
   LIVE_RECOMMENDED_MODEL,
@@ -66,6 +68,11 @@ const AppInner: React.FC = () => {
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const serverConnection = useServerStatus();
   const docker = useDockerContext();
+
+  // Reactive cache invalidations on server state transitions
+  useServerEventReactor(serverConnection);
+  // Always-on Docker log token scanner
+  useAuthTokenSync(serverConnection.reachable);
 
   // Track clientRunning at app level so Sidebar can derive Session status
   const [clientRunning, setClientRunning] = useState(false);

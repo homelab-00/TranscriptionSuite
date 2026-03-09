@@ -67,7 +67,7 @@ export function useLanguages(modelName?: string | null): LanguagesState {
         backendType: data.backend_type ?? null,
       } satisfies LanguagesQueryData;
     },
-    staleTime: Infinity,
+    staleTime: 60_000,
     placeholderData: PLACEHOLDER,
   });
 

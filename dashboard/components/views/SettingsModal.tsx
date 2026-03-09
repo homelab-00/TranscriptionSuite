@@ -24,6 +24,7 @@ import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
 import { ShortcutCapture } from '../ui/ShortcutCapture';
+import { useQueryClient } from '@tanstack/react-query';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -48,15 +49,6 @@ const DEFAULT_SHORTCUTS = {
 const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
-
-function extractAdminTokenFromDockerLogLine(line: string): string | null {
-  if (!line) return null;
-  const cleanLine = line.replace(/\u001b\[[0-9;]*m/g, '');
-  const match = /Admin Token:\s*([^\s]+)/i.exec(cleanLine);
-  if (!match) return null;
-  const token = match[1].trim();
-  return token.length > 0 ? token : null;
-}
 
 function normalizeConfigString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -157,11 +149,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     useHttps: false,
     hfToken: '',
   });
-  const knownServerAdminTokenRef = React.useRef('');
 
+  // Sync auth token from the centralized useAuthTokenSync hook's cache
+  const queryClient = useQueryClient();
   useEffect(() => {
-    knownServerAdminTokenRef.current = clientSettings.authToken.trim();
-  }, [clientSettings.authToken]);
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event?.query?.queryKey?.[0] !== 'authToken') return;
+      const token = queryClient.getQueryData<string>(['authToken']);
+      if (token && token !== clientSettings.authToken) {
+        setClientSettings((prev) =>
+          prev.authToken === token ? prev : { ...prev, authToken: token },
+        );
+      }
+    });
+    // Seed from cache on mount
+    const cached = queryClient.getQueryData<string>(['authToken']);
+    if (cached && cached !== clientSettings.authToken) {
+      setClientSettings((prev) =>
+        prev.authToken === cached ? prev : { ...prev, authToken: cached },
+      );
+    }
+    return unsubscribe;
+  }, [queryClient]);
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'Server') return;
@@ -178,68 +187,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       cancelled = true;
     };
   }, [isOpen, activeTab]);
-
-  useEffect(() => {
-    if (!isOpen || activeTab !== 'Server') return;
-
-    const api = (window as any).electronAPI;
-    const docker = api?.docker;
-    if (!docker) return;
-
-    let cancelled = false;
-
-    const applyDetectedToken = (token: string) => {
-      const normalized = token.trim();
-      if (!normalized || normalized === knownServerAdminTokenRef.current) return;
-
-      knownServerAdminTokenRef.current = normalized;
-      setClientSettings((prev) =>
-        prev.authToken === normalized ? prev : { ...prev, authToken: normalized },
-      );
-      api?.config?.set?.('connection.authToken', normalized).catch(() => {});
-      apiClient.setAuthToken(normalized);
-    };
-
-    const scanRecentLogs = async () => {
-      try {
-        const lines = await docker.getLogs?.(300);
-        if (cancelled || !Array.isArray(lines)) return;
-        for (let i = lines.length - 1; i >= 0; i -= 1) {
-          const token = extractAdminTokenFromDockerLogLine(lines[i]);
-          if (token) {
-            applyDetectedToken(token);
-            break;
-          }
-        }
-      } catch {
-        // Server/container may not exist yet.
-      }
-    };
-
-    void scanRecentLogs();
-
-    const unsubscribe =
-      typeof docker.onLogLine === 'function'
-        ? docker.onLogLine((line: string) => {
-            const token = extractAdminTokenFromDockerLogLine(line);
-            if (token) {
-              applyDetectedToken(token);
-            }
-          })
-        : undefined;
-
-    const pollId = window.setInterval(() => {
-      if (!knownServerAdminTokenRef.current) {
-        void scanRecentLogs();
-      }
-    }, 2000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(pollId);
-      unsubscribe?.();
-    };
-  }, [activeTab, isOpen]);
 
   // Animation Lifecycle + Load Settings from Config Store
   useEffect(() => {

@@ -155,8 +155,8 @@ To begin with, you need to install Docker (or Podman).
     * Not required if using CPU mode
 
 **Windows:**
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (during installation make sure the
-  *'Use WSL 2 instead of Hyper-V'* checkbox is enabled)
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backen (during installation, if presented with the option, make sure the *'Use WSL 2 instead of Hyper-V'* checkbox is enabled).
+After installation to make sure it's enabled, run `wsl --list --verbose` - if the number is 2, Docker is using the WSL 2 backend.
 2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
     * Not required if using CPU mode
 

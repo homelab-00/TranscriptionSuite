@@ -65,6 +65,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [9.5 Server Busy Handling](#95-server-busy-handling)
   - [9.6 Model Management](#96-model-management)
   - [9.7 Package Management](#97-package-management)
+  - [9.8 Reactive UI Updates & State Syncing](#98-reactive-ui-updates--state-syncing)
 - [10. Configuration Reference](#10-configuration-reference)
   - [10.1 Server Configuration](#101-server-configuration)
   - [10.2 Dashboard Configuration](#102-dashboard-configuration)
@@ -1796,6 +1797,80 @@ npm install   # re-installs exact versions from package-lock.json
 - Test thoroughly after updates (typecheck → build → runtime)
 - After upgrading Node.js itself, update both `dashboard/.nvmrc` and the `node-version` in `.github/workflows/dashboard-quality.yml`
 - npm deprecation warnings from transitive dependencies (like `inflight`, `glob` in electron-builder) are usually harmless and cannot be eliminated until upstream packages update
+
+### 9.8 Reactive UI Updates & State Syncing
+
+Dashboard UI elements stay current with backend state through a "state transition reactor" pattern rather than ad-hoc refresh calls. There is no SSE/WebSocket event push from the server; instead, the existing 10-second `useServerStatus` poll provides the signal, and two always-on hooks convert those signals into targeted React Query cache invalidations.
+
+#### Architecture
+
+```
+AppInner (App.tsx)
+  ├─ useServerStatus()          ← polls /api/status every 10 s (existing)
+  ├─ useAuthTokenSync()         ← always-on Docker log token scanner
+  └─ useServerEventReactor()    ← watches transitions, invalidates caches
+       ↓ on transition detected
+       queryClient.invalidateQueries(...)
+       ↓
+       useLanguages / useAdminStatus / etc. refetch automatically
+```
+
+Both hooks are mounted once in `AppInner` immediately after `useServerStatus()`.
+
+#### Key Files
+
+| File | Role |
+|------|---------|
+| `src/hooks/useServerEventReactor.ts` | Detects `reachable` and `ready` transitions; cascades cache invalidations |
+| `src/hooks/useAuthTokenSync.ts` | Always-on Docker log scanner; keeps `apiClient`, electron-store, and the `['authToken']` cache key in sync |
+| `src/utils/dockerLogParsing.ts` | Shared `extractAdminTokenFromDockerLogLine` utility |
+| `src/hooks/useLanguages.ts` | `staleTime: 60_000` (was `Infinity`) — cache becomes stale after 60 s so invalidations actually trigger refetches |
+
+#### `useServerEventReactor` — Transition Matrix
+
+The reactor tracks the previous values of `serverConnection.reachable` and `serverConnection.ready` in a ref and fires invalidations only on rising edges:
+
+| Transition | Condition | Invalidates |
+|---|---|---|
+| Server becomes reachable | `false → true` on `reachable` | `['adminStatus']`, `['languages']` |
+| Models become ready | `false → true` on `ready` | `['languages']`, `['adminStatus']` |
+| Server becomes unreachable | `true → false` on `reachable` | _(updates ref only; no point fetching)_ |
+
+`invalidateQueries({ queryKey: ['languages'] })` uses React Query's prefix matching — it invalidates all backend-specific variants (`['languages', 'whisper']`, `['languages', 'parakeet']`, etc.) at once.
+
+#### `useAuthTokenSync` — Docker Log Token Detection
+
+The hook runs independently of which view is active:
+
+1. **On mount:** Seeds `knownTokenRef` from electron-store so a persisted token is not overwritten by a log re-scan.
+2. **Log scan:** Calls `docker.getLogs(300)` on mount to scan the 300 most recent lines for `Admin Token: <value>`.
+3. **Subscription:** Subscribes to `docker.onLogLine` to detect the token the moment it appears in new log output.
+4. **Poll fallback:** A 2-second interval retries the scan while `knownTokenRef` is empty.
+5. **On detection:** Writes to `electronAPI.config.set('connection.authToken', token)`, calls `apiClient.setAuthToken(token)`, and publishes the token to `queryClient.setQueryData(['authToken'], token)` so any consumer can subscribe reactively.
+6. **Graceful no-op:** Skips all of the above in non-Electron environments (e.g., browser dev mode) by checking for `window.electronAPI.docker`.
+
+#### `SettingsModal` — Reactive Token Consumption
+
+The Settings modal's Server tab auth token field is now reactive: instead of running its own Docker log scanner, it subscribes to the shared `['authToken']` query cache via `queryClient.getQueryCache().subscribe(...)`. When `useAuthTokenSync` updates the cache key, the modal's `clientSettings.authToken` state updates immediately without any interaction from the user.
+
+#### `ServerView` — Reactive Token Read
+
+The `authToken` state in `ServerView` was previously set once on mount (`useEffect(..., [])`). The dependency array is now `[adminStatus]`, so the token re-reads from electron-store on every admin status poll (every 10 s) and immediately after any admin status invalidation triggered by the reactor. This catches the server-just-started case without extra infrastructure.
+
+#### Explicit Invalidation After Model Reload
+
+In `SessionView.handleReloadModels`, the `onComplete` callback calls `queryClient.invalidateQueries({ queryKey: ['languages'] })` directly after model load finishes. This provides instant feedback (0 ms latency) rather than waiting for the reactor's next poll cycle (up to 10 s).
+
+#### `staleTime` Rationale
+
+`useLanguages` previously used `staleTime: Infinity`, which meant React Query considered cached language data "fresh forever" — even an explicit `invalidateQueries` call would not trigger a refetch for mounted components. Changing to `staleTime: 60_000` (60 seconds) means:
+
+- After an invalidation the query is immediately eligible for a refetch.
+- During normal operation, 60 s avoids unnecessary network chatter (the language list is a cheap, rarely-changing GET).
+
+#### Future Enhancement: SSE
+
+For sub-second latency, a backend SSE endpoint (`/api/events`) could push `model_loaded`, `model_unloaded`, and `config_changed` events. The reactor pattern is designed to be extended with SSE — the invalidation logic stays the same, only the trigger source changes from a poll-derived transition to an `EventSource` message.
 
 ---
 

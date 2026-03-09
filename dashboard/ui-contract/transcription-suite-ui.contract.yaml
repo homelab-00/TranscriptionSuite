@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.4
+  spec_version: 1.0.3
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -35,7 +35,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-09T11:51:30.756Z
+    generated_at: 2026-03-09T15:25:17.461Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -664,7 +664,6 @@ utility_allowlist:
     - md:grid-cols-2
     - md:grid-cols-4
     - md:items-center
-    - md:items-end
     - md:justify-between
     - min-h-0
     - min-h-32
@@ -700,7 +699,6 @@ utility_allowlist:
     - mx-2
     - mx-auto
     - my-1
-    - my-2
     - opacity-0
     - opacity-10
     - opacity-30
@@ -728,7 +726,6 @@ utility_allowlist:
     - p-6
     - p-8
     - pb-0
-    - pb-1
     - pb-10
     - pb-2
     - pb-4
@@ -802,7 +799,6 @@ utility_allowlist:
     - rounded-tl-none
     - rounded-tr-none
     - rounded-xl
-    - select-all
     - select-none
     - selectable-text
     - shadow
@@ -844,7 +840,6 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
-    - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
     - text-amber-200
@@ -852,19 +847,15 @@ utility_allowlist:
     - text-amber-300/80
     - text-amber-400
     - text-amber-400/60
-    - text-amber-400/80
     - text-base
     - text-black
     - text-blue-400
     - text-center
     - text-green-400
-    - text-green-400/70
     - text-indigo-400
     - text-left
     - text-lg
     - text-only
-    - text-orange-200
-    - text-orange-400
     - text-orange-500
     - text-red-100
     - text-red-200/90

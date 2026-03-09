@@ -25,6 +25,7 @@ import { StatusLight } from '../ui/StatusLight';
 import { AudioVisualizer } from '../AudioVisualizer';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
+import { useQueryClient } from '@tanstack/react-query';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
@@ -113,6 +114,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
       })
       .catch(() => {});
   }, []);
+
+  const queryClient = useQueryClient();
 
   // Admin status (needed early for model-aware language list)
   const admin = useAdminStatus();
@@ -519,6 +522,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         setModelsOperationType(null);
         admin.refresh();
         serverConnection.refresh();
+        void queryClient.invalidateQueries({ queryKey: ['languages'] });
       },
       onError: (msg) => {
         logClientEvent('Client', `Model load failed: ${msg}`, 'error');
@@ -528,7 +532,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     });
 
     modelsLoadCleanupRef.current = cleanup;
-  }, [admin, serverConnection]);
+  }, [admin, serverConnection, queryClient]);
 
   // System Health Check for Visual Effects
   const isSystemHealthy = serverRunning && clientConnected;

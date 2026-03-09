@@ -259,7 +259,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         })
         .catch(() => {});
     }
-  }, []);
+  }, [adminStatus]);
 
   // Load persisted model selection UI state once per mount.
   useEffect(() => {
