@@ -7,9 +7,6 @@ interface BugReportModalProps {
 }
 
 const REPO_ISSUES_URL = 'https://github.com/homelab-00/TranscriptionSuite/issues/new';
-const LOG_TAIL_LINES = 150;
-/** GitHub URL max is ~8192 chars; leave room for the rest of the URL. */
-const MAX_BODY_LENGTH = 7000;
 
 export const BugReportModal: React.FC<BugReportModalProps> = ({ isOpen, onClose }) => {
   const [isRendered, setIsRendered] = useState(false);
@@ -19,8 +16,6 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({ isOpen, onClose 
   const [platform, setPlatform] = useState<string>('');
   const [clientLogPath, setClientLogPath] = useState<string>('');
   const [serverLogPath, setServerLogPath] = useState<string>('');
-  const [clientLog, setClientLog] = useState<string>('');
-  const [serverLog, setServerLog] = useState<string>('');
   const [submitted, setSubmitted] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -59,10 +54,8 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({ isOpen, onClose 
         setPlatform(api.app.getPlatform?.() ?? '');
 
         api.app
-          .readLogFiles(LOG_TAIL_LINES)
+          .readLogFiles()
           .then((result) => {
-            setClientLog(result.clientLog);
-            setServerLog(result.serverLog);
             setClientLogPath(result.clientLogPath);
             setServerLogPath(result.serverLogPath);
           })
@@ -95,23 +88,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({ isOpen, onClose 
   const handleSubmit = () => {
     const title = encodeURIComponent('Bug Report');
     const sysInfo = `**Version:** ${appVersion}\n**Platform:** ${platform}`;
-
-    // Build body with truncation to stay within URL limits
-    let body = `## Description\n\n${description || '_No description provided._'}\n\n## System Info\n\n${sysInfo}`;
-
-    const clientLogSection = clientLog
-      ? `\n\n<details><summary>Client Log (last ${LOG_TAIL_LINES} lines)</summary>\n\n\`\`\`\n${clientLog}\n\`\`\`\n\n</details>`
-      : '';
-    const serverLogSection = serverLog
-      ? `\n\n<details><summary>Server Log (last ${LOG_TAIL_LINES} lines)</summary>\n\n\`\`\`\n${serverLog}\n\`\`\`\n\n</details>`
-      : '';
-
-    body += clientLogSection + serverLogSection;
-
-    // Truncate if too long for a URL
-    if (body.length > MAX_BODY_LENGTH) {
-      body = body.slice(0, MAX_BODY_LENGTH) + '\n\n_(truncated — attach full logs manually)_';
-    }
+    const body = `## Description\n\n${description || '_No description provided._'}\n\n## System Info\n\n${sysInfo}\n\n---\n\n_Please attach your log files to this issue (paths shown in the app after submitting)._`;
 
     const url = `${REPO_ISSUES_URL}?title=${title}&body=${encodeURIComponent(body)}`;
     void openExternal(url);
@@ -176,7 +153,8 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({ isOpen, onClose 
                   Version: {appVersion} &bull; Platform: {platform || 'unknown'}
                 </p>
                 <p className="mt-1.5 text-xs text-slate-500">
-                  {clientLog ? '✓' : '✗'} Client log &bull; {serverLog ? '✓' : '✗'} Server log
+                  {clientLogPath ? '✓' : '✗'} Client log &bull; {serverLogPath ? '✓' : '✗'} Server
+                  log
                 </p>
               </div>
 
