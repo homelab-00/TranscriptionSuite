@@ -151,8 +151,9 @@ async def create_transcription(
 
     except TranscriptionCancelledError:
         return _openai_error(500, "Transcription was cancelled", error_type="server_error")
-    except ValueError as exc:
-        return _openai_error(400, str(exc))
+    except ValueError:
+        logger.warning("OpenAI transcription endpoint: invalid request", exc_info=True)
+        return _openai_error(400, "Invalid request parameters", error_type="invalid_request_error")
     except HTTPException:
         raise
     except Exception:
@@ -234,8 +235,9 @@ async def create_translation(
 
     except TranscriptionCancelledError:
         return _openai_error(500, "Transcription was cancelled", error_type="server_error")
-    except ValueError as exc:
-        return _openai_error(400, str(exc))
+    except ValueError:
+        logger.warning("OpenAI translation endpoint: invalid request", exc_info=True)
+        return _openai_error(400, "Invalid request parameters", error_type="invalid_request_error")
     except HTTPException:
         raise
     except Exception:
