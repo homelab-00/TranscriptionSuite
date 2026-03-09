@@ -39,6 +39,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.5 Docker Volume Structure](#65-docker-volume-structure)
   - [6.6 Docker Image Selection](#66-docker-image-selection)
   - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
+  - [6.8 Differential Update Implementation](#68-differential-update-implementation)
 - [7. API Reference](#7-api-reference)
   - [7.1 API Endpoints — Quick Reference](#71-api-endpoints--quick-reference)
   - [7.2 Endpoint Details](#72-endpoint-details)
@@ -900,6 +901,123 @@ docker compose up -d
 ```
 
 Use runtime reset only for recovery/maintenance.
+
+### 6.8 Differential Update Implementation
+
+This section describes the internals of `server/docker/bootstrap_runtime.py`, which implements the differential runtime dependency update system.
+
+#### Two-fingerprint scheme
+
+Bootstrap tracks two independent fingerprints, both written into `/runtime/.runtime-bootstrap-marker.json` after every successful sync:
+
+| Fingerprint | Inputs | Purpose |
+|-------------|--------|---------|
+| **Structural fingerprint** | Python ABI tag + CPU architecture + sorted optional extras | Determines whether the venv shape is compatible. A change here means the existing venv cannot be updated incrementally; a full rebuild is required. |
+| **Lock fingerprint** | `uv.lock` file content (SHA-256) | Tracks whether only package versions changed. If the structural fingerprint is unchanged but this one changed, an incremental `delta-sync` is sufficient. |
+
+A third composite **dependency fingerprint** is the hash of both: schema version + ABI + arch + extras + `uv.lock`. This is the fingerprint stored in the `fingerprint` field and used as the primary skip check.
+
+#### Three bootstrap paths
+
+```
+startup
+   │
+   ▼
+fingerprint match? ──yes──► skip (no uv call, <1 s)
+   │
+   no
+   ▼
+structural fingerprint match?
+   │yes                         │no / venv missing
+   ▼                            ▼
+delta-sync                 rebuild-sync
+(uv sync against            (wipe .venv, run
+existing .venv)              uv sync fresh)
+   │
+   │ failure
+   ▼
+escalate → rebuild-sync
+```
+
+| Path | Trigger | uv call | Typical duration |
+|------|---------|---------|------------------|
+| `skip` | `fingerprint` field in marker matches current hash | None | < 1 s |
+| `delta-sync` | Structural fingerprint matches but `uv.lock` changed (or marker missing/stale) | `uv sync --frozen --no-dev` against existing `.venv` | Seconds to minutes depending on package delta |
+| `rebuild-sync` | `.venv` absent, structural mismatch, `BOOTSTRAP_FORCE_REBUILD=true`, or `delta-sync` failure | Wipes `.venv`, then `uv sync --frozen --no-dev` from scratch | Minutes (first run: up to ~30 min for full CUDA stack) |
+
+If `delta-sync` fails, bootstrap automatically escalates to `rebuild-sync` without surfacing an error, recording `escalated_to_rebuild: true` in the marker.
+
+#### Role of the uv wheel cache (`/runtime/cache`)
+
+`UV_CACHE_DIR` is set to `/runtime/cache`, which lives **inside the `runtime-deps` Docker volume** alongside `/runtime/.venv`. This means:
+
+- Cached wheels survive across container restarts and image updates.
+- A `rebuild-sync` after a `delta-sync` failure can still serve most packages from the local cache, avoiding a full re-download.
+- The cache is **kept by default**. To reclaim ~1–2 GB: set `BOOTSTRAP_PRUNE_UV_CACHE=true` (the cache directory is deleted after a successful sync). Note this makes the next `rebuild-sync` slower.
+
+#### Optional extras and model-driven install
+
+Boost uses `[project.optional-dependencies]` groups in `pyproject.toml`:
+
+| Extra | Packages installed | Trigger |
+|-------|-------------------|---------|
+| `whisper` | `faster-whisper`, `ctranslate2`, `whisperx` | `INSTALL_WHISPER=true` **or** configured model name is a faster-whisper variant |
+| `nemo` | `nemo_toolkit[asr]` | `INSTALL_NEMO=true` **or** configured model name is a NeMo/Parakeet variant |
+| `vibevoice_asr` | `vibevoice` (git+ ref) | `INSTALL_VIBEVOICE_ASR=true` **or** configured model name matches the VibeVoice-ASR pattern |
+
+Extras are part of the **structural fingerprint**. Adding or removing an extra triggers a `rebuild-sync`.
+
+#### Package delta logging
+
+When `BOOTSTRAP_LOG_CHANGES=true` (default), bootstrap snapshots installed packages before and after every sync via `importlib.metadata` and emits a diff summary:
+
+```
+[bootstrap] Package delta: added=12 updated=3 removed=0
+[bootstrap] Sample added packages: faster-whisper, ctranslate2, ...
+```
+
+This appears in `docker logs` and in the server log file.
+
+#### Bootstrap status file
+
+`/runtime/bootstrap-status.json` is written at the end of every bootstrap run. It records:
+
+- The selected sync mode and selection reason.
+- Feature availability for each backend (`whisper`, `nemo`, `vibevoice_asr`, `diarization`).
+- A `preload_cache_key` for diarization (so the expensive PyAnnote pipeline load is skipped on restart if nothing changed).
+- Package delta counts and diagnostics.
+
+The server's `/api/status` endpoint reads this file to report backend capability to the dashboard.
+
+#### Marker file
+
+`/runtime/.runtime-bootstrap-marker.json` is the decision artifact bootstrap reads at every startup. Fields:
+
+| Field | Description |
+|-------|-------------|
+| `schema_version` | Incremented when marker format changes; mismatch forces `rebuild-sync`. |
+| `fingerprint` | Composite hash used for skip check. |
+| `structural_fingerprint` | Hash of ABI + arch + extras (without `uv.lock`). |
+| `lock_fingerprint` | Hash of `uv.lock` content only. |
+| `python_abi` | Python ABI tag string (e.g. `cpython-313-x86_64-linux-gnu`). |
+| `arch` | CPU architecture from `platform.machine()`. |
+| `sync_mode` | Last chosen path: `skip`, `delta-sync`, `rebuild-sync`. |
+| `selection_reason` | Why that path was chosen (e.g. `hash_match_skip`, `lock_changed`, `venv_missing`). |
+| `escalated_to_rebuild` | `true` if `delta-sync` was attempted but failed. |
+| `updated_at` | ISO-8601 timestamp of last successful sync. |
+
+#### Relevant environment variables
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `BOOTSTRAP_FORCE_REBUILD` | `false` | Skip fingerprint checks and force a fresh `rebuild-sync`. |
+| `BOOTSTRAP_PRUNE_UV_CACHE` | `false` | Delete `/runtime/cache` after a successful sync to reclaim disk space. |
+| `BOOTSTRAP_LOG_CHANGES` | `true` | Emit before/after package delta to logs. |
+| `BOOTSTRAP_TIMEOUT_SECONDS` | `1800` | Maximum seconds allowed for a single `uv sync` run. |
+| `BOOTSTRAP_REQUIRE_HF_TOKEN` | `false` | Abort bootstrap if `HF_TOKEN` is not set. |
+| `INSTALL_WHISPER` | `false` | Force-enable the `whisper` extra regardless of configured model. |
+| `INSTALL_NEMO` | `false` | Force-enable the `nemo` extra regardless of configured model. |
+| `INSTALL_VIBEVOICE_ASR` | `false` | Force-enable the `vibevoice_asr` extra regardless of configured model. |
 
 **Config reset semantics**
 - Normal image/runtime updates do **not** require deleting `~/.config/TranscriptionSuite` (or platform equivalent).
