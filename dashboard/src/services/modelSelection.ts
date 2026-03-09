@@ -14,8 +14,14 @@ export const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 export const MODEL_DISABLED_OPTION = 'None (Disabled)';
 
 export const WHISPER_LARGE_V3 = 'Systran/faster-whisper-large-v3';
+export const WHISPER_DISTIL_LARGE_V3 = 'Systran/faster-distil-whisper-large-v3';
+export const WHISPER_LARGE_V3_TURBO = 'deepdml/faster-whisper-large-v3-turbo-ct2';
 export const WHISPER_MEDIUM = 'Systran/faster-whisper-medium';
+export const WHISPER_MEDIUM_EN = 'Systran/faster-whisper-medium.en';
+export const WHISPER_DISTIL_MEDIUM_EN = 'Systran/faster-distil-whisper-medium.en';
 export const WHISPER_SMALL = 'Systran/faster-whisper-small';
+export const WHISPER_SMALL_EN = 'Systran/faster-whisper-small.en';
+export const WHISPER_DISTIL_SMALL_EN = 'Systran/faster-distil-whisper-small.en';
 
 export const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
 export const VIBEVOICE_ASR = 'microsoft/VibeVoice-ASR';
@@ -25,13 +31,29 @@ export const MAIN_MODEL_PRESETS = [
   MAIN_RECOMMENDED_MODEL,
   CANARY_1B_V2,
   WHISPER_LARGE_V3,
+  WHISPER_DISTIL_LARGE_V3,
+  WHISPER_LARGE_V3_TURBO,
   WHISPER_MEDIUM,
+  WHISPER_MEDIUM_EN,
+  WHISPER_DISTIL_MEDIUM_EN,
   WHISPER_SMALL,
+  WHISPER_SMALL_EN,
+  WHISPER_DISTIL_SMALL_EN,
   VIBEVOICE_ASR,
   VIBEVOICE_ASR_4BIT,
 ] as const;
 
-export const LIVE_MODEL_PRESETS = [WHISPER_LARGE_V3, WHISPER_MEDIUM, WHISPER_SMALL] as const;
+export const LIVE_MODEL_PRESETS = [
+  WHISPER_LARGE_V3,
+  WHISPER_DISTIL_LARGE_V3,
+  WHISPER_LARGE_V3_TURBO,
+  WHISPER_MEDIUM,
+  WHISPER_MEDIUM_EN,
+  WHISPER_DISTIL_MEDIUM_EN,
+  WHISPER_SMALL,
+  WHISPER_SMALL_EN,
+  WHISPER_DISTIL_SMALL_EN,
+] as const;
 
 export const ONBOARDING_MAIN_MODEL_OPTIONS = [
   ...MAIN_MODEL_PRESETS,

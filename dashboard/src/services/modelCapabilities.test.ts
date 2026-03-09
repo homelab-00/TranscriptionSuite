@@ -5,6 +5,7 @@ import {
   isNemoModel,
   isWhisperModel,
   isVibeVoiceASRModel,
+  isEnglishOnlyWhisperModel,
   filterLanguagesForModel,
   supportsTranslation,
   NEMO_LANGUAGES,
@@ -97,6 +98,15 @@ describe('isWhisperModel', () => {
     expect(isWhisperModel('Systran/faster-whisper-small')).toBe(true);
   });
 
+  it('returns true for new distil/turbo/.en whisper variants', () => {
+    expect(isWhisperModel('Systran/faster-distil-whisper-large-v3')).toBe(true);
+    expect(isWhisperModel('deepdml/faster-whisper-large-v3-turbo-ct2')).toBe(true);
+    expect(isWhisperModel('Systran/faster-whisper-medium.en')).toBe(true);
+    expect(isWhisperModel('Systran/faster-whisper-small.en')).toBe(true);
+    expect(isWhisperModel('Systran/faster-distil-whisper-medium.en')).toBe(true);
+    expect(isWhisperModel('Systran/faster-distil-whisper-small.en')).toBe(true);
+  });
+
   it('returns true for unknown/empty (default backend)', () => {
     expect(isWhisperModel(null)).toBe(true);
     expect(isWhisperModel(undefined)).toBe(true);
@@ -110,6 +120,30 @@ describe('isWhisperModel', () => {
 
   it('returns false for vibevoice', () => {
     expect(isWhisperModel('microsoft/VibeVoice-ASR')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isEnglishOnlyWhisperModel
+// ---------------------------------------------------------------------------
+describe('isEnglishOnlyWhisperModel', () => {
+  it('returns true for .en suffixed models', () => {
+    expect(isEnglishOnlyWhisperModel('Systran/faster-whisper-medium.en')).toBe(true);
+    expect(isEnglishOnlyWhisperModel('Systran/faster-whisper-small.en')).toBe(true);
+    expect(isEnglishOnlyWhisperModel('Systran/faster-distil-whisper-medium.en')).toBe(true);
+    expect(isEnglishOnlyWhisperModel('Systran/faster-distil-whisper-small.en')).toBe(true);
+  });
+
+  it('returns false for multilingual models', () => {
+    expect(isEnglishOnlyWhisperModel('Systran/faster-whisper-large-v3')).toBe(false);
+    expect(isEnglishOnlyWhisperModel('Systran/faster-whisper-medium')).toBe(false);
+    expect(isEnglishOnlyWhisperModel('Systran/faster-distil-whisper-large-v3')).toBe(false);
+  });
+
+  it('returns false for null/undefined/empty', () => {
+    expect(isEnglishOnlyWhisperModel(null)).toBe(false);
+    expect(isEnglishOnlyWhisperModel(undefined)).toBe(false);
+    expect(isEnglishOnlyWhisperModel('')).toBe(false);
   });
 });
 
@@ -212,6 +246,21 @@ describe('filterLanguagesForModel', () => {
 
     expect(result).toEqual(['Auto Detect']);
   });
+
+  it('returns only English for .en whisper models', () => {
+    expect(filterLanguagesForModel(allLanguages, 'Systran/faster-whisper-medium.en')).toEqual([
+      'English',
+    ]);
+    expect(filterLanguagesForModel(allLanguages, 'Systran/faster-whisper-small.en')).toEqual([
+      'English',
+    ]);
+    expect(
+      filterLanguagesForModel(allLanguages, 'Systran/faster-distil-whisper-medium.en'),
+    ).toEqual(['English']);
+    expect(filterLanguagesForModel(allLanguages, 'Systran/faster-distil-whisper-small.en')).toEqual(
+      ['English'],
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -242,8 +291,18 @@ describe('supportsTranslation', () => {
     expect(supportsTranslation('Systran/faster-whisper-medium.en')).toBe(false);
   });
 
-  it('returns false for distil-large-v3', () => {
-    expect(supportsTranslation('Systran/faster-distil-large-v3')).toBe(false);
+  it('returns true for distil-large-v3 (multilingual, supports translation)', () => {
+    expect(supportsTranslation('Systran/faster-distil-large-v3')).toBe(true);
+    expect(supportsTranslation('Systran/faster-distil-whisper-large-v3')).toBe(true);
+  });
+
+  it('returns false for turbo ct2 model', () => {
+    expect(supportsTranslation('deepdml/faster-whisper-large-v3-turbo-ct2')).toBe(false);
+  });
+
+  it('returns false for .en distil models', () => {
+    expect(supportsTranslation('Systran/faster-distil-whisper-medium.en')).toBe(false);
+    expect(supportsTranslation('Systran/faster-distil-whisper-small.en')).toBe(false);
   });
 
   it('returns true for unknown/empty (permissive default)', () => {

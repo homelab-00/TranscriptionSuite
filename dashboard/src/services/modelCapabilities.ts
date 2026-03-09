@@ -110,9 +110,18 @@ export function isVibeVoiceASRModel(modelName: string | null | undefined): boole
 }
 
 /**
+ * Returns true if the model is an English-only Whisper variant (name ends with `.en`).
+ */
+export function isEnglishOnlyWhisperModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim().toLowerCase();
+  return name.endsWith('.en');
+}
+
+/**
  * Filter a language list to only those supported by the given model.
  * Whisper models support everything; NeMo models (Parakeet, Canary) support 25 languages.
- * The "Auto Detect" entry is always preserved.
+ * English-only (.en) Whisper models restrict to English only.
+ * The "Auto Detect" entry is always preserved for applicable models.
  */
 export function filterLanguagesForModel(
   languages: string[],
@@ -120,6 +129,9 @@ export function filterLanguagesForModel(
 ): string[] {
   if (isVibeVoiceASRModel(modelName)) {
     return languages.filter((l) => l === 'Auto Detect');
+  }
+  if (isEnglishOnlyWhisperModel(modelName)) {
+    return languages.filter((l) => l === 'English');
   }
   if (!isNemoModel(modelName)) return languages;
   return languages.filter((l) => l === 'Auto Detect' || NEMO_LANGUAGES.has(l));
@@ -143,7 +155,6 @@ export function supportsTranslation(modelName: string | null | undefined): boole
   if (isVibeVoiceASRModel(modelName)) return false;
   if (name.includes('turbo')) return false;
   if (name.endsWith('.en')) return false;
-  if (name.includes('distil-large-v3')) return false;
 
   return true;
 }

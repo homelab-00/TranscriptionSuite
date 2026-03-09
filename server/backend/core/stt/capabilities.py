@@ -46,10 +46,6 @@ def supports_english_translation(model_name: str | None) -> bool:
     if name.endswith(".en") or "/whisper-" in name and name.endswith(".en"):
         return False
 
-    # Distil large-v3 is English-focused ASR.
-    if "distil-whisper/distil-large-v3" in name or "distil-large-v3" in name:
-        return False
-
     return True
 
 
