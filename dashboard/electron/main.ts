@@ -724,6 +724,17 @@ ipcMain.handle('app:removeConfigAndCache', async () => {
   }
   const externalCacheDir = path.join(cacheBaseDir, 'TranscriptionSuite');
 
+  // Clear Chromium/Electron session data before deleting the directories so that
+  // in-memory state is wiped and Electron does not immediately flush stale data
+  // back to disk after the rm. This covers cookies, localStorage, sessionStorage,
+  // IndexedDB, shader cache, service workers, etc.
+  await Promise.all([
+    session.defaultSession.clearStorageData(),
+    session.defaultSession.clearCache(),
+    session.defaultSession.clearHostResolverCache(),
+    session.defaultSession.clearAuthCache(),
+  ]);
+
   await Promise.all([
     fs.promises.rm(userDataDir, { recursive: true, force: true }),
     fs.promises.rm(externalCacheDir, { recursive: true, force: true }),

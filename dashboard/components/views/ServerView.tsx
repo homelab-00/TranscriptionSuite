@@ -1545,7 +1545,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   onChange={(e) => setKeepConfigDirectory(e.target.checked)}
                   className="text-accent-cyan focus:ring-accent-cyan h-4 w-4 rounded border-white/20 bg-black/30"
                 />
-                <span className="text-sm text-slate-200">Keep Config Folder</span>
+                <div>
+                  <span className="text-sm text-slate-200">Keep Config Folder</span>
+                  {!keepConfigDirectory && (
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      Settings and session data will be cleared. Some app infrastructure files (GPU
+                      cache, etc.) may be recreated while the app is running — restart for a fully
+                      clean state.
+                    </p>
+                  )}
+                </div>
               </label>
             </div>
             <div className="flex justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4">
