@@ -650,25 +650,52 @@ async function listImages(): Promise<DockerImage[]> {
     for (const line of output.split('\n').filter(Boolean)) {
       try {
         const row = JSON.parse(line) as {
+          // Docker NDJSON fields
           Repository?: string;
           Tag?: string;
           Size?: string;
           CreatedAt?: string;
           ID?: string;
+          // Podman NDJSON fields
+          RepoTags?: string[];
+          Names?: string[];
+          Id?: string;
+          Created?: number | string;
         };
         parsedAnyJsonLine = true;
 
         const repo = row.Repository?.trim() ?? '';
-        const tag = row.Tag?.trim() || 'unknown';
-        if (tag === '<none>') continue;
+        const tagField = row.Tag?.trim() ?? '';
 
-        parsed.push({
-          tag,
-          fullName: `${repo}:${tag}`,
-          size: row.Size?.trim() ?? '',
-          created: row.CreatedAt?.trim() ?? '',
-          id: row.ID?.trim() ?? '',
-        });
+        if (repo || tagField) {
+          // Docker format: separate Repository and Tag fields.
+          const tag = tagField || 'unknown';
+          if (tag === '<none>') continue;
+          parsed.push({
+            tag,
+            fullName: `${repo}:${tag}`,
+            size: row.Size?.trim() ?? '',
+            created: row.CreatedAt?.trim() ?? '',
+            id: row.ID?.trim() ?? '',
+          });
+        } else {
+          // Podman format: full "repo:tag" refs in RepoTags or Names.
+          const refs: string[] = row.RepoTags ?? row.Names ?? [];
+          for (const ref of refs) {
+            const trimmed = ref.trim();
+            if (!trimmed.startsWith(`${IMAGE_REPO}:`)) continue;
+            const lastColon = trimmed.lastIndexOf(':');
+            const tag = lastColon > -1 ? trimmed.slice(lastColon + 1) : 'unknown';
+            if (tag === '<none>') continue;
+            parsed.push({
+              tag,
+              fullName: trimmed,
+              size: row.Size?.trim() ?? '',
+              created: row.CreatedAt?.trim() ?? String(row.Created ?? ''),
+              id: (row.ID ?? row.Id)?.trim() ?? '',
+            });
+          }
+        }
       } catch {
         // Ignore malformed JSON line and continue.
       }
@@ -1336,7 +1363,8 @@ const logLineBuffer: string[] = [];
 
 function resolveDockerTailArg(tail?: number): string {
   if (typeof tail !== 'number' || !Number.isFinite(tail) || tail < 0) {
-    return 'all';
+    // Docker accepts "all"; Podman requires an integer (0 = all logs by default).
+    return detectedRuntimeKind === 'podman' ? '0' : 'all';
   }
   return String(Math.floor(tail));
 }
@@ -1369,10 +1397,16 @@ async function startBackgroundLogStream(): Promise<void> {
   let stdoutRemainder = '';
   let stderrRemainder = '';
 
-  logProcess = spawn(bin, ['logs', '--follow', '--timestamps', '--tail', 'all', CONTAINER_NAME], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
-  });
+  // Docker accepts "--tail all"; Podman requires an integer (0 = show all existing logs).
+  const tailAllArg = detectedRuntimeKind === 'podman' ? '0' : 'all';
+  logProcess = spawn(
+    bin,
+    ['logs', '--follow', '--timestamps', '--tail', tailAllArg, CONTAINER_NAME],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
+    },
+  );
 
   const handle = (data: Buffer, stream: 'stdout' | 'stderr') => {
     const previousRemainder = stream === 'stdout' ? stdoutRemainder : stderrRemainder;
