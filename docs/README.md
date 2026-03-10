@@ -66,9 +66,10 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
    - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
      - [Server Machine Setup](#server-machine-setup)
    - [3.2 Option B: LAN (same local network)](#32-option-b-lan-same-local-network)
- - [4. Technical Info](#4-technical-info)
- - [5. License](#5-license)
- - [6. Acknowledgments](#6-acknowledgments)
+ - [4. License](#4-troubleshooting)
+ - [5. Technical Info](#5-technical-info)
+ - [6. License](#6-license)
+ - [7. Acknowledgments](#7-acknowledgments)
 
 ---
 
@@ -442,19 +443,29 @@ Same as Tailscale above — if a firewall is active:
 
 ---
 
-## 4. Technical Info
+## 4. Troubleshooting
+
+As with most things, the first thing to try is turning them off and on again. Stop the server/client, quit the app and then try again.
+
+The next step is to start deleting things. The safest choice is deleting *everything*, but that means having to redownload everything and losing whatever recordings you've saved in the Notebook (unless you create a backup). Volumes 'data' & 'models' don't usually need to be removed for example.
+
+Controls for all these actions can be found in the Server tab. Here you can remove the container, image, and volumes individually or use the big red button at the bottom (that can also remove your config folder).
+
+---
+
+## 5. Technical Info
 
 For more information about the technical aspects of the project, check out [README_DEV](README_DEV.md).
 
 ---
 
-## 5. License
+## 6. License
 
 GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 
-## 6. Acknowledgments
+## 7. Acknowledgments
 
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
