@@ -66,7 +66,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
    - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
      - [Server Machine Setup](#server-machine-setup)
    - [3.2 Option B: LAN (same local network)](#32-option-b-lan-same-local-network)
- - [4. License](#4-troubleshooting)
+ - [4. Troubleshhoting](#4-troubleshooting)
  - [5. Technical Info](#5-technical-info)
  - [6. License](#6-license)
  - [7. Acknowledgments](#7-acknowledgments)
@@ -213,9 +213,9 @@ We're now ready to start the server. This process includes two parts: downloadin
 
 Notes:
 * *Settings are saved to:*
-*- Linux: `~/.config/TranscriptionSuite/`*
-*- Windows: `%APPDATA%\TranscriptionSuite\`*
-*- macOS: `~/Library/Application Support/TranscriptionSuite/`*
+  * *- Linux: `~/.config/TranscriptionSuite/`*
+  * *- Windows: `%APPDATA%\TranscriptionSuite\`*
+  * *- macOS: `~/Library/Application Support/TranscriptionSuite/`*
 
 * *GNOME note: The [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension is required for system tray support.*
 
