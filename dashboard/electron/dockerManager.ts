@@ -649,51 +649,56 @@ async function listImages(): Promise<DockerImage[]> {
 
     for (const line of output.split('\n').filter(Boolean)) {
       try {
-        const row = JSON.parse(line) as {
+        type ImageRecord = {
           // Docker NDJSON fields
           Repository?: string;
           Tag?: string;
           Size?: string;
           CreatedAt?: string;
           ID?: string;
-          // Podman NDJSON fields
+          // Podman NDJSON / JSON array fields
           RepoTags?: string[];
           Names?: string[];
           Id?: string;
           Created?: number | string;
         };
+        const rawParsed = JSON.parse(line) as ImageRecord | ImageRecord[];
+        // Podman may output a JSON array (possibly on one line); Docker uses NDJSON.
+        const rows: ImageRecord[] = Array.isArray(rawParsed) ? rawParsed : [rawParsed];
         parsedAnyJsonLine = true;
 
-        const repo = row.Repository?.trim() ?? '';
-        const tagField = row.Tag?.trim() ?? '';
+        for (const row of rows) {
+          const repo = row.Repository?.trim() ?? '';
+          const tagField = row.Tag?.trim() ?? '';
 
-        if (repo || tagField) {
-          // Docker format: separate Repository and Tag fields.
-          const tag = tagField || 'unknown';
-          if (tag === '<none>') continue;
-          parsed.push({
-            tag,
-            fullName: `${repo}:${tag}`,
-            size: row.Size?.trim() ?? '',
-            created: row.CreatedAt?.trim() ?? '',
-            id: row.ID?.trim() ?? '',
-          });
-        } else {
-          // Podman format: full "repo:tag" refs in RepoTags or Names.
-          const refs: string[] = row.RepoTags ?? row.Names ?? [];
-          for (const ref of refs) {
-            const trimmed = ref.trim();
-            if (!trimmed.startsWith(`${IMAGE_REPO}:`)) continue;
-            const lastColon = trimmed.lastIndexOf(':');
-            const tag = lastColon > -1 ? trimmed.slice(lastColon + 1) : 'unknown';
+          if (repo || tagField) {
+            // Docker format: separate Repository and Tag fields.
+            const tag = tagField || 'unknown';
             if (tag === '<none>') continue;
             parsed.push({
               tag,
-              fullName: trimmed,
+              fullName: `${repo}:${tag}`,
               size: row.Size?.trim() ?? '',
-              created: row.CreatedAt?.trim() ?? String(row.Created ?? ''),
-              id: (row.ID ?? row.Id)?.trim() ?? '',
+              created: row.CreatedAt?.trim() ?? '',
+              id: row.ID?.trim() ?? '',
             });
+          } else {
+            // Podman format: full "repo:tag" refs in RepoTags or Names.
+            const refs: string[] = row.RepoTags ?? row.Names ?? [];
+            for (const ref of refs) {
+              const trimmed = ref.trim();
+              if (!trimmed.startsWith(`${IMAGE_REPO}:`)) continue;
+              const lastColon = trimmed.lastIndexOf(':');
+              const tag = lastColon > -1 ? trimmed.slice(lastColon + 1) : 'unknown';
+              if (tag === '<none>') continue;
+              parsed.push({
+                tag,
+                fullName: trimmed,
+                size: row.Size?.trim() ?? '',
+                created: row.CreatedAt?.trim() ?? String(row.Created ?? ''),
+                id: (row.ID ?? row.Id)?.trim() ?? '',
+              });
+            }
           }
         }
       } catch {
