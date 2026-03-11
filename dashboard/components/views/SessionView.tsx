@@ -45,6 +45,8 @@ import {
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
 import { isModelDisabled } from '../../src/services/modelSelection';
+import { SessionTab } from '../../types';
+import { SessionImportTab } from './SessionImportTab';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -63,6 +65,8 @@ interface SessionViewProps {
   startupFlowPending: boolean;
   isUploading?: boolean;
   live: LiveModeState;
+  sessionTab: SessionTab;
+  onChangeSessionTab: (tab: SessionTab) => void;
 }
 
 export const SessionView: React.FC<SessionViewProps> = ({
@@ -73,6 +77,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
   startupFlowPending,
   isUploading,
   live,
+  sessionTab,
+  onChangeSessionTab,
 }) => {
   // Global State
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
@@ -955,834 +961,879 @@ export const SessionView: React.FC<SessionViewProps> = ({
         <h1 className="text-3xl font-bold tracking-tight text-white">Session</h1>
       </div>
 
-      {/* 2. Main Content Area */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
-        {/* Left Column: Controls (40%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
-          {/* Left Top Scroll Indicator */}
-          <div
-            className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <div
-              className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
-              style={{
-                maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-                WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-              }}
-            ></div>
-          </div>
-          {/* Left Top Corner Mask */}
-          <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              WebkitMaskImage:
-                'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-            }}
-          />
-
-          {/* Main Scrollable Area for Left Column */}
-          <div
-            ref={leftScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
-          >
-            <div
-              ref={leftContentRef}
-              className="space-y-6"
-              style={
-                leftColumnBaselineHeight
-                  ? { minHeight: `${leftColumnBaselineHeight}px` }
-                  : undefined
-              }
-            >
-              {/* Unified Control Center */}
-              <GlassCard
-                title="Control Center"
-                className={`from-glass-200 to-glass-100 relative flex-none bg-linear-to-b transition-all duration-500 ease-in-out ${isSystemHealthy ? 'border-accent-cyan/50! z-10 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]!' : ''}`}
+      {sessionTab === SessionTab.IMPORT ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <SessionImportTab />
+        </div>
+      ) : (
+        <>
+          {/* 2. Main Content Area */}
+          <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
+            {/* Left Column: Controls (40%) */}
+            <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
+              {/* Left Top Scroll Indicator */}
+              <div
+                className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
               >
-                <div className="space-y-5">
-                  {/* Server Control */}
-                  <div className="flex flex-col space-y-4 rounded-xl border border-white/5 bg-white/5 p-4 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`bg-accent-magenta/10 text-accent-magenta rounded-lg p-2`}>
-                          <Server size={20} />
-                        </div>
-                        <div className="text-sm font-semibold tracking-wide text-white">
-                          Inference Server
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-medium text-slate-400">
-                          {serverRunning && docker.container.health === 'healthy'
-                            ? 'Docker Container Running'
-                            : serverRunning
-                              ? 'Container Starting\u2026'
-                              : docker.container.exists
-                                ? 'Container Stopped'
-                                : 'Container Missing'}
-                        </span>
-                        {serverRunning && serverMode && (
-                          <span
-                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                          >
-                            {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                            {serverMode}
-                          </span>
-                        )}
-                        <StatusLight
-                          status={
-                            serverRunning && docker.container.health === 'healthy'
-                              ? 'active'
-                              : docker.container.exists
-                                ? 'warning'
-                                : 'inactive'
-                          }
-                          className="h-2 w-2"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => onStartServer('local', runtimeProfile)}
-                          disabled={serverRunning || docker.operating || startupFlowPending}
-                          className="px-3 text-xs"
-                        >
-                          {docker.operating || startupFlowPending ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            'Start Local'
-                          )}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => onStartServer('remote', runtimeProfile)}
-                          disabled={serverRunning || docker.operating || startupFlowPending}
-                          className="px-3 text-xs"
-                        >
-                          Start Remote
-                        </Button>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => docker.stopContainer()}
-                          disabled={!serverRunning || docker.operating}
-                          className="px-3 text-xs"
-                        >
-                          Stop
-                        </Button>
-                      </div>
-                      <div className="ml-auto shrink-0">
-                        <Button
-                          variant={showUnloadModelsState ? 'danger' : 'secondary'}
-                          size="sm"
-                          onClick={isAsrModelsLoaded ? handleUnloadAllModels : handleReloadModels}
-                          disabled={!serverConnection.reachable || modelsOperationPending}
-                          className="px-3 text-xs"
-                        >
-                          {modelsOperationPending ? (
-                            <>
-                              <Loader2 size={14} className="mr-1 animate-spin" />
-                              {modelsOperationType === 'loading' ? 'Loading...' : 'Unloading...'}
-                            </>
-                          ) : showUnloadModelsState ? (
-                            'Unload Models'
-                          ) : (
-                            'Reload Models'
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
+                <div
+                  className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
+                  style={{
+                    maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                  }}
+                ></div>
+              </div>
+              {/* Left Top Corner Mask */}
+              <div
+                className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+                style={{
+                  ...maskStyle,
+                  maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+                  WebkitMaskImage:
+                    'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+                }}
+              />
 
-                  {/* Client Control */}
-                  <div className="flex flex-col space-y-4 rounded-xl border border-white/5 bg-white/5 p-4 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`bg-accent-cyan/10 text-accent-cyan rounded-lg p-2`}>
-                          <Activity size={20} />
-                        </div>
-                        <div className="text-sm font-semibold tracking-wide text-white">
-                          Client Link
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-medium text-slate-400">
-                          {clientStatusLabel}
-                        </span>
-                        {clientRunning && clientMode && (
-                          <span
-                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${clientMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                          >
-                            {clientMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                            {clientMode}
-                          </span>
-                        )}
-                        <StatusLight
-                          status={
-                            clientRunning && !serverConnection.reachable
-                              ? 'warning'
-                              : clientRunning
-                                ? 'active'
-                                : 'inactive'
-                          }
-                          className="h-2 w-2"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleStartClientLocal}
-                        disabled={clientRunning}
-                        className="px-3 text-xs"
-                      >
-                        Start Local
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={handleStartClientRemote}
-                        disabled={clientRunning}
-                        className="px-3 text-xs"
-                      >
-                        Start Remote
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={handleStopClient}
-                        disabled={!clientRunning}
-                        className="px-3 text-xs"
-                      >
-                        Stop
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </GlassCard>
-
-              {/* Main Transcription */}
-              <GlassCard
-                title="Main Transcription"
-                className="flex-none"
-                action={
-                  <button
-                    onClick={() => live.toggleMute()}
-                    className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                    title={live.muted ? 'Unmute' : 'Mute'}
+              {/* Main Scrollable Area for Left Column */}
+              <div
+                ref={leftScrollRef}
+                className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+              >
+                <div
+                  ref={leftContentRef}
+                  className="space-y-6"
+                  style={
+                    leftColumnBaselineHeight
+                      ? { minHeight: `${leftColumnBaselineHeight}px` }
+                      : undefined
+                  }
+                >
+                  {/* Unified Control Center */}
+                  <GlassCard
+                    title="Control Center"
+                    className={`from-glass-200 to-glass-100 relative flex-none bg-linear-to-b transition-all duration-500 ease-in-out ${isSystemHealthy ? 'border-accent-cyan/50! z-10 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]!' : ''}`}
                   >
-                    {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                  </button>
-                }
+                    <div className="space-y-5">
+                      {/* Server Control */}
+                      <div className="flex flex-col space-y-4 rounded-xl border border-white/5 bg-white/5 p-4 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`bg-accent-magenta/10 text-accent-magenta rounded-lg p-2`}
+                            >
+                              <Server size={20} />
+                            </div>
+                            <div className="text-sm font-semibold tracking-wide text-white">
+                              Inference Server
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xs font-medium text-slate-400">
+                              {serverRunning && docker.container.health === 'healthy'
+                                ? 'Docker Container Running'
+                                : serverRunning
+                                  ? 'Container Starting\u2026'
+                                  : docker.container.exists
+                                    ? 'Container Stopped'
+                                    : 'Container Missing'}
+                            </span>
+                            {serverRunning && serverMode && (
+                              <span
+                                className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                              >
+                                {serverMode === 'local' ? (
+                                  <Laptop size={10} />
+                                ) : (
+                                  <Radio size={10} />
+                                )}
+                                {serverMode}
+                              </span>
+                            )}
+                            <StatusLight
+                              status={
+                                serverRunning && docker.container.health === 'healthy'
+                                  ? 'active'
+                                  : docker.container.exists
+                                    ? 'warning'
+                                    : 'inactive'
+                              }
+                              className="h-2 w-2"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => onStartServer('local', runtimeProfile)}
+                              disabled={serverRunning || docker.operating || startupFlowPending}
+                              className="px-3 text-xs"
+                            >
+                              {docker.operating || startupFlowPending ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                'Start Local'
+                              )}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => onStartServer('remote', runtimeProfile)}
+                              disabled={serverRunning || docker.operating || startupFlowPending}
+                              className="px-3 text-xs"
+                            >
+                              Start Remote
+                            </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => docker.stopContainer()}
+                              disabled={!serverRunning || docker.operating}
+                              className="px-3 text-xs"
+                            >
+                              Stop
+                            </Button>
+                          </div>
+                          <div className="ml-auto shrink-0">
+                            <Button
+                              variant={showUnloadModelsState ? 'danger' : 'secondary'}
+                              size="sm"
+                              onClick={
+                                isAsrModelsLoaded ? handleUnloadAllModels : handleReloadModels
+                              }
+                              disabled={!serverConnection.reachable || modelsOperationPending}
+                              className="px-3 text-xs"
+                            >
+                              {modelsOperationPending ? (
+                                <>
+                                  <Loader2 size={14} className="mr-1 animate-spin" />
+                                  {modelsOperationType === 'loading'
+                                    ? 'Loading...'
+                                    : 'Unloading...'}
+                                </>
+                              ) : showUnloadModelsState ? (
+                                'Unload Models'
+                              ) : (
+                                'Reload Models'
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Client Control */}
+                      <div className="flex flex-col space-y-4 rounded-xl border border-white/5 bg-white/5 p-4 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`bg-accent-cyan/10 text-accent-cyan rounded-lg p-2`}>
+                              <Activity size={20} />
+                            </div>
+                            <div className="text-sm font-semibold tracking-wide text-white">
+                              Client Link
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xs font-medium text-slate-400">
+                              {clientStatusLabel}
+                            </span>
+                            {clientRunning && clientMode && (
+                              <span
+                                className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${clientMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                              >
+                                {clientMode === 'local' ? (
+                                  <Laptop size={10} />
+                                ) : (
+                                  <Radio size={10} />
+                                )}
+                                {clientMode}
+                              </span>
+                            )}
+                            <StatusLight
+                              status={
+                                clientRunning && !serverConnection.reachable
+                                  ? 'warning'
+                                  : clientRunning
+                                    ? 'active'
+                                    : 'inactive'
+                              }
+                              className="h-2 w-2"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleStartClientLocal}
+                            disabled={clientRunning}
+                            className="px-3 text-xs"
+                          >
+                            Start Local
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleStartClientRemote}
+                            disabled={clientRunning}
+                            className="px-3 text-xs"
+                          >
+                            Start Remote
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={handleStopClient}
+                            disabled={!clientRunning}
+                            className="px-3 text-xs"
+                          >
+                            Stop
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </GlassCard>
+
+                  {/* Main Transcription */}
+                  <GlassCard
+                    title="Main Transcription"
+                    className="flex-none"
+                    action={
+                      <button
+                        onClick={() => live.toggleMute()}
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                        title={live.muted ? 'Unmute' : 'Mute'}
+                      >
+                        {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                      </button>
+                    }
+                  >
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between gap-6 p-1">
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <label className="mb-2 ml-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                            Source Language
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 rounded-xl border p-2.5 shadow-inner">
+                              <Languages size={18} />
+                            </div>
+                            <CustomSelect
+                              value={mainLanguage}
+                              onChange={handleMainLanguageChange}
+                              options={mainLanguageOptions}
+                              accentColor="magenta"
+                              className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
+                            />
+                          </div>
+                        </div>
+                        <div className="mb-1 h-12 w-px self-end bg-white/10"></div>
+                        <div
+                          className="flex min-w-25 flex-col items-center"
+                          title={canTranslate ? '' : 'Current model does not support translation'}
+                        >
+                          <label
+                            className={`mt-1 mb-2 text-center text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                          >
+                            {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
+                          </label>
+                          <div className="flex h-11.5 items-center justify-center">
+                            {isCanaryMainBidi ? (
+                              <CustomSelect
+                                value={mainBidiTarget}
+                                onChange={setMainBidiTarget}
+                                options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                                accentColor="magenta"
+                                className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                              />
+                            ) : (
+                              <AppleSwitch
+                                checked={mainTranslate && canTranslate}
+                                onChange={setMainTranslate}
+                                size="sm"
+                                disabled={!canTranslate}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Record / Stop Button */}
+                      <div className="flex flex-col gap-2">
+                        {serverRunning && serverConnection.ready && mainModelDisabled && (
+                          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                            Main model not selected.
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          {canStartRecording ? (
+                            <Button
+                              variant="primary"
+                              className="bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30 w-full"
+                              icon={
+                                isConnecting ? (
+                                  <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                  <Mic size={16} />
+                                )
+                              }
+                              onClick={handleStartRecording}
+                              disabled={
+                                isLive ||
+                                !clientRunning ||
+                                !serverConnection.ready ||
+                                mainModelDisabled
+                              }
+                            >
+                              {isConnecting ? 'Connecting...' : 'Start Recording'}
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                variant="danger"
+                                className="w-full"
+                                icon={
+                                  isProcessing ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                  ) : (
+                                    <Square size={16} />
+                                  )
+                                }
+                                onClick={handleStopRecording}
+                                disabled={isProcessing}
+                              >
+                                {isProcessing ? 'Processing...' : 'Stop Recording'}
+                              </Button>
+                              {isProcessing && (
+                                <Button
+                                  variant="secondary"
+                                  className="shrink-0"
+                                  icon={<X size={16} />}
+                                  onClick={handleCancelProcessing}
+                                >
+                                  Cancel
+                                </Button>
+                              )}
+                            </>
+                          )}
+                          {transcription.vadActive && (
+                            <span className="animate-pulse font-mono text-xs whitespace-nowrap text-green-400">
+                              VAD Active
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Transcription Result */}
+                      {transcription.result && (
+                        <div className="space-y-2">
+                          <div className="selectable-text custom-scrollbar max-h-32 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300">
+                            {transcription.result.text}
+                            {transcription.result.language && (
+                              <div className="mt-2 text-xs text-slate-500">
+                                Detected: {transcription.result.language} &middot;{' '}
+                                {transcription.result.duration?.toFixed(1)}s
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={<Copy size={14} />}
+                              onClick={handleCopyTranscription}
+                            >
+                              Copy
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={<Download size={14} />}
+                              onClick={handleDownloadTranscription}
+                            >
+                              Download
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Errors */}
+                      {transcription.error && (
+                        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                          {transcription.error}
+                        </div>
+                      )}
+                    </div>
+                  </GlassCard>
+
+                  {/* Audio Configuration */}
+                  <GlassCard title="Audio Configuration" className="flex-none">
+                    <div className="space-y-6">
+                      <div>
+                        <label className="mb-2 ml-1 block text-xs font-medium tracking-wider text-slate-400 uppercase">
+                          Active Input Source
+                        </label>
+                        <div className="relative flex rounded-xl border border-white/5 bg-black/60 p-1 shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]">
+                          <div
+                            className={`absolute top-1 bottom-1 z-0 w-[calc(50%-4px)] rounded-lg border-t border-white/10 bg-slate-700 shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${audioSource === 'system' ? 'translate-x-[calc(100%+4px)]' : 'translate-x-0'}`}
+                          />
+                          <button
+                            onClick={() => handleAudioSourceChange('mic')}
+                            className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'mic' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                          >
+                            <Mic
+                              size={18}
+                              className={`transition-all duration-300 ${audioSource === 'mic' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
+                            />
+                            <span>Microphone</span>
+                          </button>
+                          <button
+                            onClick={() => handleAudioSourceChange('system')}
+                            className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'system' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                          >
+                            <Laptop
+                              size={18}
+                              className={`transition-all duration-300 ${audioSource === 'system' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
+                            />
+                            <span>System Audio</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="h-px w-full bg-white/5"></div>
+                      <div className="space-y-4">
+                        <div
+                          className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'mic' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
+                        >
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Mic
+                                size={14}
+                                className={
+                                  audioSource === 'mic' ? 'text-accent-cyan' : 'text-slate-500'
+                                }
+                              />
+                              <label
+                                className={`text-xs font-medium ${audioSource === 'mic' ? 'text-white' : 'text-slate-400'}`}
+                              >
+                                Microphone Device
+                              </label>
+                            </div>
+                            {audioSource === 'mic' && (
+                              <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
+                                Live
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              <CustomSelect
+                                value={micDevice}
+                                onChange={handleMicDeviceChange}
+                                options={
+                                  micDevices.length > 0 ? micDevices : ['Default Microphone']
+                                }
+                                className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
+                              />
+                            </div>
+                            <Button
+                              variant="secondary"
+                              size="icon"
+                              className="shrink-0"
+                              icon={<RefreshCw size={14} />}
+                              onClick={enumerateDevices}
+                            />
+                          </div>
+                        </div>
+                        <div
+                          className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'system' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
+                        >
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Laptop
+                                size={14}
+                                className={
+                                  audioSource === 'system' ? 'text-accent-cyan' : 'text-slate-500'
+                                }
+                              />
+                              <label
+                                className={`text-xs font-medium ${audioSource === 'system' ? 'text-white' : 'text-slate-400'}`}
+                              >
+                                System Audio
+                              </label>
+                            </div>
+                            {audioSource === 'system' && (
+                              <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
+                                Live
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              {isLinux ? (
+                                <CustomSelect
+                                  value={sysDevice}
+                                  onChange={handleSystemDeviceChange}
+                                  options={sysDevices.length > 0 ? sysDevices : ['Default Output']}
+                                  className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
+                                />
+                              ) : (
+                                <div className="w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/60 select-none">
+                                  All System Audio
+                                </div>
+                              )}
+                            </div>
+                            {isLinux && (
+                              <Button
+                                variant="secondary"
+                                size="icon"
+                                className="shrink-0"
+                                icon={<RefreshCw size={14} />}
+                                onClick={fetchSinks}
+                              />
+                            )}
+                          </div>
+                          {/* Capture gain slider — boost or attenuate system audio input */}
+                          {audioSource === 'system' && (
+                            <div className="mt-2.5">
+                              <div className="mb-1 flex items-center justify-between">
+                                <label className="text-[11px] font-medium text-slate-400">
+                                  Capture Gain
+                                </label>
+                                <div className="flex items-center gap-1.5">
+                                  {monitorVolumePct !== null && (
+                                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-500 tabular-nums">
+                                      src {monitorVolumePct}%
+                                    </span>
+                                  )}
+                                  <span className="min-w-[3ch] text-right text-[11px] text-slate-300 tabular-nums">
+                                    {captureGain.toFixed(2)}x
+                                  </span>
+                                </div>
+                              </div>
+                              <input
+                                type="range"
+                                min={0.25}
+                                max={5}
+                                step={0.25}
+                                value={captureGain}
+                                onChange={(e) =>
+                                  handleCaptureGainChange(parseFloat(e.target.value))
+                                }
+                                className="ts-gain-slider h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-cyan-400"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </GlassCard>
+                </div>
+              </div>
+
+              {/* Left Bottom Scroll Indicator */}
+              <div
+                className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
               >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-6 p-1">
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <label className="mb-2 ml-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-                        Source Language
-                      </label>
+                <div
+                  className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
+                  style={{
+                    maskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
+                  }}
+                ></div>
+              </div>
+              {/* Left Bottom Corner Mask */}
+              <div
+                className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+                style={{
+                  ...maskStyle,
+                  maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+                  WebkitMaskImage:
+                    'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+                }}
+              />
+            </div>
+
+            {/* Right Column: Visualizer & Live Mode (60%) */}
+            <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
+              {/* Right Top Scroll Indicator */}
+              <div
+                className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
+              >
+                <div
+                  className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
+                  style={{
+                    maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                  }}
+                ></div>
+              </div>
+              {/* Right Top Corner Mask */}
+              <div
+                className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+                style={{
+                  ...maskStyle,
+                  maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+                  WebkitMaskImage:
+                    'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
+                }}
+              />
+
+              {/* Right Column Scroll Container */}
+              <div
+                ref={rightScrollRef}
+                className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+              >
+                <div
+                  ref={rightContentRef}
+                  className="flex min-h-full flex-col"
+                  style={
+                    rightColumnBaselineHeight
+                      ? { minHeight: `${rightColumnBaselineHeight}px` }
+                      : undefined
+                  }
+                >
+                  {/* Visualizer Card */}
+                  <GlassCard className="relative z-10 mb-6 flex-none overflow-visible">
+                    <div className="mb-4 flex shrink-0 items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-accent-cyan/10 text-accent-cyan rounded-full p-2">
+                          <Activity size={20} className={isLive ? 'animate-pulse' : ''} />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-white">Audio Visualizer</h3>
+                          <p className="text-xs text-slate-400">
+                            {activeAnalyser ? 'Live — listening' : 'Idle — awaiting input'}
+                          </p>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
-                        <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 rounded-xl border p-2.5 shadow-inner">
-                          <Languages size={18} />
+                        <div className="flex items-center gap-1 rounded-lg border border-white/5 bg-black/20 p-0.5">
+                          <button
+                            onClick={() =>
+                              setVisualizerAmplitudeScale((s) =>
+                                Math.max(0.25, +(s - 0.25).toFixed(2)),
+                              )
+                            }
+                            className="rounded p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                            title="Decrease sensitivity"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              setVisualizerAmplitudeScale((s) =>
+                                Math.min(4, +(s + 0.25).toFixed(2)),
+                              )
+                            }
+                            className="rounded p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                            title="Increase sensitivity"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => setIsFullscreenVisualizerOpen(true)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                          title="Fullscreen"
+                        >
+                          <Maximize2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <AudioVisualizer
+                      analyserNode={activeAnalyser}
+                      amplitudeScale={visualizerAmplitudeScale}
+                    />
+                  </GlassCard>
+
+                  {/* Live Mode (Text + Controls) */}
+                  <GlassCard
+                    className="flex min-h-[calc(100vh-30rem)] flex-1 flex-col transition-all duration-300"
+                    title="Live Mode"
+                    action={
+                      <button
+                        onClick={() => live.toggleMute()}
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                        title={live.muted ? 'Unmute' : 'Mute'}
+                      >
+                        {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                      </button>
+                    }
+                  >
+                    {/* Live Mode Controls Toolbar */}
+                    <div className="custom-scrollbar no-scrollbar mb-4 flex flex-none flex-nowrap items-center gap-2 overflow-x-auto border-b border-white/5 p-1 pb-4">
+                      <div className="flex h-8 shrink-0 items-center gap-2">
+                        <span
+                          className={`text-xs font-bold tracking-wider uppercase ${isLive ? 'text-green-400' : 'text-slate-500'}`}
+                        >
+                          {live.status === 'starting'
+                            ? 'Loading...'
+                            : isLive
+                              ? 'Active'
+                              : 'Offline'}
+                        </span>
+                        <AppleSwitch
+                          checked={isLive}
+                          onChange={handleLiveToggle}
+                          size="sm"
+                          disabled={
+                            !isLive &&
+                            (!clientRunning ||
+                              !serverConnection.ready ||
+                              liveModelDisabled ||
+                              !liveModeWhisperOnlyCompatible)
+                          }
+                        />
+                      </div>
+                      <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                      <div className="flex h-8 shrink-0 items-center gap-2">
+                        <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 flex aspect-square h-full items-center justify-center rounded-lg border">
+                          <Languages size={15} />
                         </div>
                         <CustomSelect
-                          value={mainLanguage}
-                          onChange={handleMainLanguageChange}
-                          options={mainLanguageOptions}
+                          value={liveLanguage}
+                          onChange={handleLiveLanguageChange}
+                          options={liveLanguageOptions}
                           accentColor="magenta"
-                          className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
+                          className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                         />
                       </div>
-                    </div>
-                    <div className="mb-1 h-12 w-px self-end bg-white/10"></div>
-                    <div
-                      className="flex min-w-25 flex-col items-center"
-                      title={canTranslate ? '' : 'Current model does not support translation'}
-                    >
-                      <label
-                        className={`mt-1 mb-2 text-center text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                      <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                      <div
+                        className="flex h-8 shrink-0 items-center gap-2"
+                        title={canTranslateLive ? '' : 'Current model does not support translation'}
                       >
-                        {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
-                      </label>
-                      <div className="flex h-11.5 items-center justify-center">
-                        {isCanaryMainBidi ? (
+                        <span
+                          className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                        >
+                          {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
+                        </span>
+                        {isCanaryLiveBidi ? (
                           <CustomSelect
-                            value={mainBidiTarget}
-                            onChange={setMainBidiTarget}
+                            value={liveBidiTarget}
+                            onChange={setLiveBidiTarget}
                             options={['Off', ...CANARY_TRANSLATION_TARGETS]}
                             accentColor="magenta"
                             className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                           />
                         ) : (
                           <AppleSwitch
-                            checked={mainTranslate && canTranslate}
-                            onChange={setMainTranslate}
+                            checked={liveTranslate && canTranslateLive}
+                            onChange={setLiveTranslate}
                             size="sm"
-                            disabled={!canTranslate}
+                            disabled={!canTranslateLive}
                           />
                         )}
                       </div>
+                      <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Copy size={14} />}
+                        onClick={() => {
+                          writeToClipboard(live.getText());
+                          live.clearHistory();
+                        }}
+                        className="ml-auto h-8 shrink-0 whitespace-nowrap"
+                      >
+                        Copy
+                      </Button>
                     </div>
-                  </div>
 
-                  {/* Record / Stop Button */}
-                  <div className="flex flex-col gap-2">
-                    {serverRunning && serverConnection.ready && mainModelDisabled && (
-                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                        Main model not selected.
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      {canStartRecording ? (
-                        <Button
-                          variant="primary"
-                          className="bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/30 w-full"
-                          icon={
-                            isConnecting ? (
-                              <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                              <Mic size={16} />
-                            )
-                          }
-                          onClick={handleStartRecording}
-                          disabled={
-                            isLive || !clientRunning || !serverConnection.ready || mainModelDisabled
-                          }
-                        >
-                          {isConnecting ? 'Connecting...' : 'Start Recording'}
-                        </Button>
-                      ) : (
+                    {/* Transcript Area */}
+                    <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
+                      {serverRunning && serverConnection.ready && liveModelDisabled && (
+                        <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
+                      )}
+                      {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
+                        <div className="mb-3 text-xs text-red-400">
+                          {liveModeUnsupportedMessage}
+                        </div>
+                      )}
+                      {isLive || live.sentences.length > 0 || live.partial ? (
                         <>
-                          <Button
-                            variant="danger"
-                            className="w-full"
-                            icon={
-                              isProcessing ? (
-                                <Loader2 size={16} className="animate-spin" />
-                              ) : (
-                                <Square size={16} />
-                              )
-                            }
-                            onClick={handleStopRecording}
-                            disabled={isProcessing}
-                          >
-                            {isProcessing ? 'Processing...' : 'Stop Recording'}
-                          </Button>
-                          {isProcessing && (
-                            <Button
-                              variant="secondary"
-                              className="shrink-0"
-                              icon={<X size={16} />}
-                              onClick={handleCancelProcessing}
-                            >
-                              Cancel
-                            </Button>
+                          {live.statusMessage && (
+                            <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
+                              <Loader2 size={14} className="animate-spin" />
+                              <span className="text-xs">{live.statusMessage}</span>
+                            </div>
+                          )}
+                          {live.sentences.map((s, i) => (
+                            <div key={i} className="mb-2">
+                              <span className="mr-2 text-slate-500 select-none">
+                                {new Date(s.timestamp).toLocaleTimeString('en-US', {
+                                  hour12: false,
+                                })}
+                              </span>
+                              <span>{s.text}</span>
+                            </div>
+                          ))}
+                          {live.partial && (
+                            <div className="mb-2 opacity-60">
+                              <span className="mr-2 text-slate-500 select-none">
+                                {new Date().toLocaleTimeString('en-US', { hour12: false })}
+                              </span>
+                              <span className="italic">{live.partial}</span>
+                              <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
+                            </div>
+                          )}
+                          {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
+                            <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
+                              <Activity size={32} strokeWidth={1} className="animate-pulse" />
+                              <p>Listening... speak to see transcription.</p>
+                            </div>
+                          )}
+                          {live.error && (
+                            <div className="mt-2 text-xs text-red-400">{live.error}</div>
                           )}
                         </>
-                      )}
-                      {transcription.vadActive && (
-                        <span className="animate-pulse font-mono text-xs whitespace-nowrap text-green-400">
-                          VAD Active
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Transcription Result */}
-                  {transcription.result && (
-                    <div className="space-y-2">
-                      <div className="selectable-text custom-scrollbar max-h-32 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300">
-                        {transcription.result.text}
-                        {transcription.result.language && (
-                          <div className="mt-2 text-xs text-slate-500">
-                            Detected: {transcription.result.language} &middot;{' '}
-                            {transcription.result.duration?.toFixed(1)}s
+                      ) : (
+                        <div className="absolute inset-4 flex items-center justify-center">
+                          <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
+                            <Radio size={48} strokeWidth={1} />
+                            <p>Live mode is off. Toggle the switch to start.</p>
                           </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={<Copy size={14} />}
-                          onClick={handleCopyTranscription}
-                        >
-                          Copy
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={<Download size={14} />}
-                          onClick={handleDownloadTranscription}
-                        >
-                          Download
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Errors */}
-                  {transcription.error && (
-                    <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                      {transcription.error}
-                    </div>
-                  )}
-                </div>
-              </GlassCard>
-
-              {/* Audio Configuration */}
-              <GlassCard title="Audio Configuration" className="flex-none">
-                <div className="space-y-6">
-                  <div>
-                    <label className="mb-2 ml-1 block text-xs font-medium tracking-wider text-slate-400 uppercase">
-                      Active Input Source
-                    </label>
-                    <div className="relative flex rounded-xl border border-white/5 bg-black/60 p-1 shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]">
-                      <div
-                        className={`absolute top-1 bottom-1 z-0 w-[calc(50%-4px)] rounded-lg border-t border-white/10 bg-slate-700 shadow-[0_2px_8px_rgba(0,0,0,0.4)] transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${audioSource === 'system' ? 'translate-x-[calc(100%+4px)]' : 'translate-x-0'}`}
-                      />
-                      <button
-                        onClick={() => handleAudioSourceChange('mic')}
-                        className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'mic' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        <Mic
-                          size={18}
-                          className={`transition-all duration-300 ${audioSource === 'mic' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
-                        />
-                        <span>Microphone</span>
-                      </button>
-                      <button
-                        onClick={() => handleAudioSourceChange('system')}
-                        className={`relative z-10 flex flex-1 items-center justify-center space-x-2.5 py-2.5 text-sm font-semibold transition-all duration-300 ${audioSource === 'system' ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                      >
-                        <Laptop
-                          size={18}
-                          className={`transition-all duration-300 ${audioSource === 'system' ? 'text-accent-cyan scale-110 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]' : ''}`}
-                        />
-                        <span>System Audio</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="h-px w-full bg-white/5"></div>
-                  <div className="space-y-4">
-                    <div
-                      className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'mic' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Mic
-                            size={14}
-                            className={
-                              audioSource === 'mic' ? 'text-accent-cyan' : 'text-slate-500'
-                            }
-                          />
-                          <label
-                            className={`text-xs font-medium ${audioSource === 'mic' ? 'text-white' : 'text-slate-400'}`}
-                          >
-                            Microphone Device
-                          </label>
-                        </div>
-                        {audioSource === 'mic' && (
-                          <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
-                            Live
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <CustomSelect
-                            value={micDevice}
-                            onChange={handleMicDeviceChange}
-                            options={micDevices.length > 0 ? micDevices : ['Default Microphone']}
-                            className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
-                          />
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="icon"
-                          className="shrink-0"
-                          icon={<RefreshCw size={14} />}
-                          onClick={enumerateDevices}
-                        />
-                      </div>
-                    </div>
-                    <div
-                      className={`rounded-xl border p-3 transition-all duration-300 ${audioSource === 'system' ? 'bg-accent-cyan/5 border-accent-cyan/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]' : 'border-transparent bg-transparent hover:bg-white/5'}`}
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Laptop
-                            size={14}
-                            className={
-                              audioSource === 'system' ? 'text-accent-cyan' : 'text-slate-500'
-                            }
-                          />
-                          <label
-                            className={`text-xs font-medium ${audioSource === 'system' ? 'text-white' : 'text-slate-400'}`}
-                          >
-                            System Audio
-                          </label>
-                        </div>
-                        {audioSource === 'system' && (
-                          <span className="bg-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-black uppercase">
-                            Live
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          {isLinux ? (
-                            <CustomSelect
-                              value={sysDevice}
-                              onChange={handleSystemDeviceChange}
-                              options={sysDevices.length > 0 ? sysDevices : ['Default Output']}
-                              className="focus:ring-accent-cyan w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
-                            />
-                          ) : (
-                            <div className="w-full min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/60 select-none">
-                              All System Audio
-                            </div>
-                          )}
-                        </div>
-                        {isLinux && (
-                          <Button
-                            variant="secondary"
-                            size="icon"
-                            className="shrink-0"
-                            icon={<RefreshCw size={14} />}
-                            onClick={fetchSinks}
-                          />
-                        )}
-                      </div>
-                      {/* Capture gain slider — boost or attenuate system audio input */}
-                      {audioSource === 'system' && (
-                        <div className="mt-2.5">
-                          <div className="mb-1 flex items-center justify-between">
-                            <label className="text-[11px] font-medium text-slate-400">
-                              Capture Gain
-                            </label>
-                            <div className="flex items-center gap-1.5">
-                              {monitorVolumePct !== null && (
-                                <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-500 tabular-nums">
-                                  src {monitorVolumePct}%
-                                </span>
-                              )}
-                              <span className="min-w-[3ch] text-right text-[11px] text-slate-300 tabular-nums">
-                                {captureGain.toFixed(2)}x
-                              </span>
-                            </div>
-                          </div>
-                          <input
-                            type="range"
-                            min={0.25}
-                            max={5}
-                            step={0.25}
-                            value={captureGain}
-                            onChange={(e) => handleCaptureGainChange(parseFloat(e.target.value))}
-                            className="ts-gain-slider h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-cyan-400"
-                          />
                         </div>
                       )}
                     </div>
-                  </div>
+                  </GlassCard>
                 </div>
-              </GlassCard>
-            </div>
-          </div>
+              </div>
 
-          {/* Left Bottom Scroll Indicator */}
-          <div
-            className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${leftScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <div
-              className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
-              style={{
-                maskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
-                WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
-              }}
-            ></div>
-          </div>
-          {/* Left Bottom Corner Mask */}
-          <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-              WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-            }}
-          />
-        </div>
-
-        {/* Right Column: Visualizer & Live Mode (60%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
-          {/* Right Top Scroll Indicator */}
-          <div
-            className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <div
-              className="h-full w-full bg-linear-to-b from-white/10 to-transparent backdrop-blur-sm"
-              style={{
-                maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-                WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)',
-              }}
-            ></div>
-          </div>
-          {/* Right Top Corner Mask */}
-          <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-              WebkitMaskImage:
-                'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
-            }}
-          />
-
-          {/* Right Column Scroll Container */}
-          <div
-            ref={rightScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
-          >
-            <div
-              ref={rightContentRef}
-              className="flex min-h-full flex-col"
-              style={
-                rightColumnBaselineHeight
-                  ? { minHeight: `${rightColumnBaselineHeight}px` }
-                  : undefined
-              }
-            >
-              {/* Visualizer Card */}
-              <GlassCard className="relative z-10 mb-6 flex-none overflow-visible">
-                <div className="mb-4 flex shrink-0 items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-accent-cyan/10 text-accent-cyan rounded-full p-2">
-                      <Activity size={20} className={isLive ? 'animate-pulse' : ''} />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-white">Audio Visualizer</h3>
-                      <p className="text-xs text-slate-400">
-                        {activeAnalyser ? 'Live — listening' : 'Idle — awaiting input'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 rounded-lg border border-white/5 bg-black/20 p-0.5">
-                      <button
-                        onClick={() =>
-                          setVisualizerAmplitudeScale((s) => Math.max(0.25, +(s - 0.25).toFixed(2)))
-                        }
-                        className="rounded p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-                        title="Decrease sensitivity"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <button
-                        onClick={() =>
-                          setVisualizerAmplitudeScale((s) => Math.min(4, +(s + 0.25).toFixed(2)))
-                        }
-                        className="rounded p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-                        title="Increase sensitivity"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => setIsFullscreenVisualizerOpen(true)}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-                      title="Fullscreen"
-                    >
-                      <Maximize2 size={14} />
-                    </button>
-                  </div>
-                </div>
-                <AudioVisualizer
-                  analyserNode={activeAnalyser}
-                  amplitudeScale={visualizerAmplitudeScale}
-                />
-              </GlassCard>
-
-              {/* Live Mode (Text + Controls) */}
-              <GlassCard
-                className="flex min-h-[calc(100vh-30rem)] flex-1 flex-col transition-all duration-300"
-                title="Live Mode"
-                action={
-                  <button
-                    onClick={() => live.toggleMute()}
-                    className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                    title={live.muted ? 'Unmute' : 'Mute'}
-                  >
-                    {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                  </button>
-                }
+              {/* Right Bottom Scroll Indicator */}
+              <div
+                className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
               >
-                {/* Live Mode Controls Toolbar */}
-                <div className="custom-scrollbar no-scrollbar mb-4 flex flex-none flex-nowrap items-center gap-2 overflow-x-auto border-b border-white/5 p-1 pb-4">
-                  <div className="flex h-8 shrink-0 items-center gap-2">
-                    <span
-                      className={`text-xs font-bold tracking-wider uppercase ${isLive ? 'text-green-400' : 'text-slate-500'}`}
-                    >
-                      {live.status === 'starting' ? 'Loading...' : isLive ? 'Active' : 'Offline'}
-                    </span>
-                    <AppleSwitch
-                      checked={isLive}
-                      onChange={handleLiveToggle}
-                      size="sm"
-                      disabled={
-                        !isLive &&
-                        (!clientRunning ||
-                          !serverConnection.ready ||
-                          liveModelDisabled ||
-                          !liveModeWhisperOnlyCompatible)
-                      }
-                    />
-                  </div>
-                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
-                  <div className="flex h-8 shrink-0 items-center gap-2">
-                    <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 flex aspect-square h-full items-center justify-center rounded-lg border">
-                      <Languages size={15} />
-                    </div>
-                    <CustomSelect
-                      value={liveLanguage}
-                      onChange={handleLiveLanguageChange}
-                      options={liveLanguageOptions}
-                      accentColor="magenta"
-                      className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
-                    />
-                  </div>
-                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
-                  <div
-                    className="flex h-8 shrink-0 items-center gap-2"
-                    title={canTranslateLive ? '' : 'Current model does not support translation'}
-                  >
-                    <span
-                      className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
-                    >
-                      {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
-                    </span>
-                    {isCanaryLiveBidi ? (
-                      <CustomSelect
-                        value={liveBidiTarget}
-                        onChange={setLiveBidiTarget}
-                        options={['Off', ...CANARY_TRANSLATION_TARGETS]}
-                        accentColor="magenta"
-                        className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
-                      />
-                    ) : (
-                      <AppleSwitch
-                        checked={liveTranslate && canTranslateLive}
-                        onChange={setLiveTranslate}
-                        size="sm"
-                        disabled={!canTranslateLive}
-                      />
-                    )}
-                  </div>
-                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Copy size={14} />}
-                    onClick={() => {
-                      writeToClipboard(live.getText());
-                      live.clearHistory();
-                    }}
-                    className="ml-auto h-8 shrink-0 whitespace-nowrap"
-                  >
-                    Copy
-                  </Button>
-                </div>
-
-                {/* Transcript Area */}
-                <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
-                  {serverRunning && serverConnection.ready && liveModelDisabled && (
-                    <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
-                  )}
-                  {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
-                    <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
-                  )}
-                  {isLive || live.sentences.length > 0 || live.partial ? (
-                    <>
-                      {live.statusMessage && (
-                        <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
-                          <Loader2 size={14} className="animate-spin" />
-                          <span className="text-xs">{live.statusMessage}</span>
-                        </div>
-                      )}
-                      {live.sentences.map((s, i) => (
-                        <div key={i} className="mb-2">
-                          <span className="mr-2 text-slate-500 select-none">
-                            {new Date(s.timestamp).toLocaleTimeString('en-US', { hour12: false })}
-                          </span>
-                          <span>{s.text}</span>
-                        </div>
-                      ))}
-                      {live.partial && (
-                        <div className="mb-2 opacity-60">
-                          <span className="mr-2 text-slate-500 select-none">
-                            {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                          </span>
-                          <span className="italic">{live.partial}</span>
-                          <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
-                        </div>
-                      )}
-                      {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
-                        <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                          <Activity size={32} strokeWidth={1} className="animate-pulse" />
-                          <p>Listening... speak to see transcription.</p>
-                        </div>
-                      )}
-                      {live.error && <div className="mt-2 text-xs text-red-400">{live.error}</div>}
-                    </>
-                  ) : (
-                    <div className="absolute inset-4 flex items-center justify-center">
-                      <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
-                        <Radio size={48} strokeWidth={1} />
-                        <p>Live mode is off. Toggle the switch to start.</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </GlassCard>
+                <div
+                  className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
+                  style={{
+                    maskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
+                  }}
+                ></div>
+              </div>
+              {/* Right Bottom Corner Mask */}
+              <div
+                className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+                style={{
+                  ...maskStyle,
+                  maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+                  WebkitMaskImage:
+                    'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
+                }}
+              />
             </div>
           </div>
 
-          {/* Right Bottom Scroll Indicator */}
-          <div
-            className={`pointer-events-none absolute right-3 bottom-0 left-0 z-20 h-6 overflow-hidden rounded-b-2xl transition-opacity duration-300 ${rightScrollState.bottom ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <div
-              className="h-full w-full bg-linear-to-t from-white/10 to-transparent backdrop-blur-sm"
-              style={{
-                maskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
-                WebkitMaskImage: 'linear-gradient(to top, black 50%, transparent 100%)',
-              }}
-            ></div>
-          </div>
-          {/* Right Bottom Corner Mask */}
-          <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
-            style={{
-              ...maskStyle,
-              maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-              WebkitMaskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
-            }}
+          {/* Fullscreen Visualizer Modal */}
+          <FullscreenVisualizer
+            isOpen={isFullscreenVisualizerOpen}
+            onClose={() => setIsFullscreenVisualizerOpen(false)}
+            analyserNode={activeAnalyser}
           />
-        </div>
-      </div>
-
-      {/* Fullscreen Visualizer Modal */}
-      <FullscreenVisualizer
-        isOpen={isFullscreenVisualizerOpen}
-        onClose={() => setIsFullscreenVisualizerOpen(false)}
-        analyserNode={activeAnalyser}
-      />
+        </>
+      )}
     </div>
   );
 };

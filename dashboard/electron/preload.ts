@@ -185,6 +185,11 @@ export interface ElectronAPI {
   tailscale: {
     getHostname: () => Promise<string | null>;
   };
+  fileIO: {
+    getDownloadsPath: () => Promise<string>;
+    writeText: (filePath: string, content: string) => Promise<void>;
+    selectFolder: () => Promise<string | null>;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -349,5 +354,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   tailscale: {
     getHostname: () => ipcRenderer.invoke('tailscale:getHostname') as Promise<string | null>,
+  },
+  fileIO: {
+    getDownloadsPath: () => ipcRenderer.invoke('app:getDownloadsPath') as Promise<string>,
+    writeText: (filePath: string, content: string) =>
+      ipcRenderer.invoke('file:writeText', filePath, content) as Promise<void>,
+    selectFolder: () => ipcRenderer.invoke('dialog:selectFolder') as Promise<string | null>,
   },
 } satisfies ElectronAPI);

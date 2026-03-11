@@ -12,6 +12,11 @@ export enum NotebookTab {
   IMPORT = 'IMPORT',
 }
 
+export enum SessionTab {
+  MAIN = 'MAIN',
+  IMPORT = 'IMPORT',
+}
+
 export interface StatusIndicatorProps {
   status: 'active' | 'inactive' | 'warning' | 'error' | 'loading';
   label?: string;

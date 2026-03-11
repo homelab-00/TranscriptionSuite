@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { View, NotebookTab } from '../types';
+import { View, NotebookTab, SessionTab } from '../types';
 import {
   Mic2,
   Book,
@@ -22,6 +22,8 @@ interface SidebarProps {
   onChangeView: (view: View) => void;
   notebookTab: NotebookTab;
   onChangeNotebookTab: (tab: NotebookTab) => void;
+  sessionTab: SessionTab;
+  onChangeSessionTab: (tab: SessionTab) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
   onOpenBugReport: () => void;
@@ -41,6 +43,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeView,
   notebookTab,
   onChangeNotebookTab,
+  sessionTab,
+  onChangeSessionTab,
   onOpenSettings,
   onOpenAbout,
   onOpenBugReport,
@@ -154,8 +158,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: NotebookTab.IMPORT, icon: <Upload size={14} />, label: 'Import' },
   ];
 
+  // Sub-items shown indented below the Session nav item
+  const sessionSubItems = [{ id: SessionTab.IMPORT, icon: <Upload size={14} />, label: 'Import' }];
+
   const activeIndex = navItems.findIndex((item) => item.id === currentView);
   const notebookOpen = currentView === View.NOTEBOOK;
+  const sessionOpen = currentView === View.SESSION;
 
   const sidebarWidthPx = collapsed ? SIDEBAR_COLLAPSED_WIDTH_PX : expandedWidthPx;
 
@@ -252,6 +260,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
               </button>
+
+              {/* Session sub-tabs: Import — animated collapse */}
+              {item.id === View.SESSION && (
+                <div
+                  className={`grid ${sessionOpen ? '' : 'pointer-events-none'}`}
+                  style={{
+                    gridTemplateRows: sessionOpen ? '1fr' : '0fr',
+                    marginTop: sessionOpen ? '0' : '-0.5rem',
+                    opacity: sessionOpen ? 1 : 0,
+                    transition:
+                      'grid-template-rows 200ms cubic-bezier(0.25,0.1,0.25,1), margin-top 200ms cubic-bezier(0.25,0.1,0.25,1), opacity 200ms cubic-bezier(0.25,0.1,0.25,1)',
+                  }}
+                >
+                  <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
+                    {sessionSubItems.map((subItem) => {
+                      const isSubActive = sessionOpen && sessionTab === subItem.id;
+                      return (
+                        <button
+                          key={subItem.id}
+                          onClick={() => {
+                            onChangeView(View.SESSION);
+                            onChangeSessionTab(subItem.id);
+                          }}
+                          className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
+                            isSubActive
+                              ? 'bg-white/6 text-slate-200'
+                              : 'text-slate-500 hover:bg-white/5 hover:text-slate-400'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`transition-colors duration-200 ${isSubActive ? 'text-accent-cyan/70' : ''}`}
+                            >
+                              {subItem.icon}
+                            </span>
+                            <span
+                              className={`text-xs font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
+                            >
+                              {subItem.label}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Notebook sub-tabs: Search and Import — animated collapse */}
               {item.id === View.NOTEBOOK && (

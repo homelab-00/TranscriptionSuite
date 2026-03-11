@@ -198,6 +198,20 @@ export interface TimeslotResponse {
 
 export type ExportFormat = 'txt' | 'srt' | 'ass';
 
+// ─── File Import (Session) ────────────────────────────────────────────────────
+
+/** Result stored in job_tracker after a file-import background transcription completes */
+export interface FileImportJobResult {
+  job_id: string;
+  transcription?: TranscriptionResponse;
+  diarization?: {
+    requested: boolean;
+    performed: boolean;
+    reason: string | null;
+  };
+  error?: string;
+}
+
 export interface BackupInfo {
   filename: string;
   created_at: string;

@@ -488,6 +488,32 @@ export class APIClient {
     return this.postFormData('/api/notebook/transcribe/upload', fd);
   }
 
+  // ─── File Import (Session) ────────────────────────────────────────────────
+
+  /**
+   * POST /api/transcribe/import — start a background file-import transcription.
+   * Returns 202 Accepted with { job_id }. Poll /api/admin/status for result.
+   */
+  async importAndTranscribe(
+    file: File,
+    options?: Omit<TranscriptionUploadOptions, 'file_created_at' | 'title'>,
+  ): Promise<TranscriptionAccepted> {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (options?.language) fd.append('language', options.language);
+    if (options?.translation_enabled) fd.append('translation_enabled', 'true');
+    if (options?.translation_target_language)
+      fd.append('translation_target_language', options.translation_target_language);
+    if (options?.enable_diarization) fd.append('enable_diarization', 'true');
+    if (options?.enable_word_timestamps !== undefined)
+      fd.append('enable_word_timestamps', String(options.enable_word_timestamps));
+    if (options?.expected_speakers)
+      fd.append('expected_speakers', String(options.expected_speakers));
+    if (options?.parallel_diarization !== undefined)
+      fd.append('parallel_diarization', String(options.parallel_diarization));
+    return this.postFormData('/api/transcribe/import', fd);
+  }
+
   // ─── Notebook: Calendar & Timeslot ────────────────────────────────────────
 
   /** GET /api/notebook/calendar?year=&month= */

@@ -233,6 +233,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - Status lights show Server and Client states with color indicators (green=running AND healthy, orange=container exists but not healthy, gray=missing, red=unhealthy/error, blue=starting)
 - Main content area on the right with views: Session, Models, Notebook, Server, Logs
 - Notebook tab contains Calendar, Search, and Import sub-tabs
+- Session tab contains a File Import sub-tab for transcribing audio files to .txt/.srt without creating a Notebook entry
 - Settings accessible via sidebar button with four tabs: App, Client, Server, Notebook
 - App tab includes Runtime Mode toggle (GPU/CPU) for selecting hardware acceleration profile
 - System tray integration with 11 state-aware icons, context menu controls, quick-access file transcription, and left-click toggle (start recording when standby; stop & transcribe when recording). Middle-click also stops & transcribes on Windows/macOS (Linux AppIndicator does not support middle-click). "Transcribe File" from the tray always uses pure transcription (diarization disabled). Tray icon updates are forced via `setTitle` on Linux to ensure StatusNotifier/AppIndicator refreshes the icon on state changes (e.g. live mode). Connecting state is debounced 250 ms to suppress brief yellow flash before red recording state; completion state shows for 1 s before reverting
@@ -321,6 +322,7 @@ TranscriptionSuite/
 │   │   │   ├── modelCapabilities.ts # Multi-backend capability detection (translation, live mode)
 │   │   │   ├── modelRegistry.ts  # Model registry + canonical ModelFamily/ModelRole types (includes 'none')
 │   │   │   ├── modelSelection.ts # Main/live selection helpers + disabled-slot mapping (re-exports registry types)
+│   │   │   ├── transcriptionFormatters.ts # Client-side SRT and TXT formatters for transcription API response objects
 │   │   │   └── clientDebugLog.ts # Client debug logging service (persisted entries + IPC-ingested live Electron lines)
 │   │   ├── index.css             # Tailwind CSS + global styles
 │   │   └── types/
@@ -1049,6 +1051,7 @@ The server's `/api/status` endpoint reads this file to report backend capability
 | `/api/transcribe/audio` | POST | User | Transcribe uploaded audio (full pipeline) |
 | `/api/transcribe/quick` | POST | User | Transcribe uploaded audio (fast, no word timestamps or diarization) |
 | `/api/transcribe/cancel` | POST | User | Cancel the running transcription |
+| `/api/transcribe/import` | POST | User | Import audio file + transcribe in background; full result stored in job tracker (202 Accepted) |
 | `/api/transcribe/languages` | GET | User | List languages supported by the active model |
 | `/api/notebook/recordings` | GET | User | List recordings (optional date filter) |
 | `/api/notebook/recordings/{id}` | GET | User | Get recording with full segments and words |
@@ -1208,6 +1211,28 @@ Request cancellation of the current transcription job. Cancellation is checked b
 // No job running
 {"success": false, "cancelled_user": null, "message": "No transcription job is currently running"}
 ```
+
+##### `POST /api/transcribe/import`
+Import an audio file and transcribe it in the background. Unlike the Notebook upload, this does **not** save to the database. The full result is stored in the job tracker and retrieved by the client, which formats and writes the output file locally as `.txt` or `.srt`.
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `language` | `string` | auto-detect | BCP-47 language code (e.g. `en`, `fr`) |
+| `translation_enabled` | `bool` | `false` | Translate output to `translation_target_language` |
+| `translation_target_language` | `string` | `null` | Target language code |
+| `enable_diarization` | `bool` | `false` | Run speaker diarization |
+| `enable_word_timestamps` | `bool` | `true` | Include word-level timestamps |
+| `expected_speakers` | `int` | `null` | Force exactly N speakers (1–10) |
+| `parallel_diarization` | `bool` | config | Run diarization in parallel with transcription |
+
+**Response:** `{"job_id": "<8-char prefix>"}` (`202`)
+
+Poll `GET /api/admin/status` → `job_tracker.result` for completion. The result contains `transcription` (full `TranscriptionResult`), `diarization` (outcome metadata), and optionally `error`.
+
+**Errors:** `400` no file or invalid `expected_speakers` · `409` job busy · `503` no model loaded
 
 ##### `GET /api/transcribe/languages`
 List supported languages for the currently loaded backend.
@@ -1636,8 +1661,8 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors — falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks) |
-| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle; `server.probeConnection` and `server.checkFirewallPort` for connection diagnostics; `tailscale.getHostname` for FQDN auto-detection |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors — falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks); `app:getDownloadsPath` (returns system downloads folder path); `file:writeText` (writes UTF-8 text to a user-specified file path); `dialog:selectFolder` (shows folder picker dialog for output directory selection) |
+| `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle; `server.probeConnection` and `server.checkFirewallPort` for connection diagnostics; `tailscale.getHostname` for FQDN auto-detection; `fileIO` namespace (`getDownloadsPath`, `writeText`, `selectFolder`) for Session Import file operations |
 | `containerRuntime.ts` | Auto-detects Docker or Podman, caches the result, handles rootless socket resolution; supports `CONTAINER_RUNTIME` env override |
 | `dockerManager.ts` | Container CLI wrapper for Docker/Podman — container/image management, additive optional-family install env updates, and auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs) |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
@@ -1655,6 +1680,7 @@ npm run dev:electron
 | `modelCapabilities.ts` | Multi-backend capability detection (translation, live mode support) |
 | `modelRegistry.ts` | Model registry + canonical `ModelFamily` / `ModelRole` types (`ModelFamily` includes `'none'` for disabled-slot state) |
 | `modelSelection.ts` | Shared model-selection constants, disabled sentinel mapping, family/dependency resolution, and re-exported registry model types |
+| `transcriptionFormatters.ts` | Client-side SRT and TXT formatters for transcription API response objects (`renderSrt`, `renderTxt`) |
 | `clientDebugLog.ts` | Client-side debug logging with structured capture, shared append path, persisted writes, and non-persisted IPC line ingestion |
 
 **React Hooks (`src/hooks/`):**
@@ -1674,6 +1700,7 @@ npm run dev:electron
 | `useAdminStatus.ts` | Admin authentication state |
 | `useTraySync.ts` | Resolve composite app state and sync tray icon/menu/tooltip using `ServerHealthState` from `useServerStatus` |
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
+| `useSessionImportQueue.ts` | Session File Import queue — submits files to `/api/transcribe/import`, polls for results, and writes output as `.txt` or `.srt` via the `fileIO` IPC bridge (falls back to browser download when not in Electron) |
 | `useClientDebugLogs.ts` | Client debug log state + renderer bridge subscription for live `app:clientLogLine` updates into the Session log terminal |
 | `DockerContext.tsx` | React context provider for Docker state sharing |
 | `ServerStatusContext.tsx` | React context provider for server connection state |
@@ -1713,7 +1740,8 @@ npm run dev:electron
 
 | View | Purpose |
 |------|---------|
-| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications. Disables Start Recording when main model is disabled and Live Mode when live model is disabled |
+| `SessionView.tsx` | Main transcription: recording, live mode, cancel, copy/download, desktop notifications; hosts File Import sub-tab. Disables Start Recording when main model is disabled and Live Mode when live model is disabled |
+| `SessionImportTab.tsx` | Session File Import tab: drop zone, output directory picker (persisted), per-file progress queue with status icons, SRT/TXT output, diarization and timestamp toggles |
 | `ModelManagerTab.tsx` | Model Manager: browse by family, view capabilities, download/delete, cache status; treats `None (Disabled)` slot selections as intentionally empty |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
 | `ServerView.tsx` | Docker server management: image selection, container control, persisted main/live model selection including `None (Disabled)` |

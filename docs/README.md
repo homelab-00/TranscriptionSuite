@@ -84,6 +84,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [50 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
+- **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice — no Notebook entry created
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only currently)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere

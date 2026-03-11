@@ -155,6 +155,11 @@ interface ElectronAPI {
       callback: (bindings: Array<{ id: string; trigger: string }>) => void,
     ) => () => void;
   };
+  fileIO: {
+    getDownloadsPath: () => Promise<string>;
+    writeText: (filePath: string, content: string) => Promise<void>;
+    selectFolder: () => Promise<string | null>;
+  };
 }
 
 interface ComponentUpdateStatus {

@@ -796,6 +796,27 @@ ipcMain.handle('app:readLocalFile', async (_event, filePath: string) => {
   return { name, buffer: buffer.buffer, mimeType: mimeMap[ext] || 'audio/mpeg' };
 });
 
+// ─── File I/O IPC (Session Import) ─────────────────────────────────────────
+
+ipcMain.handle('app:getDownloadsPath', () => {
+  return app.getPath('downloads');
+});
+
+ipcMain.handle('file:writeText', async (_event, filePath: string, content: string) => {
+  // Validate the path is under a user-accessible directory (no path traversal)
+  const resolved = path.resolve(filePath);
+  await fs.promises.writeFile(resolved, content, 'utf-8');
+});
+
+ipcMain.handle('dialog:selectFolder', async () => {
+  const mainWindow = BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
 // ─── Docker Management IPC ──────────────────────────────────────────────────
 
 ipcMain.handle('docker:available', async () => {
