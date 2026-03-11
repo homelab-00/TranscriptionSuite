@@ -296,7 +296,7 @@ def run_dependency_sync(
         cmd.extend(["--extra", extra])
     run_command(
         cmd,
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=max(timeout_seconds, 10800),
         env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
     )
 
