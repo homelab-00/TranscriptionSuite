@@ -640,77 +640,110 @@ async function listImages(): Promise<DockerImage[]> {
       `reference=${IMAGE_REPO}`,
     ]);
     if (!output) {
-      console.log('[DockerManager] listImages: no matching images (json+filter)');
-      return [];
-    }
+      console.log(
+        '[DockerManager] listImages: json+filter returned empty output, trying next strategy',
+      );
+    } else {
+      type ImageRecord = {
+        // Docker NDJSON fields (PascalCase)
+        Repository?: string;
+        Tag?: string;
+        Size?: string;
+        CreatedAt?: string;
+        ID?: string;
+        // Podman JSON array fields (PascalCase — Go template / newer Podman)
+        RepoTags?: string[];
+        Names?: string[];
+        Id?: string;
+        Created?: number | string;
+        // Podman JSON array fields (lowercase — documented podman-images JSON format)
+        id?: string;
+        names?: string[];
+        created?: number | string;
+        size?: number | string;
+      };
 
-    const parsed: DockerImage[] = [];
-    let parsedAnyJsonLine = false;
+      const parseImageRecord = (row: ImageRecord): DockerImage[] => {
+        const results: DockerImage[] = [];
+        const repo = row.Repository?.trim() ?? '';
+        const tagField = row.Tag?.trim() ?? '';
 
-    for (const line of output.split('\n').filter(Boolean)) {
-      try {
-        type ImageRecord = {
-          // Docker NDJSON fields
-          Repository?: string;
-          Tag?: string;
-          Size?: string;
-          CreatedAt?: string;
-          ID?: string;
-          // Podman NDJSON / JSON array fields
-          RepoTags?: string[];
-          Names?: string[];
-          Id?: string;
-          Created?: number | string;
-        };
-        const rawParsed = JSON.parse(line) as ImageRecord | ImageRecord[];
-        // Podman may output a JSON array (possibly on one line); Docker uses NDJSON.
-        const rows: ImageRecord[] = Array.isArray(rawParsed) ? rawParsed : [rawParsed];
-        parsedAnyJsonLine = true;
-
-        for (const row of rows) {
-          const repo = row.Repository?.trim() ?? '';
-          const tagField = row.Tag?.trim() ?? '';
-
-          if (repo || tagField) {
-            // Docker format: separate Repository and Tag fields.
-            const tag = tagField || 'unknown';
-            if (tag === '<none>') continue;
-            parsed.push({
+        if (repo || tagField) {
+          // Docker format: separate Repository and Tag fields.
+          const tag = tagField || 'unknown';
+          if (tag !== '<none>') {
+            results.push({
               tag,
               fullName: `${repo}:${tag}`,
               size: row.Size?.trim() ?? '',
               created: row.CreatedAt?.trim() ?? '',
               id: row.ID?.trim() ?? '',
             });
-          } else {
-            // Podman format: full "repo:tag" refs in RepoTags or Names.
-            const refs: string[] = row.RepoTags ?? row.Names ?? [];
-            for (const ref of refs) {
-              const trimmed = ref.trim();
-              if (!trimmed.startsWith(`${IMAGE_REPO}:`)) continue;
-              const lastColon = trimmed.lastIndexOf(':');
-              const tag = lastColon > -1 ? trimmed.slice(lastColon + 1) : 'unknown';
-              if (tag === '<none>') continue;
-              parsed.push({
-                tag,
-                fullName: trimmed,
-                size: row.Size?.trim() ?? '',
-                created: row.CreatedAt?.trim() ?? String(row.Created ?? ''),
-                id: (row.ID ?? row.Id)?.trim() ?? '',
-              });
-            }
+          }
+        } else {
+          // Podman format: full "repo:tag" refs.
+          // Podman's --format json uses lowercase field names (names, id, created, size);
+          // Go-template / newer Podman versions use PascalCase (Names, RepoTags, Id).
+          const refs: string[] = row.RepoTags ?? row.Names ?? row.names ?? [];
+          const resolvedId = (row.ID ?? row.Id ?? row.id)?.trim() ?? '';
+          const resolvedCreated = row.CreatedAt?.trim() ?? String(row.Created ?? row.created ?? '');
+          const resolvedSize = row.Size?.trim() ?? (row.size != null ? String(row.size) : '');
+          for (const ref of refs) {
+            const trimmed = ref.trim();
+            if (!trimmed.startsWith(`${IMAGE_REPO}:`)) continue;
+            const lastColon = trimmed.lastIndexOf(':');
+            const tag = lastColon > -1 ? trimmed.slice(lastColon + 1) : 'unknown';
+            if (tag === '<none>') continue;
+            results.push({
+              tag,
+              fullName: trimmed,
+              size: resolvedSize,
+              created: resolvedCreated,
+              id: resolvedId,
+            });
           }
         }
-      } catch {
-        // Ignore malformed JSON line and continue.
-      }
-    }
+        return results;
+      };
 
-    if (parsedAnyJsonLine) {
-      console.log(`[DockerManager] listImages: found ${parsed.length} image(s) via json+filter`);
-      return parsed;
+      const parsed: DockerImage[] = [];
+      let parsedAnyJson = false;
+
+      // Try whole-output parse first (handles Podman's pretty-printed JSON arrays).
+      try {
+        const wholeOutput = JSON.parse(output) as ImageRecord | ImageRecord[];
+        const rows: ImageRecord[] = Array.isArray(wholeOutput) ? wholeOutput : [wholeOutput];
+        parsedAnyJson = true;
+        for (const row of rows) {
+          parsed.push(...parseImageRecord(row));
+        }
+      } catch {
+        // Not a single JSON value — try line-by-line NDJSON (Docker path).
+        for (const line of output.split('\n').filter(Boolean)) {
+          try {
+            const rawParsed = JSON.parse(line) as ImageRecord | ImageRecord[];
+            const rows: ImageRecord[] = Array.isArray(rawParsed) ? rawParsed : [rawParsed];
+            parsedAnyJson = true;
+            for (const row of rows) {
+              parsed.push(...parseImageRecord(row));
+            }
+          } catch {
+            // Ignore malformed JSON line and continue.
+          }
+        }
+      }
+
+      if (parsedAnyJson && parsed.length > 0) {
+        console.log(`[DockerManager] listImages: found ${parsed.length} image(s) via json+filter`);
+        return parsed;
+      }
+      if (parsedAnyJson) {
+        console.log(
+          '[DockerManager] listImages: json+filter parsed OK but found 0 images, trying next strategy',
+        );
+      }
+      // Fall through to next strategy if no JSON was parsed or 0 images found.
     }
-    // Fall through to legacy format if no JSON was parsed.
   } catch (err: any) {
     console.warn('[DockerManager] listImages json+filter failed:', err.message);
   }
@@ -725,8 +758,13 @@ async function listImages(): Promise<DockerImage[]> {
       `reference=${IMAGE_REPO}`,
     ]);
     const results = parseLegacyFormat(legacyOutput);
-    console.log(`[DockerManager] listImages: found ${results.length} image(s) via template+filter`);
-    return results;
+    if (results.length > 0) {
+      console.log(
+        `[DockerManager] listImages: found ${results.length} image(s) via template+filter`,
+      );
+      return results;
+    }
+    console.log('[DockerManager] listImages: template+filter found 0 images, trying next strategy');
   } catch (err: any) {
     console.warn('[DockerManager] listImages template+filter failed:', err.message);
   }
