@@ -52,24 +52,25 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
  
 ## Table of Contents
 
- - [1. Introduction](#1-introduction)
+- [1. Introduction](#1-introduction)
   - [1.1 Features](#11-features)
   - [1.2 Screenshots](#12-screenshots)
   - [1.3 Short Tour](#13-short-tour)
- - [2. Installation](#2-installation)
-   - [2.1 Prerequisites](#21-prerequisites)
-   - [2.2 Download the Dashboard app](#22-download-the-dashboard-app)
-     - [2.2.1 Linux AppImage Prerequisites (Linux only)](#221-linux-appimage-prerequisites-linux-only)
-     - [2.2.2 Verify Download with Kleopatra (optional)](#222-verify-download-with-kleopatra-optional)
-   - [2.3 Setting Up the Server](#23-setting-up-the-server)
- - [3. Remote Connection](#3-remote-connection)
-   - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
-     - [Server Machine Setup](#server-machine-setup)
-   - [3.2 Option B: LAN (same local network)](#32-option-b-lan-same-local-network)
- - [4. Troubleshhoting](#4-troubleshooting)
- - [5. Technical Info](#5-technical-info)
- - [6. License](#6-license)
- - [7. Acknowledgments](#7-acknowledgments)
+- [2. Installation](#2-installation)
+  - [2.1 Prerequisites](#21-prerequisites)
+  - [2.2 Download the Dashboard app](#22-download-the-dashboard-app)
+    - [2.2.1 Linux AppImage Prerequisites (Linux only)](#221-linux-appimage-prerequisites-linux-only)
+    - [2.2.2 Verify Download with Kleopatra (optional)](#222-verify-download-with-kleopatra-optional)
+  - [2.3 Setting Up the Server](#23-setting-up-the-server)
+- [3. Remote Connection](#3-remote-connection)
+  - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
+    - [Server Machine Setup](#server-machine-setup)
+  - [3.2 Option B: LAN (same local network)](#32-option-b-lan-same-local-network)
+- [4. OpenAI-compatible API Endpoints](#4-openai-compatible-api-endpoints)
+- [5. Troubleshooting](#5-troubleshooting)
+- [6. Technical Info](#6-technical-info)
+- [7. License](#7-license)
+- [8. Acknowledgments](#8-acknowledgments)
 
 ---
 
@@ -443,7 +444,97 @@ Same as Tailscale above — if a firewall is active:
 
 ---
 
-## 4. Troubleshooting
+## 4. OpenAI-compatible API Endpoints
+
+Mounted at `/v1/audio/`. These endpoints follow the [OpenAI Audio API spec](https://platform.openai.com/docs/api-reference/audio) so that OpenAI-compatible clients (Open-WebUI, LM Studio, etc.) can point at TranscriptionSuite as a drop-in STT backend.
+
+**Auth:** Same rules as all other API routes — Bearer token required in TLS mode; open to localhost in local mode.
+
+**Error shape:** All errors follow the OpenAI error envelope:
+```json
+{"error": {"message": "...", "type": "...", "param": null, "code": null}}
+```
+
+#### `POST /v1/audio/transcriptions`
+
+Transcribe an audio or video file. Language auto-detected when `language` is omitted.
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `model` | `string` | `"whisper-1"` | Accepted but ignored; the server uses whatever model is configured |
+| `language` | `string` | auto-detect | BCP-47 language code (e.g. `en`, `fr`) |
+| `prompt` | `string` | `null` | Initial prompt passed to the transcription engine as `initial_prompt` |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `temperature` | `float` | `null` | Accepted but ignored |
+| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps (only effective with `verbose_json`) |
+
+**Response formats:**
+
+| `response_format` | Content-Type | Shape |
+|-------------------|--------------|-------|
+| `json` | `application/json` | `{"text": "..."}` |
+| `text` | `text/plain` | Raw transcript string |
+| `verbose_json` | `application/json` | Full object with `task`, `language`, `duration`, `text`, `segments`, optional `words` |
+| `srt` | `text/plain` | SRT subtitle file |
+| `vtt` | `text/plain` | WebVTT subtitle file |
+
+**Error codes:**
+
+| Status | `type` | Cause |
+|--------|--------|-------|
+| `400` | `invalid_request_error` | Unknown `response_format`, missing/empty `file` |
+| `429` | `rate_limit_error` | Another transcription job is already running |
+| `503` | `server_error` | No transcription model is configured |
+| `500` | `server_error` | Internal engine error |
+
+**Example (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/transcriptions \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@recording.wav" \
+  -F "model=whisper-1" \
+  -F "response_format=verbose_json" \
+  -F "timestamp_granularities[]=word"
+```
+
+#### `POST /v1/audio/translations`
+
+Transcribe **and translate** an audio or video file to English. Identical to `/transcriptions` except:
+- `language` is not accepted (source language is always auto-detected)
+- Translation target is always English
+- The `task` field in `verbose_json` responses is `"translate"` instead of `"transcribe"`
+
+**Form fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `file` | `UploadFile` | required | Audio or video file |
+| `model` | `string` | `"whisper-1"` | Accepted but ignored |
+| `prompt` | `string` | `null` | Initial prompt passed to the transcription engine |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `temperature` | `float` | `null` | Accepted but ignored |
+| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps |
+
+**Error codes:** Same as `/transcriptions`.
+
+> **Backend note:** Translation requires a Whisper-family model with translation capability. Parakeet/Canary backends that don't support `task="translate"` will return a `400` or `500` from the engine layer.
+
+**Example (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/translations \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@foreign_audio.mp3" \
+  -F "response_format=text"
+```
+
+**For more info about API endpoints, see section 7 of README_DEV.**
+
+---
+
+## 5. Troubleshooting
 
 As with most things, the first thing to try is turning them off and on again. Stop the server/client, quit the app and then try again.
 
@@ -453,19 +544,19 @@ Controls for all these actions can be found in the Server tab. Here you can remo
 
 ---
 
-## 5. Technical Info
+## 6. Technical Info
 
 For more information about the technical aspects of the project, check out [README_DEV](README_DEV.md).
 
 ---
 
-## 6. License
+## 7. License
 
 GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 
-## 7. Acknowledgments
+## 8. Acknowledgments
 
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
 - [OpenAI Whisper](https://github.com/openai/whisper)
