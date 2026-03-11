@@ -1002,19 +1002,23 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   const fileArgs = composeFileArgs(runtimeProfile, detectedRuntimeKind ?? undefined);
 
+  const upArgs = ['compose', ...fileArgs, 'up', '-d'];
   // --no-build: the build section is for manual dev builds only; the packaged
   //   app copies compose files to a writable dir where the relative build
   //   context (../..) resolves to the wrong location.
   // --pull never: image pulling is handled explicitly by pullImage(); letting
   //   compose pull during "up" can fail on private registries without auth.
-  return exec(
-    await runtimeBin(),
-    ['compose', ...fileArgs, 'up', '-d', '--no-build', '--pull', 'never'],
-    {
-      cwd: getComposeDir(),
-      env: composeEnv,
-    },
-  );
+  // NOTE: podman-compose does not support --no-build or --pull CLI flags
+  //   (see https://github.com/containers/podman-compose/issues/816).
+  //   Safe to omit: the image is pre-pulled, so compose won't re-pull (default
+  //   pull_policy is 'missing'), and won't auto-build when the image exists.
+  if (detectedRuntimeKind !== 'podman') {
+    upArgs.push('--no-build', '--pull', 'never');
+  }
+  return exec(await runtimeBin(), upArgs, {
+    cwd: getComposeDir(),
+    env: composeEnv,
+  });
 }
 
 /**
