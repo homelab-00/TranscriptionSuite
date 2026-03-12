@@ -114,6 +114,23 @@ const MAIN_PROCESS_LOG_REMAINDERS: Record<'stdout' | 'stderr', string> = {
 let mainProcessLogRouterInstalled = false;
 let legacyElectronDebugLogMigrated = false;
 
+// Buffer log entries emitted before the renderer window is ready.
+// Flushed once mainWindow.webContents fires 'did-finish-load'.
+let earlyLogBuffer: ClientLogLinePayload[] | null = [];
+
+function flushEarlyLogBuffer(): void {
+  if (!earlyLogBuffer || !mainWindow) return;
+  const buffered = earlyLogBuffer;
+  earlyLogBuffer = null;
+  for (const payload of buffered) {
+    try {
+      mainWindow.webContents.send('app:clientLogLine', payload);
+    } catch {
+      // Ignore delivery failures.
+    }
+  }
+}
+
 function ensureClientLogFilePath(): string {
   const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
   fs.mkdirSync(logDir, { recursive: true });
@@ -203,10 +220,16 @@ function appendRoutedClientLogLine(message: string, type: ClientLogType): void {
     message: normalizedMessage,
     type,
   };
-  try {
-    mainWindow?.webContents.send('app:clientLogLine', payload);
-  } catch {
-    // Ignore renderer delivery failures.
+
+  if (earlyLogBuffer) {
+    // Window not ready yet — buffer for later delivery.
+    earlyLogBuffer.push(payload);
+  } else {
+    try {
+      mainWindow?.webContents.send('app:clientLogLine', payload);
+    } catch {
+      // Ignore renderer delivery failures.
+    }
   }
 }
 
@@ -537,6 +560,11 @@ function createWindow(): void {
   }
 
   mainWindow.removeMenu();
+
+  // Flush any log entries buffered before the renderer was ready.
+  mainWindow.webContents.on('did-finish-load', () => {
+    flushEarlyLogBuffer();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
