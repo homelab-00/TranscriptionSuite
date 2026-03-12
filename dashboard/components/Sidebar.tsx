@@ -229,7 +229,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <React.Fragment key={item.id}>
               <button
-                onClick={() => onChangeView(item.id)}
+                onClick={() => {
+                  onChangeView(item.id);
+                  if (item.id === View.NOTEBOOK) onChangeNotebookTab(NotebookTab.CALENDAR);
+                  if (item.id === View.SESSION) onChangeSessionTab(SessionTab.MAIN);
+                }}
                 className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'px-4'} h-12 rounded-xl transition-colors duration-200 ${
                   isActive ? 'text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
                 } `}

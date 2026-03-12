@@ -962,7 +962,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       </div>
 
       {sessionTab === SessionTab.IMPORT ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
           <SessionImportTab />
         </div>
       ) : (

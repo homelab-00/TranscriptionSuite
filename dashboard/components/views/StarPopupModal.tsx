@@ -90,7 +90,7 @@ export const StarPopupModal: React.FC<StarPopupModalProps> = ({ isOpen, onDismis
           </div>
 
           <h2 className="text-center text-lg font-semibold text-white">
-            Enjoying Transcription Suite?
+            Enjoying TranscriptionSuite?
           </h2>
           <p className="text-center text-sm leading-relaxed text-slate-300">
             If you find this project useful, consider leaving a star on GitHub. It helps others
