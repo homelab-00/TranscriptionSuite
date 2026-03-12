@@ -19,7 +19,10 @@ export function useStarPopup() {
 
       // Check immediately in case already past threshold
       if (cumulativeMs >= TWO_HOURS_MS) {
-        if (!cancelled) setShowStarPopup(true);
+        if (!cancelled) {
+          setShowStarPopup(true);
+          await setConfig('app.starPopupShown', true);
+        }
         return;
       }
 
@@ -29,6 +32,7 @@ export function useStarPopup() {
 
         if (cumulativeMs >= TWO_HOURS_MS) {
           setShowStarPopup(true);
+          await setConfig('app.starPopupShown', true);
           if (intervalRef.current) {
             clearInterval(intervalRef.current);
             intervalRef.current = null;
