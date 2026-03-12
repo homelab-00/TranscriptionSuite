@@ -1333,6 +1333,9 @@ const SESSION_MARKER = '══════ SERVER START';
 const MAX_LOG_SESSIONS = 5;
 const MAX_SERVER_LOG_LINES = 10_000;
 
+/** Timestamp of the current container session, set during log rotation. */
+let containerSessionStart: string | undefined;
+
 /**
  * Resolve the path to the persistent server log file inside the user config dir.
  */
@@ -1352,6 +1355,7 @@ function getServerLogPath(): string {
  * recreated.  Subsequent log lines are appended by {@link appendLogLine}.
  */
 function rotateServerLog(): void {
+  containerSessionStart = new Date().toISOString();
   try {
     const logPath = getServerLogPath();
 
@@ -1444,16 +1448,19 @@ async function startBackgroundLogStream(): Promise<void> {
   let stdoutRemainder = '';
   let stderrRemainder = '';
 
-  // Docker accepts "--tail all"; Podman requires an integer (0 = show all existing logs).
-  const tailAllArg = detectedRuntimeKind === 'podman' ? '0' : 'all';
-  logProcess = spawn(
-    bin,
-    ['logs', '--follow', '--timestamps', '--tail', tailAllArg, CONTAINER_NAME],
-    {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
-    },
-  );
+  const args = ['logs', '--follow', '--timestamps'];
+  if (containerSessionStart) {
+    args.push('--since', containerSessionStart);
+  } else {
+    // Fallback: no session marker yet, only stream new lines
+    args.push('--tail', '0');
+  }
+  args.push(CONTAINER_NAME);
+
+  logProcess = spawn(bin, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
+  });
 
   const handle = (data: Buffer, stream: 'stdout' | 'stderr') => {
     const previousRemainder = stream === 'stdout' ? stdoutRemainder : stderrRemainder;
@@ -1697,14 +1704,32 @@ async function downloadModelToCache(modelId: string): Promise<void> {
   const pyCmd =
     "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
   const bin = await runtimeBin();
-  await execFileAsync(
-    bin,
-    ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, trimmedModelId],
-    {
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 600_000, // 10 minutes for large models
-    },
-  );
+  try {
+    await execFileAsync(
+      bin,
+      ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, trimmedModelId],
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 600_000, // 10 minutes for large models
+      },
+    );
+  } catch (err: any) {
+    const stderr: string = err?.stderr ?? '';
+    if (stderr.includes('ModuleNotFoundError') || stderr.includes('No module named')) {
+      throw new Error(
+        'Server is still starting up (installing dependencies). ' +
+          'Please wait for the server to finish initializing before downloading models.',
+      );
+    }
+    if (stderr.includes('GatedRepoError') || stderr.includes('403 Client Error')) {
+      throw new Error(
+        `Access denied for "${trimmedModelId}". This is a gated model — ` +
+          `visit https://huggingface.co/${trimmedModelId} to accept the license, ` +
+          `then add your HuggingFace token in Settings.`,
+      );
+    }
+    throw err;
+  }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
