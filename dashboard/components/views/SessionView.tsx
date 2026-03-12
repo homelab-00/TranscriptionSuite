@@ -17,6 +17,8 @@ import {
   Download,
   Plus,
   Minus,
+  ExternalLink,
+  Minimize2,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -25,6 +27,7 @@ import { StatusLight } from '../ui/StatusLight';
 import { AudioVisualizer } from '../AudioVisualizer';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
+import { PopOutWindow } from '../PopOutWindow';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -82,6 +85,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 }) => {
   // Global State
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
+  const [isLivePoppedOut, setIsLivePoppedOut] = useState(false);
   const [visualizerAmplitudeScale, setVisualizerAmplitudeScale] = useState(1.0);
 
   // Capture gain — boosts quiet system audio sources via Web Audio GainNode.
@@ -1663,155 +1667,383 @@ export const SessionView: React.FC<SessionViewProps> = ({
               </GlassCard>
 
               {/* Live Mode (Text + Controls) */}
-              <GlassCard
-                className="flex min-h-[calc(100vh-30rem)] flex-1 flex-col transition-all duration-300"
-                title="Live Mode"
-                action={
-                  <button
-                    onClick={() => live.toggleMute()}
-                    className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                    title={live.muted ? 'Unmute' : 'Mute'}
+              {isLivePoppedOut ? (
+                <>
+                  {/* Greyed-out placeholder while popped out */}
+                  <GlassCard
+                    className="flex min-h-[calc(100vh-30rem)] flex-1 flex-col opacity-40 transition-all duration-300"
+                    title="Live Mode"
+                    action={
+                      <button
+                        onClick={() => setIsLivePoppedOut(false)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Return Live Mode to this window"
+                      >
+                        <Minimize2 size={14} />
+                      </button>
+                    }
                   >
-                    {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                  </button>
-                }
-              >
-                {/* Live Mode Controls Toolbar */}
-                <div className="custom-scrollbar no-scrollbar mb-4 flex flex-none flex-nowrap items-center gap-2 overflow-x-auto border-b border-white/5 p-1 pb-4">
-                  <div className="flex h-8 shrink-0 items-center gap-2">
-                    <span
-                      className={`text-xs font-bold tracking-wider uppercase ${isLive ? 'text-green-400' : 'text-slate-500'}`}
-                    >
-                      {live.status === 'starting' ? 'Loading...' : isLive ? 'Active' : 'Offline'}
-                    </span>
-                    <span
-                      title={!isLive && liveModeDisabledReason ? liveModeDisabledReason : undefined}
-                    >
-                      <AppleSwitch
-                        checked={isLive}
-                        onChange={handleLiveToggle}
-                        size="sm"
-                        disabled={
-                          !isLive &&
-                          (!clientRunning ||
-                            !serverConnection.ready ||
-                            liveModelDisabled ||
-                            !liveModeWhisperOnlyCompatible)
-                        }
-                      />
-                    </span>
-                  </div>
-                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
-                  <div className="flex h-8 shrink-0 items-center gap-2">
-                    <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 flex aspect-square h-full items-center justify-center rounded-lg border">
-                      <Languages size={15} />
-                    </div>
-                    <CustomSelect
-                      value={liveLanguage}
-                      onChange={handleLiveLanguageChange}
-                      options={liveLanguageOptions}
-                      accentColor="magenta"
-                      className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
-                    />
-                  </div>
-                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
-                  <div
-                    className="flex h-8 shrink-0 items-center gap-2"
-                    title={canTranslateLive ? '' : 'Current model does not support translation'}
-                  >
-                    <span
-                      className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
-                    >
-                      {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
-                    </span>
-                    {isCanaryLiveBidi ? (
-                      <CustomSelect
-                        value={liveBidiTarget}
-                        onChange={setLiveBidiTarget}
-                        options={['Off', ...CANARY_TRANSLATION_TARGETS]}
-                        accentColor="magenta"
-                        className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
-                      />
-                    ) : (
-                      <AppleSwitch
-                        checked={liveTranslate && canTranslateLive}
-                        onChange={setLiveTranslate}
-                        size="sm"
-                        disabled={!canTranslateLive}
-                      />
-                    )}
-                  </div>
-                  <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Copy size={14} />}
-                    onClick={() => {
-                      writeToClipboard(live.getText());
-                      live.clearHistory();
-                    }}
-                    className="ml-auto h-8 shrink-0 whitespace-nowrap"
-                  >
-                    Copy
-                  </Button>
-                </div>
-
-                {/* Transcript Area */}
-                <div
-                  ref={liveTranscriptRef}
-                  className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
-                >
-                  {serverRunning && serverConnection.ready && liveModelDisabled && (
-                    <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
-                  )}
-                  {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
-                    <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
-                  )}
-                  {isLive || live.sentences.length > 0 || live.partial ? (
-                    <>
-                      {live.statusMessage && (
-                        <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
-                          <Loader2 size={14} className="animate-spin" />
-                          <span className="text-xs">{live.statusMessage}</span>
-                        </div>
-                      )}
-                      {live.sentences.map((s, i) => (
-                        <div key={i} className="mb-2">
-                          <span className="mr-2 text-slate-500 select-none">
-                            {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                              hour12: false,
-                            })}
-                          </span>
-                          <span>{s.text}</span>
-                        </div>
-                      ))}
-                      {live.partial && (
-                        <div className="mb-2 opacity-60">
-                          <span className="mr-2 text-slate-500 select-none">
-                            {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                          </span>
-                          <span className="italic">{live.partial}</span>
-                          <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
-                        </div>
-                      )}
-                      {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
-                        <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                          <Activity size={32} strokeWidth={1} className="animate-pulse" />
-                          <p>Listening... speak to see transcription.</p>
-                        </div>
-                      )}
-                      {live.error && <div className="mt-2 text-xs text-red-400">{live.error}</div>}
-                    </>
-                  ) : (
-                    <div className="absolute inset-4 flex items-center justify-center">
-                      <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
-                        <Radio size={48} strokeWidth={1} />
-                        <p>Live mode is off. Toggle the switch to start.</p>
+                    <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-white/5 bg-black/20">
+                      <div className="flex flex-col items-center space-y-3 text-center text-slate-500 select-none">
+                        <ExternalLink size={48} strokeWidth={1} />
+                        <p className="text-sm">Live Mode is in a separate window.</p>
+                        <button
+                          onClick={() => setIsLivePoppedOut(false)}
+                          className="mt-1 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                        >
+                          Return here
+                        </button>
                       </div>
                     </div>
-                  )}
-                </div>
-              </GlassCard>
+                  </GlassCard>
+                  {/* Pop-out window with live content */}
+                  <PopOutWindow
+                    isOpen={isLivePoppedOut}
+                    onClose={() => setIsLivePoppedOut(false)}
+                    title="Live Mode — Transcription Suite"
+                    width={520}
+                    height={650}
+                  >
+                    <div className="flex h-full flex-col bg-[#0f172a] p-4">
+                      {/* Pop-out header bar */}
+                      <div className="mb-4 flex shrink-0 items-center justify-between">
+                        <h2 className="text-sm font-semibold tracking-wide text-white/90">
+                          Live Mode
+                        </h2>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => live.toggleMute()}
+                            className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                            title={live.muted ? 'Unmute' : 'Mute'}
+                          >
+                            {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                          </button>
+                          <button
+                            onClick={() => setIsLivePoppedOut(false)}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                            title="Return to main window"
+                          >
+                            <Minimize2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      {/* Controls Toolbar */}
+                      <div className="custom-scrollbar no-scrollbar mb-4 flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-white/5 p-1 pb-4">
+                        <div className="flex h-8 shrink-0 items-center gap-2">
+                          <span
+                            className={`text-xs font-bold tracking-wider uppercase ${isLive ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {live.status === 'starting'
+                              ? 'Loading...'
+                              : isLive
+                                ? 'Active'
+                                : 'Offline'}
+                          </span>
+                          <span
+                            title={
+                              !isLive && liveModeDisabledReason ? liveModeDisabledReason : undefined
+                            }
+                          >
+                            <AppleSwitch
+                              checked={isLive}
+                              onChange={handleLiveToggle}
+                              size="sm"
+                              disabled={
+                                !isLive &&
+                                (!clientRunning ||
+                                  !serverConnection.ready ||
+                                  liveModelDisabled ||
+                                  !liveModeWhisperOnlyCompatible)
+                              }
+                            />
+                          </span>
+                        </div>
+                        <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                        <div className="flex h-8 shrink-0 items-center gap-2">
+                          <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 flex aspect-square h-full items-center justify-center rounded-lg border">
+                            <Languages size={15} />
+                          </div>
+                          <CustomSelect
+                            value={liveLanguage}
+                            onChange={handleLiveLanguageChange}
+                            options={liveLanguageOptions}
+                            accentColor="magenta"
+                            className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                          />
+                        </div>
+                        <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                        <div
+                          className="flex h-8 shrink-0 items-center gap-2"
+                          title={
+                            canTranslateLive ? '' : 'Current model does not support translation'
+                          }
+                        >
+                          <span
+                            className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                          >
+                            {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
+                          </span>
+                          {isCanaryLiveBidi ? (
+                            <CustomSelect
+                              value={liveBidiTarget}
+                              onChange={setLiveBidiTarget}
+                              options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                              accentColor="magenta"
+                              className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                            />
+                          ) : (
+                            <AppleSwitch
+                              checked={liveTranslate && canTranslateLive}
+                              onChange={setLiveTranslate}
+                              size="sm"
+                              disabled={!canTranslateLive}
+                            />
+                          )}
+                        </div>
+                        <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={<Copy size={14} />}
+                          onClick={() => {
+                            writeToClipboard(live.getText());
+                            live.clearHistory();
+                          }}
+                          className="ml-auto h-8 shrink-0 whitespace-nowrap"
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                      {/* Transcript Area */}
+                      <div
+                        ref={liveTranscriptRef}
+                        className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
+                      >
+                        {serverRunning && serverConnection.ready && liveModelDisabled && (
+                          <div className="mb-3 text-xs text-amber-300">
+                            Live model not selected.
+                          </div>
+                        )}
+                        {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
+                          <div className="mb-3 text-xs text-red-400">
+                            {liveModeUnsupportedMessage}
+                          </div>
+                        )}
+                        {isLive || live.sentences.length > 0 || live.partial ? (
+                          <>
+                            {live.statusMessage && (
+                              <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
+                                <Loader2 size={14} className="animate-spin" />
+                                <span className="text-xs">{live.statusMessage}</span>
+                              </div>
+                            )}
+                            {live.sentences.map((s, i) => (
+                              <div key={i} className="mb-2">
+                                <span className="mr-2 text-slate-500 select-none">
+                                  {new Date(s.timestamp).toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                  })}
+                                </span>
+                                <span>{s.text}</span>
+                              </div>
+                            ))}
+                            {live.partial && (
+                              <div className="mb-2 opacity-60">
+                                <span className="mr-2 text-slate-500 select-none">
+                                  {new Date().toLocaleTimeString('en-US', { hour12: false })}
+                                </span>
+                                <span className="italic">{live.partial}</span>
+                                <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
+                              </div>
+                            )}
+                            {live.sentences.length === 0 &&
+                              !live.partial &&
+                              !live.statusMessage && (
+                                <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
+                                  <Activity size={32} strokeWidth={1} className="animate-pulse" />
+                                  <p>Listening... speak to see transcription.</p>
+                                </div>
+                              )}
+                            {live.error && (
+                              <div className="mt-2 text-xs text-red-400">{live.error}</div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="absolute inset-4 flex items-center justify-center">
+                            <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
+                              <Radio size={48} strokeWidth={1} />
+                              <p>Live mode is off. Toggle the switch to start.</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </PopOutWindow>
+                </>
+              ) : (
+                <GlassCard
+                  className="flex min-h-[calc(100vh-30rem)] flex-1 flex-col transition-all duration-300"
+                  title="Live Mode"
+                  action={
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setIsLivePoppedOut(true)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Pop out into separate window"
+                      >
+                        <ExternalLink size={14} />
+                      </button>
+                      <button
+                        onClick={() => live.toggleMute()}
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                        title={live.muted ? 'Unmute' : 'Mute'}
+                      >
+                        {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                      </button>
+                    </div>
+                  }
+                >
+                  {/* Live Mode Controls Toolbar */}
+                  <div className="custom-scrollbar no-scrollbar mb-4 flex flex-none flex-nowrap items-center gap-2 overflow-x-auto border-b border-white/5 p-1 pb-4">
+                    <div className="flex h-8 shrink-0 items-center gap-2">
+                      <span
+                        className={`text-xs font-bold tracking-wider uppercase ${isLive ? 'text-green-400' : 'text-slate-500'}`}
+                      >
+                        {live.status === 'starting' ? 'Loading...' : isLive ? 'Active' : 'Offline'}
+                      </span>
+                      <span
+                        title={
+                          !isLive && liveModeDisabledReason ? liveModeDisabledReason : undefined
+                        }
+                      >
+                        <AppleSwitch
+                          checked={isLive}
+                          onChange={handleLiveToggle}
+                          size="sm"
+                          disabled={
+                            !isLive &&
+                            (!clientRunning ||
+                              !serverConnection.ready ||
+                              liveModelDisabled ||
+                              !liveModeWhisperOnlyCompatible)
+                          }
+                        />
+                      </span>
+                    </div>
+                    <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                    <div className="flex h-8 shrink-0 items-center gap-2">
+                      <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 flex aspect-square h-full items-center justify-center rounded-lg border">
+                        <Languages size={15} />
+                      </div>
+                      <CustomSelect
+                        value={liveLanguage}
+                        onChange={handleLiveLanguageChange}
+                        options={liveLanguageOptions}
+                        accentColor="magenta"
+                        className="focus:ring-accent-magenta h-full min-w-32.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                      />
+                    </div>
+                    <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                    <div
+                      className="flex h-8 shrink-0 items-center gap-2"
+                      title={canTranslateLive ? '' : 'Current model does not support translation'}
+                    >
+                      <span
+                        className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                      >
+                        {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
+                      </span>
+                      {isCanaryLiveBidi ? (
+                        <CustomSelect
+                          value={liveBidiTarget}
+                          onChange={setLiveBidiTarget}
+                          options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                          accentColor="magenta"
+                          className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                        />
+                      ) : (
+                        <AppleSwitch
+                          checked={liveTranslate && canTranslateLive}
+                          onChange={setLiveTranslate}
+                          size="sm"
+                          disabled={!canTranslateLive}
+                        />
+                      )}
+                    </div>
+                    <div className="mx-0.5 h-5 w-px shrink-0 bg-white/10"></div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Copy size={14} />}
+                      onClick={() => {
+                        writeToClipboard(live.getText());
+                        live.clearHistory();
+                      }}
+                      className="ml-auto h-8 shrink-0 whitespace-nowrap"
+                    >
+                      Copy
+                    </Button>
+                  </div>
+
+                  {/* Transcript Area */}
+                  <div
+                    ref={liveTranscriptRef}
+                    className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
+                  >
+                    {serverRunning && serverConnection.ready && liveModelDisabled && (
+                      <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
+                    )}
+                    {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
+                      <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
+                    )}
+                    {isLive || live.sentences.length > 0 || live.partial ? (
+                      <>
+                        {live.statusMessage && (
+                          <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
+                            <Loader2 size={14} className="animate-spin" />
+                            <span className="text-xs">{live.statusMessage}</span>
+                          </div>
+                        )}
+                        {live.sentences.map((s, i) => (
+                          <div key={i} className="mb-2">
+                            <span className="mr-2 text-slate-500 select-none">
+                              {new Date(s.timestamp).toLocaleTimeString('en-US', {
+                                hour12: false,
+                              })}
+                            </span>
+                            <span>{s.text}</span>
+                          </div>
+                        ))}
+                        {live.partial && (
+                          <div className="mb-2 opacity-60">
+                            <span className="mr-2 text-slate-500 select-none">
+                              {new Date().toLocaleTimeString('en-US', { hour12: false })}
+                            </span>
+                            <span className="italic">{live.partial}</span>
+                            <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
+                          </div>
+                        )}
+                        {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
+                          <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
+                            <Activity size={32} strokeWidth={1} className="animate-pulse" />
+                            <p>Listening... speak to see transcription.</p>
+                          </div>
+                        )}
+                        {live.error && (
+                          <div className="mt-2 text-xs text-red-400">{live.error}</div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="absolute inset-4 flex items-center justify-center">
+                        <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
+                          <Radio size={48} strokeWidth={1} />
+                          <p>Live mode is off. Toggle the switch to start.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </GlassCard>
+              )}
             </div>
           </div>
 

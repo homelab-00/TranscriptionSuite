@@ -522,9 +522,28 @@ function createWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // External URLs: open in system browser
     if (/^https?:\/\//i.test(url)) {
       void shell.openExternal(url);
       return { action: 'deny' };
+    }
+    // Same-origin blank windows (React Portal pop-outs): allow with native frame
+    if (url === '' || url === 'about:blank') {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          frame: true,
+          autoHideMenuBar: true,
+          backgroundColor: '#0f172a',
+          icon: iconPath,
+          webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: false,
+          },
+        },
+      };
     }
     return { action: 'deny' };
   });
