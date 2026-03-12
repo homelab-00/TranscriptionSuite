@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -32,6 +32,7 @@ import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
+import { useWordHighlighter } from '../../src/hooks/useWordHighlighter';
 import type { ChatMessage, Conversation } from '../../src/api/types';
 
 /** Local type for chat message display (simpler than API's ChatMessage) */
@@ -416,6 +417,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
 
   // Audio player state
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -485,6 +487,22 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
         .trim();
   const isVibeVoiceRecording = recording?.transcription_backend === 'vibevoice_asr';
   const allowWordPlaybackHighlight = !isVibeVoiceRecording;
+  const segmentWordOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let total = 0;
+    for (const seg of segments) {
+      offsets.push(total);
+      total += seg.words?.length ?? 0;
+    }
+    return offsets;
+  }, [segments]);
+  useWordHighlighter({
+    audioRef,
+    segments,
+    isPlaying,
+    containerRef: transcriptContainerRef,
+    enabled: allowWordPlaybackHighlight,
+  });
 
   // Initialize Portal Target on Mount
   useEffect(() => {
@@ -1209,7 +1227,10 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
               </div>
 
               {/* Scrollable Body */}
-              <div className="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-8">
+              <div
+                ref={transcriptContainerRef}
+                className="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-8"
+              >
                 {/* 1. Audio Player Card */}
                 <div className="group relative overflow-hidden rounded-2xl border border-white/5 bg-black/20 p-6 select-none">
                   {/* Hidden audio element for playback */}
@@ -1408,19 +1429,14 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                                 {seg.words.map((w, wi) => (
                                   <span
                                     key={wi}
+                                    data-word-idx={segmentWordOffsets[i] + wi}
                                     onClick={() => {
                                       if (audioRef.current) {
                                         audioRef.current.currentTime = w.start;
                                         audioRef.current.play().catch(() => {});
                                       }
                                     }}
-                                    className={`hover:bg-accent-cyan/20 hover:text-accent-cyan cursor-pointer rounded px-px transition-colors duration-150 ${
-                                      audioRef.current &&
-                                      currentTime >= w.start &&
-                                      currentTime < w.end
-                                        ? 'bg-accent-cyan/30 text-accent-cyan font-medium'
-                                        : ''
-                                    }`}
+                                    className="hover:bg-accent-cyan/20 hover:text-accent-cyan cursor-pointer rounded px-px transition-colors duration-150"
                                     title={`${formatRecSecs(w.start)} → ${formatRecSecs(w.end)}`}
                                   >
                                     {w.word}
