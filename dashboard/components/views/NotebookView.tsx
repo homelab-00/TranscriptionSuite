@@ -44,14 +44,9 @@ import { useConfirm } from '../../src/hooks/useConfirm';
 interface NotebookViewProps {
   onUploadingChange?: (uploading: boolean) => void;
   activeTab: NotebookTab;
-  onChangeTab: (tab: NotebookTab) => void;
 }
 
-export const NotebookView: React.FC<NotebookViewProps> = ({
-  onUploadingChange,
-  activeTab,
-  onChangeTab,
-}) => {
+export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange, activeTab }) => {
   const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
   const [adminStatusPollingEnabled, setAdminStatusPollingEnabled] = useState(true);
   const admin = useAdminStatus(10_000, adminStatusPollingEnabled);
@@ -136,26 +131,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col space-y-6 p-6">
       <div className="flex flex-none items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight text-white">Audio Notebook</h1>
-        <div className="bg-glass-200 flex rounded-lg border border-white/5 p-1 backdrop-blur-md">
-          {[
-            { id: NotebookTab.CALENDAR, icon: <Calendar size={16} />, label: 'Calendar' },
-            { id: NotebookTab.SEARCH, icon: <Search size={16} />, label: 'Search' },
-            { id: NotebookTab.IMPORT, icon: <Upload size={16} />, label: 'Import' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onChangeTab(tab.id)}
-              className={`flex items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-all duration-200 ${
-                activeTab === tab.id
-                  ? 'bg-white/10 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-2 relative min-h-0 flex-1 duration-300">

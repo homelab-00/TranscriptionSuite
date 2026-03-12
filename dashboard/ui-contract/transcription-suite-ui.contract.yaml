@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.12
+  spec_version: 1.0.13
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -36,7 +36,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-12T16:31:33.042Z
+    generated_at: 2026-03-12T20:13:29.373Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -250,7 +250,6 @@ foundation:
         - rounded-br-full
         - rounded-full
         - rounded-lg
-        - rounded-md
         - rounded-r-full
         - rounded-t-2xl
         - rounded-tl-none
@@ -793,7 +792,6 @@ utility_allowlist:
     - rounded-br-full
     - rounded-full
     - rounded-lg
-    - rounded-md
     - rounded-r-full
     - rounded-t-2xl
     - rounded-tl-none
@@ -824,7 +822,6 @@ utility_allowlist:
     - snap-start
     - snap-x
     - space-x-1
-    - space-x-2
     - space-x-2.5
     - space-x-3
     - space-y-1

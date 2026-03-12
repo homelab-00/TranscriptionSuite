@@ -531,11 +531,7 @@ const AppInner: React.FC = () => {
       case View.NOTEBOOK:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <NotebookView
-              onUploadingChange={setIsUploading}
-              activeTab={notebookTab}
-              onChangeTab={setNotebookTab}
-            />
+            <NotebookView onUploadingChange={setIsUploading} activeTab={notebookTab} />
           </ErrorBoundary>
         );
       case View.SERVER:
