@@ -866,6 +866,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const leftContentRef = useRef<HTMLDivElement>(null);
   const rightContentRef = useRef<HTMLDivElement>(null);
 
+  // Live transcript auto-scroll
+  const liveTranscriptRef = useRef<HTMLDivElement>(null);
+  const liveAutoScrollRef = useRef(true);
+
   const [leftScrollState, setLeftScrollState] = useState({ top: false, bottom: false });
   const [rightScrollState, setRightScrollState] = useState({ top: false, bottom: false });
   const [leftColumnBaselineHeight, setLeftColumnBaselineHeight] = useState<number | null>(null);
@@ -955,6 +959,27 @@ export const SessionView: React.FC<SessionViewProps> = ({
       clearTimeout(timer);
     };
   }, [recalcScrollIndicators]);
+
+  // Live transcript: track manual scroll to pause auto-scroll
+  useEffect(() => {
+    const el = liveTranscriptRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      // Consider "near bottom" if within 60px of the bottom
+      liveAutoScrollRef.current = scrollHeight - scrollTop - clientHeight < 60;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Live transcript: auto-scroll to bottom when new content arrives
+  useEffect(() => {
+    const el = liveTranscriptRef.current;
+    if (el && liveAutoScrollRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [live.sentences, live.partial]);
 
   const maskStyle: React.CSSProperties = {
     backgroundColor: '#0f172a',
@@ -1732,7 +1757,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 </div>
 
                 {/* Transcript Area */}
-                <div className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner">
+                <div
+                  ref={liveTranscriptRef}
+                  className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
+                >
                   {serverRunning && serverConnection.ready && liveModelDisabled && (
                     <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
                   )}
