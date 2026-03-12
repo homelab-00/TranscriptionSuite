@@ -207,7 +207,7 @@ We're now ready to start the server. This process includes two parts: downloadin
 
 1. *Download the image*: Using the Sidebar on the left, head over to the Server tab and click the button 'Fetch Fresh Image'
 2. *Starting the container*: Scroll down a bit and click the 'Start Local' button in the #2 box
-3. *Initial setup - models, diarization*: A series of prompts will ask you for which models you want to download to begin with, and if you want to enable diarization (entering your HuggingFace token and accepting the [terms of the model](https://huggingface.co/pyannote/speaker-diarization-community-1) is required)
+3. *Initial setup - models, diarization*: A series of prompts will ask you for which models you want to download to begin with, and if you want to enable diarization. Specifically for diarization, you need to enter your HuggingFace token and accept the [terms of the model](https://huggingface.co/pyannote/speaker-diarization-community-1). To create that token, see [here](https://huggingface.co/docs/hub/en/security-tokens) for instructions and then create a 'Read' access token.
 4. **Wait** - Initial startup can take a long time, even on newer hardware and fast internet speeds; we're talking 10-20 minutes with reasonable specs though, not hours; you'll know it's done when the server status light turns green
 5. **Start the client**: Head to the Session tab and click on the 'Start Local' button inside the Client Link box - if it turns green you're ready to roll!
 
