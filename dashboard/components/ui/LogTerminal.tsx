@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface LogEntry {
   timestamp: string;
@@ -21,13 +21,28 @@ export const LogTerminal: React.FC<LogTerminalProps> = ({
   color = 'cyan',
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
 
-  // Auto-scroll to bottom
-  useEffect(() => {
+  // Pause auto-scroll when the user scrolls inside the terminal body
+  const handleWheel = useCallback(() => {
+    setAutoScroll(false);
+  }, []);
+
+  // Re-enable auto-scroll when the cursor leaves the terminal body
+  const handleMouseLeave = useCallback(() => {
+    setAutoScroll(true);
+    // Immediately snap to bottom on re-enable
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, []);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs, autoScroll]);
 
   const accentColor = {
     cyan: 'text-accent-cyan border-accent-cyan/20',
@@ -56,6 +71,8 @@ export const LogTerminal: React.FC<LogTerminalProps> = ({
       {/* Terminal Body - Added selectable-text class */}
       <div
         ref={scrollRef}
+        onWheel={handleWheel}
+        onMouseLeave={handleMouseLeave}
         className="custom-scrollbar selectable-text flex-1 space-y-1.5 overflow-y-auto p-4 font-mono text-xs"
       >
         {logs.map((log, index) => (
