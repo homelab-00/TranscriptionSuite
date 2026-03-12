@@ -30,6 +30,7 @@ import { getConfig, setConfig } from '../../src/config/store';
 export const SessionImportTab: React.FC = () => {
   const [outputDir, setOutputDir] = useState('');
   const [diarization, setDiarization] = useState(true);
+  const [diarizedFormat, setDiarizedFormat] = useState<'srt' | 'ass'>('srt');
   const [wordTimestamps, setWordTimestamps] = useState(true);
   const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
   const [parallelDefault, setParallelDefault] = useState<boolean>(false);
@@ -46,7 +47,7 @@ export const SessionImportTab: React.FC = () => {
     ? supportsExplicitWordTimestampToggleForModel(activeModel)
     : backendType !== 'vibevoice_asr';
 
-  const queue = useSessionImportQueue({ outputDir });
+  const queue = useSessionImportQueue({ outputDir, diarizedFormat });
 
   // Fetch downloads path on mount
   useEffect(() => {
@@ -324,8 +325,8 @@ export const SessionImportTab: React.FC = () => {
       <div className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2.5">
         <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
         <p className="text-xs leading-relaxed text-slate-500">
-          Transcriptions are saved as .txt (plain text) or .srt (subtitles with speaker labels when
-          diarization is enabled) to the output folder.
+          Transcriptions are saved as .txt (plain text) or .srt/.ass (subtitles with speaker labels
+          when diarization is enabled) to the output folder.
         </p>
       </div>
 
@@ -336,10 +337,25 @@ export const SessionImportTab: React.FC = () => {
             checked={diarization}
             onChange={handleDiarizationChange}
             label="Speaker Diarization"
-            description="Identify distinct speakers — output saved as .srt with speaker labels"
+            description="Identify distinct speakers — output saved as a subtitle file with speaker labels"
           />
           {diarization && (
             <>
+              <div className="h-px bg-white/5"></div>
+              <div className="flex items-center justify-between gap-4 pl-1">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-white">Output Format</p>
+                  <p className="text-xs text-slate-400">Subtitle format for diarized output</p>
+                </div>
+                <select
+                  value={diarizedFormat}
+                  onChange={(e) => setDiarizedFormat(e.target.value as 'srt' | 'ass')}
+                  className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
+                >
+                  <option value="srt">.srt</option>
+                  <option value="ass">.ass</option>
+                </select>
+              </div>
               <div className="h-px bg-white/5"></div>
               <div className="pl-1">
                 <AppleSwitch

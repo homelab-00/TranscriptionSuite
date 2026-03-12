@@ -11,7 +11,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { apiClient } from '../api/client';
 import type { TranscriptionUploadOptions, FileImportJobResult } from '../api/types';
-import { renderSrt, renderTxt } from '../services/transcriptionFormatters';
+import { renderSrt, renderAss, renderTxt } from '../services/transcriptionFormatters';
 
 export type SessionImportJobStatus = 'pending' | 'processing' | 'writing' | 'success' | 'error';
 
@@ -61,6 +61,8 @@ export interface UseSessionImportQueueReturn {
 interface UseSessionImportQueueConfig {
   /** Directory to write output files to */
   outputDir: string;
+  /** Output format for diarized files (default: 'srt') */
+  diarizedFormat?: 'srt' | 'ass';
 }
 
 let jobIdCounter = 0;
@@ -71,9 +73,14 @@ function nextJobId(): string {
 /**
  * Derive output filename from the audio filename and format.
  */
-function buildOutputFilename(audioFilename: string, diarizationPerformed: boolean): string {
+function buildOutputFilename(
+  audioFilename: string,
+  diarizationPerformed: boolean,
+  diarizedFormat: 'srt' | 'ass' = 'srt',
+): string {
   const stem = audioFilename.replace(/\.[^.]+$/, '');
-  return diarizationPerformed ? `${stem}.srt` : `${stem}.txt`;
+  if (!diarizationPerformed) return `${stem}.txt`;
+  return `${stem}.${diarizedFormat}`;
 }
 
 /**
@@ -188,9 +195,17 @@ export function useSessionImportQueue(
 
           // Determine output format based on whether diarization was performed
           const diarizationPerformed = result.diarization?.performed ?? false;
-          const outputFilename = buildOutputFilename(file.name, diarizationPerformed);
+          const diarizedFormat = configRef.current.diarizedFormat ?? 'srt';
+          const outputFilename = buildOutputFilename(
+            file.name,
+            diarizationPerformed,
+            diarizedFormat,
+          );
+          const stem = file.name.replace(/\.[^.]+$/, '');
           const content = diarizationPerformed
-            ? renderSrt(result.transcription)
+            ? diarizedFormat === 'ass'
+              ? renderAss(result.transcription, stem)
+              : renderSrt(result.transcription)
             : renderTxt(result.transcription);
 
           // Update status to 'writing'
