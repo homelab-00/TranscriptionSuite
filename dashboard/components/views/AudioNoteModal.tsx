@@ -474,7 +474,9 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const segments = transcription?.segments ?? [];
   const hasDiarizationTranscript =
     Boolean(recording?.has_diarization) || segments.some((seg) => Boolean(seg.speaker));
-  const plainTranscriptText = hasDiarizationTranscript
+  const hasWordTimestamps = segments.some((seg) => seg.words && seg.words.length > 0);
+  const hasSegmentDetail = hasDiarizationTranscript || hasWordTimestamps;
+  const plainTranscriptText = hasSegmentDetail
     ? ''
     : segments
         .map((seg) => seg.text.trim())
@@ -1380,24 +1382,29 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     </span>
                   </div>
                   {segments.length > 0 ? (
-                    hasDiarizationTranscript ? (
+                    hasSegmentDetail ? (
                       segments.map((seg, i) => (
-                        <div key={i} className="group flex gap-6">
-                          <div className="w-16 flex-none pt-1 text-right select-none">
-                            {seg.speaker && (
-                              <div
-                                className={`mb-1 text-xs font-bold ${speakerColor(seg.speaker)}`}
-                              >
-                                {seg.speaker}
+                        <div
+                          key={i}
+                          className={`group flex ${hasDiarizationTranscript ? 'gap-6' : ''}`}
+                        >
+                          {hasDiarizationTranscript && (
+                            <div className="w-16 flex-none pt-1 text-right select-none">
+                              {seg.speaker && (
+                                <div
+                                  className={`mb-1 text-xs font-bold ${speakerColor(seg.speaker)}`}
+                                >
+                                  {seg.speaker}
+                                </div>
+                              )}
+                              <div className="font-mono text-[10px] text-slate-500">
+                                {formatRecSecs(seg.start)}
                               </div>
-                            )}
-                            <div className="font-mono text-[10px] text-slate-500">
-                              {formatRecSecs(seg.start)}
                             </div>
-                          </div>
+                          )}
                           <div className="selectable-text min-w-0 flex-1 leading-relaxed text-slate-300 transition-colors group-hover:text-white">
                             {allowWordPlaybackHighlight && seg.words && seg.words.length > 0 ? (
-                              <p>
+                              <p className="flex flex-wrap">
                                 {seg.words.map((w, wi) => (
                                   <span
                                     key={wi}
