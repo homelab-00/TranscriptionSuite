@@ -549,6 +549,8 @@ Controls for all these actions can be found in the Server tab. Here you can remo
 
 For more information about the technical aspects of the project, check out [README_DEV](README_DEV.md).
 
+To follow the progress of issues and planned features, head over to the project's [Blackboard](https://github.com/users/homelab-00/projects/2/views/2).
+
 ---
 
 ## 7. License
