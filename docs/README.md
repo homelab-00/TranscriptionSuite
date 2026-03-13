@@ -46,10 +46,6 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 </div>
 
----
-
-## Table of Contents
- 
 ## Table of Contents
 
 - [1. Introduction](#1-introduction)
@@ -59,7 +55,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - [2. Installation](#2-installation)
   - [2.1 Prerequisites](#21-prerequisites)
   - [2.2 Download the Dashboard app](#22-download-the-dashboard-app)
-    - [2.2.1 Linux AppImage Prerequisites (Linux only)](#221-linux-appimage-prerequisites-linux-only)
+    - [2.2.1 Linux AppImage Prerequisites](#221-linux-appimage-prerequisites)
     - [2.2.2 Verify Download with Kleopatra (optional)](#222-verify-download-with-kleopatra-optional)
   - [2.3 Setting Up the Server](#23-setting-up-the-server)
 - [3. Remote Connection](#3-remote-connection)
@@ -70,7 +66,9 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - [5. Troubleshooting](#5-troubleshooting)
 - [6. Technical Info](#6-technical-info)
 - [7. License](#7-license)
-- [8. Acknowledgments](#8-acknowledgments)
+- [8. State of the Project](#8-state-of-the-project)
+  - [8.1 In General & AI Disclosure](#81-in-general--ai-disclosure)
+  - [8.2 Contributing](#82-contributing)
 
 ---
 
@@ -174,7 +172,7 @@ This is just the frontend, no models or packages are downloaded yet.
 >* *Linux and Windows builds are x64; macOS is arm64*
 >* *Each release artifact includes an gpg signature by my key (`.sig`)*
 
-##### 2.2.1 Linux AppImage Prerequisites (Linux only)
+##### 2.2.1 Linux AppImage Prerequisites
 
 AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
 
@@ -557,14 +555,20 @@ GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 
-## 8. Acknowledgments
+## 8. State of the Project
 
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
-- [OpenAI Whisper](https://github.com/openai/whisper)
-- [WhisperX](https://github.com/m-bain/whisperX)
-- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo)
-- [VibeVoice-ASR](https://github.com/microsoft/VibeVoice)
-- [CTranslate2](https://github.com/OpenNMT/CTranslate2)
-- [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
-- [Tailscale](https://tailscale.com/)
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) - For inspiring this project!
+### 8.1 In General & AI Disclosure
+
+This was initially developed as a personal tool and in time turned into a hobby project. I am an engineer, just not a *software* engineer; so **this whole thing is vibecoded**. At the same time it's not blind vibecoding; for example Dockerizing the server for easy distribution was 100% my idea.
+
+I'm using this project to learn about programming. Starting from virtually nothing, I can now say that I've got a decent grasp of Python, git, uv & Docker. I started doing this because it's fun, not to make money. Though I do find, despite my mech eng degree, that I want to follow it as a career.
+
+Anyways, since I'm 100% dogfooding the app I'm not going to abandon it (unless some other project makes mine completely redundant). I will also try to the best of my ability to deal with bugs as soon as possible.
+
+Finally, I want to thank [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for inspiring this project.
+
+### 8.2 Contributing
+
+I'm always open to contributors! Might help me learn a thing or two about programming. 
+
+To follow the progress of issues and planned features, head over to the project's [Blackboard](https://github.com/users/homelab-00/projects/2/views/2). Pick a planned feature to work on or add your own suggestion.
