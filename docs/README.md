@@ -45,11 +45,6 @@ or CPU mode. Dockerized for fast setup.
 https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 </div>
-
----
-
-## Table of Contents
- 
 ## Table of Contents
 
 - [1. Introduction](#1-introduction)
@@ -70,7 +65,9 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - [5. Troubleshooting](#5-troubleshooting)
 - [6. Technical Info](#6-technical-info)
 - [7. License](#7-license)
-- [8. Acknowledgments](#8-acknowledgments)
+- [8. State of the Project](#8-state-of-the-project)
+  - [8.1 In General & AI Disclosure](#81-in-general--ai-disclosure)
+  - [8.2 Contributing](#82-contributing)
 
 ---
 
@@ -549,8 +546,6 @@ Controls for all these actions can be found in the Server tab. Here you can remo
 
 For more information about the technical aspects of the project, check out [README_DEV](README_DEV.md).
 
-To follow the progress of issues and planned features, head over to the project's [Blackboard](https://github.com/users/homelab-00/projects/2/views/2).
-
 ---
 
 ## 7. License
@@ -559,14 +554,20 @@ GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 
-## 8. Acknowledgments
+## 8. State of the Project
 
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)
-- [OpenAI Whisper](https://github.com/openai/whisper)
-- [WhisperX](https://github.com/m-bain/whisperX)
-- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo)
-- [VibeVoice-ASR](https://github.com/microsoft/VibeVoice)
-- [CTranslate2](https://github.com/OpenNMT/CTranslate2)
-- [PyAnnote Audio](https://github.com/pyannote/pyannote-audio)
-- [Tailscale](https://tailscale.com/)
-- [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) - For inspiring this project!
+### 8.1 In General & AI Disclosure
+
+This was initially developed as a personal tool and in time turned into a hobby project. I am an engineer, just not a *software* engineer; so **this whole thing is vibecoded**. At the same time it's not blind vibecoding; for example Dockerizing the server for easy distribution was 100% my idea.
+
+I'm using this project to learn about programming. Starting from virtually nothing, I can now say that I've got a decent grasp of Python, git, uv & Docker. I started doing this because it's fun, not to make money. Though I do find, despite my mech eng degree, that I want to follow it as a career.
+
+Anyways, since I'm 100% dogfooding the app I'm not going to abandon it (unless some other project makes mine completely redundant). I will also try to the best of my ability to deal with bugs as soon as possible.
+
+Finally, I want to thank [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for inspiring this project.
+
+### 8.2 Contributing
+
+I'm always open to contributors! Might help me learn a thing or two about programming. 
+
+To follow the progress of issues and planned features, head over to the project's [Blackboard](https://github.com/users/homelab-00/projects/2/views/2). Pick a planned feature to work on or add your own suggestion.
