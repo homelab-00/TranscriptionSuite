@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMe
 import { createPortal } from 'react-dom';
 import { NotebookTab } from '../../types';
 import {
-  Calendar,
   Search,
   Upload,
   Filter,
