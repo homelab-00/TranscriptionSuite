@@ -320,6 +320,13 @@ remote_server:
 
 > **Note:** Tailscale HTTPS certificates are issued for `.ts.net` hostnames, so
 > MagicDNS must be enabled in your Tailnet.
+>
+> **Certificate expiry:** These certificates expire after **90 days**. When they expire the app will attempt to auto-renew via `tailscale cert` before starting the server. If auto-renewal fails, renew manually:
+> ```bash
+> sudo tailscale cert your-machine.your-tailnet.ts.net
+> mv your-machine.your-tailnet.ts.net.crt ~/.config/Tailscale/my-machine.crt
+> mv your-machine.your-tailnet.ts.net.key ~/.config/Tailscale/my-machine.key
+> ```
 
 **Step 3 — Start the Server in Remote Mode**
 

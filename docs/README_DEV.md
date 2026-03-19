@@ -777,6 +777,23 @@ to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
    docker compose up -d
    ```
 
+#### Certificate expiry
+
+Tailscale certificates (Let's Encrypt) expire after **90 days**. When the app detects an expired cert at Docker start time, it attempts automatic renewal via `tailscale cert` (without sudo first — works if Tailscale operator is configured; falls back to sudo). If auto-renewal succeeds, startup continues transparently. If it fails, an actionable error is shown.
+
+To renew manually:
+```bash
+sudo tailscale cert <YOUR_DEVICE_NAME>.<YOUR_TAILNET_DNS_NAME>
+mv <hostname>.crt ~/.config/Tailscale/my-machine.crt
+mv <hostname>.key ~/.config/Tailscale/my-machine.key
+```
+Then restart the container. The app also warns in the log if a cert expires within 7 days and attempts preemptive renewal at that point.
+
+> **"Server unreachable" with a working Tailscale tunnel** usually means the certificate has expired. Verify with:
+> ```bash
+> openssl x509 -enddate -noout -in ~/.config/Tailscale/my-machine.crt
+> ```
+
 ### 6.5 Docker Volume Structure
 
 **`transcriptionsuite-data`** (mounted to `/data`):
@@ -1664,7 +1681,7 @@ npm run dev:electron
 | `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors — falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks); `app:getDownloadsPath` (returns system downloads folder path); `file:writeText` (writes UTF-8 text to a user-specified file path); `dialog:selectFolder` (shows folder picker dialog for output directory selection) |
 | `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle; `server.probeConnection` and `server.checkFirewallPort` for connection diagnostics; `tailscale.getHostname` for FQDN auto-detection; `fileIO` namespace (`getDownloadsPath`, `writeText`, `selectFolder`) for Session Import file operations |
 | `containerRuntime.ts` | Auto-detects Docker or Podman, caches the result, handles rootless socket resolution; supports `CONTAINER_RUNTIME` env override |
-| `dockerManager.ts` | Container CLI wrapper for Docker/Podman — container/image management, additive optional-family install env updates, and auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs) |
+| `dockerManager.ts` | Container CLI wrapper for Docker/Podman — container/image management, additive optional-family install env updates, auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs), and pre-flight TLS certificate expiry check with auto-renewal for Tailscale certificates via `tailscale cert` |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
 | `pasteAtCursor.ts` | Paste-at-cursor feature (xdotool/wtype/platform dispatch) |

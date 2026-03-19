@@ -217,11 +217,14 @@ export class APIClient {
           // certificate-error handler can accept certs that Node.js rejected
           // (e.g. hostname mismatch for LAN profile).  For connectivity errors
           // (DNS, refused, timeout) return immediately — fetch would also fail.
+          // Only fall through to renderer fetch for TLS errors that the
+          // certificate-error handler in main.ts *can* accept (LAN profile).
+          // CERT_HAS_EXPIRED is excluded: an expired cert cannot be accepted
+          // by any handler — the probe's specific error should surface.
           const tlsFallbackCodes = new Set([
             'ERR_TLS_CERT_ALTNAME_INVALID',
             'DEPTH_ZERO_SELF_SIGNED_CERT',
             'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
-            'CERT_HAS_EXPIRED',
             'ERR_TLS_CERT_AUTHORITY_INVALID',
           ]);
           if (!probe.errorCode || !tlsFallbackCodes.has(probe.errorCode)) {

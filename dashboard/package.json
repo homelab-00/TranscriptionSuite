@@ -1,7 +1,7 @@
 {
   "name": "transcriptionsuite",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Desktop dashboard for managing TranscriptionSuite server and transcription workflows.",
   "author": "homelab-00",
   "type": "module",

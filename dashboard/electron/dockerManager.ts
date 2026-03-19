@@ -21,6 +21,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 import { app } from 'electron';
 import {
   type ContainerRuntimeKind,
@@ -368,6 +369,73 @@ function generateSelfSignedLanCert(certPath: string, keyPath: string): boolean {
 }
 
 /**
+ * Extract the Tailscale hostname from a certificate's SAN entries.
+ * Returns the first *.ts.net DNS name, or null if none found.
+ */
+function extractTailscaleHostname(x509: crypto.X509Certificate): string | null {
+  const san = x509.subjectAltName; // e.g. "DNS:machine.tailnet.ts.net"
+  if (!san) return null;
+  for (const entry of san.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith('DNS:') && trimmed.endsWith('.ts.net')) {
+      return trimmed.slice(4); // strip "DNS:" prefix
+    }
+  }
+  return null;
+}
+
+/**
+ * Attempt to renew a Tailscale TLS certificate by running `tailscale cert`.
+ * Tries without sudo first (works when Tailscale operator is configured);
+ * falls back to sudo on Linux/macOS.
+ * @returns true if renewal succeeded and files were written
+ */
+function tryRenewTailscaleCert(hostname: string, certDest: string, keyDest: string): boolean {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-cert-'));
+  const tmpCert = path.join(tmpDir, `${hostname}.crt`);
+  const tmpKey = path.join(tmpDir, `${hostname}.key`);
+
+  const attempts: [string, string[]][] = [
+    ['tailscale', ['cert', '--cert-file', tmpCert, '--key-file', tmpKey, hostname]],
+  ];
+  if (process.platform !== 'win32') {
+    attempts.push([
+      'sudo',
+      ['tailscale', 'cert', '--cert-file', tmpCert, '--key-file', tmpKey, hostname],
+    ]);
+  }
+
+  for (const [cmd, args] of attempts) {
+    try {
+      execFileSync(cmd, args, { timeout: 30_000, stdio: 'pipe' });
+      if (fs.existsSync(tmpCert) && fs.existsSync(tmpKey)) {
+        fs.mkdirSync(path.dirname(certDest), { recursive: true });
+        fs.mkdirSync(path.dirname(keyDest), { recursive: true });
+        fs.copyFileSync(tmpCert, certDest);
+        fs.copyFileSync(tmpKey, keyDest);
+        try {
+          fs.unlinkSync(tmpCert);
+          fs.unlinkSync(tmpKey);
+          fs.rmdirSync(tmpDir);
+        } catch {
+          /* best-effort cleanup */
+        }
+        return true;
+      }
+    } catch {
+      // Try next attempt
+    }
+  }
+
+  try {
+    fs.rmSync(tmpDir, { recursive: true });
+  } catch {
+    /* best-effort cleanup */
+  }
+  return false;
+}
+
+/**
  * Resolve the host-side TLS cert + key paths for the active remote profile.
  *
  * Reads `connection.remoteProfile` from the electron-store to decide which
@@ -467,6 +535,71 @@ function resolveTlsCertPaths(): TlsCertPaths {
       `TLS key file not found: ${keyPath}\n\n` +
         `Please ensure the key file exists at the configured path.`,
     );
+  }
+
+  // ---------- Check certificate expiry ----------
+  const EXPIRY_WARN_DAYS = 7;
+  try {
+    const certPem = fs.readFileSync(certPath);
+    const x509 = new crypto.X509Certificate(certPem);
+    const expiryDate = new Date(x509.validTo);
+    const now = new Date();
+    const daysUntilExpiry = (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (daysUntilExpiry <= 0) {
+      if (profile === 'tailscale') {
+        const hostname = extractTailscaleHostname(x509);
+        if (hostname) {
+          const renewed = tryRenewTailscaleCert(hostname, certPath, keyPath);
+          if (renewed) {
+            console.log(
+              `[DockerManager] Auto-renewed expired Tailscale certificate for ${hostname}`,
+            );
+          } else {
+            throw new Error(
+              `TLS certificate expired on ${expiryDate.toLocaleDateString()}.\n\n` +
+                `Auto-renewal failed. Please renew manually:\n` +
+                `  sudo tailscale cert ${hostname}\n` +
+                `Then copy the new cert/key to:\n` +
+                `  Cert: ${certPath}\n  Key:  ${keyPath}`,
+            );
+          }
+        } else {
+          throw new Error(
+            `TLS certificate expired on ${expiryDate.toLocaleDateString()}.\n\n` +
+              `Renew with:  sudo tailscale cert <your-machine>.tail<xxxx>.ts.net\n` +
+              `Then copy the new cert/key to:\n` +
+              `  Cert: ${certPath}\n  Key:  ${keyPath}`,
+          );
+        }
+      } else {
+        throw new Error(
+          `TLS certificate expired on ${expiryDate.toLocaleDateString()}.\n\n` +
+            `Delete the old certificate files and restart — ` +
+            `a new self-signed certificate will be auto-generated.\n` +
+            `  Cert: ${certPath}\n  Key:  ${keyPath}`,
+        );
+      }
+    } else if (daysUntilExpiry <= EXPIRY_WARN_DAYS) {
+      console.warn(
+        `[DockerManager] TLS certificate expires in ${Math.ceil(daysUntilExpiry)} day(s) ` +
+          `(${expiryDate.toLocaleDateString()}). Consider renewing soon.`,
+      );
+      if (profile === 'tailscale') {
+        const hostname = extractTailscaleHostname(x509);
+        if (hostname) {
+          const renewed = tryRenewTailscaleCert(hostname, certPath, keyPath);
+          if (renewed) {
+            console.log(
+              `[DockerManager] Preemptively renewed Tailscale certificate for ${hostname}`,
+            );
+          }
+        }
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('TLS certificate expired')) throw err;
+    console.warn('[DockerManager] Could not check certificate expiry:', err);
   }
 
   return { certPath, keyPath, profile };
