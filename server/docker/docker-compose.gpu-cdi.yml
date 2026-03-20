@@ -1,0 +1,17 @@
+# Docker CDI GPU overlay — modern alternative to legacy nvidia runtime hook.
+# Requires nvidia-container-toolkit configured for CDI:
+#   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+#   sudo nvidia-ctk config --in-place --set nvidia-container-runtime.mode=cdi
+# Used automatically when the dashboard detects CDI mode.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu-cdi.yml up -d
+
+services:
+  transcriptionsuite:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              device_ids:
+                - nvidia.com/gpu=all
+              capabilities: [gpu]

@@ -625,9 +625,15 @@ function composeFileArgs(
     files.push('docker-compose.desktop-vm.yml');
   }
 
-  // GPU overlay (only for GPU profile) — Podman uses CDI, Docker uses deploy.resources
+  // GPU overlay (only for GPU profile)
   if (runtimeProfile === 'gpu') {
-    files.push(runtimeKind === 'podman' ? 'podman-compose.gpu.yml' : 'docker-compose.gpu.yml');
+    if (runtimeKind === 'podman') {
+      files.push('podman-compose.gpu.yml');
+    } else if (detectedGpuMode === 'cdi') {
+      files.push('docker-compose.gpu-cdi.yml');
+    } else {
+      files.push('docker-compose.gpu.yml'); // legacy nvidia runtime
+    }
   }
 
   // Flatten into compose args
@@ -673,6 +679,9 @@ function buildProcessEnv(
 
 /** Cached runtime kind for synchronous access after initial detection */
 let detectedRuntimeKind: ContainerRuntimeKind | null = null;
+
+/** Detected GPU toolkit mode: CDI (modern) or legacy (nvidia runtime hook) */
+let detectedGpuMode: 'cdi' | 'legacy' | null = null;
 
 async function exec(
   cmd: string,
@@ -1702,31 +1711,32 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
   if (gpu) {
     const isPodman = detectedRuntimeKind === 'podman';
 
-    // Check 1: Legacy nvidia runtime registered in Docker (not applicable to Podman)
-    if (!isPodman) {
+    // Check 1: Modern CDI (Container Device Interface) — nvidia-container-toolkit 1.14+
+    // Preferred over legacy mode; required by Podman, works with all driver versions.
+    try {
+      const cdiOutput = await exec('nvidia-ctk', ['cdi', 'list']);
+      if (cdiOutput.includes('nvidia.com/gpu')) {
+        toolkit = true;
+        detectedGpuMode = 'cdi';
+        console.log('[DockerManager] NVIDIA container toolkit: CDI mode detected');
+      }
+    } catch {
+      // nvidia-ctk not available or CDI not configured
+    }
+
+    // Check 2: Legacy nvidia runtime registered in Docker (not applicable to Podman).
+    // Fallback for older setups that haven't migrated to CDI yet.
+    if (!toolkit && !isPodman) {
       try {
         const bin = await runtimeBin();
         const info = await exec(bin, ['info', '--format', '{{json .Runtimes}}']);
         if (info.includes('nvidia')) {
           toolkit = true;
+          detectedGpuMode = 'legacy';
           console.log('[DockerManager] NVIDIA container toolkit: legacy runtime detected');
         }
       } catch (err: any) {
         console.warn('[DockerManager] runtime info for toolkit check failed:', err.message);
-      }
-    }
-
-    // Check 2: Modern CDI (Container Device Interface) — nvidia-container-toolkit 1.14+
-    // This is the only method supported by Podman.
-    if (!toolkit) {
-      try {
-        const cdiOutput = await exec('nvidia-ctk', ['cdi', 'list']);
-        if (cdiOutput.includes('nvidia.com/gpu')) {
-          toolkit = true;
-          console.log('[DockerManager] NVIDIA container toolkit: CDI mode detected');
-        }
-      } catch {
-        // nvidia-ctk not available or CDI not configured
       }
     }
 

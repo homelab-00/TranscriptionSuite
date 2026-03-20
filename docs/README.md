@@ -548,6 +548,18 @@ The next step is to start deleting things. The safest choice is deleting *everyt
 
 Controls for all these actions can be found in the Server tab. Here you can remove the container, image, and volumes individually or use the big red button at the bottom (that can also remove your config folder).
 
+### GPU not working after a system update (Linux)
+
+If the server crashes with `CUDA failed with error unknown error` after a system update (common on rolling-release distros like Arch), your NVIDIA driver likely updated past what the legacy Docker GPU hook supports. The fix is to switch to CDI mode:
+
+```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+sudo nvidia-ctk config --in-place --set nvidia-container-runtime.mode=cdi
+sudo systemctl restart docker
+```
+
+The dashboard detects CDI automatically and uses the correct GPU configuration. No image rebuild or reinstall needed.
+
 ---
 
 ## 6. Technical Info

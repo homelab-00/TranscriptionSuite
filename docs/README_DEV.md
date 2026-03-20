@@ -686,7 +686,9 @@ Docker Compose configuration is split into layered files for cross-platform and 
 | `docker-compose.yml` | Base: service definition, environment, volumes |
 | `docker-compose.linux-host.yml` | Linux: host networking (direct localhost access) |
 | `docker-compose.desktop-vm.yml` | macOS/Windows: bridge networking + port mapping + `host.docker.internal` |
-| `docker-compose.gpu.yml` | NVIDIA GPU device reservation |
+| `docker-compose.gpu.yml` | NVIDIA GPU reservation (legacy `driver: nvidia` hook) |
+| `docker-compose.gpu-cdi.yml` | NVIDIA GPU reservation (modern CDI mode) |
+| `podman-compose.gpu.yml` | Podman GPU reservation (CDI, the only mode Podman supports) |
 
 **Usage examples:**
 
@@ -707,7 +709,17 @@ docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
 ```
 
-The Electron dashboard selects the correct compose file stack automatically based on the detected platform, container runtime (Docker vs Podman), and the user's runtime profile setting.
+The Electron dashboard selects the correct compose file stack automatically based on the detected platform, container runtime (Docker vs Podman), GPU toolkit mode (CDI vs legacy), and the user's runtime profile setting.
+
+**GPU overlay selection logic** (`dockerManager.ts → composeFileArgs()`):
+
+| Runtime | Detected mode | Overlay used |
+|---------|---------------|--------------|
+| Docker | CDI | `docker-compose.gpu-cdi.yml` |
+| Docker | Legacy | `docker-compose.gpu.yml` |
+| Podman | (always CDI) | `podman-compose.gpu.yml` |
+
+Detection order in `checkGpu()`: CDI is checked first (`nvidia-ctk cdi list`), then legacy (`docker info` for nvidia runtime). The result is stored in the module-level `detectedGpuMode` variable.
 
 The `start-local.sh` / `start-remote.sh` convenience scripts auto-detect Docker or Podman and default to Linux + GPU mode.
 
@@ -2315,12 +2327,44 @@ Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for thi
 ### 13.1 Docker GPU Access
 
 ```bash
-# Verify GPU is accessible
+# Verify GPU is accessible (legacy mode)
 docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
+
+# Verify GPU is accessible (CDI mode)
+docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 
 # Check container logs
 docker compose logs -f
 ```
+
+#### CUDA unknown error after system update
+
+On rolling-release distros (Arch, Manjaro, etc.), a system update that upgrades glibc or the NVIDIA driver can break the nvidia-container-toolkit's **legacy hook mode**. The legacy pre-start hook runs `/sbin/ldconfig` inside the container, and newer glibc/driver combinations cause this to fail silently — CUDA reports `RuntimeError: CUDA failed with error unknown error` even though `nvidia-smi` works fine on the host.
+
+**Symptoms:**
+- Server crashes during model preload with `CUDA failed with error unknown error`
+- `nvidia-smi` works on the host but CUDA fails inside the container
+- Server bootloops if Docker restart policy is enabled
+
+**Root cause:** The legacy nvidia runtime hook (`--gpus all` / `driver: nvidia` in compose) is incompatible with the updated host libraries. This is a [known issue](https://github.com/NVIDIA/nvidia-container-toolkit/issues/1246) affecting driver versions 570+ with newer glibc.
+
+**Fix — switch to CDI (Container Device Interface) mode:**
+
+```bash
+# 1. Generate CDI specification for your GPU
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+
+# 2. Switch nvidia-container-toolkit to CDI mode
+sudo nvidia-ctk config --in-place --set nvidia-container-runtime.mode=cdi
+
+# 3. Restart Docker to pick up the change
+sudo systemctl restart docker
+
+# 4. Verify (should show GPU info)
+docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
+```
+
+The dashboard automatically detects CDI vs legacy mode at startup (`checkGpu()` in `dockerManager.ts`) and selects the matching compose overlay (`docker-compose.gpu-cdi.yml` or `docker-compose.gpu.yml`). No image rebuild needed — compose overlays are host-side only.
 
 ### 13.2 Health Check Issues
 
