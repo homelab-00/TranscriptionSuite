@@ -24,6 +24,8 @@ import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
+import { useSessionImportQueue } from './src/hooks/useSessionImportQueue';
+import { useImportQueue } from './src/hooks/useImportQueue';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
@@ -81,11 +83,19 @@ const AppInner: React.FC = () => {
   // Live mode lifted to App level so state survives tab switches
   const live = useLiveMode();
 
+  // Import queue state lifted to App level so it survives tab switches (GH #42)
+  const sessionImportQueue = useSessionImportQueue({ outputDir: '', diarizedFormat: 'srt' });
+  const notebookImportQueue = useImportQueue();
+
   // Star popup (one-time after 2+ hours cumulative use)
   const { showStarPopup, dismissStarPopup } = useStarPopup();
 
-  // Lifted upload/import status so tray sync (in SessionView) can reflect it
-  const [isUploading, setIsUploading] = useState(false);
+  // Derive upload/import status from queue state so tray sync reflects it
+  const isUploading =
+    notebookImportQueue.isProcessing ||
+    notebookImportQueue.pendingCount > 0 ||
+    sessionImportQueue.isProcessing ||
+    sessionImportQueue.pendingCount > 0;
 
   const [startupFlowPending, setStartupFlowPending] = useState(false);
   const startupFlowPendingRef = useRef(false);
@@ -525,13 +535,14 @@ const AppInner: React.FC = () => {
               live={live}
               sessionTab={sessionTab}
               onChangeSessionTab={setSessionTab}
+              sessionImportQueue={sessionImportQueue}
             />
           </ErrorBoundary>
         );
       case View.NOTEBOOK:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <NotebookView onUploadingChange={setIsUploading} activeTab={notebookTab} />
+            <NotebookView importQueue={notebookImportQueue} activeTab={notebookTab} />
           </ErrorBoundary>
         );
       case View.SERVER:
@@ -568,6 +579,7 @@ const AppInner: React.FC = () => {
               live={live}
               sessionTab={sessionTab}
               onChangeSessionTab={setSessionTab}
+              sessionImportQueue={sessionImportQueue}
             />
           </ErrorBoundary>
         );

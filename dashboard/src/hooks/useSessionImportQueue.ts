@@ -50,6 +50,8 @@ export interface UseSessionImportQueueReturn {
   clearAll: () => void;
   /** Retry a failed job */
   retryJob: (id: string) => void;
+  /** Update config (outputDir, diarizedFormat) without re-creating the hook */
+  updateConfig: (patch: Partial<UseSessionImportQueueConfig>) => void;
   /** Number of pending jobs */
   pendingCount: number;
   /** Number of completed jobs */
@@ -106,7 +108,6 @@ export function useSessionImportQueue(
   const processingRef = useRef(false);
   const abortRef = useRef(false);
   const configRef = useRef(config);
-  configRef.current = config;
 
   const updateJobs = useCallback((updater: (prev: SessionImportJob[]) => SessionImportJob[]) => {
     const next = updater(jobsRef.current);
@@ -307,6 +308,10 @@ export function useSessionImportQueue(
     [processQueue, updateJobs],
   );
 
+  const updateConfig = useCallback((patch: Partial<UseSessionImportQueueConfig>) => {
+    configRef.current = { ...configRef.current, ...patch };
+  }, []);
+
   const pendingCount = jobs.filter((j) => j.status === 'pending').length;
   const completedCount = jobs.filter((j) => j.status === 'success').length;
   const errorCount = jobs.filter((j) => j.status === 'error').length;
@@ -320,6 +325,7 @@ export function useSessionImportQueue(
     clearFinished,
     clearAll,
     retryJob,
+    updateConfig,
     pendingCount,
     completedCount,
     errorCount,

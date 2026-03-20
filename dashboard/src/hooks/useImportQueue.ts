@@ -41,6 +41,8 @@ export interface UseImportQueueReturn {
   clearAll: () => void;
   /** Retry a failed job */
   retryJob: (id: string) => void;
+  /** Update callbacks (onJobSuccess, onJobError) without re-creating the hook */
+  updateCallbacks: (config: UseImportQueueConfig) => void;
   /** Number of pending jobs */
   pendingCount: number;
   /** Number of completed jobs */
@@ -67,7 +69,6 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
   const processingRef = useRef(false);
   const abortRef = useRef(false);
   const callbacksRef = useRef<UseImportQueueConfig | undefined>(config);
-  callbacksRef.current = config;
 
   const updateJobs = useCallback((updater: (prev: ImportJob[]) => ImportJob[]) => {
     const next = updater(jobsRef.current);
@@ -234,6 +235,10 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
     [processQueue, updateJobs],
   );
 
+  const updateCallbacks = useCallback((newConfig: UseImportQueueConfig) => {
+    callbacksRef.current = newConfig;
+  }, []);
+
   const pendingCount = jobs.filter((j) => j.status === 'pending').length;
   const completedCount = jobs.filter((j) => j.status === 'success').length;
   const errorCount = jobs.filter((j) => j.status === 'error').length;
@@ -247,6 +252,7 @@ export function useImportQueue(config?: UseImportQueueConfig): UseImportQueueRet
     clearFinished,
     clearAll,
     retryJob,
+    updateCallbacks,
     pendingCount,
     completedCount,
     errorCount,

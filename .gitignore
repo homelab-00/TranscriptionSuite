@@ -25,6 +25,16 @@ dashboard/*.sln
 dashboard/*.sw?
 
 
+# AI Stuff
+
+.gitnexus/
+_bmad/
+_bmad-output/
+CLAUDE.md
+AGENTS.md
+.mcp.json
+
+
 # MISC
 
 ## .hidden folders
@@ -46,8 +56,4 @@ __pycache__/
 *.local
 *.mp3
 .directory
-.gitnexus
-CLAUDE.md
-AGENTS.md
-.mcp.json
 codeql-agent-results/

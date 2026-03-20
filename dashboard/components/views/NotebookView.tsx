@@ -31,7 +31,6 @@ import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
 import { useLanguages } from '../../src/hooks/useLanguages';
-import { useImportQueue } from '../../src/hooks/useImportQueue';
 import type { ImportJob, UseImportQueueReturn } from '../../src/hooks/useImportQueue';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { apiClient } from '../../src/api/client';
@@ -41,11 +40,11 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 
 interface NotebookViewProps {
-  onUploadingChange?: (uploading: boolean) => void;
+  importQueue: UseImportQueueReturn;
   activeTab: NotebookTab;
 }
 
-export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange, activeTab }) => {
+export const NotebookView: React.FC<NotebookViewProps> = ({ importQueue, activeTab }) => {
   const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
   const [adminStatusPollingEnabled, setAdminStatusPollingEnabled] = useState(true);
   const admin = useAdminStatus(10_000, adminStatusPollingEnabled);
@@ -74,14 +73,13 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange, a
     setCalendarRefreshNonce((prev) => prev + 1);
   }, []);
 
-  const importQueue = useImportQueue({
-    onJobSuccess: () => {
-      bumpCalendarRefresh();
-    },
-    onJobError: (job, error) => {
-      toast.error(`Import failed for ${job.file.name}: ${error}`);
-    },
-  });
+  // Register callbacks on the lifted import queue hook
+  useEffect(() => {
+    importQueue.updateCallbacks({
+      onJobSuccess: () => bumpCalendarRefresh(),
+      onJobError: (job, error) => toast.error(`Import failed for ${job.file.name}: ${error}`),
+    });
+  }, [importQueue, bumpCalendarRefresh]);
 
   useEffect(() => {
     if (adminStatusPollingEnabled && admin.error?.includes('API 403')) {
@@ -97,11 +95,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ onUploadingChange, a
   const supportsExplicitWordTimestampToggle = activeModel
     ? supportsExplicitWordTimestampToggleForModel(activeModel)
     : notebookBackendType !== 'vibevoice_asr';
-
-  useEffect(() => {
-    onUploadingChange?.(importQueue.isProcessing || importQueue.pendingCount > 0);
-    return () => onUploadingChange?.(false);
-  }, [importQueue.isProcessing, importQueue.pendingCount, onUploadingChange]);
 
   const renderContent = () => {
     switch (activeTab) {

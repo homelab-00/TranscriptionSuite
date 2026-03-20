@@ -50,6 +50,7 @@ import {
 import { isModelDisabled } from '../../src/services/modelSelection';
 import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
+import type { UseSessionImportQueueReturn } from '../../src/hooks/useSessionImportQueue';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -70,6 +71,7 @@ interface SessionViewProps {
   live: LiveModeState;
   sessionTab: SessionTab;
   onChangeSessionTab: (tab: SessionTab) => void;
+  sessionImportQueue: UseSessionImportQueueReturn;
 }
 
 export const SessionView: React.FC<SessionViewProps> = ({
@@ -82,6 +84,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   live,
   sessionTab,
   onChangeSessionTab,
+  sessionImportQueue,
 }) => {
   // Global State
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
@@ -999,7 +1002,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           <div className="mb-6 flex flex-col space-y-2">
             <h1 className="text-3xl font-bold tracking-tight text-white">Session</h1>
           </div>
-          <SessionImportTab />
+          <SessionImportTab queue={sessionImportQueue} />
         </div>
       </div>
     );

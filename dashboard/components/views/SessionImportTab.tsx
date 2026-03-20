@@ -15,7 +15,6 @@ import {
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
-import { useSessionImportQueue } from '../../src/hooks/useSessionImportQueue';
 import type {
   SessionImportJob,
   UseSessionImportQueueReturn,
@@ -27,7 +26,11 @@ import type { AdminStatus } from '../../src/api/types';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { getConfig, setConfig } from '../../src/config/store';
 
-export const SessionImportTab: React.FC = () => {
+interface SessionImportTabProps {
+  queue: UseSessionImportQueueReturn;
+}
+
+export const SessionImportTab: React.FC<SessionImportTabProps> = ({ queue }) => {
   const [outputDir, setOutputDir] = useState('');
   const [diarization, setDiarization] = useState(true);
   const [diarizedFormat, setDiarizedFormat] = useState<'srt' | 'ass'>('srt');
@@ -46,8 +49,6 @@ export const SessionImportTab: React.FC = () => {
   const supportsExplicitWordTimestampToggle = activeModel
     ? supportsExplicitWordTimestampToggleForModel(activeModel)
     : backendType !== 'vibevoice_asr';
-
-  const queue = useSessionImportQueue({ outputDir, diarizedFormat });
 
   // Fetch downloads path on mount
   useEffect(() => {
@@ -85,6 +86,11 @@ export const SessionImportTab: React.FC = () => {
       })
       .catch(() => {});
   }, []);
+
+  // Sync outputDir and diarizedFormat to the lifted queue hook
+  useEffect(() => {
+    queue.updateConfig({ outputDir, diarizedFormat });
+  }, [outputDir, diarizedFormat, queue]);
 
   useEffect(() => {
     if (!supportsExplicitWordTimestampToggle) {
