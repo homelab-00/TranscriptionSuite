@@ -13,6 +13,7 @@ import {
   Play,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Check,
   Plus,
   Minus,
@@ -22,6 +23,10 @@ import {
   XCircle,
   AlertCircle,
   Info,
+  Eye,
+  Pause,
+  FolderOpen,
+  WifiOff,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -31,20 +36,29 @@ import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
 import { useLanguages } from '../../src/hooks/useLanguages';
-import type { ImportJob, UseImportQueueReturn } from '../../src/hooks/useImportQueue';
+import {
+  useImportQueueStore,
+  selectNotebookJobs,
+  selectPendingCount,
+  selectCompletedCount,
+  selectErrorCount,
+  selectIsProcessing,
+} from '../../src/stores/importQueueStore';
+import type { UnifiedImportJob } from '../../src/stores/importQueueStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useNotebookWatcher } from '../../src/hooks/useNotebookWatcher';
 import { apiClient } from '../../src/api/client';
 import type { AdminStatus, Recording } from '../../src/api/types';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
+import { getConfig, setConfig } from '../../src/config/store';
 
 interface NotebookViewProps {
-  importQueue: UseImportQueueReturn;
   activeTab: NotebookTab;
 }
 
-export const NotebookView: React.FC<NotebookViewProps> = ({ importQueue, activeTab }) => {
+export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
   const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
   const [adminStatusPollingEnabled, setAdminStatusPollingEnabled] = useState(true);
   const admin = useAdminStatus(10_000, adminStatusPollingEnabled);
@@ -73,13 +87,17 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ importQueue, activeT
     setCalendarRefreshNonce((prev) => prev + 1);
   }, []);
 
-  // Register callbacks on the lifted import queue hook
+  // Register callbacks on the unified Zustand queue store
+  const updateNotebookCallbacks = useImportQueueStore((s) => s.updateNotebookCallbacks);
   useEffect(() => {
-    importQueue.updateCallbacks({
+    updateNotebookCallbacks({
       onJobSuccess: () => bumpCalendarRefresh(),
-      onJobError: (job, error) => toast.error(`Import failed for ${job.file.name}: ${error}`),
+      onJobError: (job: UnifiedImportJob, error: string) => {
+        const name = typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name;
+        toast.error(`Import failed for ${name}: ${error}`);
+      },
     });
-  }, [importQueue, bumpCalendarRefresh]);
+  }, [updateNotebookCallbacks, bumpCalendarRefresh]);
 
   useEffect(() => {
     if (adminStatusPollingEnabled && admin.error?.includes('API 403')) {
@@ -111,7 +129,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ importQueue, activeT
       case NotebookTab.IMPORT:
         return (
           <ImportTab
-            queue={importQueue}
             supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
             adminStatus={admin.status}
           />
@@ -143,7 +160,6 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ importQueue, activeT
         onClose={() => setIsAddModalOpen(false)}
         initialTime={selectedTimeSlot}
         initialDate={selectedDateSlot}
-        queue={importQueue}
         supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
       />
     </div>
@@ -1249,14 +1265,99 @@ const SearchTab: React.FC<{ onNoteClick: (note: any) => void }> = ({ onNoteClick
 };
 
 const ImportTab = ({
-  queue,
   supportsExplicitWordTimestampToggle,
   adminStatus,
 }: {
-  queue: UseImportQueueReturn;
   supportsExplicitWordTimestampToggle: boolean;
   adminStatus: AdminStatus | null;
 }) => {
+  // Zustand store
+  const jobs = useImportQueueStore(selectNotebookJobs);
+  const isPaused = useImportQueueStore((s) => s.isPaused);
+  const isProcessing = useImportQueueStore(selectIsProcessing);
+  const pendingCount = useImportQueueStore(selectPendingCount);
+  const completedCount = useImportQueueStore(selectCompletedCount);
+  const errorCount = useImportQueueStore(selectErrorCount);
+  const addFiles = useImportQueueStore((s) => s.addFiles);
+  const removeJob = useImportQueueStore((s) => s.removeJob);
+  const retryJob = useImportQueueStore((s) => s.retryJob);
+  const clearFinished = useImportQueueStore((s) => s.clearFinished);
+  const pauseQueue = useImportQueueStore((s) => s.pauseQueue);
+  const resumeQueue = useImportQueueStore((s) => s.resumeQueue);
+  const watcherServerConnected = useImportQueueStore((s) => s.watcherServerConnected);
+  const avgProcessingMs = useImportQueueStore((s) => s.avgProcessingMs);
+  const watchLog = useImportQueueStore((s) => s.watchLog);
+  const clearWatchLog = useImportQueueStore((s) => s.clearWatchLog);
+
+  const {
+    notebookWatchPath,
+    notebookWatchActive,
+    setNotebookWatchActive,
+    setWatchPath,
+    notebookWatchAccessible,
+  } = useNotebookWatcher();
+  const sessionWatchPath = useImportQueueStore((s) => s.sessionWatchPath);
+  const watchConflict =
+    notebookWatchPath && sessionWatchPath && notebookWatchPath === sessionWatchPath;
+
+  const hasElectronApi =
+    typeof window !== 'undefined' && Boolean((window as any).electronAPI?.fileIO);
+
+  const [isDragOverWatch, setIsDragOverWatch] = useState(false);
+  const [logExpanded, setLogExpanded] = useState(false);
+
+  // 4.6 — first-run hint state
+  const manualImportCountRef = useRef(0);
+  const [showWatchHint, setShowWatchHint] = useState(false);
+
+  // 4.6 — load manual import count and hint state on mount
+  useEffect(() => {
+    Promise.all([
+      getConfig<number>('stats.manualImportCount'),
+      getConfig<boolean>('stats.watchFolderHintShown'),
+    ]).then(([count, hintShown]) => {
+      manualImportCountRef.current = count ?? 0;
+      if (!hintShown && (count ?? 0) >= 3 && !notebookWatchPath) {
+        setShowWatchHint(true);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Hide hint once a watch path is selected
+  useEffect(() => {
+    if (notebookWatchPath && showWatchHint) {
+      setShowWatchHint(false);
+    }
+  }, [notebookWatchPath, showWatchHint]);
+
+  const handleSelectWatchFolder = useCallback(async () => {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.fileIO) return;
+    const selected = await electronAPI.fileIO.selectFolder();
+    if (selected) await setWatchPath(selected);
+  }, [setWatchPath]);
+
+  // 4.4 — drag a folder onto the watch path input area
+  const handleWatchFolderDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOverWatch(false);
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const folderPath = (file as any).path as string | undefined;
+      if (folderPath) {
+        await setWatchPath(folderPath);
+      }
+    },
+    [setWatchPath],
+  );
+
+  const dismissWatchHint = useCallback(async () => {
+    setShowWatchHint(false);
+    await setConfig('stats.watchFolderHintShown', true);
+  }, []);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [diarization, setDiarization] = useState(true);
   const [wordTimestamps, setWordTimestamps] = useState(true);
@@ -1303,13 +1404,31 @@ const ImportTab = ({
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      queue.addFiles(Array.from(files), {
+      addFiles(Array.from(files), 'notebook-normal', {
         enable_diarization: diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
         parallel_diarization: diarization ? parallelDiarization : undefined,
       });
+
+      // 4.6 — track manual import count and possibly show hint
+      const newCount = manualImportCountRef.current + files.length;
+      manualImportCountRef.current = newCount;
+      void setConfig('stats.manualImportCount', newCount);
+      if (newCount >= 3 && !notebookWatchPath && !showWatchHint) {
+        getConfig<boolean>('stats.watchFolderHintShown').then((shown) => {
+          if (!shown) setShowWatchHint(true);
+        });
+      }
     },
-    [diarization, parallelDiarization, queue, supportsExplicitWordTimestampToggle, wordTimestamps],
+    [
+      addFiles,
+      diarization,
+      parallelDiarization,
+      supportsExplicitWordTimestampToggle,
+      wordTimestamps,
+      notebookWatchPath,
+      showWatchHint,
+    ],
   );
 
   const handleDrop = useCallback(
@@ -1321,12 +1440,14 @@ const ImportTab = ({
     [handleFiles],
   );
 
-  const statusIcon = (job: ImportJob) => {
+  const statusIcon = (job: UnifiedImportJob) => {
     switch (job.status) {
       case 'pending':
         return <Clock size={14} className="text-slate-400" />;
       case 'processing':
         return <Loader2 size={14} className="text-accent-cyan animate-spin" />;
+      case 'writing':
+        return <Loader2 size={14} className="text-accent-cyan animate-pulse" />;
       case 'success':
         return <Check size={14} className="text-green-400" />;
       case 'error':
@@ -1334,7 +1455,7 @@ const ImportTab = ({
     }
   };
 
-  const statusLabel = (job: ImportJob) => {
+  const statusLabel = (job: UnifiedImportJob) => {
     switch (job.status) {
       case 'pending':
         return 'Queued';
@@ -1391,22 +1512,175 @@ const ImportTab = ({
         <Button variant="primary">Browse Files</Button>
       </div>
 
+      {/* 4.6 — First-run hint: suggest watch folder after 3+ manual imports */}
+      {showWatchHint && hasElectronApi && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5">
+          <Info size={14} className="mt-0.5 shrink-0 text-amber-400" />
+          <p className="flex-1 text-xs text-amber-300">
+            Tip: Use <strong>Folder Watch</strong> below to automatically process new files without
+            dragging them in each time.
+          </p>
+          <button
+            onClick={dismissWatchHint}
+            className="shrink-0 text-slate-500 transition-colors hover:text-slate-400"
+            title="Dismiss"
+          >
+            <XCircle size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Folder Watch */}
+      {hasElectronApi && (
+        <GlassCard title="Folder Watch">
+          <div className="space-y-4">
+            {/* 4.4 — drag-to-watch: drop a folder onto the path row */}
+            <div
+              className={`flex items-center gap-3 rounded-lg border border-dashed transition-colors ${
+                isDragOverWatch ? 'border-accent-cyan/50 bg-accent-cyan/5' : 'border-transparent'
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOverWatch(true);
+              }}
+              onDragLeave={() => setIsDragOverWatch(false)}
+              onDrop={handleWatchFolderDrop}
+            >
+              <input
+                type="text"
+                value={notebookWatchPath}
+                readOnly
+                className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 outline-none"
+                placeholder={isDragOverWatch ? 'Drop folder here…' : 'Select folder to watch…'}
+              />
+              <button
+                onClick={handleSelectWatchFolder}
+                className="hover:bg-accent-cyan/10 hover:text-accent-cyan flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition-colors"
+              >
+                <FolderOpen size={14} />
+                Browse
+              </button>
+            </div>
+
+            {/* 4.1 — folder inaccessible indicator */}
+            {notebookWatchActive && !notebookWatchAccessible && (
+              <div className="flex items-center gap-2 text-xs text-amber-400">
+                <AlertCircle size={12} />
+                Folder is inaccessible — check that the drive is connected
+              </div>
+            )}
+
+            {/* 4.2 — server offline indicator */}
+            {notebookWatchActive && !watcherServerConnected && (
+              <div className="flex items-center gap-2 text-xs text-amber-400">
+                <WifiOff size={12} />
+                Server is offline — file discovery paused
+              </div>
+            )}
+
+            {watchConflict && (
+              <p className="text-xs text-red-400">
+                This folder is already used by the Session watcher. Choose a different folder.
+              </p>
+            )}
+
+            <AppleSwitch
+              checked={notebookWatchActive}
+              onChange={setNotebookWatchActive}
+              label="Auto-Watch"
+              description={
+                !notebookWatchPath
+                  ? 'Select a folder to enable watching'
+                  : watchConflict
+                    ? 'Resolve the folder conflict above to enable'
+                    : notebookWatchActive && !notebookWatchAccessible
+                      ? 'Folder unreachable — waiting for drive to reconnect'
+                      : notebookWatchActive && !watcherServerConnected
+                        ? 'Watching paused — server offline'
+                        : notebookWatchActive
+                          ? 'Watching for new audio files'
+                          : 'Watch is paused'
+              }
+              disabled={!notebookWatchPath || Boolean(watchConflict)}
+            />
+
+            {/* 4.3 — activity log (collapsible) */}
+            {watchLog.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setLogExpanded((v) => !v)}
+                    className="flex items-center gap-1 text-xs text-slate-500 transition-colors hover:text-slate-400"
+                  >
+                    <ChevronDown
+                      size={12}
+                      className={`transition-transform ${logExpanded ? 'rotate-180' : ''}`}
+                    />
+                    Activity log ({watchLog.length})
+                  </button>
+                  {logExpanded && (
+                    <button
+                      onClick={clearWatchLog}
+                      className="text-xs text-slate-600 transition-colors hover:text-slate-500"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {logExpanded && (
+                  <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                    {[...watchLog].reverse().map((entry, i) => (
+                      <div
+                        key={i}
+                        className={`text-xs ${entry.level === 'warn' ? 'text-amber-400' : 'text-slate-500'}`}
+                      >
+                        <span className="text-slate-600">
+                          {new Date(entry.ts).toLocaleTimeString()}
+                        </span>{' '}
+                        {entry.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </GlassCard>
+      )}
+
       {/* Queue List */}
-      {queue.jobs.length > 0 && (
+      {jobs.length > 0 && (
         <GlassCard
-          title={`Import Queue${queue.isProcessing ? ' — Processing' : ''}`}
+          title={`Import Queue${isProcessing ? ' — Processing' : ''}`}
           action={
             <div className="flex items-center gap-3 text-xs text-slate-400">
-              {queue.completedCount > 0 && (
-                <span className="text-green-400">{queue.completedCount} done</span>
+              {completedCount > 0 && <span className="text-green-400">{completedCount} done</span>}
+              {pendingCount > 0 && (
+                <span>
+                  {pendingCount} pending
+                  {/* 4.5 — time estimate */}
+                  {avgProcessingMs > 0 && (
+                    <span className="ml-1 text-slate-500">
+                      (~
+                      {Math.round((pendingCount * avgProcessingMs) / 60_000) < 1
+                        ? '<1'
+                        : Math.round((pendingCount * avgProcessingMs) / 60_000)}{' '}
+                      min)
+                    </span>
+                  )}
+                </span>
               )}
-              {queue.pendingCount > 0 && <span>{queue.pendingCount} pending</span>}
-              {queue.errorCount > 0 && (
-                <span className="text-red-400">{queue.errorCount} failed</span>
-              )}
-              {(queue.completedCount > 0 || queue.errorCount > 0) && (
+              {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
+              <button
+                onClick={isPaused ? resumeQueue : pauseQueue}
+                className="ml-1 text-slate-500 transition-colors hover:text-white"
+                title={isPaused ? 'Resume queue' : 'Pause queue'}
+              >
+                {isPaused ? <Play size={12} /> : <Pause size={12} />}
+              </button>
+              {(completedCount > 0 || errorCount > 0) && (
                 <button
-                  onClick={queue.clearFinished}
+                  onClick={clearFinished}
                   className="ml-1 text-slate-500 transition-colors hover:text-white"
                   title="Clear finished"
                 >
@@ -1417,17 +1691,24 @@ const ImportTab = ({
           }
         >
           <div className="max-h-60 space-y-2 overflow-y-auto">
-            {queue.jobs.map((job) => (
+            {jobs.map((job) => (
               <div
                 key={job.id}
                 className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
               >
                 {statusIcon(job)}
-                <span className="flex-1 truncate text-sm text-white">{job.file.name}</span>
+                {(job.type === 'notebook-auto' || job.type === 'session-auto') && (
+                  <span title="Auto-watch">
+                    <Eye size={12} className="shrink-0 text-slate-500" />
+                  </span>
+                )}
+                <span className="flex-1 truncate text-sm text-white">
+                  {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                </span>
                 <span className="text-xs whitespace-nowrap text-slate-400">{statusLabel(job)}</span>
                 {job.status === 'error' && (
                   <button
-                    onClick={() => queue.retryJob(job.id)}
+                    onClick={() => retryJob(job.id)}
                     className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
                     title="Retry"
                   >
@@ -1436,7 +1717,7 @@ const ImportTab = ({
                 )}
                 {job.status !== 'processing' && (
                   <button
-                    onClick={() => queue.removeJob(job.id)}
+                    onClick={() => removeJob(job.id)}
                     className="p-1 text-slate-500 transition-colors hover:text-red-400"
                     title="Remove"
                   >

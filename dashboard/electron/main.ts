@@ -33,6 +33,7 @@ import {
   isWaylandPortalActive,
 } from './shortcutManager.js';
 import { pasteAtCursor } from './pasteAtCursor.js';
+import { WatcherManager } from './watcherManager.js';
 
 // When launched via a wrapper (e.g. AppImage through GearLevel), the stdout/stderr
 // pipes may already be closed.  Any console.log/warn/error call will then raise
@@ -431,6 +432,8 @@ const store = new Store({
     'app.pasteAtCursor': false,
     'app.cumulativeUsageMs': 0,
     'app.starPopupShown': false,
+    'folderWatch.sessionPath': '',
+    'folderWatch.notebookPath': '',
   },
 });
 
@@ -443,6 +446,10 @@ for (const key of ['connection.port', 'server.port'] as const) {
 // ─── Tray Manager ───────────────────────────────────────────────────────────
 
 const trayManager = new TrayManager(isDev, () => mainWindow);
+
+// ─── Watcher Manager ─────────────────────────────────────────────────────────
+
+const watcherManager = new WatcherManager(() => mainWindow);
 
 // ─── Update Manager ─────────────────────────────────────────────────────────
 
@@ -1554,6 +1561,7 @@ function gracefulShutdown(): Promise<void> {
     unregisterShortcuts();
     trayManager.destroy();
     updateManager.destroy();
+    await watcherManager.destroyAll();
     shutdownLog('[Shutdown] Cleanup complete.');
   })();
 
@@ -1658,6 +1666,37 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+// ─── Watcher IPC Handlers ────────────────────────────────────────────────────
+
+ipcMain.handle('watcher:startSession', async (_event, folderPath: string) => {
+  await watcherManager.startSessionWatcher(folderPath);
+});
+
+ipcMain.handle('watcher:stopSession', async () => {
+  await watcherManager.stopSessionWatcher();
+});
+
+ipcMain.handle('watcher:startNotebook', async (_event, folderPath: string) => {
+  await watcherManager.startNotebookWatcher(folderPath);
+});
+
+ipcMain.handle('watcher:stopNotebook', async () => {
+  await watcherManager.stopNotebookWatcher();
+});
+
+ipcMain.handle('watcher:clearLedger', async (_event, type: 'session' | 'notebook') => {
+  if (type === 'session') watcherManager.clearSessionLedger();
+  else watcherManager.clearNotebookLedger();
+});
+
+ipcMain.handle('watcher:checkPath', async (_event, folderPath: string) => {
+  try {
+    return fs.statSync(folderPath).isDirectory();
+  } catch {
+    return false;
+  }
 });
 
 // ─── Shortcuts IPC Handlers ─────────────────────────────────────────────────

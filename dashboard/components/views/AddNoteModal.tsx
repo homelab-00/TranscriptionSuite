@@ -4,7 +4,7 @@ import { X, Upload, FileAudio, Calendar, Trash2, Info } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { GlassCard } from '../ui/GlassCard';
-import type { UseImportQueueReturn } from '../../src/hooks/useImportQueue';
+import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { apiClient } from '../../src/api/client';
 import { toast } from 'sonner';
 
@@ -13,7 +13,6 @@ interface AddNoteModalProps {
   onClose: () => void;
   initialTime?: number; // e.g. 10 for 10:00
   initialDate?: string; // e.g. 2026-02-17
-  queue: Pick<UseImportQueueReturn, 'addFiles'>;
   supportsExplicitWordTimestampToggle?: boolean;
 }
 
@@ -30,7 +29,6 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   onClose,
   initialTime,
   initialDate,
-  queue,
   supportsExplicitWordTimestampToggle = true,
 }) => {
   const [isRendered, setIsRendered] = useState(false);
@@ -121,7 +119,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       }
       const enableWordTimestamps = supportsExplicitWordTimestampToggle ? isTimestampsEnabled : true;
 
-      queue.addFiles(selectedFiles, {
+      useImportQueueStore.getState().addFiles(selectedFiles, 'notebook-normal', {
         enable_diarization: isDiarizationEnabled,
         enable_word_timestamps: enableWordTimestamps,
         parallel_diarization: isDiarizationEnabled ? parallelDiarization : undefined,
@@ -149,7 +147,6 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     parallelDiarization,
     initialTime,
     onClose,
-    queue,
     selectedDateKey,
     supportsExplicitWordTimestampToggle,
     title,

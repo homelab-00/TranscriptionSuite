@@ -35,6 +35,7 @@
     "@headlessui/react": "2.2.9",
     "@particle/dbus-next": "0.11.4",
     "@tanstack/react-query": "5.90.21",
+    "chokidar": "^5.0.0",
     "electron-store": "11.0.2",
     "lucide-react": "0.564.0",
     "react": "19.2.4",
@@ -42,7 +43,9 @@
     "react-error-boundary": "5.0.0",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "sonner": "2.0.7"
+    "sonner": "2.0.7",
+    "xxhash-wasm": "^1.1.0",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.2.1",

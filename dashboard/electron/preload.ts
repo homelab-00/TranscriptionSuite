@@ -190,6 +190,23 @@ export interface ElectronAPI {
     writeText: (filePath: string, content: string) => Promise<void>;
     selectFolder: () => Promise<string | null>;
   };
+  watcher: {
+    startSession: (folderPath: string) => Promise<void>;
+    stopSession: () => Promise<void>;
+    startNotebook: (folderPath: string) => Promise<void>;
+    stopNotebook: () => Promise<void>;
+    clearLedger: (type: 'session' | 'notebook') => Promise<void>;
+    checkPath: (folderPath: string) => Promise<boolean>;
+    /** Push listener — returns cleanup function. Follows docker.onLogLine pattern. */
+    onFilesDetected: (
+      callback: (payload: {
+        type: 'session' | 'notebook';
+        files: string[];
+        count: number;
+        fileMeta: Array<{ path: string; createdAt: string }>;
+      }) => void,
+    ) => () => void;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -360,5 +377,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     writeText: (filePath: string, content: string) =>
       ipcRenderer.invoke('file:writeText', filePath, content) as Promise<void>,
     selectFolder: () => ipcRenderer.invoke('dialog:selectFolder') as Promise<string | null>,
+  },
+  watcher: {
+    startSession: (folderPath: string) =>
+      ipcRenderer.invoke('watcher:startSession', folderPath) as Promise<void>,
+    stopSession: () => ipcRenderer.invoke('watcher:stopSession') as Promise<void>,
+    startNotebook: (folderPath: string) =>
+      ipcRenderer.invoke('watcher:startNotebook', folderPath) as Promise<void>,
+    stopNotebook: () => ipcRenderer.invoke('watcher:stopNotebook') as Promise<void>,
+    clearLedger: (type: 'session' | 'notebook') =>
+      ipcRenderer.invoke('watcher:clearLedger', type) as Promise<void>,
+    checkPath: (folderPath: string) =>
+      ipcRenderer.invoke('watcher:checkPath', folderPath) as Promise<boolean>,
+    onFilesDetected: (
+      callback: (payload: {
+        type: 'session' | 'notebook';
+        files: string[];
+        count: number;
+        fileMeta: Array<{ path: string; createdAt: string }>;
+      }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: {
+          type: 'session' | 'notebook';
+          files: string[];
+          count: number;
+          fileMeta: Array<{ path: string; createdAt: string }>;
+        },
+      ) => callback(payload);
+      ipcRenderer.on('watcher:filesDetected', handler);
+      return () => ipcRenderer.removeListener('watcher:filesDetected', handler);
+    },
   },
 } satisfies ElectronAPI);
