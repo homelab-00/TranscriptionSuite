@@ -30,8 +30,6 @@ dashboard/*.sw?
 .gitnexus/
 _bmad/
 _bmad-output/
-CLAUDE.md
-AGENTS.md
 .mcp.json
 
 
