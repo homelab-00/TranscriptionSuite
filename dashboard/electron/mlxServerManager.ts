@@ -208,18 +208,11 @@ export class MLXServerManager {
   private _resolveUvicornPath(): string | null {
     const candidates: string[] = [];
 
-    // Development: workspace root relative to dist-electron/mlxServerManager.js
-    // __dirname    = <project>/dashboard/dist-electron/
-    // path.dirname = <project>/dashboard/
-    // one '..'     = <project>/  (workspace root)
-    const distElectronDir = path.dirname(
-      // During dev, __dirname is not available in ESM; use process.cwd() fallback.
-      typeof __dirname !== 'undefined'
-        ? __dirname
-        : new URL(import.meta.url).pathname.replace(/\/[^/]+$/, ''),
-    );
-    const devProjectRoot = path.resolve(distElectronDir, '..');
-    candidates.push(path.join(devProjectRoot, 'server/backend/.venv/bin/uvicorn'));
+    // Development: app.getAppPath() = <project>/dashboard/ → go up one level.
+    // This is the reliable Electron API for locating the package.json directory
+    // and works correctly in both dev (npx electron .) and packaged builds.
+    const appDir = app.getAppPath();
+    candidates.push(path.join(appDir, '..', 'server/backend/.venv/bin/uvicorn'));
 
     // Packaged: resources/backend/.venv/bin/uvicorn
     if (process.resourcesPath) {
