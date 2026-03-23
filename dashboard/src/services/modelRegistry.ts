@@ -12,6 +12,7 @@ import {
   isCanaryModel,
   isParakeetModel,
   isMLXModel,
+  isMLXParakeetModel,
 } from './modelCapabilities';
 
 export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'mlx' | 'diarization' | 'custom' | 'none';
@@ -173,6 +174,30 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     roles: ['main'],
   },
 
+  // ── MLX Parakeet (Apple Silicon / Metal) ───────────────────────────────
+  {
+    id: 'mlx-community/parakeet-tdt-1.1b',
+    displayName: 'MLX Parakeet TDT 1.1B',
+    family: 'mlx',
+    description:
+      'NVIDIA Parakeet-TDT 1.1B on MLX. Fastest high-accuracy option on Apple Silicon. English-only.',
+    parameterCount: '1.1B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-1.1b',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/parakeet-tdt-0.6b-v3',
+    displayName: 'MLX Parakeet TDT 0.6B',
+    family: 'mlx',
+    description:
+      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. Lightweight, fast, high-accuracy. English-only.',
+    parameterCount: '600M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
+    roles: ['main'],
+  },
+
   // ── MLX Whisper (Apple Silicon / Metal) ────────────────────────────────
   {
     id: 'mlx-community/whisper-large-v3-mlx',
@@ -245,6 +270,6 @@ export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
   if (isNemoModel(modelId)) return 'nemo';
   if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
-  if (isMLXModel(modelId)) return 'mlx';
+  if (isMLXParakeetModel(modelId) || isMLXModel(modelId)) return 'mlx';
   return 'whisper';
 }

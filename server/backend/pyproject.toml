@@ -69,6 +69,7 @@ vibevoice_asr = [
 ]
 mlx = [
     "mlx-whisper>=0.4.1",
+    "parakeet-mlx>=0.2.0",
     "soundfile>=0.13.1",
 ]
 [project.scripts]

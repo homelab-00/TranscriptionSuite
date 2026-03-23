@@ -9,6 +9,7 @@ import re
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
+_MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
 
 
 def normalize_model_name(model_name: str | None) -> str:
@@ -26,8 +27,10 @@ def supports_english_translation(model_name: str | None) -> bool:
     if not name:
         return True
 
-    # NVIDIA Parakeet / NeMo ASR-only models (no translation).
+    # NVIDIA Parakeet and MLX Parakeet are English-only ASR (no translation).
     if _PARAKEET_PATTERN.match(name):
+        return False
+    if _MLX_PARAKEET_PATTERN.match(name):
         return False
 
     # NVIDIA Canary models support X↔English translation.

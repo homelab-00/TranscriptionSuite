@@ -5,8 +5,8 @@
 
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
-const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;
-const MLX_PATTERN = /^mlx-community\//i;
+const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;// MLX Parakeet must be checked before the general mlx-community prefix.
+const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;const MLX_PATTERN = /^mlx-community\//i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -104,6 +104,15 @@ export function isMLXModel(modelName: string | null | undefined): boolean {
 }
 
 /**
+ * Returns true if the model is an MLX-accelerated Parakeet-TDT model.
+ * English-only; no translation; no live mode.
+ */
+export function isMLXParakeetModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_PARAKEET_PATTERN.test(name);
+}
+
+/**
  * Returns true if the model should run on the faster-whisper/Whisper backend.
  * Unknown or empty values are treated as Whisper-compatible defaults.
  */
@@ -140,6 +149,9 @@ export function filterLanguagesForModel(
   if (isVibeVoiceASRModel(modelName)) {
     return languages.filter((l) => l === 'Auto Detect');
   }
+  if (isMLXParakeetModel(modelName)) {
+    return languages.filter((l) => l === 'English');
+  }
   if (isEnglishOnlyWhisperModel(modelName)) {
     return languages.filter((l) => l === 'English');
   }
@@ -159,6 +171,8 @@ export function supportsTranslation(modelName: string | null | undefined): boole
 
   // Parakeet models are ASR-only (no translation)
   if (isParakeetModel(modelName)) return false;
+  // MLX Parakeet models are English-only (no translation)
+  if (isMLXParakeetModel(modelName)) return false;
   // Canary models support translation (X↔English)
   if (isCanaryModel(modelName)) return true;
   // VibeVoice-ASR (v1 integration) is ASR+diarization only.
