@@ -1644,8 +1644,38 @@ app.whenReady().then(() => {
     const hfToken = (store.get('server.hfToken') as string) || undefined;
     const mainTranscriberModel =
       (store.get('server.mainModelSelection') as string) || 'mlx-community/whisper-small-mlx';
+
+    // Resolve live transcriber model from stored selection sentinels.
+    const LIVE_SAME_AS_MAIN = 'Same as Main Transcriber';
+    const LIVE_CUSTOM = 'Custom (HuggingFace repo)';
+    const liveModelSelection = (store.get('server.liveModelSelection') as string) || '';
+    const liveCustomModel = (store.get('server.liveCustomModel') as string) || '';
+    let resolvedLiveModel: string;
+    if (liveModelSelection === 'None (Disabled)' || liveModelSelection === '__none__') {
+      resolvedLiveModel = '';
+    } else if (!liveModelSelection || liveModelSelection === LIVE_SAME_AS_MAIN) {
+      resolvedLiveModel = mainTranscriberModel;
+    } else if (liveModelSelection === LIVE_CUSTOM) {
+      resolvedLiveModel = liveCustomModel || mainTranscriberModel;
+    } else {
+      resolvedLiveModel = liveModelSelection;
+    }
+    // Normalize: if resolved model is MLX, fall back to faster-whisper.
+    if (resolvedLiveModel && /mlx/i.test(resolvedLiveModel)) {
+      resolvedLiveModel = 'Systran/faster-whisper-medium';
+    }
+
+    const diarizationModel =
+      (store.get('server.diarizationModelSelection') as string) || undefined;
+
     mlxServerManager
-      .start({ port, hfToken, mainTranscriberModel })
+      .start({
+        port,
+        hfToken,
+        mainTranscriberModel,
+        liveTranscriberModel: resolvedLiveModel || undefined,
+        diarizationModel: diarizationModel || undefined,
+      })
       .catch((err: unknown) => console.warn('[MLX] Auto-start failed:', err));
   }
 

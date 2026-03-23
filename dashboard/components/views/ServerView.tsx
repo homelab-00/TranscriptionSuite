@@ -418,14 +418,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
           const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
           const storedModel = (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
+          const storedCustomModel = (await api.config?.get('server.mainCustomModel').catch(() => '')) ?? '';
           const storedLiveModel = (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
           const storedLiveCustom = (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
           const storedDiarizationModel = (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
+          // Use the same resolution path as the component's render to avoid raw sentinel strings.
+          const resolvedMain = resolveMainModelSelectionValue(storedModel, storedCustomModel, '') || MLX_DEFAULT_MODEL;
+          const resolvedLive = resolveLiveModelSelectionValue(storedLiveModel, storedLiveCustom, resolvedMain, '');
+          const normalizedLive = normalizeLiveModelToWhisper(resolvedLive);
           await api.mlx.start({
             port: Number(port),
             hfToken: hfToken || undefined,
-            mainTranscriberModel: storedModel || MLX_DEFAULT_MODEL,
-            liveTranscriberModel: storedLiveCustom || storedLiveModel || undefined,
+            mainTranscriberModel: sanitizeModelName(resolvedMain) || MLX_DEFAULT_MODEL,
+            liveTranscriberModel: sanitizeModelName(normalizedLive) || undefined,
             diarizationModel: storedDiarizationModel || undefined,
           });
         } catch (err) {
