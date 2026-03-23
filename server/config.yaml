@@ -189,9 +189,13 @@ diarization:
     #   2. This config value (not recommended for Docker deployments)
     hf_token: null
 
-    # Device for diarization: "cuda" or "cpu"
-    # Default: "cuda"
-    device: "cuda"
+    # Device for diarization.
+    # "auto"  - best available: CUDA → MPS (Apple Silicon) → CPU  (recommended)
+    # "cuda"  - NVIDIA GPU (falls back to MPS then CPU if unavailable)
+    # "mps"   - Apple Silicon GPU (falls back to CPU if unavailable)
+    # "cpu"   - force CPU
+    # Default: "auto"
+    device: "auto"
 
     # Speaker count hints (null for auto-detection).
     # If you know exactly how many speakers, set both to the same value.
