@@ -34,6 +34,7 @@ def get_user_config_dir() -> Path:
     Returns:
         Path to user config directory:
         - Linux: ~/.config/TranscriptionSuite/
+        - macOS: ~/Library/Application Support/TranscriptionSuite/
         - Windows: ~/Documents/TranscriptionSuite/
         - Docker: /user-config/ (if exists and is mounted)
     """
@@ -47,8 +48,11 @@ def get_user_config_dir() -> Path:
         # Windows: Documents/TranscriptionSuite/
         documents = Path.home() / "Documents"
         return documents / "TranscriptionSuite"
+    elif sys.platform == "darwin":
+        # macOS: ~/Library/Application Support/TranscriptionSuite/
+        return Path.home() / "Library" / "Application Support" / "TranscriptionSuite"
     else:
-        # Linux/macOS: ~/.config/TranscriptionSuite/
+        # Linux: ~/.config/TranscriptionSuite/
         xdg_config = os.environ.get("XDG_CONFIG_HOME")
         if xdg_config:
             return Path(xdg_config) / "TranscriptionSuite"

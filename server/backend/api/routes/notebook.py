@@ -9,6 +9,7 @@ Handles:
 
 import asyncio
 import logging
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -599,7 +600,8 @@ def _run_transcription(
 
         # Convert audio to MP3 and save to permanent storage
         config = get_config()
-        audio_dir = Path(config.get("audio_notebook", "audio_dir", default="/data/audio"))
+        _data_dir = os.environ.get("DATA_DIR", "/data")
+        audio_dir = Path(config.get("audio_notebook", "audio_dir", default=f"{_data_dir}/audio"))
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Keep original filename, convert to .mp3 extension

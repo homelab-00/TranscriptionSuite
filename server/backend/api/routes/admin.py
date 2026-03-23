@@ -9,6 +9,7 @@ Handles:
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from fastapi import (
@@ -330,7 +331,9 @@ async def get_logs(
         from pathlib import Path
 
         # Try to find log file
+        _data_dir = os.environ.get("DATA_DIR", "/data")
         log_paths = [
+            Path(_data_dir) / "logs" / "server.log",
             Path("/data/logs/server.log"),
             Path(__file__).parent.parent.parent.parent / "data" / "logs" / "server.log",
         ]
