@@ -10,7 +10,8 @@ Supported model IDs (mlx-community namespace on HuggingFace):
 Key characteristics:
 - English-only (Parakeet-TDT does not support multilingual input)
 - No translation task support
-- Sentence-level timestamps (not word-level)
+- Token-level timestamps exposed as word timestamps for diarization
+- Sentence segmentation via silence-gap and duration heuristics
 - Automatic language identification not applicable (always English)
 
 The model is downloaded and cached by ``parakeet-mlx`` on first load.
@@ -153,21 +154,47 @@ class MLXParakeetBackend(STTBackend):
             tmp_path = tmp.name
 
         try:
-            result = self._model.transcribe(tmp_path)
+            from parakeet_mlx import DecodingConfig, SentenceConfig
+
+            decoding_config = DecodingConfig(
+                sentence=SentenceConfig(
+                    # Split on silence gaps ≥ 0.5 s and cap each sentence at
+                    # 30 s.  This ensures the 1.1b model (which rarely emits
+                    # sentence-ending punctuation) still produces meaningful
+                    # segments rather than one monolithic utterance.
+                    silence_gap=0.5,
+                    max_duration=30.0,
+                )
+            )
+            result = self._model.transcribe(tmp_path, decoding_config=decoding_config)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
         # Convert AlignedResult.sentences → BackendSegment list.
-        # Each sentence has .text, .start, .end (seconds).
+        # Each sentence has .text, .start, .end and a .tokens list
+        # (AlignedToken: .text, .start, .end, .confidence).
+        # Populate words so the diarization pipeline has timestamps to work
+        # with — each word dict uses the key names expected by the engine:
+        # {"word", "start", "end", "probability"}.
         segments: list[BackendSegment] = []
         if hasattr(result, "sentences") and result.sentences:
             for sentence in result.sentences:
+                words = [
+                    {
+                        "word": tok.text,
+                        "start": round(float(tok.start), 3),
+                        "end": round(float(tok.end), 3),
+                        "probability": round(float(tok.confidence), 3),
+                    }
+                    for tok in sentence.tokens
+                    if tok.text.strip()
+                ]
                 segments.append(
                     BackendSegment(
                         text=str(sentence.text).strip(),
                         start=float(sentence.start),
                         end=float(sentence.end),
-                        words=[],  # parakeet-mlx provides sentence-level only
+                        words=words,
                     )
                 )
         elif hasattr(result, "text") and str(result.text).strip():
