@@ -22,6 +22,8 @@ export interface MLXStartOptions {
   port: number;
   hfToken?: string;
   mainTranscriberModel?: string;
+  liveTranscriberModel?: string;
+  diarizationModel?: string;
 }
 
 const MAX_LOG_LINES = 500;
@@ -76,6 +78,8 @@ export class MLXServerManager {
     };
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;
+    if (opts.liveTranscriberModel) env.LIVE_TRANSCRIBER_MODEL = opts.liveTranscriberModel;
+    if (opts.diarizationModel) env.DIARIZATION_MODEL = opts.diarizationModel;
 
     // Ensure required directories exist.
     for (const dir of [

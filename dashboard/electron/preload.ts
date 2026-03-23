@@ -210,7 +210,7 @@ export interface ElectronAPI {
     ) => () => void;
   };
   mlx: {
-    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string }) => Promise<void>;
+    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string; liveTranscriberModel?: string; diarizationModel?: string }) => Promise<void>;
     stop: () => Promise<void>;
     getStatus: () => Promise<'stopped' | 'starting' | 'running' | 'stopping' | 'error'>;
     getLogs: (tail?: number) => Promise<string[]>;
@@ -426,7 +426,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   mlx: {
-    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string }) =>
+    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string; liveTranscriberModel?: string; diarizationModel?: string }) =>
       ipcRenderer.invoke('mlx:start', opts) as Promise<void>,
     stop: () => ipcRenderer.invoke('mlx:stop') as Promise<void>,
     getStatus: () =>

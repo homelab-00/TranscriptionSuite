@@ -418,10 +418,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
           const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
           const storedModel = (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
+          const storedLiveModel = (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
+          const storedLiveCustom = (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
+          const storedDiarizationModel = (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
           await api.mlx.start({
             port: Number(port),
             hfToken: hfToken || undefined,
             mainTranscriberModel: storedModel || MLX_DEFAULT_MODEL,
+            liveTranscriberModel: storedLiveCustom || storedLiveModel || undefined,
+            diarizationModel: storedDiarizationModel || undefined,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -598,12 +603,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         port: Number(port),
         hfToken: hfToken || undefined,
         mainTranscriberModel: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
+        liveTranscriberModel: sanitizeModelName(normalizedLiveModel) || undefined,
+        diarizationModel: sanitizeModelName(activeDiarizationModel) || undefined,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Failed to start Metal server: ${msg}`);
     }
-  }, [activeTranscriber]);
+  }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel]);
 
   const handleMLXStop = useCallback(async () => {
     const api = (window as any).electronAPI;
