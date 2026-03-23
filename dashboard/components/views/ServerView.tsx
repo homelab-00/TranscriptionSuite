@@ -208,6 +208,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [isDarwin] = useState<boolean>(() => {
     return (window as any).electronAPI?.app?.getPlatform?.() === 'darwin';
   });
+  const [isAppleSilicon] = useState<boolean>(() => {
+    return (window as any).electronAPI?.app?.getArch?.() === 'arm64';
+  });
 
   // Auth token display in Instance Settings
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -742,7 +745,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Setup checks — gated by the currently selected runtime profile
   const rtName = docker.runtimeKind ?? 'Docker';
   const gpuSatisfied = gpuInfo?.gpu ?? false;
-  const metalSatisfied = metalSupported;
+  // Hardware check (arm64 mac) passes immediately via Electron; server report only
+  // refines whether mlx_whisper is actually installed.
+  const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
   const needsDocker = runtimeProfile !== 'metal';
   const needsNvidia = runtimeProfile === 'gpu';
   const needsMetal  = runtimeProfile === 'metal';
@@ -784,12 +789,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       hint: !needsMetal
         ? 'Not needed for selected runtime'
         : metalSatisfied
-          ? 'MLX acceleration available'
+          ? mlxFeature === undefined ? 'Apple Silicon detected' : 'MLX acceleration available'
           : mlxFeature?.reason === 'not_apple_silicon'
             ? 'Intel Mac — not supported'
             : mlxFeature?.reason === 'mlx_whisper_not_installed'
               ? 'mlx-whisper not installed — run: uv sync --extra mlx'
-              : 'MLX unavailable',
+              : !isAppleSilicon
+                ? 'Apple Silicon (arm64) required'
+                : 'MLX unavailable',
     },
   ];
   // allPassed: na items (not required for this runtime) count as passing
