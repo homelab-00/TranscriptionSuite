@@ -48,6 +48,11 @@ def is_vibevoice_asr_model(model_name: str) -> bool:
     return detect_backend_type(model_name) == "vibevoice_asr"
 
 
+def is_mlx_model(model_name: str) -> bool:
+    """Return True if *model_name* is an MLX Community model (Apple Silicon)."""
+    return detect_backend_type(model_name) == "mlx_whisper"
+
+
 def create_backend(model_name: str) -> STTBackend:
     """Instantiate the appropriate STTBackend for *model_name*."""
     backend_type = detect_backend_type(model_name)
