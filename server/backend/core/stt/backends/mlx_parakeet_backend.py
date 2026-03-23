@@ -230,32 +230,33 @@ class MLXParakeetBackend(STTBackend):
 
         # Convert AlignedResult.sentences → BackendSegment list.
         #
-        # parakeet-mlx uses a SentencePiece-style vocabulary where the `▁`
-        # character (U+2581) is replaced with a plain space in each token's
-        # .text field by the library's decode function.  Word-initial subword
-        # pieces carry a leading space (e.g. "copper" may be emitted as tokens
-        # [" co", "pper"] or ["co", " pper"]), so naively joining token texts
-        # produces "co pper" instead of "copper".
+        # sentence.text is the library's authoritative decode: it joins all
+        # token texts as "".join(t.text for t in tokens), where each token's
+        # text is vocabulary[id].replace("▁", " ").  This correctly places
+        # spaces only at word boundaries (word-initial SentencePiece pieces
+        # carry "▁" → space; continuation pieces do not) and preserves all
+        # punctuation tokens exactly as the model produced them.
         #
-        # We fix this by grouping tokens into proper words:
-        #   - A token whose .text starts with ' ' marks the beginning of a new
-        #     word (its leading space is stripped before appending to the word).
-        #   - Tokens without a leading space are continuations of the current
-        #     word.
-        #   - Pure-whitespace tokens are ignored (they act as separators).
+        # _tokens_to_words() is retained solely to generate word-level
+        # timestamps for the diarization pipeline.  We no longer use it to
+        # reconstruct segment text, which avoids two problems that occurred
+        # when joining stripped word groups with " ".join():
+        #   1. Punctuation tokens that start with a space in the vocabulary
+        #      (e.g. " ," or " .") became isolated words, producing
+        #      "boundary . Okay" instead of "boundary. Okay".
+        #   2. Any punctuation at a word-group boundary could be dropped or
+        #      misattributed when the join added an extra space before it.
         #
-        # Words are then used both for diarization (which needs word-level
-        # start/end timestamps) and to reconstruct clean segment text.
+        # Note: the parakeet-tdt-1.1b model does not generate punctuation or
+        # capitalisation in its token output (no bundled P&C model in the MLX
+        # port).  parakeet-tdt-0.6b-v3 does produce punctuation natively.
         segments: list[BackendSegment] = []
         if hasattr(result, "sentences") and result.sentences:
             for sentence in result.sentences:
                 words = _tokens_to_words(sentence.tokens)
-                # Reconstruct clean text from grouped words so the segment text
-                # matches the grouped, space-normalised word texts.
-                clean_text = " ".join(w["word"] for w in words).strip()
                 segments.append(
                     BackendSegment(
-                        text=clean_text or str(sentence.text).strip(),
+                        text=str(sentence.text).strip(),
                         start=float(sentence.start),
                         end=float(sentence.end),
                         words=words,
