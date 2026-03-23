@@ -9,6 +9,7 @@ Handles:
 """
 
 import asyncio
+import functools
 import logging
 import tempfile
 from pathlib import Path
@@ -169,13 +170,16 @@ async def transcribe_audio(
                     tmp_path, target_sample_rate=preferred_rate
                 )
 
-                diar_result = backend.transcribe_with_diarization(
-                    audio_data,
-                    audio_sample_rate=audio_sample_rate,
-                    language=language,
-                    task="translate" if translation_enabled else "transcribe",
-                    beam_size=engine.beam_size,
-                    num_speakers=expected_speakers,
+                diar_result = await asyncio.to_thread(
+                    functools.partial(
+                        backend.transcribe_with_diarization,
+                        audio_data,
+                        audio_sample_rate=audio_sample_rate,
+                        language=language,
+                        task="translate" if translation_enabled else "transcribe",
+                        beam_size=engine.beam_size,
+                        num_speakers=expected_speakers,
+                    )
                 )
 
                 from server.core.stt.engine import TranscriptionResult
@@ -222,18 +226,21 @@ async def transcribe_audio(
 
                 diarize_fn = transcribe_then_diarize
 
-            result, diar_result = diarize_fn(
-                engine=engine,
-                model_manager=model_manager,
-                file_path=tmp_path,
-                language=language,
-                task="translate" if translation_enabled else "transcribe",
-                translation_target_language=(
-                    translation_target_language if translation_enabled else None
-                ),
-                word_timestamps=need_word_timestamps,
-                expected_speakers=expected_speakers,
-                cancellation_check=model_manager.job_tracker.is_cancelled,
+            result, diar_result = await asyncio.to_thread(
+                functools.partial(
+                    diarize_fn,
+                    engine=engine,
+                    model_manager=model_manager,
+                    file_path=tmp_path,
+                    language=language,
+                    task="translate" if translation_enabled else "transcribe",
+                    translation_target_language=(
+                        translation_target_language if translation_enabled else None
+                    ),
+                    word_timestamps=need_word_timestamps,
+                    expected_speakers=expected_speakers,
+                    cancellation_check=model_manager.job_tracker.is_cancelled,
+                )
             )
 
             if diar_result is not None:
@@ -262,15 +269,18 @@ async def transcribe_audio(
         else:
             # Transcribe without diarization
             logger.info("Transcribing uploaded file")
-            result = engine.transcribe_file(
-                tmp_path,
-                language=language,
-                task="translate" if translation_enabled else "transcribe",
-                translation_target_language=(
-                    translation_target_language if translation_enabled else None
-                ),
-                word_timestamps=need_word_timestamps,
-                cancellation_check=model_manager.job_tracker.is_cancelled,
+            result = await asyncio.to_thread(
+                functools.partial(
+                    engine.transcribe_file,
+                    tmp_path,
+                    language=language,
+                    task="translate" if translation_enabled else "transcribe",
+                    translation_target_language=(
+                        translation_target_language if translation_enabled else None
+                    ),
+                    word_timestamps=need_word_timestamps,
+                    cancellation_check=model_manager.job_tracker.is_cancelled,
+                )
             )
 
         return result.to_dict()
@@ -342,15 +352,18 @@ async def transcribe_quick(
 
         # Transcribe without word timestamps for speed, with cancellation support
         logger.info("Quick transcription started")
-        result = engine.transcribe_file(
-            tmp_path,
-            language=language,
-            task="translate" if translation_enabled else "transcribe",
-            translation_target_language=(
-                translation_target_language if translation_enabled else None
-            ),
-            word_timestamps=False,  # No word timestamps for speed
-            cancellation_check=model_manager.job_tracker.is_cancelled,
+        result = await asyncio.to_thread(
+            functools.partial(
+                engine.transcribe_file,
+                tmp_path,
+                language=language,
+                task="translate" if translation_enabled else "transcribe",
+                translation_target_language=(
+                    translation_target_language if translation_enabled else None
+                ),
+                word_timestamps=False,  # No word timestamps for speed
+                cancellation_check=model_manager.job_tracker.is_cancelled,
+            )
         )
 
         return result.to_dict()

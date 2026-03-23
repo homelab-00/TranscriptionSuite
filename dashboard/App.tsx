@@ -310,6 +310,9 @@ const AppInner: React.FC = () => {
         diarizationModel?: string;
       },
     ) => {
+      // Bare-metal mode: server is managed externally (native process). Skip Docker entirely.
+      if (runtimeProfile === 'metal') return;
+
       if (startupFlowPendingRef.current || docker.operating || docker.loading) return;
 
       startupFlowPendingRef.current = true;
