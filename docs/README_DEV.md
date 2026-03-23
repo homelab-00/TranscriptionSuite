@@ -2597,3 +2597,129 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 - electron-builder (packaging)
 - electron-store (client config persistence)
 - Lucide React (icons)
+
+---
+
+## 15. Testing Bare-Metal MLX Functionality
+
+This section covers how to test the Apple Silicon / Metal (MLX) backend without
+Docker.  All steps assume an **Apple Silicon Mac** (M1 or later) with the Python
+virtual environment already created (`uv sync --extra mlx` inside `server/backend/`).
+
+See also: [docs/apple-silicon-metal.md](apple-silicon-metal.md) for the full setup guide.
+
+---
+
+### 15.1 Unit Tests (CI-safe, no GPU required)
+
+```bash
+cd server/backend
+uv run pytest tests/test_mlx_whisper_backend.py -v
+```
+
+These tests run on any platform using stubs for `mlx_whisper` and `scipy`.
+16 tests cover:
+
+| Class | What is tested |
+|-------|---------------|
+| `TestFactoryDetection` | `detect_backend_type` returns `mlx_whisper` for `mlx-community/` prefix; `is_mlx_model()` helper |
+| `TestMLXWhisperBackendLifecycle` | `load()`, `unload()`, `is_loaded()`; `RuntimeError` when mlx_whisper absent |
+| `TestMLXWhisperBackendTranscribe` | Output structure (segments, words, info); empty segments; not-loaded guard |
+| `TestMLXWhisperBeamSizeFallback` | `beam_size > 1` silently falls back to greedy (`None`); `None` passes through |
+| `TestMLXWhisperResampling` | 44100 Hz audio triggers `scipy.signal.resample`; 16000 Hz skips it |
+
+---
+
+### 15.2 Manual Server Test (Apple Silicon required)
+
+**Start the bare-metal server:**
+
+```bash
+cd /path/to/TranscriptionSuite
+
+DATA_DIR="$HOME/Library/Application Support/TranscriptionSuite/data"
+HF_HOME="$HOME/Library/Application Support/TranscriptionSuite/models"
+
+mkdir -p "$DATA_DIR/logs" "$DATA_DIR/audio" "$DATA_DIR/tokens"
+
+DATA_DIR="$DATA_DIR" \
+HF_HOME="$HF_HOME" \
+HF_TOKEN="hf_..." \
+MAIN_TRANSCRIBER_MODEL="mlx-community/whisper-small-mlx" \
+LOG_LEVEL=DEBUG \
+LOG_DIR="$DATA_DIR/logs" \
+server/backend/.venv/bin/uvicorn server.api.main:app \
+  --host 0.0.0.0 --port 9786
+```
+
+**Verify the server is ready:**
+
+```bash
+curl -s http://localhost:9786/ready | python3 -m json.tool
+# Expected: "loaded": true, "backend": "mlx_whisper", "features.mlx.available": true
+```
+
+**Transcribe a file:**
+
+```bash
+curl -s -X POST http://localhost:9786/api/transcribe/file \
+  -F "file=@samples/input/sample.wav" \
+  -w "\nHTTP_STATUS: %{http_code}\n" | python3 -m json.tool
+```
+
+**With diarization** (requires HF_TOKEN and PyAnnote model access):
+
+```bash
+curl -s -X POST http://localhost:9786/api/transcribe/file \
+  -F "file=@samples/input/sample.wav" \
+  -F "diarization=true" \
+  -w "\nHTTP_STATUS: %{http_code}\n" | python3 -m json.tool
+```
+
+---
+
+### 15.3 Dashboard Integration Test
+
+1. Run `npm run dev:electron` from `dashboard/`.
+2. Open **Server** view → select **Metal (MLX)** runtime profile.
+3. Click **Start Metal Server** — the status light should turn green within ~5 s.
+4. Verify the server log in the dashboard shows uvicorn startup output.
+5. Open the **Transcribe** view and upload an audio file — confirm the transcript appears.
+6. Click **Stop** in the Server view — the status light should go grey.
+7. Quit the app and relaunch — the server should auto-start if Metal is still selected.
+
+---
+
+### 15.4 Tail the Structured Log
+
+```bash
+tail -f "$HOME/Library/Application Support/TranscriptionSuite/data/logs/server.log" \
+  | python3 -c "import sys,json; [print(json.dumps(json.loads(l),indent=2)) for l in sys.stdin if l.strip()]"
+```
+
+Expected: one JSON object per request, including `event`, `level`, `timestamp`, and  
+for transcription requests: `model`, `duration_s`, `backend`.
+
+---
+
+### 15.5 Confirming MLX is Active
+
+The `/ready` endpoint reports whether MLX is available:
+
+```bash
+curl -s http://localhost:9786/ready | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('Backend:', d.get('backend'))
+print('MLX available:', d.get('features', {}).get('mlx', {}).get('available'))
+print('Loaded:', d.get('loaded'))
+"
+```
+
+If `mlx.available` is `false`, check `mlx.reason`:
+
+| Reason | Fix |
+|--------|-----|
+| `not_apple_silicon` | Must run on Apple Silicon (arm64) |
+| `mlx_whisper_not_installed` | `cd server/backend && uv sync --extra mlx` |
+| `platform_not_darwin` | Only macOS is supported for Metal acceleration |
