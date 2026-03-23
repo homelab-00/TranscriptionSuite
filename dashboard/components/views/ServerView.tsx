@@ -875,7 +875,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {allPassed ? 'Setup Complete' : 'Setup Checklist'}
                   </span>
                   <span className="font-mono text-xs text-slate-500">
-                    {setupChecks.filter((c) => c.ok || (c as any).na).length}/{setupChecks.length} checks passed
+                    {setupChecks.filter((c) => !c.na && c.ok).length}/{setupChecks.filter((c) => !c.na).length} checks passed
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
