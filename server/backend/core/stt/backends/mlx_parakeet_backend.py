@@ -38,6 +38,64 @@ SAMPLE_RATE = 16000
 logger = logging.getLogger(__name__)
 
 
+def _tokens_to_words(tokens: list[Any]) -> list[dict[str, Any]]:
+    """Group Parakeet AlignedToken objects into word-level dicts.
+
+    parakeet-mlx replaces the SentencePiece word-boundary character `▁`
+    (U+2581) with a plain space in each token's ``.text`` field.  A token
+    whose ``.text`` starts with a space marks the beginning of a new word;
+    continuation pieces have no leading space.  Pure-whitespace tokens are
+    treated as separators and discarded.
+
+    Returns a list of dicts compatible with the engine's word format:
+    ``{"word", "start", "end", "probability"}``.
+    """
+    words: list[dict[str, Any]] = []
+    buf_pieces: list[str] = []
+    buf_start: float = 0.0
+    buf_end: float = 0.0
+    buf_conf: list[float] = []
+
+    def flush() -> None:
+        text = "".join(buf_pieces).strip()
+        if text:
+            words.append(
+                {
+                    "word": text,
+                    "start": round(buf_start, 3),
+                    "end": round(buf_end, 3),
+                    # Use minimum confidence across pieces (conservative).
+                    "probability": round(min(buf_conf, default=1.0), 3),
+                }
+            )
+        buf_pieces.clear()
+        buf_conf.clear()
+
+    for tok in tokens:
+        text: str = tok.text
+        if not text or not text.strip():
+            # Pure whitespace / blank token — word separator.
+            flush()
+            continue
+
+        starts_word = text.startswith(" ")
+        stripped = text.lstrip(" ")
+
+        if starts_word and buf_pieces:
+            flush()
+
+        if not buf_pieces:
+            # First piece of a new word — record its start time.
+            buf_start = float(tok.start)  # type: ignore[attr-defined]
+
+        buf_pieces.append(stripped)
+        buf_end = float(tok.end)  # type: ignore[attr-defined]
+        buf_conf.append(float(tok.confidence))  # type: ignore[attr-defined]
+
+    flush()
+    return words
+
+
 class MLXParakeetBackend(STTBackend):
     """Apple MLX / Metal-accelerated Parakeet-TDT backend.
 
@@ -171,27 +229,33 @@ class MLXParakeetBackend(STTBackend):
             Path(tmp_path).unlink(missing_ok=True)
 
         # Convert AlignedResult.sentences → BackendSegment list.
-        # Each sentence has .text, .start, .end and a .tokens list
-        # (AlignedToken: .text, .start, .end, .confidence).
-        # Populate words so the diarization pipeline has timestamps to work
-        # with — each word dict uses the key names expected by the engine:
-        # {"word", "start", "end", "probability"}.
+        #
+        # parakeet-mlx uses a SentencePiece-style vocabulary where the `▁`
+        # character (U+2581) is replaced with a plain space in each token's
+        # .text field by the library's decode function.  Word-initial subword
+        # pieces carry a leading space (e.g. "copper" may be emitted as tokens
+        # [" co", "pper"] or ["co", " pper"]), so naively joining token texts
+        # produces "co pper" instead of "copper".
+        #
+        # We fix this by grouping tokens into proper words:
+        #   - A token whose .text starts with ' ' marks the beginning of a new
+        #     word (its leading space is stripped before appending to the word).
+        #   - Tokens without a leading space are continuations of the current
+        #     word.
+        #   - Pure-whitespace tokens are ignored (they act as separators).
+        #
+        # Words are then used both for diarization (which needs word-level
+        # start/end timestamps) and to reconstruct clean segment text.
         segments: list[BackendSegment] = []
         if hasattr(result, "sentences") and result.sentences:
             for sentence in result.sentences:
-                words = [
-                    {
-                        "word": tok.text,
-                        "start": round(float(tok.start), 3),
-                        "end": round(float(tok.end), 3),
-                        "probability": round(float(tok.confidence), 3),
-                    }
-                    for tok in sentence.tokens
-                    if tok.text.strip()
-                ]
+                words = _tokens_to_words(sentence.tokens)
+                # Reconstruct clean text from grouped words so the segment text
+                # matches the grouped, space-normalised word texts.
+                clean_text = " ".join(w["word"] for w in words).strip()
                 segments.append(
                     BackendSegment(
-                        text=str(sentence.text).strip(),
+                        text=clean_text or str(sentence.text).strip(),
                         start=float(sentence.start),
                         end=float(sentence.end),
                         words=words,
