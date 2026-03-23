@@ -36,6 +36,7 @@ import { AddNoteModal } from './AddNoteModal';
 import { useCalendar } from '../../src/hooks/useCalendar';
 import { useSearch } from '../../src/hooks/useSearch';
 import { useLanguages } from '../../src/hooks/useLanguages';
+import { useShallow } from 'zustand/react/shallow';
 import {
   useImportQueueStore,
   selectNotebookJobs,
@@ -136,16 +137,8 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
     }
   };
 
-  return (
-    <div className="mx-auto flex h-full w-full max-w-7xl flex-col space-y-6 p-6">
-      <div className="flex flex-none items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight text-white">Audio Notebook</h1>
-      </div>
-
-      <div className="animate-in fade-in slide-in-from-bottom-2 relative min-h-0 flex-1 duration-300">
-        {renderContent()}
-      </div>
-
+  const modals = (
+    <>
       {/* View/Edit Audio Note Overlay */}
       <AudioNoteModal
         isOpen={isNoteModalOpen}
@@ -162,6 +155,37 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
         initialDate={selectedDateSlot}
         supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
       />
+    </>
+  );
+
+  if (activeTab === NotebookTab.IMPORT) {
+    return (
+      <div className="custom-scrollbar h-full w-full overflow-y-auto">
+        <div className="mx-auto max-w-7xl py-6 pr-3 pl-6">
+          <div className="mb-6 flex flex-col space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight text-white">Audio Notebook</h1>
+          </div>
+          <ImportTab
+            supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
+            adminStatus={admin.status}
+          />
+        </div>
+        {modals}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-7xl flex-col space-y-6 p-6">
+      <div className="flex flex-none items-center justify-between">
+        <h1 className="text-3xl font-bold tracking-tight text-white">Audio Notebook</h1>
+      </div>
+
+      <div className="animate-in fade-in slide-in-from-bottom-2 relative min-h-0 flex-1 duration-300">
+        {renderContent()}
+      </div>
+
+      {modals}
     </div>
   );
 };
@@ -1272,7 +1296,7 @@ const ImportTab = ({
   adminStatus: AdminStatus | null;
 }) => {
   // Zustand store
-  const jobs = useImportQueueStore(selectNotebookJobs);
+  const jobs = useImportQueueStore(useShallow(selectNotebookJobs));
   const isPaused = useImportQueueStore((s) => s.isPaused);
   const isProcessing = useImportQueueStore(selectIsProcessing);
   const pendingCount = useImportQueueStore(selectPendingCount);
@@ -1466,6 +1490,8 @@ const ImportTab = ({
         }
         return 'Processing...';
       }
+      case 'writing':
+        return 'Saving file...';
       case 'success':
         return `Done — ID ${job.result?.recording_id}`;
       case 'error':
@@ -1474,7 +1500,7 @@ const ImportTab = ({
   };
 
   return (
-    <div className="mx-auto mt-10 max-w-2xl space-y-8">
+    <div className="mx-auto mt-10 max-w-2xl space-y-8 pb-10">
       <input
         ref={fileInputRef}
         type="file"

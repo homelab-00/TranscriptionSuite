@@ -20,6 +20,7 @@ import {
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { useShallow } from 'zustand/react/shallow';
 import {
   useImportQueueStore,
   selectSessionJobs,
@@ -48,7 +49,7 @@ function formatTimeEst(ms: number): string {
 
 export const SessionImportTab: React.FC = () => {
   // Zustand store
-  const jobs = useImportQueueStore(selectSessionJobs);
+  const jobs = useImportQueueStore(useShallow(selectSessionJobs));
   const isPaused = useImportQueueStore((s) => s.isPaused);
   const isProcessing = useImportQueueStore(selectIsProcessing);
   const pendingCount = useImportQueueStore(selectPendingCount);
