@@ -115,6 +115,18 @@ class MLXWhisperBackend(STTBackend):
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         del suppress_tokens, vad_filter, progress_callback  # not used by MLX Whisper
 
+        # MLX Whisper only supports greedy decoding (beam_size=1 / None).
+        # Silently drop beam_size > 1 rather than raising. This matches the
+        # warmup call which deliberately omits beam_size.
+        if beam_size is not None and beam_size > 1:
+            logger.debug(
+                "MLX Whisper does not support beam search (beam_size=%d); "
+                "falling back to greedy decoding.",
+                beam_size,
+            )
+        # Use None so mlx_whisper picks its own default (greedy)
+        mlx_beam_size: int | None = None
+
         if not self._loaded or self._model_name is None:
             raise RuntimeError("MLX Whisper model is not loaded")
 
@@ -152,7 +164,7 @@ class MLXWhisperBackend(STTBackend):
             task=effective_task,
             initial_prompt=initial_prompt,
             word_timestamps=word_timestamps,
-            beam_size=beam_size,
+            beam_size=mlx_beam_size,
         )
 
         # Convert MLX Whisper output to BackendSegment list.

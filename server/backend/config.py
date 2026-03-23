@@ -189,8 +189,15 @@ class ServerConfig:
         ("DIARIZATION_MODEL", ("diarization", "model")),
     )
 
+    _ENV_LOGGING_OVERRIDES = (
+        # LOG_LEVEL overrides logging.level (DEBUG, INFO, WARNING, ERROR)
+        ("LOG_LEVEL", ("logging", "level")),
+        # LOG_DIR overrides logging.directory (path to log file directory)
+        ("LOG_DIR", ("logging", "directory")),
+    )
+
     def _apply_env_overrides(self) -> None:
-        """Apply environment variable overrides for model selection.
+        """Apply environment variable overrides for model selection and logging.
 
         Environment variables (set by the dashboard via docker-compose) take
         precedence over config.yaml values.  Only non-empty values are applied.
@@ -200,6 +207,15 @@ class ServerConfig:
             if not value:
                 continue
             # Ensure the nested dict structure exists
+            section = self.config
+            for key in config_path[:-1]:
+                section = section.setdefault(key, {})
+            section[config_path[-1]] = value
+
+        for env_key, config_path in self._ENV_LOGGING_OVERRIDES:
+            value = os.environ.get(env_key, "").strip()
+            if not value:
+                continue
             section = self.config
             for key in config_path[:-1]:
                 section = section.setdefault(key, {})
