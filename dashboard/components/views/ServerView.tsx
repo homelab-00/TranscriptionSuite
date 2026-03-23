@@ -739,55 +739,60 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, []);
 
-  // Setup checks
+  // Setup checks — gated by the currently selected runtime profile
   const rtName = docker.runtimeKind ?? 'Docker';
   const gpuSatisfied = gpuInfo?.gpu ?? false;
   const metalSatisfied = metalSupported;
+  const needsDocker = runtimeProfile !== 'metal';
+  const needsNvidia = runtimeProfile === 'gpu';
+  const needsMetal  = runtimeProfile === 'metal';
   const setupChecks = [
     {
       label: `${rtName} installed`,
       ok: docker.available,
-      hint: 'Install Docker Engine, Docker Desktop, or Podman',
+      na: !needsDocker,
+      hint: !needsDocker
+        ? 'Not needed for Metal runtime'
+        : 'Install Docker Engine, Docker Desktop, or Podman',
     },
     {
       label: `${rtName} image pulled`,
       ok: docker.images.length > 0,
-      hint: 'Pull an image below to get started',
+      na: !needsDocker,
+      hint: !needsDocker
+        ? 'Not needed for Metal runtime'
+        : 'Pull an image below to get started',
     },
     {
       label: 'NVIDIA GPU detected',
       ok: gpuSatisfied,
-      // Grey out when Metal is active and NVIDIA isn't present — hardware is covered
-      na: !gpuSatisfied && metalSatisfied,
-      warn: gpuInfo !== null && !gpuSatisfied && !metalSatisfied,
-      hint: gpuSatisfied
-        ? gpuInfo?.toolkit
-          ? 'nvidia-container-toolkit ready'
-          : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
-        : metalSatisfied
-          ? 'Not needed — Metal acceleration active'
-          : 'CPU mode will be used (slower)',
+      na: !needsNvidia,
+      warn: needsNvidia && gpuInfo !== null && !gpuSatisfied,
+      hint: !needsNvidia
+        ? 'Not needed for selected runtime'
+        : gpuSatisfied
+          ? gpuInfo?.toolkit
+            ? 'nvidia-container-toolkit ready'
+            : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
+          : 'Install NVIDIA drivers and nvidia-container-toolkit',
     },
     {
       label: 'Apple Silicon Metal',
       ok: metalSatisfied,
-      // Grey out when NVIDIA is active and Metal isn't present — hardware is covered
-      na: !metalSatisfied && gpuSatisfied,
-      warn: !metalSatisfied && !gpuSatisfied && isDarwin,
-      hint: metalSatisfied
-        ? 'MLX acceleration available'
-        : gpuSatisfied
-          ? 'Not needed — NVIDIA GPU active'
-          : !isDarwin
-            ? 'Not applicable on this platform'
-            : mlxFeature?.reason === 'not_apple_silicon'
-              ? 'Intel Mac — CPU mode will be used'
-              : mlxFeature?.reason === 'mlx_whisper_not_installed'
-                ? 'mlx-whisper not installed — run: uv sync --extra mlx'
-                : 'MLX unavailable — CPU mode will be used',
+      na: !needsMetal,
+      warn: needsMetal && !metalSatisfied,
+      hint: !needsMetal
+        ? 'Not needed for selected runtime'
+        : metalSatisfied
+          ? 'MLX acceleration available'
+          : mlxFeature?.reason === 'not_apple_silicon'
+            ? 'Intel Mac — not supported'
+            : mlxFeature?.reason === 'mlx_whisper_not_installed'
+              ? 'mlx-whisper not installed — run: uv sync --extra mlx'
+              : 'MLX unavailable',
     },
   ];
-  // allPassed: na items (greyed-out / covered by the other GPU option) count as passing
+  // allPassed: na items (not required for this runtime) count as passing
   const allPassed = setupChecks.every((c) => c.ok || c.na);
   const showChecklist = !setupDismissed || !allPassed;
 
