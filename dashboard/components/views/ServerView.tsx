@@ -548,13 +548,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   useEffect(() => {
     if (!localSelectionsHydrated || modelsHydrated || !adminStatus) return;
 
-    const mappedMain = mapMainModelToSelection(configuredMainModel);
-    const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
+    // Only seed model selections from the running server when the user has no
+    // locally-persisted preference (still at the loading placeholder). If a real
+    // preference was restored from electron-store, keep it — otherwise, navigating
+    // away and returning would overwrite the user's selection with whatever model
+    // the server happens to be running (which may be an older choice).
+    if (mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+      const mappedMain = mapMainModelToSelection(configuredMainModel);
+      const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
 
-    setMainModelSelection(mappedMain.selection);
-    setMainCustomModel(mappedMain.custom);
-    setLiveModelSelection(mappedLive.selection);
-    setLiveCustomModel(mappedLive.custom);
+      setMainModelSelection(mappedMain.selection);
+      setMainCustomModel(mappedMain.custom);
+      setLiveModelSelection(mappedLive.selection);
+      setLiveCustomModel(mappedLive.custom);
+    }
 
     setModelsHydrated(true);
   }, [
@@ -562,6 +569,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     configuredMainModel,
     configuredLiveModel,
     localSelectionsHydrated,
+    mainModelSelection,
     modelsHydrated,
   ]);
 
