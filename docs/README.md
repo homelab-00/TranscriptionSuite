@@ -240,6 +240,13 @@ Dashboard app. Two connection profiles are available:
 Both profiles use **HTTPS + token authentication**. The only difference is *how* the
 client reaches the server and *where* the TLS certificates come from.
 
+> **Remote profile chooser:** When you click **Start Remote** without Tailscale
+> certificates configured, a dialog asks you to choose between **LAN** and **Tailscale**.
+> Pick **LAN** if both machines are on the same local network — no extra setup is needed
+> (a self-signed certificate is generated automatically). Pick **Tailscale** if you need
+> cross-network access (requires Tailscale certificates — see Section 3.1 below).
+> You can change this later in **Settings → Client → Remote Profile**.
+
 **Architecture overview:**
 
 ```

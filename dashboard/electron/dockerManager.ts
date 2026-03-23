@@ -605,6 +605,62 @@ function resolveTlsCertPaths(): TlsCertPaths {
   return { certPath, keyPath, profile };
 }
 
+/**
+ * Check whether the Tailscale TLS certificate files exist at the paths configured
+ * in config.yaml.  Used by the renderer (via IPC) to decide whether to show the
+ * remote profile chooser dialog before starting the container.
+ *
+ * Returns `true` when:
+ * - The active profile is already `'lan'` (dialog is irrelevant), OR
+ * - Both the configured `host_cert_path` and `host_key_path` files exist on disk.
+ *
+ * Returns `false` when either file is missing or the paths are not configured,
+ * meaning the user hasn't set up Tailscale yet and should be prompted.
+ */
+function checkTailscaleCertsExist(): boolean {
+  const profile = readRemoteTlsProfile();
+  if (profile === 'lan') return true;
+
+  // NOTE: The config.yaml reading block below is intentionally parallel to the one
+  // in resolveTlsCertPaths(). If the loading logic changes there, update here too.
+  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  const templateCandidates = [
+    path.resolve(__dirname, '../../server/config.yaml'),
+    path.join(process.resourcesPath ?? '', 'config.yaml'),
+  ];
+
+  let templateText = '';
+  for (const candidate of templateCandidates) {
+    try {
+      templateText = fs.readFileSync(candidate, 'utf8');
+      break;
+    } catch {
+      // try next
+    }
+  }
+
+  let userText = '';
+  try {
+    userText = fs.readFileSync(userConfigPath, 'utf8');
+  } catch {
+    // user config is optional
+  }
+
+  const rawCertPath =
+    extractYamlScalar(userText, 'host_cert_path') ??
+    extractYamlScalar(templateText, 'host_cert_path');
+  const rawKeyPath =
+    extractYamlScalar(userText, 'host_key_path') ??
+    extractYamlScalar(templateText, 'host_key_path');
+
+  if (!rawCertPath || !rawKeyPath) return false;
+
+  const certPath = expandTilde(rawCertPath.trim());
+  const keyPath = expandTilde(rawKeyPath.trim());
+
+  return fs.existsSync(certPath) && fs.existsSync(keyPath);
+}
+
 // ─── Compose File Selection ─────────────────────────────────────────────────
 
 /**
@@ -1911,6 +1967,7 @@ export const dockerManager = {
   checkModelsCached,
   removeModelCache,
   downloadModelToCache,
+  checkTailscaleCertsExist,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

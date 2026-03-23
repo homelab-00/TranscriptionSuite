@@ -961,6 +961,10 @@ ipcMain.handle('docker:readOptionalDependencyBootstrapStatus', async () => {
   return dockerManager.readOptionalDependencyBootstrapStatus();
 });
 
+ipcMain.handle('docker:checkTailscaleCertsExist', async () => {
+  return dockerManager.checkTailscaleCertsExist();
+});
+
 ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
   return dockerManager.getLogs(tail);
 });

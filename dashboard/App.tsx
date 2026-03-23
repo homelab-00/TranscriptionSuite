@@ -123,6 +123,11 @@ const AppInner: React.FC = () => {
   const [missingFamiliesForPrompt, setMissingFamiliesForPrompt] = useState<MissingFamily[]>([]);
   const dependencyInstallResolverRef = useRef<((install: boolean | null) => void) | null>(null);
 
+  const [remoteProfilePromptOpen, setRemoteProfilePromptOpen] = useState(false);
+  const remoteProfileResolverRef = useRef<
+    ((result: { action: 'cancel' | 'continue'; profile: 'tailscale' | 'lan' }) => void) | null
+  >(null);
+
   const containerLastSeenRef = useRef<boolean | null>(null);
 
   useEffect(() => {
@@ -205,6 +210,26 @@ const AppInner: React.FC = () => {
     [],
   );
 
+  const resolveRemoteProfilePrompt = useCallback(
+    (result: { action: 'cancel' | 'continue'; profile: 'tailscale' | 'lan' }) => {
+      setRemoteProfilePromptOpen(false);
+      const resolver = remoteProfileResolverRef.current;
+      remoteProfileResolverRef.current = null;
+      resolver?.(result);
+    },
+    [],
+  );
+
+  const requestRemoteProfilePrompt = useCallback(async (): Promise<{
+    action: 'cancel' | 'continue';
+    profile: 'tailscale' | 'lan';
+  }> => {
+    return new Promise((resolve) => {
+      remoteProfileResolverRef.current = resolve;
+      setRemoteProfilePromptOpen(true);
+    });
+  }, []);
+
   useEffect(() => {
     return () => {
       if (hfResolverRef.current) {
@@ -222,6 +247,10 @@ const AppInner: React.FC = () => {
       if (dependencyInstallResolverRef.current) {
         dependencyInstallResolverRef.current(null);
         dependencyInstallResolverRef.current = null;
+      }
+      if (remoteProfileResolverRef.current) {
+        remoteProfileResolverRef.current({ action: 'cancel', profile: 'tailscale' });
+        remoteProfileResolverRef.current = null;
       }
     };
   }, []);
@@ -496,6 +525,25 @@ const AppInner: React.FC = () => {
           }
         }
 
+        // --- Remote profile chooser (GH #43) ---
+        if (mode === 'remote') {
+          const certsExist = dockerApi?.checkTailscaleCertsExist
+            ? await dockerApi.checkTailscaleCertsExist().catch((err: unknown) => {
+                console.warn(
+                  '[App] checkTailscaleCertsExist failed, showing profile chooser:',
+                  err,
+                );
+                return false;
+              })
+            : false;
+          const currentProfile = await getConfig<'tailscale' | 'lan'>('connection.remoteProfile');
+          if (currentProfile !== 'lan' && !certsExist) {
+            const profileResult = await requestRemoteProfilePrompt();
+            if (profileResult.action === 'cancel') return;
+            await setConfig('connection.remoteProfile', profileResult.profile);
+          }
+        }
+
         await docker.startContainer(
           mode,
           runtimeProfile,
@@ -515,7 +563,13 @@ const AppInner: React.FC = () => {
         setStartupFlowPending(false);
       }
     },
-    [docker, requestHfPrompt, requestModelOnboarding, requestDependencyInstallPrompt],
+    [
+      docker,
+      requestHfPrompt,
+      requestModelOnboarding,
+      requestDependencyInstallPrompt,
+      requestRemoteProfilePrompt,
+    ],
   );
 
   const renderView = () => {
@@ -813,6 +867,64 @@ const AppInner: React.FC = () => {
                 }}
               >
                 Save Token
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {remoteProfilePromptOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
+            onClick={() => resolveRemoteProfilePrompt({ action: 'cancel', profile: 'tailscale' })}
+          />
+          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+            <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
+              <h2 className="text-lg font-semibold text-white">Remote Connection Profile</h2>
+            </div>
+            <div className="custom-scrollbar selectable-text flex-1 overflow-y-auto bg-black/20 p-6">
+              <div className="space-y-4 text-sm text-slate-300">
+                <p>How will remote clients connect to this server?</p>
+                <div className="space-y-3">
+                  <button
+                    className="w-full rounded-xl border border-white/10 bg-white/5 p-4 text-left transition hover:border-white/20 hover:bg-white/10"
+                    onClick={() =>
+                      resolveRemoteProfilePrompt({ action: 'continue', profile: 'lan' })
+                    }
+                  >
+                    <div className="font-medium text-white">LAN (local network)</div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      Both machines on the same network. A self-signed TLS certificate is generated
+                      automatically.
+                    </div>
+                  </button>
+                  <button
+                    className="w-full rounded-xl border border-white/10 bg-white/5 p-4 text-left transition hover:border-white/20 hover:bg-white/10"
+                    onClick={() =>
+                      resolveRemoteProfilePrompt({ action: 'continue', profile: 'tailscale' })
+                    }
+                  >
+                    <div className="font-medium text-white">Tailscale</div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      Cross-network access via Tailscale. Requires Tailscale certificates (see
+                      README for setup).
+                    </div>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500">
+                  You can change this later in Settings &rarr; Client &rarr; Remote Profile.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-none justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  resolveRemoteProfilePrompt({ action: 'cancel', profile: 'tailscale' })
+                }
+              >
+                Cancel
               </Button>
             </div>
           </div>

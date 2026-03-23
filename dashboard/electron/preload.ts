@@ -122,6 +122,7 @@ export interface ElectronAPI {
       nemo?: { available: boolean; reason?: string };
       vibevoiceAsr?: { available: boolean; reason?: string };
     } | null>;
+    checkTailscaleCertsExist: () => Promise<boolean>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;
@@ -295,6 +296,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         nemo?: { available: boolean; reason?: string };
         vibevoiceAsr?: { available: boolean; reason?: string };
       } | null>,
+    checkTailscaleCertsExist: () =>
+      ipcRenderer.invoke('docker:checkTailscaleCertsExist') as Promise<boolean>,
     getLogs: (tail?: number) => ipcRenderer.invoke('docker:getLogs', tail),
     startLogStream: (tail?: number) => ipcRenderer.invoke('docker:startLogStream', tail),
     stopLogStream: () => ipcRenderer.invoke('docker:stopLogStream'),

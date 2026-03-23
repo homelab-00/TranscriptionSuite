@@ -736,6 +736,28 @@ TLS_KEY_PATH=~/.config/Tailscale/my-machine.key \
 docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
 ```
 
+#### Remote Profile Chooser Dialog
+
+When the user clicks "Start Remote" and `connection.remoteProfile` is still the
+default (`'tailscale'`) with no Tailscale cert files on disk, the app shows a
+modal asking them to choose LAN or Tailscale before proceeding.
+
+**Flow:**
+1. `startServerWithOnboarding()` (App.tsx) checks `mode === 'remote'`
+2. Calls `docker:checkTailscaleCertsExist` IPC → `checkTailscaleCertsExist()` in
+   dockerManager.ts (reads config.yaml cert paths, expands tilde, checks `fs.existsSync`)
+3. If `connection.remoteProfile !== 'lan'` AND certs don't exist → shows modal
+4. User picks LAN or Tailscale → persists to `connection.remoteProfile` via `setConfig()`
+5. Container start resumes — `resolveTlsCertPaths()` now reads the chosen profile
+   - LAN: auto-generates self-signed cert
+   - Tailscale: validates cert files exist (shows error with instructions if missing)
+
+**Files involved:**
+- `dockerManager.ts` — `checkTailscaleCertsExist()` function
+- `main.ts` — `docker:checkTailscaleCertsExist` IPC handler
+- `preload.ts` — IPC bridge
+- `App.tsx` — modal state, request/resolve callbacks, JSX, check in startup flow
+
 **Ports:**
 - `9786` — Both HTTP and HTTPS (single port; HTTPS when `TLS_ENABLED=true`)
 
