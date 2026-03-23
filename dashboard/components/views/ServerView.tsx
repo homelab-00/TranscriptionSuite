@@ -21,6 +21,8 @@ import {
   Users,
   Laptop,
   Radio,
+  Zap,
+  MinusCircle,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -403,6 +405,21 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
+
+  // MLX (native process) server state
+  type MLXStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+  const [mlxStatus, setMlxStatus] = useState<MLXStatus>('stopped');
+
+  // Sync mlxStatus from the main process on mount and subscribe to push updates.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    api.mlx.getStatus().then(setMlxStatus).catch(() => {});
+    const unsub = api.mlx.onStatusChanged((status: MLXStatus) => setMlxStatus(status));
+    return unsub;
+  }, []);
+
+
   const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
@@ -539,6 +556,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
       : DIARIZATION_DEFAULT_MODEL;
+
+  // MLX native-process start/stop handlers (depend on activeTranscriber declared above)
+  const handleMLXStart = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
+    const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+    await api.mlx.start({
+      port: Number(port),
+      hfToken: hfToken || undefined,
+      mainTranscriberModel: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
+    });
+  }, [activeTranscriber]);
+
+  const handleMLXStop = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    await api.mlx.stop();
+  }, []);
 
   // Hard-reset any non-whisper live model selection to the default whisper model.
   useEffect(() => {
@@ -1112,6 +1148,42 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
 
                   <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                    {runtimeProfile === 'metal' ? (
+                      // ─── Metal: native process controls ───────────────────
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="secondary"
+                          className="h-9 px-4"
+                          onClick={handleMLXStart}
+                          disabled={mlxStatus === 'running' || mlxStatus === 'starting' || mlxStatus === 'stopping'}
+                        >
+                          {mlxStatus === 'starting' ? (
+                            <><Loader2 size={14} className="animate-spin" /> Starting…</>
+                          ) : (
+                            <><Zap size={14} /> Start Metal Server</>
+                          )}
+                        </Button>
+                        <Button
+                          variant="danger"
+                          className="h-9 px-4"
+                          onClick={handleMLXStop}
+                          disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
+                        >
+                          {mlxStatus === 'stopping' ? (
+                            <><Loader2 size={14} className="animate-spin" /> Stopping…</>
+                          ) : (
+                            'Stop'
+                          )}
+                        </Button>
+                        <span className="text-xs text-slate-500">
+                          {mlxStatus === 'error' ? (
+                            <span className="text-red-400">Error — check logs</span>
+                          ) : mlxStatus === 'stopped' ? (
+                            'Native process stopped'
+                          ) : null}
+                        </span>
+                      </div>
+                    ) : (
                     <div className="flex gap-2">
                       <Button
                         variant="secondary"
@@ -1164,6 +1236,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         Stop
                       </Button>
                     </div>
+                    )}
+                    {runtimeProfile !== 'metal' && (
                     <Button
                       variant="danger"
                       className="h-9 px-4"
@@ -1172,6 +1246,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     >
                       Remove Container
                     </Button>
+                    )}
                   </div>
                 </div>
 
