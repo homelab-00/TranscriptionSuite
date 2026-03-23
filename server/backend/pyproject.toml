@@ -67,6 +67,10 @@ nemo = [
 vibevoice_asr = [
     "vibevoice @ git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e",
 ]
+mlx = [
+    "mlx-whisper>=0.4.1",
+    "soundfile>=0.13.1",
+]
 [project.scripts]
 transcription-server = "server.api.main:main"
 
@@ -93,5 +97,6 @@ url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu129" }]
-torchaudio = [{ index = "pytorch-cu129" }]
+# Linux/Windows: use CUDA 12.9 build; macOS: fall back to PyPI CPU/MPS build
+torch = [{ index = "pytorch-cu129", marker = "sys_platform != 'darwin'" }]
+torchaudio = [{ index = "pytorch-cu129", marker = "sys_platform != 'darwin'" }]
