@@ -1017,105 +1017,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   )}
                 </div>
 
-                {runtimeProfile !== 'metal' && (
-                  <div className="flex flex-wrap items-center gap-5">
-                    <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                      <StatusLight
-                        status={
-                          isRunningAndHealthy
-                            ? 'active'
-                            : containerStatus.exists
-                              ? 'warning'
-                              : 'inactive'
-                        }
-                        animate={isRunningAndHealthy}
-                      />
-                      <span
-                        className={`font-mono text-sm transition-colors ${
-                          isRunning
-                            ? 'text-slate-300'
-                            : containerStatus.exists
-                              ? 'text-accent-orange'
-                              : 'text-slate-500'
-                        }`}
-                      >
-                        {statusLabel}
-                      </span>
-                      {isRunning && serverMode && (
-                        <span
-                          className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                        >
-                          {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                          {serverMode}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="secondary"
-                          className="h-9 px-4"
-                          onClick={() =>
-                            onStartServer('local', runtimeProfile, selectedTagForStart, {
-                              mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                              liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                              diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            })
-                          }
-                          disabled={
-                            docker.operating ||
-                            isRunning ||
-                            startupFlowPending ||
-                            !liveModelWhisperOnlyCompatible
-                          }
-                        >
-                          {docker.operating || startupFlowPending ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            'Start Local'
-                          )}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          className="h-9 px-4"
-                          onClick={() =>
-                            onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                              mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                              liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                              diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            })
-                          }
-                          disabled={
-                            docker.operating ||
-                            isRunning ||
-                            startupFlowPending ||
-                            !liveModelWhisperOnlyCompatible
-                          }
-                        >
-                          Start Remote
-                        </Button>
-                        <Button
-                          variant="danger"
-                          className="h-9 px-4"
-                          onClick={() => docker.stopContainer()}
-                          disabled={docker.operating || !isRunning}
-                        >
-                          Stop
-                        </Button>
-                      </div>
-                      <Button
-                        variant="danger"
-                        className="h-9 px-4"
-                        onClick={() => docker.removeContainer()}
-                        disabled={docker.operating || isRunning || !containerStatus.exists}
-                      >
-                        Remove Container
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
                 {/* Auth Token (read-only) */}
                 {authToken && (
                   <div className="border-t border-white/5 pt-4">
@@ -1199,25 +1100,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
                 )}
 
-                {containerStatus.startedAt && isRunning && (
-                  <div className="font-mono text-xs text-slate-500">
-                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
-                    {containerStatus.health && (
-                      <span className="ml-3">
-                        Health:{' '}
-                        <span
-                          className={
-                            containerStatus.health === 'healthy'
-                              ? 'text-green-400'
-                              : 'text-accent-orange'
-                          }
-                        >
-                          {containerStatus.health}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
             </GlassCard>
           </div>
@@ -1387,9 +1269,123 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </Button>
                   </div>
                 </div>
+                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        isRunningAndHealthy
+                          ? 'active'
+                          : containerStatus.exists
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={isRunningAndHealthy}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        isRunning
+                          ? 'text-slate-300'
+                          : containerStatus.exists
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
+                    {isRunning && serverMode && (
+                      <span
+                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                      >
+                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                        {serverMode}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('local', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        {docker.operating || startupFlowPending ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          'Start Local'
+                        )}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        Start Remote
+                      </Button>
+                      <Button
+                        variant="danger"
+                        className="h-9 px-4"
+                        onClick={() => docker.stopContainer()}
+                        disabled={docker.operating || !isRunning}
+                      >
+                        Stop
+                      </Button>
+                    </div>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4"
+                      onClick={() => docker.removeContainer()}
+                      disabled={docker.operating || isRunning || !containerStatus.exists}
+                    >
+                      Remove Container
+                    </Button>
+                  </div>
+                </div>
                 {docker.operationError && (
                   <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                     {docker.operationError}
+                  </div>
+                )}
+                {containerStatus.startedAt && isRunning && (
+                  <div className="mt-2 font-mono text-xs text-slate-500">
+                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
+                    {containerStatus.health && (
+                      <span className="ml-3">
+                        Health:{' '}
+                        <span
+                          className={
+                            containerStatus.health === 'healthy'
+                              ? 'text-green-400'
+                              : 'text-accent-orange'
+                          }
+                        >
+                          {containerStatus.health}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 )}
               </GlassCard>
