@@ -120,6 +120,9 @@ cd dashboard && npm run dev:electron
 # 1. Run backend server (native Python)
 cd server/backend
 uv venv --python 3.13 && uv sync
+# The hatch editable install requires a self-referential symlink server/backend/server → .
+# It is gitignored and must be created once after each fresh clone or venv rebuild:
+ln -sf . server
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 9786
 
 # 2. Run dashboard (in a separate terminal)
@@ -2634,6 +2637,14 @@ These tests run on any platform using stubs for `mlx_whisper` and `scipy`.
 
 **Start the bare-metal server:**
 
+> **Prerequisite:** The hatch editable install requires a self-referential symlink
+> `server/backend/server → .` so Python can find the `server` package.  This is
+> gitignored and must exist before starting the server.  Create it once per clone:
+> ```bash
+> ln -sf . server/backend/server
+> ```
+> `mlxServerManager.ts` (Electron) creates this automatically on first start.
+
 ```bash
 cd /path/to/TranscriptionSuite
 
@@ -2675,6 +2686,28 @@ curl -s -X POST http://localhost:9786/api/transcribe/file \
   -F "diarization=true" \
   -w "\nHTTP_STATUS: %{http_code}\n" | python3 -m json.tool
 ```
+
+**Observed benchmarks on M-series (whisper-large-v3-mlx):**
+
+| File          | Duration | Wall time | RTF    | Speakers |
+|---------------|----------|-----------|--------|----------|
+| 1min_test.wav | 60s      | ~3s       | ~20×   | —        |
+| 1min_test.wav | 60s      | ~6s       | ~10×   | 2 (SPEAKER_00/01) |
+| 10min.m4a     | 600s     | ~63s      | ~9.5×  | 3 (SPEAKER_00/01/02) |
+
+**Monitor GPU / ANE usage during transcription:**
+
+```bash
+# Install once
+brew install asitop
+
+# Run in a separate terminal before submitting the request
+sudo asitop
+```
+
+`asitop` shows CPU, GPU, and ANE utilization in real-time.  During MLX transcription
+the GPU row should spike to ~80–100 % and the ANE row may also show activity.
+Alternatively, open **Activity Monitor → Window → GPU History**.
 
 ---
 

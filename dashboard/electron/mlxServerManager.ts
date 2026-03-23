@@ -86,6 +86,23 @@ export class MLXServerManager {
       fs.mkdirSync(dir, { recursive: true });
     }
 
+    // server/backend/ dir: 3 levels up from the uvicorn binary file
+    //   uvicorn → bin → .venv → backend
+    const serverBackendDir = path.resolve(uvicornPath, '../../..');
+
+    // The hatch editable install requires a self-referential symlink
+    // server/backend/server → . so that Python can find the `server` package.
+    // It is gitignored and may be absent after a fresh clone — create it if needed.
+    const serverSymlink = path.join(serverBackendDir, 'server');
+    if (!fs.existsSync(serverSymlink)) {
+      try {
+        fs.symlinkSync('.', serverSymlink);
+        this._appendLog('[MLX] Created server/backend/server symlink for package resolution.');
+      } catch (e) {
+        this._appendLog(`[MLX] Warning: could not create server symlink: ${e}`);
+      }
+    }
+
     this._setStatus('starting');
     this._emit('mlx:statusChanged', 'starting');
     this._appendLog(`[MLX] Starting uvicorn on port ${opts.port}…`);
@@ -94,7 +111,7 @@ export class MLXServerManager {
       uvicornPath,
       ['server.api.main:app', '--host', '0.0.0.0', '--port', String(opts.port)],
       {
-        cwd: path.resolve(uvicornPath, '../../../..'), // project root (server/backend/.venv/bin → 4 levels up)
+        cwd: serverBackendDir, // server/backend/ is the package root for uvicorn
         env,
         // Don't inherit parent stdio — capture separately.
         stdio: ['ignore', 'pipe', 'pipe'],
