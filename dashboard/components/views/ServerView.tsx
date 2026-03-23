@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
+import { toast } from 'sonner';
 import {
   Box,
   Cpu,
@@ -564,13 +565,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const handleMLXStart = useCallback(async () => {
     const api = (window as any).electronAPI;
     if (!api?.mlx) return;
-    const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
-    const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
-    await api.mlx.start({
-      port: Number(port),
-      hfToken: hfToken || undefined,
-      mainTranscriberModel: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
-    });
+    try {
+      const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
+      const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+      await api.mlx.start({
+        port: Number(port),
+        hfToken: hfToken || undefined,
+        mainTranscriberModel: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to start Metal server: ${msg}`);
+    }
   }, [activeTranscriber]);
 
   const handleMLXStop = useCallback(async () => {

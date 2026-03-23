@@ -58,6 +58,7 @@ export class MLXServerManager {
     const uvicornPath = this._resolveUvicornPath();
     if (!uvicornPath) {
       this._setStatus('error');
+      this._emit('mlx:statusChanged', 'error');
       throw new Error(
         'Cannot find uvicorn binary. Run `uv sync --extra mlx` inside server/backend first.',
       );
@@ -208,14 +209,16 @@ export class MLXServerManager {
     const candidates: string[] = [];
 
     // Development: workspace root relative to dist-electron/mlxServerManager.js
-    // dist-electron/ is one level under dashboard/, which is one level under project root
+    // __dirname    = <project>/dashboard/dist-electron/
+    // path.dirname = <project>/dashboard/
+    // one '..'     = <project>/  (workspace root)
     const distElectronDir = path.dirname(
       // During dev, __dirname is not available in ESM; use process.cwd() fallback.
       typeof __dirname !== 'undefined'
         ? __dirname
         : new URL(import.meta.url).pathname.replace(/\/[^/]+$/, ''),
     );
-    const devProjectRoot = path.resolve(distElectronDir, '../..');
+    const devProjectRoot = path.resolve(distElectronDir, '..');
     candidates.push(path.join(devProjectRoot, 'server/backend/.venv/bin/uvicorn'));
 
     // Packaged: resources/backend/.venv/bin/uvicorn
