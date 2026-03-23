@@ -109,15 +109,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Derive status for each sidebar item from Docker + client state
   // For bare-metal mode, use server reachability instead of Docker container state.
-  // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
+  // Issue 17 — Session: green when server reachable (metal) or container running+healthy+client (Docker), orange when container exists, gray otherwise
   const sessionStatus: 'active' | 'warning' | 'inactive' = useMockupStatusFallback
     ? 'active'
     : isMetal
-      ? serverReachable && clientRunning
-        ? 'active'
-        : serverReachable
-          ? 'warning'
-          : 'inactive'
+      ? serverReachable ? 'active' : 'inactive'
       : containerRunning && clientRunning && containerHealth === 'healthy'
         ? 'active'
         : containerExists

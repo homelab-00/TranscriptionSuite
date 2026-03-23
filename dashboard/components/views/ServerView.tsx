@@ -39,6 +39,7 @@ import { MODEL_REGISTRY } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   MAIN_MODEL_CUSTOM_OPTION,
+  MAIN_RECOMMENDED_MODEL,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
@@ -435,6 +436,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (api?.config) {
       api.config.set('server.runtimeProfile', profile);
     }
+    // Leaving Metal: reset any MLX-only model selections back to non-MLX defaults.
+    if (profile !== 'metal') {
+      if (MLX_MODEL_IDS.has(mainModelSelection)) {
+        setMainModelSelection(MAIN_RECOMMENDED_MODEL);
+        api?.config?.set('server.mainModelSelection', MAIN_RECOMMENDED_MODEL);
+      }
+      if (MLX_MODEL_IDS.has(liveModelSelection)) {
+        setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+        api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
+      }
+    }
     if (!api?.mlx) return;
     if (profile !== 'metal') {
       // Leaving Metal — stop the native server if it is running or errored.
@@ -471,7 +483,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         }
       }
     }
-  }, []);
+  }, [mainModelSelection, liveModelSelection]);
 
   // Derive status from Docker hook
   const containerStatus = docker.container;
