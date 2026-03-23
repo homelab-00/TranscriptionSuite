@@ -300,6 +300,7 @@ export interface AdminStatus {
     diarization?: { available: boolean; reason: string };
     whisper?: { available: boolean; reason: string };
     nemo?: { available: boolean; reason: string };
+    mlx?: { available: boolean; reason: string };
     [key: string]: unknown;
   };
 }

@@ -48,7 +48,9 @@ import {
 } from '../../src/services/modelSelection';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 
-type RuntimeProfile = 'gpu' | 'cpu';
+type RuntimeProfile = 'gpu' | 'cpu' | 'metal';
+
+const MLX_DEFAULT_MODEL = 'mlx-community/whisper-small-mlx';
 
 interface ServerViewProps {
   onStartServer: (
@@ -198,6 +200,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Runtime profile (persisted in electron-store)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
 
+  // Metal (Apple Silicon) detection – derived from server-side feature check
+  const mlxFeature = (adminStatus?.models as any)?.features?.mlx as { available: boolean; reason: string } | undefined;
+  const metalSupported = mlxFeature?.available ?? false;
+  const [isDarwin] = useState<boolean>(() => {
+    return (window as any).electronAPI?.app?.getPlatform?.() === 'darwin';
+  });
+
   // Auth token display in Instance Settings
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [authTokenCopied, setAuthTokenCopied] = useState(false);
@@ -226,7 +235,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'metal') setRuntimeProfile(val);
         })
         .catch(() => {});
       api.config
@@ -659,14 +668,30 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         .then((info: { gpu: boolean; toolkit: boolean }) => {
           cachedGpuInfo = info;
           setGpuInfo(info);
-          // Auto-set runtime profile based on GPU detection (only if not already configured)
+          // Auto-set runtime profile based on hardware detection (only if not already configured).
+          // Priority: Metal (Apple Silicon) > NVIDIA GPU > CPU
           api.config
             ?.get('server.runtimeProfile')
             .then((val: unknown) => {
-              if (!val && info.gpu && info.toolkit) {
-                handleRuntimeProfileChange('gpu');
-              } else if (!val && !info.gpu) {
-                handleRuntimeProfileChange('cpu');
+              if (!val) {
+                if (metalSupported) {
+                  handleRuntimeProfileChange('metal');
+                  api.config
+                    ?.get('server.mainModelSelection')
+                    .then((modelVal: unknown) => {
+                      const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
+                      if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+                        setMainModelSelection(MLX_DEFAULT_MODEL);
+                        api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
+                        api.config?.set('server.mainCustomModel', '');
+                      }
+                    })
+                    .catch(() => {});
+                } else if (info.gpu && info.toolkit) {
+                  handleRuntimeProfileChange('gpu');
+                } else {
+                  handleRuntimeProfileChange('cpu');
+                }
               }
             })
             .catch(() => {});
@@ -680,6 +705,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Setup checks
   const rtName = docker.runtimeKind ?? 'Docker';
+  const gpuSatisfied = gpuInfo?.gpu ?? false;
+  const metalSatisfied = metalSupported;
   const setupChecks = [
     {
       label: `${rtName} installed`,
@@ -693,16 +720,39 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     },
     {
       label: 'NVIDIA GPU detected',
-      ok: gpuInfo?.gpu ?? false,
-      warn: gpuInfo !== null && !gpuInfo.gpu,
-      hint: gpuInfo?.gpu
-        ? gpuInfo.toolkit
+      ok: gpuSatisfied,
+      // Grey out when Metal is active and NVIDIA isn't present — hardware is covered
+      na: !gpuSatisfied && metalSatisfied,
+      warn: gpuInfo !== null && !gpuSatisfied && !metalSatisfied,
+      hint: gpuSatisfied
+        ? gpuInfo?.toolkit
           ? 'nvidia-container-toolkit ready'
           : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
-        : 'CPU mode will be used (slower)',
+        : metalSatisfied
+          ? 'Not needed — Metal acceleration active'
+          : 'CPU mode will be used (slower)',
+    },
+    {
+      label: 'Apple Silicon Metal',
+      ok: metalSatisfied,
+      // Grey out when NVIDIA is active and Metal isn't present — hardware is covered
+      na: !metalSatisfied && gpuSatisfied,
+      warn: !metalSatisfied && !gpuSatisfied && isDarwin,
+      hint: metalSatisfied
+        ? 'MLX acceleration available'
+        : gpuSatisfied
+          ? 'Not needed — NVIDIA GPU active'
+          : !isDarwin
+            ? 'Not applicable on this platform'
+            : mlxFeature?.reason === 'not_apple_silicon'
+              ? 'Intel Mac — CPU mode will be used'
+              : mlxFeature?.reason === 'mlx_whisper_not_installed'
+                ? 'mlx-whisper not installed — run: uv sync --extra mlx'
+                : 'MLX unavailable — CPU mode will be used',
     },
   ];
-  const allPassed = setupChecks.every((c) => c.ok);
+  // allPassed: na items (greyed-out / covered by the other GPU option) count as passing
+  const allPassed = setupChecks.every((c) => c.ok || c.na);
   const showChecklist = !setupDismissed || !allPassed;
 
   const handleDismissSetup = useCallback(() => {
@@ -784,7 +834,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {allPassed ? 'Setup Complete' : 'Setup Checklist'}
                   </span>
                   <span className="font-mono text-xs text-slate-500">
-                    {setupChecks.filter((c) => c.ok).length}/{setupChecks.length} checks passed
+                    {setupChecks.filter((c) => c.ok || (c as any).na).length}/{setupChecks.length} checks passed
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -841,15 +891,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <div key={i} className="flex items-center gap-3">
                       {check.ok ? (
                         <CheckCircle2 size={15} className="shrink-0 text-green-400" />
+                      ) : (check as any).na ? (
+                        <MinusCircle size={15} className="shrink-0 text-slate-600" />
                       ) : check.warn ? (
                         <AlertTriangle size={15} className="text-accent-orange shrink-0" />
                       ) : (
                         <XCircle size={15} className="shrink-0 text-red-400" />
                       )}
-                      <span className={`text-sm ${check.ok ? 'text-slate-300' : 'text-white'}`}>
+                      <span
+                        className={`text-sm ${
+                          check.ok
+                            ? 'text-slate-300'
+                            : (check as any).na
+                              ? 'text-slate-600'
+                              : 'text-white'
+                        }`}
+                      >
                         {check.label}
                       </span>
-                      <span className="ml-auto text-xs text-slate-500">{check.hint}</span>
+                      <span className={`ml-auto text-xs ${(check as any).na ? 'text-slate-700' : 'text-slate-500'}`}>{check.hint}</span>
                     </div>
                   ))}
                 </div>
@@ -996,6 +1056,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       <Cpu size={14} />
                       CPU Only
                     </button>
+                    {metalSupported && (
+                      <button
+                        onClick={() => handleRuntimeProfileChange('metal')}
+                        disabled={isRunning}
+                        className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                          runtimeProfile === 'metal'
+                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
+                            : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                        } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                      >
+                        <Zap size={14} />
+                        Metal (MLX)
+                      </button>
+                    )}
                   </div>
                   {runtimeProfile === 'cpu' && !isRunning && (
                     <span className="text-xs text-slate-500 italic">

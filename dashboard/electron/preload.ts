@@ -29,7 +29,7 @@ export interface TrayMenuState {
   isStandby?: boolean;
 }
 
-export type RuntimeProfile = 'gpu' | 'cpu';
+export type RuntimeProfile = 'gpu' | 'cpu' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 export type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 
@@ -64,6 +64,7 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
+    getArch: () => string;
     getSessionType: () => string;
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
@@ -232,6 +233,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
+    getArch: () => process.arch,
     getSessionType: () =>
       process.env.XDG_SESSION_TYPE ?? (process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),

@@ -45,7 +45,7 @@ import {
   toBackendModelEnvValue,
 } from './src/services/modelSelection';
 
-type RuntimeProfile = 'gpu' | 'cpu';
+type RuntimeProfile = 'gpu' | 'cpu' | 'metal';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type MissingFamily = 'whisper' | 'nemo' | 'vibevoice';
 

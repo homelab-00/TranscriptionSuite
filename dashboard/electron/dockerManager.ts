@@ -100,7 +100,7 @@ function getComposeDir(): string {
 }
 
 /** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
-export type RuntimeProfile = 'gpu' | 'cpu';
+export type RuntimeProfile = 'gpu' | 'cpu' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
 const VOLUME_NAMES = {

@@ -444,6 +444,22 @@ class ModelManager:
             status["error"] = self._vibevoice_asr_feature_error
         return status
 
+    def _get_mlx_feature_status(self) -> dict[str, Any]:
+        """Check if MLX Whisper (Apple Silicon Metal) is available."""
+        import platform as _platform
+        import sys
+
+        if sys.platform != "darwin":
+            return {"available": False, "reason": "not_macos"}
+        if _platform.machine() != "arm64":
+            return {"available": False, "reason": "not_apple_silicon"}
+        try:
+            import mlx_whisper  # noqa: F401
+
+            return {"available": True, "reason": "mlx_whisper_installed"}
+        except ImportError:
+            return {"available": False, "reason": "mlx_whisper_not_installed"}
+
     def get_whisper_feature_status(self) -> dict[str, Any]:
         """Return faster-whisper capability metadata for API clients."""
         return {
@@ -812,6 +828,7 @@ class ModelManager:
                     "reason": self._nemo_feature_reason,
                 },
                 "vibevoice_asr": self.get_vibevoice_asr_feature_status(),
+                "mlx": self._get_mlx_feature_status(),
             },
         }
         return status
