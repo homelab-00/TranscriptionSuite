@@ -1,10 +1,10 @@
 meta:
-  spec_version: 1.0.14
+  spec_version: 1.0.15
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
+    repo_path: /Users/haiiro/NoSync/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/AudioVisualizer.tsx
@@ -38,7 +38,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-22T21:30:44.708Z
+    generated_at: 2026-03-23T23:32:37.460Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -123,6 +123,7 @@ foundation:
         - rgba(0, 0, 0, 0.7)
         - rgba(0,0,0,0.3)
         - rgba(0,0,0,0.4)
+        - rgba(167,139,250,0.15)
         - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
@@ -271,6 +272,7 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
+        - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
         - min-w-[3ch]
@@ -401,6 +403,7 @@ utility_allowlist:
     - bg-accent-magenta/10
     - bg-accent-orange
     - bg-accent-orange/10
+    - bg-accent-violet/15
     - bg-amber-400/10
     - bg-amber-400/20
     - bg-amber-400/5
@@ -480,6 +483,7 @@ utility_allowlist:
     - border-l-accent-magenta
     - border-l-blue-400
     - border-l-green-400
+    - border-l-orange-400
     - border-l-slate-300
     - border-l-slate-500
     - border-orange-500/20
@@ -850,6 +854,8 @@ utility_allowlist:
     - text-accent-cyan
     - text-accent-magenta
     - text-accent-orange
+    - text-accent-violet
+    - text-accent-violet/80
     - text-amber-200
     - text-amber-300
     - text-amber-300/80
@@ -864,6 +870,7 @@ utility_allowlist:
     - text-left
     - text-lg
     - text-only
+    - text-orange-400
     - text-orange-500
     - text-red-100
     - text-red-200/90
@@ -879,6 +886,7 @@ utility_allowlist:
     - text-slate-700
     - text-slate-900
     - text-sm
+    - text-violet-400
     - text-white
     - text-white/60
     - text-white/90
@@ -965,6 +973,7 @@ utility_allowlist:
     - h-[85vh]
     - lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]
     - max-h-[80vh]
+    - max-w-[55%]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]

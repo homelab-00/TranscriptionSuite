@@ -95,6 +95,17 @@ const AppInner: React.FC = () => {
     setWatcherServerConnected(serverConnection.reachable);
   }, [serverConnection.reachable, setWatcherServerConnected]);
 
+  // Track runtimeProfile at App level so Sidebar can derive correct status for bare-metal mode
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (api?.config) {
+      api.config.get('server.runtimeProfile').then((val: unknown) => {
+        if (val === 'gpu' || val === 'cpu' || val === 'metal') setRuntimeProfile(val);
+      }).catch(() => {});
+    }
+  }, []);
+
   const [startupFlowPending, setStartupFlowPending] = useState(false);
   const startupFlowPendingRef = useRef(false);
 
@@ -656,6 +667,8 @@ const AppInner: React.FC = () => {
         containerExists={docker.container.exists}
         containerHealth={docker.container.health}
         clientRunning={clientRunning}
+        runtimeProfile={runtimeProfile}
+        serverReachable={serverConnection.reachable}
       />
 
       {/* Main Content Area */}

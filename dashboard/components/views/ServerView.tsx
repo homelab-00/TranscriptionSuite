@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { toast } from 'sonner';
 import {
@@ -35,6 +35,7 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { isWhisperModel } from '../../src/services/modelCapabilities';
+import { MODEL_REGISTRY } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   MAIN_MODEL_CUSTOM_OPTION,
@@ -53,7 +54,7 @@ import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu' | 'metal';
 
-const MLX_DEFAULT_MODEL = 'mlx-community/whisper-small-mlx';
+const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
 interface ServerViewProps {
   onStartServer: (
@@ -74,6 +75,7 @@ const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
 const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
+// Static sets for validation — include all models regardless of runtime profile.
 const MAIN_MODEL_SELECTION_OPTIONS = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   ...MAIN_MODEL_PRESETS,
@@ -90,6 +92,11 @@ const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
   DIARIZATION_DEFAULT_MODEL,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
+
+// IDs of models that require the Metal/MLX runtime.
+const MLX_MODEL_IDS = new Set(
+  MODEL_REGISTRY.filter((m) => m.family === 'mlx').map((m) => m.id),
+);
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -212,6 +219,31 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [isAppleSilicon] = useState<boolean>(() => {
     return (window as any).electronAPI?.app?.getArch?.() === 'arm64';
   });
+
+  // Native storage paths for bare-metal mode (loaded once on mount)
+  const [nativeDataDir, setNativeDataDir] = useState<string | null>(null);
+  const [nativeModelsDir, setNativeModelsDir] = useState<string | null>(null);
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.app?.getConfigDir) return;
+    api.app.getConfigDir().then((dir: string) => {
+      setNativeDataDir(dir + '/data');
+      setNativeModelsDir(dir + '/models');
+    }).catch(() => {});
+  }, []);
+
+  // Derive model option lists filtered by the active runtime profile.
+  // MLX models are only shown when running under Metal; non-MLX models are
+  // always shown (they work with Docker GPU/CPU and bare-metal via ctranslate2).
+  const isMetal = runtimeProfile === 'metal';
+  const mainModelOptions = useMemo(() => {
+    const presets = MAIN_MODEL_PRESETS.filter((id) => isMetal || !MLX_MODEL_IDS.has(id));
+    return [...presets, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
+  }, [isMetal]);
+  const liveModelOptions = useMemo(() => {
+    // Live mode only supports faster-whisper; no MLX live models exist yet.
+    return [LIVE_MODEL_SAME_AS_MAIN_OPTION, ...LIVE_MODEL_PRESETS, MODEL_DISABLED_OPTION, LIVE_MODEL_CUSTOM_OPTION];
+  }, []);
 
   // Auth token display in Instance Settings
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -1488,15 +1520,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <CustomSelect
                       value={mainModelSelection}
                       onChange={setMainModelSelection}
-                      options={[
-                        ...MAIN_MODEL_PRESETS,
-                        MODEL_DISABLED_OPTION,
-                        MAIN_MODEL_CUSTOM_OPTION,
-                      ]}
+                      options={mainModelOptions}
                       accentColor="magenta"
                       className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
+                    {MLX_MODEL_IDS.has(mainModelSelection) && (
+                      <p className="flex items-center gap-1 text-xs text-violet-400">
+                        <Zap size={10} />
+                        Metal / MLX accelerated
+                      </p>
+                    )}
                     {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
                       <input
                         type="text"
@@ -1538,12 +1572,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <CustomSelect
                       value={liveModelSelection}
                       onChange={setLiveModelSelection}
-                      options={[
-                        LIVE_MODEL_SAME_AS_MAIN_OPTION,
-                        ...LIVE_MODEL_PRESETS,
-                        MODEL_DISABLED_OPTION,
-                        LIVE_MODEL_CUSTOM_OPTION,
-                      ]}
+                      options={liveModelOptions}
                       className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
@@ -1646,6 +1675,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             <GlassCard
               title="5. Persistent Volumes"
               action={
+                !isMetal ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1654,10 +1684,32 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 >
                   Refresh
                 </Button>
+                ) : undefined
               }
             >
               <div className="space-y-4">
-                {docker.volumes.length > 0 ? (
+                {isMetal ? (
+                  // Bare-metal mode: show native filesystem paths instead of Docker volumes
+                  <>
+                    {[
+                      { label: 'Data directory', path: nativeDataDir, color: 'bg-blue-500' },
+                      { label: 'Models cache (HF_HOME)', path: nativeModelsDir, color: 'bg-purple-500' },
+                    ].map(({ label, path: dir, color }) => (
+                      <div key={label} className="flex items-center justify-between py-1 text-sm">
+                        <div className="flex items-center gap-3">
+                          <div className={`h-2 w-2 rounded-full ${color}`} />
+                          <span className="text-slate-300">{label}</span>
+                        </div>
+                        <span className="max-w-[55%] truncate text-right font-mono text-xs text-slate-400" title={dir ?? ''}>
+                          {dir ?? '…'}
+                        </span>
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-500 italic">
+                      Managed by the native server process. Delete these directories to clear cached models or transcription data.
+                    </p>
+                  </>
+                ) : docker.volumes.length > 0 ? (
                   docker.volumes.map((vol) => {
                     const colorMap: Record<string, string> = {
                       'transcriptionsuite-data': 'bg-blue-500',
@@ -1692,7 +1744,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
                 )}
 
-                {docker.volumes.length > 0 && (
+                {!isMetal && docker.volumes.length > 0 && (
                   <div className="mt-4 flex gap-2 overflow-x-auto border-t border-white/5 pt-4 pb-2">
                     {docker.volumes.map((vol) => (
                       <Button
