@@ -45,6 +45,10 @@ _bmad-output/
 .github/instructions/
 .github/prompts/
 
+# Finder, Windows Explorer, etc metadata
+.DS_Store
+Thumbs.db
+
 ## etc
 __pycache__/
 *.env
