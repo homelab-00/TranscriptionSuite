@@ -175,26 +175,21 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // ── MLX Parakeet (Apple Silicon / Metal) ───────────────────────────────
-  {
-    id: 'mlx-community/parakeet-tdt-1.1b',
-    displayName: 'MLX Parakeet TDT 1.1B',
-    family: 'mlx',
-    description:
-      'NVIDIA Parakeet-TDT 1.1B on MLX. Fastest high-accuracy option on Apple Silicon. English-only.',
-    parameterCount: '1.1B',
-    huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-1.1b',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
-    roles: ['main'],
-  },
+  // Note: mlx-community/parakeet-tdt-1.1b is intentionally omitted.
+  // The 1.1b TDT model was trained to output lowercase text only (no native
+  // punctuation or capitalisation) and there is no MLX PnC variant.  The
+  // 0.6b-v3 is NVIDIA's September 2025 SOTA model trained on 660K hours
+  // (10× more data), supports 25 languages with native P&C, and matches or
+  // beats the 1.1b on all English benchmarks.
   {
     id: 'mlx-community/parakeet-tdt-0.6b-v3',
-    displayName: 'MLX Parakeet TDT 0.6B',
+    displayName: 'MLX Parakeet TDT 0.6B v3',
     family: 'mlx',
     description:
-      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. Lightweight, fast, high-accuracy. English-only.',
+      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. SOTA accuracy on Apple Silicon — 660K hours of training, native punctuation & capitalisation, 25 European languages.',
     parameterCount: '600M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
     roles: ['main'],
   },
 

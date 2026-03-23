@@ -3,16 +3,18 @@
 Uses the ``parakeet-mlx`` package which runs NVIDIA Parakeet-TDT models via
 Apple's MLX framework, giving Metal GPU acceleration on Apple Silicon Macs.
 
-Supported model IDs (mlx-community namespace on HuggingFace):
+Recommended model ID (mlx-community namespace on HuggingFace):
     mlx-community/parakeet-tdt-0.6b-v3
-    mlx-community/parakeet-tdt-1.1b
 
-Key characteristics:
-- English-only (Parakeet-TDT does not support multilingual input)
+key characteristics:
+- 25 European languages with native punctuation and capitalisation
 - No translation task support
 - Token-level timestamps exposed as word timestamps for diarization
 - Sentence segmentation via silence-gap and duration heuristics
-- Automatic language identification not applicable (always English)
+
+Note: mlx-community/parakeet-tdt-1.1b is the older (pre-2025) model trained
+on 64K hours of English-only data without native punctuation or capitalisation.
+``parakeet-tdt-0.6b-v3`` supersedes it: 660K hours, 25 languages, P&C native.
 
 The model is downloaded and cached by ``parakeet-mlx`` on first load.
 """
@@ -247,9 +249,8 @@ class MLXParakeetBackend(STTBackend):
         #   2. Any punctuation at a word-group boundary could be dropped or
         #      misattributed when the join added an extra space before it.
         #
-        # Note: the parakeet-tdt-1.1b model does not generate punctuation or
-        # capitalisation in its token output (no bundled P&C model in the MLX
-        # port).  parakeet-tdt-0.6b-v3 does produce punctuation natively.
+        # parakeet-tdt-0.6b-v3 produces punctuation and capitalisation natively
+        # (those are part of its token vocabulary from training).
         segments: list[BackendSegment] = []
         if hasattr(result, "sentences") and result.sentences:
             for sentence in result.sentences:
