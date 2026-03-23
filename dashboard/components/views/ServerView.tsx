@@ -396,12 +396,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     };
   }, []);
 
-  // Persist runtime profile changes
-  const handleRuntimeProfileChange = useCallback((profile: RuntimeProfile) => {
+  // Persist runtime profile changes and start/stop MLX server accordingly
+  const handleRuntimeProfileChange = useCallback(async (profile: RuntimeProfile) => {
     setRuntimeProfile(profile);
     const api = (window as any).electronAPI;
     if (api?.config) {
       api.config.set('server.runtimeProfile', profile);
+    }
+    if (!api?.mlx) return;
+    if (profile !== 'metal') {
+      // Leaving Metal — stop the native server if it is running or errored.
+      const current = await api.mlx.getStatus().catch(() => 'stopped');
+      if (current === 'running' || current === 'starting' || current === 'error') {
+        await api.mlx.stop().catch(() => {});
+      }
+    } else {
+      // Entering Metal — start the native server if it is not already up.
+      const current = await api.mlx.getStatus().catch(() => 'stopped');
+      if (current === 'stopped' || current === 'error') {
+        try {
+          const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
+          const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+          const storedModel = (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
+          await api.mlx.start({
+            port: Number(port),
+            hfToken: hfToken || undefined,
+            mainTranscriberModel: storedModel || MLX_DEFAULT_MODEL,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          toast.error(`Failed to start Metal server: ${msg}`);
+        }
+      }
     }
   }, []);
 
