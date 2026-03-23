@@ -6,6 +6,7 @@
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
 const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;
+const MLX_PATTERN = /^mlx-community\//i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -94,11 +95,20 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
 }
 
 /**
+ * Returns true if the model runs on the MLX Whisper backend (Apple Silicon).
+ * Model IDs in the mlx-community namespace on HuggingFace.
+ */
+export function isMLXModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_PATTERN.test(name);
+}
+
+/**
  * Returns true if the model should run on the faster-whisper/Whisper backend.
  * Unknown or empty values are treated as Whisper-compatible defaults.
  */
 export function isWhisperModel(modelName: string | null | undefined): boolean {
-  return !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName);
+  return !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName) && !isMLXModel(modelName);
 }
 
 /**

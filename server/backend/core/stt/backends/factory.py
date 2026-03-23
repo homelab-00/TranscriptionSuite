@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
+_MLX_PATTERN = re.compile(r"^mlx-community/", re.IGNORECASE)
 
 
 def detect_backend_type(model_name: str) -> str:
@@ -22,6 +23,8 @@ def detect_backend_type(model_name: str) -> str:
         return "canary"
     if _VIBEVOICE_ASR_PATTERN.match(name):
         return "vibevoice_asr"
+    if _MLX_PATTERN.match(name):
+        return "mlx_whisper"
     return "whisper"
 
 
@@ -62,6 +65,11 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.vibevoice_asr_backend import VibeVoiceASRBackend
 
         return VibeVoiceASRBackend()
+
+    if backend_type == "mlx_whisper":
+        from server.core.stt.backends.mlx_whisper_backend import MLXWhisperBackend
+
+        return MLXWhisperBackend()
 
     from server.core.stt.backends.whisperx_backend import WhisperXBackend
 

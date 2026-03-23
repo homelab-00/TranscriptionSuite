@@ -11,9 +11,10 @@ import {
   isVibeVoiceASRModel,
   isCanaryModel,
   isParakeetModel,
+  isMLXModel,
 } from './modelCapabilities';
 
-export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'diarization' | 'custom' | 'none';
+export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'mlx' | 'diarization' | 'custom' | 'none';
 export type ModelRole = 'main' | 'live' | 'diarization';
 
 export interface ModelInfo {
@@ -172,6 +173,49 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     roles: ['main'],
   },
 
+  // ── MLX Whisper (Apple Silicon / Metal) ────────────────────────────────
+  {
+    id: 'mlx-community/whisper-large-v3-mlx',
+    displayName: 'MLX Whisper Large v3',
+    family: 'mlx',
+    description:
+      'Apple Silicon Metal-accelerated Whisper large-v3. Best accuracy on Mac bare-metal.',
+    parameterCount: '1.5B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-medium-mlx',
+    displayName: 'MLX Whisper Medium',
+    family: 'mlx',
+    description: 'Good accuracy/speed balance on Apple Silicon.',
+    parameterCount: '769M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-medium-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-small-mlx',
+    displayName: 'MLX Whisper Small',
+    family: 'mlx',
+    description: 'Lightweight Metal-accelerated model for fast Mac bare-metal transcription.',
+    parameterCount: '244M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-tiny-mlx',
+    displayName: 'MLX Whisper Tiny',
+    family: 'mlx',
+    description: 'Smallest Metal-accelerated model. Fastest but lowest accuracy.',
+    parameterCount: '39M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+
   // ── Diarization ──────────────────────────────────────────────────────────
   {
     id: 'pyannote/speaker-diarization-community-1',
@@ -201,5 +245,6 @@ export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
   if (isNemoModel(modelId)) return 'nemo';
   if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
+  if (isMLXModel(modelId)) return 'mlx';
   return 'whisper';
 }
