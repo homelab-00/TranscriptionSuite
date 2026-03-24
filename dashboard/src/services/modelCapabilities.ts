@@ -6,7 +6,9 @@
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
 const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;// MLX Parakeet must be checked before the general mlx-community prefix.
-const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;const MLX_PATTERN = /^mlx-community\//i;
+const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;
+// Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
+const MLX_CANARY_PATTERN = /^[^/]+\/canary[^/]*-mlx/i;const MLX_PATTERN = /^mlx-community\//i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -100,7 +102,7 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
  */
 export function isMLXModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
-  return MLX_PATTERN.test(name);
+  return MLX_PATTERN.test(name) || MLX_CANARY_PATTERN.test(name);
 }
 
 /**
@@ -113,11 +115,20 @@ export function isMLXParakeetModel(modelName: string | null | undefined): boolea
 }
 
 /**
+ * Returns true if the model is an MLX-accelerated Canary model (community port).
+ * 25 EU languages; native P&C; no translation; no live mode.
+ */
+export function isMLXCanaryModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_CANARY_PATTERN.test(name);
+}
+
+/**
  * Returns true if the model should run on the faster-whisper/Whisper backend.
  * Unknown or empty values are treated as Whisper-compatible defaults.
  */
 export function isWhisperModel(modelName: string | null | undefined): boolean {
-  return !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName) && !isMLXModel(modelName);
+  return !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName) && !isMLXModel(modelName) && !isMLXCanaryModel(modelName);
 }
 
 /**

@@ -10,6 +10,7 @@ _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNOREC
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
+_MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
 
 
 def normalize_model_name(model_name: str | None) -> str:
@@ -31,6 +32,9 @@ def supports_english_translation(model_name: str | None) -> bool:
     if _PARAKEET_PATTERN.match(name):
         return False
     if _MLX_PARAKEET_PATTERN.match(name):
+        return False
+    # MLX Canary port supports ASR only — no translation task.
+    if _MLX_CANARY_PATTERN.match(name):
         return False
 
     # NVIDIA Canary models support X↔English translation.

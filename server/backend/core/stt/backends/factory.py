@@ -11,8 +11,10 @@ if TYPE_CHECKING:
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
-# MLX Parakeet must be checked before the general mlx-community prefix.
+# MLX Parakeet and MLX Canary must be checked before the general mlx-community prefix.
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
+# Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
+_MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
 _MLX_PATTERN = re.compile(r"^mlx-community/", re.IGNORECASE)
 
 
@@ -27,6 +29,8 @@ def detect_backend_type(model_name: str) -> str:
         return "vibevoice_asr"
     if _MLX_PARAKEET_PATTERN.match(name):
         return "mlx_parakeet"
+    if _MLX_CANARY_PATTERN.match(name):
+        return "mlx_canary"
     if _MLX_PATTERN.match(name):
         return "mlx_whisper"
     return "whisper"
@@ -54,7 +58,7 @@ def is_vibevoice_asr_model(model_name: str) -> bool:
 
 def is_mlx_model(model_name: str) -> bool:
     """Return True if *model_name* is an MLX Community model (Apple Silicon)."""
-    return detect_backend_type(model_name) in ("mlx_whisper", "mlx_parakeet")
+    return detect_backend_type(model_name) in ("mlx_whisper", "mlx_parakeet", "mlx_canary")
 
 
 def is_mlx_parakeet_model(model_name: str) -> bool:
@@ -84,6 +88,11 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.mlx_parakeet_backend import MLXParakeetBackend
 
         return MLXParakeetBackend()
+
+    if backend_type == "mlx_canary":
+        from server.core.stt.backends.mlx_canary_backend import MLXCanaryBackend
+
+        return MLXCanaryBackend()
 
     if backend_type == "mlx_whisper":
         from server.core.stt.backends.mlx_whisper_backend import MLXWhisperBackend

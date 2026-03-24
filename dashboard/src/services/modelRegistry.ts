@@ -193,6 +193,32 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     roles: ['main'],
   },
 
+  // ── MLX Canary (Apple Silicon / Metal) ─────────────────────────────────
+  // Community MLX ports of NVIDIA Canary 1B v2 using the canary-mlx package.
+  // No translation support in the MLX port (ASR only).
+  {
+    id: 'eelcor/canary-1b-v2-mlx',
+    displayName: 'MLX Canary 1B v2',
+    family: 'mlx',
+    description:
+      'NVIDIA Canary 1B v2 on MLX. ~8.5× real-time on Apple Silicon, native P&C, 25 European languages. Full precision (~3.7 GB).',
+    parameterCount: '1B',
+    huggingfaceUrl: 'https://huggingface.co/eelcor/canary-1b-v2-mlx',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+  {
+    id: 'Mediform/canary-1b-v2-mlx-q8',
+    displayName: 'MLX Canary 1B v2 (Q8)',
+    family: 'mlx',
+    description:
+      'NVIDIA Canary 1B v2 on MLX, Q8 quantised. Native P&C, 25 European languages. Smaller footprint (~1.1 GB).',
+    parameterCount: '1B',
+    huggingfaceUrl: 'https://huggingface.co/Mediform/canary-1b-v2-mlx-q8',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+
   // ── MLX Whisper (Apple Silicon / Metal) ────────────────────────────────
   {
     id: 'mlx-community/whisper-large-v3-mlx',

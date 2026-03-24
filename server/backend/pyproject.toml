@@ -27,12 +27,10 @@ dependencies = [
     "aiohttp==3.13.3",
     "httpx==0.28.1",
     "websockets==16.0",
-
     # Core ML / Transcription
-    "torch==2.8.0",          # Required by PyAnnote 4.0.3
-    "torchaudio==2.8.0",     # Required by PyAnnote 4.0.3
+    "torch==2.8.0", # Required by PyAnnote 4.0.3
+    "torchaudio==2.8.0", # Required by PyAnnote 4.0.3
     "pyannote.audio==4.0.4", # Diarization (still needed for NeMo backends)
-
     # Audio Processing
     "numpy==2.4.2",
     "soundfile==0.13.1",
@@ -40,14 +38,12 @@ dependencies = [
     "silero-vad==6.2.1",
     "ffmpeg-python==0.2.0",
     "scipy==1.17.1",
-
     # Database
     "aiosqlite==0.22.1",
     "sqlalchemy==2.0.48",
     "alembic==1.18.4",
-
     # Utilities
-    "setuptools<81",          # webrtcvad imports pkg_resources, removed in setuptools>=81
+    "setuptools<81", # webrtcvad imports pkg_resources, removed in setuptools>=81
     "pyyaml==6.0.3",
     "psutil==7.2.2",
     "filelock==3.25.0",
@@ -70,6 +66,7 @@ vibevoice_asr = [
 mlx = [
     "mlx-whisper>=0.4.1",
     "parakeet-mlx>=0.2.0",
+    "canary-mlx>=0.1.0",
     "soundfile>=0.13.1",
 ]
 [project.scripts]

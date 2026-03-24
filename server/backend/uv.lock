@@ -328,6 +328,23 @@ wheels = [
 ]
 
 [[package]]
+name = "canary-mlx"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dacite" },
+    { name = "huggingface-hub" },
+    { name = "librosa" },
+    { name = "mlx" },
+    { name = "numpy" },
+    { name = "sentencepiece" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/98/86/ee94316b208ce1d1e06996fd748ac0a0ee9ca643209cefcf1675ad74fe1f/canary_mlx-0.1.0.tar.gz", hash = "sha256:5c427015826ec7c4c52c42f441c3de47ec4e8730ca81188e8f05acd38ea157db", size = 23089, upload-time = "2026-01-02T10:40:02.908Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/35/6535861adbaee067c09e06ea15295bfe5e10ae548afadefbb9264b9c7b1d/canary_mlx-0.1.0-py3-none-any.whl", hash = "sha256:102ffe8756607aa0cfaa569830ec194c8d2de386ce01d5d925049e912d2e8238", size = 24134, upload-time = "2026-01-02T10:40:01.228Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.2.25"
 source = { registry = "https://pypi.org/simple" }
@@ -4041,6 +4058,7 @@ dependencies = [
 
 [package.optional-dependencies]
 mlx = [
+    { name = "canary-mlx" },
     { name = "mlx-whisper" },
     { name = "parakeet-mlx" },
     { name = "soundfile" },
@@ -4069,6 +4087,7 @@ requires-dist = [
     { name = "aiohttp", specifier = "==3.13.3" },
     { name = "aiosqlite", specifier = "==0.22.1" },
     { name = "alembic", specifier = "==1.18.4" },
+    { name = "canary-mlx", marker = "extra == 'mlx'", specifier = ">=0.1.0" },
     { name = "ctranslate2", marker = "extra == 'whisper'", specifier = "==4.7.1" },
     { name = "fastapi", specifier = "==0.135.1" },
     { name = "faster-whisper", marker = "extra == 'whisper'", specifier = "==1.2.1" },
