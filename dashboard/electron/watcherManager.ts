@@ -274,18 +274,26 @@ export class WatcherManager {
    */
   private computeFingerprint(filePath: string): string | null {
     if (!this.hasher) return null;
+    let fd: number | undefined;
     try {
-      const stat = fs.statSync(filePath);
+      fd = fs.openSync(filePath, 'r');
+      const stat = fs.fstatSync(fd);
       const sampleLen = Math.min(stat.size, FINGERPRINT_SAMPLE_BYTES);
       const buf = Buffer.alloc(sampleLen);
-      const fd = fs.openSync(filePath, 'r');
       fs.readSync(fd, buf, 0, sampleLen, 0);
       fs.closeSync(fd);
+      fd = undefined;
       // h64Raw takes Uint8Array; Buffer is a Uint8Array subclass — use explicit view
       const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
       const hash = this.hasher.h64Raw(u8);
       return `${stat.size}:${hash.toString(16)}`;
     } catch {
+      if (fd !== undefined)
+        try {
+          fs.closeSync(fd);
+        } catch {
+          /* ignore */
+        }
       return null;
     }
   }
