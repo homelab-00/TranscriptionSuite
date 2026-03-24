@@ -400,16 +400,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     _log_time("token store initialized")
     logger.info("Token store initialized")
 
-    # Initialize model manager
-    manager = get_model_manager(config.config)
-    _log_time("model manager created")
-    logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
-
-    # Preload transcription model at startup
+    # Wait for ML package pre-warming before touching CUDA
+    # (concurrent CUDA init from prewarm thread + ModelManager is not thread-safe)
     if prewarm_thread is not None and prewarm_thread.is_alive():
         _log_time("waiting for import pre-warming to finish...")
         prewarm_thread.join(timeout=60)
     _log_time("import pre-warming complete")
+
+    # Initialize model manager (accesses CUDA — must come after prewarm join)
+    manager = get_model_manager(config.config)
+    _log_time("model manager created")
+    logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
 
     selected_main_model = resolve_main_transcriber_model(config)
     if not selected_main_model.strip():
