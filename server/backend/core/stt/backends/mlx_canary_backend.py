@@ -11,8 +11,9 @@ Supported model IDs on HuggingFace:
 Key characteristics:
 - 25 European languages with native punctuation and capitalisation
 - No translation task support (ASR only in the MLX port)
-- Token-level timestamps exposed as word timestamps for diarization
-- Chunked processing for long audio files (120 s chunks)
+- No sub-segment word timestamps (canary-mlx timestamps=True is broken for this model;
+  segments carry chunk-level start/end estimates at 30-second granularity)
+- Chunked processing: audio is split into 30-second windows internally
 
 The model is downloaded and cached by ``canary-mlx`` on first load.
 """
@@ -80,60 +81,6 @@ def _resolve_language_code(language: str | None) -> str:
     if len(lang) == 2:
         return lang.lower()
     return _LANGUAGE_NAME_TO_CODE.get(lang.lower(), "en")
-
-
-def _tokens_to_words(tokens: list[Any]) -> list[dict[str, Any]]:
-    """Group canary-mlx AlignedToken objects into word-level dicts.
-
-    canary-mlx tokens use SentencePiece conventions: a token whose ``.text``
-    starts with a space marks the beginning of a new word; continuation pieces
-    have no leading space.  Pure-whitespace tokens are treated as separators
-    and discarded.
-
-    canary-mlx AlignedToken has no ``confidence`` field, so probability is
-    set to 1.0 for all words.
-
-    Returns a list of dicts compatible with the engine's word format:
-    ``{"word", "start", "end", "probability"}``.
-    """
-    words: list[dict[str, Any]] = []
-    buf_pieces: list[str] = []
-    buf_start: float = 0.0
-    buf_end: float = 0.0
-
-    def flush() -> None:
-        text = "".join(buf_pieces).strip()
-        if text:
-            words.append(
-                {
-                    "word": text,
-                    "start": round(buf_start, 3),
-                    "end": round(buf_end, 3),
-                    "probability": 1.0,
-                }
-            )
-        buf_pieces.clear()
-
-    for tok in tokens:
-        text: str = tok.text
-        if not text or not text.strip():
-            flush()
-            continue
-
-        starts_word = text.startswith(" ")
-        stripped = text.lstrip(" ")
-
-        if starts_word and buf_pieces:
-            flush()
-
-        if not buf_pieces:
-            buf_start = float(tok.start)
-
-        buf_pieces.append(stripped)
-        buf_end = float(tok.end)
-
-    flush()
-    return words
 
 
 def _load_canary_model(model_name: str) -> Any:
@@ -218,6 +165,10 @@ def _load_canary_model(model_name: str) -> Any:
         for k, v in tree_flatten(model.parameters())
     ]
     model.update(tree_unflatten(cast_weights))
+
+    # Eagerly evaluate all weight tensors so the first inference call
+    # starts with a clean MLX computation graph.
+    mx.eval(model.parameters())
 
     return model
 
@@ -310,7 +261,6 @@ class MLXCanaryBackend(STTBackend):
             vad_filter,
             word_timestamps,
             translation_target_language,
-            progress_callback,
         )
 
         if not self._loaded or self._model is None:
@@ -331,53 +281,66 @@ class MLXCanaryBackend(STTBackend):
             else:
                 audio = audio.astype(np.float32)
 
-        # canary-mlx expects a file path; write audio to a temp WAV.
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            sf.write(tmp.name, audio, SAMPLE_RATE)
-            tmp_path = tmp.name
-
-        try:
-            result = self._model.transcribe(
-                tmp_path,
-                language=lang_code,
-                timestamps=True,
-                punctuation=True,
-                # Process in 120-second chunks so long recordings don't OOM.
-                chunk_duration=120.0,
-            )
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
-
-        # Convert AlignedResult.sentences → BackendSegment list.
+        # canary-mlx 0.1.x has two known bugs that make the library's built-in
+        # chunked transcription unreliable:
         #
-        # sentence.text is the library's authoritative decode:
-        # "".join(t.text for t in tokens), which preserves all punctuation
-        # and spacing exactly as produced by the model.
+        #   1. timestamps=True always returns blank text (' ') for this model —
+        #      the library constructs timestamp tokens but discards actual text.
+        #   2. The merge_chunks() LCS fallback uses index-based midpoints rather
+        #      than time-based ones, so when chunk token-sets don't overlap,
+        #      earlier-chunk content is progressively lost.
         #
-        # _tokens_to_words() is used solely to generate word-level timestamps
-        # for the diarization pipeline.
+        # Workaround: manually split audio into fixed 30-second windows, call
+        # transcribe(timestamps=False) on each, and assign chunk-level timestamps.
+        # This loses sub-segment timing but produces correct transcription text.
+        CHUNK_S = 30.0
+        chunk_size = int(CHUNK_S * SAMPLE_RATE)
+
         segments: list[BackendSegment] = []
-        if hasattr(result, "sentences") and result.sentences:
-            for sentence in result.sentences:
-                words = _tokens_to_words(sentence.tokens)
+        audio_len = len(audio)
+
+        for start_sample in range(0, audio_len, chunk_size):
+            end_sample = min(start_sample + chunk_size, audio_len)
+            chunk = audio[start_sample:end_sample]
+
+            # canary_mlx's STFT computes t = (n - win_length + hop_length) // hop_length.
+            # For n < win_length (400 samples = 25 ms), t is negative and the
+            # Metal allocator overflows when asked for a negative-sized buffer.
+            # Skip tiny residual chunks; their content is negligible.
+            if len(chunk) < 400:
+                break
+
+            chunk_start_s = start_sample / SAMPLE_RATE
+            chunk_end_s = end_sample / SAMPLE_RATE
+
+            if progress_callback is not None:
+                progress_callback(start_sample, audio_len)
+
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                sf.write(tmp.name, chunk, SAMPLE_RATE)
+                tmp_path = tmp.name
+            try:
+                text = self._model.transcribe(
+                    tmp_path,
+                    language=lang_code,
+                    timestamps=False,
+                    punctuation=True,
+                )
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+
+            if isinstance(text, str) and text.strip():
                 segments.append(
                     BackendSegment(
-                        text=str(sentence.text).strip(),
-                        start=float(sentence.start),
-                        end=float(sentence.end),
-                        words=words,
+                        text=text.strip(),
+                        start=chunk_start_s,
+                        end=chunk_end_s,
+                        words=[],
                     )
                 )
-        elif hasattr(result, "text") and str(result.text).strip():
-            # Fallback: no sentence segmentation — create one segment.
-            segments.append(
-                BackendSegment(
-                    text=str(result.text).strip(),
-                    start=0.0,
-                    end=float(len(audio)) / SAMPLE_RATE,
-                    words=[],
-                )
-            )
+
+        if progress_callback is not None:
+            progress_callback(audio_len, audio_len)
 
         info = BackendTranscriptionInfo(
             language=lang_code,
