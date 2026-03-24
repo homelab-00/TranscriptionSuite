@@ -2543,6 +2543,59 @@ docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 
 
 The dashboard automatically detects CDI vs legacy mode at startup (`checkGpu()` in `dockerManager.ts`) and selects the matching compose overlay (`docker-compose.gpu-cdi.yml` or `docker-compose.gpu.yml`). No image rebuild needed — compose overlays are host-side only.
 
+#### CUDA unknown error in CDI mode (cgroupv2 device filter regression)
+
+On systems using **CDI mode** with **cgroupv2** (the default on modern distros), a Docker or nvidia-container-toolkit update can break CUDA compute while leaving `nvidia-smi` working. This happens when Docker's cgroupv2 eBPF device filter fails to grant access to `/dev/nvidia-uvm` (major 237), even though the CDI spec correctly requests `permissions: rwm` for it.
+
+**Symptoms:**
+- Server crashes with `CUDA failed with error unknown error` or `CUDA unknown error`
+- `nvidia-smi` works both on the host AND inside the container
+- `torch.cuda.is_available()` returns `False` with a "CUDA unknown error" warning
+- Running the container with `--privileged` makes CUDA work
+
+**Diagnosis — confirm this is the issue:**
+```bash
+# 1. Quick cuInit test (should print cuInit=0 if CUDA works, 999 if broken)
+docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 bash -c "
+  apt-get update -qq > /dev/null 2>&1 && apt-get install -qq -y python3 > /dev/null 2>&1
+  python3 -c 'import ctypes; c=ctypes.CDLL(\"libcuda.so.1\"); print(f\"cuInit={c.cuInit(0)}\")'
+"
+
+# 2. If cuInit=999, verify it's the nvidia-uvm EPERM:
+# (install strace in the container and look for the EPERM on /dev/nvidia-uvm)
+# strace output will show: openat("/dev/nvidia-uvm", O_RDWR|O_CLOEXEC) = -1 EPERM
+```
+
+**Root cause:** The CDI spec defines which device nodes to mount and their cgroup permissions. Docker must translate these into cgroupv2 eBPF device-allow rules. A regression in Docker, the nvidia-container-toolkit, or the kernel can cause this translation to silently fail for `/dev/nvidia-uvm` — the device file is mounted (and even has world-writable permissions), but the eBPF filter blocks the `open()` syscall with `EPERM`. Standard workarounds like `--cap-add=ALL`, `--security-opt seccomp=unconfined`, and `--device-cgroup-rule` have no effect because cgroupv2's eBPF program ignores them.
+
+**Fix — regenerate the CDI spec:**
+```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+```
+
+This regenerates the CDI specification with the current toolkit version, which often produces a spec that Docker handles correctly. No Docker restart is needed — the spec is read at container creation time.
+
+**If regeneration doesn't fix it — switch to legacy mode:**
+
+Follow the reverse of the CDI migration above:
+```bash
+# 1. Switch nvidia-container-toolkit to legacy mode
+sudo nvidia-ctk config --in-place --set nvidia-container-runtime.mode=legacy
+
+# 2. Register the nvidia runtime with Docker
+sudo nvidia-ctk runtime configure --runtime=docker
+
+# 3. Restart Docker
+sudo systemctl restart docker
+
+# 4. Verify (should show GPU info)
+docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
+```
+
+The dashboard will detect the mode change at next startup and switch to the legacy compose overlay automatically.
+
+**Affected versions (first observed):** Docker 29.3.0, nvidia-container-toolkit 1.19.0, kernel 6.19.9-zen, driver 590.48.01. The issue affects ALL containers using CDI mode on the system, not just TranscriptionSuite.
+
 ### 13.2 Health Check Issues
 
 ```bash

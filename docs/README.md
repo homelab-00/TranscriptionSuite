@@ -635,6 +635,10 @@ sudo systemctl restart docker
 
 The dashboard detects CDI automatically and uses the correct GPU configuration. No image rebuild or reinstall needed.
 
+### Advanced Troubleshooting
+
+For more advanced troubleshooting steps, head over to README_DEV's [Troubleshooting section](README_DEVmd#13-troubleshooting).
+
 ---
 
 ## 7. Technical Info
