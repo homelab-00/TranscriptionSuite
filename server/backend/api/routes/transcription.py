@@ -273,7 +273,24 @@ async def transcribe_audio(
                 cancellation_check=model_manager.job_tracker.is_cancelled,
             )
 
-        return result.to_dict()
+        result_dict = result.to_dict()
+
+        # Fire outgoing webhook for completed transcription
+        from server.core.webhook import dispatch as dispatch_webhook
+
+        await dispatch_webhook(
+            "longform_complete",
+            {
+                "source": "longform",
+                "text": result_dict.get("text", ""),
+                "filename": file.filename or "",
+                "duration": result_dict.get("duration", 0),
+                "language": result_dict.get("language"),
+                "num_speakers": result_dict.get("num_speakers", 0),
+            },
+        )
+
+        return result_dict
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -353,7 +370,24 @@ async def transcribe_quick(
             cancellation_check=model_manager.job_tracker.is_cancelled,
         )
 
-        return result.to_dict()
+        result_dict = result.to_dict()
+
+        # Fire outgoing webhook for completed transcription
+        from server.core.webhook import dispatch as dispatch_webhook
+
+        await dispatch_webhook(
+            "longform_complete",
+            {
+                "source": "longform",
+                "text": result_dict.get("text", ""),
+                "filename": file.filename or "",
+                "duration": result_dict.get("duration", 0),
+                "language": result_dict.get("language"),
+                "num_speakers": result_dict.get("num_speakers", 0),
+            },
+        )
+
+        return result_dict
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -430,6 +464,7 @@ def _run_file_import(
     parallel_diarization: bool | None,
     use_parallel_default: bool,
     job_id: str,
+    event_loop: Any = None,
 ) -> None:
     """
     Run transcription in a background thread for file import.
@@ -605,15 +640,33 @@ def _run_file_import(
                 )
 
         # Store successful result for client polling
+        result_dict = result.to_dict()
         model_manager.job_tracker.end_job(
             job_id,
             result={
                 "job_id": job_id[:8],
-                "transcription": result.to_dict(),
+                "transcription": result_dict,
                 "diarization": diarization_outcome,
             },
         )
         logger.info("File import job %s completed: %s", job_id[:8], filename)
+
+        # Fire outgoing webhook (background thread — use fire-and-forget)
+        if event_loop is not None:
+            from server.core.webhook import dispatch_fire_and_forget
+
+            dispatch_fire_and_forget(
+                event_loop,
+                "longform_complete",
+                {
+                    "source": "longform",
+                    "text": result_dict.get("text", ""),
+                    "filename": filename,
+                    "duration": result_dict.get("duration", 0),
+                    "language": result_dict.get("language"),
+                    "num_speakers": result_dict.get("num_speakers", 0),
+                },
+            )
 
     except TranscriptionCancelledError:
         logger.info("File import job %s cancelled by user", job_id[:8])
@@ -703,8 +756,11 @@ async def import_and_transcribe(
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
 
+    # Capture event loop for webhook dispatch from background thread
+    loop = asyncio.get_running_loop()
+
     # Launch background transcription task
-    asyncio.get_event_loop().create_task(
+    loop.create_task(
         asyncio.to_thread(
             _run_file_import,
             model_manager=model_manager,
@@ -719,6 +775,7 @@ async def import_and_transcribe(
             parallel_diarization=parallel_diarization,
             use_parallel_default=use_parallel_default,
             job_id=job_id,
+            event_loop=loop,
         )
     )
 

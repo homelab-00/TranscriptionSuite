@@ -110,6 +110,17 @@ class LiveModeSession:
     def _on_sentence(self, text: str) -> None:
         """Callback when a sentence is completed."""
         self._queue_message("sentence", {"text": text})
+        # Fire outgoing webhook (thread-safe — this runs in engine's background thread)
+        from server.core.webhook import dispatch_fire_and_forget
+
+        dispatch_fire_and_forget(
+            self._loop,
+            "live_sentence",
+            {
+                "source": "live",
+                "text": text,
+            },
+        )
 
     def _on_realtime_update(self, text: str) -> None:
         """Callback for real-time partial updates."""

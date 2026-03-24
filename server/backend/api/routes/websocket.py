@@ -166,6 +166,25 @@ class TranscriptionSession:
 
             logger.info(f"Transcription complete for {self.client_name}")
 
+            # Fire outgoing webhook (separate guard so failures don't
+            # trigger a "transcription failed" error message to the client)
+            try:
+                from server.core.webhook import dispatch as dispatch_webhook
+
+                await dispatch_webhook(
+                    "longform_complete",
+                    {
+                        "source": "longform",
+                        "text": result.text,
+                        "filename": "",
+                        "duration": result.duration,
+                        "language": result.language,
+                        "num_speakers": 0,
+                    },
+                )
+            except Exception as wh_err:
+                logger.warning("Webhook dispatch failed after transcription: %s", wh_err)
+
         except Exception as e:
             logger.error(f"Transcription error: {e}", exc_info=True)
             await self.send_message("error", {"message": f"Transcription failed: {e}"})

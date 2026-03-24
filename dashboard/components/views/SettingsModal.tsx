@@ -19,6 +19,7 @@ import {
   Shield,
   Copy,
   Check,
+  Send,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -71,6 +72,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [showServerAdminToken, setShowServerAdminToken] = useState(false);
   const [serverAdminTokenCopied, setServerAdminTokenCopied] = useState(false);
   const [showHfToken, setShowHfToken] = useState(false);
+  const [webhookTesting, setWebhookTesting] = useState(false);
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
 
   // Animation State
   const [isRendered, setIsRendered] = useState(false);
@@ -1301,6 +1304,91 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </Button>
           </div>
         </div>
+
+        <Section title="Outgoing Webhook">
+          <p className="mb-3 text-xs text-slate-400">
+            Send HTTP POST requests to an external URL when transcription events occur (live
+            sentences and longform completions). Changes are saved with the button below.
+          </p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-slate-300">Enable Webhook</label>
+              <AppleSwitch
+                checked={(serverConfigUpdates['webhook.enabled'] as boolean) ?? false}
+                onChange={(v) => handleServerConfigFieldChange('webhook.enabled', v)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-300">Webhook URL</label>
+              <input
+                type="text"
+                value={(serverConfigUpdates['webhook.url'] as string) ?? ''}
+                onChange={(e) => handleServerConfigFieldChange('webhook.url', e.target.value)}
+                placeholder="https://example.com/webhook"
+                className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-sm text-white placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-300">
+                Secret <span className="text-slate-500">(optional)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type={showWebhookSecret ? 'text' : 'password'}
+                  value={(serverConfigUpdates['webhook.secret'] as string) ?? ''}
+                  onChange={(e) => handleServerConfigFieldChange('webhook.secret', e.target.value)}
+                  placeholder="Bearer token or API key"
+                  className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 pr-10 font-mono text-sm text-white placeholder:text-slate-600 focus:border-blue-500/50 focus:outline-none"
+                />
+                <button
+                  onClick={() => setShowWebhookSecret(!showWebhookSecret)}
+                  className="absolute top-2 right-2 p-1 text-slate-500 transition-colors hover:text-white"
+                  title={showWebhookSecret ? 'Hide secret' : 'Show secret'}
+                >
+                  {showWebhookSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Sent as <code className="text-slate-400">Authorization: Bearer &lt;secret&gt;</code>{' '}
+                header on outgoing requests.
+              </p>
+            </div>
+            <div className="pt-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={
+                  webhookTesting ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Send size={14} />
+                  )
+                }
+                disabled={webhookTesting}
+                onClick={async () => {
+                  setWebhookTesting(true);
+                  try {
+                    const url = (serverConfigUpdates['webhook.url'] as string) ?? '';
+                    const secret = (serverConfigUpdates['webhook.secret'] as string) ?? '';
+                    const res = await apiClient.testWebhook(url || undefined, secret || undefined);
+                    if (res.success) {
+                      toast.success(res.message || 'Webhook test sent');
+                    } else {
+                      toast.error(res.message || 'Webhook test failed');
+                    }
+                  } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : 'Webhook test failed';
+                    toast.error(msg);
+                  } finally {
+                    setWebhookTesting(false);
+                  }
+                }}
+              >
+                {webhookTesting ? 'Sending...' : 'Send Test Webhook'}
+              </Button>
+            </div>
+          </div>
+        </Section>
 
         <ServerConfigEditor
           pendingUpdates={serverConfigUpdates}

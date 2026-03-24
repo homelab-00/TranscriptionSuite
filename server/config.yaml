@@ -430,6 +430,27 @@ logging:
     # Number of backup log files to keep
     backup_count: 5
 
+# ----------------------------------------------------------------------------
+# Outgoing Webhook
+# ----------------------------------------------------------------------------
+# Fire HTTP POST requests to an external URL when transcription events occur.
+# Events: live sentences (each completed sentence from Live Mode) and
+# longform transcription completions (when a file transcription job finishes).
+# The payload includes an "event" field ("live_sentence" or "longform_complete")
+# and a "source" field ("live" or "longform") so the receiver can differentiate.
+webhook:
+    # Enable/disable outgoing webhooks.
+    enabled: false
+
+    # Target URL for webhook POST requests.
+    # All events are sent to this single URL.
+    url: ""
+
+    # Optional bearer token or API key.
+    # If set, sent as "Authorization: Bearer <secret>" header on outgoing requests.
+    # You can use one of this server's auth tokens, or any external API key.
+    secret: ""
+
 # ============================================================================
 # Real-time STT Engine Configuration
 # ============================================================================

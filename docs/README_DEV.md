@@ -53,6 +53,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [7.3 WebSocket Protocol](#73-websocket-protocol)
   - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
   - [7.5 OpenAI-Compatible Endpoints](#75-openai-compatible-endpoints)
+  - [7.6 Outgoing Webhook System](#76-outgoing-webhook-system)
 - [8. Backend Development](#8-backend-development)
   - [8.1 Backend Structure](#81-backend-structure)
   - [8.2 Running the Server Locally](#82-running-the-server-locally)
@@ -1139,6 +1140,7 @@ The server's `/api/status` endpoint reads this file to report backend capability
 | `/api/admin/models/load` | POST | Admin | Load transcription models |
 | `/api/admin/models/load/stream` | WS | Admin | Load models with streaming progress |
 | `/api/admin/models/unload` | POST | Admin | Unload models to free GPU memory |
+| `/api/admin/webhook/test` | POST | Admin | Send a test webhook to verify the configured URL |
 | `/api/admin/logs` | GET | Admin | Tail server log |
 | `/ws` | WebSocket | User | Real-time audio streaming |
 | `/ws/live` | WebSocket | User | Live Mode continuous transcription |
@@ -1478,6 +1480,16 @@ Load models with streaming progress updates. The WebSocket streams JSON progress
 ##### `POST /api/admin/models/unload`
 Unload all transcription models to free GPU memory. Returns `409` if a transcription job is active.
 
+##### `POST /api/admin/webhook/test`
+Send a test webhook to verify the configured URL. Optionally accepts `{"url": "...", "secret": "..."}` in the request body to test a URL before saving it to config; falls back to the values stored in `config.yaml` when omitted.
+
+**Response:**
+```json
+{"success": true, "status_code": 200, "message": "Webhook test sent (HTTP 200)"}
+```
+
+Returns `400` if no URL is configured or provided. Returns `success: false` with details if the URL is blocked by the SSRF guard or the remote server is unreachable.
+
 ##### `GET /api/admin/logs`
 Tail recent server log entries. Query params: `service` (filter), `level` (filter), `limit` (1–1000, default 100).
 
@@ -1613,6 +1625,99 @@ curl -X POST http://localhost:9786/v1/audio/translations \
   -F "response_format=text"
 ```
 
+### 7.6 Outgoing Webhook System
+
+The server can fire HTTP POST requests to a user-configured URL when transcription events occur. Configuration is in the `webhook:` section of `config.yaml`.
+
+#### Configuration
+
+```yaml
+webhook:
+    enabled: false    # Master toggle
+    url: ""           # Target URL for POST requests
+    secret: ""        # Optional; sent as "Authorization: Bearer <secret>"
+```
+
+Config is read at dispatch time from the `get_config()` singleton, so changes made via the Settings editor take effect on the next event without a server restart.
+
+#### Event Types and Dispatch Points
+
+| Event | Source | Dispatch point |
+|-------|--------|----------------|
+| `live_sentence` | Live Mode | `live.py` → `LiveModeSession._on_sentence()` |
+| `longform_complete` | `/api/transcribe/audio` | `transcription.py` → after `engine.transcribe_file()` |
+| `longform_complete` | `/api/transcribe/quick` | `transcription.py` → after `engine.transcribe_file()` |
+| `longform_complete` | `/api/transcribe/import` | `transcription.py` → background thread after `end_job()` |
+| `longform_complete` | `/ws` (WebSocket) | `websocket.py` → after `send_message("final", ...)` |
+| `longform_complete` | `/api/notebook/transcribe/upload` | `notebook.py` → background thread after `end_job()` |
+| `longform_complete` | `/v1/audio/transcriptions` | `openai_audio.py` → after result built |
+| `longform_complete` | `/v1/audio/translations` | `openai_audio.py` → after result built |
+| `test` | `POST /api/admin/webhook/test` | `admin.py` → `send_test_webhook()` |
+
+#### Payload Schemas
+
+All payloads share a common envelope:
+```json
+{
+  "event": "<event_type>",
+  "timestamp": "ISO 8601 UTC",
+  "payload": { ... }
+}
+```
+
+**`live_sentence`:**
+```json
+{"source": "live", "text": "The completed sentence."}
+```
+
+**`longform_complete`:**
+```json
+{
+  "source": "longform",
+  "text": "Full transcript...",
+  "filename": "meeting.wav",
+  "duration": 1234.56,
+  "language": "en",
+  "num_speakers": 2
+}
+```
+
+**`test`:**
+```json
+{"message": "Test webhook from TranscriptionSuite.", "source": "test"}
+```
+
+#### Thread Safety
+
+Webhook dispatch is async (`httpx.AsyncClient`). Most dispatch points use `await dispatch(...)` directly from async route handlers. Two dispatch points run inside `asyncio.to_thread()` background threads (`/import` and notebook upload) — these capture the event loop in the route handler with `asyncio.get_running_loop()` and pass it to `dispatch_fire_and_forget()`, which uses `asyncio.run_coroutine_threadsafe()` to schedule the coroutine. The Live Mode `_on_sentence()` callback also runs from the engine's background thread and uses the same `dispatch_fire_and_forget()` pattern.
+
+#### SSRF Guard
+
+`webhook.py` includes `_is_safe_url()` which blocks:
+- Non-HTTP(S) schemes (`ftp://`, `file://`, etc.)
+- Private IP ranges (RFC 1918: `10.x`, `172.16-31.x`, `192.168.x`)
+- Loopback (`127.0.0.1`, `localhost`)
+- Internal hostnames (`.internal`, `.local`)
+- Link-local, multicast, and reserved IP ranges
+
+Both `dispatch()` and `send_test_webhook()` validate the URL before making any request.
+
+#### Module
+
+`server/backend/core/webhook.py` — key functions:
+
+| Function | Purpose |
+|----------|---------|
+| `dispatch(event_type, payload)` | Async POST to configured URL; catches all exceptions, never raises |
+| `dispatch_fire_and_forget(loop, event_type, payload)` | Thread-safe wrapper; schedules `dispatch()` on the given event loop |
+| `send_test_webhook(url, secret)` | Returns `{success, status_code, message}` for the admin test endpoint |
+| `_read_webhook_config()` | Reads `(enabled, url, secret)` from `get_config()` |
+| `_is_safe_url(url)` | SSRF guard — validates URL before dispatch |
+
+#### Tests
+
+`server/backend/tests/test_webhook.py` — 17 tests covering dispatch logic, auth header, error handling, SSRF guard, and fire-and-forget scheduling.
+
 ---
 
 ## 8. Backend Development
@@ -1636,6 +1741,7 @@ server/backend/
 │   ├── speaker_merge.py          # Speaker assignment via overlap, fallback chain, micro-turn smoothing
 │   ├── subtitle_export.py        # SRT/ASS subtitle rendering
 │   ├── token_store.py            # Token hashing, generation, validation, expiry, migration
+│   ├── webhook.py                # Outgoing webhook dispatcher (fire-and-forget POST)
 │   └── stt/                      # Speech-to-text subsystem
 │       ├── capabilities.py       # Translation/capability validation per backend
 │       ├── engine.py             # AudioToTextRecorder with VAD
@@ -2085,6 +2191,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `remote_server` - Host, port, TLS settings
 - `storage` - Database path, audio storage
 - `local_llm` - LM Studio integration (supports v1 REST API for LM Studio 0.4.0+)
+- `webhook` - Outgoing webhook (enable/disable, target URL, optional Bearer secret)
 - `backup` - Automatic database backup settings
 
 **Live Mode Configuration:**

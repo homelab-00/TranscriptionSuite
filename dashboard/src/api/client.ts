@@ -670,6 +670,19 @@ export class APIClient {
     return this.patch('/api/admin/diarization', settings);
   }
 
+  // ─── Webhook ─────────────────────────────────────────────────────────────
+
+  /** POST /api/admin/webhook/test — send a test webhook to the configured URL */
+  async testWebhook(
+    url?: string,
+    secret?: string,
+  ): Promise<{ success: boolean; status_code: number | null; message: string }> {
+    const body: Record<string, string> = {};
+    if (url) body.url = url;
+    if (secret) body.secret = secret;
+    return this.post('/api/admin/webhook/test', Object.keys(body).length ? body : undefined);
+  }
+
   // ─── LLM ──────────────────────────────────────────────────────────────────
 
   /** GET /api/llm/status */

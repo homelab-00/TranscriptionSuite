@@ -144,6 +144,22 @@ async def create_transcription(
             initial_prompt=prompt,
         )
 
+        # Fire outgoing webhook for completed transcription
+        result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
+        from server.core.webhook import dispatch as dispatch_webhook
+
+        await dispatch_webhook(
+            "longform_complete",
+            {
+                "source": "longform",
+                "text": result_dict.get("text", ""),
+                "filename": file.filename or "",
+                "duration": result_dict.get("duration", 0),
+                "language": result_dict.get("language"),
+                "num_speakers": result_dict.get("num_speakers", 0),
+            },
+        )
+
         include_words = word_timestamps and response_format == "verbose_json"
         return _build_response(
             result, response_format, task="transcribe", include_words=include_words
@@ -226,6 +242,22 @@ async def create_translation(
             translation_target_language="en",
             word_timestamps=word_timestamps,
             initial_prompt=prompt,
+        )
+
+        # Fire outgoing webhook for completed translation
+        result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
+        from server.core.webhook import dispatch as dispatch_webhook
+
+        await dispatch_webhook(
+            "longform_complete",
+            {
+                "source": "longform",
+                "text": result_dict.get("text", ""),
+                "filename": file.filename or "",
+                "duration": result_dict.get("duration", 0),
+                "language": result_dict.get("language"),
+                "num_speakers": result_dict.get("num_speakers", 0),
+            },
         )
 
         include_words = word_timestamps and response_format == "verbose_json"

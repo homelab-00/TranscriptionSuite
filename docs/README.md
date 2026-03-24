@@ -63,12 +63,13 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
     - [Server Machine Setup](#server-machine-setup)
   - [3.2 Option B: LAN (same local network)](#32-option-b-lan-same-local-network)
 - [4. OpenAI-compatible API Endpoints](#4-openai-compatible-api-endpoints)
-- [5. Troubleshooting](#5-troubleshooting)
-- [6. Technical Info](#6-technical-info)
-- [7. License](#7-license)
-- [8. State of the Project](#8-state-of-the-project)
-  - [8.1 In General & AI Disclosure](#81-in-general--ai-disclosure)
-  - [8.2 Contributing](#82-contributing)
+- [5. Outgoing Webhooks](#5-outgoing-webhooks)
+- [6. Troubleshooting](#6-troubleshooting)
+- [7. Technical Info](#7-technical-info)
+- [8. License](#8-license)
+- [9. State of the Project](#9-state-of-the-project)
+  - [9.1 In General & AI Disclosure](#91-in-general--ai-disclosure)
+  - [9.2 Contributing](#92-contributing)
 
 ---
 
@@ -547,7 +548,74 @@ curl -X POST http://localhost:9786/v1/audio/translations \
 
 ---
 
-## 5. Troubleshooting
+## 5. Outgoing Webhooks
+
+TranscriptionSuite can send HTTP POST requests to an external URL whenever a transcription event occurs. This lets you pipe transcription results into your own applications, automation pipelines, or logging services.
+
+Two event types are supported:
+
+| Event | Fires when |
+|-------|------------|
+| `live_sentence` | A sentence is completed during Live Mode |
+| `longform_complete` | A file/import/notebook transcription job finishes |
+
+### Setup
+
+Open **Settings → Server** tab. In the **Outgoing Webhook** section:
+
+1. **Enable** the webhook toggle
+2. Enter the **URL** to receive POST requests
+3. *(Optional)* Enter a **Secret** — sent as `Authorization: Bearer <secret>` on every request
+4. Click **Send Test Webhook** to verify your endpoint receives the request
+
+These settings are also editable directly in `config.yaml`:
+
+```yaml
+webhook:
+    enabled: true
+    url: "https://your-api.example.com/webhook"
+    secret: "your-optional-secret"
+```
+
+### Payload Format
+
+Every webhook POST has `Content-Type: application/json` with this envelope:
+
+```json
+{
+  "event": "live_sentence",
+  "timestamp": "2026-03-24T14:30:00.123456+00:00",
+  "payload": { ... }
+}
+```
+
+**Live sentence payload:**
+
+```json
+{
+  "source": "live",
+  "text": "The completed sentence."
+}
+```
+
+**Longform completion payload:**
+
+```json
+{
+  "source": "longform",
+  "text": "Full transcript text...",
+  "filename": "meeting.wav",
+  "duration": 1234.56,
+  "language": "en",
+  "num_speakers": 2
+}
+```
+
+> **Note:** Delivery is fire-and-forget — the server sends each webhook once and does not retry on failure. Failed deliveries are logged on the server side.
+
+---
+
+## 6. Troubleshooting
 
 As with most things, the first thing to try is turning them off and on again. Stop the server/client, quit the app and then try again.
 
@@ -569,21 +637,21 @@ The dashboard detects CDI automatically and uses the correct GPU configuration. 
 
 ---
 
-## 6. Technical Info
+## 7. Technical Info
 
 For more information about the technical aspects of the project, check out [README_DEV](README_DEV.md).
 
 ---
 
-## 7. License
+## 8. License
 
 GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
 
 ---
 
-## 8. State of the Project
+## 9. State of the Project
 
-### 8.1 In General & AI Disclosure
+### 9.1 In General & AI Disclosure
 
 This was initially developed as a personal tool and in time turned into a hobby project. I am an engineer, just not a *software* engineer; so **this whole thing is vibecoded**. At the same time it's not blind vibecoding; for example Dockerizing the server for easy distribution was 100% my idea.
 
@@ -593,7 +661,7 @@ Anyways, since I'm 100% dogfooding the app I'm not going to abandon it (unless s
 
 Finally, I want to thank [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) for inspiring this project.
 
-### 8.2 Contributing
+### 9.2 Contributing
 
 I'm always open to contributors! Might help me learn a thing or two about programming. 
 

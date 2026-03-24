@@ -415,6 +415,7 @@ def _run_transcription(
     use_parallel_default: bool,
     title: str | None,
     job_id: str,
+    event_loop: Any = None,
 ) -> None:
     """
     Run transcription in a background thread.
@@ -665,6 +666,23 @@ def _run_transcription(
             f"Background transcription job {job_id[:8]} completed: recording_id={recording_id}"
         )
 
+        # Fire outgoing webhook (background thread — use fire-and-forget)
+        if event_loop is not None:
+            from server.core.webhook import dispatch_fire_and_forget
+
+            dispatch_fire_and_forget(
+                event_loop,
+                "longform_complete",
+                {
+                    "source": "longform",
+                    "text": result.text,
+                    "filename": filename or "",
+                    "duration": result.duration,
+                    "language": result.language,
+                    "num_speakers": result.num_speakers,
+                },
+            )
+
     except Exception as e:
         logger.error(f"Background transcription job {job_id[:8]} failed: {e}", exc_info=True)
         # Store error result for client polling
@@ -748,8 +766,11 @@ async def upload_and_transcribe(
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
 
+    # Capture event loop for webhook dispatch from background thread
+    loop = asyncio.get_running_loop()
+
     # Launch background transcription task (runs on thread pool, doesn't block event loop)
-    asyncio.get_event_loop().create_task(
+    loop.create_task(
         asyncio.to_thread(
             _run_transcription,
             model_manager=model_manager,
@@ -766,6 +787,7 @@ async def upload_and_transcribe(
             use_parallel_default=use_parallel_default,
             title=title,
             job_id=job_id,
+            event_loop=loop,
         )
     )
 

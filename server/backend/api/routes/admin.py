@@ -175,6 +175,39 @@ async def update_config(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.post("/webhook/test")
+async def test_webhook(request: Request) -> dict[str, Any]:
+    """Send a test webhook to verify the configured URL.
+
+    Optionally accepts ``{"url": "...", "secret": "..."}`` in the request
+    body to test a URL before saving it to config.  Falls back to the
+    values already stored in ``config.yaml`` when omitted.
+    """
+    if not require_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    url = str(body.get("url") or "").strip()
+    secret = str(body.get("secret") or "").strip()
+
+    # Fall back to config if not provided in request body
+    if not url:
+        config = request.app.state.config
+        url = str(config.get("webhook", "url", default="") or "").strip()
+        secret = secret or str(config.get("webhook", "secret", default="") or "").strip()
+
+    if not url:
+        raise HTTPException(status_code=400, detail="No webhook URL configured or provided")
+
+    from server.core.webhook import send_test_webhook
+
+    return await send_test_webhook(url, secret)
+
+
 @router.post("/models/load")
 async def load_models(request: Request) -> dict[str, str]:
     """Explicitly load transcription models."""
