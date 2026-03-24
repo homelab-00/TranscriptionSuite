@@ -136,6 +136,92 @@ def _tokens_to_words(tokens: list[Any]) -> list[dict[str, Any]]:
     return words
 
 
+def _load_canary_model(model_name: str) -> Any:
+    """Download, prepare, and load a Canary MLX model with full compatibility.
+
+    Handles two quirks found in some community Canary-MLX repositories that
+    ``canary-mlx`` 0.1.x does not support out-of-the-box:
+
+    1. **Embedded tokenizer** (e.g. ``Mediform/canary-1b-v2-mlx-q8``): the
+       SentencePiece model is stored as a base64 blob inside ``config.json``
+       rather than as a separate ``tokenizer.model`` file.  We decode and
+       write the file on first load (idempotent).
+
+    2. **Quantized weights** (e.g. Q8 checkpoints): the safetensors file
+       contains ``scales`` / ``biases`` quantization tensors that don't match
+       the default float architecture.  We apply ``mlx.nn.quantize()`` after
+       constructing the model but before loading the checkpoint — the same
+       pattern used by mlx-lm for quantized models.
+    """
+    import base64
+    import json
+
+    import mlx.core as mx
+    import mlx.nn as nn
+    from dacite import from_dict
+    from huggingface_hub import snapshot_download
+    from mlx.utils import tree_flatten, tree_unflatten
+
+    from canary_mlx.model import Canary, CanaryConfig
+
+    # --- Step 1: locate / download the model ---
+    path = Path(model_name)
+    if path.exists() and path.is_dir():
+        model_dir = path
+    else:
+        model_dir = Path(
+            snapshot_download(
+                model_name,
+                allow_patterns=["*.json", "*.safetensors", "*.model"],
+            )
+        )
+
+    config_path = model_dir / "config.json"
+    weight_path = model_dir / "model.safetensors"
+    config = json.loads(config_path.read_text())
+
+    # --- Step 2: extract embedded tokenizer if needed ---
+    tok = config.get("tokenizer", {})
+    tokenizer_path = model_dir / "tokenizer.model"
+    if (
+        isinstance(tok, dict)
+        and "model_base64" in tok
+        and not tokenizer_path.exists()
+    ):
+        logger.info(f"Extracting embedded tokenizer from config.json ({model_name})")
+        tokenizer_bytes = base64.b64decode(tok["model_base64"])
+        tokenizer_path.write_bytes(tokenizer_bytes)
+        config["tokenizer"] = {"type": "sentencepiece", "model_path": "tokenizer.model"}
+        config_path.write_text(json.dumps(config))
+        logger.info(f"tokenizer.model written ({len(tokenizer_bytes)} bytes)")
+
+    # --- Step 3: build model architecture ---
+    quant_cfg = config.get("quantization", {})
+    config["model_dir"] = model_dir
+    model = Canary(from_dict(CanaryConfig, config))
+    model.eval()
+
+    # --- Step 4: apply quantization BEFORE loading weights ---
+    # quantized checkpoints have extra 'scales'/'biases' tensors; the model
+    # architecture must be converted first or load_weights() will reject them.
+    if quant_cfg.get("bits"):
+        nn.quantize(model, bits=quant_cfg["bits"])
+        logger.debug(f"Applied Q{quant_cfg['bits']} quantisation to model architecture")
+
+    # --- Step 5: load weights ---
+    model.load_weights(str(weight_path))
+
+    # --- Step 6: cast float parameters to bfloat16 ---
+    # Skip integer (quantized) tensors — they must stay in their compact form.
+    cast_weights = [
+        (k, v.astype(mx.bfloat16) if not mx.issubdtype(v.dtype, mx.integer) else v)
+        for k, v in tree_flatten(model.parameters())
+    ]
+    model.update(tree_unflatten(cast_weights))
+
+    return model
+
+
 class MLXCanaryBackend(STTBackend):
     """Apple MLX / Metal-accelerated Canary backend.
 
@@ -154,10 +240,10 @@ class MLXCanaryBackend(STTBackend):
     # ------------------------------------------------------------------
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
-        """Load the Canary model via ``canary_mlx.load_model``."""
+        """Load the Canary model."""
         del device, kwargs
         try:
-            from canary_mlx import load_model  # noqa: F401
+            import canary_mlx  # noqa: F401
         except ImportError as exc:
             raise RuntimeError(
                 "canary-mlx is not installed. "
@@ -166,9 +252,7 @@ class MLXCanaryBackend(STTBackend):
 
         logger.info(f"Loading MLX Canary model: {model_name}")
         try:
-            from canary_mlx import load_model
-
-            self._model = load_model(model_name)
+            self._model = _load_canary_model(model_name)
             self._model_name = model_name
             self._loaded = True
             logger.info(f"MLX Canary model loaded: {model_name}")
