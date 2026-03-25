@@ -59,3 +59,4 @@ __pycache__/
 *.mp3
 .directory
 codeql-agent-results/
+benchmark_*.json
