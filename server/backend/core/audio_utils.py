@@ -9,11 +9,13 @@ Provides common audio operations:
 """
 
 import gc
+import glob as glob_module
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -83,6 +85,40 @@ def _capture_nvidia_smi() -> str:
         return f"nvidia-smi failed: {e}"
 
 
+def _log_cuda_diagnostics() -> None:
+    """Log a single structured diagnostic line with torch/CUDA/driver/device info.
+
+    Called once at startup before the CUDA health check attempt. Never raises.
+    """
+    try:
+        torch_version = torch.__version__ if torch is not None else "unavailable"
+        cuda_version = (
+            getattr(torch.version, "cuda", "unavailable") if torch is not None else "unavailable"
+        )
+        device_nodes = sorted(glob_module.glob("/dev/nvidia*") + glob_module.glob("/dev/dri/*"))
+
+        smi_output = _capture_nvidia_smi()
+        driver_version = "unavailable"
+        for line in smi_output.splitlines():
+            if "Driver Version" in line:
+                parts = line.split("Driver Version:")
+                if len(parts) > 1:
+                    driver_version = parts[1].strip().split()[0]
+                break
+
+        logger.info(
+            "CUDA startup diagnostics",
+            extra={
+                "torch_version": torch_version,
+                "cuda_version": cuda_version,
+                "device_nodes": device_nodes,
+                "driver_version": driver_version,
+            },
+        )
+    except Exception as e:
+        logger.debug(f"Failed to collect CUDA diagnostics: {e}")
+
+
 def clear_gpu_cache() -> None:
     """
     Clear GPU cache and run garbage collection.
@@ -124,6 +160,8 @@ def cuda_health_check() -> dict[str, Any]:
     if not HAS_TORCH or torch is None:
         return {"status": "no_torch"}
 
+    _log_cuda_diagnostics()
+
     try:
         torch.cuda.init()
         props = torch.cuda.get_device_properties(0)
@@ -147,9 +185,54 @@ def cuda_health_check() -> dict[str, Any]:
                 "error": str(e),
                 "nvidia_smi": smi_output,
             }
-        return {"status": "no_cuda", "error": str(e)}
+        # Transient error — retry once after a short delay.
+        logger.warning(
+            "CUDA health check: transient error, retrying in 500ms",
+            extra={"error": str(e)},
+        )
+        time.sleep(0.5)
+        try:
+            torch.cuda.init()
+            props = torch.cuda.get_device_properties(0)
+            return {
+                "status": "healthy",
+                "device_name": props.name,
+                "total_memory_gb": round(props.total_mem / 1024**3, 2),
+                "retried": True,
+            }
+        except Exception as retry_e:
+            return {"status": "no_cuda", "error": str(retry_e)}
     except Exception as e:
-        return {"status": "no_cuda", "error": str(e)}
+        err_lower = str(e).lower()
+        if "unknown error" in err_lower or "error 999" in err_lower:
+            _cuda_probe_failed = True
+            smi_output = _capture_nvidia_smi()
+            logger.error(
+                "CUDA health check: unrecoverable GPU state detected",
+                exc_info=True,
+                extra={"nvidia_smi": smi_output},
+            )
+            return {
+                "status": "unrecoverable",
+                "error": str(e),
+                "nvidia_smi": smi_output,
+            }
+        logger.warning(
+            "CUDA health check: transient error, retrying in 500ms",
+            extra={"error": str(e)},
+        )
+        time.sleep(0.5)
+        try:
+            torch.cuda.init()
+            props = torch.cuda.get_device_properties(0)
+            return {
+                "status": "healthy",
+                "device_name": props.name,
+                "total_memory_gb": round(props.total_mem / 1024**3, 2),
+                "retried": True,
+            }
+        except Exception as retry_e:
+            return {"status": "no_cuda", "error": str(retry_e)}
 
 
 def get_gpu_memory_info() -> dict:

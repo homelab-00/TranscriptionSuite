@@ -31,16 +31,116 @@ async function hasCommand(name: string): Promise<boolean> {
   }
 }
 
+// ─── Window Class Detection (Linux only) ────────────────────────────────────
+
+/** Known terminal emulator window classes (case-insensitive). */
+const TERMINAL_WINDOW_CLASSES = new Set([
+  'konsole',
+  'kitty',
+  'alacritty',
+  'foot',
+  'wezterm',
+  'gnome-terminal-server',
+  'xterm',
+  'tilix',
+  'terminator',
+  'xfce4-terminal',
+  'mate-terminal',
+  'sakura',
+  'st',
+  'urxvt',
+  'lxterminal',
+]);
+
+/** Window classes where paste should be skipped (file managers, shells, etc.). */
+const PASTE_SKIP_WINDOW_CLASSES = new Set([
+  'org.kde.dolphin',
+  'org.gnome.nautilus',
+  'pcmanfm',
+  'thunar',
+  'nemo',
+  'caja',
+  'org.kde.plasmashell',
+]);
+
+function isTerminalWindow(windowClass: string | null): boolean {
+  return windowClass != null && TERMINAL_WINDOW_CLASSES.has(windowClass.toLowerCase());
+}
+
+function isPasteSkipWindow(windowClass: string | null): boolean {
+  return windowClass != null && PASTE_SKIP_WINDOW_CLASSES.has(windowClass.toLowerCase());
+}
+
+/**
+ * Detect the active window's class name on Linux.
+ * Returns null when detection is not supported or fails.
+ */
+async function getActiveWindowClass(): Promise<string | null> {
+  if (isWayland()) {
+    // KDE Wayland: query KWin D-Bus for the active window resource class.
+    try {
+      const { stdout } = await execFileAsync('gdbus', [
+        'call',
+        '--session',
+        '--dest',
+        'org.kde.KWin',
+        '--object-path',
+        '/KWin',
+        '--method',
+        'org.kde.KWin.activeWindow',
+      ]);
+      // Output is a GVariant string like: ('konsole',)
+      const match = stdout.match(/'([^']+)'/);
+      if (match) return match[1];
+    } catch {
+      // Non-KDE compositor or KWin D-Bus not available — fall back to null.
+    }
+    return null;
+  } else {
+    // X11: xdotool returns the WM_CLASS name for the active window.
+    try {
+      const { stdout } = await execFileAsync('xdotool', ['getactivewindow', 'getwindowclassname']);
+      return stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 // ─── Keystroke Simulation ───────────────────────────────────────────────────
 
 async function simulatePasteLinuxWayland(): Promise<void> {
+  const windowClass = await getActiveWindowClass();
+
+  if (isPasteSkipWindow(windowClass)) {
+    throw new Error(
+      'Paste skipped — active window does not accept text input. Text has been copied to clipboard.',
+    );
+  }
+
+  const isTerminal = isTerminalWindow(windowClass);
+
   // Wayland fallback chain: wtype → dotool → ydotool
   // Each tool is tried at runtime — a tool may be installed but fail if the
   // compositor doesn't support its required protocol (e.g. wtype needs
   // zwp_virtual_keyboard_v1, which KWin/KDE does not expose).
   if (await hasCommand('wtype')) {
     try {
-      await execFileAsync('wtype', ['-M', 'ctrl', 'v', '-m', 'ctrl']);
+      if (isTerminal) {
+        await execFileAsync('wtype', [
+          '-M',
+          'ctrl',
+          '-M',
+          'shift',
+          'v',
+          '-m',
+          'shift',
+          '-m',
+          'ctrl',
+        ]);
+      } else {
+        await execFileAsync('wtype', ['-M', 'ctrl', 'v', '-m', 'ctrl']);
+      }
       return;
     } catch {
       // fall through to next tool
@@ -48,7 +148,7 @@ async function simulatePasteLinuxWayland(): Promise<void> {
   }
   if (await hasCommand('dotool')) {
     try {
-      await execFileAsync('dotool', ['key', 'ctrl+v']);
+      await execFileAsync('dotool', ['key', isTerminal ? 'ctrl+shift+v' : 'ctrl+v']);
       return;
     } catch {
       // fall through to next tool
@@ -56,7 +156,12 @@ async function simulatePasteLinuxWayland(): Promise<void> {
   }
   if (await hasCommand('ydotool')) {
     try {
-      await execFileAsync('ydotool', ['key', '29:1', '47:1', '47:0', '29:0']);
+      if (isTerminal) {
+        // Ctrl+Shift+V raw keycodes
+        await execFileAsync('ydotool', ['key', '29:1', '42:1', '47:1', '47:0', '42:0', '29:0']);
+      } else {
+        await execFileAsync('ydotool', ['key', '29:1', '47:1', '47:0', '29:0']);
+      }
       return;
     } catch {
       // fall through to next tool
@@ -65,7 +170,11 @@ async function simulatePasteLinuxWayland(): Promise<void> {
   // Last resort: xdotool works for XWayland apps even in a Wayland session
   // (e.g. KDE Plasma, where many apps still run via XWayland).
   if (await hasCommand('xdotool')) {
-    await execFileAsync('xdotool', ['key', '--clearmodifiers', 'ctrl+v']);
+    await execFileAsync('xdotool', [
+      'key',
+      '--clearmodifiers',
+      isTerminal ? 'ctrl+shift+v' : 'ctrl+v',
+    ]);
     return;
   }
   throw new Error(
@@ -75,13 +184,31 @@ async function simulatePasteLinuxWayland(): Promise<void> {
 }
 
 async function simulatePasteLinuxX11(): Promise<void> {
+  const windowClass = await getActiveWindowClass();
+
+  if (isPasteSkipWindow(windowClass)) {
+    throw new Error(
+      'Paste skipped — active window does not accept text input. Text has been copied to clipboard.',
+    );
+  }
+
+  const isTerminal = isTerminalWindow(windowClass);
+
   // X11 fallback chain: xdotool → ydotool
   if (await hasCommand('xdotool')) {
-    await execFileAsync('xdotool', ['key', '--clearmodifiers', 'ctrl+v']);
+    await execFileAsync('xdotool', [
+      'key',
+      '--clearmodifiers',
+      isTerminal ? 'ctrl+shift+v' : 'ctrl+v',
+    ]);
     return;
   }
   if (await hasCommand('ydotool')) {
-    await execFileAsync('ydotool', ['key', '29:1', '47:1', '47:0', '29:0']);
+    if (isTerminal) {
+      await execFileAsync('ydotool', ['key', '29:1', '42:1', '47:1', '47:0', '42:0', '29:0']);
+    } else {
+      await execFileAsync('ydotool', ['key', '29:1', '47:1', '47:0', '29:0']);
+    }
     return;
   }
   throw new Error(

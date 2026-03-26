@@ -19,6 +19,7 @@ import {
   Minus,
   ExternalLink,
   Minimize2,
+  AlertTriangle,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -1290,6 +1291,15 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                   {/* Record / Stop Button */}
                   <div className="flex flex-col gap-2">
+                    {serverRunning && serverConnection.details?.gpu_error && (
+                      <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <span>
+                          {serverConnection.details.gpu_error_action ??
+                            'GPU unavailable — restart your computer to reset the GPU driver, or switch to CPU mode in Settings > Server.'}
+                        </span>
+                      </div>
+                    )}
                     {serverRunning && serverConnection.ready && mainModelDisabled && (
                       <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
                         Main model not selected.

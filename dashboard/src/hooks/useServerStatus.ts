@@ -18,11 +18,13 @@ export interface ServerConnectionInfo {
   ready: boolean;
   /** Last error message, if any */
   error: string | null;
+  /** GPU error string when CUDA is in a failed state, null otherwise */
+  gpuError: string | null;
   /** Force an immediate re-check */
   refresh: () => void;
 }
 
-function deriveStatus(
+export function deriveStatus(
   result: Awaited<ReturnType<typeof apiClient.checkConnection>> | undefined,
 ): Omit<ServerConnectionInfo, 'refresh'> {
   if (!result) {
@@ -34,6 +36,7 @@ function deriveStatus(
       reachable: false,
       ready: false,
       error: null,
+      gpuError: null,
     };
   }
 
@@ -46,6 +49,23 @@ function deriveStatus(
       reachable: false,
       ready: false,
       error: result.error,
+      gpuError: null,
+    };
+  }
+
+  // GPU error takes priority — even if server is reachable, it cannot transcribe.
+  if (result.status?.gpu_error) {
+    return {
+      serverStatus: 'error',
+      clientStatus: 'error',
+      details: result.status,
+      serverLabel:
+        result.status.gpu_error_action ??
+        'GPU unavailable — restart computer or switch to CPU mode in Settings > Server',
+      reachable: true,
+      ready: false,
+      error: result.error,
+      gpuError: result.status.gpu_error,
     };
   }
 
@@ -58,6 +78,7 @@ function deriveStatus(
       reachable: true,
       ready: true,
       error: result.error,
+      gpuError: null,
     };
   }
 
@@ -69,6 +90,7 @@ function deriveStatus(
     reachable: true,
     ready: false,
     error: result.error,
+    gpuError: null,
   };
 }
 

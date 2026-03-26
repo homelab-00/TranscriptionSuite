@@ -93,3 +93,36 @@ def test_status_accessible_in_tls_mode_without_auth(test_client_tls):
 
     assert response.status_code == 200
     assert response.json()["status"] == "running"
+
+
+def test_status_includes_gpu_error_when_set(test_client_local):
+    """GET /api/status includes gpu_error and gpu_error_action when GPU failure is recorded."""
+    test_client_local.app.state.gpu_error = {
+        "error": "CUDA unknown error",
+        "status": "unrecoverable",
+    }
+    try:
+        response = test_client_local.get("/api/status")
+    finally:
+        del test_client_local.app.state.gpu_error
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "gpu_error" in body
+    assert "CUDA unknown error" in body["gpu_error"]
+    assert "gpu_error_action" in body
+    assert len(body["gpu_error_action"]) > 0
+
+
+def test_status_no_gpu_error_when_healthy(test_client_local):
+    """GET /api/status does NOT include gpu_error when server is healthy."""
+    # Ensure gpu_error is not set
+    if hasattr(test_client_local.app.state, "gpu_error"):
+        del test_client_local.app.state.gpu_error
+
+    response = test_client_local.get("/api/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "gpu_error" not in body
+    assert "gpu_error_action" not in body

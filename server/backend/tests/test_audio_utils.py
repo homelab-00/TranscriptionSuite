@@ -115,6 +115,63 @@ class TestCudaHealthCheck:
         assert result["status"] == "no_cuda"
         assert au._cuda_probe_failed is False
 
+    def test_retries_transient_non_999_error_and_succeeds(self):
+        """On a transient RuntimeError, sleep 500ms and retry once — succeed on retry."""
+        mock_props = MagicMock()
+        mock_props.name = "NVIDIA RTX 3080"
+        mock_props.total_mem = 10 * 1024**3
+
+        mock_torch = MagicMock()
+        # First init raises transient error, second succeeds
+        mock_torch.cuda.init.side_effect = [RuntimeError("some transient error"), None]
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "time") as mock_time,
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "healthy"
+        assert result.get("retried") is True
+        mock_time.sleep.assert_called_once_with(0.5)
+        assert mock_torch.cuda.init.call_count == 2
+
+    def test_no_retry_on_error_999(self):
+        """Error 999 (unrecoverable) must NOT retry — sets flag immediately."""
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = RuntimeError("CUDA unknown error (999)")
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "_capture_nvidia_smi", return_value=""),
+            patch.object(au, "time") as mock_time,
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "unrecoverable"
+        assert au._cuda_probe_failed is True
+        mock_time.sleep.assert_not_called()
+        assert mock_torch.cuda.init.call_count == 1
+
+    def test_retry_also_fails_returns_no_cuda(self):
+        """When both first attempt and retry fail with transient errors, return no_cuda."""
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = RuntimeError("transient error")
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "time") as mock_time,
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "no_cuda"
+        mock_time.sleep.assert_called_once_with(0.5)
+        assert mock_torch.cuda.init.call_count == 2
+
 
 # ── check_cuda_available with probe flag ─────────────────────────────────
 

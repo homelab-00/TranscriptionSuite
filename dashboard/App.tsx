@@ -653,6 +653,7 @@ const AppInner: React.FC = () => {
         containerExists={docker.container.exists}
         containerHealth={docker.container.health}
         clientRunning={clientRunning}
+        gpuError={serverConnection.details?.gpu_error}
       />
 
       {/* Main Content Area */}

@@ -635,6 +635,37 @@ sudo systemctl restart docker
 
 The dashboard detects CDI automatically and uses the correct GPU configuration. No image rebuild or reinstall needed.
 
+### Dashboard shows GPU error / red status
+
+**Symptom:** The dashboard shows a red error state with "GPU unavailable" in the Session view and red dots in the sidebar.
+
+**Steps:**
+
+1. **Restart your computer** to fully reset the GPU driver state. This resolves most cases of CUDA error 999 (driver context poisoning from a prior crash).
+2. If the error recurs frequently, enable NVIDIA Persistence Mode on the host to prevent the driver from entering a degraded state on container stop/start cycles:
+   ```bash
+   sudo nvidia-smi -pm 1
+   ```
+3. If the error persists after a reboot, check the server logs for the CUDA diagnostic line (logged at startup). It contains the torch version, CUDA version, and device nodes — useful for reporting the issue.
+4. **Advanced:** `sudo nvidia-smi --gpu-reset` can reset the GPU without a full reboot, but this affects all processes using the GPU on the host.
+5. **Workaround:** Switch to CPU mode in **Settings > Server** while you investigate.
+
+### GPU errors persist across container restarts
+
+**Symptom:** `nvidia-smi` shows a healthy GPU, but the server logs report CUDA error 999 every time the container starts.
+
+**Cause:** The NVIDIA driver can enter a degraded context when a container exits uncleanly. Without Persistence Mode, the driver resets incompletely on the next attach.
+
+**Solution:** Enable NVIDIA Persistence Mode on the host:
+
+```bash
+sudo nvidia-smi -pm 1
+```
+
+This keeps the driver context warm across container lifecycle events. The setting persists until the next reboot; add it to a startup script (e.g. `/etc/rc.local` or a systemd unit) to make it permanent.
+
+**Alternative:** Reboot the host to fully reset the driver state.
+
 ### Advanced Troubleshooting
 
 For more advanced troubleshooting steps, head over to README_DEV's [Troubleshooting section](README_DEVmd#13-troubleshooting).

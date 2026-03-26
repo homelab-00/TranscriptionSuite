@@ -31,6 +31,7 @@ interface SidebarProps {
   containerExists: boolean;
   containerHealth?: string;
   clientRunning: boolean;
+  gpuError?: string;
 }
 
 const SIDEBAR_COLLAPSED_WIDTH_PX = 80;
@@ -52,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   containerExists,
   containerHealth,
   clientRunning,
+  gpuError,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedWidthPx, setExpandedWidthPx] = useState(SIDEBAR_EXPANDED_BASE_WIDTH_PX);
@@ -104,21 +106,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Derive status for each sidebar item from Docker + client state
   // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
-  const sessionStatus: 'active' | 'warning' | 'inactive' = useMockupStatusFallback
-    ? 'active'
-    : containerRunning && clientRunning && containerHealth === 'healthy'
+  const sessionStatus: 'active' | 'warning' | 'inactive' | 'error' = gpuError
+    ? 'error'
+    : useMockupStatusFallback
       ? 'active'
-      : containerExists
-        ? 'warning'
-        : 'inactive';
+      : containerRunning && clientRunning && containerHealth === 'healthy'
+        ? 'active'
+        : containerExists
+          ? 'warning'
+          : 'inactive';
   // Issue 18 — Server: pulsing green when server running AND healthy, orange when container exists, gray otherwise
-  const serverSidebarStatus: 'active' | 'warning' | 'inactive' = useMockupStatusFallback
-    ? 'active'
-    : containerRunning && containerHealth === 'healthy'
+  const serverSidebarStatus: 'active' | 'warning' | 'inactive' | 'error' = gpuError
+    ? 'error'
+    : useMockupStatusFallback
       ? 'active'
-      : containerExists
-        ? 'warning'
-        : 'inactive';
+      : containerRunning && containerHealth === 'healthy'
+        ? 'active'
+        : containerExists
+          ? 'warning'
+          : 'inactive';
 
   // Top navigation items that get the sliding animation
   const navItems = [
@@ -126,19 +132,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: View.SESSION,
       label: 'Session',
       icon: <Mic2 size={20} />,
-      status: sessionStatus as 'active' | 'warning' | 'inactive',
+      status: sessionStatus as 'active' | 'warning' | 'inactive' | 'error',
     },
     {
       id: View.NOTEBOOK,
       label: 'Notebook',
       icon: <Book size={20} />,
-      status: serverSidebarStatus as 'active' | 'warning' | 'inactive',
+      status: serverSidebarStatus as 'active' | 'warning' | 'inactive' | 'error',
     },
     {
       id: View.SERVER,
       label: 'Server',
       icon: <Server size={20} />,
-      status: serverSidebarStatus as 'active' | 'warning' | 'inactive',
+      status: serverSidebarStatus as 'active' | 'warning' | 'inactive' | 'error',
     },
     {
       id: View.MODEL_MANAGER,
