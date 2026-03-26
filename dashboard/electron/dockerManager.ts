@@ -41,7 +41,7 @@ const __dirname = path.dirname(__filename);
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
-const CONTAINER_NAME = 'transcriptionsuite-container';
+export const CONTAINER_NAME = 'transcriptionsuite-container';
 
 /**
  * Resolve compose directory.

@@ -82,10 +82,17 @@ async def get_status(request: Request) -> dict[str, Any]:
         status = {"error": "Model manager not initialized"}
         is_ready = False
 
-    return {
+    response: dict[str, Any] = {
         "status": "running",
         "version": __version__,
         "models": status,
         "features": status.get("features", {}),
         "ready": is_ready or is_live_mode_active(),
     }
+
+    gpu_error = getattr(request.app.state, "gpu_error", None)
+    if gpu_error is not None:
+        response["gpu_error"] = gpu_error.get("error", "Unknown GPU error")
+        response["gpu_error_action"] = "Please restart your computer to reset the GPU driver."
+
+    return response

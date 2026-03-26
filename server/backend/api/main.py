@@ -407,13 +407,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         prewarm_thread.join(timeout=60)
     _log_time("import pre-warming complete")
 
+    # CUDA health probe — detect unrecoverable GPU state before ModelManager
+    from server.core.audio_utils import cuda_health_check
+
+    gpu_health = cuda_health_check()
+    _log_time(f"CUDA health check: {gpu_health['status']}")
+    gpu_unrecoverable = gpu_health["status"] == "unrecoverable"
+    if gpu_unrecoverable:
+        logger.error(
+            "CUDA health check failed — GPU transcription disabled for this session",
+            extra={
+                "error": gpu_health["error"],
+                "nvidia_smi": gpu_health.get("nvidia_smi", "N/A"),
+            },
+        )
+        app.state.gpu_error = gpu_health
+
     # Initialize model manager (accesses CUDA — must come after prewarm join)
     manager = get_model_manager(config.config)
     _log_time("model manager created")
     logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")
 
     selected_main_model = resolve_main_transcriber_model(config)
-    if not selected_main_model.strip():
+    if gpu_unrecoverable:
+        logger.warning("Model preload skipped — GPU in unrecoverable state")
+        _log_time("model preload skipped (GPU unrecoverable)")
+    elif not selected_main_model.strip():
         logger.info("No main model selected; preload skipped (intentional disabled slot mode)")
         _log_time("model preload skipped (main model disabled)")
     else:

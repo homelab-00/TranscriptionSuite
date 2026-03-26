@@ -1,6 +1,9 @@
 """Tests for audio_utils.py — GPU cache, format helpers, normalization, VAD.
 
 Covers:
+- ``_capture_nvidia_smi()`` subprocess success, timeout, not-found, error
+- ``cuda_health_check()`` no-torch, healthy, unrecoverable, no-cuda paths
+- ``check_cuda_available()`` with _cuda_probe_failed flag
 - ``clear_gpu_cache()`` no-op when CUDA unavailable
 - ``check_cuda_available()`` with/without torch
 - ``get_gpu_memory_info()`` when CUDA unavailable
@@ -21,6 +24,126 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import server.core.audio_utils as au
+
+# ── _capture_nvidia_smi ───────────────────────────────────────────────────
+
+
+class TestCaptureNvidiaSmi:
+    def test_returns_stdout_on_success(self):
+        mock_result = MagicMock()
+        mock_result.stdout = "GPU 0: NVIDIA RTX 3080\nDriver Version: 570.86\n"
+
+        with patch("subprocess.run", return_value=mock_result):
+            output = au._capture_nvidia_smi()
+
+        assert "RTX 3080" in output
+
+    def test_returns_timeout_message(self):
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="nvidia-smi", timeout=5),
+        ):
+            output = au._capture_nvidia_smi()
+
+        assert "timed out" in output
+
+    def test_returns_not_found_message(self):
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            output = au._capture_nvidia_smi()
+
+        assert "not found" in output
+
+    def test_returns_error_message_on_other_exception(self):
+        with patch("subprocess.run", side_effect=OSError("permission denied")):
+            output = au._capture_nvidia_smi()
+
+        assert "permission denied" in output
+
+
+# ── cuda_health_check ────────────────────────────────────────────────────
+
+
+class TestCudaHealthCheck:
+    @pytest.fixture(autouse=True)
+    def _reset_cuda_probe_flag(self):
+        yield
+        au._cuda_probe_failed = False
+
+    def test_no_torch_returns_no_torch(self):
+        with patch.object(au, "HAS_TORCH", False):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "no_torch"
+
+    def test_healthy_gpu_returns_healthy(self):
+        mock_torch = MagicMock()
+        mock_props = MagicMock()
+        mock_props.name = "NVIDIA RTX 3080"
+        mock_props.total_mem = 10 * 1024**3  # 10 GB
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "healthy"
+        assert result["device_name"] == "NVIDIA RTX 3080"
+        assert result["total_memory_gb"] == 10.0
+
+    def test_unknown_error_returns_unrecoverable(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = RuntimeError("CUDA unknown error")
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "_capture_nvidia_smi", return_value="nvidia-smi output"),
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "unrecoverable"
+        assert "unknown error" in result["error"]
+        assert result["nvidia_smi"] == "nvidia-smi output"
+        assert au._cuda_probe_failed is True
+
+    def test_no_cuda_device_returns_no_cuda(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = RuntimeError("no CUDA-capable device")
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "no_cuda"
+        assert au._cuda_probe_failed is False
+
+
+# ── check_cuda_available with probe flag ─────────────────────────────────
+
+
+class TestCheckCudaAvailableWithProbeFlag:
+    @pytest.fixture(autouse=True)
+    def _reset_cuda_probe_flag(self):
+        yield
+        au._cuda_probe_failed = False
+
+    def test_returns_false_when_probe_failed(self):
+        au._cuda_probe_failed = True
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            assert au.check_cuda_available() is False
+
+        # torch.cuda.is_available should never be called
+        mock_torch.cuda.is_available.assert_not_called()
+
+    def test_returns_true_when_probe_not_failed(self):
+        au._cuda_probe_failed = False
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            assert au.check_cuda_available() is True
+
 
 # ── clear_gpu_cache ───────────────────────────────────────────────────────
 

@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import warnings
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -58,6 +58,30 @@ except ImportError:
     load_silero_vad = None  # type: ignore
     HAS_SILERO_VAD = False
 
+# Set to True by cuda_health_check() when CUDA is in an unrecoverable state.
+# Makes check_cuda_available() the single source of truth for all consumers.
+_cuda_probe_failed: bool = False
+
+
+def _capture_nvidia_smi() -> str:
+    """Capture nvidia-smi output for diagnostics. Never raises."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return f"nvidia-smi exited {result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        return result.stdout
+    except subprocess.TimeoutExpired:
+        return "nvidia-smi timed out after 5s (driver may be unresponsive)"
+    except FileNotFoundError:
+        return "nvidia-smi not found in PATH"
+    except Exception as e:
+        return f"nvidia-smi failed: {e}"
+
 
 def clear_gpu_cache() -> None:
     """
@@ -79,9 +103,53 @@ def clear_gpu_cache() -> None:
 
 def check_cuda_available() -> bool:
     """Check if CUDA is available for GPU acceleration."""
+    if _cuda_probe_failed:
+        return False
     if not HAS_TORCH or torch is None:
         return False
     return torch.cuda.is_available()
+
+
+def cuda_health_check() -> dict[str, Any]:
+    """Probe CUDA health at startup. Never raises.
+
+    Returns a dict with 'status' key:
+    - 'no_torch': torch not installed (not an error)
+    - 'healthy': CUDA initialized and device responsive
+    - 'unrecoverable': CUDA in failed state (sets _cuda_probe_failed flag)
+    - 'no_cuda': No CUDA device but driver is fine
+    """
+    global _cuda_probe_failed
+
+    if not HAS_TORCH or torch is None:
+        return {"status": "no_torch"}
+
+    try:
+        torch.cuda.init()
+        props = torch.cuda.get_device_properties(0)
+        return {
+            "status": "healthy",
+            "device_name": props.name,
+            "total_memory_gb": round(props.total_mem / 1024**3, 2),
+        }
+    except RuntimeError as e:
+        err_lower = str(e).lower()
+        if "unknown error" in err_lower or "error 999" in err_lower:
+            _cuda_probe_failed = True
+            smi_output = _capture_nvidia_smi()
+            logger.error(
+                "CUDA health check: unrecoverable GPU state detected",
+                exc_info=True,
+                extra={"nvidia_smi": smi_output},
+            )
+            return {
+                "status": "unrecoverable",
+                "error": str(e),
+                "nvidia_smi": smi_output,
+            }
+        return {"status": "no_cuda", "error": str(e)}
+    except Exception as e:
+        return {"status": "no_cuda", "error": str(e)}
 
 
 def get_gpu_memory_info() -> dict:
@@ -108,10 +176,10 @@ def get_gpu_memory_info() -> dict:
 
 def convert_to_wav(
     input_path: str,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
     sample_rate: int = 16000,
     channels: int = 1,
-) -> Optional[str]:
+) -> str | None:
     """
     Convert any media file to a WAV file using FFmpeg.
 
@@ -156,14 +224,14 @@ def convert_to_wav(
 
     except subprocess.CalledProcessError as e:
         logger.error(f"FFmpeg conversion failed: {e.stderr}")
-        raise RuntimeError(f"Audio conversion failed: {e.stderr}")
+        raise RuntimeError(f"Audio conversion failed: {e.stderr}") from e
 
 
 def convert_to_mp3(
     input_path: str,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
     bitrate: str = "192k",
-) -> Optional[str]:
+) -> str | None:
     """
     Convert any audio file to MP3 format using FFmpeg.
 
@@ -205,13 +273,13 @@ def convert_to_mp3(
 
     except subprocess.CalledProcessError as e:
         logger.error(f"FFmpeg MP3 conversion failed: {e.stderr}")
-        raise RuntimeError(f"MP3 conversion failed: {e.stderr}")
+        raise RuntimeError(f"MP3 conversion failed: {e.stderr}") from e
 
 
 def load_audio_legacy(
     file_path: str,
     target_sample_rate: int = 16000,
-) -> Tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int]:
     """
     Load an audio file using legacy scipy/soundfile backend (for compatibility).
 
@@ -268,7 +336,7 @@ def load_audio_legacy(
 def load_audio(
     file_path: str,
     target_sample_rate: int = 16000,
-) -> Tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int]:
     """
     Load an audio file and return as numpy array.
 
@@ -368,13 +436,9 @@ def normalize_audio(
     try:
         cfg = get_config()
         backend = cfg.get("audio_processing", default={}).get("backend", "ffmpeg")
-        method = cfg.get("audio_processing", default={}).get(
-            "normalization_method", "dynaudnorm"
-        )
+        method = cfg.get("audio_processing", default={}).get("normalization_method", "dynaudnorm")
     except Exception as e:
-        logger.warning(
-            f"Could not load config, falling back to legacy normalization: {e}"
-        )
+        logger.warning(f"Could not load config, falling back to legacy normalization: {e}")
         return normalize_audio_legacy(audio, target_db)
 
     if backend == "ffmpeg" and method in ["dynaudnorm", "loudnorm"]:

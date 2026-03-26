@@ -24,6 +24,8 @@ export interface ServerStatus {
   uptime?: number;
   gpu_available?: boolean;
   gpu_memory?: string;
+  gpu_error?: string;
+  gpu_error_action?: string;
   diarization_available?: boolean;
   active_connections?: number;
   tls_enabled?: boolean;

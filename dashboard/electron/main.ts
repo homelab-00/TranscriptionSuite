@@ -6,7 +6,7 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
-import { execFile, execFileSync } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
 import { promisify } from 'util';
 import {
   app,
@@ -21,7 +21,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
-import { dockerManager, type StartContainerOptions } from './dockerManager.js';
+import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import {
@@ -1513,6 +1513,38 @@ ipcMain.handle(
 
 let isQuitting = false;
 let shutdownPromise: Promise<void> | null = null;
+let sentinelPid: number | null = null;
+
+/**
+ * Spawn a sentinel process that watches for Electron PID death and stops the
+ * Docker container. Uses `setsid` to create a new session so the sentinel
+ * survives SIGBUS/SIGKILL of the parent process group. Linux only.
+ */
+function spawnContainerSentinel(): void {
+  if (process.platform !== 'linux') return;
+
+  const shouldStopServer = (store.get('app.stopServerOnQuit') as boolean) ?? true;
+  const useRemote = (store.get('connection.useRemote') as boolean) ?? false;
+  if (!shouldStopServer || useRemote) return;
+
+  const pid = process.pid;
+  const child = spawn(
+    'setsid',
+    [
+      'sh',
+      '-c',
+      `while kill -0 ${pid} 2>/dev/null; do sleep 2; done; docker stop --time 10 ${CONTAINER_NAME} 2>/dev/null`,
+    ],
+    { detached: true, stdio: 'ignore' },
+  );
+  child.unref();
+  sentinelPid = child.pid ?? null;
+  if (sentinelPid === null) {
+    shutdownLog('[Sentinel] Failed to spawn container sentinel (setsid not found?)');
+    return;
+  }
+  shutdownLog(`[Sentinel] Spawned container sentinel (PID: ${sentinelPid})`);
+}
 
 /**
  * Log a shutdown diagnostic message. Writes to console, which is already
@@ -1534,6 +1566,17 @@ function gracefulShutdown(): Promise<void> {
 
   shutdownPromise = (async () => {
     flushMainProcessLogRemainders();
+    // Kill the container sentinel before we stop the container ourselves —
+    // prevents both racing to docker-stop.
+    if (sentinelPid !== null) {
+      try {
+        process.kill(sentinelPid, 'SIGTERM');
+      } catch {
+        /* already dead */
+      }
+      shutdownLog('[Sentinel] Killed container sentinel.');
+      sentinelPid = null;
+    }
     // Stop the background log stream so the disk writer shuts down cleanly.
     dockerManager.stopBackgroundLogStream();
     shutdownLog('[Shutdown] Graceful shutdown started.');
@@ -1632,6 +1675,9 @@ app.whenReady().then(() => {
     .catch(() => {
       // Best-effort — Docker may not be available yet.
     });
+
+  // Crash-resilient container cleanup: sentinel survives SIGBUS/SIGKILL
+  spawnContainerSentinel();
 
   // Register global keyboard shortcuts (async — uses D-Bus portal on Wayland)
   registerShortcuts(store, () => mainWindow).catch((err) =>
