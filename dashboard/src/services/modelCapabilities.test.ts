@@ -380,6 +380,11 @@ describe('supportsDiarization', () => {
     expect(supportsDiarization('Systran/faster-whisper-large-v3')).toBe(true);
   });
 
+  it('returns false for VibeVoice models (uses built-in diarization, not pyannote)', () => {
+    expect(supportsDiarization('microsoft/VibeVoice-ASR')).toBe(false);
+    expect(supportsDiarization('scerz/VibeVoice-ASR-4bit')).toBe(false);
+  });
+
   it('returns true for NeMo models', () => {
     expect(supportsDiarization('nvidia/parakeet-tdt-0.6b-v3')).toBe(true);
   });

@@ -166,6 +166,7 @@ export interface StartContainerOptions {
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
+  whispercppModel?: string;
 }
 
 const HF_DECISION_VALUES = new Set<HfTokenDecision>(['unset', 'provided', 'skipped']);
@@ -1100,6 +1101,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     mainTranscriberModel,
     liveTranscriberModel,
     diarizationModel,
+    whispercppModel,
   } = options;
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
@@ -1196,6 +1198,20 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   if (diarizationModel !== undefined) {
     composeEnv['DIARIZATION_MODEL'] = diarizationModel;
     envUpdates['DIARIZATION_MODEL'] = diarizationModel;
+  }
+
+  // Vulkan sidecar: set whisper-server URL based on networking mode and
+  // optionally pass a custom GGML model path.
+  if (runtimeProfile === 'vulkan') {
+    const serverUrl =
+      process.platform === 'linux' ? 'http://localhost:8080' : 'http://whisper-server:8080';
+    composeEnv['WHISPERCPP_SERVER_URL'] = serverUrl;
+    envUpdates['WHISPERCPP_SERVER_URL'] = serverUrl;
+
+    if (whispercppModel) {
+      composeEnv['WHISPERCPP_MODEL'] = whispercppModel;
+      envUpdates['WHISPERCPP_MODEL'] = whispercppModel;
+    }
   }
 
   upsertComposeEnvValues(envUpdates);

@@ -121,11 +121,13 @@ export function isWhisperCppModel(modelName: string | null | undefined): boolean
 }
 
 /**
- * Returns true if the model supports speaker diarization.
- * whisper.cpp models do not support pyannote diarization.
+ * Returns true if the model supports pyannote speaker diarization.
+ * whisper.cpp models lack pyannote integration; VibeVoice uses its own
+ * built-in diarization rather than pyannote.
  */
 export function supportsDiarization(modelName: string | null | undefined): boolean {
   if (isWhisperCppModel(modelName)) return false;
+  if (isVibeVoiceASRModel(modelName)) return false;
   return true;
 }
 
