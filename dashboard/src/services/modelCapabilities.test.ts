@@ -4,10 +4,12 @@ import {
   isCanaryModel,
   isNemoModel,
   isWhisperModel,
+  isWhisperCppModel,
   isVibeVoiceASRModel,
   isEnglishOnlyWhisperModel,
   filterLanguagesForModel,
   supportsTranslation,
+  supportsDiarization,
   NEMO_LANGUAGES,
   CANARY_TRANSLATION_TARGETS,
 } from './modelCapabilities';
@@ -309,5 +311,95 @@ describe('supportsTranslation', () => {
     expect(supportsTranslation(null)).toBe(true);
     expect(supportsTranslation(undefined)).toBe(true);
     expect(supportsTranslation('')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isWhisperCppModel (GGML model detection)
+// ---------------------------------------------------------------------------
+describe('isWhisperCppModel', () => {
+  it('matches ggml- prefixed .bin models', () => {
+    expect(isWhisperCppModel('ggml-large-v3.bin')).toBe(true);
+    expect(isWhisperCppModel('ggml-base.en.bin')).toBe(true);
+    expect(isWhisperCppModel('ggml-medium.bin')).toBe(true);
+    expect(isWhisperCppModel('ggml-tiny.bin')).toBe(true);
+  });
+
+  it('matches .gguf models', () => {
+    expect(isWhisperCppModel('large-v3-turbo.gguf')).toBe(true);
+    expect(isWhisperCppModel('whisper-large-v3.gguf')).toBe(true);
+  });
+
+  it('matches paths with ggml- prefix', () => {
+    expect(isWhisperCppModel('/models/ggml-small.bin')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isWhisperCppModel('GGML-LARGE-V3.BIN')).toBe(true);
+    expect(isWhisperCppModel('model.GGUF')).toBe(true);
+  });
+
+  it('rejects HuggingFace-style whisper model names', () => {
+    expect(isWhisperCppModel('openai/whisper-large-v3')).toBe(false);
+    expect(isWhisperCppModel('Systran/faster-whisper-large-v3')).toBe(false);
+  });
+
+  it('rejects NeMo and VibeVoice models', () => {
+    expect(isWhisperCppModel('nvidia/parakeet-ctc-1.1b')).toBe(false);
+    expect(isWhisperCppModel('nvidia/canary-1b')).toBe(false);
+    expect(isWhisperCppModel('microsoft/VibeVoice-ASR')).toBe(false);
+  });
+
+  it('returns false for null/undefined/empty', () => {
+    expect(isWhisperCppModel(null)).toBe(false);
+    expect(isWhisperCppModel(undefined)).toBe(false);
+    expect(isWhisperCppModel('')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isWhisperModel excludes whisper.cpp models
+// ---------------------------------------------------------------------------
+describe('isWhisperModel with GGML models', () => {
+  it('returns false for GGML models (they use whispercpp backend)', () => {
+    expect(isWhisperModel('ggml-large-v3.bin')).toBe(false);
+    expect(isWhisperModel('large-v3.gguf')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// supportsDiarization
+// ---------------------------------------------------------------------------
+describe('supportsDiarization', () => {
+  it('returns false for whisper.cpp models (no pyannote)', () => {
+    expect(supportsDiarization('ggml-large-v3.bin')).toBe(false);
+    expect(supportsDiarization('large-v3.gguf')).toBe(false);
+  });
+
+  it('returns true for whisper models', () => {
+    expect(supportsDiarization('Systran/faster-whisper-large-v3')).toBe(true);
+  });
+
+  it('returns true for NeMo models', () => {
+    expect(supportsDiarization('nvidia/parakeet-tdt-0.6b-v3')).toBe(true);
+  });
+
+  it('returns true for null/undefined', () => {
+    expect(supportsDiarization(null)).toBe(true);
+    expect(supportsDiarization(undefined)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// supportsTranslation with GGML models
+// ---------------------------------------------------------------------------
+describe('supportsTranslation with GGML models', () => {
+  it('returns true for standard GGML models (whisper translate task)', () => {
+    expect(supportsTranslation('ggml-large-v3.bin')).toBe(true);
+    expect(supportsTranslation('large-v3.gguf')).toBe(true);
+  });
+
+  it('returns false for GGML turbo models', () => {
+    expect(supportsTranslation('ggml-large-v3-turbo.bin')).toBe(false);
   });
 });

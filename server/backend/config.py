@@ -187,6 +187,7 @@ class ServerConfig:
         ("MAIN_TRANSCRIBER_MODEL", ("main_transcriber", "model")),
         ("LIVE_TRANSCRIBER_MODEL", ("live_transcriber", "model")),
         ("DIARIZATION_MODEL", ("diarization", "model")),
+        ("WHISPERCPP_SERVER_URL", ("whisper_cpp", "server_url")),
     )
 
     def _apply_env_overrides(self) -> None:
@@ -362,6 +363,11 @@ class ServerConfig:
     def stt(self) -> dict[str, Any]:
         """Get STT (speech-to-text) configuration."""
         return self.config.get("stt", {})
+
+    @property
+    def whisper_cpp(self) -> dict[str, Any]:
+        """Get whisper.cpp sidecar configuration."""
+        return self.config.get("whisper_cpp", {})
 
 
 def _non_empty_string(value: Any) -> str | None:

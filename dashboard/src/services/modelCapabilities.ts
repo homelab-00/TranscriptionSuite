@@ -6,6 +6,7 @@
 const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
 const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;
+const WHISPERCPP_PATTERN = /(?:(?:^|\/)ggml-.*\.bin$|\.gguf$)/i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -98,7 +99,9 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
  * Unknown or empty values are treated as Whisper-compatible defaults.
  */
 export function isWhisperModel(modelName: string | null | undefined): boolean {
-  return !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName);
+  return (
+    !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName) && !isWhisperCppModel(modelName)
+  );
 }
 
 /**
@@ -107,6 +110,23 @@ export function isWhisperModel(modelName: string | null | undefined): boolean {
 export function isVibeVoiceASRModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
   return VIBEVOICE_ASR_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model is a GGML model for the whisper.cpp sidecar backend.
+ */
+export function isWhisperCppModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return WHISPERCPP_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model supports speaker diarization.
+ * whisper.cpp models do not support pyannote diarization.
+ */
+export function supportsDiarization(modelName: string | null | undefined): boolean {
+  if (isWhisperCppModel(modelName)) return false;
+  return true;
 }
 
 /**

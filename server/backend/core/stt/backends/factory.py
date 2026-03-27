@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
+_WHISPERCPP_PATTERN = re.compile(r"((?:^|/)ggml-.*\.bin$|\.gguf$)", re.IGNORECASE)
 
 
 def detect_backend_type(model_name: str) -> str:
@@ -22,6 +23,8 @@ def detect_backend_type(model_name: str) -> str:
         return "canary"
     if _VIBEVOICE_ASR_PATTERN.match(name):
         return "vibevoice_asr"
+    if _WHISPERCPP_PATTERN.search(name):
+        return "whispercpp"
     return "whisper"
 
 
@@ -45,6 +48,11 @@ def is_vibevoice_asr_model(model_name: str) -> bool:
     return detect_backend_type(model_name) == "vibevoice_asr"
 
 
+def is_whispercpp_model(model_name: str) -> bool:
+    """Return True if *model_name* is a GGML model for the whisper.cpp sidecar."""
+    return detect_backend_type(model_name) == "whispercpp"
+
+
 def create_backend(model_name: str) -> STTBackend:
     """Instantiate the appropriate STTBackend for *model_name*."""
     backend_type = detect_backend_type(model_name)
@@ -62,6 +70,11 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.vibevoice_asr_backend import VibeVoiceASRBackend
 
         return VibeVoiceASRBackend()
+
+    if backend_type == "whispercpp":
+        from server.core.stt.backends.whispercpp_backend import WhisperCppBackend
+
+        return WhisperCppBackend()
 
     from server.core.stt.backends.whisperx_backend import WhisperXBackend
 

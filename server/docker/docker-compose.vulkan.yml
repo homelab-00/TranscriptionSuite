@@ -1,0 +1,30 @@
+# Vulkan sidecar overlay — whisper.cpp with Vulkan GPU acceleration.
+# Adds a whisper-server sidecar container for AMD/Intel GPU transcription.
+#
+# On Linux with host networking, both containers use the host network, so the
+# server is reachable at localhost:8080 (Docker DNS is unavailable in host mode).
+# On Windows/macOS (bridge networking), Docker DNS resolves "whisper-server".
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml up -d
+
+services:
+  whisper-server:
+    image: ghcr.io/ggerganov/whisper.cpp:main-server-vulkan
+    restart: unless-stopped
+    volumes:
+      - huggingface-models:/models:ro
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - WHISPER_MODEL=${WHISPERCPP_MODEL:-/models/ggml-large-v3-turbo.bin}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  transcriptionsuite:
+    depends_on:
+      whisper-server:
+        condition: service_healthy

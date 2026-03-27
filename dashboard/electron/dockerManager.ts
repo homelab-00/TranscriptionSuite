@@ -99,8 +99,8 @@ function getComposeDir(): string {
   return composeDir;
 }
 
-/** Runtime profile: GPU (NVIDIA CUDA) or CPU-only */
-export type RuntimeProfile = 'gpu' | 'cpu';
+/** Runtime profile: GPU (NVIDIA CUDA), Vulkan (AMD/Intel GPU), or CPU-only */
+export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
 const VOLUME_NAMES = {
@@ -690,6 +690,11 @@ function composeFileArgs(
     } else {
       files.push('docker-compose.gpu.yml'); // legacy nvidia runtime
     }
+  }
+
+  // Vulkan sidecar overlay (AMD/Intel GPU via whisper.cpp)
+  if (runtimeProfile === 'vulkan') {
+    files.push('docker-compose.vulkan.yml');
   }
 
   // Flatten into compose args

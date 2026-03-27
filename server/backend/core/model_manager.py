@@ -237,6 +237,7 @@ class ModelManager:
         self._initialize_whisper_feature_status()
         self._initialize_nemo_feature_status()
         self._initialize_vibevoice_asr_feature_status()
+        self._initialize_whispercpp_feature_status()
 
         # Fix 3: Start background NeMo import if NeMo models will be used
         self._start_background_nemo_import()
@@ -366,6 +367,23 @@ class ModelManager:
         self._vibevoice_asr_feature_available = False
         self._vibevoice_asr_feature_reason = "requested" if install_requested else "not_requested"
         self._vibevoice_asr_feature_error = None
+
+    def _initialize_whispercpp_feature_status(self) -> None:
+        """Initialize whisper.cpp sidecar feature availability."""
+        server_url = os.environ.get("WHISPERCPP_SERVER_URL", "").strip()
+        self._whispercpp_feature_available = bool(server_url)
+        self._whispercpp_server_url = server_url or None
+        if server_url:
+            logger.info("whisper.cpp sidecar configured at %s", server_url)
+        else:
+            logger.debug("whisper.cpp sidecar not configured (WHISPERCPP_SERVER_URL empty)")
+
+    def get_whispercpp_feature_status(self) -> dict[str, Any]:
+        """Return whisper.cpp sidecar feature status."""
+        return {
+            "available": self._whispercpp_feature_available,
+            "server_url": self._whispercpp_server_url,
+        }
 
     def _start_background_nemo_import(self) -> None:
         """Fix 3: Start background NeMo import to reduce startup latency.
@@ -812,6 +830,7 @@ class ModelManager:
                     "reason": self._nemo_feature_reason,
                 },
                 "vibevoice_asr": self.get_vibevoice_asr_feature_status(),
+                "whispercpp": self.get_whispercpp_feature_status(),
             },
         }
         return status

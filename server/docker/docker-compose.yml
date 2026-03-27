@@ -8,6 +8,7 @@
 #   docker-compose.linux-host.yml   — Linux: host networking
 #   docker-compose.desktop-vm.yml   — macOS/Windows: bridge networking + port mapping
 #   docker-compose.gpu.yml          — NVIDIA GPU reservation
+#   docker-compose.vulkan.yml       — Vulkan sidecar (AMD/Intel GPU via whisper.cpp)
 #
 # Manual usage (Linux + GPU, the default):
 #   docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
@@ -84,6 +85,8 @@ services:
       # VibeVoice-ASR backend support (optional, experimental in-process backend)
       - INSTALL_VIBEVOICE_ASR=${INSTALL_VIBEVOICE_ASR:-false}
       - VIBEVOICE_ASR_PACKAGE_SPEC=${VIBEVOICE_ASR_PACKAGE_SPEC:-git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e}
+      # whisper.cpp sidecar URL (populated by docker-compose.vulkan.yml overlay)
+      - WHISPERCPP_SERVER_URL=${WHISPERCPP_SERVER_URL:-}
       # PyTorch CUDA memory allocator — reduce fragmentation on long transcriptions
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8
       # LM Studio URL — overridden in platform overlay (host.docker.internal for VM platforms)
